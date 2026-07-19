@@ -44,7 +44,11 @@ that discipline is the whole point of the build brief.
 
 ## Commands
 
-- `npm run db:migrate` / `db:seed` / `db:generate`
+- `npm run db:migrate` / `db:seed` / `db:generate` — run as the owner URL
+  (`DATABASE_URL_OWNER`).
+- `npm run db:create-role` — creates/rotates the `app_user` role the app
+  connects as. Required: Neon's owner role has BYPASSRLS, so the app must
+  never run as it (`DATABASE_URL` = app_user).
 - `npm run test:isolation` — the two-tenant RLS certification; must pass
   before any deploy. Needs `DATABASE_URL` (dev/staging DB, never prod).
 - `npm run build` — must stay green; keys are not required for the build

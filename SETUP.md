@@ -82,17 +82,27 @@ Neon is hosted Postgres. The app stores all its data here.
    ```
 5. Paste it into `.env` as the value of `DATABASE_URL`.
 
-### 1.3 Create the tables
+### 1.3 Create the tables and the app's database role
 
-Back in your terminal, run these two commands one after the other:
+Back in your terminal, run these three commands one after the other:
 
 ```
 npm run db:migrate
 npm run db:seed
+npm run db:create-role
 ```
 
 Expected output: `db:migrate` prints "Running migrations…" then "Migrations
-complete." — `db:seed` prints "Seeded 7 modules."
+complete." — `db:seed` prints "Seeded 7 modules." — `db:create-role` prints
+"app_user role created" and ".env updated".
+
+**Why the third command matters:** Neon's default database login has a
+special power that lets it *bypass row-level security* — the very protection
+that keeps one client from seeing another's data. `db:create-role` creates a
+restricted `app_user` login without that power, points the app at it, and
+keeps the original owner login (as `DATABASE_URL_OWNER`) for migrations
+only. The isolation test in Part 3.6 fails loudly if this step was skipped —
+that's by design.
 
 **If you get an error:**
 - `DATABASE_URL is not set` → the `.env` file isn't named exactly `.env`, or
@@ -327,7 +337,9 @@ Not needed for local testing. Summary for later:
    the `superapp` repository. Framework auto-detects as Next.js.
 2. In the import screen's **Environment Variables** section, add every
    variable from your `.env` (for real clients you'd eventually switch to
-   Clerk/Stripe *live* keys, but test keys are fine to start).
+   Clerk/Stripe *live* keys, but test keys are fine to start). Use the
+   `app_user` `DATABASE_URL` — the deployed app must never run as the
+   database owner (Part 1.3). `DATABASE_URL_OWNER` is not needed on Vercel.
 3. Deploy. You'll get a URL like `https://superapp-xyz.vercel.app`.
 4. Set `NEXT_PUBLIC_APP_URL` to that URL (Vercel → Settings → Environment
    Variables) and redeploy.

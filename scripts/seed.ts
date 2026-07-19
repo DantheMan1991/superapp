@@ -71,14 +71,15 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
 ];
 
 async function main() {
-  if (!process.env.DATABASE_URL) {
+  const url = process.env.DATABASE_URL_OWNER || process.env.DATABASE_URL;
+  if (!url) {
     console.error("DATABASE_URL is not set.");
     process.exit(1);
   }
   if (!globalThis.WebSocket) {
     neonConfig.webSocketConstructor = ws;
   }
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = new Pool({ connectionString: url });
   const db = drizzle(pool, { schema });
 
   await db.transaction(async (tx) => {

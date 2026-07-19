@@ -1,0 +1,136 @@
+import Link from "next/link";
+import { desc, eq, sql as dsql } from "drizzle-orm";
+import { Plus } from "lucide-react";
+import { withSystem, schema } from "@/db";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  SubscriptionStatusBadge,
+  TenantStatusBadge,
+} from "@/components/status-badge";
+
+export const dynamic = "force-dynamic";
+
+export default async function AdminClientsPage() {
+  const rows = await withSystem((tx) =>
+    tx
+      .select({
+        tenant: schema.tenants,
+        subStatus: schema.subscriptions.status,
+        planName: schema.subscriptions.planName,
+        moduleCount: dsql<number>`(
+          select count(*)::int from ${schema.tenantModules} tm
+          where tm.tenant_id = ${schema.tenants.id} and tm.enabled = true
+        )`,
+      })
+      .from(schema.tenants)
+      .leftJoin(
+        schema.subscriptions,
+        eq(schema.subscriptions.tenantId, schema.tenants.id),
+      )
+      .orderBy(desc(schema.tenants.createdAt)),
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Clients</h1>
+          <p className="text-sm text-muted-foreground">
+            Every business on the platform, at a glance.
+          </p>
+        </div>
+        <Button asChild>
+          <Link href="/admin/clients/new">
+            <Plus className="size-4" /> New client
+          </Link>
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">
+            {rows.length} client{rows.length === 1 ? "" : "s"}
+          </CardTitle>
+          <CardDescription>
+            Click a row to manage modules, billing, and notes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Business</TableHead>
+                <TableHead>Industry</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Subscription</TableHead>
+                <TableHead className="text-right">Active modules</TableHead>
+                <TableHead className="text-right">Since</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.length === 0 && (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="py-10 text-center text-muted-foreground"
+                  >
+                    No clients yet. Create the first one to get moving.
+                  </TableCell>
+                </TableRow>
+              )}
+              {rows.map(({ tenant, subStatus, planName, moduleCount }) => (
+                <TableRow key={tenant.id}>
+                  <TableCell>
+                    <Link
+                      href={`/admin/tenants/${tenant.id}`}
+                      className="font-medium hover:underline"
+                    >
+                      {tenant.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="capitalize text-muted-foreground">
+                    {tenant.industry}
+                  </TableCell>
+                  <TableCell>
+                    <TenantStatusBadge status={tenant.status} />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <SubscriptionStatusBadge status={subStatus ?? "none"} />
+                      {planName && (
+                        <span className="text-xs text-muted-foreground">
+                          {planName}
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {moduleCount}
+                  </TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {tenant.createdAt.toLocaleDateString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -30,6 +30,8 @@ export default async function DashboardLayout({
       })),
   ];
 
+  navItems.push({ href: "/dashboard/team", label: "Team", icon: "users" });
+
   if (ctx.role === "owner") {
     navItems.push({
       href: "/dashboard/billing",

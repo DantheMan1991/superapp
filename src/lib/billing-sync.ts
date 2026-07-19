@@ -18,6 +18,11 @@ export async function syncSubscription(
 
   const firstItem = sub.items?.data?.[0];
   const priceId = firstItem?.price?.id ?? null;
+  // Recurring amount only — one-time line items (onboarding fee) don't recur.
+  const amountCents =
+    firstItem?.price?.recurring && firstItem.price.unit_amount != null
+      ? firstItem.price.unit_amount * (firstItem.quantity ?? 1)
+      : null;
   // current_period_end lives on the item in newer API versions.
   const periodEndUnix =
     firstItem?.current_period_end ??
@@ -44,6 +49,7 @@ export async function syncSubscription(
         status: sub.status,
         priceId,
         planName: planNameForPriceId(priceId),
+        amountCents,
         currentPeriodEnd: periodEndUnix
           ? new Date(periodEndUnix * 1000)
           : null,

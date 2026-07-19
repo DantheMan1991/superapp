@@ -1,18 +1,13 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 
-const isProtectedRoute = createRouteMatcher([
-  "/admin(.*)",
-  "/dashboard(.*)",
-  "/onboarding(.*)",
-]);
-
-// Auth gate only. Role checks (superadmin, tenant role) happen server-side in
-// layouts/actions — never trust the edge alone.
-export default clerkMiddleware(async (auth, req) => {
-  if (isProtectedRoute(req)) {
-    await auth.protect();
-  }
-});
+/**
+ * clerkMiddleware only attaches auth context to the request. Authorization
+ * happens where the data lives — requireSuperAdmin / requireTenant /
+ * requireTenantOwner in every protected layout, page, and server action —
+ * per Clerk's resource-based auth guidance. Path matching here would be a
+ * second, weaker source of truth.
+ */
+export default clerkMiddleware();
 
 export const config = {
   matcher: [

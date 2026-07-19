@@ -25,6 +25,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const PAYING = ["active", "trialing"];
+
 export default async function AdminClientsPage() {
   const rows = await withSystem((tx) =>
     tx
@@ -32,6 +34,7 @@ export default async function AdminClientsPage() {
         tenant: schema.tenants,
         subStatus: schema.subscriptions.status,
         planName: schema.subscriptions.planName,
+        amountCents: schema.subscriptions.amountCents,
         moduleCount: dsql<number>`(
           select count(*)::int from tenant_modules tm
           where tm.tenant_id = tenants.id and tm.enabled = true
@@ -44,6 +47,26 @@ export default async function AdminClientsPage() {
       )
       .orderBy(desc(schema.tenants.createdAt)),
   );
+
+  const activeClients = rows.filter(
+    (r) => r.tenant.status === "active",
+  ).length;
+  const paying = rows.filter((r) => PAYING.includes(r.subStatus ?? ""));
+  const mrrCents = paying.reduce((sum, r) => sum + (r.amountCents ?? 0), 0);
+
+  const stats = [
+    { label: "Clients", value: String(rows.length) },
+    { label: "Active", value: String(activeClients) },
+    { label: "Paying subscriptions", value: String(paying.length) },
+    {
+      label: "MRR",
+      value: (mrrCents / 100).toLocaleString(undefined, {
+        style: "currency",
+        currency: "usd",
+        maximumFractionDigits: 0,
+      }),
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -59,6 +82,21 @@ export default async function AdminClientsPage() {
             <Plus className="size-4" /> New client
           </Link>
         </Button>
+      </div>
+
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+        {stats.map((stat) => (
+          <Card key={stat.label} className="py-4">
+            <CardContent className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {stat.label}
+              </p>
+              <p className="text-2xl font-semibold tabular-nums tracking-tight">
+                {stat.value}
+              </p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <Card>

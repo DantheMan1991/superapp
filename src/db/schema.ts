@@ -151,6 +151,8 @@ export const subscriptions = pgTable(
     status: text("status").notNull().default("none"), // none | active | trialing | past_due | canceled | incomplete
     planName: text("plan_name"),
     priceId: text("price_id"),
+    /** Monthly recurring amount in cents, synced from Stripe. Powers MRR. */
+    amountCents: integer("amount_cents"),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     updatedAt: timestamp("updated_at", { withTimezone: true })

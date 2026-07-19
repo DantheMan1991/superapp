@@ -26,8 +26,8 @@ export default async function AdminModulesPage() {
       .select({
         module: schema.modules,
         activeCount: dsql<number>`(
-          select count(*)::int from ${schema.tenantModules} tm
-          where tm.module_id = ${schema.modules.id} and tm.enabled = true
+          select count(*)::int from tenant_modules tm
+          where tm.module_id = modules.id and tm.enabled = true
         )`,
       })
       .from(schema.modules)

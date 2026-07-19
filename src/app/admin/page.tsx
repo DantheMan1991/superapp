@@ -33,8 +33,8 @@ export default async function AdminClientsPage() {
         subStatus: schema.subscriptions.status,
         planName: schema.subscriptions.planName,
         moduleCount: dsql<number>`(
-          select count(*)::int from ${schema.tenantModules} tm
-          where tm.tenant_id = ${schema.tenants.id} and tm.enabled = true
+          select count(*)::int from tenant_modules tm
+          where tm.tenant_id = tenants.id and tm.enabled = true
         )`,
       })
       .from(schema.tenants)

@@ -25,8 +25,11 @@ that matter for code:
   `requireTenant()`, `requireTenantOwner()` in `src/lib/auth.ts`. The
   middleware only checks "signed in".
 - **Zod-validate every boundary** (server actions, webhooks).
-- **Billing state is written only by the Stripe webhook** (signature-verified).
-  Card data never touches this server.
+- **Billing state is written only from trusted Stripe data**: the
+  signature-verified webhook, or a server→Stripe API reconcile
+  (`src/lib/billing-sync.ts`, run on billing page load for local dev /
+  missed events). Never from client input. Card data never touches this
+  server.
 - **Audit sensitive actions** via `logAudit()` — identifiers only, never
   secrets/PII.
 

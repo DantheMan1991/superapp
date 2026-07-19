@@ -290,10 +290,14 @@ STRIPE_PRICE_ONBOARDING=price_...      ← Onboarding one-off
 3. Pay with Stripe's test card: number **4242 4242 4242 4242**, any future
    expiry date, any 3-digit CVC, any name/ZIP.
 
-### 4.4 Subscription status syncing (webhook — needs one extra tool)
+### 4.4 Subscription status syncing (optional locally)
 
-After a test payment, the *client's subscription status in the app* updates
-via webhook. Locally that requires the **Stripe CLI**:
+The app refreshes subscription status straight from Stripe whenever the
+Billing page loads, so local checkouts show up as **active** on their own —
+no extra tooling needed. In production, webhooks (Part 6) do this in
+real time.
+
+If you want true webhook delivery locally anyway, use the **Stripe CLI**:
 
 1. Install: **https://docs.stripe.com/stripe-cli** (Windows: download the
    `.exe` zip, or `scoop install stripe` if you use Scoop).

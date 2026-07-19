@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { CheckCircle2 } from "lucide-react";
 import { withTenant, schema } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
+import { reconcileSubscriptionFromStripe } from "@/lib/billing-sync";
 import { PLANS } from "@/lib/stripe";
 import {
   Card,
@@ -24,6 +25,10 @@ export default async function BillingPage({
 }) {
   const ctx = await requireTenantOwner();
   const { status } = await searchParams;
+
+  // Webhooks are the primary sync; this direct API read covers local dev
+  // (no public URL for Stripe to call) and heals any missed event.
+  await reconcileSubscriptionFromStripe(ctx.tenant.id);
 
   const subscription = await withTenant(ctx.tenant.id, (tx) =>
     tx.query.subscriptions.findFirst({

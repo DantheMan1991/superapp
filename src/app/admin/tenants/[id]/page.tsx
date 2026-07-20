@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { withSystem, schema } from "@/db";
 import { moduleRegistry } from "@/modules";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -17,7 +18,12 @@ import {
   SubscriptionStatusBadge,
   TenantStatusBadge,
 } from "@/components/status-badge";
-import { AddNoteForm, ModuleToggle, TenantStatusSelect } from "./controls";
+import {
+  AddNoteForm,
+  ConvertProspectForm,
+  ModuleToggle,
+  TenantStatusSelect,
+} from "./controls";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +40,7 @@ export default async function TenantDetailPage({
     });
     if (!tenant) return null;
 
-    const [allModules, tenantMods, subscription, notes, audit, members] =
+    const [allModules, tenantMods, subscription, notes, audit, members, discoveries] =
       await Promise.all([
         tx.query.modules.findMany({ orderBy: asc(schema.modules.sortOrder) }),
         tx.query.tenantModules.findMany({
@@ -64,14 +70,19 @@ export default async function TenantDetailPage({
             eq(schema.memberships.profileId, schema.profiles.id),
           )
           .where(eq(schema.memberships.tenantId, tenant.id)),
+        tx.query.audits.findMany({
+          where: eq(schema.audits.tenantId, tenant.id),
+          orderBy: desc(schema.audits.updatedAt),
+        }),
       ]);
 
-    return { tenant, allModules, tenantMods, subscription, notes, audit, members };
+    return { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries };
   });
 
   if (!data) notFound();
-  const { tenant, allModules, tenantMods, subscription, notes, audit, members } =
+  const { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries } =
     data;
+  const isProspect = !tenant.clerkOrgId;
 
   const enabledBySlug = new Map(
     tenantMods.map((tm) => [tm.moduleId, tm.enabled]),
@@ -91,10 +102,19 @@ export default async function TenantDetailPage({
           <h1 className="text-2xl font-semibold tracking-tight">
             {tenant.name}
           </h1>
-          <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <span className="capitalize">{tenant.industry}</span>
+            {tenant.contactName && (
+              <>
+                <span>·</span>
+                <span>{tenant.contactName}</span>
+              </>
+            )}
             <span>·</span>
-            <span>Client since {tenant.createdAt.toLocaleDateString()}</span>
+            <span>
+              {isProspect ? "Added" : "Client since"}{" "}
+              {tenant.createdAt.toLocaleDateString()}
+            </span>
             <TenantStatusBadge status={tenant.status} />
           </div>
         </div>
@@ -103,6 +123,43 @@ export default async function TenantDetailPage({
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Discovery</CardTitle>
+              <CardDescription>
+                Audit engagements for this business — the conversation, the
+                health check, the build spec.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {discoveries.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No discovery yet.
+                </p>
+              )}
+              {discoveries.map((d) => (
+                <Link
+                  key={d.id}
+                  href={`/admin/audits/${d.id}`}
+                  className="flex items-center justify-between rounded-md border px-3 py-2 text-sm hover:bg-muted/60"
+                >
+                  <span>
+                    Started {d.createdAt.toLocaleDateString()}
+                    {d.report && " · report ready"}
+                  </span>
+                  <Badge variant="secondary" className="capitalize">
+                    {d.status.replace("_", " ")}
+                  </Badge>
+                </Link>
+              ))}
+              <Button asChild variant="secondary" size="sm">
+                <Link href={`/admin/audits/new?tenant=${tenant.id}`}>
+                  Start discovery
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Modules</CardTitle>
@@ -176,6 +233,24 @@ export default async function TenantDetailPage({
         </div>
 
         <div className="space-y-6">
+          {isProspect && (
+            <Card className="border-brand/40">
+              <CardHeader>
+                <CardTitle className="text-base">Prospect</CardTitle>
+                <CardDescription>
+                  CRM record only — no platform workspace yet. Converting
+                  creates their login workspace and keeps all history.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ConvertProspectForm
+                  tenantId={tenant.id}
+                  contactEmail={tenant.contactEmail}
+                />
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Subscription</CardTitle>

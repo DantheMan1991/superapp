@@ -12,7 +12,13 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { addTenantNote, setTenantStatus, toggleModule } from "../../actions";
+import { Input } from "@/components/ui/input";
+import {
+  addTenantNote,
+  convertProspectToClient,
+  setTenantStatus,
+  toggleModule,
+} from "../../actions";
 
 const STATUSES = ["prospect", "onboarding", "active", "paused", "churned"] as const;
 
@@ -80,6 +86,41 @@ export function ModuleToggle({
       }
       aria-label={`Toggle ${moduleId}`}
     />
+  );
+}
+
+export function ConvertProspectForm({
+  tenantId,
+  contactEmail,
+}: {
+  tenantId: string;
+  contactEmail: string | null;
+}) {
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <form
+      action={(formData) =>
+        startTransition(async () => {
+          const res = await convertProspectToClient(formData);
+          if (res?.error) toast.error(res.error);
+          else if (res?.warning) toast.warning(res.warning);
+          else toast.success("Converted — they're a client now");
+        })
+      }
+      className="space-y-2"
+    >
+      <input type="hidden" name="tenantId" value={tenantId} />
+      <Input
+        name="ownerEmail"
+        type="email"
+        defaultValue={contactEmail ?? ""}
+        placeholder="owner@business.com (optional invite)"
+      />
+      <Button type="submit" size="sm" disabled={pending} className="w-full">
+        {pending ? "Converting…" : "Convert to client"}
+      </Button>
+    </form>
   );
 }
 

@@ -37,16 +37,24 @@ export const moduleStatus = pgEnum("module_status", [
   "coming_soon",
 ]);
 
-/** A client business. Maps 1:1 to a Clerk Organization. The unit of isolation. */
+/**
+ * A business in the CRM — the record that spans the whole lifecycle.
+ * status "prospect" + null clerkOrgId = CRM-only (discovery stage);
+ * converting to a client attaches a Clerk Organization to the SAME row,
+ * which is what makes it a tenant (the unit of data isolation).
+ */
 export const tenants = pgTable(
   "tenants",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    clerkOrgId: text("clerk_org_id").notNull(),
+    /** Null while the business is a prospect with no platform workspace. */
+    clerkOrgId: text("clerk_org_id"),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     industry: text("industry").notNull().default("general"),
     status: tenantStatus("status").notNull().default("onboarding"),
+    contactName: text("contact_name"),
+    contactEmail: text("contact_email"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -242,6 +250,10 @@ export const audits = pgTable(
   "audits",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** The CRM record this engagement belongs to. Always set by the app. */
+    tenantId: uuid("tenant_id").references(() => tenants.id, {
+      onDelete: "cascade",
+    }),
     businessName: text("business_name").notNull(),
     industry: text("industry").notNull().default("general"),
     contactName: text("contact_name"),

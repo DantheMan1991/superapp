@@ -18,16 +18,19 @@ import { createClientBusiness } from "../../actions";
 const INDUSTRIES = [
   { value: "real-estate", label: "Real estate (flipping / rentals)" },
   { value: "construction", label: "Construction / trades" },
+  { value: "farm", label: "Farm / agriculture" },
   { value: "general", label: "Other / general" },
 ];
 
 export function NewClientForm() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [industry, setIndustry] = useState("real-estate");
+  const [industry, setIndustry] = useState("construction");
+  const [kind, setKind] = useState<"prospect" | "client">("prospect");
 
   function onSubmit(formData: FormData) {
     formData.set("industry", industry);
+    formData.set("kind", kind);
     startTransition(async () => {
       const result = await createClientBusiness(formData);
       if (result?.error) {
@@ -35,7 +38,7 @@ export function NewClientForm() {
         return;
       }
       if (result?.warning) toast.warning(result.warning);
-      else toast.success("Client created");
+      else toast.success(kind === "prospect" ? "Prospect added" : "Client created");
       router.push(
         result?.tenantId ? `/admin/tenants/${result.tenantId}` : "/admin",
       );
@@ -44,6 +47,30 @@ export function NewClientForm() {
 
   return (
     <form action={onSubmit} className="space-y-5">
+      <div className="space-y-2">
+        <Label>Stage</Label>
+        <Select
+          value={kind}
+          onValueChange={(v) => setKind(v as "prospect" | "client")}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="prospect">
+              Prospect — CRM record only, no platform access yet
+            </SelectItem>
+            <SelectItem value="client">
+              Client — creates their workspace, ready to onboard
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Prospects can be converted to clients later with one click — same
+          record, history intact.
+        </p>
+      </div>
+
       <div className="space-y-2">
         <Label htmlFor="name">Business name</Label>
         <Input
@@ -73,10 +100,25 @@ export function NewClientForm() {
       </div>
 
       <div className="space-y-2">
+        <Label htmlFor="contactName">
+          Contact person{" "}
+          <span className="font-normal text-muted-foreground">(optional)</span>
+        </Label>
+        <Input
+          id="contactName"
+          name="contactName"
+          placeholder="Mike Rossi, owner"
+          maxLength={120}
+        />
+      </div>
+
+      <div className="space-y-2">
         <Label htmlFor="ownerEmail">
-          Owner email{" "}
+          {kind === "client" ? "Owner email" : "Contact email"}{" "}
           <span className="font-normal text-muted-foreground">
-            (optional — sends an invitation to join)
+            {kind === "client"
+              ? "(optional — sends an invitation to join)"
+              : "(optional — used when you convert them later)"}
           </span>
         </Label>
         <Input
@@ -88,7 +130,11 @@ export function NewClientForm() {
       </div>
 
       <Button type="submit" disabled={pending} className="w-full">
-        {pending ? "Creating…" : "Create client"}
+        {pending
+          ? "Saving…"
+          : kind === "prospect"
+            ? "Add prospect"
+            : "Create client"}
       </Button>
     </form>
   );

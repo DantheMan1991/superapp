@@ -1,10 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -16,20 +16,30 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { createAuditEngagement } from "../actions";
 
-const INDUSTRIES = [
-  { value: "real-estate", label: "Real estate (flipping / rentals)" },
-  { value: "construction", label: "Construction / trades" },
-  { value: "farm", label: "Farm / agriculture" },
-  { value: "general", label: "Other / general" },
-];
+export interface BusinessOption {
+  id: string;
+  name: string;
+  industry: string;
+  status: string;
+}
 
-export function NewAuditForm() {
+export function NewAuditForm({
+  businesses,
+  preselectedId,
+}: {
+  businesses: BusinessOption[];
+  preselectedId?: string;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [industry, setIndustry] = useState("construction");
+  const [tenantId, setTenantId] = useState(preselectedId ?? "");
 
   function onSubmit(formData: FormData) {
-    formData.set("industry", industry);
+    if (!tenantId) {
+      toast.error("Pick a business from the CRM first");
+      return;
+    }
+    formData.set("tenantId", tenantId);
     startTransition(async () => {
       const result = await createAuditEngagement(formData);
       if (result?.error) {
@@ -45,44 +55,32 @@ export function NewAuditForm() {
   return (
     <form action={onSubmit} className="space-y-5">
       <div className="space-y-2">
-        <Label htmlFor="businessName">Business name</Label>
-        <Input
-          id="businessName"
-          name="businessName"
-          placeholder="Rossi Concrete LLC"
-          required
-          minLength={2}
-          maxLength={120}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Industry</Label>
-        <Select value={industry} onValueChange={setIndustry}>
+        <Label>Business</Label>
+        <Select value={tenantId} onValueChange={setTenantId}>
           <SelectTrigger className="w-full">
-            <SelectValue />
+            <SelectValue placeholder="Pick from the CRM…" />
           </SelectTrigger>
           <SelectContent>
-            {INDUSTRIES.map((i) => (
-              <SelectItem key={i.value} value={i.value}>
-                {i.label}
+            {businesses.map((b) => (
+              <SelectItem key={b.id} value={b.id}>
+                {b.name}
+                <span className="ml-2 text-xs text-muted-foreground capitalize">
+                  {b.industry} · {b.status.replace("_", " ")}
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="contactName">
-          Contact{" "}
-          <span className="font-normal text-muted-foreground">(optional)</span>
-        </Label>
-        <Input
-          id="contactName"
-          name="contactName"
-          placeholder="Mike Rossi, owner"
-          maxLength={120}
-        />
+        <p className="text-xs text-muted-foreground">
+          Not in the CRM yet?{" "}
+          <Link
+            href="/admin/clients/new"
+            className="underline hover:text-foreground"
+          >
+            Add the business first
+          </Link>{" "}
+          — every engagement hangs off a CRM record.
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -99,7 +97,11 @@ export function NewAuditForm() {
         />
       </div>
 
-      <Button type="submit" disabled={pending} className="w-full">
+      <Button
+        type="submit"
+        disabled={pending || !tenantId}
+        className="w-full"
+      >
         {pending ? "Creating…" : "Start discovery"}
       </Button>
     </form>

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { withSystem, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
+import { slugify } from "@/lib/slug";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 
 /** All actions here re-verify superadmin server-side before touching data. */
@@ -121,22 +122,68 @@ export async function addTenantNote(formData: FormData) {
 const createClientSchema = z.object({
   name: z.string().trim().min(2).max(120),
   industry: z.string().trim().min(1).max(64),
+  kind: z.enum(["prospect", "client"]).default("prospect"),
+  contactName: z.string().trim().max(120).optional().or(z.literal("")),
   ownerEmail: z.string().trim().email().optional().or(z.literal("")),
 });
 
 /**
- * Owner-initiated onboarding: create the Clerk org (source of truth), sync
- * the tenant row, optionally invite the client's owner by email.
+ * Add a business to the CRM. As a "prospect" it's a CRM-only record (no
+ * Clerk org, no platform access) — the discovery stage. As a "client" it
+ * gets its Clerk organization immediately and the owner can be invited.
  */
 export async function createClientBusiness(formData: FormData) {
   const { userId } = await requireSuperAdmin();
   const parsed = createClientSchema.safeParse({
     name: formData.get("name"),
     industry: formData.get("industry"),
+    kind: formData.get("kind") ?? "prospect",
+    contactName: formData.get("contactName"),
     ownerEmail: formData.get("ownerEmail"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+
+  if (parsed.data.kind === "prospect") {
+    const base = slugify(parsed.data.name);
+    const tenant = await withSystem(async (tx) => {
+      let slug = base;
+      for (let i = 2; ; i++) {
+        const clash = await tx.query.tenants.findFirst({
+          where: eq(schema.tenants.slug, slug),
+        });
+        if (!clash) break;
+        slug = `${base}-${i}`;
+      }
+      const [row] = await tx
+        .insert(schema.tenants)
+        .values({
+          clerkOrgId: null,
+          name: parsed.data.name,
+          slug,
+          industry: parsed.data.industry,
+          status: "prospect",
+          contactName: parsed.data.contactName || null,
+          contactEmail: parsed.data.ownerEmail || null,
+        })
+        .returning();
+      await tx
+        .insert(schema.subscriptions)
+        .values({ tenantId: row.id })
+        .onConflictDoNothing();
+      return row;
+    });
+
+    await logAudit({
+      action: "prospect.created",
+      tenantId: tenant.id,
+      actorClerkUserId: userId,
+      actorLabel: "admin-console",
+    });
+
+    revalidatePath("/admin");
+    return { ok: true, tenantId: tenant.id };
   }
 
   const client = await clerkClient();
@@ -162,7 +209,12 @@ export async function createClientBusiness(formData: FormData) {
   await withSystem((tx) =>
     tx
       .update(schema.tenants)
-      .set({ industry: parsed.data.industry, updatedAt: new Date() })
+      .set({
+        industry: parsed.data.industry,
+        contactName: parsed.data.contactName || null,
+        contactEmail: parsed.data.ownerEmail || null,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.tenants.id, tenant.id)),
   );
 
@@ -195,4 +247,86 @@ export async function createClientBusiness(formData: FormData) {
 
   revalidatePath("/admin");
   return { ok: true, tenantId: tenant.id };
+}
+
+const convertSchema = z.object({
+  tenantId: z.string().uuid(),
+  ownerEmail: z.string().trim().email().optional().or(z.literal("")),
+});
+
+/**
+ * Prospect → client: create the Clerk organization and attach it to the
+ * SAME CRM row, so audits, notes, and history stay connected.
+ */
+export async function convertProspectToClient(formData: FormData) {
+  const { userId } = await requireSuperAdmin();
+  const parsed = convertSchema.safeParse({
+    tenantId: formData.get("tenantId"),
+    ownerEmail: formData.get("ownerEmail"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+
+  const tenant = await withSystem((tx) =>
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, parsed.data.tenantId),
+    }),
+  );
+  if (!tenant) return { error: "Business not found" };
+  if (tenant.clerkOrgId) return { error: "Already a client." };
+
+  const client = await clerkClient();
+  const me = await currentUser();
+
+  let org;
+  try {
+    org = await client.organizations.createOrganization({
+      name: tenant.name,
+      createdBy: me?.id,
+    });
+  } catch (err) {
+    console.error("clerk org creation failed", err);
+    return { error: "Could not create the organization in Clerk." };
+  }
+
+  // Attach immediately so the org.created webhook's upsert finds this row
+  // by clerkOrgId instead of creating a duplicate.
+  await withSystem((tx) =>
+    tx
+      .update(schema.tenants)
+      .set({
+        clerkOrgId: org.id,
+        status: "onboarding",
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.tenants.id, tenant.id)),
+  );
+
+  const invite = parsed.data.ownerEmail || tenant.contactEmail;
+  let warning: string | undefined;
+  if (invite) {
+    try {
+      await client.organizations.createOrganizationInvitation({
+        organizationId: org.id,
+        emailAddress: invite,
+        role: "org:admin",
+        inviterUserId: me?.id,
+      });
+    } catch (err) {
+      console.error("clerk invitation failed", err);
+      warning = "Converted, but the email invitation failed to send.";
+    }
+  }
+
+  await logAudit({
+    action: "prospect.converted",
+    tenantId: tenant.id,
+    actorClerkUserId: userId,
+    meta: { invited: invite || null },
+  });
+
+  revalidatePath(`/admin/tenants/${tenant.id}`);
+  revalidatePath("/admin");
+  return { ok: true, warning };
 }

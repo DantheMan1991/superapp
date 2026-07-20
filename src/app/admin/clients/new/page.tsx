@@ -23,11 +23,11 @@ export default function NewClientPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Onboard a new client</CardTitle>
+          <CardTitle>Add a business</CardTitle>
           <CardDescription>
-            Creates the business on the platform and (optionally) emails the
-            owner an invitation. You can switch on modules and start billing
-            from their client page afterward.
+            Every business gets one CRM record for its whole life — prospect,
+            discovery, client, billing. Start as a prospect if they haven&apos;t
+            signed; convert with one click when they do.
           </CardDescription>
         </CardHeader>
         <CardContent>

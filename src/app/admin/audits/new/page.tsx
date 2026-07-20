@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { asc } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
+import { withSystem, schema } from "@/db";
 import {
   Card,
   CardContent,
@@ -11,7 +13,20 @@ import { NewAuditForm } from "./new-audit-form";
 
 export const dynamic = "force-dynamic";
 
-export default function NewAuditPage() {
+export default async function NewAuditPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tenant?: string }>;
+}) {
+  const { tenant: preselectedId } = await searchParams;
+
+  const businesses = await withSystem((tx) =>
+    tx.query.tenants.findMany({
+      columns: { id: true, name: true, industry: true, status: true },
+      orderBy: asc(schema.tenants.name),
+    }),
+  );
+
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <Link
@@ -25,12 +40,15 @@ export default function NewAuditPage() {
         <CardHeader>
           <CardTitle>New discovery engagement</CardTitle>
           <CardDescription>
-            Give the copilot whatever you know so far — it will tell you what
-            to find out. Add notes as you talk to the prospect.
+            Pick the business from your CRM — prospects and clients both work.
+            The copilot gets everything the CRM knows about them.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <NewAuditForm />
+          <NewAuditForm
+            businesses={businesses}
+            preselectedId={preselectedId}
+          />
         </CardContent>
       </Card>
     </div>

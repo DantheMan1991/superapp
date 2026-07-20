@@ -37,6 +37,17 @@ export default async function AuditDetailPage({
           {audit.contactName && <> · {audit.contactName}</>}
           {" · started "}
           {audit.createdAt.toLocaleDateString()}
+          {audit.tenantId && (
+            <>
+              {" · "}
+              <Link
+                href={`/admin/tenants/${audit.tenantId}`}
+                className="underline hover:text-foreground"
+              >
+                CRM record
+              </Link>
+            </>
+          )}
         </p>
       </div>
 

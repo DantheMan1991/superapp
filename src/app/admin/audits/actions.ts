@@ -15,31 +15,40 @@ import {
 } from "@/lib/discovery";
 
 const createAuditSchema = z.object({
-  businessName: z.string().trim().min(2).max(120),
-  industry: z.string().trim().min(1).max(64),
-  contactName: z.string().trim().max(120).optional().or(z.literal("")),
+  tenantId: z.string().uuid("Pick a business from the CRM"),
   context: z.string().trim().max(10000).optional().or(z.literal("")),
 });
 
+/**
+ * Start a discovery engagement for an existing CRM record (prospect or
+ * client). Business facts are snapshotted onto the audit so the copilot
+ * prompt has them even if the CRM record is edited later.
+ */
 export async function createAuditEngagement(formData: FormData) {
   const { userId } = await requireSuperAdmin();
   const parsed = createAuditSchema.safeParse({
-    businessName: formData.get("businessName"),
-    industry: formData.get("industry"),
-    contactName: formData.get("contactName"),
+    tenantId: formData.get("tenantId"),
     context: formData.get("context"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
 
+  const tenant = await withSystem((tx) =>
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, parsed.data.tenantId),
+    }),
+  );
+  if (!tenant) return { error: "Business not found in the CRM" };
+
   const [audit] = await withSystem((tx) =>
     tx
       .insert(schema.audits)
       .values({
-        businessName: parsed.data.businessName,
-        industry: parsed.data.industry,
-        contactName: parsed.data.contactName || null,
+        tenantId: tenant.id,
+        businessName: tenant.name,
+        industry: tenant.industry,
+        contactName: tenant.contactName,
         context: parsed.data.context || "",
       })
       .returning(),

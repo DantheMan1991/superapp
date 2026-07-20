@@ -36,6 +36,20 @@
       "when": 1784541768599,
       "tag": "0004_audits_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784542397561,
+      "tag": "0005_crm_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784542402372,
+      "tag": "0006_crm_backfill",
+      "breakpoints": true
     }
   ]
 }

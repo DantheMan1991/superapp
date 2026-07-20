@@ -98,11 +98,17 @@ export default async function AuditsPage() {
                       >
                         {audit.businessName}
                       </Link>
-                      {audit.contactName && (
-                        <div className="text-xs text-muted-foreground">
-                          {audit.contactName}
-                        </div>
-                      )}
+                      <div className="text-xs text-muted-foreground">
+                        {audit.contactName && <>{audit.contactName} · </>}
+                        {audit.tenantId && (
+                          <Link
+                            href={`/admin/tenants/${audit.tenantId}`}
+                            className="underline hover:text-foreground"
+                          >
+                            CRM record
+                          </Link>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="capitalize text-muted-foreground">
                       {audit.industry}

@@ -74,12 +74,12 @@ export default async function AdminClientsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Clients</h1>
           <p className="text-sm text-muted-foreground">
-            Every business on the platform, at a glance.
+            Your whole book of business — prospects through paying clients.
           </p>
         </div>
         <Button asChild>
           <Link href="/admin/clients/new">
-            <Plus className="size-4" /> New client
+            <Plus className="size-4" /> Add business
           </Link>
         </Button>
       </div>

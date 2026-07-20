@@ -226,6 +226,45 @@ export const helloItems = pgTable(
   (t) => [index("hello_items_tenant_idx").on(t.tenantId)],
 );
 
+export const auditStatus = pgEnum("audit_status", [
+  "open",
+  "report_ready",
+  "won",
+  "lost",
+]);
+
+/**
+ * Discovery/audit engagements with prospects (Tier 0 — the sales wedge).
+ * Prospects are not tenants yet, so this is platform-level data:
+ * RLS restricts it to the superadmin context only.
+ */
+export const audits = pgTable(
+  "audits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    businessName: text("business_name").notNull(),
+    industry: text("industry").notNull().default("general"),
+    contactName: text("contact_name"),
+    status: auditStatus("status").notNull().default("open"),
+    /** What we knew going in — intake notes, referral context. */
+    context: text("context").notNull().default(""),
+    /** Conversation with the discovery copilot: [{role, content}, …] */
+    messages: jsonb("messages").notNull().default([]),
+    /** Generated deliverable: health check + build spec, markdown. */
+    report: text("report"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("audits_status_idx").on(t.status)],
+);
+
+export type Audit = typeof audits.$inferSelect;
+export type AuditMessage = { role: "user" | "assistant"; content: string };
+
 export type Tenant = typeof tenants.$inferSelect;
 export type Profile = typeof profiles.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;

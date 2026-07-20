@@ -25,6 +25,7 @@ export default async function AdminLayout({
       contextLabel="Platform admin"
       navItems={[
         { href: "/admin", label: "Clients", icon: "users", exact: true },
+        { href: "/admin/audits", label: "Discovery", icon: "sparkles" },
         { href: "/admin/modules", label: "Modules", icon: "boxes" },
         { href: "/admin/audit", label: "Audit log", icon: "audit" },
       ]}

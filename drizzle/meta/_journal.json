@@ -22,6 +22,20 @@
       "when": 1784500488724,
       "tag": "0002_subscription_amount",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784541763947,
+      "tag": "0003_audits",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784541768599,
+      "tag": "0004_audits_rls",
+      "breakpoints": true
     }
   ]
 }

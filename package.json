@@ -15,6 +15,7 @@
     "test:isolation": "vitest run tests/tenant-isolation.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.3",
     "@clerk/nextjs": "^7.5.20",
     "@neondatabase/serverless": "^1.1.0",
     "class-variance-authority": "^0.7.1",
@@ -26,6 +27,7 @@
     "radix-ui": "^1.6.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-markdown": "^10.1.0",
     "shadcn": "^4.13.1",
     "sonner": "^2.0.7",
     "stripe": "^22.3.2",
@@ -37,6 +39,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tailwindcss/typography": "^0.5.20",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

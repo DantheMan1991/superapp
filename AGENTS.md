@@ -32,6 +32,11 @@ that matter for code:
   server.
 - **Audit sensitive actions** via `logAudit()` — identifiers only, never
   secrets/PII.
+- **Claude API calls** go through `getClaude()` (`src/lib/claude.ts`, lazy,
+  model `claude-opus-4-8`, adaptive thinking, streamed). The Discovery
+  copilot (`/admin/audits`, prompts in `src/lib/discovery.ts`) is
+  superadmin-only; `audits` is platform-level data with a superadmin-only
+  RLS policy.
 
 ## Adding a module (the Phase 2 workflow)
 

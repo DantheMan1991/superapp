@@ -316,6 +316,25 @@ once deployed).
 
 ---
 
+## Part 4.5 — Anthropic: the Discovery copilot (5 min)
+
+The **Discovery** tool in your admin cockpit (`/admin/audits`) uses Claude to
+help you analyze prospects and generate audit reports. It needs its own API
+key:
+
+1. Go to **https://console.anthropic.com** and sign up (or sign in).
+2. You may need to add billing (Settings → Billing) — API usage is
+   pay-per-use. A full discovery engagement (conversation + report) typically
+   costs a few dollars; there's no subscription.
+3. Left sidebar → **API keys** → **Create key** → name it `superapp` → copy
+   the key (starts `sk-ant-`). It's shown only once.
+4. Paste it into `.env` as `ANTHROPIC_API_KEY` and restart the dev server.
+5. If deployed: also add `ANTHROPIC_API_KEY` to the Vercel environment
+   variables and redeploy.
+
+Everything else in the app works without this key — only the Discovery
+copilot needs it.
+
 ## Part 5 — Common problems
 
 | Symptom | Cause → fix |

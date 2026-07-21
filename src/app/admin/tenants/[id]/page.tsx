@@ -24,6 +24,8 @@ import {
   ModuleToggle,
   TenantStatusSelect,
 } from "./controls";
+import { getLedgerIntegrity } from "@/modules/accounting/core";
+import { formatCents } from "@/modules/accounting/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -76,11 +78,20 @@ export default async function TenantDetailPage({
         }),
       ]);
 
-    return { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries };
+    // Read-only ledger health check (the "withSystem never writes
+    // accounting rows" rule is untouched — this only reads).
+    const accountingEnabled = tenantMods.some(
+      (m) => m.moduleId === "accounting" && m.enabled,
+    );
+    const ledgerIntegrity = accountingEnabled
+      ? await getLedgerIntegrity(tx, tenant.id)
+      : null;
+
+    return { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries, ledgerIntegrity };
   });
 
   if (!data) notFound();
-  const { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries } =
+  const { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries, ledgerIntegrity } =
     data;
   const isProspect = !tenant.clerkOrgId;
 
@@ -280,6 +291,43 @@ export default async function TenantDetailPage({
               </p>
             </CardContent>
           </Card>
+
+          {ledgerIntegrity && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Ledger integrity</CardTitle>
+                <CardDescription>
+                  Independent check that the books balance.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Books</span>
+                  {ledgerIntegrity.balanced ? (
+                    <Badge className="bg-emerald-600 hover:bg-emerald-600">
+                      Balanced
+                    </Badge>
+                  ) : (
+                    <Badge variant="destructive">
+                      Off by {formatCents(Math.abs(ledgerIntegrity.totalCents))}
+                    </Badge>
+                  )}
+                </div>
+                {ledgerIntegrity.unbalancedEntries.length > 0 && (
+                  <div className="space-y-1 pt-1">
+                    <p className="text-xs font-medium text-destructive">
+                      Unbalanced entries:
+                    </p>
+                    {ledgerIntegrity.unbalancedEntries.map((e) => (
+                      <p key={e.entryId} className="font-mono text-xs text-muted-foreground">
+                        {e.entryId} ({formatCents(Math.abs(e.balanceCents))})
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>

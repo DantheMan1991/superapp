@@ -23,9 +23,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
   {
     id: "accounting",
     name: "Accounting",
-    description: "Transactions, receipt capture, invoicing, AR tracking, reporting.",
+    description:
+      "Double-entry ledger, chart of accounts, journal entries, trial balance.",
     category: "core",
-    status: "coming_soon",
+    status: "available",
     sortOrder: 10,
   },
   {

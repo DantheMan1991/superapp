@@ -1,0 +1,121 @@
+import Link from "next/link";
+import { and, eq, sql } from "drizzle-orm";
+import { Calculator } from "lucide-react";
+import { withTenant, schema } from "@/db";
+import type { TenantContext } from "@/lib/auth";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { getSettings, ledgerIsBalanced } from "./core";
+import { AccountingNav } from "./components/accounting-nav";
+
+/** Module home — overview of the ledger's state. */
+export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
+  const tenantId = ctx.tenant.id;
+  const data = await withTenant(tenantId, async (tx) => {
+    const [accountCount] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.accounts)
+      .where(
+        and(
+          eq(schema.accounts.tenantId, tenantId),
+          eq(schema.accounts.isActive, true),
+        ),
+      );
+    const statusCounts = await tx
+      .select({
+        status: schema.journalEntries.status,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(schema.journalEntries)
+      .where(eq(schema.journalEntries.tenantId, tenantId))
+      .groupBy(schema.journalEntries.status);
+    const balanced = await ledgerIsBalanced(tx, tenantId);
+    const settings = await getSettings(tx, tenantId);
+    return { accountCount: accountCount.n, statusCounts, balanced, settings };
+  });
+
+  const count = (s: string) =>
+    data.statusCounts.find((r) => r.status === s)?.n ?? 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-brand/10 text-brand">
+            <Calculator className="size-5" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Accounting</h1>
+            <p className="text-sm text-muted-foreground">
+              Double-entry books for {ctx.tenant.name}.
+            </p>
+          </div>
+        </div>
+        <Button asChild>
+          <Link href="/dashboard/m/accounting/journal/new">New entry</Link>
+        </Button>
+      </div>
+
+      <AccountingNav />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Ledger health</CardDescription>
+            <CardTitle className="text-base">
+              {data.balanced ? (
+                <Badge className="bg-emerald-600 hover:bg-emerald-600">
+                  In balance
+                </Badge>
+              ) : (
+                <Badge variant="destructive">Out of balance</Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            Debits equal credits across all posted entries.
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Active accounts</CardDescription>
+            <CardTitle className="text-2xl">{data.accountCount}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            <Link className="underline-offset-2 hover:underline" href="/dashboard/m/accounting/accounts">
+              Manage the chart of accounts
+            </Link>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Posted entries</CardDescription>
+            <CardTitle className="text-2xl">{count("posted")}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            {count("draft")} draft{count("draft") === 1 ? "" : "s"} ·{" "}
+            {count("void")} void
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Books closed through</CardDescription>
+            <CardTitle className="text-2xl">
+              {data.settings.closedThrough ?? "—"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            Entries on or before this date are locked.
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

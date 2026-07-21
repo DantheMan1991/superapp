@@ -1,4 +1,5 @@
 import type { ModuleDefinition } from "./types";
+import { AccountingModule } from "./accounting/AccountingModule";
 import { HelloModule } from "./hello/HelloModule";
 
 /**
@@ -13,6 +14,12 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     name: "Hello Module",
     icon: "sparkles",
     Component: HelloModule,
+  },
+  accounting: {
+    slug: "accounting",
+    name: "Accounting",
+    icon: "calculator",
+    Component: AccountingModule,
   },
 };
 

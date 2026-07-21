@@ -1,5 +1,10 @@
+import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
+  check,
+  date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -274,6 +279,299 @@ export const audits = pgTable(
   (t) => [index("audits_status_idx").on(t.status)],
 );
 
+/* ------------------------------------------------------------------------
+ * Accounting module — Core Ledger Platform (Phase 2, session 1).
+ *
+ * Conventions specific to these tables:
+ * - Money is bigint cents; amounts on journal lines are SIGNED
+ *   (positive = debit, negative = credit). Every non-draft entry must sum
+ *   to zero — enforced by a deferrable constraint trigger in
+ *   drizzle/0008_accounting_rls_triggers.sql, not only by app code.
+ * - Bookkeeping dates are `date` columns (mode: "string"), never
+ *   timestamps — a ledger day has no timezone.
+ * - Composite tenant keys: parents expose UNIQUE (tenant_id, id) and child
+ *   FKs include tenant_id, so the database itself proves an entry, its
+ *   lines, its accounts, and its dimensions all belong to one tenant.
+ * - Self/cross references that must survive whole-tenant cascade deletes
+ *   use the default NO ACTION (checked at end of statement), not RESTRICT
+ *   (checked immediately, which would abort the cascade mid-flight).
+ * ---------------------------------------------------------------------- */
+
+export const accountType = pgEnum("account_type", [
+  "asset",
+  "liability",
+  "equity",
+  "income",
+  "expense",
+]);
+
+export const journalEntryStatus = pgEnum("journal_entry_status", [
+  "draft",
+  "posted",
+  "void",
+]);
+
+export const journalEntrySource = pgEnum("journal_entry_source", [
+  "manual",
+  "invoice",
+  "invoice_payment",
+  "bill",
+  "bill_payment",
+  "bank_import",
+  "opening_balance",
+  "recurring",
+  "reversal",
+]);
+
+export const entryEditPolicy = pgEnum("entry_edit_policy", [
+  "standard",
+  "strict_append_only",
+]);
+
+/** Chart of accounts. Never hard-deleted once referenced — deactivate instead. */
+export const accounts = pgTable(
+  "accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    accountType: accountType("account_type").notNull(),
+    /** QB "detail type" analog. Text (not enum) so industry packs can add slugs. */
+    subtype: text("subtype").notNull().default("other"),
+    parentId: uuid("parent_id"),
+    description: text("description").notNull().default(""),
+    isActive: boolean("is_active").notNull().default(true),
+    /** AR/AP/Opening Balance Equity/Retained Earnings — protected from edit. */
+    isSystem: boolean("is_system").notNull().default(false),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("accounts_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("accounts_tenant_code_idx").on(t.tenantId, t.code),
+    index("accounts_tenant_idx").on(t.tenantId),
+    index("accounts_tenant_type_idx").on(t.tenantId, t.accountType),
+    foreignKey({
+      name: "accounts_parent_fk",
+      columns: [t.tenantId, t.parentId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+  ],
+);
+
+export const journalEntries = pgTable(
+  "journal_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The bookkeeping day (no timezone). ISO string, compared lexically. */
+    entryDate: date("entry_date", { mode: "string" }).notNull(),
+    memo: text("memo").notNull().default(""),
+    status: journalEntryStatus("status").notNull().default("draft"),
+    source: journalEntrySource("source").notNull().default("manual"),
+    /** Soft back-pointer to the source document (invoice, bank txn, …). */
+    sourceId: uuid("source_id"),
+    idempotencyKey: text("idempotency_key"),
+    reversesEntryId: uuid("reverses_entry_id"),
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    /** Optimistic concurrency: compare-and-increment on every mutation. */
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("journal_entries_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("journal_entries_tenant_date_idx").on(t.tenantId, t.entryDate),
+    index("journal_entries_tenant_status_idx").on(t.tenantId, t.status),
+    uniqueIndex("journal_entries_tenant_idem_idx")
+      .on(t.tenantId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} is not null`),
+    // An entry can be reversed at most once — a DB rule, not a convention.
+    uniqueIndex("journal_entries_tenant_reverses_idx")
+      .on(t.tenantId, t.reversesEntryId)
+      .where(sql`${t.reversesEntryId} is not null`),
+    foreignKey({
+      name: "journal_entries_reverses_fk",
+      columns: [t.tenantId, t.reversesEntryId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+  ],
+);
+
+export const journalLines = pgTable(
+  "journal_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Denormalized on purpose: required by the RLS policy shape and lets
+     * reports aggregate without joining entries. Composite FKs below keep
+     * it consistent with the parent entry and account. */
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    entryId: uuid("entry_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    /** Signed: positive = debit, negative = credit. Never zero. */
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    memo: text("memo").notNull().default(""),
+    lineNo: integer("line_no").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("journal_lines_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("journal_lines_entry_line_no_idx").on(
+      t.tenantId,
+      t.entryId,
+      t.lineNo,
+    ),
+    index("journal_lines_tenant_account_idx").on(t.tenantId, t.accountId),
+    index("journal_lines_tenant_entry_idx").on(t.tenantId, t.entryId),
+    foreignKey({
+      name: "journal_lines_entry_fk",
+      columns: [t.tenantId, t.entryId],
+      foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "journal_lines_account_fk",
+      columns: [t.tenantId, t.accountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    check("journal_lines_amount_nonzero", sql`${t.amountCents} <> 0`),
+  ],
+);
+
+/**
+ * Core registry of reportable dimension values (property, job, cost code…).
+ * Industry packs sync their entities into this table in the same
+ * transaction as their own CRUD; the core never imports pack tables.
+ */
+export const dimensionMembers = pgTable(
+  "dimension_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    dimensionType: text("dimension_type").notNull(),
+    /** The pack-side entity row this member mirrors. */
+    packEntityId: uuid("pack_entity_id").notNull(),
+    displayName: text("display_name").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("dimension_members_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("dimension_members_tenant_type_entity_idx").on(
+      t.tenantId,
+      t.dimensionType,
+      t.packEntityId,
+    ),
+    // Target for the typed FK from line_dimensions: proves member type.
+    uniqueIndex("dimension_members_tenant_type_id_idx").on(
+      t.tenantId,
+      t.dimensionType,
+      t.id,
+    ),
+    index("dimension_members_tenant_idx").on(t.tenantId),
+  ],
+);
+
+/**
+ * Tags a journal line with one dimension member per dimension type.
+ * dimension_type is denormalized so both rules are DB-enforced:
+ * one-per-type-per-line (unique below) and member-is-of-stated-type
+ * (typed composite FK below).
+ */
+export const lineDimensions = pgTable(
+  "line_dimensions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    journalLineId: uuid("journal_line_id").notNull(),
+    dimensionType: text("dimension_type").notNull(),
+    memberId: uuid("member_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("line_dimensions_line_type_idx").on(
+      t.tenantId,
+      t.journalLineId,
+      t.dimensionType,
+    ),
+    index("line_dimensions_tenant_member_idx").on(t.tenantId, t.memberId),
+    foreignKey({
+      name: "line_dimensions_line_fk",
+      columns: [t.tenantId, t.journalLineId],
+      foreignColumns: [journalLines.tenantId, journalLines.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "line_dimensions_member_fk",
+      columns: [t.tenantId, t.dimensionType, t.memberId],
+      foreignColumns: [
+        dimensionMembers.tenantId,
+        dimensionMembers.dimensionType,
+        dimensionMembers.id,
+      ],
+    }),
+  ],
+);
+
+/** One row per tenant with the accounting module enabled. */
+export const accountingSettings = pgTable(
+  "accounting_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Entries dated on or before this are locked (reversal-only). */
+    closedThrough: date("closed_through", { mode: "string" }),
+    coaTemplate: text("coa_template").notNull().default("general"),
+    fiscalYearStartMonth: integer("fiscal_year_start_month")
+      .notNull()
+      .default(1),
+    entryEditPolicy: entryEditPolicy("entry_edit_policy")
+      .notNull()
+      .default("standard"),
+    /** Defines "today" and period cutoffs — the server TZ never decides. */
+    bookkeepingTimezone: text("bookkeeping_timezone")
+      .notNull()
+      .default("America/New_York"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("accounting_settings_tenant_idx").on(t.tenantId)],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -286,3 +584,9 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type TenantNote = typeof tenantNotes.$inferSelect;
 export type AuditEntry = typeof auditLog.$inferSelect;
 export type HelloItem = typeof helloItems.$inferSelect;
+export type Account = typeof accounts.$inferSelect;
+export type JournalEntry = typeof journalEntries.$inferSelect;
+export type JournalLine = typeof journalLines.$inferSelect;
+export type DimensionMember = typeof dimensionMembers.$inferSelect;
+export type LineDimension = typeof lineDimensions.$inferSelect;
+export type AccountingSettings = typeof accountingSettings.$inferSelect;

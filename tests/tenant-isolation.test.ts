@@ -168,3 +168,250 @@ d("tenant isolation (RLS)", () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+/**
+ * Accounting tables: RLS isolation PLUS the composite-tenant-FK guarantees
+ * — the database itself must refuse a row that stitches together entities
+ * from two tenants, even when the row's own tenant_id passes RLS.
+ */
+const STAMP_ACC = `iso-acc-${process.pid}`;
+
+interface AccFixture {
+  accountId: string;
+  entryId: string;
+  lineId: string;
+  memberId: string;
+}
+
+d("accounting isolation (RLS + composite tenant FKs)", () => {
+  let tenantA: string;
+  let tenantB: string;
+  const fx: Record<string, AccFixture> = {};
+
+  async function seedAccounting(tenantId: string, tag: string): Promise<AccFixture> {
+    return withTenant(tenantId, async (tx) => {
+      await tx.insert(schema.accountingSettings).values({ tenantId });
+      const [cash] = await tx
+        .insert(schema.accounts)
+        .values({
+          tenantId,
+          code: "1000",
+          name: `Checking ${tag}`,
+          accountType: "asset",
+          subtype: "bank",
+        })
+        .returning();
+      const [expense] = await tx
+        .insert(schema.accounts)
+        .values({
+          tenantId,
+          code: "6000",
+          name: `Expense ${tag}`,
+          accountType: "expense",
+          subtype: "operating_expense",
+        })
+        .returning();
+      const [entry] = await tx
+        .insert(schema.journalEntries)
+        .values({
+          tenantId,
+          entryDate: "2026-07-01",
+          memo: `secret entry of ${tag}`,
+          status: "posted",
+          postedAt: new Date(),
+          createdByClerkUserId: `user-${tag}`,
+        })
+        .returning();
+      const lines = await tx
+        .insert(schema.journalLines)
+        .values([
+          { tenantId, entryId: entry.id, accountId: expense.id, amountCents: 5000, lineNo: 1 },
+          { tenantId, entryId: entry.id, accountId: cash.id, amountCents: -5000, lineNo: 2 },
+        ])
+        .returning();
+      const [member] = await tx
+        .insert(schema.dimensionMembers)
+        .values({
+          tenantId,
+          dimensionType: "property",
+          packEntityId: crypto.randomUUID(),
+          displayName: `Property ${tag}`,
+        })
+        .returning();
+      await tx.insert(schema.lineDimensions).values({
+        tenantId,
+        journalLineId: lines[0].id,
+        dimensionType: "property",
+        memberId: member.id,
+      });
+      return {
+        accountId: cash.id,
+        entryId: entry.id,
+        lineId: lines[0].id,
+        memberId: member.id,
+      };
+    });
+  }
+
+  beforeAll(async () => {
+    [tenantA, tenantB] = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP_ACC}-a`, name: "Acc Iso A", slug: `${STAMP_ACC}-a` },
+          { clerkOrgId: `${STAMP_ACC}-b`, name: "Acc Iso B", slug: `${STAMP_ACC}-b` },
+        ])
+        .returning();
+      return [rows[0].id, rows[1].id];
+    });
+    fx.a = await seedAccounting(tenantA, "A");
+    fx.b = await seedAccounting(tenantB, "B");
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("unscoped selects on every accounting table return only the tenant's rows", async () => {
+    await withTenant(tenantA, async (tx) => {
+      const accounts = await tx.select().from(schema.accounts);
+      expect(accounts.length).toBeGreaterThan(0);
+      expect(accounts.every((r) => r.tenantId === tenantA)).toBe(true);
+      const entries = await tx.select().from(schema.journalEntries);
+      expect(entries.every((r) => r.tenantId === tenantA)).toBe(true);
+      const lines = await tx.select().from(schema.journalLines);
+      expect(lines.every((r) => r.tenantId === tenantA)).toBe(true);
+      const settings = await tx.select().from(schema.accountingSettings);
+      expect(settings.every((r) => r.tenantId === tenantA)).toBe(true);
+      const members = await tx.select().from(schema.dimensionMembers);
+      expect(members.every((r) => r.tenantId === tenantA)).toBe(true);
+      const dims = await tx.select().from(schema.lineDimensions);
+      expect(dims.every((r) => r.tenantId === tenantA)).toBe(true);
+    });
+  });
+
+  it("cross-tenant filters read zero rows", async () => {
+    const entries = await withTenant(tenantA, (tx) =>
+      tx
+        .select()
+        .from(schema.journalEntries)
+        .where(eq(schema.journalEntries.tenantId, tenantB)),
+    );
+    expect(entries).toHaveLength(0);
+  });
+
+  it("cannot INSERT accounting rows attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.accounts).values({
+          tenantId: tenantB,
+          code: "9999",
+          name: "smuggled account",
+          accountType: "expense",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.journalEntries).values({
+          tenantId: tenantB,
+          entryDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: cannot attach a line to the OTHER tenant's entry", async () => {
+    // tenant_id passes RLS (it's A's own), but (tenant_id, entry_id)
+    // doesn't exist as a pair — the FK itself must reject it.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.journalLines).values({
+          tenantId: tenantA,
+          entryId: fx.b.entryId,
+          accountId: fx.a.accountId,
+          amountCents: 100,
+          lineNo: 99,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: cannot post a line against the OTHER tenant's account", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.journalLines).values({
+          tenantId: tenantA,
+          entryId: fx.a.entryId,
+          accountId: fx.b.accountId,
+          amountCents: 100,
+          lineNo: 99,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: cannot tag a line with the OTHER tenant's dimension member", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.lineDimensions).values({
+          tenantId: tenantA,
+          journalLineId: fx.a.lineId,
+          dimensionType: "property",
+          memberId: fx.b.memberId,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("typed FK: member must be of the stated dimension type", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.lineDimensions).values({
+          tenantId: tenantA,
+          journalLineId: fx.a.lineId,
+          dimensionType: "job", // fx.a.memberId is a "property" member
+          memberId: fx.a.memberId,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cross-tenant UPDATE and DELETE affect zero accounting rows", async () => {
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.accounts)
+        .set({ name: "defaced" })
+        .where(eq(schema.accounts.tenantId, tenantB))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const deleted = await withTenant(tenantA, (tx) =>
+      tx
+        .delete(schema.journalEntries)
+        .where(eq(schema.journalEntries.tenantId, tenantB))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("no context → default deny on all accounting tables", async () => {
+    const counts = await withSystem(async (tx) => {
+      await tx.execute(sql`select set_config('app.role', '', true)`);
+      await tx.execute(sql`select set_config('app.tenant_id', '', true)`);
+      return Promise.all([
+        tx.select().from(schema.accounts),
+        tx.select().from(schema.journalEntries),
+        tx.select().from(schema.journalLines),
+        tx.select().from(schema.dimensionMembers),
+        tx.select().from(schema.lineDimensions),
+        tx.select().from(schema.accountingSettings),
+      ]);
+    });
+    for (const rows of counts) expect(rows).toHaveLength(0);
+  });
+});

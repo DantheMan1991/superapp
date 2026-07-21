@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Boxes,
+  Calculator,
   CreditCard,
   LayoutDashboard,
   Menu,
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils";
 
 const ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
+  calculator: Calculator,
   users: Users,
   boxes: Boxes,
   audit: ScrollText,

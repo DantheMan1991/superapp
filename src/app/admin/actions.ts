@@ -4,11 +4,12 @@ import { revalidatePath } from "next/cache";
 import { clerkClient, currentUser } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { withSystem, schema } from "@/db";
+import { withSystem, withTenant, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { slugify } from "@/lib/slug";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
+import { provisionAccounting } from "@/modules/accounting/templates/apply";
 
 /** All actions here re-verify superadmin server-side before touching data. */
 
@@ -23,6 +24,21 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
   const parsed = toggleModuleSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   const { tenantId, moduleId, enabled } = parsed.data;
+
+  // Provision BEFORE enabling, so an enabled-but-unprovisioned module is
+  // unrepresentable. Idempotent, and runs as the tenant (withTenant) — the
+  // rule is that withSystem never writes accounting rows.
+  let provisioned: { accountsCreated: number } | undefined;
+  if (moduleId === "accounting" && enabled) {
+    try {
+      provisioned = await withTenant(tenantId, (tx) =>
+        provisionAccounting(tx, tenantId),
+      );
+    } catch (err) {
+      console.error("accounting provisioning failed", err);
+      return { error: "Could not provision the accounting module." };
+    }
+  }
 
   await withSystem(async (tx) => {
     const existing = await tx.query.tenantModules.findFirst({
@@ -56,7 +72,18 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
     actorClerkUserId: userId,
     targetType: "module",
     targetId: moduleId,
+    meta: provisioned ? { accountsCreated: provisioned.accountsCreated } : {},
   });
+  if (provisioned) {
+    await logAudit({
+      action: "coa.template_applied",
+      tenantId,
+      actorClerkUserId: userId,
+      targetType: "module",
+      targetId: moduleId,
+      meta: { accountsCreated: provisioned.accountsCreated },
+    });
+  }
 
   revalidatePath(`/admin/tenants/${tenantId}`);
   revalidatePath("/admin");

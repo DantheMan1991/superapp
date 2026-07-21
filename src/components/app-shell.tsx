@@ -126,7 +126,7 @@ export function AppShell({
   return (
     <div className="flex min-h-screen w-full flex-col lg:flex-row">
       {/* Mobile top bar */}
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-2 bg-sidebar px-3 text-sidebar-foreground lg:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center gap-2 bg-sidebar px-3 text-sidebar-foreground lg:hidden print:hidden">
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
           <SheetTrigger asChild>
             <Button
@@ -160,7 +160,7 @@ export function AppShell({
       </header>
 
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-60 flex-col bg-sidebar text-sidebar-foreground lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-60 flex-col bg-sidebar text-sidebar-foreground lg:flex print:hidden">
         <div className="flex h-16 items-center px-5">
           <Brand contextLabel={contextLabel} />
         </div>
@@ -170,7 +170,7 @@ export function AppShell({
         )}
       </aside>
 
-      <main className="flex-1 bg-background lg:ml-60">
+      <main className="flex-1 bg-background lg:ml-60 print:ml-0">
         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {children}
         </div>

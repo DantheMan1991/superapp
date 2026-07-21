@@ -31,5 +31,31 @@ export {
   updateAccount,
   type AccountTypeValue,
 } from "./coa";
-export { archiveDimensionMember, upsertDimensionMember } from "./dimensions";
+export {
+  archiveDimensionMember,
+  listDimensionMembers,
+  upsertDimensionMember,
+} from "./dimensions";
 export { getLedgerIntegrity, type LedgerIntegrity } from "./integrity";
+export {
+  getBalanceSheet,
+  getCashActivity,
+  getProfitAndLoss,
+} from "./reports";
+export {
+  BS_GROUP_BY_SUBTYPE,
+  PNL_SECTION_BY_SUBTYPE,
+  buildBalanceSheet,
+  buildCashActivity,
+  buildProfitAndLoss,
+  bsGroupFor,
+  displayCents,
+  pnlSectionFor,
+  type BalanceSheetReport,
+  type CashActivityReport,
+  type CashActivityRow,
+  type ProfitAndLossReport,
+  type ReportColumn,
+  type ReportRow,
+  type ReportRowKind,
+} from "./report-builders";

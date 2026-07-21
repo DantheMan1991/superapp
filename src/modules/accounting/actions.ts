@@ -13,6 +13,9 @@ import {
   deleteDraft,
   editEntry,
   friendlyMessage,
+  getBalanceSheet,
+  getCashActivity,
+  getProfitAndLoss,
   postDraft,
   postEntry,
   reverseEntry,
@@ -21,6 +24,12 @@ import {
   voidEntry,
   type LedgerCtx,
 } from "./core";
+import {
+  balanceSheetToCsvRows,
+  cashActivityToCsvRows,
+  pnlToCsvRows,
+  toCsv,
+} from "./lib/csv";
 import { MAX_AMOUNT_CENTS, isValidIsoDate } from "./lib/money";
 
 /**
@@ -391,6 +400,78 @@ export async function setCoaAccountActive(
     });
     revalidatePath(`${BASE}/accounts`);
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// --------------------------------------------------------------- reports
+
+const exportCsvSchema = z.discriminatedUnion("report", [
+  z.object({
+    report: z.literal("pnl"),
+    from: dateStr,
+    to: dateStr,
+    compare: z.enum(["prev-period", "prev-year"]).optional(),
+    dim: z.string().regex(/^[a-z0-9_]+$/).max(32).optional(),
+  }),
+  z.object({
+    report: z.literal("balance-sheet"),
+    asOf: dateStr,
+    compare: z.enum(["prev-year"]).optional(),
+  }),
+  z.object({
+    report: z.literal("cash"),
+    from: dateStr,
+    to: dateStr,
+  }),
+]);
+
+/**
+ * CSV export re-runs the report server-side (never trusts client rows)
+ * and returns the file content; the client downloads it as a Blob.
+ */
+export async function exportReportCsv(
+  input: z.infer<typeof exportCsvSchema>,
+): Promise<ActionResult<{ filename: string; csv: string }>> {
+  const ctx = await gate();
+  const parsed = exportCsvSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  const p = parsed.data;
+  try {
+    const data = await withTenant(ctx.tenantId, async (tx) => {
+      if (p.report === "pnl") {
+        const report = await getProfitAndLoss(tx, ctx.tenantId, {
+          from: p.from,
+          to: p.to,
+          compare: p.compare,
+          dimensionType: p.dim,
+        });
+        return {
+          filename: `profit-and-loss_${p.from}_${p.to}.csv`,
+          csv: toCsv(pnlToCsvRows(report)),
+        };
+      }
+      if (p.report === "balance-sheet") {
+        const report = await getBalanceSheet(tx, ctx.tenantId, {
+          asOf: p.asOf,
+          compare: p.compare,
+        });
+        return {
+          filename: `balance-sheet_${p.asOf}.csv`,
+          csv: toCsv(balanceSheetToCsvRows(report)),
+        };
+      }
+      const report = await getCashActivity(tx, ctx.tenantId, {
+        from: p.from,
+        to: p.to,
+      });
+      return {
+        filename: `cash-activity_${p.from}_${p.to}.csv`,
+        csv: toCsv(cashActivityToCsvRows(report)),
+      };
+    });
+    return { ok: true, data };
   } catch (err) {
     return fail(err);
   }

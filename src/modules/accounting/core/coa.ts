@@ -8,16 +8,10 @@ import type { LedgerCtx } from "./types";
 
 export const MAX_COA_DEPTH = 3;
 
-export type AccountTypeValue = Account["accountType"];
-
-/** Display convention: which side a positive balance sits on. Derived, never stored. */
-export const NORMAL_BALANCE: Record<AccountTypeValue, "debit" | "credit"> = {
-  asset: "debit",
-  expense: "debit",
-  liability: "credit",
-  equity: "credit",
-  income: "credit",
-};
+// Defined in the pure report-builders module (client-safe); re-exported
+// here so server code keeps one import path.
+import type { AccountTypeValue } from "./report-builders";
+export { NORMAL_BALANCE, type AccountTypeValue } from "./report-builders";
 
 export async function listAccounts(tx: Tx, tenantId: string): Promise<Account[]> {
   return tx.query.accounts.findMany({

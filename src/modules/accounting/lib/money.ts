@@ -46,6 +46,28 @@ export function toSafeCents(value: string | number | null): number {
   return n;
 }
 
+/**
+ * Format signed cents in accounting style: negatives in parentheses.
+ * "1,234.56" / "(1,234.56)". Used by reports (P6); formatCents stays
+ * sign-blind for debit/credit-column layouts.
+ */
+export function formatCentsSigned(cents: number): string {
+  const s = formatCents(cents);
+  return cents < 0 ? `(${s})` : s;
+}
+
+/**
+ * CSV amount: plain "-1234.56" built by integer construction — no float
+ * division, no thousands separators (P5).
+ */
+export function centsToCsvAmount(cents: number): string {
+  const sign = cents < 0 ? "-" : "";
+  const abs = Math.abs(cents);
+  const whole = Math.trunc(abs / 100);
+  const frac = String(abs % 100).padStart(2, "0");
+  return `${sign}${whole}.${frac}`;
+}
+
 /** Today's ISO date (yyyy-mm-dd) in the tenant's bookkeeping timezone. */
 export function todayInTimezone(timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {

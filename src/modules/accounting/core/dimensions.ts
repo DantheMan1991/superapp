@@ -12,6 +12,23 @@ import type { LedgerCtx } from "./types";
  * entity CRUD — the core never imports pack tables.
  */
 
+/** Read helper for report selectors and column labels. */
+export async function listDimensionMembers(
+  tx: Tx,
+  tenantId: string,
+  dimensionType?: string,
+): Promise<DimensionMember[]> {
+  return tx.query.dimensionMembers.findMany({
+    where: dimensionType
+      ? and(
+          eq(schema.dimensionMembers.tenantId, tenantId),
+          eq(schema.dimensionMembers.dimensionType, dimensionType),
+        )
+      : eq(schema.dimensionMembers.tenantId, tenantId),
+    orderBy: (m, { asc }) => asc(m.displayName),
+  });
+}
+
 export async function upsertDimensionMember(
   tx: Tx,
   ctx: LedgerCtx,

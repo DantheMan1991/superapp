@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { ArrowRight, FileCheck2, Landmark, Megaphone } from "lucide-react";
@@ -29,9 +30,14 @@ export default async function LandingPage() {
       <header className="border-b">
         <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
-            <div className="flex size-8 items-center justify-center rounded-md bg-primary font-bold text-primary-foreground">
-              Y
-            </div>
+            <Image
+              src="/yosher-mark.png"
+              alt="Yosher"
+              width={36}
+              height={36}
+              priority
+              className="rounded-md"
+            />
             <div className="leading-tight">
               <span className="font-semibold tracking-tight">Yosher</span>
               <span className="hidden text-xs text-muted-foreground sm:block">

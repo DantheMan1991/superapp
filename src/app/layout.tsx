@@ -21,6 +21,12 @@ export const metadata: Metadata = {
   },
   description:
     "Software runs the day-to-day; a real person reviews what matters. Grow without building an office.",
+  openGraph: {
+    title: "Yosher — The Outsourced Business Office",
+    description:
+      "Software runs the day-to-day; a real person reviews what matters. Grow without building an office.",
+    images: ["/yosher-logo.png"],
+  },
 };
 
 export default function RootLayout({

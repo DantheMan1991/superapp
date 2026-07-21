@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -50,8 +51,9 @@ interface AppShellProps {
 function Brand({ contextLabel }: { contextLabel: string }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground font-bold">
-        Y
+      {/* The mark lives on a white chip so it reads on the dark sidebar. */}
+      <div className="flex size-8 items-center justify-center overflow-hidden rounded-md bg-white">
+        <Image src="/yosher-mark.png" alt="Yosher" width={30} height={30} />
       </div>
       <div className="leading-tight">
         <div className="text-sm font-semibold tracking-tight">Yosher</div>

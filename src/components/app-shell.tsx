@@ -51,10 +51,10 @@ function Brand({ contextLabel }: { contextLabel: string }) {
   return (
     <div className="flex items-center gap-2.5">
       <div className="flex size-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground font-bold">
-        S
+        Y
       </div>
       <div className="leading-tight">
-        <div className="text-sm font-semibold tracking-tight">SuperApp</div>
+        <div className="text-sm font-semibold tracking-tight">Yosher</div>
         <div className="text-[11px] text-sidebar-foreground/60">
           {contextLabel}
         </div>

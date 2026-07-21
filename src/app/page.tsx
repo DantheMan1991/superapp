@@ -6,18 +6,18 @@ import { Button } from "@/components/ui/button";
 const PILLARS = [
   {
     icon: Landmark,
-    title: "Books, done and reviewed",
-    body: "Software categorizes, invoices, and chases AR. A real accountant reviews and closes the month.",
+    title: "Books that stay clean",
+    body: "Every transaction categorized, invoices out the door, and unpaid bills chased automatically — so your books are always current and ready to close.",
   },
   {
     icon: FileCheck2,
-    title: "Contracts, lawyer-checked",
-    body: "Generated from proven templates, deadlines tracked, and reviewed by an attorney when it matters.",
+    title: "Contracts, done right",
+    body: "Generate contracts and change orders from proven templates, with every key date tracked so nothing slips through.",
   },
   {
     icon: Megaphone,
-    title: "Marketing, running",
-    body: "Content, reviews, and lead follow-up handled — with a strategist setting the direction.",
+    title: "A pipeline that never goes quiet",
+    body: "Content, review requests, and lead follow-up handled automatically — so the next job is already lined up.",
   },
 ];
 
@@ -30,9 +30,14 @@ export default async function LandingPage() {
         <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
             <div className="flex size-8 items-center justify-center rounded-md bg-primary font-bold text-primary-foreground">
-              S
+              Y
             </div>
-            <span className="font-semibold tracking-tight">SuperApp</span>
+            <div className="leading-tight">
+              <span className="font-semibold tracking-tight">Yosher</span>
+              <span className="hidden text-xs text-muted-foreground sm:block">
+                Your business, built right.
+              </span>
+            </div>
           </div>
           <nav className="flex items-center gap-2">
             {userId ? (
@@ -64,9 +69,10 @@ export default async function LandingPage() {
             Grow without building an office.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-muted-foreground">
-            Custom software does the administrative volume. Licensed
-            professionals review and sign off on what matters. You just build
-            things.
+            Custom software handles the administrative volume — books,
+            invoicing, contracts, follow-up. When judgment matters, a real
+            professional reviews and signs off. You stay focused on the work
+            only you can do.
           </p>
           <div className="mt-8 flex items-center justify-center gap-3">
             <Button asChild size="lg">
@@ -91,12 +97,36 @@ export default async function LandingPage() {
             ))}
           </div>
         </section>
+
+        <section className="border-t">
+          <div className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
+            <h2 className="text-2xl font-semibold tracking-tight">
+              Software does the volume. You keep the judgment.
+            </h2>
+            {/* Stage-accurate wording per the brand doc: describes the
+                professional-review layer as the direction being built toward.
+                Do not claim live accountant/attorney review until those
+                professionals are under contract. */}
+            <p className="mt-4 text-muted-foreground">
+              Yosher automates the administrative work that eats your evenings
+              — but it never pretends to replace real expertise. As your
+              business grows, Yosher brings in licensed professionals to
+              review and sign off on what matters: an accountant to close your
+              books, an attorney for the contracts that carry risk.
+              You&apos;re never trusting a machine with the decisions that
+              count.
+            </p>
+          </div>
+        </section>
       </main>
 
       <footer className="border-t">
         <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between px-6 text-xs text-muted-foreground">
-          <span>© {new Date().getFullYear()} SuperApp</span>
-          <span>AI does the volume. Humans do the judgment.</span>
+          <span>
+            <span className="font-medium text-foreground">Yosher</span> — Your
+            business, built right.
+          </span>
+          <span>© {new Date().getFullYear()} Yosher</span>
         </div>
       </footer>
     </div>

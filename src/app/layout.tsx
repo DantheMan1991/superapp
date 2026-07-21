@@ -16,11 +16,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "SuperApp — The Outsourced Business Office",
-    template: "%s · SuperApp",
+    default: "Yosher — The Outsourced Business Office",
+    template: "%s · Yosher",
   },
   description:
-    "Software runs the day-to-day. Real professionals sign off on what matters. Grow without building an office.",
+    "Software runs the day-to-day; a real person reviews what matters. Grow without building an office.",
 };
 
 export default function RootLayout({

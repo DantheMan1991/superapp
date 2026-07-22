@@ -19,7 +19,17 @@ export type LedgerErrorCode =
   | "COA_DEPTH"
   | "COA_TYPE_MISMATCH"
   | "SYSTEM_ACCOUNT"
-  | "SETTINGS_MISSING";
+  | "SETTINGS_MISSING"
+  | "TXN_NOT_UNREVIEWED"
+  | "BANK_ACCOUNT_NOT_FOUND"
+  | "RECON_ACTIVE_EXISTS"
+  | "RECON_NOT_OPEN"
+  | "RECON_NOT_BALANCED"
+  | "RECON_LINE_INVALID"
+  | "RECON_NOT_LATEST"
+  | "AI_COOLDOWN"
+  | "AI_UNAVAILABLE"
+  | "IMPORT_INVALID";
 
 /**
  * Typed failure from the ledger core. Server actions catch these and map
@@ -62,6 +72,20 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   SYSTEM_ACCOUNT: "System accounts cannot be changed or deactivated.",
   SETTINGS_MISSING:
     "Accounting is not fully set up for this business. Toggle the module off and on again.",
+  TXN_NOT_UNREVIEWED:
+    "That bank transaction was already handled — refresh the page.",
+  BANK_ACCOUNT_NOT_FOUND: "That bank account no longer exists.",
+  RECON_ACTIVE_EXISTS:
+    "A reconciliation is already in progress for this account.",
+  RECON_NOT_OPEN: "That reconciliation is not open.",
+  RECON_NOT_BALANCED:
+    "The difference isn't zero yet — keep clearing transactions.",
+  RECON_LINE_INVALID: "That line can't be cleared in this reconciliation.",
+  RECON_NOT_LATEST:
+    "Only the most recent completed reconciliation can be reopened.",
+  AI_COOLDOWN: "Suggestions were just requested — try again in a moment.",
+  AI_UNAVAILABLE: "The AI service didn't return usable suggestions. Try again.",
+  IMPORT_INVALID: "Some rows couldn't be read. Check the column mapping.",
 };
 
 export function friendlyMessage(err: unknown): string {

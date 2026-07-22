@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // Bank CSV imports travel as text through a server action (preview +
+    // import). Server-side caps: 1M chars / 10k rows.
+    serverActions: { bodySizeLimit: "4mb" },
+  },
   async redirects() {
     // Muscle-memory aliases for the auth pages.
     return [

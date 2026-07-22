@@ -38,6 +38,18 @@ export {
 } from "./dimensions";
 export { getLedgerIntegrity, type LedgerIntegrity } from "./integrity";
 export {
+  cancelReconciliation,
+  completeReconciliation,
+  expectedLedgerCents,
+  getReconciliationView,
+  listReconciliations,
+  reopenReconciliation,
+  startReconciliation,
+  toggleReconciliationLine,
+  type ReconciliationCandidate,
+  type ReconciliationView,
+} from "./reconciliation";
+export {
   getBalanceSheet,
   getCashActivity,
   getProfitAndLoss,

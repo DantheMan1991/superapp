@@ -38,7 +38,22 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
       .groupBy(schema.journalEntries.status);
     const balanced = await ledgerIsBalanced(tx, tenantId);
     const settings = await getSettings(tx, tenantId);
-    return { accountCount: accountCount.n, statusCounts, balanced, settings };
+    const [unreviewed] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.bankTransactions)
+      .where(
+        and(
+          eq(schema.bankTransactions.tenantId, tenantId),
+          eq(schema.bankTransactions.status, "unreviewed"),
+        ),
+      );
+    return {
+      accountCount: accountCount.n,
+      statusCounts,
+      balanced,
+      settings,
+      unreviewed: unreviewed.n,
+    };
   });
 
   const count = (s: string) =>
@@ -102,6 +117,22 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
           <CardContent className="text-xs text-muted-foreground">
             {count("draft")} draft{count("draft") === 1 ? "" : "s"} ·{" "}
             {count("void")} void
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Bank feed</CardDescription>
+            <CardTitle className="text-2xl">{data.unreviewed}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            <Link
+              className="underline-offset-2 hover:underline"
+              href="/dashboard/m/accounting/banking"
+            >
+              {data.unreviewed === 0
+                ? "Nothing waiting for review"
+                : "Transactions waiting for review"}
+            </Link>
           </CardContent>
         </Card>
         <Card>

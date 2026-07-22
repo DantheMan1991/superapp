@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -97,7 +97,35 @@ export default async function BankRegisterPage({
         txnDate: t.txnDate,
       })),
     });
-    return { bankAccount, balance, txns, counts, categories, matchCandidates };
+    // Receipt attachment counts (session 5) — one grouped query.
+    const attachmentCounts =
+      txns.length > 0
+        ? await tx
+            .select({
+              bankTransactionId: schema.documentLinks.bankTransactionId,
+              n: sql<number>`count(*)::int`,
+            })
+            .from(schema.documentLinks)
+            .where(
+              and(
+                eq(schema.documentLinks.tenantId, tenantId),
+                inArray(
+                  schema.documentLinks.bankTransactionId,
+                  txns.map((t) => t.id),
+                ),
+              ),
+            )
+            .groupBy(schema.documentLinks.bankTransactionId)
+        : [];
+    return {
+      bankAccount,
+      balance,
+      txns,
+      counts,
+      categories,
+      matchCandidates,
+      attachmentCounts,
+    };
   });
   if (!data) notFound();
   const { bankAccount, txns, counts } = data;
@@ -107,9 +135,13 @@ export default async function BankRegisterPage({
   const display = bankAccount.kind === "credit_card" ? -net : net;
   const isOwner = ctx.role === "owner";
 
+  const attachmentsOf = new Map(
+    data.attachmentCounts.map((a) => [a.bankTransactionId, a.n]),
+  );
   const rows = txns.map((t) => {
     const suggestion = readAiSuggestion(t);
     return {
+      attachmentCount: attachmentsOf.get(t.id) ?? 0,
       id: t.id,
       txnDate: t.txnDate,
       description: t.description,

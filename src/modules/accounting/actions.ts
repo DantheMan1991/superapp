@@ -32,6 +32,7 @@ import {
   toCsv,
 } from "./lib/csv";
 import { resetBankLinkForEntry } from "./banking/match";
+import { detachAllForTargets } from "./documents/links";
 import { MAX_AMOUNT_CENTS, isValidIsoDate } from "./lib/money";
 
 /**
@@ -203,6 +204,11 @@ export async function deleteDraftEntry(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     await withTenant(ctx.tenantId, async (tx) => {
+      // P21 (session 5): the entry FK on document_links is NO ACTION —
+      // detach attachments in the same tx or the delete fails at the DB.
+      await detachAllForTargets(tx, ctx.tenantId, "entry", [
+        parsed.data.entryId,
+      ]);
       const before = await deleteDraft(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "ledger.draft_deleted",

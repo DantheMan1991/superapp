@@ -1,11 +1,12 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { CountryCode, Products, type Transaction as PlaidTransaction } from "plaid";
 import { schema, withTenant, type Tx } from "@/db";
 import type { BankAccount, PlaidItem } from "@/db/schema";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { getPlaid } from "@/lib/plaid";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
+import { detachAllForTargets } from "../documents/links";
 
 /**
  * Plaid live connections. The access token is encrypted at rest and only
@@ -232,31 +233,42 @@ export async function syncPlaidItem(
           result.modified += rows.length;
         }
         for (const r of removed) {
-          const deleted = await tx
-            .delete(schema.bankTransactions)
+          // Only unreviewed/excluded — posted rows stay (books stand).
+          const candidates = await tx
+            .select({ id: schema.bankTransactions.id })
+            .from(schema.bankTransactions)
             .where(
               and(
                 eq(schema.bankTransactions.tenantId, ctx.tenantId),
                 eq(schema.bankTransactions.externalHash, r.transaction_id),
                 eq(schema.bankTransactions.source, "plaid"),
-                // Only unreviewed/excluded — posted rows stay (books stand).
-                eq(schema.bankTransactions.status, "unreviewed"),
+                inArray(schema.bankTransactions.status, [
+                  "unreviewed",
+                  "excluded",
+                ]),
               ),
-            )
-            .returning({ id: schema.bankTransactions.id });
-          const deletedExcluded = await tx
-            .delete(schema.bankTransactions)
-            .where(
-              and(
-                eq(schema.bankTransactions.tenantId, ctx.tenantId),
-                eq(schema.bankTransactions.externalHash, r.transaction_id),
-                eq(schema.bankTransactions.source, "plaid"),
-                eq(schema.bankTransactions.status, "excluded"),
-              ),
-            )
-            .returning({ id: schema.bankTransactions.id });
-          result.removed += deleted.length + deletedExcluded.length;
-          if (deleted.length === 0 && deletedExcluded.length === 0) {
+            );
+          const ids = candidates.map((c) => c.id);
+          if (ids.length > 0) {
+            // P21 (session 5): document_links FK is NO ACTION — detach
+            // attachments in the same tx or this delete fails at the DB.
+            await detachAllForTargets(
+              tx,
+              ctx.tenantId,
+              "bank_transaction",
+              ids,
+            );
+            const deleted = await tx
+              .delete(schema.bankTransactions)
+              .where(
+                and(
+                  eq(schema.bankTransactions.tenantId, ctx.tenantId),
+                  inArray(schema.bankTransactions.id, ids),
+                ),
+              )
+              .returning({ id: schema.bankTransactions.id });
+            result.removed += deleted.length;
+          } else {
             console.warn("plaid removed a transaction that is already posted:", r.transaction_id);
           }
         }

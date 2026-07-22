@@ -29,7 +29,20 @@ export type LedgerErrorCode =
   | "RECON_NOT_LATEST"
   | "AI_COOLDOWN"
   | "AI_UNAVAILABLE"
-  | "IMPORT_INVALID";
+  | "IMPORT_INVALID"
+  | "CUSTOMER_NOT_FOUND"
+  | "CUSTOMER_INACTIVE"
+  | "INVOICE_NOT_FOUND"
+  | "INVOICE_NOT_DRAFT"
+  | "INVOICE_NOT_OPEN"
+  | "INVOICE_EMPTY"
+  | "INVOICE_NUMBER_TAKEN"
+  | "INVOICE_HAS_PAYMENTS"
+  | "INVOICE_OVERPAYMENT"
+  | "PAYMENT_NOT_FOUND"
+  | "RECURRING_NOT_FOUND"
+  | "RECURRING_TEMPLATE_INVALID"
+  | "TXN_MATCH_INVALID";
 
 /**
  * Typed failure from the ledger core. Server actions catch these and map
@@ -86,6 +99,20 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   AI_COOLDOWN: "Suggestions were just requested — try again in a moment.",
   AI_UNAVAILABLE: "The AI service didn't return usable suggestions. Try again.",
   IMPORT_INVALID: "Some rows couldn't be read. Check the column mapping.",
+  CUSTOMER_NOT_FOUND: "That customer no longer exists.",
+  CUSTOMER_INACTIVE: "That customer is inactive — reactivate them first.",
+  INVOICE_NOT_FOUND: "That invoice no longer exists.",
+  INVOICE_NOT_DRAFT: "Only draft invoices can be changed this way.",
+  INVOICE_NOT_OPEN: "That invoice isn't open for payments.",
+  INVOICE_EMPTY: "An invoice needs at least one line and a total above zero.",
+  INVOICE_NUMBER_TAKEN: "That invoice number is already in use.",
+  INVOICE_HAS_PAYMENTS: "Remove the payments first, then void.",
+  INVOICE_OVERPAYMENT: "That's more than the remaining balance.",
+  PAYMENT_NOT_FOUND: "That payment no longer exists.",
+  RECURRING_NOT_FOUND: "That recurring template no longer exists.",
+  RECURRING_TEMPLATE_INVALID:
+    "The template references an inactive account or tag — edit it first.",
+  TXN_MATCH_INVALID: "That entry can no longer be matched — refresh and try again.",
 };
 
 export function friendlyMessage(err: unknown): string {

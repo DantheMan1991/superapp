@@ -25,11 +25,20 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   acceptSuggestionsAction,
   categorizeTransactionAction,
   excludeTransactionAction,
+  matchTransactionToEntryAction,
   restoreTransactionAction,
   suggestCategoriesAction,
+  unmatchTransactionAction,
 } from "@/modules/accounting/banking/actions";
 import { formatCents } from "@/modules/accounting/lib/money";
 
@@ -104,6 +113,14 @@ export function RegisterTabs({
   );
 }
 
+interface MatchCandidate {
+  entryId: string;
+  entryDate: string;
+  memo: string;
+  source: string;
+  label: string;
+}
+
 interface ReviewRow {
   id: string;
   txnDate: string;
@@ -118,6 +135,7 @@ interface ReviewRow {
     confidence: number;
     reason: string | null;
   } | null;
+  matchCandidates: MatchCandidate[];
 }
 
 interface CategoryOption {
@@ -189,6 +207,35 @@ export function ReviewTable({
     });
   }
 
+  const [matchFor, setMatchFor] = useState<ReviewRow | null>(null);
+
+  function matchTo(entryId: string) {
+    if (!matchFor) return;
+    setBusyId(matchFor.id);
+    startTransition(async () => {
+      const result = await matchTransactionToEntryAction({
+        transactionId: matchFor.id,
+        journalEntryId: entryId,
+      });
+      if ("error" in result) toast.error(result.error);
+      else toast.success("Matched — nothing new was posted");
+      setMatchFor(null);
+      setBusyId(null);
+      router.refresh();
+    });
+  }
+
+  function unmatch(row: ReviewRow) {
+    setBusyId(row.id);
+    startTransition(async () => {
+      const result = await unmatchTransactionAction({ transactionId: row.id });
+      if ("error" in result) toast.error(result.error);
+      else toast.success("Unmatched — back in review");
+      setBusyId(null);
+      router.refresh();
+    });
+  }
+
   function acceptAll() {
     startTransition(async () => {
       const result = await acceptSuggestionsAction({
@@ -216,6 +263,38 @@ export function ReviewTable({
           </Button>
         </div>
       )}
+      <Dialog open={matchFor !== null} onOpenChange={(o) => !o && setMatchFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Match to an existing entry</DialogTitle>
+            <DialogDescription>
+              This deposit looks like it was already recorded. Matching links
+              the feed row to the entry below — nothing new is posted.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="divide-y">
+            {matchFor?.matchCandidates.map((c) => (
+              <li key={c.entryId} className="flex items-center justify-between gap-3 py-2.5">
+                <span className="min-w-0 text-sm">
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {c.entryDate}
+                  </span>{" "}
+                  <span className="truncate">{c.label}</span>
+                </span>
+                <Button
+                  size="sm"
+                  className="h-8 shrink-0"
+                  disabled={pending}
+                  onClick={() => matchTo(c.entryId)}
+                >
+                  Match
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </DialogContent>
+      </Dialog>
+
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -306,6 +385,17 @@ export function ReviewTable({
                       <TableCell className="whitespace-nowrap text-right">
                         {row.status === "unreviewed" && tab === "unreviewed" && (
                           <div className="flex justify-end gap-1.5">
+                            {row.matchCandidates.length > 0 && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8"
+                                disabled={pending && busyId === row.id}
+                                onClick={() => setMatchFor(row)}
+                              >
+                                Match
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               className="h-8"
@@ -325,6 +415,20 @@ export function ReviewTable({
                             </Button>
                           </div>
                         )}
+                        {row.status === "posted" &&
+                          tab === "all" &&
+                          row.journalEntryId && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8"
+                              disabled={pending && busyId === row.id}
+                              onClick={() => unmatch(row)}
+                              title="Send this transaction back to review (the entry stays posted)"
+                            >
+                              Unmatch
+                            </Button>
+                          )}
                         {row.status === "excluded" && tab === "excluded" && (
                           <Button
                             size="sm"

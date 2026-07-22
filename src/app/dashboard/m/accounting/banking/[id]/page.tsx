@@ -14,6 +14,7 @@ import {
   formatCentsSigned,
   todayInTimezone,
 } from "@/modules/accounting/lib/money";
+import { findMatchCandidatesBatch } from "@/modules/accounting/banking/match";
 import { readAiSuggestion } from "@/modules/accounting/banking/review";
 import { RegisterTabs, ReviewTable, SuggestButton } from "./register-controls";
 
@@ -85,7 +86,18 @@ export default async function BankRegisterPage({
       ),
       orderBy: (a, { asc }) => [asc(a.code)],
     });
-    return { bankAccount, balance, txns, counts, categories };
+    // Existing-entry match candidates for the review tab (P12: a feed row
+    // is satisfied by exactly one entry — categorize OR match).
+    const unreviewedTxns = txns.filter((t) => t.status === "unreviewed");
+    const matchCandidates = await findMatchCandidatesBatch(tx, tenantId, {
+      ledgerAccountId: bankAccount.accountId,
+      txns: unreviewedTxns.map((t) => ({
+        id: t.id,
+        amountCents: t.amountCents,
+        txnDate: t.txnDate,
+      })),
+    });
+    return { bankAccount, balance, txns, counts, categories, matchCandidates };
   });
   if (!data) notFound();
   const { bankAccount, txns, counts } = data;
@@ -113,6 +125,7 @@ export default async function BankRegisterPage({
             reason: suggestion.reason ?? null,
           }
         : null,
+      matchCandidates: data.matchCandidates.get(t.id) ?? [],
     };
   });
   const categoryOptions = data.categories

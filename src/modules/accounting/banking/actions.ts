@@ -35,6 +35,7 @@ import {
 } from "./csv-parse";
 import { importTransactions } from "./import";
 import { categorizeTransaction, readAiSuggestion, setTransactionExcluded } from "./review";
+import { matchTransactionToEntry, unmatchTransaction } from "./match";
 import { suggestCategoriesForBankAccount } from "../ai/suggest";
 import {
   createLinkToken,
@@ -498,6 +499,63 @@ export async function acceptSuggestionsAction(
   }
   revalidateBanking();
   return { ok: true, data: { posted, skipped, firstError } };
+}
+
+// ---------------------------------------------------------------- matching
+
+const matchSchema = z.object({
+  transactionId: z.string().uuid(),
+  journalEntryId: z.string().uuid(),
+});
+
+/** Link a staged txn to an EXISTING posted entry — posts nothing (P12). */
+export async function matchTransactionToEntryAction(
+  input: z.infer<typeof matchSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = matchSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      await matchTransactionToEntry(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.txn_matched",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_transaction",
+        targetId: parsed.data.transactionId,
+        meta: { entryId: parsed.data.journalEntryId },
+      });
+    });
+    revalidateBanking();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function unmatchTransactionAction(
+  input: z.infer<typeof txnRefSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = txnRefSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      await unmatchTransaction(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.txn_unmatched",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_transaction",
+        targetId: parsed.data.transactionId,
+      });
+    });
+    revalidateBanking();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
 }
 
 // -------------------------------------------------------------------- AI

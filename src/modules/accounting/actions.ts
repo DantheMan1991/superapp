@@ -31,6 +31,7 @@ import {
   pnlToCsvRows,
   toCsv,
 } from "./lib/csv";
+import { resetBankLinkForEntry } from "./banking/match";
 import { MAX_AMOUNT_CENTS, isValidIsoDate } from "./lib/money";
 
 /**
@@ -229,22 +230,10 @@ export async function voidPostedEntry(
     await withTenant(ctx.tenantId, async (tx) => {
       const entry = await voidEntry(tx, ctx, parsed.data);
       // Tool coordination (actions layer — core stays tool-unaware): a
-      // voided bank-import entry sends its staging row back to review.
-      if (entry.source === "bank_import") {
-        await tx
-          .update(schema.bankTransactions)
-          .set({
-            status: "unreviewed",
-            journalEntryId: null,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(schema.bankTransactions.tenantId, ctx.tenantId),
-              eq(schema.bankTransactions.journalEntryId, entry.id),
-            ),
-          );
-      }
+      // voided entry that satisfies a bank-feed row — whether born from
+      // the feed (bank_import) or MATCHED to it (invoice payment,
+      // quick-add) — sends that row back to review. No-op otherwise.
+      await resetBankLinkForEntry(tx, ctx.tenantId, entry.id);
       await logAuditInTx(tx, {
         action: "ledger.entry_voided",
         tenantId: ctx.tenantId,

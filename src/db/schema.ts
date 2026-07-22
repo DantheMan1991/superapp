@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -497,11 +498,264 @@ export const dimensionMembers = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * Invoicing / AR (session 4). The tenant's OWN customers (the platform
+ * `tenants` table is the founder's CRM — unrelated). Invoices carry an
+ * explicit state machine; `partial`/`paid` are derived from payments,
+ * never set directly. Issuance posts Dr AR / Cr income through the core
+ * engine; payments post Dr deposit / Cr AR.
+ * ---------------------------------------------------------------------- */
+
+export const invoiceStatus = pgEnum("invoice_status", [
+  "draft",
+  "issued",
+  "partial",
+  "paid",
+  "void",
+]);
+
+export const recurringFrequency = pgEnum("recurring_frequency", ["monthly"]);
+
+export const customers = pgTable(
+  "customers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    email: text("email").notNull().default(""),
+    phone: text("phone").notNull().default(""),
+    address: text("address").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("customers_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("customers_tenant_idx").on(t.tenantId),
+  ],
+);
+
 /**
- * Tags a journal line with one dimension member per dimension type.
- * dimension_type is denormalized so both rules are DB-enforced:
- * one-per-type-per-line (unique below) and member-is-of-stated-type
- * (typed composite FK below).
+ * Recurring invoice templates (the rent-roll seam). The template is jsonb
+ * — zod-validated at write AND re-validated at generation time (accounts
+ * and dimension members may have deactivated since; generation skips
+ * invalid templates with a report instead of failing the run).
+ */
+export const recurringInvoices = pgTable(
+  "recurring_invoices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id").notNull(),
+    name: text("name").notNull(),
+    /** {lines: [{description, quantity, unitPriceCents, incomeAccountId,
+     * dimensionMemberIds?}], memo, dueInDays} */
+    template: jsonb("template").notNull(),
+    frequency: recurringFrequency("frequency").notNull().default("monthly"),
+    dayOfMonth: integer("day_of_month").notNull(),
+    nextRunDate: date("next_run_date", { mode: "string" }).notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    lastGeneratedAt: timestamp("last_generated_at", { withTimezone: true }),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("recurring_invoices_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("recurring_invoices_tenant_next_idx")
+      .on(t.tenantId, t.nextRunDate)
+      .where(sql`${t.isActive} = true`),
+    foreignKey({
+      name: "recurring_invoices_customer_fk",
+      columns: [t.tenantId, t.customerId],
+      foreignColumns: [customers.tenantId, customers.id],
+    }),
+    // 1–28 keeps month advancement a total function (no clamping logic).
+    check(
+      "recurring_invoices_day_of_month",
+      sql`${t.dayOfMonth} between 1 and 28`,
+    ),
+  ],
+);
+
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    customerId: uuid("customer_id").notNull(),
+    invoiceNumber: text("invoice_number").notNull(),
+    status: invoiceStatus("status").notNull().default("draft"),
+    issueDate: date("issue_date", { mode: "string" }).notNull(),
+    dueDate: date("due_date", { mode: "string" }),
+    memo: text("memo").notNull().default(""),
+    /** Denormalized Σ line amounts; recomputed in the same tx as line writes. */
+    totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
+    /** The issuance entry. Null while draft; survives void (audit trail). */
+    journalEntryId: uuid("journal_entry_id"),
+    recurringInvoiceId: uuid("recurring_invoice_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("invoices_tenant_id_id_idx").on(t.tenantId, t.id),
+    // The numbering race arbiter.
+    uniqueIndex("invoices_tenant_number_idx").on(t.tenantId, t.invoiceNumber),
+    index("invoices_tenant_status_idx").on(t.tenantId, t.status),
+    index("invoices_tenant_customer_idx").on(t.tenantId, t.customerId),
+    // One invoice per issuance entry — mirrors bank_transactions.
+    uniqueIndex("invoices_tenant_entry_idx")
+      .on(t.tenantId, t.journalEntryId)
+      .where(sql`${t.journalEntryId} is not null`),
+    foreignKey({
+      name: "invoices_customer_fk",
+      columns: [t.tenantId, t.customerId],
+      foreignColumns: [customers.tenantId, customers.id],
+    }),
+    foreignKey({
+      name: "invoices_entry_fk",
+      columns: [t.tenantId, t.journalEntryId],
+      foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }),
+    foreignKey({
+      name: "invoices_recurring_fk",
+      columns: [t.tenantId, t.recurringInvoiceId],
+      foreignColumns: [recurringInvoices.tenantId, recurringInvoices.id],
+    }),
+    check("invoices_total_nonnegative", sql`${t.totalCents} >= 0`),
+  ],
+);
+
+export const invoiceLines = pgTable(
+  "invoice_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id").notNull(),
+    lineNo: integer("line_no").notNull().default(0),
+    description: text("description").notNull().default(""),
+    /** 2dp quantity; drizzle numeric arrives as string — parse via lib only. */
+    quantity: numeric("quantity", { precision: 12, scale: 2 })
+      .notNull()
+      .default("1"),
+    /** Signed: negative = discount line (posts Dr income). */
+    unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
+    /** App-computed round(quantity × unitPrice); 0 = posts nothing. */
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    incomeAccountId: uuid("income_account_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("invoice_lines_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("invoice_lines_invoice_line_no_idx").on(
+      t.tenantId,
+      t.invoiceId,
+      t.lineNo,
+    ),
+    index("invoice_lines_tenant_invoice_idx").on(t.tenantId, t.invoiceId),
+    foreignKey({
+      name: "invoice_lines_invoice_fk",
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "invoice_lines_income_account_fk",
+      columns: [t.tenantId, t.incomeAccountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    check("invoice_lines_quantity_positive", sql`${t.quantity} > 0`),
+  ],
+);
+
+export const invoicePayments = pgTable(
+  "invoice_payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    invoiceId: uuid("invoice_id").notNull(),
+    paymentDate: date("payment_date", { mode: "string" }).notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    /** Where the money landed: a bank register's ledger account or 1250. */
+    depositAccountId: uuid("deposit_account_id").notNull(),
+    /** zod enum: cash | check | card | bank_transfer | other. */
+    method: text("method").notNull().default("other"),
+    memo: text("memo").notNull().default(""),
+    /** Created atomically with its entry — NOT NULL by design. */
+    journalEntryId: uuid("journal_entry_id").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("invoice_payments_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("invoice_payments_tenant_invoice_idx").on(t.tenantId, t.invoiceId),
+    // One payment row per entry — DB rule.
+    uniqueIndex("invoice_payments_tenant_entry_idx").on(
+      t.tenantId,
+      t.journalEntryId,
+    ),
+    // NO ACTION: an invoice with payments can never be deleted (drafts
+    // have none, so draft-delete passes).
+    foreignKey({
+      name: "invoice_payments_invoice_fk",
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    foreignKey({
+      name: "invoice_payments_deposit_account_fk",
+      columns: [t.tenantId, t.depositAccountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    foreignKey({
+      name: "invoice_payments_entry_fk",
+      columns: [t.tenantId, t.journalEntryId],
+      foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }),
+    check("invoice_payments_amount_positive", sql`${t.amountCents} > 0`),
+  ],
+);
+
+/**
+ * Tags a journal line OR an invoice line with one dimension member per
+ * dimension type. Exactly one parent is set (CHECK below); invoice-line
+ * dimensions are copied onto journal lines at issuance, so reports only
+ * ever read the journal side. dimension_type is denormalized so both
+ * rules are DB-enforced: one-per-type-per-line and
+ * member-is-of-stated-type (typed composite FK).
  */
 export const lineDimensions = pgTable(
   "line_dimensions",
@@ -510,7 +764,8 @@ export const lineDimensions = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    journalLineId: uuid("journal_line_id").notNull(),
+    journalLineId: uuid("journal_line_id"),
+    invoiceLineId: uuid("invoice_line_id"),
     dimensionType: text("dimension_type").notNull(),
     memberId: uuid("member_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -523,11 +778,19 @@ export const lineDimensions = pgTable(
       t.journalLineId,
       t.dimensionType,
     ),
+    uniqueIndex("line_dimensions_invoice_line_type_idx")
+      .on(t.tenantId, t.invoiceLineId, t.dimensionType)
+      .where(sql`${t.invoiceLineId} is not null`),
     index("line_dimensions_tenant_member_idx").on(t.tenantId, t.memberId),
     foreignKey({
       name: "line_dimensions_line_fk",
       columns: [t.tenantId, t.journalLineId],
       foreignColumns: [journalLines.tenantId, journalLines.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "line_dimensions_invoice_line_fk",
+      columns: [t.tenantId, t.invoiceLineId],
+      foreignColumns: [invoiceLines.tenantId, invoiceLines.id],
     }).onDelete("cascade"),
     foreignKey({
       name: "line_dimensions_member_fk",
@@ -538,6 +801,10 @@ export const lineDimensions = pgTable(
         dimensionMembers.id,
       ],
     }),
+    check(
+      "line_dimensions_one_parent",
+      sql`num_nonnulls(${t.journalLineId}, ${t.invoiceLineId}) = 1`,
+    ),
   ],
 );
 
@@ -847,6 +1114,11 @@ export type JournalLine = typeof journalLines.$inferSelect;
 export type DimensionMember = typeof dimensionMembers.$inferSelect;
 export type LineDimension = typeof lineDimensions.$inferSelect;
 export type AccountingSettings = typeof accountingSettings.$inferSelect;
+export type Customer = typeof customers.$inferSelect;
+export type Invoice = typeof invoices.$inferSelect;
+export type InvoiceLine = typeof invoiceLines.$inferSelect;
+export type InvoicePayment = typeof invoicePayments.$inferSelect;
+export type RecurringInvoice = typeof recurringInvoices.$inferSelect;
 export type BankAccount = typeof bankAccounts.$inferSelect;
 export type BankTransaction = typeof bankTransactions.$inferSelect;
 export type Reconciliation = typeof reconciliations.$inferSelect;

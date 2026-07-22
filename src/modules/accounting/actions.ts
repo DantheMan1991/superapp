@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { withTenant } from "@/db";
+import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
@@ -226,7 +227,24 @@ export async function voidPostedEntry(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     await withTenant(ctx.tenantId, async (tx) => {
-      await voidEntry(tx, ctx, parsed.data);
+      const entry = await voidEntry(tx, ctx, parsed.data);
+      // Tool coordination (actions layer — core stays tool-unaware): a
+      // voided bank-import entry sends its staging row back to review.
+      if (entry.source === "bank_import") {
+        await tx
+          .update(schema.bankTransactions)
+          .set({
+            status: "unreviewed",
+            journalEntryId: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.bankTransactions.tenantId, ctx.tenantId),
+              eq(schema.bankTransactions.journalEntryId, entry.id),
+            ),
+          );
+      }
       await logAuditInTx(tx, {
         action: "ledger.entry_voided",
         tenantId: ctx.tenantId,

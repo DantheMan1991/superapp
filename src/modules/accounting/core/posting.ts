@@ -324,9 +324,39 @@ async function bumpVersion(
 }
 
 /**
+ * True when any line of the entry has been cleared in a reconciliation
+ * (including an in-progress one — checking a line locks its entry so the
+ * workbench math can't shift under the owner; uncheck to edit).
+ */
+async function entryHasReconciledLines(
+  tx: Tx,
+  tenantId: string,
+  entryId: string,
+): Promise<boolean> {
+  const rows = await tx
+    .select({ id: schema.reconciliationLines.id })
+    .from(schema.reconciliationLines)
+    .innerJoin(
+      schema.journalLines,
+      and(
+        eq(schema.journalLines.tenantId, schema.reconciliationLines.tenantId),
+        eq(schema.journalLines.id, schema.reconciliationLines.journalLineId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.reconciliationLines.tenantId, tenantId),
+        eq(schema.journalLines.entryId, entryId),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
  * Guard shared by every posted-entry mutation: enforces the three-tier
- * mutability policy (open+standard = editable; strict mode or closed
- * period = reversal-only).
+ * mutability policy (open+standard = editable; strict mode, closed
+ * period, or reconciled = reversal-only).
  */
 async function assertPostedMutable(
   tx: Tx,
@@ -340,6 +370,11 @@ async function assertPostedMutable(
   }
   if (settings.closedThrough && entry.entryDate <= settings.closedThrough) {
     throw new LedgerError("ENTRY_IMMUTABLE", "entry is in a closed period");
+  }
+  if (await entryHasReconciledLines(tx, ctx.tenantId, entry.id)) {
+    throw new LedgerError("ENTRY_IMMUTABLE", "entry has reconciled lines", {
+      reason: "reconciled",
+    });
   }
 }
 

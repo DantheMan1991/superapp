@@ -335,6 +335,35 @@ key:
 Everything else in the app works without this key — only the Discovery
 copilot needs it.
 
+## Part 4.6 — Banking: encryption key + Plaid (accounting module)
+
+The accounting module's Banking tool needs two more things in `.env`:
+
+1. **`APP_ENCRYPTION_KEY`** — encrypts Plaid access tokens at rest.
+   Generate one (32 random bytes, base64):
+   ```
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+   ```
+   Paste the output as `APP_ENCRYPTION_KEY=...`. Treat it like a password —
+   if it's lost, connected banks must simply be reconnected (no data loss).
+
+2. **Plaid** (live bank connections; CSV import works without it):
+   - Sign up at **https://dashboard.plaid.com** (free).
+   - Copy the **client_id** and the **Sandbox secret** from the keys page:
+     ```
+     PLAID_CLIENT_ID=...
+     PLAID_SECRET=...
+     PLAID_ENV=sandbox
+     ```
+   - Sandbox connects to fake test banks (username `user_good`, password
+     `pass_good`) — perfect for trying the flow end to end.
+   - **For real banks**: apply for Production access in the Plaid dashboard
+     (approval takes days and has per-connection pricing — apply early),
+     then switch `PLAID_SECRET` to the production secret and
+     `PLAID_ENV=production`. Add all three to Vercel env when deploying.
+
+Restart the dev server after editing `.env`.
+
 ## Part 5 — Common problems
 
 | Symptom | Cause → fix |

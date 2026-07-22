@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 
 const TABS = [
   { href: "/dashboard/m/accounting", label: "Overview", exact: true },
+  { href: "/dashboard/m/accounting/banking", label: "Banking" },
   { href: "/dashboard/m/accounting/accounts", label: "Chart of Accounts" },
   { href: "/dashboard/m/accounting/journal", label: "Journal" },
   { href: "/dashboard/m/accounting/reports", label: "Reports" },

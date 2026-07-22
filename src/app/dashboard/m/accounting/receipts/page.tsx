@@ -122,9 +122,11 @@ export default async function ReceiptsPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Receipts</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Bills &amp; Receipts
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Receipts and bills for {ctx.tenant.name} — captured by upload or
+            Bills and receipts for {ctx.tenant.name} — captured by upload or
             email, read automatically, attached to your books.
           </p>
         </div>
@@ -170,17 +172,17 @@ export default async function ReceiptsPage({
             <Inbox className="h-8 w-8 text-muted-foreground" />
             <p className="text-sm font-medium">
               {tab === "inbox"
-                ? "No receipts waiting"
+                ? "Nothing waiting"
                 : tab === "filed"
                   ? "Nothing filed yet"
                   : "Trash is empty"}
             </p>
             <p className="max-w-sm text-xs text-muted-foreground">
               {tab === "inbox"
-                ? "Upload a receipt or forward a bill to your email-in address and it will land here, read and ready to file."
+                ? "Upload a bill or receipt — or forward one to your email-in address — and it will land here, read and ready to file."
                 : tab === "filed"
-                  ? "Receipts attached to transactions show up here."
-                  : "Trashed receipts can be restored any time — nothing is ever permanently deleted."}
+                  ? "Documents attached to transactions show up here."
+                  : "Trashed documents can be restored any time — nothing is ever permanently deleted."}
             </p>
           </CardContent>
         </Card>

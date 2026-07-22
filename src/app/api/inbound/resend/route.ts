@@ -9,10 +9,10 @@ import { tryExtractDocument } from "@/modules/accounting/ai/extract";
 import { isAllowedUpload } from "@/modules/accounting/documents/allowlist";
 import {
   EMAIL_INGEST_HOURLY_CAP,
-  MAX_EMAIL_ATTACHMENTS,
   inboundEmailSchema,
   inboundRecipients,
   parseInboundToken,
+  selectEmailAttachments,
 } from "@/modules/accounting/documents/email";
 import {
   createDocumentRecord,
@@ -21,9 +21,6 @@ import {
 } from "@/modules/accounting/documents/ingest";
 
 export const runtime = "nodejs";
-
-/** Signature logos and tracking pixels — skip anything this small. */
-const MIN_ATTACHMENT_BYTES = 8 * 1024;
 
 /** Actor label for audit rows — email ingestion has no Clerk user. */
 const SYSTEM_ACTOR = "system:email";
@@ -124,13 +121,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (listed.error) {
       throw new Error(`attachments.list failed: ${listed.error.message}`);
     }
-    const attachments = (listed.data?.data ?? [])
-      .filter(
-        (a) =>
-          isAllowedUpload(a.content_type, a.size) &&
-          a.size >= MIN_ATTACHMENT_BYTES,
-      )
-      .slice(0, MAX_EMAIL_ATTACHMENTS);
+    // Disposition-aware selection: real attachments in, signature logos
+    // and tracking pixels out (see selectEmailAttachments for the rules).
+    const attachments = selectEmailAttachments(
+      listed.data?.data ?? [],
+      isAllowedUpload,
+    );
 
     const createdIds: string[] = [];
     for (const attachment of attachments) {

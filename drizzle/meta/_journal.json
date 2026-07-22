@@ -78,6 +78,20 @@
       "when": 1784678778223,
       "tag": "0010_banking_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784684001853,
+      "tag": "0011_invoicing",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784684031476,
+      "tag": "0012_invoicing_rls",
+      "breakpoints": true
     }
   ]
 }

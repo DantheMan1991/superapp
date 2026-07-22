@@ -546,6 +546,7 @@ export async function reverseEntry(
     );
   const dimsByLine = new Map<string, string[]>();
   for (const d of dims) {
+    if (!d.journalLineId) continue; // invoice-line rows never match the filter
     const list = dimsByLine.get(d.journalLineId) ?? [];
     list.push(d.memberId);
     dimsByLine.set(d.journalLineId, list);

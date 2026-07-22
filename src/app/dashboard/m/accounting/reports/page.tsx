@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, Landmark, Wallet } from "lucide-react";
+import { BarChart3, Hourglass, Landmark, Wallet } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import {
@@ -33,6 +33,13 @@ const REPORTS = [
     title: "Cash Activity",
     description:
       "Money in and out of every bank, cash, and credit-card account over a period.",
+  },
+  {
+    href: "/dashboard/m/accounting/reports/ar-aging",
+    icon: Hourglass,
+    title: "A/R Aging",
+    description:
+      "Who owes what and how overdue — open invoice balances bucketed by days past due.",
   },
 ];
 

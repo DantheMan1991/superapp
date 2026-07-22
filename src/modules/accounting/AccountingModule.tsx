@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getSettings, ledgerIsBalanced } from "./core";
+import { formatCentsSigned, toSafeCents } from "./lib/money";
 import { AccountingNav } from "./components/accounting-nav";
 
 /** Module home — overview of the ledger's state. */
@@ -47,12 +48,44 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
           eq(schema.bankTransactions.status, "unreviewed"),
         ),
       );
+    const openInvoices = await tx
+      .select({
+        total: sql<string>`coalesce(sum(${schema.invoices.totalCents}), 0)`,
+      })
+      .from(schema.invoices)
+      .where(
+        and(
+          eq(schema.invoices.tenantId, tenantId),
+          sql`${schema.invoices.status} in ('issued', 'partial')`,
+        ),
+      );
+    const openPaid = await tx
+      .select({
+        paid: sql<string>`coalesce(sum(${schema.invoicePayments.amountCents}), 0)`,
+      })
+      .from(schema.invoicePayments)
+      .innerJoin(
+        schema.invoices,
+        and(
+          eq(schema.invoices.tenantId, schema.invoicePayments.tenantId),
+          eq(schema.invoices.id, schema.invoicePayments.invoiceId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.invoicePayments.tenantId, tenantId),
+          sql`${schema.invoices.status} in ('issued', 'partial')`,
+        ),
+      );
+    const arOutstandingCents =
+      toSafeCents(openInvoices[0]?.total ?? 0) - toSafeCents(openPaid[0]?.paid ?? 0);
     return {
       accountCount: accountCount.n,
       statusCounts,
       balanced,
       settings,
       unreviewed: unreviewed.n,
+      arOutstandingCents,
     };
   });
 
@@ -117,6 +150,22 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
           <CardContent className="text-xs text-muted-foreground">
             {count("draft")} draft{count("draft") === 1 ? "" : "s"} ·{" "}
             {count("void")} void
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Accounts receivable</CardDescription>
+            <CardTitle className="text-2xl">
+              {formatCentsSigned(data.arOutstandingCents)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            <Link
+              className="underline-offset-2 hover:underline"
+              href="/dashboard/m/accounting/reports/ar-aging"
+            >
+              Open invoices — see the aging report
+            </Link>
           </CardContent>
         </Card>
         <Card>

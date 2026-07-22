@@ -26,9 +26,11 @@ import {
   isAllowedUpload,
 } from "../src/modules/accounting/documents/allowlist";
 import {
+  MIN_INLINE_IMAGE_BYTES,
   inboundEmailSchema,
   inboundRecipients,
   parseInboundToken,
+  selectEmailAttachments,
 } from "../src/modules/accounting/documents/email";
 import {
   createDocumentRecord,
@@ -156,6 +158,59 @@ describe("inbound token parsing (pure)", () => {
     expect(parseInboundToken(inboundRecipients(parsed), domain)).toBe(
       "tok1234567890",
     );
+  });
+});
+
+describe("email attachment selection (pure)", () => {
+  const pdf = (over: object = {}) => ({
+    content_type: "application/pdf",
+    size: 200_000,
+    content_disposition: "attachment",
+    ...over,
+  });
+  const logo = (over: object = {}) => ({
+    content_type: "image/png",
+    size: 40_000,
+    content_disposition: "inline",
+    ...over,
+  });
+
+  it("keeps the bill PDF and drops the signature logo", () => {
+    const kept = selectEmailAttachments([pdf(), logo()], isAllowedUpload);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].content_type).toBe("application/pdf");
+  });
+
+  it("drops ALL inline images when any regular attachment exists", () => {
+    const bigInlinePhoto = logo({ size: 2_000_000 });
+    const kept = selectEmailAttachments([pdf(), bigInlinePhoto], isAllowedUpload);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].content_type).toBe("application/pdf");
+  });
+
+  it("keeps a pasted receipt photo when the email has no real attachment", () => {
+    const pastedPhoto = logo({ size: MIN_INLINE_IMAGE_BYTES });
+    expect(selectEmailAttachments([pastedPhoto], isAllowedUpload)).toHaveLength(1);
+    const smallLogo = logo({ size: MIN_INLINE_IMAGE_BYTES - 1 });
+    expect(selectEmailAttachments([smallLogo], isAllowedUpload)).toHaveLength(0);
+  });
+
+  it("inline PDFs count as documents regardless of size heuristics", () => {
+    const inlinePdf = pdf({ content_disposition: "inline", size: 50_000 });
+    const kept = selectEmailAttachments([inlinePdf, logo()], isAllowedUpload);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].content_type).toBe("application/pdf");
+  });
+
+  it("still applies the allowlist and drops tracking pixels", () => {
+    const zip = { content_type: "application/zip", size: 500_000, content_disposition: "attachment" };
+    const pixel = { content_type: "image/png", size: 120, content_disposition: "attachment" };
+    expect(selectEmailAttachments([zip, pixel], isAllowedUpload)).toHaveLength(0);
+  });
+
+  it("caps the number of kept attachments", () => {
+    const many = Array.from({ length: 15 }, () => pdf());
+    expect(selectEmailAttachments(many, isAllowedUpload)).toHaveLength(10);
   });
 });
 

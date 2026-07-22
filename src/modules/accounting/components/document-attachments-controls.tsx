@@ -72,7 +72,7 @@ export function AttachExistingButton({
       const result = await attachDocumentAction({ documentId, target });
       if ("error" in result && result.error) toast.error(result.error);
       else {
-        toast.success("Receipt attached.");
+        toast.success("Document attached.");
         setOpen(false);
         router.refresh();
       }
@@ -87,16 +87,16 @@ export function AttachExistingButton({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Attach a receipt</DialogTitle>
+            <DialogTitle>Attach a bill or receipt</DialogTitle>
             <DialogDescription>
-              Pick from the receipt inbox.
+              Pick from the Bills &amp; Receipts inbox.
             </DialogDescription>
           </DialogHeader>
           {docs === null ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : docs.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              The inbox is empty — upload or email a receipt first.
+              The inbox is empty — upload or email a bill or receipt first.
             </p>
           ) : (
             <div className="max-h-72 divide-y overflow-y-auto rounded-md border">

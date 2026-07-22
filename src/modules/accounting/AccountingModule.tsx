@@ -196,7 +196,7 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Receipt inbox</CardDescription>
+            <CardDescription>Bills &amp; receipts</CardDescription>
             <CardTitle className="text-2xl">{data.receiptInbox}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
@@ -205,8 +205,8 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
               href="/dashboard/m/accounting/receipts"
             >
               {data.receiptInbox === 0
-                ? "No receipts waiting to be filed"
-                : "Receipts waiting to be filed"}
+                ? "Nothing waiting to be filed"
+                : "Documents waiting to be filed"}
             </Link>
           </CardContent>
         </Card>

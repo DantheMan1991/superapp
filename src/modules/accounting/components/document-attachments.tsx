@@ -16,7 +16,7 @@ import { formatCents } from "@/modules/accounting/lib/money";
 import { AttachExistingButton, DetachAttachmentButton } from "./document-attachments-controls";
 
 /**
- * Server component: the "Receipts" card on journal-entry and invoice
+ * Server component: the "Bills & receipts" card on journal-entry and invoice
  * detail pages — lists attached documents, detaches, and attaches
  * existing inbox documents (the other direction of the inbox flow).
  */
@@ -35,14 +35,14 @@ export async function DocumentAttachments({
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Paperclip className="h-4 w-4" /> Receipts
+          <Paperclip className="h-4 w-4" /> Bills &amp; receipts
         </CardTitle>
         <AttachExistingButton target={target} />
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No receipts attached.
+            Nothing attached.
           </p>
         ) : (
           <ul className="space-y-2">

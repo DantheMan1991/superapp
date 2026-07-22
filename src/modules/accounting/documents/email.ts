@@ -74,3 +74,45 @@ export function inboundRecipients(email: InboundEmail): string[] {
     ...(email.data.received_for ?? []),
   ];
 }
+
+/** Floor for regular attachments (tracking pixels, stray icons). */
+export const MIN_ATTACHMENT_BYTES = 8 * 1024;
+/**
+ * Floor for INLINE images considered as documents. Signature logos are
+ * typically well under this; a pasted receipt photo is well over it.
+ */
+export const MIN_INLINE_IMAGE_BYTES = 100 * 1024;
+
+export interface EmailAttachmentMeta {
+  content_type: string;
+  size: number;
+  content_disposition?: string | null;
+}
+
+/**
+ * Decide which of an email's files are documents worth ingesting.
+ * Signature logos and tracking pixels arrive as INLINE images alongside
+ * the real bill; the rules that separate them:
+ *  - PDFs are always documents, inline or not.
+ *  - Regular (disposition "attachment") files are documents.
+ *  - Inline images count ONLY when the email has no regular document at
+ *    all (a receipt photo pasted into the body) AND they are large
+ *    enough to plausibly be a photo, not a logo.
+ * Caller applies the allowlist/size caps via isAllowedUpload; this
+ * function layers the disposition heuristics on top and caps the count.
+ */
+export function selectEmailAttachments<T extends EmailAttachmentMeta>(
+  attachments: readonly T[],
+  isAllowed: (mimeType: string, sizeBytes: number) => boolean,
+): T[] {
+  const allowed = attachments.filter((a) => isAllowed(a.content_type, a.size));
+  const isInlineImage = (a: EmailAttachmentMeta) =>
+    a.content_disposition === "inline" && a.content_type !== "application/pdf";
+  const regular = allowed.filter(
+    (a) => !isInlineImage(a) && a.size >= MIN_ATTACHMENT_BYTES,
+  );
+  if (regular.length > 0) return regular.slice(0, MAX_EMAIL_ATTACHMENTS);
+  return allowed
+    .filter((a) => isInlineImage(a) && a.size >= MIN_INLINE_IMAGE_BYTES)
+    .slice(0, MAX_EMAIL_ATTACHMENTS);
+}

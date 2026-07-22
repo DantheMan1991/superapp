@@ -311,7 +311,7 @@ export function DocumentRowActions({
             onClick={() =>
               run(
                 () => extractDocumentAction({ documentId: row.id }),
-                "Receipt read.",
+                "Document read.",
               )
             }
           >
@@ -414,7 +414,7 @@ export function AttachDialog({
       const result = await attachDocumentAction({ documentId: row.id, target });
       if ("error" in result && result.error) toast.error(result.error);
       else {
-        toast.success("Receipt attached.");
+        toast.success("Document attached.");
         onOpenChange(false);
         onDone?.();
         router.refresh();
@@ -432,7 +432,7 @@ export function AttachDialog({
     >
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Attach receipt</DialogTitle>
+          <DialogTitle>Attach document</DialogTitle>
           <DialogDescription>
             {row.vendorName ?? row.fileName}
             {row.totalCents !== null &&
@@ -619,7 +619,7 @@ export function RecordExpenseDialog({
         <DialogHeader>
           <DialogTitle>Record expense</DialogTitle>
           <DialogDescription>
-            Posts a journal entry from this receipt and attaches it — for cash
+            Posts a journal entry from this document and attaches it — for cash
             or out-of-feed purchases.
           </DialogDescription>
         </DialogHeader>

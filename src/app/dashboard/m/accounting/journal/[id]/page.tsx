@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
 import { getSettings } from "@/modules/accounting/core";
 import { formatCents, todayInTimezone } from "@/modules/accounting/lib/money";
 import { EntryActions } from "../entry-actions";
@@ -262,6 +263,11 @@ export default async function EntryPage({
           </CardContent>
         </Card>
       )}
+
+      <DocumentAttachments
+        tenantId={ctx.tenant.id}
+        target={{ type: "entry", id: entry.id }}
+      />
     </div>
   );
 }

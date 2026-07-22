@@ -42,7 +42,14 @@ export type LedgerErrorCode =
   | "PAYMENT_NOT_FOUND"
   | "RECURRING_NOT_FOUND"
   | "RECURRING_TEMPLATE_INVALID"
-  | "TXN_MATCH_INVALID";
+  | "TXN_MATCH_INVALID"
+  | "DOCUMENT_NOT_FOUND"
+  | "DOCUMENT_TRASHED"
+  | "DOCUMENT_HAS_LINKS"
+  | "DOCUMENT_LINK_EXISTS"
+  | "DOCUMENT_TARGET_INVALID"
+  | "DOCUMENT_NOT_EXTRACTABLE"
+  | "DOCUMENT_UPLOAD_INVALID";
 
 /**
  * Typed failure from the ledger core. Server actions catch these and map
@@ -113,6 +120,16 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   RECURRING_TEMPLATE_INVALID:
     "The template references an inactive account or tag — edit it first.",
   TXN_MATCH_INVALID: "That entry can no longer be matched — refresh and try again.",
+  DOCUMENT_NOT_FOUND: "That file no longer exists.",
+  DOCUMENT_TRASHED: "That file is in the trash — restore it first.",
+  DOCUMENT_HAS_LINKS:
+    "Detach this file from its transactions before trashing it.",
+  DOCUMENT_LINK_EXISTS: "That file is already attached there.",
+  DOCUMENT_TARGET_INVALID:
+    "That record can't take attachments or no longer exists.",
+  DOCUMENT_NOT_EXTRACTABLE: "This file type can't be read automatically.",
+  DOCUMENT_UPLOAD_INVALID:
+    "That file type or size isn't supported — JPEG, PNG, WebP, GIF or PDF up to 20MB.",
 };
 
 export function friendlyMessage(err: unknown): string {

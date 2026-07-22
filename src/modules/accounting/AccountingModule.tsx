@@ -79,6 +79,15 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
       );
     const arOutstandingCents =
       toSafeCents(openInvoices[0]?.total ?? 0) - toSafeCents(openPaid[0]?.paid ?? 0);
+    const [receiptInbox] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.documents)
+      .where(
+        and(
+          eq(schema.documents.tenantId, tenantId),
+          eq(schema.documents.status, "inbox"),
+        ),
+      );
     return {
       accountCount: accountCount.n,
       statusCounts,
@@ -86,6 +95,7 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
       settings,
       unreviewed: unreviewed.n,
       arOutstandingCents,
+      receiptInbox: receiptInbox.n,
     };
   });
 
@@ -181,6 +191,22 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
               {data.unreviewed === 0
                 ? "Nothing waiting for review"
                 : "Transactions waiting for review"}
+            </Link>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Receipt inbox</CardDescription>
+            <CardTitle className="text-2xl">{data.receiptInbox}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            <Link
+              className="underline-offset-2 hover:underline"
+              href="/dashboard/m/accounting/receipts"
+            >
+              {data.receiptInbox === 0
+                ? "No receipts waiting to be filed"
+                : "Receipts waiting to be filed"}
             </Link>
           </CardContent>
         </Card>

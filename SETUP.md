@@ -362,6 +362,32 @@ The accounting module's Banking tool needs two more things in `.env`:
      then switch `PLAID_SECRET` to the production secret and
      `PLAID_ENV=production`. Add all three to Vercel env when deploying.
 
+3. **Vercel Blob** (receipt/bill storage for the Receipts tool):
+   - In the Vercel dashboard -> your project -> **Storage** -> **Create
+     Database** -> **Blob**. Set access to **Private**.
+   - Copy the store's read-write token:
+     ```
+     BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
+     ```
+   - Works locally too - the token is all the SDK needs.
+
+4. **Resend inbound email** (email-in for the Receipts tool; uploads work
+   without it). DNS propagation can take 24-48h - start early:
+   - Sign up at **https://resend.com** -> **Domains** -> add a *receiving*
+     domain (e.g. `in.yourdomain.com`) -> add the MX record it shows you at
+     your DNS host and wait for it to verify.
+   - **Webhooks** -> add endpoint `https://<your-app>/api/inbound/resend`
+     for the `email.received` event -> copy the signing secret.
+   - **API Keys** -> create one (needed to download attachments).
+     ```
+     RESEND_API_KEY=re_...
+     RESEND_INBOUND_WEBHOOK_SECRET=whsec_...
+     INBOUND_EMAIL_DOMAIN=in.yourdomain.com
+     ```
+   - The webhook needs a public URL, so the live email flow only works on
+     a deployment (a Vercel preview is fine). Everything else - uploads,
+     extraction, attaching - works locally.
+
 Restart the dev server after editing `.env`.
 
 ## Part 5 — Common problems

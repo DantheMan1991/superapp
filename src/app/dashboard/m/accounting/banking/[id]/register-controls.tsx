@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Sparkles } from "lucide-react";
+import { Paperclip, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -123,6 +123,7 @@ interface MatchCandidate {
 
 interface ReviewRow {
   id: string;
+  attachmentCount: number;
   txnDate: string;
   description: string;
   amountCents: number;
@@ -319,7 +320,18 @@ export function ReviewTable({
                       {row.txnDate}
                     </TableCell>
                     <TableCell className="max-w-[280px]">
-                      <span className="block truncate text-sm">{row.description}</span>
+                      <span className="flex items-center gap-1.5 truncate text-sm">
+                        {row.description}
+                        {row.attachmentCount > 0 && (
+                          <span
+                            className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground"
+                            title="Attached receipts"
+                          >
+                            <Paperclip className="size-3" />
+                            {row.attachmentCount}
+                          </span>
+                        )}
+                      </span>
                       {row.status === "unreviewed" && row.suggestion && (
                         <span
                           className={cn(

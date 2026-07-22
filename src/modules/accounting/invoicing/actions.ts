@@ -9,6 +9,7 @@ import { logAuditInTx } from "@/lib/audit";
 import { LedgerError, friendlyMessage, type LedgerCtx } from "../core";
 import { isValidIsoDate, MAX_AMOUNT_CENTS } from "../lib/money";
 import { resetBankLinkForEntry } from "../banking/match";
+import { detachAllForTargets } from "../documents/links";
 import {
   createCustomer,
   setCustomerActive,
@@ -243,6 +244,11 @@ export async function deleteInvoiceDraftAction(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     await withTenant(ctx.tenantId, async (tx) => {
+      // P21 (session 5): invoice FK on document_links is NO ACTION —
+      // detach attachments in the same tx or the delete fails at the DB.
+      await detachAllForTargets(tx, ctx.tenantId, "invoice", [
+        parsed.data.invoiceId,
+      ]);
       const inv = await deleteInvoiceDraft(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "invoice.draft_deleted",

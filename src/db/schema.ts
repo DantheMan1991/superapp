@@ -831,6 +831,14 @@ export const accountingSettings = pgTable(
       .default("America/New_York"),
     /** AI-suggestion cooldown marker (30s between batches per tenant). */
     aiLastSuggestedAt: timestamp("ai_last_suggested_at", { withTimezone: true }),
+    /**
+     * Email-in routing key: receipts-{token}@{INBOUND_EMAIL_DOMAIN}.
+     * Effectively a bearer token (safe because nothing auto-posts);
+     * owner-regenerable. Null = email-in disabled.
+     */
+    inboundEmailToken: text("inbound_email_token"),
+    /** AI-extraction cooldown marker (15s between model calls per tenant). */
+    aiLastExtractedAt: timestamp("ai_last_extracted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -838,7 +846,13 @@ export const accountingSettings = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [uniqueIndex("accounting_settings_tenant_idx").on(t.tenantId)],
+  (t) => [
+    uniqueIndex("accounting_settings_tenant_idx").on(t.tenantId),
+    // GLOBAL unique — the inbound webhook resolves tenant by token alone.
+    uniqueIndex("accounting_settings_inbound_token_idx")
+      .on(t.inboundEmailToken)
+      .where(sql`${t.inboundEmailToken} is not null`),
+  ],
 );
 
 /* ------------------------------------------------------------------------
@@ -1096,6 +1110,159 @@ export const plaidItems = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * Documents (session 5): the capture-and-extract substrate. `documents` is
+ * the GENERIC file record (nothing accounting-specific — a future DMS tool
+ * and industry packs build on it); `document_links` carries the accounting
+ * attachments with exactly-one-of composite FKs. Packs bolt on via their
+ * own link tables FK'ing documents (tenant_id, id) — zero core migration.
+ * ---------------------------------------------------------------------- */
+
+export const documentSource = pgEnum("document_source", ["upload", "email"]);
+
+export const documentStatus = pgEnum("document_status", [
+  "inbox",
+  "filed",
+  "trashed",
+]);
+
+export const extractionStatus = pgEnum("extraction_status", [
+  "pending",
+  "done",
+  "failed",
+  "skipped",
+]);
+
+export const documents = pgTable(
+  "documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Private-Blob pathname. Null = no-attachment email provenance row. */
+    blobPathname: text("blob_pathname"),
+    fileName: text("file_name").notNull().default(""),
+    mimeType: text("mime_type").notNull().default(""),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
+    /** Content hash — dedup warns on match, never blocks. */
+    sha256: text("sha256").notNull().default(""),
+    source: documentSource("source").notNull().default("upload"),
+    /** filed = has at least one link; recomputed in-tx with every link write. */
+    status: documentStatus("status").notNull().default("inbox"),
+    emailFrom: text("email_from").notNull().default(""),
+    emailSubject: text("email_subject").notNull().default(""),
+    emailMessageId: text("email_message_id").notNull().default(""),
+    emailReceivedAt: timestamp("email_received_at", { withTimezone: true }),
+    /** Null for email-ingested documents. */
+    uploadedByClerkUserId: text("uploaded_by_clerk_user_id"),
+    extractionStatus: extractionStatus("extraction_status")
+      .notNull()
+      .default("pending"),
+    /** The session-6 contract shape — see documents/extraction types. */
+    extraction: jsonb("extraction"),
+    trashedAt: timestamp("trashed_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("documents_tenant_id_id_idx").on(t.tenantId, t.id),
+    // GLOBAL unique — the pathname embeds the tenant id (acct/{tenant}/…).
+    uniqueIndex("documents_blob_pathname_idx")
+      .on(t.blobPathname)
+      .where(sql`${t.blobPathname} is not null`),
+    index("documents_tenant_status_idx").on(
+      t.tenantId,
+      t.status,
+      t.createdAt,
+    ),
+    index("documents_tenant_sha256_idx").on(t.tenantId, t.sha256),
+    index("documents_tenant_extraction_idx").on(
+      t.tenantId,
+      t.extractionStatus,
+    ),
+    check("documents_size_nonnegative", sql`${t.sizeBytes} >= 0`),
+  ],
+);
+
+/**
+ * Attaches a document to exactly one accounting record (CHECK below).
+ * Target FKs are NO ACTION on purpose: hard-delete paths (journal drafts,
+ * invoice drafts, Plaid removed txns) must detach app-side first — the FK
+ * is the backstop against silently orphaned links. `bill_id` arrives as an
+ * additive migration in session 6.
+ */
+export const documentLinks = pgTable(
+  "document_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    journalEntryId: uuid("journal_entry_id"),
+    bankTransactionId: uuid("bank_transaction_id"),
+    invoiceId: uuid("invoice_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_links_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("document_links_tenant_document_idx").on(t.tenantId, t.documentId),
+    // No duplicate identical links (one pair-unique per target kind).
+    uniqueIndex("document_links_doc_entry_idx")
+      .on(t.tenantId, t.documentId, t.journalEntryId)
+      .where(sql`${t.journalEntryId} is not null`),
+    uniqueIndex("document_links_doc_bank_txn_idx")
+      .on(t.tenantId, t.documentId, t.bankTransactionId)
+      .where(sql`${t.bankTransactionId} is not null`),
+    uniqueIndex("document_links_doc_invoice_idx")
+      .on(t.tenantId, t.documentId, t.invoiceId)
+      .where(sql`${t.invoiceId} is not null`),
+    // Reverse lookups: "documents attached to this record".
+    index("document_links_tenant_entry_idx")
+      .on(t.tenantId, t.journalEntryId)
+      .where(sql`${t.journalEntryId} is not null`),
+    index("document_links_tenant_bank_txn_idx")
+      .on(t.tenantId, t.bankTransactionId)
+      .where(sql`${t.bankTransactionId} is not null`),
+    index("document_links_tenant_invoice_idx")
+      .on(t.tenantId, t.invoiceId)
+      .where(sql`${t.invoiceId} is not null`),
+    foreignKey({
+      name: "document_links_document_fk",
+      columns: [t.tenantId, t.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "document_links_entry_fk",
+      columns: [t.tenantId, t.journalEntryId],
+      foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }),
+    foreignKey({
+      name: "document_links_bank_txn_fk",
+      columns: [t.tenantId, t.bankTransactionId],
+      foreignColumns: [bankTransactions.tenantId, bankTransactions.id],
+    }),
+    foreignKey({
+      name: "document_links_invoice_fk",
+      columns: [t.tenantId, t.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    check(
+      "document_links_one_target",
+      sql`num_nonnulls(${t.journalEntryId}, ${t.bankTransactionId}, ${t.invoiceId}) = 1`,
+    ),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -1124,3 +1291,5 @@ export type BankTransaction = typeof bankTransactions.$inferSelect;
 export type Reconciliation = typeof reconciliations.$inferSelect;
 export type ReconciliationLine = typeof reconciliationLines.$inferSelect;
 export type PlaidItem = typeof plaidItems.$inferSelect;
+export type Document = typeof documents.$inferSelect;
+export type DocumentLink = typeof documentLinks.$inferSelect;

@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
 import { getSettings } from "@/modules/accounting/core";
 import { loadInvoiceLines } from "@/modules/accounting/invoicing/invoices";
 import { paidCentsFor } from "@/modules/accounting/invoicing/payments";
@@ -300,6 +301,13 @@ export default async function InvoiceDetailPage({
           )}
         </>
       )}
+
+      <div className="print:hidden">
+        <DocumentAttachments
+          tenantId={ctx.tenant.id}
+          target={{ type: "invoice", id: data.invoice.id }}
+        />
+      </div>
     </div>
   );
 }

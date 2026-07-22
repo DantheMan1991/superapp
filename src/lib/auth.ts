@@ -67,6 +67,25 @@ export async function requireTenant(): Promise<TenantContext> {
   return { tenant, userId, role };
 }
 
+/**
+ * Non-redirecting variant of requireTenant for API route handlers, which
+ * must answer 401/404 JSON instead of redirecting (session 5: the blob
+ * upload token route and the document file route). Null = not signed in,
+ * no active org, or org not yet synced.
+ */
+export async function resolveTenantContext(): Promise<TenantContext | null> {
+  const { userId, orgId, orgRole } = await auth();
+  if (!userId || !orgId) return null;
+  const tenant = await withSystem((tx) =>
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.clerkOrgId, orgId),
+    }),
+  );
+  if (!tenant) return null;
+  const role: TenantRole = orgRole === "org:admin" ? "owner" : "staff";
+  return { tenant, userId, role };
+}
+
 /** Like requireTenant, but restricted to the business owner. */
 export async function requireTenantOwner(): Promise<TenantContext> {
   const ctx = await requireTenant();

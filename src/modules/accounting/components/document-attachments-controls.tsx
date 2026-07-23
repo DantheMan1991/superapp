@@ -52,7 +52,7 @@ export function DetachAttachmentButton({ linkId }: { linkId: string }) {
 export function AttachExistingButton({
   target,
 }: {
-  target: { type: "entry" | "bank_transaction" | "invoice"; id: string };
+  target: { type: "entry" | "bank_transaction" | "invoice" | "bill"; id: string };
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);

@@ -11,7 +11,7 @@ import { countDocumentLinks, loadDocument } from "./documents";
  * a forgotten call into a loud failure instead of a silent orphan.
  */
 
-export type LinkTargetType = "entry" | "bank_transaction" | "invoice";
+export type LinkTargetType = "entry" | "bank_transaction" | "invoice" | "bill";
 
 export interface LinkTarget {
   type: LinkTargetType;
@@ -22,11 +22,13 @@ function targetColumns(target: LinkTarget): {
   journalEntryId: string | null;
   bankTransactionId: string | null;
   invoiceId: string | null;
+  billId: string | null;
 } {
   return {
     journalEntryId: target.type === "entry" ? target.id : null,
     bankTransactionId: target.type === "bank_transaction" ? target.id : null,
     invoiceId: target.type === "invoice" ? target.id : null,
+    billId: target.type === "bill" ? target.id : null,
   };
 }
 
@@ -40,7 +42,9 @@ async function assertTargetExists(
       ? schema.journalEntries
       : target.type === "bank_transaction"
         ? schema.bankTransactions
-        : schema.invoices;
+        : target.type === "invoice"
+          ? schema.invoices
+          : schema.bills;
   const row = await tx
     .select({ id: table.id })
     .from(table)
@@ -189,6 +193,29 @@ export async function listLinksForDocument(
         targetId: link.invoiceId,
         label: invoice ? `Invoice ${invoice.invoiceNumber}` : "Invoice",
       });
+    } else if (link.billId) {
+      const bill = await tx.query.bills.findFirst({
+        where: and(
+          eq(schema.bills.tenantId, tenantId),
+          eq(schema.bills.id, link.billId),
+        ),
+      });
+      const vendor = bill
+        ? await tx.query.vendors.findFirst({
+            where: and(
+              eq(schema.vendors.tenantId, tenantId),
+              eq(schema.vendors.id, bill.vendorId),
+            ),
+          })
+        : undefined;
+      views.push({
+        link,
+        targetType: "bill",
+        targetId: link.billId,
+        label: bill
+          ? `Bill — ${vendor?.name ?? "vendor"}${bill.billNumber ? ` · ${bill.billNumber}` : ""}`
+          : "Bill",
+      });
     }
   }
   return views;
@@ -204,7 +231,9 @@ export async function listDocumentsForTarget(
       ? schema.documentLinks.journalEntryId
       : target.type === "bank_transaction"
         ? schema.documentLinks.bankTransactionId
-        : schema.documentLinks.invoiceId;
+        : target.type === "invoice"
+          ? schema.documentLinks.invoiceId
+          : schema.documentLinks.billId;
   const rows = await tx
     .select({
       link: schema.documentLinks,
@@ -246,7 +275,9 @@ export async function detachAllForTargets(
       ? schema.documentLinks.journalEntryId
       : targetType === "bank_transaction"
         ? schema.documentLinks.bankTransactionId
-        : schema.documentLinks.invoiceId;
+        : targetType === "invoice"
+          ? schema.documentLinks.invoiceId
+          : schema.documentLinks.billId;
   const deleted = await tx
     .delete(schema.documentLinks)
     .where(

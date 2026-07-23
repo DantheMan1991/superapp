@@ -61,6 +61,10 @@ import {
   trashDocumentAction,
 } from "@/modules/accounting/documents/actions";
 import {
+  createBillFromDocumentAction,
+  findVendorCandidatesAction,
+} from "@/modules/accounting/payables/actions";
+import {
   formatCents,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
@@ -265,6 +269,7 @@ export function DocumentRowActions({
   const [pending, startTransition] = useTransition();
   const [attachOpen, setAttachOpen] = useState(false);
   const [expenseOpen, setExpenseOpen] = useState(false);
+  const [billOpen, setBillOpen] = useState(false);
 
   function run(fn: () => Promise<{ error?: string } | { ok: true }>, done?: string) {
     startTransition(async () => {
@@ -318,6 +323,19 @@ export function DocumentRowActions({
             <ScanText className="mr-1 h-3.5 w-3.5" /> Read
           </Button>
         )}
+      {row.status === "inbox" && row.hasBlob && (
+        <Button
+          size="sm"
+          variant={
+            row.docType === "bill" || row.docType === "invoice"
+              ? "default"
+              : "outline"
+          }
+          onClick={() => setBillOpen(true)}
+        >
+          <ReceiptText className="mr-1 h-3.5 w-3.5" /> Create bill
+        </Button>
+      )}
       <Button size="sm" variant="outline" onClick={() => setAttachOpen(true)}>
         <Paperclip className="mr-1 h-3.5 w-3.5" /> Attach
       </Button>
@@ -350,6 +368,7 @@ export function DocumentRowActions({
         open={attachOpen}
         onOpenChange={setAttachOpen}
       />
+      <CreateBillDialog row={row} open={billOpen} onOpenChange={setBillOpen} />
       <RecordExpenseDialog
         row={row}
         accounts={accounts}
@@ -407,7 +426,7 @@ export function AttachDialog({
   }, [open, row.id]);
 
   function attach(
-    target: { type: "entry" | "bank_transaction" | "invoice"; id: string },
+    target: { type: "entry" | "bank_transaction" | "invoice" | "bill"; id: string },
     onDone?: () => void,
   ) {
     startTransition(async () => {
@@ -545,6 +564,145 @@ export function AttachDialog({
             )}
           </div>
         </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ------------------------------------------------------ create bill dialog
+
+export function CreateBillDialog({
+  row,
+  open,
+  onOpenChange,
+}: {
+  row: DocumentRowData;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [candidates, setCandidates] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [vendorId, setVendorId] = useState("");
+  const [newName, setNewName] = useState(row.vendorName ?? "");
+  const loadedFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!open || loadedFor.current === row.id) return;
+    loadedFor.current = row.id;
+    void (async () => {
+      const result = await findVendorCandidatesAction({
+        name: row.vendorName ?? "",
+      });
+      const found = "error" in result ? [] : (result.data?.candidates ?? []);
+      setCandidates(found);
+      if (found.length === 1) setVendorId(found[0].id);
+    })();
+  }, [open, row.id, row.vendorName]);
+
+  function submit() {
+    if (!vendorId && !newName.trim()) {
+      toast.error("Pick or name the vendor.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await createBillFromDocumentAction({
+        documentId: row.id,
+        ...(vendorId
+          ? { vendorId }
+          : { createVendorName: newName.trim() }),
+        billDateFallback: row.createdAt.slice(0, 10),
+      });
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+        return;
+      }
+      const data = (result as {
+        data?: { billId: string; existing: boolean; duplicates: unknown[] };
+      }).data!;
+      if (data.existing) toast.info("This document already has a bill — opening it.");
+      else if (data.duplicates.length > 0)
+        toast.warning("Bill created — looks like a possible duplicate.");
+      else toast.success("Bill created from the document.");
+      onOpenChange(false);
+      router.push(`/dashboard/m/accounting/purchases/bills/${data.billId}`);
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        onOpenChange(o);
+        if (!o) loadedFor.current = null;
+      }}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create bill</DialogTitle>
+          <DialogDescription>
+            {row.vendorName ?? row.fileName}
+            {row.totalCents !== null &&
+              ` · $${formatCents(Math.abs(row.totalCents))}`}{" "}
+            — the draft is prefilled from what was read; the document attaches
+            automatically.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          {candidates === null ? (
+            <p className="text-sm text-muted-foreground">Looking for the vendor…</p>
+          ) : candidates.length > 0 ? (
+            <div className="space-y-1.5">
+              <Label>Existing vendor</Label>
+              <Select
+                value={vendorId || undefined}
+                onValueChange={(v) => {
+                  setVendorId(v);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Match to an existing vendor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {candidates.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No existing vendor matches — a new one will be created.
+            </p>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor={`nv-${row.id}`}>
+              {candidates && candidates.length > 0
+                ? "…or create a new vendor"
+                : "New vendor name"}
+            </Label>
+            <Input
+              id={`nv-${row.id}`}
+              value={newName}
+              onChange={(e) => {
+                setNewName(e.target.value);
+                if (e.target.value) setVendorId("");
+              }}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={pending}>
+            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Create bill
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

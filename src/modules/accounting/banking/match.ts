@@ -28,6 +28,96 @@ export interface MatchCandidate {
 }
 
 /**
+ * Shared label lookup for payment-sourced candidate entries:
+ * invoice payments → "Payment — INV-0003 · Customer";
+ * bill payments → "Bill payment — Vendor · number" (session 6).
+ * Returns sourceId → label.
+ */
+async function labelPaymentEntries(
+  tx: Tx,
+  tenantId: string,
+  rows: Array<{ source: string; sourceId: string | null }>,
+): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+
+  const invoicePaymentIds = rows
+    .filter((r) => r.source === "invoice_payment" && r.sourceId)
+    .map((r) => r.sourceId!);
+  if (invoicePaymentIds.length > 0) {
+    const payments = await tx
+      .select({
+        paymentId: schema.invoicePayments.id,
+        invoiceNumber: schema.invoices.invoiceNumber,
+        customerName: schema.customers.name,
+      })
+      .from(schema.invoicePayments)
+      .innerJoin(
+        schema.invoices,
+        and(
+          eq(schema.invoices.tenantId, schema.invoicePayments.tenantId),
+          eq(schema.invoices.id, schema.invoicePayments.invoiceId),
+        ),
+      )
+      .innerJoin(
+        schema.customers,
+        and(
+          eq(schema.customers.tenantId, schema.invoices.tenantId),
+          eq(schema.customers.id, schema.invoices.customerId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.invoicePayments.tenantId, tenantId),
+          inArray(schema.invoicePayments.id, invoicePaymentIds),
+        ),
+      );
+    for (const p of payments) {
+      labels.set(p.paymentId, `Payment — ${p.invoiceNumber} · ${p.customerName}`);
+    }
+  }
+
+  const billPaymentIds = rows
+    .filter((r) => r.source === "bill_payment" && r.sourceId)
+    .map((r) => r.sourceId!);
+  if (billPaymentIds.length > 0) {
+    const payments = await tx
+      .select({
+        paymentId: schema.billPayments.id,
+        billNumber: schema.bills.billNumber,
+        vendorName: schema.vendors.name,
+      })
+      .from(schema.billPayments)
+      .innerJoin(
+        schema.bills,
+        and(
+          eq(schema.bills.tenantId, schema.billPayments.tenantId),
+          eq(schema.bills.id, schema.billPayments.billId),
+        ),
+      )
+      .innerJoin(
+        schema.vendors,
+        and(
+          eq(schema.vendors.tenantId, schema.bills.tenantId),
+          eq(schema.vendors.id, schema.bills.vendorId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.billPayments.tenantId, tenantId),
+          inArray(schema.billPayments.id, billPaymentIds),
+        ),
+      );
+    for (const p of payments) {
+      labels.set(
+        p.paymentId,
+        `Bill payment — ${p.vendorName}${p.billNumber ? ` · ${p.billNumber}` : ""}`,
+      );
+    }
+  }
+  return labels;
+}
+
+/**
  * Candidates for ONE unreviewed transaction: posted entries (source ≠
  * bank_import) whose lines on the register's ledger account sum to
  * exactly the transaction amount, dated within ±7 days, not already
@@ -75,43 +165,7 @@ export async function findMatchCandidates(
     .orderBy(sql`abs(${je.entryDate} - ${args.txnDate}::date)`, je.createdAt)
     .limit(5);
 
-  // Label invoice payments "Payment — INV-0003 · Customer".
-  const paymentIds = rows
-    .filter((r) => r.source === "invoice_payment" && r.sourceId)
-    .map((r) => r.sourceId!);
-  const labels = new Map<string, string>();
-  if (paymentIds.length > 0) {
-    const payments = await tx
-      .select({
-        paymentId: schema.invoicePayments.id,
-        invoiceNumber: schema.invoices.invoiceNumber,
-        customerName: schema.customers.name,
-      })
-      .from(schema.invoicePayments)
-      .innerJoin(
-        schema.invoices,
-        and(
-          eq(schema.invoices.tenantId, schema.invoicePayments.tenantId),
-          eq(schema.invoices.id, schema.invoicePayments.invoiceId),
-        ),
-      )
-      .innerJoin(
-        schema.customers,
-        and(
-          eq(schema.customers.tenantId, schema.invoices.tenantId),
-          eq(schema.customers.id, schema.invoices.customerId),
-        ),
-      )
-      .where(
-        and(
-          eq(schema.invoicePayments.tenantId, tenantId),
-          sql`${schema.invoicePayments.id} in ${paymentIds}`,
-        ),
-      );
-    for (const p of payments) {
-      labels.set(p.paymentId, `Payment — ${p.invoiceNumber} · ${p.customerName}`);
-    }
-  }
+  const labels = await labelPaymentEntries(tx, tenantId, rows);
 
   return rows.map((r) => ({
     entryId: r.entryId,
@@ -175,42 +229,7 @@ export async function findMatchCandidatesBatch(
     )
     .groupBy(je.id, je.entryDate, je.memo, je.source, je.sourceId);
 
-  const paymentIds = entries
-    .filter((e) => e.source === "invoice_payment" && e.sourceId)
-    .map((e) => e.sourceId!);
-  const labels = new Map<string, string>();
-  if (paymentIds.length > 0) {
-    const payments = await tx
-      .select({
-        paymentId: schema.invoicePayments.id,
-        invoiceNumber: schema.invoices.invoiceNumber,
-        customerName: schema.customers.name,
-      })
-      .from(schema.invoicePayments)
-      .innerJoin(
-        schema.invoices,
-        and(
-          eq(schema.invoices.tenantId, schema.invoicePayments.tenantId),
-          eq(schema.invoices.id, schema.invoicePayments.invoiceId),
-        ),
-      )
-      .innerJoin(
-        schema.customers,
-        and(
-          eq(schema.customers.tenantId, schema.invoices.tenantId),
-          eq(schema.customers.id, schema.invoices.customerId),
-        ),
-      )
-      .where(
-        and(
-          eq(schema.invoicePayments.tenantId, tenantId),
-          inArray(schema.invoicePayments.id, paymentIds),
-        ),
-      );
-    for (const p of payments) {
-      labels.set(p.paymentId, `Payment — ${p.invoiceNumber} · ${p.customerName}`);
-    }
-  }
+  const labels = await labelPaymentEntries(tx, tenantId, entries);
 
   const daysApart = (a: string, b: string) => {
     const [ay, am, ad] = a.split("-").map(Number);

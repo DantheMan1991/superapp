@@ -104,13 +104,17 @@ describe("inbound token parsing (pure)", () => {
       "abc123def456",
     );
   });
-  it("tolerates display-name form and case", () => {
+  it("tolerates display-name form; case-folds the token (Outlook lowercases addresses)", () => {
     expect(
       parseInboundToken(
         ['"Yosher Receipts" <RECEIPTS-ABC123DEF456@IN.EXAMPLE.COM>'],
         domain,
       ),
-    ).toBe("ABC123DEF456");
+    ).toBe("abc123def456");
+    // Mixed-case survivors of older tokens fold to the stored lowercase form.
+    expect(
+      parseInboundToken(["receipts-AbC123dEf456@in.example.com"], domain),
+    ).toBe("abc123def456");
   });
   it("scans past unrelated recipients", () => {
     expect(

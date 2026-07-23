@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { get, head, put } from "@vercel/blob";
 import { schema, type Tx } from "@/db";
-import { assertBlobConfigured, receiptPathPrefix } from "@/lib/blob";
+import { assertBlobConfigured, blobToken, receiptPathPrefix } from "@/lib/blob";
 import { LedgerError, type LedgerCtx } from "../core";
 import { isAllowedUpload } from "./allowlist";
 
@@ -18,8 +18,7 @@ export function sha256Hex(bytes: Uint8Array): string {
 }
 
 export async function readBlobBytes(pathname: string): Promise<Uint8Array> {
-  assertBlobConfigured();
-  const result = await get(pathname, { access: "private" });
+  const result = await get(pathname, { access: "private", token: blobToken() });
   if (!result || result.statusCode !== 200) {
     throw new LedgerError("DOCUMENT_NOT_FOUND", `blob missing: ${pathname}`);
   }
@@ -137,7 +136,7 @@ export async function inspectUploadedBlob(
   }
   let meta;
   try {
-    meta = await head(pathname);
+    meta = await head(pathname, { token: blobToken() });
   } catch {
     throw new LedgerError("DOCUMENT_NOT_FOUND", `blob missing: ${pathname}`);
   }
@@ -176,6 +175,7 @@ export async function storeEmailAttachment(
       access: "private",
       addRandomSuffix: true,
       contentType,
+      token: blobToken(),
     },
   );
   return result.pathname;

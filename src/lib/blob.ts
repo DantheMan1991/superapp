@@ -12,6 +12,16 @@ export function assertBlobConfigured(): void {
 }
 
 /**
+ * The read-write token, passed EXPLICITLY to every SDK call. Without it
+ * the SDK prefers ambient OIDC credentials when it can find any, which
+ * fails outside deployed functions (learned in production debugging).
+ */
+export function blobToken(): string {
+  assertBlobConfigured();
+  return process.env.BLOB_READ_WRITE_TOKEN!;
+}
+
+/**
  * All accounting receipts live under this per-tenant prefix. The upload
  * token route and the registration action both enforce it — a client can
  * only ever write into (and register from) its own tenant's namespace.

@@ -463,7 +463,10 @@ async function setEmailToken(
   try {
     const ctx = await gate();
     requireOwnerRole(ctx);
-    const token = randomBytes(18).toString("base64url");
+    // Lowercase hex: email local-parts get lowercased by mail servers in
+    // the wild, so the token must survive case-folding. 16 bytes = 128
+    // bits — same effective entropy, case-insensitively safe.
+    const token = randomBytes(16).toString("hex");
     await withTenant(ctx.tenantId, async (tx) => {
       await tx
         .update(schema.accountingSettings)

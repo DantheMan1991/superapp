@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { upload } from "@vercel/blob/client";
+// Presigned flow — required for PRIVATE stores (classic client tokens
+// are rejected by the store; learned in production).
+import { uploadPresigned } from "@vercel/blob/client";
 import {
   Copy,
   Landmark,
@@ -112,7 +114,7 @@ export function UploadButton({ tenantId }: { tenantId: string }) {
           );
           continue;
         }
-        const blob = await upload(
+        const blob = await uploadPresigned(
           `acct/${tenantId}/receipts/${file.name}`,
           file,
           {

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { issueSignedToken } from "@vercel/blob";
+import {
+  handleUploadPresigned,
+  type HandleUploadPresignedBody,
+} from "@vercel/blob/client";
 import { resolveTenantContext } from "@/lib/auth";
 import { isModuleEnabled } from "@/lib/modules";
-import { assertBlobConfigured, receiptPathPrefix } from "@/lib/blob";
+import { blobToken, receiptPathPrefix } from "@/lib/blob";
 import {
   ALLOWED_MIME_TYPES,
   MAX_FILE_BYTES,
@@ -11,21 +15,25 @@ import {
 export const runtime = "nodejs";
 
 /**
- * Token issuance for client-direct blob uploads — the named exception to
- * the server-actions convention (phone photos exceed the 4MB action body
- * limit). The auth story is equivalent: this callback re-checks tenant +
- * module and pins the pathname to the caller's own namespace before any
- * token exists. DB registration is a separate server action the client
- * calls after the upload (onUploadCompleted cannot fire on localhost).
+ * Presigned-URL issuance for client-direct blob uploads — the named
+ * exception to the server-actions convention (phone photos exceed the
+ * 4MB action body limit). PRIVATE stores require the presigned flow
+ * (classic client tokens are rejected by the store — learned in
+ * production). The auth story is unchanged: this callback re-checks
+ * tenant + module and pins the pathname to the caller's own namespace
+ * before any URL is signed. DB registration is a separate server action
+ * the client calls after the upload.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  assertBlobConfigured();
-  const body = (await req.json()) as HandleUploadBody;
+  const body = (await req.json()) as HandleUploadPresignedBody;
   try {
-    const result = await handleUpload({
+    const result = await handleUploadPresigned({
       body,
       request: req,
-      onBeforeGenerateToken: async (pathname) => {
+      // Only used to verify upload-completed callbacks, which we don't
+      // register (P4) — a placeholder keeps local dev working without it.
+      webhookPublicKey: process.env.BLOB_WEBHOOK_PUBLIC_KEY ?? "unconfigured",
+      getSignedToken: async (pathname) => {
         const ctx = await resolveTenantContext();
         if (!ctx) throw new Error("unauthorized");
         if (!(await isModuleEnabled(ctx.tenant.id, "accounting"))) {
@@ -34,21 +42,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         if (!pathname.startsWith(receiptPathPrefix(ctx.tenant.id))) {
           throw new Error("pathname outside tenant namespace");
         }
-        return {
+        const token = await issueSignedToken({
+          token: blobToken(),
+          pathname,
+          operations: ["put"],
+          validUntil: Date.now() + 10 * 60_000,
           allowedContentTypes: [...ALLOWED_MIME_TYPES],
           maximumSizeInBytes: MAX_FILE_BYTES,
-          addRandomSuffix: true,
-          validUntil: Date.now() + 10 * 60_000,
-          tokenPayload: JSON.stringify({
-            tenantId: ctx.tenant.id,
-            userId: ctx.userId,
-          }),
+        });
+        return {
+          token,
+          urlOptions: { addRandomSuffix: true },
         };
-      },
-      onUploadCompleted: async ({ blob }) => {
-        // Not the registration path (P4) — the client registers via a
-        // server action so the flow works on localhost too.
-        console.log("blob upload completed", blob.pathname);
       },
     });
     return NextResponse.json(result);

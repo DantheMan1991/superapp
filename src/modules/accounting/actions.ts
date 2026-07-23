@@ -9,6 +9,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import {
   LedgerError,
+  assertEntryNotSourceManaged,
   createAccount,
   deactivateAccount,
   deleteDraft,
@@ -234,6 +235,9 @@ export async function voidPostedEntry(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     await withTenant(ctx.tenantId, async (tx) => {
+      // P19 (session 6): document-owned entries are voided from their
+      // document (voidInvoice/voidBill/unapply) — never from the journal.
+      await assertEntryNotSourceManaged(tx, ctx.tenantId, parsed.data.entryId);
       const entry = await voidEntry(tx, ctx, parsed.data);
       // Tool coordination (actions layer — core stays tool-unaware): a
       // voided entry that satisfies a bank-feed row — whether born from

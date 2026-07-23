@@ -616,3 +616,283 @@ d("documents isolation (RLS + composite tenant FKs)", () => {
     for (const r of rows) expect(r).toHaveLength(0);
   });
 });
+
+/**
+ * Payables (session 6): RLS isolation for vendors/bills/bill_lines/
+ * bill_payments plus the composite-FK smuggle matrix and the EXTENDED
+ * exactly-one CHECKs on document_links (4 targets) and line_dimensions
+ * (3 parents).
+ */
+const STAMP_PAY = `iso-pay-${process.pid}`;
+
+interface PayFixture {
+  vendorId: string;
+  billId: string;
+  billLineId: string;
+  accountId: string;
+  entryId: string;
+  documentId: string;
+}
+
+d("payables isolation (RLS + composite tenant FKs)", () => {
+  let tenantA: string;
+  let tenantB: string;
+  const fx: Record<string, PayFixture> = {};
+
+  async function seedPayables(tenantId: string, tag: string): Promise<PayFixture> {
+    return withTenant(tenantId, async (tx) => {
+      const [expense] = await tx
+        .insert(schema.accounts)
+        .values({ tenantId, code: "6000", name: `Expense ${tag}`, accountType: "expense", subtype: "operating_expense" })
+        .returning();
+      const [entry] = await tx
+        .insert(schema.journalEntries)
+        .values({ tenantId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
+        .returning();
+      const [vendor] = await tx
+        .insert(schema.vendors)
+        .values({ tenantId, name: `Vendor ${tag}` })
+        .returning();
+      const [bill] = await tx
+        .insert(schema.bills)
+        .values({ tenantId, vendorId: vendor.id, billDate: "2026-07-01", createdByClerkUserId: `user-${tag}` })
+        .returning();
+      const [billLine] = await tx
+        .insert(schema.billLines)
+        .values({ tenantId, billId: bill.id, lineNo: 1, description: `line ${tag}`, amountCents: 1000, accountId: expense.id })
+        .returning();
+      const [doc] = await tx
+        .insert(schema.documents)
+        .values({ tenantId, blobPathname: `acct/${tenantId}/receipts/pay-${tag}.pdf`, fileName: `${tag}.pdf`, mimeType: "application/pdf", sizeBytes: 10, sha256: `pay-${tag}` })
+        .returning();
+      return {
+        vendorId: vendor.id,
+        billId: bill.id,
+        billLineId: billLine.id,
+        accountId: expense.id,
+        entryId: entry.id,
+        documentId: doc.id,
+      };
+    });
+  }
+
+  beforeAll(async () => {
+    [tenantA, tenantB] = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP_PAY}-a`, name: "Pay Iso A", slug: `${STAMP_PAY}-a` },
+          { clerkOrgId: `${STAMP_PAY}-b`, name: "Pay Iso B", slug: `${STAMP_PAY}-b` },
+        ])
+        .returning();
+      return [rows[0].id, rows[1].id];
+    });
+    fx.a = await seedPayables(tenantA, "A");
+    fx.b = await seedPayables(tenantB, "B");
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("unscoped selects on payables tables return only the tenant's rows", async () => {
+    await withTenant(tenantA, async (tx) => {
+      const vendors = await tx.select().from(schema.vendors);
+      expect(vendors.length).toBeGreaterThan(0);
+      expect(vendors.every((r) => r.tenantId === tenantA)).toBe(true);
+      const bills = await tx.select().from(schema.bills);
+      expect(bills.every((r) => r.tenantId === tenantA)).toBe(true);
+      const lines = await tx.select().from(schema.billLines);
+      expect(lines.every((r) => r.tenantId === tenantA)).toBe(true);
+      const payments = await tx.select().from(schema.billPayments);
+      expect(payments.every((r) => r.tenantId === tenantA)).toBe(true);
+    });
+  });
+
+  it("cannot INSERT payables rows attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.vendors).values({ tenantId: tenantB, name: "smuggled vendor" }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.bills).values({
+          tenantId: tenantB,
+          vendorId: fx.b.vendorId,
+          billDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's bill cannot point at B's vendor or B's entry", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.bills).values({
+          tenantId: tenantA,
+          vendorId: fx.b.vendorId,
+          billDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.bills).values({
+          tenantId: tenantA,
+          vendorId: fx.a.vendorId,
+          journalEntryId: fx.b.entryId,
+          billDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's bill_line cannot point at B's bill or B's account", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.billLines).values({
+          tenantId: tenantA,
+          billId: fx.b.billId,
+          lineNo: 9,
+          amountCents: 100,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.billLines).values({
+          tenantId: tenantA,
+          billId: fx.a.billId,
+          lineNo: 9,
+          amountCents: 100,
+          accountId: fx.b.accountId,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's bill_payment cannot point at B's bill or B's entry", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.billPayments).values({
+          tenantId: tenantA,
+          billId: fx.b.billId,
+          paymentDate: "2026-07-01",
+          amountCents: 100,
+          paidFromAccountId: fx.a.accountId,
+          journalEntryId: fx.a.entryId,
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.billPayments).values({
+          tenantId: tenantA,
+          billId: fx.a.billId,
+          paymentDate: "2026-07-01",
+          amountCents: 100,
+          paidFromAccountId: fx.a.accountId,
+          journalEntryId: fx.b.entryId,
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's document_link and line_dimension cannot point at B's bill rows", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documentLinks).values({
+          tenantId: tenantA,
+          documentId: fx.a.documentId,
+          billId: fx.b.billId,
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.lineDimensions).values({
+          tenantId: tenantA,
+          billLineId: fx.b.billLineId,
+          dimensionType: "property",
+          memberId: crypto.randomUUID(),
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("extended CHECKs: exactly one target/parent still enforced", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documentLinks).values({
+          tenantId: tenantA,
+          documentId: fx.a.documentId,
+          billId: fx.a.billId,
+          journalEntryId: fx.a.entryId,
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documentLinks).values({
+          tenantId: tenantA,
+          documentId: fx.a.documentId,
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.lineDimensions).values({
+          tenantId: tenantA,
+          billLineId: fx.a.billLineId,
+          journalLineId: crypto.randomUUID(),
+          dimensionType: "property",
+          memberId: crypto.randomUUID(),
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cross-tenant UPDATE and DELETE affect zero payables rows", async () => {
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.bills)
+        .set({ memo: "defaced" })
+        .where(eq(schema.bills.tenantId, tenantB))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const deleted = await withTenant(tenantA, (tx) =>
+      tx
+        .delete(schema.vendors)
+        .where(eq(schema.vendors.tenantId, tenantB))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("default-deny: no context sees no payables rows", async () => {
+    const rows = await withSystem(async (tx) => {
+      await tx.execute(sql`select set_config('app.role', '', true)`);
+      await tx.execute(sql`select set_config('app.tenant_id', '', true)`);
+      return Promise.all([
+        tx.select().from(schema.vendors),
+        tx.select().from(schema.bills),
+        tx.select().from(schema.billLines),
+        tx.select().from(schema.billPayments),
+      ]);
+    });
+    for (const r of rows) expect(r).toHaveLength(0);
+  });
+});

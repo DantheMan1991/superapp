@@ -49,7 +49,20 @@ export type LedgerErrorCode =
   | "DOCUMENT_LINK_EXISTS"
   | "DOCUMENT_TARGET_INVALID"
   | "DOCUMENT_NOT_EXTRACTABLE"
-  | "DOCUMENT_UPLOAD_INVALID";
+  | "DOCUMENT_UPLOAD_INVALID"
+  | "VENDOR_NOT_FOUND"
+  | "VENDOR_INACTIVE"
+  | "BILL_NOT_FOUND"
+  | "BILL_NOT_DRAFT"
+  | "BILL_NOT_AWAITING"
+  | "BILL_NOT_APPROVABLE"
+  | "BILL_NOT_OPEN"
+  | "BILL_EMPTY"
+  | "BILL_UNCODED_LINES"
+  | "BILL_HAS_PAYMENTS"
+  | "BILL_OVERPAYMENT"
+  | "BILL_PAYMENT_NOT_FOUND"
+  | "ENTRY_SOURCE_MANAGED";
 
 /**
  * Typed failure from the ledger core. Server actions catch these and map
@@ -130,6 +143,20 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   DOCUMENT_NOT_EXTRACTABLE: "This file type can't be read automatically.",
   DOCUMENT_UPLOAD_INVALID:
     "That file type or size isn't supported — JPEG, PNG, WebP, GIF or PDF up to 20MB.",
+  VENDOR_NOT_FOUND: "That vendor no longer exists.",
+  VENDOR_INACTIVE: "That vendor is inactive — reactivate them first.",
+  BILL_NOT_FOUND: "That bill no longer exists.",
+  BILL_NOT_DRAFT: "Only draft bills can be changed this way.",
+  BILL_NOT_AWAITING: "That bill isn't awaiting approval.",
+  BILL_NOT_APPROVABLE: "Only draft or submitted bills can be approved.",
+  BILL_NOT_OPEN: "That bill isn't open for payments.",
+  BILL_EMPTY: "A bill needs at least one line and a total above zero.",
+  BILL_UNCODED_LINES: "Every line needs an account before approval.",
+  BILL_HAS_PAYMENTS: "Remove the payments first, then void.",
+  BILL_OVERPAYMENT: "That's more than the remaining balance.",
+  BILL_PAYMENT_NOT_FOUND: "That payment no longer exists.",
+  ENTRY_SOURCE_MANAGED:
+    "This entry belongs to an invoice or bill — manage it from that document instead.",
 };
 
 export function friendlyMessage(err: unknown): string {

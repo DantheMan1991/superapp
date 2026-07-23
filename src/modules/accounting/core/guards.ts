@@ -12,6 +12,34 @@ export function requireOwnerRole(ctx: LedgerCtx): void {
   }
 }
 
+/** Entry sources whose lifecycle a document tool owns (P19, session 6). */
+const MANAGED_SOURCES = new Set([
+  "invoice",
+  "invoice_payment",
+  "bill",
+  "bill_payment",
+]);
+
+/**
+ * Journal-voiding an entry born from an invoice or bill would silently
+ * desync that document's status and aging — those entries are voided
+ * from their document instead (voidInvoice/voidBill/unapply, which call
+ * core voidEntry directly and stay unaffected). Reverse stays allowed.
+ */
+export async function assertEntryNotSourceManaged(
+  tx: Tx,
+  tenantId: string,
+  entryId: string,
+): Promise<void> {
+  const entry = await tx.query.journalEntries.findFirst({
+    where: eq(schema.journalEntries.id, entryId),
+    columns: { source: true, tenantId: true },
+  });
+  if (entry && entry.tenantId === tenantId && MANAGED_SOURCES.has(entry.source)) {
+    throw new LedgerError("ENTRY_SOURCE_MANAGED", entry.source);
+  }
+}
+
 export async function getSettings(
   tx: Tx,
   tenantId: string,

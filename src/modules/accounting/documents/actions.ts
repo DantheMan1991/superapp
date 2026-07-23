@@ -153,7 +153,7 @@ export async function extractDocumentAction(
 const attachSchema = z.object({
   documentId: z.string().uuid(),
   target: z.object({
-    type: z.enum(["entry", "bank_transaction", "invoice"]),
+    type: z.enum(["entry", "bank_transaction", "invoice", "bill"]),
     id: z.string().uuid(),
   }),
 });

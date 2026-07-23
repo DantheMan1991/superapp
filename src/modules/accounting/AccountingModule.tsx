@@ -88,6 +88,47 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
           eq(schema.documents.status, "inbox"),
         ),
       );
+    const openBills = await tx
+      .select({
+        total: sql<string>`coalesce(sum(${schema.bills.totalCents}), 0)`,
+      })
+      .from(schema.bills)
+      .where(
+        and(
+          eq(schema.bills.tenantId, tenantId),
+          sql`${schema.bills.status} in ('approved', 'partial')`,
+        ),
+      );
+    const openBillsPaid = await tx
+      .select({
+        paid: sql<string>`coalesce(sum(${schema.billPayments.amountCents}), 0)`,
+      })
+      .from(schema.billPayments)
+      .innerJoin(
+        schema.bills,
+        and(
+          eq(schema.bills.tenantId, schema.billPayments.tenantId),
+          eq(schema.bills.id, schema.billPayments.billId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.billPayments.tenantId, tenantId),
+          sql`${schema.bills.status} in ('approved', 'partial')`,
+        ),
+      );
+    const [awaitingApproval] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.bills)
+      .where(
+        and(
+          eq(schema.bills.tenantId, tenantId),
+          eq(schema.bills.status, "awaiting_approval"),
+        ),
+      );
+    const apOutstandingCents =
+      toSafeCents(openBills[0]?.total ?? 0) -
+      toSafeCents(openBillsPaid[0]?.paid ?? 0);
     return {
       accountCount: accountCount.n,
       statusCounts,
@@ -96,6 +137,8 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
       unreviewed: unreviewed.n,
       arOutstandingCents,
       receiptInbox: receiptInbox.n,
+      apOutstandingCents,
+      awaitingApproval: awaitingApproval.n,
     };
   });
 
@@ -191,6 +234,24 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
               {data.unreviewed === 0
                 ? "Nothing waiting for review"
                 : "Transactions waiting for review"}
+            </Link>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Accounts payable</CardDescription>
+            <CardTitle className="text-2xl">
+              {formatCentsSigned(data.apOutstandingCents)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            <Link
+              className="underline-offset-2 hover:underline"
+              href="/dashboard/m/accounting/purchases/bills"
+            >
+              {data.awaitingApproval > 0
+                ? `${data.awaitingApproval} bill${data.awaitingApproval === 1 ? "" : "s"} awaiting approval`
+                : "Open bills — see A/P aging"}
             </Link>
           </CardContent>
         </Card>

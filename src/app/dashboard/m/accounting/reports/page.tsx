@@ -41,6 +41,13 @@ const REPORTS = [
     description:
       "Who owes what and how overdue — open invoice balances bucketed by days past due.",
   },
+  {
+    href: "/dashboard/m/accounting/reports/ap-aging",
+    icon: Hourglass,
+    title: "A/P Aging",
+    description:
+      "What the business owes vendors — open bill balances bucketed by days past due.",
+  },
 ];
 
 export default async function ReportsHubPage() {

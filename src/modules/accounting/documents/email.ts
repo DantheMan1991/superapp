@@ -14,11 +14,13 @@ export const EMAIL_INGEST_HOURLY_CAP = 100;
 const TOKEN_LOCAL_PART = /^receipts-([A-Za-z0-9_-]{10,})$/i;
 
 /**
- * Find our forwarding token among the email's recipients. The mailbox
- * prefix and domain match case-insensitively, but the TOKEN keeps its
- * case — base64url tokens are case-sensitive DB keys. Scans to/cc plus
- * `received_for` (the envelope recipient — catches BCC and forwards).
- * Returns the first token found, or null.
+ * Find our forwarding token among the email's recipients. Matching is
+ * fully case-INsensitive and the returned token is lowercased: email
+ * local-parts are not case-preserved in the wild (Outlook lowercases
+ * forwarded addresses — learned in production), so tokens are generated
+ * lowercase and stored lowercase. Scans to/cc plus `received_for` (the
+ * envelope recipient — catches BCC and forwards). Returns the first
+ * token found, or null.
  */
 export function parseInboundToken(
   addresses: readonly string[],
@@ -34,7 +36,7 @@ export function parseInboundToken(
     if (at < 0) continue;
     if (addr.slice(at + 1).toLowerCase() !== wantDomain) continue;
     const m = TOKEN_LOCAL_PART.exec(addr.slice(0, at));
-    if (m) return m[1];
+    if (m) return m[1].toLowerCase();
   }
   return null;
 }

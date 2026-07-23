@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { resolveTenantContext } from "@/lib/auth";
 import { isModuleEnabled } from "@/lib/modules";
-import { assertBlobConfigured } from "@/lib/blob";
+import { blobToken } from "@/lib/blob";
 
 export const runtime = "nodejs";
 
@@ -38,10 +38,10 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  assertBlobConfigured();
   const ifNoneMatch = req.headers.get("if-none-match") ?? undefined;
   const result = await get(doc.blobPathname, {
     access: "private",
+    token: blobToken(),
     ...(ifNoneMatch ? { ifNoneMatch } : {}),
   });
   if (!result) {

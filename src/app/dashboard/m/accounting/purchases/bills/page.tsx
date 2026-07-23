@@ -142,8 +142,8 @@ export default async function BillsPage({
 
       {data.bills.length === 0 ? (
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          No bills here yet. Create one, or open Bills &amp; Receipts and use
-          “Create bill” on an emailed bill.
+          No bills here yet. Create one, or open the Inbox and use “Create
+          bill” on an emailed bill.
         </p>
       ) : (
         <Table>

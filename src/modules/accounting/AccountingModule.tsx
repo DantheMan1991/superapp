@@ -257,7 +257,7 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Bills &amp; receipts</CardDescription>
+            <CardDescription>Inbox</CardDescription>
             <CardTitle className="text-2xl">{data.receiptInbox}</CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">

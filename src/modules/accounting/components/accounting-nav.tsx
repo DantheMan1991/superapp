@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/dashboard/m/accounting", label: "Overview", exact: true },
   { href: "/dashboard/m/accounting/banking", label: "Banking" },
-  { href: "/dashboard/m/accounting/receipts", label: "Bills & Receipts" },
+  { href: "/dashboard/m/accounting/receipts", label: "Inbox" },
   { href: "/dashboard/m/accounting/sales", label: "Sales" },
   { href: "/dashboard/m/accounting/purchases", label: "Purchases" },
   { href: "/dashboard/m/accounting/accounts", label: "Chart of Accounts" },

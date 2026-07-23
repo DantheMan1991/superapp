@@ -132,7 +132,7 @@ export default async function ReceiptDetailPage({
             href="/dashboard/m/accounting/receipts"
             className="mb-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            <ArrowLeft className="h-3 w-3" /> Bills &amp; Receipts
+            <ArrowLeft className="h-3 w-3" /> Inbox
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight">
             {row.vendorName ?? doc.fileName}

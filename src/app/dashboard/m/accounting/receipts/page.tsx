@@ -22,7 +22,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const TABS = [
-  { key: "inbox", label: "Inbox" },
+  { key: "inbox", label: "To file" },
   { key: "filed", label: "Filed" },
   { key: "trash", label: "Trash" },
 ] as const;
@@ -122,12 +122,10 @@ export default async function ReceiptsPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Bills &amp; Receipts
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
           <p className="text-sm text-muted-foreground">
-            Bills and receipts for {ctx.tenant.name} — captured by upload or
-            email, read automatically, attached to your books.
+            Everything arrives here — bills and receipts, uploaded or emailed,
+            read automatically and routed to your books.
           </p>
         </div>
         <UploadButton tenantId={tenantId} />

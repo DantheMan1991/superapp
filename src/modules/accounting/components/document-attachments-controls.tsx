@@ -89,7 +89,7 @@ export function AttachExistingButton({
           <DialogHeader>
             <DialogTitle>Attach a bill or receipt</DialogTitle>
             <DialogDescription>
-              Pick from the Bills &amp; Receipts inbox.
+              Pick from the Inbox.
             </DialogDescription>
           </DialogHeader>
           {docs === null ? (

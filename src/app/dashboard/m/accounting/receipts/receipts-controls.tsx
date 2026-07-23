@@ -284,6 +284,10 @@ export function DocumentRowActions({
     });
   }
 
+  // The document tells you where it wants to go (founder direction):
+  // bills/invoices route to Purchases, receipts are expenses.
+  const looksLikeBill = row.docType === "bill" || row.docType === "invoice";
+
   if (row.status === "trashed") {
     return (
       <Button
@@ -328,11 +332,7 @@ export function DocumentRowActions({
       {row.status === "inbox" && row.hasBlob && (
         <Button
           size="sm"
-          variant={
-            row.docType === "bill" || row.docType === "invoice"
-              ? "default"
-              : "outline"
-          }
+          variant={looksLikeBill ? "default" : "outline"}
           onClick={() => setBillOpen(true)}
         >
           <ReceiptText className="mr-1 h-3.5 w-3.5" /> Create bill
@@ -342,7 +342,11 @@ export function DocumentRowActions({
         <Paperclip className="mr-1 h-3.5 w-3.5" /> Attach
       </Button>
       {isOwner && row.status === "inbox" && (
-        <Button size="sm" variant="outline" onClick={() => setExpenseOpen(true)}>
+        <Button
+          size="sm"
+          variant={!looksLikeBill && row.extractionStatus === "done" ? "default" : "outline"}
+          onClick={() => setExpenseOpen(true)}
+        >
           <ReceiptText className="mr-1 h-3.5 w-3.5" /> Record expense
         </Button>
       )}

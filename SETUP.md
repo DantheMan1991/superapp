@@ -443,6 +443,25 @@ Not needed for local testing. Summary for later:
 
 ---
 
+## Public health-check interview (`/health-check`)
+
+The landing page links to a free AI "Business Health Check" — an anonymous
+guided interview (~10 questions) that ends with an on-screen assessment and
+drops the prospect + transcript into **Admin → Discovery** as a self-serve
+lead (badge on the list). Setup:
+
+- Set `INTERVIEW_IP_SALT` in `.env` and Vercel env — any long random string
+  (e.g. `openssl rand -hex 32`). Visitor IPs are hashed with this salt for
+  rate limiting; **raw IPs are never stored**. Without the salt the page
+  fails closed and shows the at-capacity message.
+- Uses the same `ANTHROPIC_API_KEY`. Built-in guardrails: 3 interviews per
+  IP per day, 50 per day platform-wide (this ceiling is also the Claude
+  budget cap), 12-exchange max per interview, 5s between messages.
+- IP detection trusts the first `x-forwarded-for` hop — correct on Vercel;
+  revisit if the app ever moves behind a different proxy.
+
+---
+
 ## Operational notes (read once, remember later)
 
 - **Backups:** Neon has point-in-time restore on paid plans; on free tier,

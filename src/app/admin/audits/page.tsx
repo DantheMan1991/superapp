@@ -35,6 +35,7 @@ export default async function AuditsPage() {
   const audits = await withSystem((tx) =>
     tx.query.audits.findMany({ orderBy: desc(schema.audits.updatedAt) }),
   );
+  const selfServeCount = audits.filter((a) => a.source === "self_serve").length;
 
   return (
     <div className="space-y-6">
@@ -60,6 +61,9 @@ export default async function AuditsPage() {
           </CardTitle>
           <CardDescription>
             The audit is the sales wedge — it reveals the work.
+            {selfServeCount > 0 && (
+              <> {selfServeCount} came in from the website health check.</>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -98,6 +102,14 @@ export default async function AuditsPage() {
                       >
                         {audit.businessName}
                       </Link>
+                      {audit.source === "self_serve" && (
+                        <Badge
+                          variant="outline"
+                          className="ml-2 border-transparent bg-brand/10 text-brand"
+                        >
+                          Self-serve
+                        </Badge>
+                      )}
                       <div className="text-xs text-muted-foreground">
                         {audit.contactName && <>{audit.contactName} · </>}
                         {audit.tenantId && (

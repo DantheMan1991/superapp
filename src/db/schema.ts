@@ -270,6 +270,8 @@ export const audits = pgTable(
     industry: text("industry").notNull().default("general"),
     contactName: text("contact_name"),
     status: auditStatus("status").notNull().default("open"),
+    /** Who initiated: "founder" (admin console) | "self_serve" (public health check). */
+    source: text("source").notNull().default("founder"),
     /** What we knew going in — intake notes, referral context. */
     context: text("context").notNull().default(""),
     /** Conversation with the discovery copilot: [{role, content}, …] */
@@ -1753,3 +1755,54 @@ export type Retainer = typeof retainers.$inferSelect;
 export type RetainerAllotment = typeof retainerAllotments.$inferSelect;
 export type RetainerTimeEntry = typeof retainerTimeEntries.$inferSelect;
 export type RetainerPurchase = typeof retainerPurchases.$inferSelect;
+
+/**
+ * Anonymous public health-check interview sessions — the conversation
+ * BEFORE it becomes a lead (then promoted to a prospect tenant + audit).
+ * The row id doubles as the bearer token the visitor's browser holds
+ * (unguessable uuid). Platform-level data: superadmin-only RLS (0022).
+ * Never stores a raw IP — ip_hash = sha256(INTERVIEW_IP_SALT + ip).
+ */
+export const interviewSessions = pgTable(
+  "interview_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** zod/CHECK: active | awaiting_contact | completed | expired. */
+    state: text("state").notNull().default("active"),
+    /** [{role: "user" | "assistant", content}, …] — starts with the opener. */
+    messages: jsonb("messages").notNull().default([]),
+    /** User turns processed. Server-enforced INTERVIEW_EXCHANGE_CAP. */
+    exchangeCount: integer("exchange_count").notNull().default(0),
+    ipHash: text("ip_hash").notNull(),
+    /** Per-session turn-cooldown claim (ai_last_* pattern). */
+    lastTurnAt: timestamp("last_turn_at", { withTimezone: true }),
+    /** Public-facing markdown assessment; null until generated (or failed). */
+    assessment: text("assessment"),
+    /** Set on promotion — the double-submit idempotency anchor. */
+    auditId: uuid("audit_id").references(() => audits.id, {
+      onDelete: "set null",
+    }),
+    email: text("email"),
+    contactName: text("contact_name"),
+    businessName: text("business_name"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("interview_sessions_ip_created_idx").on(t.ipHash, t.createdAt),
+    index("interview_sessions_created_idx").on(t.createdAt),
+    uniqueIndex("interview_sessions_audit_idx")
+      .on(t.auditId)
+      .where(sql`${t.auditId} is not null`),
+    check(
+      "interview_sessions_state_check",
+      sql`${t.state} in ('active', 'awaiting_contact', 'completed', 'expired')`,
+    ),
+  ],
+);
+
+export type InterviewSession = typeof interviewSessions.$inferSelect;

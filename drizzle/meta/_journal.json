@@ -148,6 +148,20 @@
       "when": 1784895670917,
       "tag": "0020_retainers_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784911366718,
+      "tag": "0021_health_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784911367718,
+      "tag": "0022_health_check_rls",
+      "breakpoints": true
     }
   ]
 }

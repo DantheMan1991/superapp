@@ -30,6 +30,7 @@ export default async function DashboardLayout({
       })),
   ];
 
+  navItems.push({ href: "/dashboard/hours", label: "Hours", icon: "clock" });
   navItems.push({ href: "/dashboard/team", label: "Team", icon: "users" });
 
   if (ctx.role === "owner") {

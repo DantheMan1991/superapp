@@ -6,36 +6,7 @@ import { withSystem, schema } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { getStripe, PLANS, priceIdForPlan, type PlanKey } from "@/lib/stripe";
-
-function appUrl(path: string): string {
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  return `${base.replace(/\/$/, "")}${path}`;
-}
-
-/** Find or create the tenant's Stripe customer, persisting the id. */
-async function ensureCustomer(tenantId: string, tenantName: string) {
-  const stripe = getStripe();
-  const sub = await withSystem((tx) =>
-    tx.query.subscriptions.findFirst({
-      where: eq(schema.subscriptions.tenantId, tenantId),
-    }),
-  );
-  if (sub?.stripeCustomerId) return sub.stripeCustomerId;
-
-  const customer = await stripe.customers.create({
-    name: tenantName,
-    metadata: { tenantId },
-  });
-
-  await withSystem((tx) =>
-    tx
-      .update(schema.subscriptions)
-      .set({ stripeCustomerId: customer.id, updatedAt: new Date() })
-      .where(eq(schema.subscriptions.tenantId, tenantId)),
-  );
-
-  return customer.id;
-}
+import { appUrl, ensureCustomer } from "@/lib/stripe-customer";
 
 const checkoutSchema = z.object({
   plan: z.enum(["operations", "business_office"]),

@@ -44,3 +44,37 @@ export function planNameForPriceId(priceId: string | null | undefined): string |
   }
   return null;
 }
+
+/**
+ * Fixed extra-hour blocks sold as one-time payments on top of the retainer.
+ * Minutes are ALWAYS taken from this map server-side — never from Stripe
+ * metadata — so a tampered checkout session can't inflate a credit.
+ */
+export const HOUR_BLOCKS = {
+  five_hours: {
+    key: "five_hours",
+    name: "5-hour block",
+    minutes: 300,
+    priceEnv: "STRIPE_PRICE_HOURS_5",
+    description: "Five extra hours of hands-on work. Never expires.",
+  },
+  ten_hours: {
+    key: "ten_hours",
+    name: "10-hour block",
+    minutes: 600,
+    priceEnv: "STRIPE_PRICE_HOURS_10",
+    description: "Ten extra hours at a better rate. Never expires.",
+  },
+} as const;
+
+export type HourBlockKey = keyof typeof HOUR_BLOCKS;
+
+export function priceIdForHourBlock(block: HourBlockKey): string | undefined {
+  return process.env[HOUR_BLOCKS[block].priceEnv];
+}
+
+/** Safe lookup for untrusted strings (webhook metadata). */
+export function hourBlockForKey(key: string | undefined | null) {
+  if (!key || !(key in HOUR_BLOCKS)) return null;
+  return HOUR_BLOCKS[key as HourBlockKey];
+}

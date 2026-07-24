@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   Boxes,
   Calculator,
+  Clock,
   CreditCard,
   LayoutDashboard,
   Menu,
@@ -31,6 +32,7 @@ const ICONS: Record<string, LucideIcon> = {
   billing: CreditCard,
   settings: Settings,
   wrench: Wrench,
+  clock: Clock,
 };
 
 export interface NavItem {

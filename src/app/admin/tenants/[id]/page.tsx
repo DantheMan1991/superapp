@@ -24,8 +24,19 @@ import {
   ModuleToggle,
   TenantStatusSelect,
 } from "./controls";
+import {
+  AllotmentForm,
+  EntryEditRow,
+  ManualLogForm,
+  TimerControls,
+} from "../../retainers/controls";
 import { getLedgerIntegrity } from "@/modules/accounting/core";
 import { formatCents } from "@/modules/accounting/lib/money";
+import { loadRetainerView } from "@/lib/retainer";
+import {
+  formatMinutesAsHours,
+  todayInRetainerTz,
+} from "@/lib/retainer-core";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +53,7 @@ export default async function TenantDetailPage({
     });
     if (!tenant) return null;
 
-    const [allModules, tenantMods, subscription, notes, audit, members, discoveries] =
+    const [allModules, tenantMods, subscription, notes, audit, members, discoveries, retainerView, timeEntries] =
       await Promise.all([
         tx.query.modules.findMany({ orderBy: asc(schema.modules.sortOrder) }),
         tx.query.tenantModules.findMany({
@@ -76,6 +87,15 @@ export default async function TenantDetailPage({
           where: eq(schema.audits.tenantId, tenant.id),
           orderBy: desc(schema.audits.updatedAt),
         }),
+        loadRetainerView(tx, tenant.id),
+        tx.query.retainerTimeEntries.findMany({
+          where: eq(schema.retainerTimeEntries.tenantId, tenant.id),
+          orderBy: [
+            desc(schema.retainerTimeEntries.workDate),
+            desc(schema.retainerTimeEntries.createdAt),
+          ],
+          limit: 15,
+        }),
       ]);
 
     // Read-only ledger health check (the "withSystem never writes
@@ -87,12 +107,13 @@ export default async function TenantDetailPage({
       ? await getLedgerIntegrity(tx, tenant.id)
       : null;
 
-    return { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries, ledgerIntegrity };
+    return { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries, ledgerIntegrity, retainerView, timeEntries };
   });
 
   if (!data) notFound();
-  const { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries, ledgerIntegrity } =
+  const { tenant, allModules, tenantMods, subscription, notes, audit, members, discoveries, ledgerIntegrity, retainerView, timeEntries } =
     data;
+  const today = todayInRetainerTz();
   const isProspect = !tenant.clerkOrgId;
 
   const enabledBySlug = new Map(
@@ -211,6 +232,67 @@ export default async function TenantDetailPage({
                   </div>
                 );
               })}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Retainer</CardTitle>
+              <CardDescription>
+                Monthly included hours and your logged work. The client sees
+                the meter and every note on their Hours page.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm">
+                  <span className="font-medium">
+                    {formatMinutesAsHours(retainerView.usage.usedMinutes)}
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    of {formatMinutesAsHours(retainerView.usage.includedMinutes)}{" "}
+                    used this month ·{" "}
+                    {formatMinutesAsHours(
+                      retainerView.usage.purchasedMinutesRemaining,
+                    )}{" "}
+                    purchased left
+                  </span>{" "}
+                  {retainerView.usage.isOver ? (
+                    <Badge variant="destructive">
+                      Over by{" "}
+                      {formatMinutesAsHours(
+                        retainerView.usage.unpaidOverageMinutes,
+                      )}
+                    </Badge>
+                  ) : retainerView.usage.isNearLimit ? (
+                    <Badge variant="outline">Near limit</Badge>
+                  ) : null}
+                </div>
+                <AllotmentForm
+                  tenantId={tenant.id}
+                  includedHours={retainerView.usage.includedMinutes / 60}
+                />
+              </div>
+              <Separator />
+              <TimerControls
+                tenantId={tenant.id}
+                timerStartedAt={
+                  retainerView.retainer?.timerStartedAt?.toISOString() ?? null
+                }
+                timerNote={retainerView.retainer?.timerNote ?? null}
+              />
+              <Separator />
+              <ManualLogForm tenantId={tenant.id} today={today} />
+              {timeEntries.length > 0 && (
+                <>
+                  <Separator />
+                  <div className="divide-y">
+                    {timeEntries.map((entry) => (
+                      <EntryEditRow key={entry.id} entry={entry} today={today} />
+                    ))}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 

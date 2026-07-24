@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { CheckCircle2 } from "lucide-react";
 import { withTenant, schema } from "@/db";
@@ -88,6 +89,14 @@ export default async function BillingPage({
           </CardFooter>
         )}
       </Card>
+
+      <p className="text-xs text-muted-foreground">
+        Need extra hands-on hours this month? Buy hour blocks on the{" "}
+        <Link href="/dashboard/hours" className="underline hover:text-foreground">
+          Hours page
+        </Link>
+        .
+      </p>
 
       {!hasSubscription && (
         <div className="grid gap-4 md:grid-cols-2">

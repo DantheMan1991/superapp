@@ -32,6 +32,7 @@
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
     "react-plaid-link": "^4.1.1",
+    "remark-gfm": "^4.0.1",
     "resend": "^6.18.0",
     "shadcn": "^4.13.1",
     "sharp": "^0.35.3",

@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Module dossiers are read from disk at request time by /admin/docs;
+  // make sure they're traced into the serverless bundle on deploy.
+  outputFileTracingIncludes: {
+    "/admin/docs": ["./docs/modules/**/*"],
+    "/admin/docs/[slug]": ["./docs/modules/**/*"],
+  },
   experimental: {
     // Bank CSV imports travel as text through a server action (preview +
     // import). Server-side caps: 1M chars / 10k rows.

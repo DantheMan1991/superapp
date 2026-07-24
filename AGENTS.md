@@ -46,9 +46,27 @@ that matter for code:
    (`npm run db:generate`, then a `--custom` one for policies).
 4. Server actions: `requireTenant()` + `requireModuleEnabled()` + `withTenant()`.
 5. Extend `tests/tenant-isolation.test.ts` to cover the new tables.
+6. Dossier: create `docs/modules/<slug>.md` from `_TEMPLATE.md`.
 
 Modules stay "coming_soon" empty slots until a paying client pulls them in —
 that discipline is the whole point of the build brief.
+
+## Module dossiers (source of truth for humans AND agents)
+
+`docs/modules/<slug>.md` is the living record of each module (and of
+platform machinery like retainer-hours): purpose, build log, data model,
+decisions & gotchas, open items. Rendered read-only in the superadmin UI
+at `/admin/docs`.
+
+- **Every PR that touches a module MUST add a build-log entry to its
+  dossier** (date, short title, what/why) and update the other sections if
+  the data model or a decision changed. This is not optional documentation
+  polish — the dossiers are the context agents read before making changes.
+- **At the start of a session that modifies a module, read its dossier
+  first** — it's cheaper and more reliable than re-deriving state from git
+  history.
+- Per-client differences live in config/data, never forked code — the
+  dossier describes THE module, not per-tenant variants.
 
 ## Commands
 

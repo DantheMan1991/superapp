@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  BookOpen,
   Boxes,
   Calculator,
   Clock,
@@ -23,6 +24,7 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 import { cn } from "@/lib/utils";
 
 const ICONS: Record<string, LucideIcon> = {
+  book: BookOpen,
   dashboard: LayoutDashboard,
   calculator: Calculator,
   users: Users,

@@ -28,6 +28,7 @@ export default async function AdminLayout({
         { href: "/admin/retainers", label: "Retainers", icon: "clock" },
         { href: "/admin/audits", label: "Discovery", icon: "sparkles" },
         { href: "/admin/modules", label: "Modules", icon: "boxes" },
+        { href: "/admin/docs", label: "Build docs", icon: "book" },
         { href: "/admin/audit", label: "Audit log", icon: "audit" },
       ]}
       footer={

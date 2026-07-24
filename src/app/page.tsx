@@ -80,11 +80,16 @@ export default async function LandingPage() {
             professional reviews and signs off. You stay focused on the work
             only you can do.
           </p>
-          <div className="mt-8 flex items-center justify-center gap-3">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Button asChild size="lg">
               <Link href={userId ? "/dashboard" : "/sign-up"}>
                 {userId ? "Open dashboard" : "Get started"}
                 <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="outline">
+              <Link href="/health-check">
+                Get your free business health check
               </Link>
             </Button>
           </div>
@@ -105,6 +110,28 @@ export default async function LandingPage() {
         </section>
 
         <section className="border-t">
+          <div className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
+            <h2 className="text-2xl font-semibold tracking-tight">
+              Find out where your business is bleeding time and money — free.
+            </h2>
+            <p className="mt-4 text-muted-foreground">
+              Answer about ten quick questions from our AI interviewer — about
+              the work, the crew, the paperwork, all of it — and get a
+              plain-language health check of your business: what&apos;s costing
+              you hours every week, what it adds up to in dollars, and what to
+              fix first. No signup, no card, no sales script.
+            </p>
+            <div className="mt-6">
+              <Button asChild variant="outline">
+                <Link href="/health-check">
+                  Start your free health check <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section className="border-t bg-muted/40">
           <div className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
             <h2 className="text-2xl font-semibold tracking-tight">
               Software does the volume. You keep the judgment.

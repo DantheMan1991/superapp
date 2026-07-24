@@ -7,7 +7,7 @@ import { z } from "zod";
 import { withSystem, withTenant, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { slugify } from "@/lib/slug";
+import { slugify, uniqueTenantSlug } from "@/lib/slug";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
 
@@ -173,16 +173,8 @@ export async function createClientBusiness(formData: FormData) {
   }
 
   if (parsed.data.kind === "prospect") {
-    const base = slugify(parsed.data.name);
     const tenant = await withSystem(async (tx) => {
-      let slug = base;
-      for (let i = 2; ; i++) {
-        const clash = await tx.query.tenants.findFirst({
-          where: eq(schema.tenants.slug, slug),
-        });
-        if (!clash) break;
-        slug = `${base}-${i}`;
-      }
+      const slug = await uniqueTenantSlug(tx, parsed.data.name);
       const [row] = await tx
         .insert(schema.tenants)
         .values({

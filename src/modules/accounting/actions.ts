@@ -21,7 +21,6 @@ import {
   postDraft,
   postEntry,
   reverseEntry,
-  setClosedThrough,
   updateAccount,
   voidEntry,
   type LedgerCtx,
@@ -49,9 +48,14 @@ type ActionResult<T = undefined> =
   | { ok: true; data?: T }
   | { error: string };
 
-async function gate(): Promise<LedgerCtx> {
+async function gate(opts?: { allowExpert?: boolean }): Promise<LedgerCtx> {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
+  // Fail closed for the expert (accountant) role: read-only actions must opt
+  // in via allowExpert — a forgotten opt-in denies a read, never grants a write.
+  if (ctx.role === "expert" && !opts?.allowExpert) {
+    throw new LedgerError("FORBIDDEN_EXPERT", "accountant access is read-only");
+  }
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
 }
 
@@ -451,7 +455,7 @@ const exportCsvSchema = z.discriminatedUnion("report", [
 export async function exportReportCsv(
   input: z.infer<typeof exportCsvSchema>,
 ): Promise<ActionResult<{ filename: string; csv: string }>> {
-  const ctx = await gate();
+  const ctx = await gate({ allowExpert: true }); // read-only report export
   const parsed = exportCsvSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   const p = parsed.data;
@@ -494,29 +498,5 @@ export async function exportReportCsv(
   }
 }
 
-// ---------------------------------------------------------------- period
-
-const closeSchema = z.object({ date: dateStr.nullable() });
-
-export async function updateClosedThrough(
-  input: z.infer<typeof closeSchema>,
-): Promise<ActionResult> {
-  const ctx = await gate();
-  const parsed = closeSchema.safeParse(input);
-  if (!parsed.success) return { error: "Invalid input" };
-  try {
-    await withTenant(ctx.tenantId, async (tx) => {
-      const { before, after } = await setClosedThrough(tx, ctx, parsed.data);
-      await logAuditInTx(tx, {
-        action: "period.closed_through_set",
-        tenantId: ctx.tenantId,
-        actorClerkUserId: ctx.userId,
-        meta: { before, after },
-      });
-    });
-    revalidate();
-    return { ok: true };
-  } catch (err) {
-    return fail(err);
-  }
-}
+// The period lock is managed from the Close page (session 7):
+// closed_through is derived state written only by completeClose/reopenClose.

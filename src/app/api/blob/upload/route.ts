@@ -36,6 +36,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       getSignedToken: async (pathname) => {
         const ctx = await resolveTenantContext();
         if (!ctx) throw new Error("unauthorized");
+        // Uploads are a write path — the expert (accountant) role is read-only.
+        if (ctx.role === "expert") throw new Error("accountant access is read-only");
         if (!(await isModuleEnabled(ctx.tenant.id, "accounting"))) {
           throw new Error("module disabled");
         }

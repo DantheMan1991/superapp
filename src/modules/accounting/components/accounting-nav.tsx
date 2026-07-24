@@ -14,6 +14,7 @@ const TABS = [
   { href: "/dashboard/m/accounting/journal", label: "Journal" },
   { href: "/dashboard/m/accounting/reports", label: "Reports" },
   { href: "/dashboard/m/accounting/trial-balance", label: "Trial Balance" },
+  { href: "/dashboard/m/accounting/close", label: "Close" },
 ];
 
 export function AccountingNav() {

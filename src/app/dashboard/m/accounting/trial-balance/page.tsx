@@ -13,6 +13,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import Link from "next/link";
+import { Lock } from "lucide-react";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { getSettings, getTrialBalance } from "@/modules/accounting/core";
 import {
@@ -20,7 +22,6 @@ import {
   isValidIsoDate,
   todayInTimezone,
 } from "@/modules/accounting/lib/money";
-import { PeriodLockControl } from "./period-lock";
 
 export const dynamic = "force-dynamic";
 
@@ -74,9 +75,16 @@ export default async function TrialBalancePage({
             Run
           </Button>
         </form>
-        {ctx.role === "owner" && (
-          <PeriodLockControl closedThrough={settings.closedThrough} />
-        )}
+        <Link
+          href="/dashboard/m/accounting/close"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        >
+          <Lock className="h-3.5 w-3.5" />
+          {settings.closedThrough
+            ? `Closed through ${settings.closedThrough}`
+            : "Books open"}
+          {" · manage on the Close page"}
+        </Link>
       </div>
 
       <Card>

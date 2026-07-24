@@ -32,6 +32,12 @@ export const tenantStatus = pgEnum("tenant_status", [
   "churned",
 ]);
 
+/**
+ * "owner"/"staff" mirror the Clerk org role; "expert" (outside accountant)
+ * is a LOCAL overlay set by the tenant owner on the Team page — any writer
+ * of memberships.role must preserve an existing "expert" value (see
+ * upsertMembership in tenant-sync.ts).
+ */
 export const membershipRole = pgEnum("membership_role", [
   "owner",
   "staff",
@@ -851,6 +857,10 @@ export const accountingSettings = pgTable(
     aiLastExtractedAt: timestamp("ai_last_extracted_at", { withTimezone: true }),
     /** AI bill-coding cooldown marker (15s; separate so tools don't block each other). */
     aiLastBillCodedAt: timestamp("ai_last_bill_coded_at", { withTimezone: true }),
+    /** AI close-narrative cooldown marker (15s). */
+    aiLastNarrativeAt: timestamp("ai_last_narrative_at", { withTimezone: true }),
+    /** Full-books export cooldown marker (60s — the zip is expensive). */
+    booksExportLastAt: timestamp("books_export_last_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1513,6 +1523,94 @@ export const billPayments = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * Close & accountant tools (session 7): month-end close records. Each
+ * completed close snapshots its checklist and establishes the period lock;
+ * accounting_settings.closed_through is DERIVED state written only by
+ * completeClose/reopenClose in core/close.ts.
+ * ---------------------------------------------------------------------- */
+
+export const periodCloseStatus = pgEnum("period_close_status", [
+  "completed",
+  "reopened",
+]);
+
+export const periodCloses = pgTable(
+  "period_closes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The date this close set accounting_settings.closed_through to. */
+    periodEnd: date("period_end", { mode: "string" }).notNull(),
+    status: periodCloseStatus("status").notNull().default("completed"),
+    /**
+     * closed_through BEFORE this close — reopen restores exactly this,
+     * which also handles closes that predate the period_closes table.
+     */
+    previousClosedThrough: date("previous_closed_through", { mode: "string" }),
+    /** CloseChecklist snapshot recomputed server-side at completion. */
+    checklist: jsonb("checklist").notNull(),
+    completedByClerkUserId: text("completed_by_clerk_user_id").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    reopenedByClerkUserId: text("reopened_by_clerk_user_id"),
+    reopenedAt: timestamp("reopened_at", { withTimezone: true }),
+    /** Review sign-off (owner or expert). Survives reopen as history. */
+    signedOffByClerkUserId: text("signed_off_by_clerk_user_id"),
+    signedOffAt: timestamp("signed_off_at", { withTimezone: true }),
+    /** AI close narrative: { narrative, highlights, model, at } | null. */
+    narrative: jsonb("narrative"),
+    narrativeGeneratedAt: timestamp("narrative_generated_at", {
+      withTimezone: true,
+    }),
+    narrativeModel: text("narrative_model"),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("period_closes_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One LIVE close per period end; reopened rows remain as history.
+    uniqueIndex("period_closes_tenant_period_completed_idx")
+      .on(t.tenantId, t.periodEnd)
+      .where(sql`${t.status} = 'completed'`),
+    index("period_closes_tenant_idx").on(t.tenantId),
+  ],
+);
+
+/** Append-only review dialogue on a close (owner ↔ accountant). */
+export const closeNotes = pgTable(
+  "close_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    closeId: uuid("close_id").notNull(),
+    authorClerkUserId: text("author_clerk_user_id").notNull(),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("close_notes_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("close_notes_tenant_close_idx").on(t.tenantId, t.closeId),
+    foreignKey({
+      name: "close_notes_close_fk",
+      columns: [t.tenantId, t.closeId],
+      foreignColumns: [periodCloses.tenantId, periodCloses.id],
+    }).onDelete("cascade"),
+  ],
+);
+
 export type PlaidItem = typeof plaidItems.$inferSelect;
 export type Document = typeof documents.$inferSelect;
 export type DocumentLink = typeof documentLinks.$inferSelect;
@@ -1520,3 +1618,5 @@ export type Vendor = typeof vendors.$inferSelect;
 export type Bill = typeof bills.$inferSelect;
 export type BillLine = typeof billLines.$inferSelect;
 export type BillPayment = typeof billPayments.$inferSelect;
+export type PeriodClose = typeof periodCloses.$inferSelect;
+export type CloseNote = typeof closeNotes.$inferSelect;

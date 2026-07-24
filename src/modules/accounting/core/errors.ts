@@ -62,7 +62,14 @@ export type LedgerErrorCode =
   | "BILL_HAS_PAYMENTS"
   | "BILL_OVERPAYMENT"
   | "BILL_PAYMENT_NOT_FOUND"
-  | "ENTRY_SOURCE_MANAGED";
+  | "ENTRY_SOURCE_MANAGED"
+  | "FORBIDDEN_EXPERT"
+  | "CLOSE_NOT_FOUND"
+  | "CLOSE_NOT_FORWARD"
+  | "CLOSE_NOT_LATEST"
+  | "CLOSE_NOT_COMPLETED"
+  | "CLOSE_ALREADY_SIGNED"
+  | "EXPORT_COOLDOWN";
 
 /**
  * Typed failure from the ledger core. Server actions catch these and map
@@ -157,6 +164,15 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   BILL_PAYMENT_NOT_FOUND: "That payment no longer exists.",
   ENTRY_SOURCE_MANAGED:
     "This entry belongs to an invoice or bill — manage it from that document instead.",
+  FORBIDDEN_EXPERT:
+    "Accountant access is read-only — reviews, sign-offs and exports only.",
+  CLOSE_NOT_FOUND: "That close no longer exists.",
+  CLOSE_NOT_FORWARD:
+    "The close date must be after the current closed-through date.",
+  CLOSE_NOT_LATEST: "Only the most recent close can be reopened.",
+  CLOSE_NOT_COMPLETED: "That close was reopened — complete a new close first.",
+  CLOSE_ALREADY_SIGNED: "This close is already signed off.",
+  EXPORT_COOLDOWN: "An export just ran — try again in a minute.",
 };
 
 export function friendlyMessage(err: unknown): string {

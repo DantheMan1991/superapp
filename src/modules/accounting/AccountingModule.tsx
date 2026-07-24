@@ -279,7 +279,12 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
-            Entries on or before this date are locked.
+            <Link
+              href="/dashboard/m/accounting/close"
+              className="underline-offset-2 hover:underline"
+            >
+              Month-end close, review &amp; export →
+            </Link>
           </CardContent>
         </Card>
       </div>

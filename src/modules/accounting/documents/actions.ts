@@ -35,9 +35,14 @@ const BASE = "/dashboard/m/accounting";
 
 type ActionResult<T = undefined> = { ok: true; data?: T } | { error: string };
 
-async function gate(): Promise<LedgerCtx> {
+async function gate(opts?: { allowExpert?: boolean }): Promise<LedgerCtx> {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
+  // Fail closed for the expert (accountant) role: read-only actions must opt
+  // in via allowExpert — a forgotten opt-in denies a read, never grants a write.
+  if (ctx.role === "expert" && !opts?.allowExpert) {
+    throw new LedgerError("FORBIDDEN_EXPERT", "accountant access is read-only");
+  }
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
 }
 

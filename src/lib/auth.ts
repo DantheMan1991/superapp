@@ -1,7 +1,7 @@
 import "server-only";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { withSystem, schema } from "@/db";
 import type { Tenant } from "@/db/schema";
 
@@ -10,7 +10,7 @@ import type { Tenant } from "@/db/schema";
  * through one of these — the middleware only guarantees "signed in".
  */
 
-export type TenantRole = "owner" | "staff";
+export type TenantRole = "owner" | "staff" | "expert";
 
 export interface TenantContext {
   tenant: Tenant;
@@ -53,18 +53,51 @@ export async function requireTenant(): Promise<TenantContext> {
   if (!userId) redirect("/sign-in");
   if (!orgId) redirect("/onboarding");
 
-  const tenant = await withSystem((tx) =>
-    tx.query.tenants.findFirst({
-      where: eq(schema.tenants.clerkOrgId, orgId),
-    }),
-  );
+  const resolved = await lookupTenantAndRole(userId, orgId, orgRole);
 
   // Org exists in Clerk but hasn't synced yet (webhook lag) — send through
   // onboarding, which creates the row idempotently.
-  if (!tenant) redirect("/onboarding");
+  if (!resolved) redirect("/onboarding");
 
-  const role: TenantRole = orgRole === "org:admin" ? "owner" : "staff";
-  return { tenant, userId, role };
+  return { ...resolved, userId };
+}
+
+/**
+ * Tenant + role resolution shared by requireTenant and resolveTenantContext.
+ * Clerk owns owner-vs-member: org:admin is always "owner" and can never be an
+ * expert. Within members, the local memberships flag decides expert-vs-staff;
+ * a missing membership row (webhook lag, fresh dev DB) degrades to staff —
+ * never upward.
+ */
+async function lookupTenantAndRole(
+  userId: string,
+  orgId: string,
+  orgRole: string | null | undefined,
+): Promise<{ tenant: Tenant; role: TenantRole } | null> {
+  return withSystem(async (tx) => {
+    const tenant = await tx.query.tenants.findFirst({
+      where: eq(schema.tenants.clerkOrgId, orgId),
+    });
+    if (!tenant) return null;
+    if (orgRole === "org:admin") return { tenant, role: "owner" };
+
+    const [membership] = await tx
+      .select({ role: schema.memberships.role })
+      .from(schema.memberships)
+      .innerJoin(
+        schema.profiles,
+        eq(schema.profiles.id, schema.memberships.profileId),
+      )
+      .where(
+        and(
+          eq(schema.memberships.tenantId, tenant.id),
+          eq(schema.profiles.clerkUserId, userId),
+        ),
+      )
+      .limit(1);
+    const role: TenantRole = membership?.role === "expert" ? "expert" : "staff";
+    return { tenant, role };
+  });
 }
 
 /**
@@ -76,14 +109,9 @@ export async function requireTenant(): Promise<TenantContext> {
 export async function resolveTenantContext(): Promise<TenantContext | null> {
   const { userId, orgId, orgRole } = await auth();
   if (!userId || !orgId) return null;
-  const tenant = await withSystem((tx) =>
-    tx.query.tenants.findFirst({
-      where: eq(schema.tenants.clerkOrgId, orgId),
-    }),
-  );
-  if (!tenant) return null;
-  const role: TenantRole = orgRole === "org:admin" ? "owner" : "staff";
-  return { tenant, userId, role };
+  const resolved = await lookupTenantAndRole(userId, orgId, orgRole);
+  if (!resolved) return null;
+  return { ...resolved, userId };
 }
 
 /** Like requireTenant, but restricted to the business owner. */

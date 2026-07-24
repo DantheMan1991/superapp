@@ -12,6 +12,13 @@ export function requireOwnerRole(ctx: LedgerCtx): void {
   }
 }
 
+/** Close-review surface (sign-off, notes): the accountant and the owner. */
+export function requireReviewRole(ctx: LedgerCtx): void {
+  if (ctx.role !== "owner" && ctx.role !== "expert") {
+    throw new LedgerError("FORBIDDEN", "owner or accountant role required");
+  }
+}
+
 /** Entry sources whose lifecycle a document tool owns (P19, session 6). */
 const MANAGED_SOURCES = new Set([
   "invoice",

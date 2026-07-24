@@ -14,18 +14,22 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SubscriptionStatusBadge } from "@/components/status-badge";
+import { loadRetainerView } from "@/lib/retainer";
+import { formatMinutesAsHours } from "@/lib/retainer-core";
+import { Badge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const ctx = await requireTenant();
-  const [active, subscription] = await Promise.all([
+  const [active, subscription, retainerView] = await Promise.all([
     getActiveModules(ctx.tenant.id),
     withTenant(ctx.tenant.id, (tx) =>
       tx.query.subscriptions.findFirst({
         where: eq(schema.subscriptions.tenantId, ctx.tenant.id),
       }),
     ),
+    withTenant(ctx.tenant.id, (tx) => loadRetainerView(tx, ctx.tenant.id)),
   ]);
 
   const renderable = active.filter(({ module }) => moduleRegistry[module.id]);
@@ -71,6 +75,37 @@ export default async function DashboardPage() {
                   we&apos;ll take it from here.
                 </p>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {retainerView.hasAnyData && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Hours</CardTitle>
+              <CardDescription
+                className={
+                  retainerView.usage.isOver ? "text-destructive" : undefined
+                }
+              >
+                {formatMinutesAsHours(retainerView.usage.usedMinutes)} of{" "}
+                {formatMinutesAsHours(retainerView.usage.includedMinutes)} used
+                ·{" "}
+                {formatMinutesAsHours(
+                  retainerView.usage.purchasedMinutesRemaining,
+                )}{" "}
+                purchased left{" "}
+                {retainerView.usage.isOver && (
+                  <Badge variant="destructive">Over</Badge>
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/dashboard/hours">
+                  View work log <ArrowRight className="size-4" />
+                </Link>
+              </Button>
             </CardContent>
           </Card>
         )}

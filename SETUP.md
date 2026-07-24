@@ -41,6 +41,8 @@ STRIPE_WEBHOOK_SECRET=
 STRIPE_PRICE_OPERATIONS=price_1AbcDef...
 STRIPE_PRICE_BUSINESS_OFFICE=price_1GhiJkl...
 STRIPE_PRICE_ONBOARDING=price_1MnoPqr...
+STRIPE_PRICE_HOURS_5=price_1StuVwx...
+STRIPE_PRICE_HOURS_10=price_1YzaBcd...
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
@@ -259,17 +261,20 @@ Everything above works without Stripe. Add this when you want the
    (starts `sk_test_`) → `.env` as `STRIPE_SECRET_KEY`. (You don't need the
    publishable key — the app uses Stripe-hosted checkout.)
 
-### 4.2 Create the three products
+### 4.2 Create the five products
 
-Repeat this three times (sidebar → **Product catalog** → **Add product**):
+Repeat this five times (sidebar → **Product catalog** → **Add product**):
 
 | Product name | Price | Billing type |
 |---|---|---|
 | Operations | e.g. $1,000.00 | **Recurring**, Monthly |
 | Business Office | e.g. $3,500.00 | **Recurring**, Monthly |
 | Onboarding | e.g. $2,500.00 | **One-off** |
+| Extra hours — 5 hour block | e.g. $500.00 | **One-off** |
+| Extra hours — 10 hour block | e.g. $900.00 | **One-off** |
 
-(The amounts are yours to choose — they're just test mode numbers for now.)
+(The amounts are yours to choose — they're just test mode numbers for now.
+The hour blocks are the retainer top-ups clients buy from their Hours page.)
 
 After saving each product, open it and find its **price** — it has an ID
 like `price_1Abc...` (click the price row, or use the ⋯ menu → *Copy price
@@ -279,6 +284,8 @@ ID*). Paste each into the matching `.env` line:
 STRIPE_PRICE_OPERATIONS=price_...      ← Operations monthly
 STRIPE_PRICE_BUSINESS_OFFICE=price_... ← Business Office monthly
 STRIPE_PRICE_ONBOARDING=price_...      ← Onboarding one-off
+STRIPE_PRICE_HOURS_5=price_...         ← 5-hour block one-off
+STRIPE_PRICE_HOURS_10=price_...        ← 10-hour block one-off
 ```
 
 ### 4.3 Try a test checkout
@@ -430,7 +437,8 @@ Not needed for local testing. Summary for later:
      `https://<your-url>/api/webhooks/stripe` → select events
      `checkout.session.completed` and the three
      `customer.subscription.*` events → copy the signing secret into
-     Vercel env as `STRIPE_WEBHOOK_SECRET`.
+     Vercel env as `STRIPE_WEBHOOK_SECRET`. (Hour-block purchases ride the
+     same `checkout.session.completed` event — no extra events needed.)
 6. Redeploy once more, then run the Part 3 walkthrough against the live URL.
 
 ---

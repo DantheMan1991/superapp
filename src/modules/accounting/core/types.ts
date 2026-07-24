@@ -7,7 +7,8 @@ import type { JournalEntry } from "@/db/schema";
 export interface LedgerCtx {
   tenantId: string;
   userId: string;
-  role: "owner" | "staff";
+  /** "expert" = outside accountant: read + close-review only, never posts. */
+  role: "owner" | "staff" | "expert";
 }
 
 export interface EntryLineInput {

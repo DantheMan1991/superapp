@@ -5,6 +5,7 @@ import type {
   ProfitAndLossReport,
   ReportRow,
 } from "../core/report-builders";
+import type { TrialBalance } from "../core/balances";
 
 /**
  * RFC 4180 CSV construction (pure, client-safe). Amounts go through
@@ -65,6 +66,32 @@ export function balanceSheetToCsvRows(report: BalanceSheetReport): string[][] {
     return cells;
   });
   return [header, ...body];
+}
+
+export function trialBalanceToCsvRows(
+  tb: TrialBalance,
+  asOf: string,
+): string[][] {
+  const rows: string[][] = [
+    ["Code", "Account", "Type", `Debit (as of ${asOf})`, `Credit (as of ${asOf})`],
+  ];
+  for (const r of tb.rows) {
+    rows.push([
+      r.account.code,
+      r.account.name,
+      r.account.accountType,
+      r.debitCents ? centsToCsvAmount(r.debitCents) : "",
+      r.creditCents ? centsToCsvAmount(r.creditCents) : "",
+    ]);
+  }
+  rows.push([
+    "",
+    "Totals",
+    "",
+    centsToCsvAmount(tb.totalDebitCents),
+    centsToCsvAmount(tb.totalCreditCents),
+  ]);
+  return rows;
 }
 
 export function cashActivityToCsvRows(report: CashActivityReport): string[][] {

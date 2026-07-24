@@ -97,7 +97,7 @@ export async function upsertMembership(params: {
     });
     if (!tenant || !profile) return null;
 
-    const role = params.clerkRole === "org:admin" ? "owner" : "staff";
+    const clerkDerived = params.clerkRole === "org:admin" ? "owner" : "staff";
     const existing = await tx.query.memberships.findFirst({
       where: and(
         eq(schema.memberships.tenantId, tenant.id),
@@ -105,6 +105,15 @@ export async function upsertMembership(params: {
       ),
     });
     if (existing) {
+      // Clerk owns owner-vs-member; the local "expert" flag (set by the
+      // tenant owner on the Team page) owns expert-vs-staff within members
+      // and must survive membership webhooks re-syncing the Clerk role.
+      const role =
+        clerkDerived === "owner"
+          ? "owner"
+          : existing.role === "expert"
+            ? "expert"
+            : "staff";
       const [updated] = await tx
         .update(schema.memberships)
         .set({ role })
@@ -114,7 +123,7 @@ export async function upsertMembership(params: {
     }
     const [created] = await tx
       .insert(schema.memberships)
-      .values({ tenantId: tenant.id, profileId: profile.id, role })
+      .values({ tenantId: tenant.id, profileId: profile.id, role: clerkDerived })
       .returning();
     return created;
   });

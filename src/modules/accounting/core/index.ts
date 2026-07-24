@@ -5,8 +5,23 @@ export {
   assertPeriodOpen,
   getSettings,
   requireOwnerRole,
+  requireReviewRole,
   setClosedThrough,
 } from "./guards";
+export {
+  addCloseNote,
+  closePeriodStart,
+  completeClose,
+  getClose,
+  getCloseChecklist,
+  listCloses,
+  loadClose,
+  reopenClose,
+  signOffClose,
+  type CloseChecklist,
+  type CloseChecklistItem,
+  type CloseNoteWithAuthor,
+} from "./close";
 export {
   deleteDraft,
   editEntry,

@@ -64,6 +64,20 @@ export function previousYear(
   return { from: shiftYearsIso(from, -1), to: shiftYearsIso(to, -1) };
 }
 
+/** The last day of the month containing D. */
+export function monthEndIso(dateIso: string): string {
+  const { y, m } = parts(dateIso);
+  return iso(y, m, lastDayOfMonth(y, m));
+}
+
+/** The end of the most recent COMPLETE month before today (close default). */
+export function lastCompleteMonthEndIso(todayIso: string): string {
+  const { y, m } = parts(todayIso);
+  const ly = m === 1 ? y - 1 : y;
+  const lm = m === 1 ? 12 : m - 1;
+  return iso(ly, lm, lastDayOfMonth(ly, lm));
+}
+
 export type RangePreset =
   | "this-month"
   | "last-month"

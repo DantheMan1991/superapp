@@ -6,7 +6,7 @@ import {
 } from "@vercel/blob/client";
 import { resolveTenantContext } from "@/lib/auth";
 import { isModuleEnabled } from "@/lib/modules";
-import { blobToken, dmsPathPrefix } from "@/lib/blob";
+import { blobToken, dmsPathPrefix, isTenantBlobPath } from "@/lib/blob";
 import {
   ALLOWED_MIME_TYPES,
   MAX_FILE_BYTES,
@@ -43,7 +43,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           throw new Error("module disabled");
         }
         // A client can only ever write into its own tenant's namespace.
-        if (!pathname.startsWith(dmsPathPrefix(ctx.tenant.id, "files"))) {
+        // isTenantBlobPath additionally rejects traversal and backslashes:
+        // blob storage is a flat keyspace so ".." does not resolve anywhere,
+        // but a key that merely LOOKS like an escape has no business existing.
+        if (
+          !pathname.startsWith(dmsPathPrefix(ctx.tenant.id, "files")) ||
+          !isTenantBlobPath(ctx.tenant.id, pathname)
+        ) {
           throw new Error("pathname outside tenant namespace");
         }
         const token = await issueSignedToken({

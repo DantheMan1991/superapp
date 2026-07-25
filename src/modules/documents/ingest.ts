@@ -4,7 +4,12 @@ import { and, desc, eq, ne } from "drizzle-orm";
 import { get, head } from "@vercel/blob";
 import { schema, type Tx } from "@/db";
 import type { Document, DocumentVisibility } from "@/db/schema";
-import { assertBlobConfigured, blobToken, dmsPathPrefix } from "@/lib/blob";
+import {
+  assertBlobConfigured,
+  blobToken,
+  dmsPathPrefix,
+  isTenantBlobPath,
+} from "@/lib/blob";
 import { DocsError } from "./core/errors";
 import { isAllowedUpload } from "./allowlist";
 import type { DocsCtx } from "./folder-ops";
@@ -52,7 +57,12 @@ export async function inspectUploadedBlob(
   pathname: string,
 ): Promise<InspectedUpload> {
   assertBlobConfigured();
-  if (!pathname.startsWith(dmsPathPrefix(tenantId, "files"))) {
+  // Re-checked here as well as at token issuance: registration is a separate
+  // request and must not trust that the earlier gate ran.
+  if (
+    !pathname.startsWith(dmsPathPrefix(tenantId, "files")) ||
+    !isTenantBlobPath(tenantId, pathname)
+  ) {
     throw new DocsError(
       "DOCUMENT_UPLOAD_INVALID",
       "pathname outside tenant namespace",

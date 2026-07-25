@@ -23,6 +23,8 @@ export interface BrowseDocument {
   tags: string[];
   fileVersionNo: number;
   fileVersionCount: number;
+  /** Optimistic-concurrency counter, for the edit dialogs. */
+  version: number;
   createdAt: Date;
 }
 
@@ -70,6 +72,7 @@ export async function listFolderContents(
       tags: schema.documents.tags,
       fileVersionNo: schema.documents.fileVersionNo,
       fileVersionCount: schema.documents.fileVersionCount,
+      version: schema.documents.version,
       createdAt: schema.documents.createdAt,
     })
     .from(schema.documents)

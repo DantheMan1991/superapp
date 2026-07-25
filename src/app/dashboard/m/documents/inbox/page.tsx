@@ -5,6 +5,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { listFolderContents } from "@/modules/documents/browse";
 import { listFolders } from "@/modules/documents/folders";
 import { formatBytes } from "@/modules/documents/lib/format";
+import { folderOptions } from "@/modules/documents/lib/folder-labels";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
 import {
   DocumentRowMenu,
@@ -44,19 +45,7 @@ export default async function DocumentsInboxPage({
     { role: ctx.role },
   );
 
-  const pathById = new Map(data.folders.map((f) => [f.path, f]));
-  const folderChoices: FolderChoice[] = data.folders
-    .map((folder) => {
-      const parts: string[] = [];
-      let prefix = "";
-      for (const segment of folder.path.split("/").filter(Boolean)) {
-        prefix += `/${segment}/`;
-        const node = pathById.get(prefix);
-        if (node) parts.push(node.name);
-      }
-      return { id: folder.id, label: parts.join(" / ") };
-    })
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const folderChoices: FolderChoice[] = folderOptions(data.folders);
 
   return (
     <div className="space-y-6">
@@ -102,7 +91,13 @@ export default async function DocumentsInboxPage({
               <span className="hidden text-xs text-muted-foreground sm:inline">
                 {doc.createdAt.toLocaleDateString()}
               </span>
-              <DocumentRowMenu documentId={doc.id} folders={folderChoices} />
+              <DocumentRowMenu
+                documentId={doc.id}
+                folders={folderChoices}
+                version={doc.version}
+                title={doc.title}
+                fileName={doc.fileName}
+              />
             </div>
           ))}
         </div>

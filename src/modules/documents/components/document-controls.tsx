@@ -3,7 +3,14 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { upload as uploadPresigned } from "@vercel/blob/client";
-import { FolderInput, Loader2, MoreHorizontal, Trash2, Upload } from "lucide-react";
+import {
+  FolderInput,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,7 +45,9 @@ import {
   registerDocumentUploadAction,
   restoreDocumentsAction,
   trashDocumentsAction,
+  updateDocumentAction,
 } from "../document-actions";
+import { Input } from "@/components/ui/input";
 
 export interface FolderChoice {
   id: string;
@@ -137,13 +146,22 @@ export function DocumentRowMenu({
   documentId,
   folders,
   trashed,
+  version,
+  title,
+  fileName,
 }: {
   documentId: string;
   folders: FolderChoice[];
   trashed?: boolean;
+  /** Required to offer renaming — the action is a compare-and-set. */
+  version?: number;
+  title?: string;
+  fileName?: string;
 }) {
   const router = useRouter();
   const [filing, setFiling] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(title ?? "");
   const [target, setTarget] = useState("__inbox__");
   const [pending, startTransition] = useTransition();
 
@@ -159,6 +177,7 @@ export function DocumentRowMenu({
       }
       toast.success(msg);
       setFiling(false);
+      setRenaming(false);
       router.refresh();
     });
   }
@@ -185,6 +204,12 @@ export function DocumentRowMenu({
             </DropdownMenuItem>
           ) : (
             <>
+              {version !== undefined && (
+                <DropdownMenuItem onSelect={() => setRenaming(true)}>
+                  <Pencil className="size-4" />
+                  Rename
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => setFiling(true)}>
                 <FolderInput className="size-4" />
                 File into…
@@ -205,6 +230,50 @@ export function DocumentRowMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Dialog open={renaming} onOpenChange={setRenaming}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename</DialogTitle>
+            <DialogDescription>
+              This sets a display title. The stored file keeps its original
+              name, so downloads and attachments are unaffected.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor={`title-${documentId}`}>Title</Label>
+            <Input
+              id={`title-${documentId}`}
+              value={draftTitle}
+              maxLength={200}
+              placeholder={fileName ?? ""}
+              onChange={(e) => setDraftTitle(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenaming(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={pending}
+              onClick={() =>
+                run(
+                  () =>
+                    updateDocumentAction({
+                      documentId,
+                      expectedVersion: version ?? 1,
+                      title: draftTitle,
+                    }),
+                  "Renamed",
+                )
+              }
+            >
+              {pending && <Loader2 className="size-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={filing} onOpenChange={setFiling}>
         <DialogContent>

@@ -13,6 +13,30 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-25 — Search, trash view, rename (branch `claude/documents-search`)
+
+Full-text search over the cabinet: a generated `search_tsv` STORED column
+(`0026`) with a GIN index, queried through `websearch_to_tsquery` so users get
+quoted phrases, `or` and `-exclusion` for free and malformed input never
+raises. Search box lives in the module nav, so it is reachable from every page;
+the query lives in the URL so a result set is linkable.
+
+`0027` fixes tokenization found by the tests: Postgres' parser treats
+`acmewidgets.pdf` and `dan@example.com` as SINGLE lexemes, so the distinctive
+part of a filename or an email local part matched nothing. `translate()` now
+splits `-_.` in `file_name` and `@.` in `email_from`. Worth knowing because the
+index *looked* fine — "invoice" matched `2026-invoice_acme.pdf` — and only the
+part anyone would actually type silently missed.
+
+Also closed two gaps from the previous session's open items: a **trash view**
+(restore already existed but nothing listed trashed files) and a **rename**
+dialog wired to `updateDocumentAction`. Folder-path label building was
+extracted to `lib/folder-labels.ts` after a third copy appeared.
+
+A nice emergent property: the accounting AI extraction's `vendorName` is
+indexed at weight B, so searching "fulton lumber" finds a receipt whose
+filename is `Invoice 3000 (1).pdf`.
+
 ### 2026-07-24 — Core cabinet: folders, visibility, upload (PRs 1–3, branch `claude/documents-core`)
 
 Three commits, each independently shippable.
@@ -66,6 +90,12 @@ replaced `documents` policy, policies for the five new tables).
 - `src/modules/documents/folder-ops.ts` — folder mutations + `recomputeVisibility`.
 - `src/modules/documents/actions.ts` (folders) and `document-actions.ts` (files).
 - `src/modules/documents/ingest.ts`, `allowlist.ts` — upload verification.
+- `src/modules/documents/search.ts` — raw-SQL full-text query. `search_tsv` is
+  deliberately absent from `schema.ts`, so this is the only place that knows
+  the column exists.
+- `src/modules/documents/lib/folder-labels.ts` — "Contracts / 2026 / Acme"
+  labels derived from the materialized path; degrades gracefully when RLS has
+  hidden an ancestor.
 - `src/modules/documents/templates/apply.ts` — provisioning, called from
   `toggleModule` in `src/app/admin/actions.ts`.
 - `src/lib/blob-stream.ts` — **the single way a stored blob reaches a
@@ -182,16 +212,14 @@ matching `documents_tenant_folder_idx`.
 - **Versions, tags and saved views have tables but no UI yet** — the schema
   ships now so the later phases need no migration. `document_versions` is
   written by nothing today; `documents.file_version_no/count` stay at 1.
-- **Search** — `extracted_text` is an empty seam. The plan is a generated
-  `tsvector` STORED column plus a GIN index, hand-written in the migration and
-  deliberately not modelled in `schema.ts` (Drizzle has no tsvector type).
-  Requires `'english'::regconfig` (the 2-arg form is not IMMUTABLE) and
-  `left(extracted_text, 200000)` (tsvector has a 1MB ceiling).
+- **`extracted_text` is still empty** — the search index reads it at weight D,
+  but nothing populates it. OCR / PDF text extraction is the follow-up that
+  makes search reach inside documents rather than across their metadata.
+- **Search is global or folder-scoped only** — no tag or kind facets, because
+  there is no tag UI yet. `searchDocuments` already takes `folderPath`; the
+  saved-view query schema anticipates the rest.
 - **External share links, templates/generation, e-signature** — designed and
   phased, not built. `document_settings` already carries their columns.
-- **Trash has no UI** — `trashDocumentsAction`/`restoreDocumentsAction` exist
-  and are reachable from the row menu, but there is no trash view to restore
-  from yet.
 - **No hard delete, and no blob is ever deleted** — same retention rule as the
   Receipts tool. A blob janitor is unbuilt.
 - **`deleteFolder` with `move_to_parent` can throw `FOLDER_NAME_TAKEN`** if a

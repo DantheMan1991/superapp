@@ -10,6 +10,7 @@ import { logAudit } from "@/lib/audit";
 import { slugify, uniqueTenantSlug } from "@/lib/slug";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
+import { provisionDocuments } from "@/modules/documents/templates/apply";
 
 /** All actions here re-verify superadmin server-side before touching data. */
 
@@ -37,6 +38,21 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
     } catch (err) {
       console.error("accounting provisioning failed", err);
       return { error: "Could not provision the accounting module." };
+    }
+  }
+
+  // Documents provisions under withSystem, not withTenant: document_settings is
+  // member_read-only by policy (platform-governed knobs), so a tenant-context
+  // insert would be denied by design. See templates/apply.ts.
+  let provisionedDocs: { foldersCreated: number } | undefined;
+  if (moduleId === "documents" && enabled) {
+    try {
+      provisionedDocs = await withSystem((tx) =>
+        provisionDocuments(tx, tenantId),
+      );
+    } catch (err) {
+      console.error("documents provisioning failed", err);
+      return { error: "Could not provision the documents module." };
     }
   }
 
@@ -82,6 +98,16 @@ export async function toggleModule(input: z.infer<typeof toggleModuleSchema>) {
       targetType: "module",
       targetId: moduleId,
       meta: { accountsCreated: provisioned.accountsCreated },
+    });
+  }
+  if (provisionedDocs) {
+    await logAudit({
+      action: "documents.provisioned",
+      tenantId,
+      actorClerkUserId: userId,
+      targetType: "module",
+      targetId: moduleId,
+      meta: { foldersCreated: provisionedDocs.foldersCreated },
     });
   }
 

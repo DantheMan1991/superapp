@@ -466,7 +466,7 @@ d("documents isolation (RLS + composite tenant FKs)", () => {
         .returning();
       const [doc] = await tx
         .insert(schema.documents)
-        .values({ tenantId, blobPathname: `acct/${tenantId}/receipts/${tag}.pdf`, fileName: `${tag}.pdf`, mimeType: "application/pdf", sizeBytes: 100, sha256: `sha-${tag}` })
+        .values({ tenantId, origin: "accounting", blobPathname: `acct/${tenantId}/receipts/${tag}.pdf`, fileName: `${tag}.pdf`, mimeType: "application/pdf", sizeBytes: 100, sha256: `sha-${tag}` })
         .returning();
       await tx.insert(schema.documentLinks).values({
         tenantId,
@@ -526,6 +526,7 @@ d("documents isolation (RLS + composite tenant FKs)", () => {
       withTenant(tenantA, (tx) =>
         tx.insert(schema.documents).values({
           tenantId: tenantB,
+          origin: "accounting",
           fileName: "smuggled.pdf",
           mimeType: "application/pdf",
         }),
@@ -663,7 +664,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .returning();
       const [doc] = await tx
         .insert(schema.documents)
-        .values({ tenantId, blobPathname: `acct/${tenantId}/receipts/pay-${tag}.pdf`, fileName: `${tag}.pdf`, mimeType: "application/pdf", sizeBytes: 10, sha256: `pay-${tag}` })
+        .values({ tenantId, origin: "accounting", blobPathname: `acct/${tenantId}/receipts/pay-${tag}.pdf`, fileName: `${tag}.pdf`, mimeType: "application/pdf", sizeBytes: 10, sha256: `pay-${tag}` })
         .returning();
       return {
         vendorId: vendor.id,
@@ -1317,5 +1318,431 @@ d("interview-session isolation (RLS, superadmin only)", () => {
       tx.query.audits.findFirst(),
     );
     if (audit) expect(["founder", "self_serve"]).toContain(audit.source);
+  });
+});
+
+/* ------------------------------------------------------------------------
+ * Documents module (DMS): the folder tree, versions, tags and saved views.
+ *
+ * This block certifies something the others do not — a SECOND dimension of
+ * isolation. Everywhere else "who are you" means "which tenant". Here it also
+ * means "which role", because owners-only folders are enforced by the RLS
+ * policy comparing effective_visibility against app.tenant_role, not by app
+ * code. The decisive tests are the ones where tenant A's own staff sees nothing.
+ * ---------------------------------------------------------------------- */
+
+const STAMP_DMS = `iso-dms-${process.pid}`;
+
+interface DmsFixture {
+  openFolderId: string;
+  lockedFolderId: string;
+  openDocId: string;
+  lockedDocId: string;
+  versionId: string;
+  tagId: string;
+  viewId: string;
+}
+
+d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
+  let tenantA: string;
+  let tenantB: string;
+  const fx: Record<string, DmsFixture> = {};
+
+  const seg = (id: string) => id.replace(/-/g, "").toLowerCase();
+
+  async function seedDms(tenantId: string, tag: string): Promise<DmsFixture> {
+    // Seeded as owner: the fixture deliberately creates owners-only rows, and
+    // the member policy's WITH CHECK would (correctly) refuse them as staff.
+    return withTenant(
+      tenantId,
+      async (tx) => {
+        const [open] = await tx
+          .insert(schema.documentFolders)
+          .values({
+            tenantId,
+            name: `Jobs ${tag}`,
+            nameKey: `jobs ${tag}`.toLowerCase(),
+            path: "/00000000000000000000000000000000/",
+            visibility: "members",
+            effectiveVisibility: "members",
+          })
+          .returning();
+        await tx
+          .update(schema.documentFolders)
+          .set({ path: `/${seg(open.id)}/` })
+          .where(eq(schema.documentFolders.id, open.id));
+
+        const [locked] = await tx
+          .insert(schema.documentFolders)
+          .values({
+            tenantId,
+            parentId: open.id,
+            name: `Payroll ${tag}`,
+            nameKey: `payroll ${tag}`.toLowerCase(),
+            path: "/00000000000000000000000000000001/",
+            depth: 2,
+            visibility: "owners",
+            effectiveVisibility: "owners",
+          })
+          .returning();
+        await tx
+          .update(schema.documentFolders)
+          .set({ path: `/${seg(open.id)}/${seg(locked.id)}/` })
+          .where(eq(schema.documentFolders.id, locked.id));
+
+        const [openDoc] = await tx
+          .insert(schema.documents)
+          .values({
+            tenantId,
+            origin: "dms",
+            folderId: open.id,
+            filedAt: new Date(),
+            blobPathname: `docs/${tenantId}/files/open-${tag}.pdf`,
+            fileName: `open-${tag}.pdf`,
+            mimeType: "application/pdf",
+            sizeBytes: 10,
+            sha256: `dms-open-${tag}`,
+            effectiveVisibility: "members",
+          })
+          .returning();
+
+        const [lockedDoc] = await tx
+          .insert(schema.documents)
+          .values({
+            tenantId,
+            origin: "dms",
+            folderId: locked.id,
+            filedAt: new Date(),
+            blobPathname: `docs/${tenantId}/files/locked-${tag}.pdf`,
+            fileName: `locked-${tag}.pdf`,
+            mimeType: "application/pdf",
+            sizeBytes: 10,
+            sha256: `dms-locked-${tag}`,
+            effectiveVisibility: "owners",
+          })
+          .returning();
+
+        const [version] = await tx
+          .insert(schema.documentVersions)
+          .values({
+            tenantId,
+            documentId: lockedDoc.id,
+            versionNo: 1,
+            blobPathname: `docs/${tenantId}/files/locked-${tag}.pdf`,
+            fileName: `locked-${tag}.pdf`,
+            mimeType: "application/pdf",
+            sizeBytes: 10,
+            sha256: `dms-locked-${tag}`,
+            isCurrent: true,
+          })
+          .returning();
+
+        const [dmsTag] = await tx
+          .insert(schema.documentTags)
+          .values({ tenantId, slug: `tag-${tag.toLowerCase()}`, name: `Tag ${tag}` })
+          .returning();
+
+        const [view] = await tx
+          .insert(schema.documentSavedViews)
+          .values({
+            tenantId,
+            name: `View ${tag}`,
+            nameKey: `view ${tag}`.toLowerCase(),
+            createdByClerkUserId: `user-${tag}`,
+            query: { folderId: open.id },
+          })
+          .returning();
+
+        return {
+          openFolderId: open.id,
+          lockedFolderId: locked.id,
+          openDocId: openDoc.id,
+          lockedDocId: lockedDoc.id,
+          versionId: version.id,
+          tagId: dmsTag.id,
+          viewId: view.id,
+        };
+      },
+      { role: "owner" },
+    );
+  }
+
+  beforeAll(async () => {
+    [tenantA, tenantB] = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP_DMS}-a`, name: "DMS Iso A", slug: `${STAMP_DMS}-a` },
+          { clerkOrgId: `${STAMP_DMS}-b`, name: "DMS Iso B", slug: `${STAMP_DMS}-b` },
+        ])
+        .returning();
+      return [rows[0].id, rows[1].id];
+    });
+    fx.a = await seedDms(tenantA, "A");
+    fx.b = await seedDms(tenantB, "B");
+    // Settings are member_read-only, so provisioning writes them as the system.
+    await withSystem(async (tx) => {
+      await tx.insert(schema.documentSettings).values({ tenantId: tenantA });
+      await tx.insert(schema.documentSettings).values({ tenantId: tenantB });
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  /* ---- tenant dimension ---- */
+
+  it("unscoped selects return only this tenant's DMS rows", async () => {
+    const [folders, versions, tags, views] = await withTenant(
+      tenantA,
+      async (tx) =>
+        Promise.all([
+          tx.select().from(schema.documentFolders),
+          tx.select().from(schema.documentVersions),
+          tx.select().from(schema.documentTags),
+          tx.select().from(schema.documentSavedViews),
+        ]),
+      { role: "owner" },
+    );
+    expect(folders.length).toBeGreaterThan(0);
+    expect(versions.length).toBeGreaterThan(0);
+    expect(tags.length).toBeGreaterThan(0);
+    expect(views.length).toBeGreaterThan(0);
+    for (const rows of [folders, versions, tags, views]) {
+      expect(rows.every((r) => r.tenantId === tenantA)).toBe(true);
+    }
+  });
+
+  it("cannot INSERT a folder attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documentFolders).values({
+          tenantId: tenantB,
+          name: "smuggled",
+          nameKey: "smuggled",
+          path: "/00000000000000000000000000000002/",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK blocks parenting a folder to the other tenant's folder", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documentFolders).values({
+          tenantId: tenantA,
+          parentId: fx.b.openFolderId,
+          name: "smuggled-child",
+          nameKey: "smuggled-child",
+          path: "/00000000000000000000000000000003/",
+          depth: 2,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK blocks filing a document into the other tenant's folder", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documents).values({
+          tenantId: tenantA,
+          origin: "dms",
+          folderId: fx.b.openFolderId,
+          fileName: "smuggled.pdf",
+          mimeType: "application/pdf",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK blocks versioning the other tenant's document", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documentVersions).values({
+          tenantId: tenantA,
+          documentId: fx.b.openDocId,
+          versionNo: 2,
+          blobPathname: `docs/${tenantA}/files/smuggled.pdf`,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cross-tenant UPDATE and DELETE affect zero rows", async () => {
+    const updated = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.documentFolders)
+          .set({ name: "hijacked" })
+          .where(eq(schema.documentFolders.id, fx.b.openFolderId))
+          .returning(),
+      { role: "owner" },
+    );
+    expect(updated).toHaveLength(0);
+
+    const deleted = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.documentTags)
+          .where(eq(schema.documentTags.id, fx.b.tagId))
+          .returning(),
+      { role: "owner" },
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  /* ---- role dimension: the reason app.tenant_role exists ---- */
+
+  it("staff cannot see their OWN tenant's owners-only folder or document", async () => {
+    const result = await withTenant(tenantA, async (tx) => ({
+      folders: await tx.select().from(schema.documentFolders),
+      docs: await tx.select().from(schema.documents),
+    }));
+    expect(result.folders.map((f) => f.id)).toContain(fx.a.openFolderId);
+    expect(result.folders.map((f) => f.id)).not.toContain(fx.a.lockedFolderId);
+    expect(result.docs.map((r) => r.id)).toContain(fx.a.openDocId);
+    expect(result.docs.map((r) => r.id)).not.toContain(fx.a.lockedDocId);
+  });
+
+  it("the default role is staff — a two-argument withTenant is fail-closed", async () => {
+    const rows = await withTenant(tenantA, (tx) =>
+      tx
+        .select()
+        .from(schema.documents)
+        .where(eq(schema.documents.id, fx.a.lockedDocId)),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("owner sees both, and still only within their own tenant", async () => {
+    const result = await withTenant(
+      tenantA,
+      async (tx) => ({
+        own: await tx.select().from(schema.documents),
+        other: await tx
+          .select()
+          .from(schema.documents)
+          .where(eq(schema.documents.id, fx.b.lockedDocId)),
+      }),
+      { role: "owner" },
+    );
+    expect(result.own.map((r) => r.id)).toContain(fx.a.lockedDocId);
+    expect(result.own.map((r) => r.id)).toContain(fx.a.openDocId);
+    expect(result.other).toHaveLength(0);
+  });
+
+  it("versions inherit visibility with no flag of their own", async () => {
+    const asStaff = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.documentVersions),
+    );
+    expect(asStaff).toHaveLength(0);
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.documentVersions),
+      { role: "owner" },
+    );
+    expect(asOwner.map((v) => v.id)).toContain(fx.a.versionId);
+  });
+
+  it("staff cannot CREATE a restricted document (WITH CHECK)", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documents).values({
+          tenantId: tenantA,
+          origin: "dms",
+          fileName: "self-hidden.pdf",
+          mimeType: "application/pdf",
+          effectiveVisibility: "owners",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  // Note the asymmetry with the cross-tenant cases above, which return 0 rows:
+  // here USING passes (staff CAN see this open document) and it is WITH CHECK
+  // that refuses the RESULT, so Postgres raises instead of filtering. Loud
+  // failure is the better outcome — a silent no-op would look like success.
+  it("staff cannot MOVE a document into a restricted folder (WITH CHECK)", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx
+          .update(schema.documents)
+          .set({ effectiveVisibility: "owners", folderId: fx.a.lockedFolderId })
+          .where(eq(schema.documents.id, fx.a.openDocId))
+          .returning(),
+      ),
+    ).rejects.toThrow();
+
+    // And the document is untouched.
+    const [after] = await withTenant(tenantA, (tx) =>
+      tx
+        .select()
+        .from(schema.documents)
+        .where(eq(schema.documents.id, fx.a.openDocId)),
+    );
+    expect(after.effectiveVisibility).toBe("members");
+    expect(after.folderId).toBe(fx.a.openFolderId);
+  });
+
+  /* ---- settings are read-only to members ---- */
+
+  it("members read settings but can never write them", async () => {
+    const rows = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.documentSettings),
+    );
+    expect(rows).toHaveLength(1);
+
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.documentSettings).values({ tenantId: tenantA }),
+      ),
+    ).rejects.toThrow();
+
+    const updated = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.documentSettings)
+          .set({ shareMaxTtlDays: 365 })
+          .where(eq(schema.documentSettings.tenantId, tenantA))
+          .returning(),
+      { role: "owner" },
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  /* ---- constraints and default-deny ---- */
+
+  it("a folder cannot be its own parent", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.execute(
+          sql`update document_folders set parent_id = id where id = ${fx.a.openFolderId}`,
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("default-deny: no context sees no DMS rows at all", async () => {
+    const results = await withSystem(async (tx) => {
+      await tx.execute(sql`select set_config('app.role', '', true)`);
+      await tx.execute(sql`select set_config('app.tenant_id', '', true)`);
+      await tx.execute(sql`select set_config('app.tenant_role', '', true)`);
+      return Promise.all([
+        tx.select().from(schema.documentFolders),
+        tx.select().from(schema.documentVersions),
+        tx.select().from(schema.documentTags),
+        tx.select().from(schema.documentSavedViews),
+        tx.select().from(schema.documentSettings),
+      ]);
+    });
+    for (const rows of results) expect(rows).toHaveLength(0);
   });
 });

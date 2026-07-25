@@ -56,9 +56,12 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
   {
     id: "documents",
     name: "Documents",
-    description: "Templates, generation, storage, e-sign.",
+    // Description tracks what actually ships; sharing, templates and e-sign
+    // land in later phases and get added here as they do.
+    description:
+      "Files for the whole business — folders, uploads, and owner-only areas.",
     category: "core",
-    status: "coming_soon",
+    status: "available",
     sortOrder: 50,
   },
   {

@@ -13,6 +13,31 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-25 — File versions (branch `claude/documents-versions`)
+
+Replace a file and keep the old one: "Upload new version…", a history panel,
+and restore. The revised drawing lands on the same document everyone already
+has links to, and last week's drawing is still one click away.
+
+**No migration.** `document_versions`, `documents.file_version_no/count`, the
+`?v=<versionId>` branch of the stream route and the `VERSION_NOT_FOUND` code
+were all built in session 1 and sat unused. Shipping the schema ahead of the UI
+paid for itself exactly as intended — this session is application code only.
+
+The load-bearing piece is `materializeCurrentVersion`. Every document in the
+system has zero version rows, so appending v2 would overwrite
+`documents.blob_pathname` and leave the ORIGINAL blob referenced by nothing:
+still stored, still billed, unreachable, and absent from a history claiming to
+be complete. v1 is written lazily from the document's own columns immediately
+before v2 is inserted. Lazily rather than as a backfill migration so there is
+exactly one code path that produces a v1 row and every test exercises it.
+
+Two refusals worth knowing: **accounting-origin documents cannot be versioned**
+(a receipt's bytes are what a journal entry points at, and the row menu does not
+offer the option rather than explaining the refusal), and **restore appends**
+rather than rewinding, so "someone rolled back on Tuesday" survives in the
+history instead of being erased by the act of rolling back.
+
 ### 2026-07-25 — Email files into a folder (branch `claude/documents-inbound`)
 
 Opt-in forwarding address per folder: `docs-<token>@in.yosherapp.com`. A
@@ -115,7 +140,7 @@ Decisions.
 | --- | --- | --- |
 | `documents` (shared) | The generic file record, now carrying DMS columns | `origin` discriminates `accounting`/`dms`; required in `$inferInsert` via `schema.ts`, and DB-defaulted to `'accounting'` so pre-Documents writers keep working (see Decisions). `member_all` policy compares `effective_visibility` against `app_current_tenant_role()`. **No new UNIQUE index may be added** — see Decisions |
 | `document_folders` | The tree | Adjacency list (`parent_id`, source of truth) **+** materialized `path`. Self composite FK, NO ACTION. Two partial name uniques (root and non-root). `text_pattern_ops` prefix index, hand-written in 0024. Same visibility policy as `documents` |
-| `document_versions` | File revision history | Partial unique on `is_current` makes "exactly one current" a DB invariant. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag |
+| `document_versions` | File revision history | Written by `versions.ts` since 2026-07-25. Partial unique on `is_current` makes "exactly one current" a DB invariant, and it is NOT deferrable, so the swap must clear the old flag before inserting. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag. A document with no history has ZERO rows here, not one — see Decisions |
 | `document_tags` | Tenant tag registry | `documents.tags text[]` stores slugs from here, so a rename never rewrites documents. Slug format enforced by CHECK |
 | `document_saved_views` | Saved filters | `query` jsonb is stored USER INPUT that becomes a WHERE clause — must be re-parsed with Zod on read |
 | `document_settings` | Per-tenant module knobs | `member_read` only (platform-governed). E-sign/AI columns created now, unused, so later phases need no migration |
@@ -135,6 +160,12 @@ replaced `documents` policy, policies for the five new tables).
 - `src/modules/documents/folder-ops.ts` — folder mutations + `recomputeVisibility`.
 - `src/modules/documents/actions.ts` (folders) and `document-actions.ts` (files).
 - `src/modules/documents/ingest.ts`, `allowlist.ts` — upload verification.
+- `src/modules/documents/versions.ts` — the revision log: `addDocumentVersion`,
+  `restoreDocumentVersion`, `listDocumentVersions`, and the lazy
+  `materializeCurrentVersion` every write path calls first.
+- `src/modules/documents/components/version-controls.tsx` — the replace dialog
+  and the history panel, mounted only while open so browsing a folder makes no
+  version queries.
 - `src/modules/documents/search.ts` — raw-SQL full-text query. `search_tsv` is
   deliberately absent from `schema.ts`, so this is the only place that knows
   the column exists.
@@ -236,6 +267,42 @@ is header injection) and emitted with an RFC 5987 `filename*`.
 module gates has cross-module privilege escalation as its failure mode; forty
 duplicated lines are cheaper.
 
+**A document with no history has ZERO version rows, not one.** The initial
+upload deliberately writes nothing to `document_versions`, so
+`listDocumentVersions` synthesizes the single entry (`id: null`) and the UI
+never special-cases "never revised". The consequence that matters: **every
+write path must call `materializeCurrentVersion` before appending**, or the
+document's current blob loses its last reference the moment
+`documents.blob_pathname` is overwritten. That function is the reason nothing
+was lost when versioning shipped over an existing corpus, and any future writer
+of `document_versions` has to call it too.
+
+**Restore appends; it never rewinds.** Restoring v1 inserts a NEW row (v4, say)
+pointing at v1's *existing* blob — no byte copy, no re-hash, and
+`restored_from_version_id` records where it came from. The alternative, moving
+the `is_current` flag backwards, would erase the fact that a rollback happened,
+which is precisely the event someone reading a history wants to see. This is
+also why `document_versions_blob_idx` is not unique.
+
+**Versioning is DMS-only.** `origin='accounting'` is refused with
+`DOCUMENT_NOT_VERSIONABLE`. A receipt's bytes are the evidence a journal entry
+or bill points at, and swapping them from the filing cabinet would rewrite that
+transaction's support without the accounting module ever hearing about it. The
+row menu hides the option instead of offering an action that will be refused.
+
+**`file_name` follows the current version; `title` does not.** The title is the
+human's label for the *thing* ("Kitchen elevation") and survives a revision that
+arrives named `scan_0042.pdf`. The file name describes the bytes actually being
+served, so downloads and the search index stay honest. The `documents.version`
+CAS counter is also bumped, so a rename dialog opened before a replacement is
+correctly refused as stale.
+
+**Share links follow the current version.** A recipient always sees the newest
+bytes, and the public route accepts no `?v=` parameter at all, so history is
+unreachable from outside the business. Both are deliberate: a link to "the
+drawing" should show the drawing that is current, and superseded revisions are
+internal.
+
 **No new UNIQUE index on `documents`, ever.** `createDocumentRecord` uses a
 bare `.onConflictDoNothing()`, which covers every unique constraint on the
 table — a second one would silently convert legitimate inserts into swallowed
@@ -303,9 +370,18 @@ to sort defeats the point of giving out the address.
 
 ## Open items
 
-- **Versions, tags and saved views have tables but no UI yet** — the schema
-  ships now so the later phases need no migration. `document_versions` is
-  written by nothing today; `documents.file_version_no/count` stay at 1.
+- **Tags and saved views have tables but no UI yet** — the schema ships now so
+  the later phases need no migration. Versions closed 2026-07-25.
+- **No diff or preview between versions** — the history panel lists them and
+  downloads any one, but comparing v2 to v3 means opening both. Real drawing
+  comparison is an industry-pack concern (overlay, not text diff).
+- **Nothing prunes version blobs.** Replacing a 40MB drawing ten times keeps all
+  ten forever, and the per-file cap is the only bound on that. Same retention
+  rule as everything else here, but versions make the storage bill grow faster
+  than the file count suggests — a retention policy is the eventual answer.
+- **A version cannot be deleted individually**, so a file uploaded to the wrong
+  document is fixed by uploading the right one over it, leaving the mistake in
+  the history. Trashing the whole document is the only eraser.
 - **`extracted_text` is still empty** — the search index reads it at weight D,
   but nothing populates it. OCR / PDF text extraction is the follow-up that
   makes search reach inside documents rather than across their metadata.

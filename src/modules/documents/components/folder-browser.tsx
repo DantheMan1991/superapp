@@ -198,6 +198,9 @@ export async function FolderBrowser({
                 title={doc.title}
                 fileName={doc.fileName}
                 shareMaxTtlDays={shareMaxTtlDays}
+                tenantId={ctx.tenant.id}
+                origin={doc.origin}
+                fileVersionCount={doc.fileVersionCount}
               />
             </div>
           ))}

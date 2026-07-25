@@ -141,6 +141,8 @@ export default async function DocumentsSearchPage({
                   version={hit.version}
                   title={hit.title}
                   fileName={hit.fileName}
+                  tenantId={ctx.tenant.id}
+                  origin={hit.origin}
                 />
               </div>
             ))}

@@ -29,3 +29,41 @@ export function blobToken(): string {
 export function receiptPathPrefix(tenantId: string): string {
   return `acct/${tenantId}/receipts/`;
 }
+
+/**
+ * The Documents module's namespaces. `kind` is split out now, unused beyond
+ * "files", so that generated documents and signature artifacts land in their
+ * own prefixes later without re-homing anything already stored.
+ *
+ * Existing `acct/…` receipts keep their pathnames forever — the global partial
+ * unique on documents.blob_pathname spans both prefixes and they cannot
+ * collide.
+ */
+export type DocumentBlobKind = "files" | "generated" | "signatures" | "signed";
+
+export function dmsPathPrefix(
+  tenantId: string,
+  kind: DocumentBlobKind = "files",
+): string {
+  return `docs/${tenantId}/${kind}/`;
+}
+
+/**
+ * Every prefix a tenant is allowed to own, across modules. Used to validate
+ * any client-supplied pathname before it is trusted as a blob location.
+ *
+ * Traversal is checked explicitly rather than assumed: a pathname is only ever
+ * compared by prefix, and ".." would let a prefix-passing string still escape.
+ */
+export function isTenantBlobPath(tenantId: string, pathname: string): boolean {
+  if (pathname.length === 0 || pathname.length > 500) return false;
+  if (pathname.includes("..") || pathname.startsWith("/")) return false;
+  if (pathname.includes("\\")) return false;
+  return (
+    pathname.startsWith(receiptPathPrefix(tenantId)) ||
+    pathname.startsWith(dmsPathPrefix(tenantId, "files")) ||
+    pathname.startsWith(dmsPathPrefix(tenantId, "generated")) ||
+    pathname.startsWith(dmsPathPrefix(tenantId, "signatures")) ||
+    pathname.startsWith(dmsPathPrefix(tenantId, "signed"))
+  );
+}

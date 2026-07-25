@@ -67,11 +67,16 @@ export async function createDocumentRecord(
   tenantId: string,
   input: NewDocumentInput,
 ): Promise<IngestResult> {
+  const origin = input.origin ?? "accounting";
+  // Scoped to origin: a receipt must never be reported as a duplicate of a
+  // file the client filed in the Documents module, or vice versa. The two
+  // surfaces share a table, not a namespace.
   const duplicate =
     input.sha256 !== ""
       ? await tx.query.documents.findFirst({
           where: and(
             eq(schema.documents.tenantId, tenantId),
+            eq(schema.documents.origin, origin),
             eq(schema.documents.sha256, input.sha256),
             ne(schema.documents.status, "trashed"),
           ),
@@ -83,7 +88,7 @@ export async function createDocumentRecord(
     .insert(schema.documents)
     .values({
       tenantId,
-      origin: input.origin ?? "accounting",
+      origin,
       blobPathname: input.blobPathname,
       fileName: input.fileName,
       mimeType: input.mimeType,

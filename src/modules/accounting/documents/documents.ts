@@ -30,6 +30,11 @@ export async function listDocuments(
   return tx.query.documents.findMany({
     where: and(
       eq(schema.documents.tenantId, tenantId),
+      // The `documents` table is shared with the Documents module; the Receipts
+      // surface shows only what this module captured. Without this term, files
+      // the client filed in the DMS would appear in the Inbox and in the
+      // attach-to-bill picker.
+      eq(schema.documents.origin, "accounting"),
       eq(
         schema.documents.status,
         tab === "trash" ? "trashed" : tab,

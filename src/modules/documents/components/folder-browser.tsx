@@ -14,6 +14,7 @@ import { listFolders } from "../folders";
 import { formatBytes } from "../lib/format";
 import { wouldCreateCycle } from "../core/tree";
 import { DocumentsNav } from "./documents-nav";
+import { DocumentRowMenu, UploadButton } from "./document-controls";
 import {
   FolderRowMenu,
   NewFolderButton,
@@ -81,6 +82,11 @@ export async function FolderBrowser({
       .map((f) => ({ id: f.id, label: labelFor(f.path) }))
       .sort((a, b) => a.label.localeCompare(b.label));
 
+  // Documents have no subtree, so every visible folder is a valid destination.
+  const folderChoices: FolderOption[] = allFolders
+    .map((f) => ({ id: f.id, label: labelFor(f.path) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -118,6 +124,10 @@ export async function FolderBrowser({
               {folder.visibility === "owners" ? "Owners only" : "Inherited"}
             </Badge>
           )}
+          <UploadButton
+            tenantId={ctx.tenant.id}
+            folderId={folder?.id ?? null}
+          />
           <NewFolderButton parentId={folder?.id ?? null} isOwner={isOwner} />
         </div>
       </div>
@@ -166,9 +176,14 @@ export async function FolderBrowser({
             <div key={doc.id} className="flex items-center gap-3 px-4 py-3">
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">
+                <a
+                  href={`/api/documents/${doc.id}/file`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="truncate text-sm font-medium hover:underline"
+                >
                   {doc.title || doc.fileName}
-                </p>
+                </a>
                 <p className="text-xs text-muted-foreground">
                   {formatBytes(doc.sizeBytes)}
                   {doc.fileVersionCount > 1 && ` · v${doc.fileVersionNo}`}
@@ -178,6 +193,7 @@ export async function FolderBrowser({
               <span className="hidden text-xs text-muted-foreground sm:inline">
                 {doc.createdAt.toLocaleDateString()}
               </span>
+              <DocumentRowMenu documentId={doc.id} folders={folderChoices} />
             </div>
           ))}
         </div>

@@ -48,7 +48,13 @@ export default async function ReceiptsPage({
         n: sql<number>`count(*)::int`,
       })
       .from(schema.documents)
-      .where(eq(schema.documents.tenantId, tenantId))
+      .where(
+        and(
+          eq(schema.documents.tenantId, tenantId),
+          // Tab counts must match the lists, which are origin-scoped.
+          eq(schema.documents.origin, "accounting"),
+        ),
+      )
       .groupBy(schema.documents.status);
     const settings = await tx.query.accountingSettings.findFirst({
       where: eq(schema.accountingSettings.tenantId, tenantId),

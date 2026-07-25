@@ -10,6 +10,20 @@ import {
   setFolderVisibility,
 } from "@/modules/documents/folder-ops";
 import { verifyDocumentInvariants } from "@/modules/documents/core/integrity";
+import { and } from "drizzle-orm";
+import {
+  dispositionFor,
+  isAllowedUpload,
+  sanitizeFileName,
+  MAX_FILE_BYTES,
+} from "@/modules/documents/allowlist";
+import {
+  dmsPathPrefix,
+  isTenantBlobPath,
+  receiptPathPrefix,
+} from "@/lib/blob";
+import { listDocuments } from "@/modules/accounting/documents/documents";
+import { getCloseChecklist } from "@/modules/accounting/core/close";
 import {
   buildFolderPath,
   computeEffectiveVisibility,
@@ -660,5 +674,187 @@ d("folder operations", () => {
         { role: "staff" },
       ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
+describe("upload allowlist", () => {
+  it("accepts the file types a filing cabinet actually holds", () => {
+    expect(isAllowedUpload("application/pdf", 1024)).toBe(true);
+    expect(isAllowedUpload("image/jpeg", 1024)).toBe(true);
+    expect(
+      isAllowedUpload(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        1024,
+      ),
+    ).toBe(true);
+    expect(isAllowedUpload("application/zip", 1024)).toBe(true);
+  });
+
+  // The stored-XSS types. Refused at upload, not merely served as attachments,
+  // so they can never sit in the store waiting to be mis-served later.
+  it("refuses types that can execute in our origin", () => {
+    expect(isAllowedUpload("text/html", 1024)).toBe(false);
+    expect(isAllowedUpload("image/svg+xml", 1024)).toBe(false);
+    expect(isAllowedUpload("application/xhtml+xml", 1024)).toBe(false);
+    expect(isAllowedUpload("application/x-msdownload", 1024)).toBe(false);
+  });
+
+  it("refuses empty and oversized files", () => {
+    expect(isAllowedUpload("application/pdf", 0)).toBe(false);
+    expect(isAllowedUpload("application/pdf", -1)).toBe(false);
+    expect(isAllowedUpload("application/pdf", MAX_FILE_BYTES + 1)).toBe(false);
+    expect(isAllowedUpload("application/pdf", Number.NaN)).toBe(false);
+  });
+
+  it("only renders inline what cannot execute", () => {
+    expect(dispositionFor("application/pdf")).toBe("inline");
+    expect(dispositionFor("image/png")).toBe("inline");
+    expect(dispositionFor("text/plain")).toBe("inline");
+    expect(dispositionFor("application/zip")).toBe("attachment");
+    expect(dispositionFor("image/tiff")).toBe("attachment");
+    expect(
+      dispositionFor(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ),
+    ).toBe("attachment");
+    // Never uploadable, but the header rule must hold regardless.
+    expect(dispositionFor("image/svg+xml")).toBe("attachment");
+    expect(dispositionFor("text/html")).toBe("attachment");
+  });
+
+  it("strips what must never reach a Content-Disposition header", () => {
+    const cr = String.fromCharCode(13);
+    const lf = String.fromCharCode(10);
+    expect(sanitizeFileName(`plan${cr}${lf}X-Evil: 1.pdf`)).toBe(
+      "planX-Evil: 1.pdf",
+    );
+    expect(sanitizeFileName('say"hello".pdf')).toBe("sayhello.pdf");
+    expect(sanitizeFileName("a/b\\c.pdf")).toBe("abc.pdf");
+    expect(sanitizeFileName("   ")).toBe("download");
+    expect(sanitizeFileName("x".repeat(300)).length).toBeLessThanOrEqual(120);
+    // Non-ASCII survives; the route emits an RFC 5987 filename* alongside.
+    expect(sanitizeFileName("Núñez.pdf")).toBe("Núñez.pdf");
+  });
+});
+
+describe("tenant blob namespaces", () => {
+  const t = "11111111-1111-4111-8111-111111111111";
+  const other = "22222222-2222-4222-8222-222222222222";
+
+  it("accepts this tenant's own prefixes, across modules", () => {
+    expect(isTenantBlobPath(t, `${dmsPathPrefix(t, "files")}a.pdf`)).toBe(true);
+    expect(isTenantBlobPath(t, `${dmsPathPrefix(t, "generated")}a.pdf`)).toBe(
+      true,
+    );
+    expect(isTenantBlobPath(t, `${receiptPathPrefix(t)}a.pdf`)).toBe(true);
+  });
+
+  it("refuses another tenant's namespace and traversal", () => {
+    expect(isTenantBlobPath(t, `${dmsPathPrefix(other, "files")}a.pdf`)).toBe(
+      false,
+    );
+    expect(isTenantBlobPath(t, `docs/${t}/files/../../${other}/files/a.pdf`)).toBe(
+      false,
+    );
+    expect(isTenantBlobPath(t, `/docs/${t}/files/a.pdf`)).toBe(false);
+    expect(isTenantBlobPath(t, `docs\\${t}\\files\\a.pdf`)).toBe(false);
+    expect(isTenantBlobPath(t, "")).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------------
+ * The regression this whole `origin` column exists to prevent.
+ * ---------------------------------------------------------------------- */
+
+d("shared documents table: accounting is unaffected by DMS rows", () => {
+  let tenantId: string;
+
+  beforeAll(async () => {
+    tenantId = await withSystem(async (tx) => {
+      const [row] = await tx
+        .insert(schema.tenants)
+        .values({
+          clerkOrgId: `${STAMP_OPS}-share`,
+          name: "DMS Share",
+          slug: `${STAMP_OPS}-share`,
+        })
+        .returning();
+      return row.id;
+    });
+    await withTenant(
+      tenantId,
+      async (tx) => {
+        await tx.insert(schema.accountingSettings).values({ tenantId });
+        // One unfiled DMS file, and one real receipt for contrast.
+        await tx.insert(schema.documents).values({
+          tenantId,
+          origin: "dms",
+          fileName: "site-photo.jpg",
+          mimeType: "image/jpeg",
+          blobPathname: `docs/${tenantId}/files/site-photo.jpg`,
+          status: "inbox",
+        });
+        await tx.insert(schema.documents).values({
+          tenantId,
+          origin: "accounting",
+          fileName: "receipt.pdf",
+          mimeType: "application/pdf",
+          blobPathname: `acct/${tenantId}/receipts/receipt.pdf`,
+          status: "inbox",
+        });
+      },
+      { role: "owner" },
+    );
+  });
+
+  afterAll(async () => {
+    await withSystem((tx) =>
+      tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId)),
+    );
+  });
+
+  it("the Receipts inbox lists only accounting-origin documents", async () => {
+    const rows = await withTenant(
+      tenantId,
+      (tx) => listDocuments(tx, tenantId, "inbox"),
+      { role: "owner" },
+    );
+    expect(rows.map((r) => r.fileName)).toEqual(["receipt.pdf"]);
+  });
+
+  // Without the origin filter every unfiled DMS file would be a permanent
+  // month-end close blocker — the most severe consequence of sharing the table.
+  it("an unfiled DMS file is not a month-end close blocker", async () => {
+    const checklist = await withTenant(
+      tenantId,
+      (tx) => getCloseChecklist(tx, tenantId, "2026-07-31"),
+      { role: "owner" },
+    );
+    const item = checklist.items.find((i) => i.key === "inbox_documents");
+    expect(item?.count).toBe(1);
+
+    // Trash the receipt: the DMS file must not keep the item red.
+    await withTenant(
+      tenantId,
+      (tx) =>
+        tx
+          .update(schema.documents)
+          .set({ status: "trashed" })
+          .where(
+            and(
+              eq(schema.documents.tenantId, tenantId),
+              eq(schema.documents.origin, "accounting"),
+            ),
+          ),
+      { role: "owner" },
+    );
+    const after = await withTenant(
+      tenantId,
+      (tx) => getCloseChecklist(tx, tenantId, "2026-07-31"),
+      { role: "owner" },
+    );
+    const afterItem = after.items.find((i) => i.key === "inbox_documents");
+    expect(afterItem?.count).toBe(0);
+    expect(afterItem?.ok).toBe(true);
   });
 });

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { get } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { resolveTenantContext } from "@/lib/auth";
 import { isModuleEnabled } from "@/lib/modules";
-import { blobToken } from "@/lib/blob";
+import { streamBlobResponse } from "@/lib/blob-stream";
 
 export const runtime = "nodejs";
 
@@ -20,6 +19,10 @@ export const runtime = "nodejs";
  * its uuid. This is the reason app.tenant_role exists (drizzle/0024) — the
  * folder-visibility rule has to hold here, not just in the DMS module's own
  * queries.
+ *
+ * Headers come from the shared streamBlobResponse helper so this route and the
+ * Documents one cannot drift apart. Receipts are always served inline: the
+ * accounting allowlist is five safe image/PDF types.
  */
 export async function GET(
   req: NextRequest,
@@ -48,29 +51,15 @@ export async function GET(
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const ifNoneMatch = req.headers.get("if-none-match") ?? undefined;
-  const result = await get(doc.blobPathname, {
-    access: "private",
-    token: blobToken(),
-    ...(ifNoneMatch ? { ifNoneMatch } : {}),
+  const response = await streamBlobResponse({
+    pathname: doc.blobPathname,
+    mimeType: doc.mimeType,
+    fileName: doc.fileName,
+    disposition: "inline",
+    ifNoneMatch: req.headers.get("if-none-match") ?? undefined,
   });
-  if (!result) {
+  if (!response) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  if (result.statusCode === 304) {
-    return new Response(null, {
-      status: 304,
-      headers: { ETag: result.blob.etag },
-    });
-  }
-  return new Response(result.stream, {
-    status: 200,
-    headers: {
-      "Content-Type": doc.mimeType || result.blob.contentType || "application/octet-stream",
-      "Content-Disposition": `inline; filename="${doc.fileName.replace(/"/g, "")}"`,
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control": "private, no-cache",
-      ETag: result.blob.etag,
-    },
-  });
+  return response;
 }

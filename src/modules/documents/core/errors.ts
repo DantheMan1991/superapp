@@ -33,6 +33,7 @@ export type DocsErrorCode =
   | "SHARE_LIMIT"
   | "SHARE_TTL_TOO_LONG"
   | "SHARE_ROOT_RESTRICTED"
+  | "SHARE_HAS_PASSCODE"
   | "SHARING_DISABLED";
 
 export class DocsError extends Error {
@@ -86,6 +87,8 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
   SHARE_TTL_TOO_LONG: "That's longer than this business allows a link to live.",
   SHARE_ROOT_RESTRICTED:
     "Owners-only files and folders can't be shared outside the business. Move it somewhere shared first, or turn off owners-only.",
+  SHARE_HAS_PASSCODE:
+    "This link has a passcode, so it can't be emailed — send the passcode separately, by phone or text.",
   SHARING_DISABLED: "Sharing is switched off for this business.",
 };
 

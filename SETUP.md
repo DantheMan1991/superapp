@@ -462,6 +462,50 @@ lead (badge on the list). Setup:
 
 ---
 
+## Outbound email (invoices, share links, notifications)
+
+Everything the platform sends on a client's behalf goes through one spine, and
+the point of it is **which address the mail comes from**.
+
+You cannot simply put a client's address in the `From` header. Mail claiming to
+be from `acmebuilders.com` but signed with our keys fails SPF/DKIM alignment,
+DMARC rejects it, and it lands in spam or is dropped. Sending as someone
+requires their DNS to say you may. So there are two honest identities:
+
+- **Their domain** (once verified) — `invoices@mail.acmebuilders.com`. The
+  owner adds DNS records at **Dashboard → Email**, which come straight from
+  Resend's API; the app re-checks with Resend and never takes the tenant's word
+  for it.
+- **Platform fallback** (until then) — `"Acme Builders" <notifications@…>`
+  with `Reply-To` pointing at the business, so it still reads as the client and
+  replies still reach them.
+
+Setup:
+
+- `EMAIL_FROM_DOMAIN` — the platform's own sending domain, verified in Resend
+  (e.g. `mail.yosherapp.com`). Without it, sending refuses with a pointed
+  message.
+- `EMAIL_DEV_REDIRECT` — **outside production every recipient is rewritten to
+  this address**, with the real one moved into the subject line. If it is not
+  set outside production, sending refuses entirely. This is what stops someone
+  running the share-email flow against a seeded local database and mailing a
+  real client. Do not remove it.
+- `RESEND_EVENTS_WEBHOOK_SECRET` — add a webhook in Resend pointing at
+  `https://<your-app>/api/email/events` for `email.delivered`, `email.bounced`
+  and `email.complained`, and paste its signing secret here. Without it,
+  bounces are invisible — and an unnoticed bounce is the most common way an
+  email workflow dies silently.
+- Guardrails: 100 messages per tenant per hour, 2000 platform-wide per day
+  (this ceiling is also the provider bill's ceiling), and an idempotency key
+  per message so a double-click or a retry cannot send twice.
+- A **subdomain** (`mail.acme.com`) is strongly preferred over the root domain:
+  it keeps this traffic's sending reputation separate from the owner's everyday
+  email, so a bad send never affects their normal mail.
+- Share links with a passcode **cannot** be emailed. A link and its passcode in
+  one message is one factor, not two.
+
+---
+
 ## Document share links (`/s/...`)
 
 The Documents module can hand out a link that lets a client, subcontractor or

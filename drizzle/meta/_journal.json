@@ -211,6 +211,20 @@
       "when": 1784971285255,
       "tag": "0029_document_shares_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1784976050781,
+      "tag": "0030_email_spine",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784976081870,
+      "tag": "0031_email_spine_rls",
+      "breakpoints": true
     }
   ]
 }

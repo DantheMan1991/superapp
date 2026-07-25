@@ -34,6 +34,9 @@ export default async function DashboardLayout({
   navItems.push({ href: "/dashboard/team", label: "Team", icon: "users" });
 
   if (ctx.role === "owner") {
+    // Owner-only: this decides what address the business's outbound mail
+    // claims to come from.
+    navItems.push({ href: "/dashboard/email", label: "Email", icon: "mail" });
     navItems.push({
       href: "/dashboard/billing",
       label: "Billing",

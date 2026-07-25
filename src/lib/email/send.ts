@@ -54,23 +54,42 @@ function platformDomain(): string | null {
 }
 
 /**
- * In any non-production environment every recipient is rewritten to
- * EMAIL_DEV_REDIRECT, with the real address moved into the subject.
+ * Everywhere except real production, every recipient is rewritten to
+ * EMAIL_DEV_REDIRECT with the real address moved into the subject.
  *
  * This is not a nicety. Without it, the first person to run the share-email
- * flow against a seeded local database sends real mail to a real client, and
- * that is not a mistake you get to take back. If the redirect is not set
- * outside production, sending refuses entirely.
+ * flow against a seeded local database — or from a branch preview — sends real
+ * mail to a real client, and that is not a mistake you get to take back. If
+ * the redirect is not set outside production, sending refuses entirely.
  */
+/**
+ * Only ONE environment may mail real people.
+ *
+ * NODE_ENV is not the test for it. Vercel builds preview deployments with
+ * NODE_ENV=production, so keying on it would treat every branch preview as
+ * live — and a preview is exactly where someone tries out share-emailing.
+ * VERCEL_ENV is the variable that actually distinguishes them
+ * (production | preview | development); NODE_ENV is only the fallback for
+ * running outside Vercel.
+ */
+export function isLiveSendEnvironment(env: {
+  vercelEnv?: string;
+  nodeEnv?: string;
+}): boolean {
+  if (env.vercelEnv) return env.vercelEnv === "production";
+  return env.nodeEnv === "production";
+}
+
 export function applyDevGuard(
   to: string,
   subject: string,
-  env: { nodeEnv?: string; redirect?: string } = {
+  env: { nodeEnv?: string; vercelEnv?: string; redirect?: string } = {
     nodeEnv: process.env.NODE_ENV,
+    vercelEnv: process.env.VERCEL_ENV,
     redirect: process.env.EMAIL_DEV_REDIRECT,
   },
 ): { to: string; subject: string } | { blocked: string } {
-  if (env.nodeEnv === "production") return { to, subject };
+  if (isLiveSendEnvironment(env)) return { to, subject };
   const redirect = env.redirect;
   if (!redirect) {
     return {

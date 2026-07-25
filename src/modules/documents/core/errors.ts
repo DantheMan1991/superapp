@@ -22,7 +22,9 @@ export type DocsErrorCode =
   | "DOCUMENT_TRASHED"
   | "DOCUMENT_HAS_LINKS"
   | "DOCUMENT_UPLOAD_INVALID"
+  | "DOCUMENT_NOT_VERSIONABLE"
   | "VERSION_NOT_FOUND"
+  | "VERSION_ALREADY_CURRENT"
   | "TAG_NOT_FOUND"
   | "TAG_NAME_TAKEN"
   | "TAG_LIMIT"
@@ -75,7 +77,10 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
     "Detach this file from its transactions before trashing it.",
   DOCUMENT_UPLOAD_INVALID:
     "That file type or size isn't supported — see the list of accepted types.",
+  DOCUMENT_NOT_VERSIONABLE:
+    "This file belongs to Receipts, so its versions are managed there — transactions point at these exact bytes.",
   VERSION_NOT_FOUND: "That version no longer exists.",
+  VERSION_ALREADY_CURRENT: "That's already the current version.",
   TAG_NOT_FOUND: "That tag no longer exists.",
   TAG_NAME_TAKEN: "A tag with that name already exists.",
   TAG_LIMIT: "That's the maximum number of tags.",

@@ -97,6 +97,9 @@ export default async function DocumentsInboxPage({
                 version={doc.version}
                 title={doc.title}
                 fileName={doc.fileName}
+                tenantId={ctx.tenant.id}
+                origin={doc.origin}
+                fileVersionCount={doc.fileVersionCount}
               />
             </div>
           ))}

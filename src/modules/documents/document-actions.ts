@@ -9,6 +9,12 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { DocsError, friendlyMessage } from "./core/errors";
 import { createDmsDocument, inspectUploadedBlob } from "./ingest";
+import {
+  addDocumentVersion,
+  listDocumentVersions,
+  restoreDocumentVersion,
+  type VersionEntry,
+} from "./versions";
 import type { DocsCtx } from "./folder-ops";
 
 /**
@@ -26,6 +32,17 @@ async function gate(): Promise<DocsCtx> {
   if (ctx.role === "expert") {
     throw new DocsError("FORBIDDEN_EXPERT", "accountant access is read-only");
   }
+  return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
+}
+
+/**
+ * The same gate without the write refusal, for actions that only read. The
+ * accountant role is read-ONLY, not blind: reviewing which revision of a
+ * document was current at year end is exactly their job.
+ */
+async function readGate(): Promise<DocsCtx> {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, "documents");
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
 }
 
@@ -102,6 +119,147 @@ export async function registerDocumentUploadAction(
         duplicateOfId: result.duplicateOfId,
       },
     };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const addVersionSchema = z.object({
+  documentId: z.string().uuid(),
+  pathname: z.string().min(1).max(500),
+  note: z.string().max(500).default(""),
+});
+
+/**
+ * Replace a document's file, keeping the old bytes as history.
+ *
+ * Same two-phase shape as the initial upload — client-direct to blob storage,
+ * then this action re-reads the blob's real metadata and hashes the actual
+ * bytes. A new revision goes through exactly the same allowlist and namespace
+ * checks as a new file, because it IS a new file; only the row it attaches to
+ * differs.
+ */
+export async function addDocumentVersionAction(
+  input: z.infer<typeof addVersionSchema>,
+): Promise<ActionResult<{ versionNo: number; sameAsCurrent: boolean }>> {
+  try {
+    const ctx = await gate();
+    const parsed = addVersionSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const inspected = await inspectUploadedBlob(ctx.tenantId, parsed.data.pathname);
+
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const added = await addDocumentVersion(tx, ctx, parsed.data.documentId, {
+          ...inspected,
+          blobPathname: parsed.data.pathname,
+          note: parsed.data.note,
+        });
+        await logAuditInTx(tx, {
+          action: "documents.version_added",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "document",
+          targetId: parsed.data.documentId,
+          // Identifiers and measurements only — never the note, which is
+          // free text a user wrote and may describe the contents.
+          meta: {
+            versionNo: added.version.versionNo,
+            sizeBytes: inspected.sizeBytes,
+            mimeType: inspected.mimeType,
+            sameAsCurrent: added.sameAsCurrent,
+          },
+        });
+        return added;
+      },
+      { role: ctx.role },
+    );
+    revalidate();
+    return {
+      ok: true,
+      data: {
+        versionNo: result.version.versionNo,
+        sameAsCurrent: result.sameAsCurrent,
+      },
+    };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const restoreVersionSchema = z.object({
+  documentId: z.string().uuid(),
+  versionId: z.string().uuid(),
+});
+
+export async function restoreDocumentVersionAction(
+  input: z.infer<typeof restoreVersionSchema>,
+): Promise<ActionResult<{ versionNo: number; sourceNo: number }>> {
+  try {
+    const ctx = await gate();
+    const parsed = restoreVersionSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const restored = await restoreDocumentVersion(
+          tx,
+          ctx,
+          parsed.data.documentId,
+          parsed.data.versionId,
+        );
+        await logAuditInTx(tx, {
+          action: "documents.version_restored",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "document",
+          targetId: parsed.data.documentId,
+          meta: {
+            versionNo: restored.version.versionNo,
+            restoredFrom: restored.sourceNo,
+          },
+        });
+        return restored;
+      },
+      { role: ctx.role },
+    );
+    revalidate();
+    return {
+      ok: true,
+      data: {
+        versionNo: result.version.versionNo,
+        sourceNo: result.sourceNo,
+      },
+    };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const listVersionsSchema = z.object({ documentId: z.string().uuid() });
+
+/**
+ * The history panel's data, fetched when the dialog opens rather than joined
+ * into the browse query — a folder page would otherwise pay for history nobody
+ * asked to see.
+ */
+export async function listDocumentVersionsAction(
+  input: z.infer<typeof listVersionsSchema>,
+): Promise<ActionResult<{ versions: VersionEntry[] }>> {
+  try {
+    const ctx = await readGate();
+    const parsed = listVersionsSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const versions = await withTenant(
+      ctx.tenantId,
+      (tx) => listDocumentVersions(tx, ctx.tenantId, parsed.data.documentId),
+      { role: ctx.role },
+    );
+    return { ok: true, data: { versions } };
   } catch (err) {
     return fail(err);
   }

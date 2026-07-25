@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { upload as uploadPresigned } from "@vercel/blob/client";
 import {
+  FileUp,
   FolderInput,
+  History,
   Link2,
   Loader2,
   MoreHorizontal,
@@ -50,6 +52,7 @@ import {
 } from "../document-actions";
 import { Input } from "@/components/ui/input";
 import { ShareDialog } from "./share-controls";
+import { NewVersionDialog, VersionHistoryDialog } from "./version-controls";
 
 export interface FolderChoice {
   id: string;
@@ -152,6 +155,9 @@ export function DocumentRowMenu({
   title,
   fileName,
   shareMaxTtlDays,
+  tenantId,
+  origin,
+  fileVersionCount,
 }: {
   documentId: string;
   folders: FolderChoice[];
@@ -162,14 +168,25 @@ export function DocumentRowMenu({
   fileName?: string;
   /** Present only where sharing makes sense (a filed document). */
   shareMaxTtlDays?: number;
+  /** Required to offer versioning — a new revision is a client-direct upload. */
+  tenantId?: string;
+  /** Versioning is offered for DMS files only; see below. */
+  origin?: string;
+  fileVersionCount?: number;
 }) {
   const router = useRouter();
   const [filing, setFiling] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [versioning, setVersioning] = useState(false);
+  const [history, setHistory] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title ?? "");
   const [target, setTarget] = useState("__inbox__");
   const [pending, startTransition] = useTransition();
+
+  // Receipts are evidence attached to transactions, so the server refuses to
+  // version them. Not offering the option is better than explaining a refusal.
+  const canVersion = tenantId !== undefined && origin === "dms";
 
   function run(
     fn: () => Promise<{ ok: true; data?: unknown } | { error: string }>,
@@ -220,6 +237,32 @@ export function DocumentRowMenu({
                 <FolderInput className="size-4" />
                 File into…
               </DropdownMenuItem>
+              {canVersion && (
+                <>
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      // Keep the menu from closing the dialog it just opened.
+                      e.preventDefault();
+                      setVersioning(true);
+                    }}
+                  >
+                    <FileUp className="size-4" />
+                    Upload new version…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      setHistory(true);
+                    }}
+                  >
+                    <History className="size-4" />
+                    Version history
+                    {fileVersionCount !== undefined &&
+                      fileVersionCount > 1 &&
+                      ` (${fileVersionCount})`}
+                  </DropdownMenuItem>
+                </>
+              )}
               {shareMaxTtlDays !== undefined && (
                 <DropdownMenuItem
                   onSelect={(e) => {
@@ -258,6 +301,30 @@ export function DocumentRowMenu({
           targetName={title || fileName || "this file"}
           maxTtlDays={shareMaxTtlDays}
         />
+      )}
+
+      {canVersion && (
+        <>
+          <NewVersionDialog
+            open={versioning}
+            onOpenChange={setVersioning}
+            tenantId={tenantId}
+            documentId={documentId}
+            fileName={fileName || "this file"}
+          />
+          {/* Mounted only while open: the dialog fetches its history on
+              mount, so a folder of 50 files makes no version queries until
+              somebody actually asks for one. */}
+          {history && (
+            <VersionHistoryDialog
+              open
+              onOpenChange={setHistory}
+              documentId={documentId}
+              title={title || fileName || "this file"}
+              canRestore
+            />
+          )}
+        </>
       )}
 
       <Dialog open={renaming} onOpenChange={setRenaming}>

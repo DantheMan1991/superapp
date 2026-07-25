@@ -36,11 +36,18 @@ Presigned client-direct upload into `docs/{tenant}/files/`, the authenticated
 streaming route, the shared `streamBlobResponse` helper, and the five
 accounting queries that had to become origin-aware — `close.ts` first.
 
+**Follow-up (`0025_documents_origin_default.sql`) — live outage fix.** 0023
+dropped `documents.origin`'s database default in the same migration that added
+it. Because migrations run against the live database before the new code
+deploys, receipt uploads and inbound email ingestion failed with a not-null
+violation for about an hour. The default is restored and must stay; see
+Decisions.
+
 ## Data model
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `documents` (shared) | The generic file record, now carrying DMS columns | `origin` discriminates `accounting`/`dms` and has **no DB default** so `$inferInsert` makes it required. `member_all` policy compares `effective_visibility` against `app_current_tenant_role()`. **No new UNIQUE index may be added** — see Decisions |
+| `documents` (shared) | The generic file record, now carrying DMS columns | `origin` discriminates `accounting`/`dms`; required in `$inferInsert` via `schema.ts`, and DB-defaulted to `'accounting'` so pre-Documents writers keep working (see Decisions). `member_all` policy compares `effective_visibility` against `app_current_tenant_role()`. **No new UNIQUE index may be added** — see Decisions |
 | `document_folders` | The tree | Adjacency list (`parent_id`, source of truth) **+** materialized `path`. Self composite FK, NO ACTION. Two partial name uniques (root and non-root). `text_pattern_ops` prefix index, hand-written in 0024. Same visibility policy as `documents` |
 | `document_versions` | File revision history | Partial unique on `is_current` makes "exactly one current" a DB invariant. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag |
 | `document_tags` | Tenant tag registry | `documents.tags text[]` stores slugs from here, so a rename never rewrites documents. Slug format enforced by CHECK |
@@ -71,10 +78,20 @@ replaced `documents` policy, policies for the five new tables).
 ## Decisions & gotchas
 
 **One table, two surfaces.** `documents` is shared with the accounting
-Receipts tool. `origin` was added with a DB default (so existing rows backfill
-for free) and then `DROP DEFAULT`ed, so Drizzle's `$inferInsert` makes it
-**required** and the compiler names every raw insert site. It found exactly
+Receipts tool. `origin` discriminates them, and `text("origin").notNull()` with
+no `.default()` in `schema.ts` makes it **required** in Drizzle's
+`$inferInsert`, so the compiler names every raw insert site. It found exactly
 four. This is enforcement by type, not by code review.
+
+**The database default is deliberate — do not drop it again.** 0023 dropped it
+and 0025 put it back after it caused a live outage. Migrations run before the
+new code deploys, so for that window the RUNNING code still inserted documents
+with no `origin` and every receipt upload and inbound-email ingestion failed
+with `23502: null value in column "origin"`. The rationale for dropping it was
+also wrong: `$inferInsert` is driven by `schema.ts`, not by the database
+default, so the drop bought no enforcement whatsoever. The lesson generalizes —
+**this repo migrates a live database ahead of the deploy, so every migration
+must leave the CURRENTLY RUNNING code working.** Expand, deploy, then contract.
 
 **The five queries that had to change.** Anything filtering `documents` by
 `status` alone silently widens once DMS rows exist. `close.ts:105` is the
@@ -147,10 +164,9 @@ that either).
 because `document_settings` is `member_read`-only by policy — a tenant-context
 insert would be denied by design.
 
-**Migration hand edits (both the same trap `0013` hit).** `origin` is added
-defaulted then `DROP DEFAULT`ed; and `document_folders_tenant_id_id_idx` was
-moved above the FKs that reference it, or the migration fails with "no unique
-constraint matching given keys".
+**Migration hand edit.** `document_folders_tenant_id_id_idx` had to be moved
+above the FKs that reference it, or the migration fails with "no unique
+constraint matching given keys" — the same trap `0013` hit.
 
 **No enum was touched.** `ALTER TYPE ... ADD VALUE` cannot be used in the
 transaction that adds it, and Drizzle runs migrations in a transaction. All

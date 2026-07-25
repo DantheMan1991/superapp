@@ -92,6 +92,23 @@ passcode in one message is one factor and a longer email.
 common way an email workflow dies silently — the sender believes the invoice
 went out and nobody finds out until someone chases payment.
 
+## Current state (2026-07-25)
+
+**Nothing actually sends yet, on purpose.** The spine, the wizard and the send
+log are built and deployed, but `mail.yosherapp.com` has not been added to
+Resend — that needs a paid plan (the free tier's one domain is already spent on
+`in.yosherapp.com` for inbound), and the founder is deliberately waiting until
+there is real business to justify it.
+
+So today: creating, copying, revoking and opening share links all work
+normally; only "Email link" fails, and it fails at the provider with the reason
+recorded in `outbound_emails.error`. Nothing sends automatically, so nothing
+breaks unprompted.
+
+`EMAIL_FROM_DOMAIN` is already set in Vercel to `mail.yosherapp.com`, so when
+the domain is eventually verified in Resend, sending starts working with no
+code or config change.
+
 ## Open items
 
 - **One transport only.** The seam exists but there is a single implementation

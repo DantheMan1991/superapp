@@ -485,11 +485,15 @@ Setup:
 - `EMAIL_FROM_DOMAIN` — the platform's own sending domain, verified in Resend
   (e.g. `mail.yosherapp.com`). Without it, sending refuses with a pointed
   message.
-- `EMAIL_DEV_REDIRECT` — **outside production every recipient is rewritten to
-  this address**, with the real one moved into the subject line. If it is not
-  set outside production, sending refuses entirely. This is what stops someone
-  running the share-email flow against a seeded local database and mailing a
-  real client. Do not remove it.
+- `EMAIL_DEV_REDIRECT` — **everywhere except real production, every recipient
+  is rewritten to this address**, with the real one moved into the subject
+  line. If it is not set, sending refuses entirely. This is what stops someone
+  running the share-email flow against a seeded local database — or from a
+  branch preview — and mailing a real client. Do not remove it.
+  Set it on **Preview and Development** in Vercel, not Production.
+  Note the trap it exists to avoid: Vercel builds previews with
+  `NODE_ENV=production`, so the guard keys on `VERCEL_ENV` instead. A preview
+  deployment is treated as non-production and redirects.
 - `RESEND_EVENTS_WEBHOOK_SECRET` — add a webhook in Resend pointing at
   `https://<your-app>/api/email/events` for `email.delivered`, `email.bounced`
   and `email.complained`, and paste its signing secret here. Without it,

@@ -183,6 +183,20 @@
       "when": 1784948030796,
       "tag": "0025_documents_origin_default",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784949409321,
+      "tag": "0026_documents_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1784950242256,
+      "tag": "0027_documents_search_tokens",
+      "breakpoints": true
     }
   ]
 }

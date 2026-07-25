@@ -12,6 +12,7 @@ import {
 } from "../browse";
 import { listFolders } from "../folders";
 import { formatBytes } from "../lib/format";
+import { folderOptions } from "../lib/folder-labels";
 import { wouldCreateCycle } from "../core/tree";
 import { DocumentsNav } from "./documents-nav";
 import { DocumentRowMenu, UploadButton } from "./document-controls";
@@ -62,30 +63,13 @@ export async function FolderBrowser({
   if (data === null) notFound();
   const { folder, contents, ancestors, allFolders } = data;
 
-  // Build "Contracts / 2026" labels for the move picker, and drop the targets
-  // that would create a cycle — the same rule the server enforces, applied in
-  // the UI so an impossible move is never offered.
-  const pathById = new Map(allFolders.map((f) => [f.path, f]));
-  const labelFor = (path: string): string => {
-    const parts: string[] = [];
-    let prefix = "";
-    for (const segment of path.split("/").filter(Boolean)) {
-      prefix += `/${segment}/`;
-      const node = pathById.get(prefix);
-      if (node) parts.push(node.name);
-    }
-    return parts.join(" / ");
-  };
+  // Drop the move targets that would create a cycle — the same rule the server
+  // enforces, applied in the UI so an impossible move is never offered.
   const moveTargetsFor = (movingPath: string): FolderOption[] =>
-    allFolders
-      .filter((f) => !wouldCreateCycle(movingPath, f.path))
-      .map((f) => ({ id: f.id, label: labelFor(f.path) }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+    folderOptions(allFolders.filter((f) => !wouldCreateCycle(movingPath, f.path)));
 
   // Documents have no subtree, so every visible folder is a valid destination.
-  const folderChoices: FolderOption[] = allFolders
-    .map((f) => ({ id: f.id, label: labelFor(f.path) }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const folderChoices: FolderOption[] = folderOptions(allFolders);
 
   return (
     <div className="space-y-6">
@@ -193,7 +177,13 @@ export async function FolderBrowser({
               <span className="hidden text-xs text-muted-foreground sm:inline">
                 {doc.createdAt.toLocaleDateString()}
               </span>
-              <DocumentRowMenu documentId={doc.id} folders={folderChoices} />
+              <DocumentRowMenu
+                documentId={doc.id}
+                folders={folderChoices}
+                version={doc.version}
+                title={doc.title}
+                fileName={doc.fileName}
+              />
             </div>
           ))}
         </div>

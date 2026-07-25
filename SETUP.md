@@ -462,6 +462,35 @@ lead (badge on the list). Setup:
 
 ---
 
+## Document share links (`/s/...`)
+
+The Documents module can hand out a link that lets a client, subcontractor or
+inspector open a file or a job folder **without signing in**. Setup:
+
+- Set `SHARE_SECRET` in `.env` and Vercel env — one long random string, at
+  least 32 characters (e.g. `openssl rand -base64 48`). Three separate values
+  are derived from it by label: the key that hashes share tokens, the key that
+  hashes visitor IPs, and the key that signs passcode-unlock cookies. Without
+  it, share links **fail closed** — creating one errors and every existing
+  link answers "no longer available".
+- Also uses the existing `APP_ENCRYPTION_KEY`. The token is stored twice: as
+  a keyed hash for lookup, and encrypted so an owner can copy the URL again
+  later. Neither key lives in the database, so a database-only compromise
+  yields no working links.
+- **Rotating `SHARE_SECRET` invalidates every outstanding link at once.** That
+  is the emergency lever if a link is ever leaked at scale; for a single link,
+  use "Turn off link" on Documents → Shared links.
+- Built-in guardrails: links must expire (30 days max by default, per tenant),
+  60 unknown-token guesses per IP per hour, 20 failed passcodes per IP per
+  hour, a link locks after 10 wrong passcodes, 5GB per link per day of egress,
+  500 active links per tenant.
+- Owners-only folders and files **cannot** be shared externally at all. Move
+  the file somewhere shared, or turn owners-only off, first.
+- `src/app/robots.ts` disallows `/s/`. That is politeness, not protection —
+  the real controls are the 256-bit token, the expiry, and `noindex`.
+
+---
+
 ## Operational notes (read once, remember later)
 
 - **Backups:** Neon has point-in-time restore on paid plans; on free tier,

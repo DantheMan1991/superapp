@@ -21,6 +21,11 @@ that matter for code:
   `withSystem(fn)` is the god view — only after `requireSuperAdmin()` or in
   trusted sync code (webhooks, audit, seeds). Postgres RLS (FORCE) is the
   backstop: no context → no rows.
+  Optional third argument `{ role }` sets `app.tenant_role` so a policy can
+  tell owners from staff (the Documents module's owners-only folders depend on
+  it). It defaults to `'staff'`, the least privileged value — pass
+  `{ role: ctx.role }` when reading anything visibility-bearing, and never a
+  role that did not come from `requireTenant()`/`resolveTenantContext()`.
 - **Authorization is server-side on every request**: `requireSuperAdmin()`,
   `requireTenant()`, `requireTenantOwner()` in `src/lib/auth.ts`. The
   middleware only checks "signed in".

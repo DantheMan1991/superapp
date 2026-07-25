@@ -1,0 +1,21 @@
+-- Restore the database default on documents.origin. Fixes a live outage.
+--
+-- 0023 added the column WITH a default and then dropped it in the SAME
+-- migration. That is only safe when schema and code deploy atomically. They
+-- don't: migrations run first, so between `db:migrate` and the new deploy the
+-- RUNNING code still inserted documents without an `origin` and every receipt
+-- upload and inbound-email ingestion failed with
+--   23502: null value in column "origin" violates not-null constraint
+--
+-- The rationale for dropping it was also simply wrong. What makes `origin`
+-- REQUIRED in Drizzle's $inferInsert is `text("origin").notNull()` with no
+-- `.default()` in src/db/schema.ts — the DATABASE default plays no part in
+-- that. So the drop bought no type-level enforcement at all and cost an
+-- outage. schema.ts is unchanged, every insert site still has to name its
+-- origin, and old code can no longer wedge the table.
+--
+-- Keep this default. The correct pattern for a live system is expand →
+-- deploy → contract, and there is nothing here worth contracting: a default of
+-- 'accounting' is exactly right for any writer that predates the Documents
+-- module.
+ALTER TABLE "documents" ALTER COLUMN "origin" SET DEFAULT 'accounting';

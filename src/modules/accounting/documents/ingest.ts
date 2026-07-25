@@ -33,6 +33,14 @@ export interface NewDocumentInput {
   sizeBytes: number;
   sha256: string;
   source: "upload" | "email";
+  /**
+   * Which surface owns this row. `documents` is shared with the Documents
+   * module, and every accounting query that filters on `status` alone also
+   * filters on this. Defaults to "accounting" so no capture caller changes;
+   * the DATABASE column has no default, which is what makes every raw insert
+   * site declare itself.
+   */
+  origin?: "accounting" | "dms";
   uploadedByClerkUserId?: string | null;
   emailFrom?: string;
   emailSubject?: string;
@@ -59,11 +67,16 @@ export async function createDocumentRecord(
   tenantId: string,
   input: NewDocumentInput,
 ): Promise<IngestResult> {
+  const origin = input.origin ?? "accounting";
+  // Scoped to origin: a receipt must never be reported as a duplicate of a
+  // file the client filed in the Documents module, or vice versa. The two
+  // surfaces share a table, not a namespace.
   const duplicate =
     input.sha256 !== ""
       ? await tx.query.documents.findFirst({
           where: and(
             eq(schema.documents.tenantId, tenantId),
+            eq(schema.documents.origin, origin),
             eq(schema.documents.sha256, input.sha256),
             ne(schema.documents.status, "trashed"),
           ),
@@ -75,6 +88,7 @@ export async function createDocumentRecord(
     .insert(schema.documents)
     .values({
       tenantId,
+      origin,
       blobPathname: input.blobPathname,
       fileName: input.fileName,
       mimeType: input.mimeType,

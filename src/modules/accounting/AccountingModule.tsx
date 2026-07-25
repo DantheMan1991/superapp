@@ -85,6 +85,8 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
       .where(
         and(
           eq(schema.documents.tenantId, tenantId),
+          // Receipts captured by this module only — see documents.ts.
+          eq(schema.documents.origin, "accounting"),
           eq(schema.documents.status, "inbox"),
         ),
       );

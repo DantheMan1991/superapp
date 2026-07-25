@@ -1186,7 +1186,48 @@ export const documents = pgTable(
     /** The session-6 contract shape — see documents/extraction types. */
     extraction: jsonb("extraction"),
     trashedAt: timestamp("trashed_at", { withTimezone: true }),
+    /**
+     * Optimistic-concurrency counter (CAS on trash/restore/move). NOT a file
+     * revision number — that's `fileVersionNo`. Never conflate the two.
+     */
     version: integer("version").notNull().default(1),
+
+    /* -- DMS (documents module) ------------------------------------------
+     * The table is shared by two surfaces. `origin` is the discriminator and
+     * has NO database default on purpose: $inferInsert makes it required, so
+     * every insert site must declare which surface it belongs to. Accounting
+     * queries that filter on `status` alone MUST also filter on origin, or
+     * DMS files leak into the Receipts inbox and the close checklist.
+     */
+    origin: text("origin").notNull(),
+    /** Null = the system Inbox (captured but not yet filed into the cabinet). */
+    folderId: uuid("folder_id"),
+    /** Display name; `fileName` stays the on-disk name (Content-Disposition). */
+    title: text("title").notNull().default(""),
+    description: text("description").notNull().default(""),
+    /** Open taxonomy for industry packs ('drawing', 'permit', 'submittal'). */
+    docKind: text("doc_kind").notNull().default(""),
+    /** Tag SLUGS, resolved against document_tags. Renames never touch this. */
+    tags: text("tags")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Pack extension bag. NOT NULL so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /** Denormalized from the folder tree — this column IS the RLS predicate. */
+    effectiveVisibility: text("effective_visibility")
+      .notNull()
+      .default("members"),
+    /** Current file revision. See document_versions for the history. */
+    fileVersionNo: integer("file_version_no").notNull().default(1),
+    fileVersionCount: integer("file_version_count").notNull().default(1),
+    /** OCR / PDF text seam — indexed by search_tsv, populated later. */
+    extractedText: text("extracted_text").notNull().default(""),
+    /** When it left the Inbox. */
+    filedAt: timestamp("filed_at", { withTimezone: true }),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1197,6 +1238,9 @@ export const documents = pgTable(
   (t) => [
     uniqueIndex("documents_tenant_id_id_idx").on(t.tenantId, t.id),
     // GLOBAL unique — the pathname embeds the tenant id (acct/{tenant}/…).
+    // NOTE: no OTHER unique index may be added to this table. createDocumentRecord
+    // uses a bare .onConflictDoNothing(), which covers every unique constraint —
+    // a second one would silently turn legitimate inserts into swallowed conflicts.
     uniqueIndex("documents_blob_pathname_idx")
       .on(t.blobPathname)
       .where(sql`${t.blobPathname} is not null`),
@@ -1210,7 +1254,41 @@ export const documents = pgTable(
       t.tenantId,
       t.extractionStatus,
     ),
+    index("documents_tenant_origin_idx").on(
+      t.tenantId,
+      t.origin,
+      t.status,
+      t.createdAt,
+    ),
+    index("documents_tenant_folder_idx").on(
+      t.tenantId,
+      t.folderId,
+      t.createdAt.desc(),
+    ),
+    index("documents_tags_gin_idx").using("gin", t.tags),
+    foreignKey({
+      name: "documents_folder_fk",
+      columns: [t.tenantId, t.folderId],
+      foreignColumns: [documentFolders.tenantId, documentFolders.id],
+    }),
     check("documents_size_nonnegative", sql`${t.sizeBytes} >= 0`),
+    check("documents_origin_check", sql`${t.origin} in ('accounting', 'dms')`),
+    check(
+      "documents_visibility_check",
+      sql`${t.effectiveVisibility} in ('members', 'owners')`,
+    ),
+    check(
+      "documents_file_version_check",
+      sql`${t.fileVersionNo} >= 1 and ${t.fileVersionCount} >= ${t.fileVersionNo}`,
+    ),
+    check(
+      "documents_tags_cap",
+      sql`array_length(${t.tags}, 1) is null or array_length(${t.tags}, 1) <= 30`,
+    ),
+    check(
+      "documents_filed_at_requires_folder",
+      sql`${t.folderId} is not null or ${t.filedAt} is null`,
+    ),
   ],
 );
 
@@ -1296,6 +1374,290 @@ export const documentLinks = pgTable(
     check(
       "document_links_one_target",
       sql`num_nonnulls(${t.journalEntryId}, ${t.bankTransactionId}, ${t.invoiceId}, ${t.billId}) = 1`,
+    ),
+  ],
+);
+
+/* ------------------------------------------------------------------------
+ * Documents module (the DMS): the filing cabinet built ON the generic
+ * `documents` record above. Receipts keeps its own surface on the same
+ * table; `documents.origin` tells the two apart.
+ *
+ * The tree is an adjacency list (`parent_id`, the source of truth) PLUS a
+ * materialized `path`. The path is what makes cycle prevention a single
+ * string comparison (`newParent.path LIKE moving.path || '%'`) instead of a
+ * recursive CTE, and makes a subtree move one UPDATE. Trees are tiny,
+ * read-hot and write-cold, which is why a closure table would be overkill.
+ *
+ * `effective_visibility` is `visibility` rolled down the ancestor chain and
+ * denormalized onto both folders and documents, because it is compared
+ * directly inside the RLS policy (drizzle/0024). Recomputed in TypeScript
+ * (modules/documents/core/tree.ts), never by recursive SQL — flipping a
+ * mid-node back to 'members' must not re-open a descendant that declares
+ * itself 'owners', which a naive subtree UPDATE gets wrong.
+ * ---------------------------------------------------------------------- */
+
+export const documentFolders = pgTable(
+  "document_folders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Null = a root folder. Self composite FK, NO ACTION (see below). */
+    parentId: uuid("parent_id"),
+    name: text("name").notNull(),
+    /** lower(btrim(name)) — app-maintained; gives case-insensitive uniqueness. */
+    nameKey: text("name_key").notNull(),
+    /** '/<id-hex32>/…/' including self. Derived — see core/tree.ts. */
+    path: text("path").notNull(),
+    depth: integer("depth").notNull().default(1),
+    /** What was declared on THIS folder. */
+    visibility: text("visibility").notNull().default("members"),
+    /** Declared value rolled down the ancestor chain — the RLS predicate. */
+    effectiveVisibility: text("effective_visibility")
+      .notNull()
+      .default("members"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** Null = provisioned by the platform (the default folder set). */
+    createdByClerkUserId: text("created_by_clerk_user_id"),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_folders_tenant_id_id_idx").on(t.tenantId, t.id),
+    // TWO partial uniques, not one: parent_id is NULL at root and NULL <> NULL
+    // in a unique index, so a single (tenant, parent, name) unique would happily
+    // allow ten root folders called "Contracts".
+    uniqueIndex("document_folders_tenant_parent_name_idx")
+      .on(t.tenantId, t.parentId, t.nameKey)
+      .where(sql`${t.parentId} is not null`),
+    uniqueIndex("document_folders_tenant_root_name_idx")
+      .on(t.tenantId, t.nameKey)
+      .where(sql`${t.parentId} is null`),
+    index("document_folders_tenant_parent_idx").on(t.tenantId, t.parentId),
+    // The (tenant_id, path text_pattern_ops) prefix index is hand-written in
+    // drizzle/0024 — drizzle-kit cannot emit opclasses, and without it every
+    // subtree query silently seq-scans on a non-C collation.
+    foreignKey({
+      name: "document_folders_parent_fk",
+      columns: [t.tenantId, t.parentId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+    check(
+      "document_folders_no_self_parent",
+      sql`${t.parentId} is null or ${t.parentId} <> ${t.id}`,
+    ),
+    check(
+      "document_folders_visibility",
+      sql`${t.visibility} in ('members', 'owners')`,
+    ),
+    check(
+      "document_folders_eff_visibility",
+      sql`${t.effectiveVisibility} in ('members', 'owners')`,
+    ),
+    // A folder declared 'owners' can never be effectively 'members'.
+    check(
+      "document_folders_eff_implies",
+      sql`${t.visibility} <> 'owners' or ${t.effectiveVisibility} = 'owners'`,
+    ),
+    check("document_folders_depth", sql`${t.depth} between 1 and 10`),
+    check(
+      "document_folders_name_not_blank",
+      sql`length(btrim(${t.name})) > 0`,
+    ),
+    check("document_folders_path_format", sql`${t.path} ~ '^(/[0-9a-f]{32})+/$'`),
+  ],
+);
+
+/**
+ * File revision history. There is deliberately NO `documents.current_version_id`
+ * pointer — it would make a circular FK and leave "exactly one current" as an
+ * app invariant. The partial unique on `is_current` makes it a DATABASE
+ * invariant instead, and `documents` keeps the current version's blob columns
+ * denormalized so list pages, the stream route and ai/extract never join.
+ *
+ * `blob_pathname` is intentionally NOT unique here: restoring v1 creates a new
+ * row pointing at v1's existing blob — no byte copy, no re-hash, honest history.
+ */
+export const documentVersions = pgTable(
+  "document_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    versionNo: integer("version_no").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    fileName: text("file_name").notNull().default(""),
+    mimeType: text("mime_type").notNull().default(""),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
+    sha256: text("sha256").notNull().default(""),
+    isCurrent: boolean("is_current").notNull().default(true),
+    note: text("note").notNull().default(""),
+    /** Set when this row was produced by restoring an earlier version. */
+    restoredFromVersionId: uuid("restored_from_version_id"),
+    uploadedByClerkUserId: text("uploaded_by_clerk_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_versions_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("document_versions_doc_no_idx").on(
+      t.tenantId,
+      t.documentId,
+      t.versionNo,
+    ),
+    // Exactly one current version per document, enforced by the database.
+    // Non-deferrable: the swap must clear the old flag BEFORE inserting.
+    uniqueIndex("document_versions_current_idx")
+      .on(t.tenantId, t.documentId)
+      .where(sql`${t.isCurrent}`),
+    index("document_versions_tenant_doc_idx").on(
+      t.tenantId,
+      t.documentId,
+      t.versionNo,
+    ),
+    // PLAIN, not unique — a restore reuses an existing blob pathname.
+    index("document_versions_blob_idx").on(t.blobPathname),
+    foreignKey({
+      name: "document_versions_document_fk",
+      columns: [t.tenantId, t.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+    }).onDelete("cascade"),
+    check("document_versions_size_nonnegative", sql`${t.sizeBytes} >= 0`),
+    check("document_versions_no_positive", sql`${t.versionNo} >= 1`),
+  ],
+);
+
+/**
+ * Tag registry. `documents.tags` stores SLUGS from this table, so renaming a
+ * tag is a one-row update and never rewrites documents. Postgres cannot FK an
+ * array element — setDocumentTags is the single door that resolves slugs
+ * against this registry inside the transaction.
+ */
+export const documentTags = pgTable(
+  "document_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    /** A design-token name, never raw CSS. */
+    color: text("color").notNull().default(""),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_tags_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("document_tags_tenant_slug_idx").on(t.tenantId, t.slug),
+    check(
+      "document_tags_slug_format",
+      sql`${t.slug} ~ '^[a-z0-9][a-z0-9-]{0,48}$'`,
+    ),
+    check("document_tags_name_not_blank", sql`length(btrim(${t.name})) > 0`),
+  ],
+);
+
+/**
+ * Saved filter views. `query` is user-controlled JSON that becomes a WHERE
+ * clause — it MUST be re-parsed with the same Zod schema on read. Stored
+ * input, never trusted config.
+ */
+export const documentSavedViews = pgTable(
+  "document_saved_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    nameKey: text("name_key").notNull(),
+    scope: text("scope").notNull().default("tenant"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    query: jsonb("query")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    sortOrder: integer("sort_order").notNull().default(0),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_saved_views_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("document_saved_views_tenant_owner_name_idx").on(
+      t.tenantId,
+      t.createdByClerkUserId,
+      t.nameKey,
+    ),
+    check(
+      "document_saved_views_scope",
+      sql`${t.scope} in ('tenant', 'private')`,
+    ),
+    check(
+      "document_saved_views_name_not_blank",
+      sql`length(btrim(${t.name})) > 0`,
+    ),
+  ],
+);
+
+/**
+ * Per-tenant module settings. Provisioned when the module is enabled. The
+ * sharing / e-sign / AI columns are created now, unused, so the later phases
+ * (share links, template drafting) need no migration of their own.
+ */
+export const documentSettings = pgTable(
+  "document_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    sharingEnabled: boolean("sharing_enabled").notNull().default(true),
+    shareMaxTtlDays: integer("share_max_ttl_days").notNull().default(30),
+    esignEnabled: boolean("esign_enabled").notNull().default(false),
+    /** AI template drafting cooldown, claimed inside the gating transaction. */
+    aiLastTemplateAt: timestamp("ai_last_template_at", { withTimezone: true }),
+    aiTemplateCountDate: date("ai_template_count_date", { mode: "string" }),
+    aiTemplateCountToday: integer("ai_template_count_today")
+      .notNull()
+      .default(0),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_settings_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("document_settings_tenant_idx").on(t.tenantId),
+    check(
+      "document_settings_ttl_positive",
+      sql`${t.shareMaxTtlDays} between 1 and 365`,
+    ),
+    check(
+      "document_settings_ai_count_nonneg",
+      sql`${t.aiTemplateCountToday} >= 0`,
     ),
   ],
 );
@@ -1745,6 +2107,15 @@ export const retainerPurchases = pgTable(
 export type PlaidItem = typeof plaidItems.$inferSelect;
 export type Document = typeof documents.$inferSelect;
 export type DocumentLink = typeof documentLinks.$inferSelect;
+export type DocumentFolder = typeof documentFolders.$inferSelect;
+export type DocumentVersion = typeof documentVersions.$inferSelect;
+export type DocumentTag = typeof documentTags.$inferSelect;
+export type DocumentSavedView = typeof documentSavedViews.$inferSelect;
+export type DocumentSettings = typeof documentSettings.$inferSelect;
+/** The two surfaces sharing the `documents` table. */
+export type DocumentOrigin = "accounting" | "dms";
+/** Folder access: every member, or tenant owners only. Inherited by children. */
+export type DocumentVisibility = "members" | "owners";
 export type Vendor = typeof vendors.$inferSelect;
 export type Bill = typeof bills.$inferSelect;
 export type BillLine = typeof billLines.$inferSelect;

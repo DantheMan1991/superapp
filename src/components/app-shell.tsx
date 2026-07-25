@@ -10,6 +10,7 @@ import {
   Calculator,
   Clock,
   CreditCard,
+  FolderOpen,
   LayoutDashboard,
   Menu,
   ScrollText,
@@ -35,6 +36,7 @@ const ICONS: Record<string, LucideIcon> = {
   settings: Settings,
   wrench: Wrench,
   clock: Clock,
+  folder: FolderOpen,
 };
 
 export interface NavItem {

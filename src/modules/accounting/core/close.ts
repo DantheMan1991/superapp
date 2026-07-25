@@ -108,6 +108,10 @@ export async function getCloseChecklist(
     .where(
       and(
         eq(schema.documents.tenantId, tenantId),
+        // `documents` is shared with the Documents module. Without this term
+        // every unfiled DMS file would count as an unprocessed receipt and
+        // become a permanent month-end close blocker.
+        eq(schema.documents.origin, "accounting"),
         eq(schema.documents.status, "inbox"),
       ),
     );

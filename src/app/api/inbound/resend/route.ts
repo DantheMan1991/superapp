@@ -7,13 +7,14 @@ import { isModuleEnabled } from "@/lib/modules";
 import { getResend } from "@/lib/resend";
 import { tryExtractDocument } from "@/modules/accounting/ai/extract";
 import { isAllowedUpload } from "@/modules/accounting/documents/allowlist";
+import { routeInboundEmail } from "@/lib/inbound-address";
 import {
   EMAIL_INGEST_HOURLY_CAP,
   inboundEmailSchema,
   inboundRecipients,
-  parseInboundToken,
   selectEmailAttachments,
 } from "@/modules/accounting/documents/email";
+import { deliverToFolder } from "./folder-delivery";
 import {
   createDocumentRecord,
   sha256Hex,
@@ -62,8 +63,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const email = parsed.data;
 
-  const token = parseInboundToken(inboundRecipients(email), domain);
-  if (!token) return NextResponse.json({ ignored: true });
+  // Two features receive mail on this domain now. The prefix in the local
+  // part decides which, and an address can only ever match one of them.
+  const route = routeInboundEmail(inboundRecipients(email), domain);
+  if (!route) return NextResponse.json({ ignored: true });
+
+  if (route.kind === "docs") {
+    try {
+      const result = await deliverToFolder(route.token, {
+        emailId: email.data.email_id,
+        from: email.data.from,
+        subject: email.data.subject,
+        messageId: email.data.message_id,
+        receivedAt: email.data.created_at
+          ? new Date(email.data.created_at)
+          : new Date(),
+      });
+      // Unknown tokens answer 200 with no detail — same no-oracle, no-retry
+      // posture as the receipts path below.
+      return NextResponse.json({ ok: true, created: result.created });
+    } catch (err) {
+      console.error("folder email delivery failed", err);
+      // 500 so the provider retries; attachment-level idempotency makes the
+      // retry safe.
+      return NextResponse.json({ error: "delivery failed" }, { status: 500 });
+    }
+  }
+
+  const token = route.token;
 
   // Read-only god-view lookup: token → tenant. Writes never use this.
   const settings = await withSystem((tx) =>

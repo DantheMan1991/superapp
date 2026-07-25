@@ -13,6 +13,7 @@ import {
 import { listFolders, loadDocumentSettings } from "../folders";
 import { formatBytes } from "../lib/format";
 import { folderOptions } from "../lib/folder-labels";
+import { folderInboundAddress } from "../inbound";
 import { wouldCreateCycle } from "../core/tree";
 import { DocumentsNav } from "./documents-nav";
 import { DocumentRowMenu, UploadButton } from "./document-controls";
@@ -67,6 +68,9 @@ export async function FolderBrowser({
   // sharing-disabled tenant should not be offered it at all.
   const shareMaxTtlDays =
     settings && settings.sharingEnabled ? settings.shareMaxTtlDays : undefined;
+  // Undefined disables the folder-address option entirely — without a
+  // receiving domain there is no address to hand out.
+  const inboundDomain = process.env.INBOUND_EMAIL_DOMAIN ?? null;
 
   // Drop the move targets that would create a cycle — the same rule the server
   // enforces, applied in the UI so an impossible move is never offered.
@@ -154,6 +158,10 @@ export async function FolderBrowser({
                   inherited:
                     sub.effectiveVisibility === "owners" &&
                     sub.visibility !== "owners",
+                  inboundAddress:
+                    sub.inboundToken && inboundDomain
+                      ? folderInboundAddress(sub.inboundToken, inboundDomain)
+                      : null,
                 }}
                 isOwner={isOwner}
                 moveTargets={moveTargetsFor(sub.path)}

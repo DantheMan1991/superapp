@@ -510,6 +510,32 @@ Setup:
 
 ---
 
+## Emailing files into a Documents folder
+
+Any folder can be given its own forwarding address —
+`docs-<token>@in.yosherapp.com` — from **Documents → Browse → folder menu →
+Email files here**. A subcontractor or supplier emails attachments there and
+they land in that folder, already filed. No login, and no change for them.
+
+This uses the **inbound** domain (`INBOUND_EMAIL_DOMAIN`) that the receipts
+inbox already needs, so it works without a paid sending plan.
+
+Worth understanding before handing addresses out:
+
+- An address is an **anonymous write surface**. Anyone who has it can put files
+  in that folder. Addresses are therefore off by default and only an owner can
+  create one.
+- **Turning one off is immediate**, and switching it on again issues a
+  *different* address — the old one stops working. That is the fix if an
+  address ever leaks.
+- **Owners-only folders cannot have one**, and if a folder is made owners-only
+  later, delivery to its existing address stops.
+- Guardrails: 100 emailed files per folder per hour, the same upload allowlist
+  as manual uploads (re-checked against the real downloaded bytes), and
+  signature logos and tracking pixels are filtered out by size and disposition.
+
+---
+
 ## Document share links (`/s/...`)
 
 The Documents module can hand out a link that lets a client, subcontractor or

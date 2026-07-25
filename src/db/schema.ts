@@ -1419,6 +1419,15 @@ export const documentFolders = pgTable(
       .notNull()
       .default("members"),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Opt-in forwarding address: docs-<token>@<inbound domain>. Null = off,
+     * which is the default — an inbound address is an anonymous write surface
+     * and should exist only where someone asked for one.
+     *
+     * Stored lowercase and GLOBALLY unique: the webhook resolves it with no
+     * tenant context, the same reason document_shares.token_hash is global.
+     */
+    inboundToken: text("inbound_token"),
     /** Null = provisioned by the platform (the default folder set). */
     createdByClerkUserId: text("created_by_clerk_user_id"),
     version: integer("version").notNull().default(1),
@@ -1441,6 +1450,13 @@ export const documentFolders = pgTable(
       .on(t.tenantId, t.nameKey)
       .where(sql`${t.parentId} is null`),
     index("document_folders_tenant_parent_idx").on(t.tenantId, t.parentId),
+    uniqueIndex("document_folders_inbound_token_idx")
+      .on(t.inboundToken)
+      .where(sql`${t.inboundToken} is not null`),
+    check(
+      "document_folders_inbound_token_format",
+      sql`${t.inboundToken} is null or ${t.inboundToken} ~ '^[a-z0-9]{16,}$'`,
+    ),
     // The (tenant_id, path text_pattern_ops) prefix index is hand-written in
     // drizzle/0024 — drizzle-kit cannot emit opclasses, and without it every
     // subtree query silently seq-scans on a non-C collation.

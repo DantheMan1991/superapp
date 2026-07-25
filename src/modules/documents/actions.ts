@@ -16,6 +16,11 @@ import {
   setFolderVisibility,
   type DocsCtx,
 } from "./folder-ops";
+import {
+  disableFolderInbound,
+  enableFolderInbound,
+  folderInboundAddress,
+} from "./inbound";
 
 /**
  * Server actions for the Documents module. Canonical shape, same as the
@@ -209,6 +214,86 @@ export async function setFolderVisibilityAction(
     );
     revalidate();
     return { ok: true, data: result };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const inboundSchema = z.object({ folderId: z.string().uuid() });
+
+/**
+ * Give a folder its own email address, so a subcontractor can send drawings
+ * straight into it.
+ *
+ * Owner-only: it is an anonymous write surface — anyone who learns the address
+ * can put files in that folder — so switching one on is not a staff decision.
+ */
+export async function enableFolderInboundAction(
+  input: z.infer<typeof inboundSchema>,
+): Promise<ActionResult<{ address: string }>> {
+  try {
+    const ctx = await gate({ ownerOnly: true });
+    const parsed = inboundSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const domain = process.env.INBOUND_EMAIL_DOMAIN;
+    if (!domain) {
+      return {
+        error: "Email receiving isn't configured — add INBOUND_EMAIL_DOMAIN. See SETUP.md.",
+      };
+    }
+
+    const token = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const value = await enableFolderInbound(tx, ctx.tenantId, parsed.data.folderId);
+        await logAuditInTx(tx, {
+          action: "documents.folder_inbound_enabled",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "document_folder",
+          targetId: parsed.data.folderId,
+          // Never the token — it is the credential.
+          meta: {},
+        });
+        return value;
+      },
+      { role: ctx.role },
+    );
+
+    revalidate();
+    return { ok: true, data: { address: folderInboundAddress(token, domain) } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function disableFolderInboundAction(
+  input: z.infer<typeof inboundSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate({ ownerOnly: true });
+    const parsed = inboundSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await disableFolderInbound(tx, ctx.tenantId, parsed.data.folderId);
+        await logAuditInTx(tx, {
+          action: "documents.folder_inbound_disabled",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "document_folder",
+          targetId: parsed.data.folderId,
+          meta: {},
+        });
+      },
+      { role: ctx.role },
+    );
+
+    revalidate();
+    return { ok: true };
   } catch (err) {
     return fail(err);
   }

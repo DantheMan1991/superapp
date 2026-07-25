@@ -3,10 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
+  Copy,
   FolderPlus,
   Link2,
   Loader2,
   Lock,
+  Mail,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -42,6 +44,8 @@ import { Switch } from "@/components/ui/switch";
 import {
   createFolderAction,
   deleteFolderAction,
+  disableFolderInboundAction,
+  enableFolderInboundAction,
   moveFolderAction,
   renameFolderAction,
   setFolderVisibilityAction,
@@ -66,6 +70,8 @@ export interface FolderRow {
   effectiveVisibility: string;
   /** Restricted by an ancestor rather than by this folder itself. */
   inherited: boolean;
+  /** The folder's own email address, when one has been switched on. */
+  inboundAddress: string | null;
 }
 
 export function NewFolderButton({
@@ -176,6 +182,8 @@ export function FolderRowMenu({
   const [renaming, setRenaming] = useState(false);
   const [moving, setMoving] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [mailbox, setMailbox] = useState(false);
+  const [address, setAddress] = useState<string | null>(folder.inboundAddress);
   const [deleting, setDeleting] = useState(false);
   const [name, setName] = useState(folder.name);
   const [target, setTarget] = useState<string>("__root__");
@@ -230,6 +238,19 @@ export function FolderRowMenu({
               <DropdownMenuItem onSelect={() => setMoving(true)}>
                 Move to…
               </DropdownMenuItem>
+              {/* Owners-only folders are refused server-side; not offering it
+                  keeps people from discovering that by failing. */}
+              {folder.effectiveVisibility !== "owners" && (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setMailbox(true);
+                  }}
+                >
+                  <Mail className="size-4" />
+                  Email files here…
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onSelect={() =>
                   run(
@@ -280,6 +301,97 @@ export function FolderRowMenu({
           maxTtlDays={shareMaxTtlDays}
         />
       )}
+
+      <Dialog open={mailbox} onOpenChange={setMailbox}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Email files into “{folder.name}”</DialogTitle>
+            <DialogDescription>
+              Give this address to a subcontractor or supplier and anything they
+              attach lands straight in this folder. Nobody needs a login.
+            </DialogDescription>
+          </DialogHeader>
+
+          {address === null ? (
+            <p className="text-sm text-muted-foreground">
+              No address yet. Anyone who has the address can put files in this
+              folder, so only share it with people who should be able to.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <Label>Address</Label>
+              <div className="flex items-center gap-2">
+                <Input readOnly value={address} className="font-mono text-xs" />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Copy address"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(address);
+                    toast.success("Address copied");
+                  }}
+                >
+                  <Copy className="size-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Turning this off stops delivery immediately. Switching it on
+                again issues a different address — the old one stops working.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMailbox(false)}>
+              Close
+            </Button>
+            {address === null ? (
+              <Button
+                disabled={pending}
+                onClick={() =>
+                  startTransition(async () => {
+                    const result = await enableFolderInboundAction({
+                      folderId: folder.id,
+                    });
+                    if ("error" in result) {
+                      toast.error(result.error);
+                      return;
+                    }
+                    setAddress(result.data?.address ?? null);
+                    toast.success("Address created");
+                    router.refresh();
+                  })
+                }
+              >
+                {pending && <Loader2 className="size-4 animate-spin" />}
+                Create address
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={pending}
+                onClick={() =>
+                  startTransition(async () => {
+                    const result = await disableFolderInboundAction({
+                      folderId: folder.id,
+                    });
+                    if ("error" in result) {
+                      toast.error(result.error);
+                      return;
+                    }
+                    setAddress(null);
+                    toast.success("Address turned off");
+                    router.refresh();
+                  })
+                }
+              >
+                {pending && <Loader2 className="size-4 animate-spin" />}
+                Turn off
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={renaming} onOpenChange={setRenaming}>
         <DialogContent>

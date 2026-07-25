@@ -13,6 +13,24 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-25 — Email files into a folder (branch `claude/documents-inbound`)
+
+Opt-in forwarding address per folder: `docs-<token>@in.yosherapp.com`. A
+subcontractor emails revised drawings to the job folder's address and they file
+themselves — no login, no app, and no attachment stranded in somebody's
+personal inbox.
+
+Deliberately the half of the email story that needs **no paid sending plan**:
+receiving was already configured for the receipts inbox, so this works today
+while outbound waits on a Resend upgrade.
+
+Two shared libs came out of it, because receipts and folders now receive on the
+same domain: `src/lib/inbound-address.ts` (prefix routing, and the production
+lesson that Outlook lowercases forwarded addresses) and
+`src/lib/inbound-attachments.ts` (which files are documents versus signature
+logos). Accounting delegates to both and keeps its own exports, so its tests
+were untouched.
+
 ### 2026-07-25 — External share links (branch `claude/documents-shares`)
 
 Tokenised, expiring links that let a client, subcontractor or inspector open a
@@ -267,6 +285,22 @@ and "limit to N views" is an honest label.
 an egress amplifier: one leaked token pointed at a large file is an unbounded
 storage bill and nothing else in the system would stop it.
 
+**A folder's email address is an anonymous WRITE surface** — the mirror image
+of a share link. Anyone holding it can put files in that folder, so addresses
+are off by default, owner-only to create, and rotating one invalidates the old
+address. Controls are the unguessable token, a per-folder hourly cap, and the
+upload allowlist re-applied to the real downloaded bytes rather than the
+provider's claimed size.
+
+**Delivery stops if the folder later becomes owners-only.** The address was
+handed to an outsider while the folder was open; continuing to accept mail
+would let a third party keep writing into somewhere the business has since
+closed. Same instinct as a share link suspending itself, and there is a test.
+
+**Emailed files arrive already filed**, not in the Inbox. A drawing sent to the
+job folder should be *in* the job folder — routing it to an inbox for someone
+to sort defeats the point of giving out the address.
+
 ## Open items
 
 - **Versions, tags and saved views have tables but no UI yet** — the schema
@@ -280,10 +314,14 @@ storage bill and nothing else in the system would stop it.
   saved-view query schema anticipates the rest.
 - **Templates/generation and e-signature** — designed and phased, not built.
   `document_settings` already carries their columns.
-- **Share links have no email delivery** — the owner copies the URL and sends
-  it themselves. The outbound email spine is its own phase, and it also
-  unblocks invoice emailing. Rule for when it lands: never send a passcode in
-  the same message as the link.
+- **Share links can be emailed, but nothing actually sends yet** — the outbound
+  spine is built and `emailShareAction` uses it, but no sending domain is
+  verified in Resend. See `docs/modules/email.md`.
+- **No sender allowlist on folder addresses.** Anyone with the address can
+  deliver. Restricting to particular sender domains ("only @acmesubs.com") is
+  the obvious next control if one ever gets abused.
+- **No notification when a file arrives by email.** It appears in the folder
+  silently; nobody is told. That wants the outbound spine.
 - **No per-link activity drawer yet** — `document_share_events` is written and
   readable, and the list page shows an open count and last-accessed date, but
   the full "opened from 203.0.113.x, 2 hours ago" feed is unbuilt.

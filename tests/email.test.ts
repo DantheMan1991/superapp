@@ -11,7 +11,7 @@ import {
   resolveSender,
   sanitizeDisplayName,
 } from "@/lib/email/identity";
-import { applyDevGuard } from "@/lib/email/send";
+import { applyDevGuard, isLiveSendEnvironment } from "@/lib/email/send";
 
 /**
  * The email spine. The pure block is the important one: resolveSender decides
@@ -155,8 +155,9 @@ describe("dev-environment guard", () => {
     expect("to" in result).toBe(false);
   });
 
-  it("passes through untouched in production", () => {
+  it("passes through untouched in real production", () => {
     const result = applyDevGuard("client@realcompany.com", "Your invoice", {
+      vercelEnv: "production",
       nodeEnv: "production",
       redirect: undefined,
     });
@@ -166,12 +167,44 @@ describe("dev-environment guard", () => {
     });
   });
 
+  /**
+   * The case that makes VERCEL_ENV necessary: Vercel builds previews with
+   * NODE_ENV=production, so keying on NODE_ENV alone would let a branch
+   * preview mail real customers.
+   */
+  it("redirects on a Vercel preview even though NODE_ENV says production", () => {
+    const result = applyDevGuard("client@realcompany.com", "Your invoice", {
+      vercelEnv: "preview",
+      nodeEnv: "production",
+      redirect: "me@example.com",
+    });
+    expect(result).toMatchObject({ to: "me@example.com" });
+  });
+
+  it("refuses on a preview with no redirect configured", () => {
+    const result = applyDevGuard("client@realcompany.com", "x", {
+      vercelEnv: "preview",
+      nodeEnv: "production",
+      redirect: undefined,
+    });
+    expect(result).toHaveProperty("blocked");
+  });
+
   it("treats test runs as non-production", () => {
     const result = applyDevGuard("client@realcompany.com", "x", {
       nodeEnv: "test",
       redirect: "me@example.com",
     });
     expect(result).toMatchObject({ to: "me@example.com" });
+  });
+
+  it("falls back to NODE_ENV when not on Vercel", () => {
+    expect(isLiveSendEnvironment({ nodeEnv: "production" })).toBe(true);
+    expect(isLiveSendEnvironment({ nodeEnv: "development" })).toBe(false);
+    // VERCEL_ENV wins whenever it is present.
+    expect(
+      isLiveSendEnvironment({ vercelEnv: "preview", nodeEnv: "production" }),
+    ).toBe(false);
   });
 });
 

@@ -69,6 +69,16 @@ export async function countDocumentsByFolder(
   return { byFolder, inbox };
 }
 
+/**
+ * The tenant's module settings. Member-readable but never member-writable —
+ * the share TTL ceiling and the AI budget are platform-governed knobs.
+ */
+export async function loadDocumentSettings(tx: Tx, tenantId: string) {
+  return tx.query.documentSettings.findFirst({
+    where: eq(schema.documentSettings.tenantId, tenantId),
+  });
+}
+
 /** Root folders only — the top level of the cabinet. */
 export async function listRootFolders(
   tx: Tx,

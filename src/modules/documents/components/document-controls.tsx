@@ -5,6 +5,7 @@ import { useRef, useState, useTransition } from "react";
 import { upload as uploadPresigned } from "@vercel/blob/client";
 import {
   FolderInput,
+  Link2,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -48,6 +49,7 @@ import {
   updateDocumentAction,
 } from "../document-actions";
 import { Input } from "@/components/ui/input";
+import { ShareDialog } from "./share-controls";
 
 export interface FolderChoice {
   id: string;
@@ -149,6 +151,7 @@ export function DocumentRowMenu({
   version,
   title,
   fileName,
+  shareMaxTtlDays,
 }: {
   documentId: string;
   folders: FolderChoice[];
@@ -157,9 +160,12 @@ export function DocumentRowMenu({
   version?: number;
   title?: string;
   fileName?: string;
+  /** Present only where sharing makes sense (a filed document). */
+  shareMaxTtlDays?: number;
 }) {
   const router = useRouter();
   const [filing, setFiling] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title ?? "");
   const [target, setTarget] = useState("__inbox__");
@@ -214,6 +220,18 @@ export function DocumentRowMenu({
                 <FolderInput className="size-4" />
                 File into…
               </DropdownMenuItem>
+              {shareMaxTtlDays !== undefined && (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    // Keep the menu from closing the dialog it just opened.
+                    e.preventDefault();
+                    setSharing(true);
+                  }}
+                >
+                  <Link2 className="size-4" />
+                  Share link…
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 variant="destructive"
                 onSelect={() =>
@@ -230,6 +248,17 @@ export function DocumentRowMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {shareMaxTtlDays !== undefined && (
+        <ShareDialog
+          open={sharing}
+          onOpenChange={setSharing}
+          scope="document"
+          targetId={documentId}
+          targetName={title || fileName || "this file"}
+          maxTtlDays={shareMaxTtlDays}
+        />
+      )}
 
       <Dialog open={renaming} onOpenChange={setRenaming}>
         <DialogContent>

@@ -1662,6 +1662,172 @@ export const documentSettings = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * Share links: anonymous, tokenised read access to a file or a folder.
+ *
+ * The token itself is never stored. `token_hash` is a keyed HMAC used for
+ * lookup, and `token_ciphertext` is the token under AES-GCM so an owner can
+ * copy the URL again weeks later — an audited reveal rather than a column
+ * anyone with database access reads silently. Both keys live in the
+ * environment, so a database-only compromise yields nothing.
+ *
+ * `token_hash` is GLOBALLY unique, with no tenant prefix, because the public
+ * lookup has no tenant context to scope by — the same reasoning as
+ * documents_blob_pathname_idx.
+ * ---------------------------------------------------------------------- */
+
+export const documentShares = pgTable(
+  "document_shares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Exactly one of these two — CHECK below. */
+    documentId: uuid("document_id"),
+    folderId: uuid("folder_id"),
+    tokenHash: text("token_hash").notNull(),
+    tokenCiphertext: text("token_ciphertext").notNull(),
+    label: text("label").notNull().default(""),
+    /** false = view-only. A UX affordance, never a security control. */
+    canDownload: boolean("can_download").notNull().default(false),
+    /** scrypt, base64(salt).base64(hash). Null = no passcode. */
+    passcodeHash: text("passcode_hash"),
+    /** No never-expiring anonymous links. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    maxUses: integer("max_uses"),
+    useCount: integer("use_count").notNull().default(0),
+    failedUnlockCount: integer("failed_unlock_count").notNull().default(0),
+    /**
+     * The root's visibility when the link was created. If the folder later
+     * becomes stricter the share suspends itself rather than continuing to
+     * expose a subtree the owner has since closed.
+     */
+    createdRootVisibility: text("created_root_visibility").notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    revokedByClerkUserId: text("revoked_by_clerk_user_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_shares_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("document_shares_token_hash_idx").on(t.tokenHash),
+    index("document_shares_tenant_document_idx")
+      .on(t.tenantId, t.documentId)
+      .where(sql`${t.documentId} is not null`),
+    index("document_shares_tenant_folder_idx")
+      .on(t.tenantId, t.folderId)
+      .where(sql`${t.folderId} is not null`),
+    index("document_shares_tenant_active_idx").on(
+      t.tenantId,
+      t.revokedAt,
+      t.expiresAt,
+    ),
+    foreignKey({
+      name: "document_shares_document_fk",
+      columns: [t.tenantId, t.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "document_shares_folder_fk",
+      columns: [t.tenantId, t.folderId],
+      foreignColumns: [documentFolders.tenantId, documentFolders.id],
+    }).onDelete("cascade"),
+    // Same shape as document_links_one_target.
+    check(
+      "document_shares_one_scope",
+      sql`num_nonnulls(${t.documentId}, ${t.folderId}) = 1`,
+    ),
+    check(
+      "document_shares_expiry_forward",
+      sql`${t.expiresAt} > ${t.createdAt}`,
+    ),
+    check(
+      "document_shares_max_uses_positive",
+      sql`${t.maxUses} is null or ${t.maxUses} > 0`,
+    ),
+    check("document_shares_use_count_nonneg", sql`${t.useCount} >= 0`),
+    check(
+      "document_shares_root_visibility",
+      sql`${t.createdRootVisibility} in ('members', 'owners')`,
+    ),
+  ],
+);
+
+/**
+ * Per-link access log — the tenant's evidence that a recipient did or did not
+ * open what they were sent. member_read only: this is a record members
+ * consult, not one they author.
+ */
+export const documentShareEvents = pgTable(
+  "document_share_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    shareId: uuid("share_id").notNull(),
+    /** Set on file fetches inside a folder share. */
+    documentId: uuid("document_id"),
+    kind: text("kind").notNull(),
+    ipHash: text("ip_hash").notNull().default(""),
+    userAgentHash: text("user_agent_hash").notNull().default(""),
+    bytesSent: bigint("bytes_sent", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_share_events_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("document_share_events_share_idx").on(
+      t.tenantId,
+      t.shareId,
+      t.createdAt,
+    ),
+    foreignKey({
+      name: "document_share_events_share_fk",
+      columns: [t.tenantId, t.shareId],
+      foreignColumns: [documentShares.tenantId, documentShares.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "document_share_events_document_fk",
+      columns: [t.tenantId, t.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+    }),
+    check("document_share_events_bytes_nonneg", sql`${t.bytesSent} >= 0`),
+  ],
+);
+
+/**
+ * Anonymous probe and failed-unlock counters. Deliberately has NO tenant_id:
+ * an attacker guessing tokens belongs to no tenant, and forcing these rows
+ * into a tenant-scoped table would either need a nullable tenant_id (breaking
+ * the FK and RLS story) or attribute an attacker's traffic to a victim.
+ * Superadmin-only, like interview_sessions.
+ */
+export const publicAccessAttempts = pgTable(
+  "public_access_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(),
+    ipHash: text("ip_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("public_access_attempts_ip_idx").on(t.ipHash, t.kind, t.createdAt),
+    index("public_access_attempts_created_idx").on(t.createdAt),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -2112,6 +2278,23 @@ export type DocumentVersion = typeof documentVersions.$inferSelect;
 export type DocumentTag = typeof documentTags.$inferSelect;
 export type DocumentSavedView = typeof documentSavedViews.$inferSelect;
 export type DocumentSettings = typeof documentSettings.$inferSelect;
+export type DocumentShare = typeof documentShares.$inferSelect;
+export type DocumentShareEvent = typeof documentShareEvents.$inferSelect;
+/** Derived, never stored — see modules/documents/shares/status.ts. */
+export type ShareStatus =
+  | "active"
+  | "revoked"
+  | "expired"
+  | "exhausted"
+  | "locked"
+  | "suspended";
+export type ShareEventKind =
+  | "viewed"
+  | "unlocked"
+  | "downloaded"
+  | "denied_passcode"
+  | "denied_scope"
+  | "budget_hit";
 /** The two surfaces sharing the `documents` table. */
 export type DocumentOrigin = "accounting" | "dms";
 /** Folder access: every member, or tenant owners only. Inherited by children. */

@@ -28,7 +28,12 @@ export type DocsErrorCode =
   | "TAG_LIMIT"
   | "VIEW_NOT_FOUND"
   | "VIEW_NAME_TAKEN"
-  | "SEARCH_QUERY_INVALID";
+  | "SEARCH_QUERY_INVALID"
+  | "SHARE_NOT_FOUND"
+  | "SHARE_LIMIT"
+  | "SHARE_TTL_TOO_LONG"
+  | "SHARE_ROOT_RESTRICTED"
+  | "SHARING_DISABLED";
 
 export class DocsError extends Error {
   constructor(
@@ -76,6 +81,12 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
   VIEW_NOT_FOUND: "That saved view no longer exists.",
   VIEW_NAME_TAKEN: "You already have a saved view with that name.",
   SEARCH_QUERY_INVALID: "That search couldn't be read — try simpler terms.",
+  SHARE_NOT_FOUND: "That link no longer exists.",
+  SHARE_LIMIT: "That's the maximum number of active links.",
+  SHARE_TTL_TOO_LONG: "That's longer than this business allows a link to live.",
+  SHARE_ROOT_RESTRICTED:
+    "Owners-only files and folders can't be shared outside the business. Move it somewhere shared first, or turn off owners-only.",
+  SHARING_DISABLED: "Sharing is switched off for this business.",
 };
 
 export function friendlyMessage(err: unknown): string {

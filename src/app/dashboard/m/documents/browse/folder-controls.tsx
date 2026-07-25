@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
   FolderPlus,
+  Link2,
   Loader2,
   Lock,
   MoreHorizontal,
@@ -45,6 +46,7 @@ import {
   renameFolderAction,
   setFolderVisibilityAction,
 } from "@/modules/documents/actions";
+import { ShareDialog } from "@/modules/documents/components/share-controls";
 
 /**
  * Client controls for the folder browser. Server components fetch and lay
@@ -163,14 +165,17 @@ export function FolderRowMenu({
   folder,
   isOwner,
   moveTargets,
+  shareMaxTtlDays,
 }: {
   folder: FolderRow;
   isOwner: boolean;
   moveTargets: FolderOption[];
+  shareMaxTtlDays?: number;
 }) {
   const router = useRouter();
   const [renaming, setRenaming] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [name, setName] = useState(folder.name);
   const [target, setTarget] = useState<string>("__root__");
@@ -206,6 +211,20 @@ export function FolderRowMenu({
             <Pencil className="size-4" />
             Rename
           </DropdownMenuItem>
+          {/* Owners-only folders are refused server-side; hiding the option
+              here keeps people from discovering that by failing. */}
+          {shareMaxTtlDays !== undefined &&
+            folder.effectiveVisibility !== "owners" && (
+              <DropdownMenuItem
+                onSelect={(e) => {
+                  e.preventDefault();
+                  setSharing(true);
+                }}
+              >
+                <Link2 className="size-4" />
+                Share link…
+              </DropdownMenuItem>
+            )}
           {isOwner && (
             <>
               <DropdownMenuItem onSelect={() => setMoving(true)}>
@@ -250,6 +269,17 @@ export function FolderRowMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {shareMaxTtlDays !== undefined && (
+        <ShareDialog
+          open={sharing}
+          onOpenChange={setSharing}
+          scope="folder"
+          targetId={folder.id}
+          targetName={folder.name}
+          maxTtlDays={shareMaxTtlDays}
+        />
+      )}
 
       <Dialog open={renaming} onOpenChange={setRenaming}>
         <DialogContent>

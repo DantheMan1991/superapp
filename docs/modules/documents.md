@@ -13,6 +13,30 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-25 — External share links (branch `claude/documents-shares`)
+
+Tokenised, expiring links that let a client, subcontractor or inspector open a
+file or a job folder with no login: `/s/<token>`. Three tables (`0028`/`0029`),
+a public page and stream route, a management page, and `robots.ts`.
+
+**The v1 restriction that shapes the whole design: a share root must be visible
+to all members.** Owners-only content cannot be shared externally at all. That
+is not just a policy choice — it is what lets the public route run `withTenant`
+at role `staff`, so *RLS itself* prunes restricted content out of every share
+and the pure scope function is a second layer rather than the only one. It also
+matches intent: a folder someone deliberately hid from their own staff should
+not be reachable by a stranger with a URL.
+
+The token is never stored. `token_hash` (keyed HMAC) is the lookup key and
+`token_ciphertext` (AES-GCM) exists so an owner can copy the URL again — an
+audited reveal rather than a plaintext column. Both keys live in the
+environment, so a database-only compromise yields no working links.
+
+New env var **`SHARE_SECRET`** (fail-closed), with labelled derivation for
+token hashing, IP hashing and unlock-cookie signing — one secret to set and
+rotate instead of three. Rotating it invalidates every outstanding link, which
+is the deliberate emergency lever.
+
 ### 2026-07-25 — Search, trash view, rename (branch `claude/documents-search`)
 
 Full-text search over the cabinet: a generated `search_tsv` STORED column
@@ -76,7 +100,10 @@ Decisions.
 | `document_versions` | File revision history | Partial unique on `is_current` makes "exactly one current" a DB invariant. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag |
 | `document_tags` | Tenant tag registry | `documents.tags text[]` stores slugs from here, so a rename never rewrites documents. Slug format enforced by CHECK |
 | `document_saved_views` | Saved filters | `query` jsonb is stored USER INPUT that becomes a WHERE clause — must be re-parsed with Zod on read |
-| `document_settings` | Per-tenant module knobs | `member_read` only (platform-governed). Share/e-sign/AI columns created now, unused, so later phases need no migration |
+| `document_settings` | Per-tenant module knobs | `member_read` only (platform-governed). E-sign/AI columns created now, unused, so later phases need no migration |
+| `document_shares` | Anonymous link grants | `token_hash` GLOBALLY unique (the public lookup has no tenant to scope by). XOR document/folder scope. `expires_at` NOT NULL — no permanent anonymous links. `created_root_visibility` snapshot drives self-suspension |
+| `document_share_events` | Per-link access log | `member_read` ONLY — evidence in a dispute, so members read it and only `recordShareEvent` (withSystem) writes it |
+| `public_access_attempts` | Anonymous probe counters | **No `tenant_id` at all.** An attacker guessing tokens is nobody's data, and attributing that traffic to whichever tenant they hit would be wrong. Superadmin-only |
 
 Migrations: `drizzle/0023_documents_dms.sql` (+ two hand edits, see Decisions)
 and `drizzle/0024_documents_dms_rls.sql` (custom: the role function, the
@@ -96,6 +123,14 @@ replaced `documents` policy, policies for the five new tables).
 - `src/modules/documents/lib/folder-labels.ts` — "Contracts / 2026 / Acme"
   labels derived from the materialized path; degrades gracefully when RLS has
   hidden an ancestor.
+- `src/lib/public-token.ts` — mint/hash/verify for anonymous credentials, plus
+  scrypt passcodes and unlock-cookie signing. One `SHARE_SECRET`, derived per
+  purpose.
+- `src/modules/documents/shares/` — `status.ts` (derived status truth table),
+  `scope.ts` (pruning rules), `resolve.ts` (the token→tenant hop),
+  `contents.ts` (what a recipient sees), `limits.ts`, `events.ts`, `shares.ts`.
+- `src/app/s/[token]/` — the public surface. Nothing else in the app renders
+  without a session.
 - `src/modules/documents/templates/apply.ts` — provisioning, called from
   `toggleModule` in `src/app/admin/actions.ts`.
 - `src/lib/blob-stream.ts` — **the single way a stored blob reaches a
@@ -207,6 +242,31 @@ hard `.limit(200)`, which is right for a chart of accounts and wrong for a
 filing cabinet. Browse uses a keyset cursor on `(created_at DESC, id DESC)`,
 matching `documents_tenant_folder_idx`.
 
+**The public surface gives nothing away.** Unknown token, revoked, expired,
+used up, locked, suspended, module switched off, tenant gone, file trashed —
+all render the identical page with identical words. The invalid-token path
+burns a decoy scrypt so it is not measurably faster than a real
+wrong-passcode check either. Verified in a logged-out browser: a
+one-character-different token is byte-identical to a revoked one.
+
+**`withSystem` does the token→tenant hop and nothing else.** It never accepts a
+caller-supplied tenant, document or folder id; every read after it is
+`withTenant`. Widening that single lookup is the most dangerous refactor in
+this module — the inbound-email webhook has the same rule for the same reason.
+
+**Scope is re-checked on every file request**, not trusted from the listing.
+The landing page is a render; the stream route is the gate. A file that left
+the share between the two — trashed, moved somewhere private, link revoked —
+is refused even though it was on screen a second ago.
+
+**`max_uses` counts VIEWS, not devices.** A reload is a view. The alternative
+needs a cookie minted during render, which React Server Components cannot do,
+and "limit to N views" is an honest label.
+
+**Byte budgets are a cost control, not only a security one.** A public link is
+an egress amplifier: one leaked token pointed at a large file is an unbounded
+storage bill and nothing else in the system would stop it.
+
 ## Open items
 
 - **Versions, tags and saved views have tables but no UI yet** — the schema
@@ -218,8 +278,21 @@ matching `documents_tenant_folder_idx`.
 - **Search is global or folder-scoped only** — no tag or kind facets, because
   there is no tag UI yet. `searchDocuments` already takes `folderPath`; the
   saved-view query schema anticipates the rest.
-- **External share links, templates/generation, e-signature** — designed and
-  phased, not built. `document_settings` already carries their columns.
+- **Templates/generation and e-signature** — designed and phased, not built.
+  `document_settings` already carries their columns.
+- **Share links have no email delivery** — the owner copies the URL and sends
+  it themselves. The outbound email spine is its own phase, and it also
+  unblocks invoice emailing. Rule for when it lands: never send a passcode in
+  the same message as the link.
+- **No per-link activity drawer yet** — `document_share_events` is written and
+  readable, and the list page shows an open count and last-accessed date, but
+  the full "opened from 203.0.113.x, 2 hours ago" feed is unbuilt.
+- **A link-scanning security appliance that pre-fetches URLs will burn a view
+  and log one.** Worth saying plainly if an activity feed ever implies a human
+  looked.
+- **The complete fix for serving user content is a separate origin**
+  (`files.yosher-usercontent.com`). The sandbox CSP holds the line until then,
+  and the stream route was written origin-agnostic so it can move.
 - **No hard delete, and no blob is ever deleted** — same retention rule as the
   Receipts tool. A blob janitor is unbuilt.
 - **`deleteFolder` with `move_to_parent` can throw `FOLDER_NAME_TAKEN`** if a

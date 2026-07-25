@@ -10,7 +10,7 @@ import {
   loadAncestors,
   loadFolderById,
 } from "../browse";
-import { listFolders } from "../folders";
+import { listFolders, loadDocumentSettings } from "../folders";
 import { formatBytes } from "../lib/format";
 import { folderOptions } from "../lib/folder-labels";
 import { wouldCreateCycle } from "../core/tree";
@@ -50,18 +50,23 @@ export async function FolderBrowser({
         folderId === null ? null : await loadFolderById(tx, ctx.tenant.id, folderId);
       if (folderId !== null && folder === null) return null;
 
-      const [contents, ancestors, allFolders] = await Promise.all([
+      const [contents, ancestors, allFolders, settings] = await Promise.all([
         listFolderContents(tx, ctx.tenant.id, { folderId, cursor }),
         folder ? loadAncestors(tx, ctx.tenant.id, folder) : Promise.resolve([]),
         listFolders(tx, ctx.tenant.id),
+        loadDocumentSettings(tx, ctx.tenant.id),
       ]);
-      return { folder, contents, ancestors, allFolders };
+      return { folder, contents, ancestors, allFolders, settings };
     },
     { role: ctx.role },
   );
 
   if (data === null) notFound();
-  const { folder, contents, ancestors, allFolders } = data;
+  const { folder, contents, ancestors, allFolders, settings } = data;
+  // Undefined disables the share option entirely — an unprovisioned or
+  // sharing-disabled tenant should not be offered it at all.
+  const shareMaxTtlDays =
+    settings && settings.sharingEnabled ? settings.shareMaxTtlDays : undefined;
 
   // Drop the move targets that would create a cycle — the same rule the server
   // enforces, applied in the UI so an impossible move is never offered.
@@ -152,6 +157,7 @@ export async function FolderBrowser({
                 }}
                 isOwner={isOwner}
                 moveTargets={moveTargetsFor(sub.path)}
+                shareMaxTtlDays={shareMaxTtlDays}
               />
             </div>
           ))}
@@ -183,6 +189,7 @@ export async function FolderBrowser({
                 version={doc.version}
                 title={doc.title}
                 fileName={doc.fileName}
+                shareMaxTtlDays={shareMaxTtlDays}
               />
             </div>
           ))}

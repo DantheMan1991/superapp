@@ -1828,6 +1828,125 @@ export const publicAccessAttempts = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * Outbound email. Platform machinery, not a module: invoices, share links and
+ * signature requests all send through the same spine.
+ *
+ * The product decision this exists to serve: mail should come FROM the client's
+ * own domain, not from ours. You cannot simply put their address in the From
+ * header — SPF/DKIM alignment would fail and DMARC would reject it — so a
+ * tenant proves ownership by adding DNS records, and until they do, sending
+ * falls back to the platform domain with Reply-To pointed at them.
+ * ---------------------------------------------------------------------- */
+
+export const emailDomains = pgTable(
+  "email_domains",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The sending domain, usually a subdomain: mail.acmebuilders.com */
+    domain: text("domain").notNull(),
+    /** The provider's id for this domain; null until creation succeeds. */
+    providerDomainId: text("provider_domain_id"),
+    /** pending | verified | failed */
+    status: text("status").notNull().default("pending"),
+    /** Normalized DNS records for the setup wizard to display. */
+    dnsRecords: jsonb("dns_records")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** The part before the @. "invoices" -> invoices@mail.acmebuilders.com */
+    fromLocalPart: text("from_local_part").notNull().default("notifications"),
+    /** Display name; defaults to the tenant's name at send time when blank. */
+    fromName: text("from_name").notNull().default(""),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("email_domains_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One sending domain per tenant in v1.
+    uniqueIndex("email_domains_tenant_idx").on(t.tenantId),
+    // A domain can only be claimed once across the platform — otherwise two
+    // tenants could both try to send as the same domain.
+    uniqueIndex("email_domains_domain_idx").on(t.domain),
+    check(
+      "email_domains_status_check",
+      sql`${t.status} in ('pending', 'verified', 'failed')`,
+    ),
+    check(
+      "email_domains_local_part_format",
+      sql`${t.fromLocalPart} ~ '^[a-z0-9][a-z0-9._-]{0,62}$'`,
+    ),
+    check("email_domains_domain_not_blank", sql`length(${t.domain}) > 3`),
+  ],
+);
+
+/**
+ * The send log. Members read it — "did that invoice actually arrive?" is a
+ * question they need answered — but only trusted server code writes it, so
+ * a delivery status can never be forged.
+ *
+ * Recipient addresses are stored in the clear, deliberately. They are the
+ * tenant's own record of their own correspondence, sitting behind RLS, and a
+ * send log that cannot tell you who you sent to is not a send log. They are
+ * kept OUT of the audit log, which is identifiers-only and superadmin-visible.
+ */
+export const outboundEmails = pgTable(
+  "outbound_emails",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** share_link | invoice | esign | ... */
+    kind: text("kind").notNull(),
+    toAddress: text("to_address").notNull(),
+    /** Split out so deliverability can be reasoned about per recipient domain. */
+    toDomain: text("to_domain").notNull().default(""),
+    subject: text("subject").notNull().default(""),
+    /** What we actually sent as — the whole point of the domain feature. */
+    fromAddress: text("from_address").notNull().default(""),
+    /** True when sent from the tenant's own verified domain. */
+    fromTenantDomain: boolean("from_tenant_domain").notNull().default(false),
+    providerMessageId: text("provider_message_id"),
+    /** queued | sent | delivered | bounced | complained | failed */
+    status: text("status").notNull().default("queued"),
+    /** Makes a retried action a no-op instead of a second email. */
+    idempotencyKey: text("idempotency_key").notNull(),
+    error: text("error").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("outbound_emails_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("outbound_emails_idempotency_idx").on(
+      t.tenantId,
+      t.idempotencyKey,
+    ),
+    index("outbound_emails_tenant_created_idx").on(t.tenantId, t.createdAt),
+    // The webhook looks messages up by provider id, with no tenant context.
+    index("outbound_emails_provider_idx")
+      .on(t.providerMessageId)
+      .where(sql`${t.providerMessageId} is not null`),
+    check(
+      "outbound_emails_status_check",
+      sql`${t.status} in ('queued', 'sent', 'delivered', 'bounced', 'complained', 'failed')`,
+    ),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -2278,6 +2397,18 @@ export type DocumentVersion = typeof documentVersions.$inferSelect;
 export type DocumentTag = typeof documentTags.$inferSelect;
 export type DocumentSavedView = typeof documentSavedViews.$inferSelect;
 export type DocumentSettings = typeof documentSettings.$inferSelect;
+export type EmailDomain = typeof emailDomains.$inferSelect;
+export type OutboundEmail = typeof outboundEmails.$inferSelect;
+/** One normalized DNS row for the setup wizard. */
+export type EmailDnsRecord = {
+  record: string;
+  type: string;
+  name: string;
+  value: string;
+  ttl: string;
+  priority?: number;
+  status?: string;
+};
 export type DocumentShare = typeof documentShares.$inferSelect;
 export type DocumentShareEvent = typeof documentShareEvents.$inferSelect;
 /** Derived, never stored — see modules/documents/shares/status.ts. */

@@ -145,6 +145,7 @@ export default async function SharedLinksPage() {
                       version={share.version}
                       status={status}
                       isOwner={ctx.role === "owner"}
+                      hasPasscode={share.passcodeHash !== null}
                     />
                   </TableCell>
                 </TableRow>

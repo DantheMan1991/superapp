@@ -7,6 +7,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { decryptSecret } from "@/lib/crypto";
+import { sendEmail } from "@/lib/email/send";
 import { isShareSecretConfigured } from "@/lib/public-token";
 import { DocsError, friendlyMessage } from "./core/errors";
 import type { DocsCtx } from "./folder-ops";
@@ -190,6 +191,124 @@ export async function revealShareUrlAction(
   } catch (err) {
     return fail(err);
   }
+}
+
+const emailSchema = z.object({
+  shareId: z.string().uuid(),
+  to: z.array(z.string().min(6).max(254)).min(1).max(10),
+  message: z.string().max(1000).default(""),
+});
+
+/**
+ * Email a link instead of copying it.
+ *
+ * Refuses outright when the link has a passcode. A link and the passcode that
+ * opens it in the same message is not two factors — it is one factor and a
+ * longer email. The owner delivers the passcode by phone or text.
+ */
+export async function emailShareAction(
+  input: z.infer<typeof emailSchema>,
+): Promise<ActionResult<{ sent: number; sentFrom: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = emailSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const prepared = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const share = await loadShare(tx, ctx.tenantId, parsed.data.shareId);
+        if (share.passcodeHash) {
+          throw new DocsError(
+            "SHARE_HAS_PASSCODE",
+            "cannot email a passcode-protected link",
+          );
+        }
+        if (share.revokedAt) {
+          throw new DocsError("SHARE_NOT_FOUND", "link is off");
+        }
+        return {
+          url: shareUrl(decryptSecret(share.tokenCiphertext)),
+          label: share.label,
+          expiresAt: share.expiresAt,
+        };
+      },
+      { role: ctx.role },
+    );
+
+    const tenantName = (await requireTenant()).tenant.name;
+    let sent = 0;
+    let sentFrom = "";
+    for (const recipient of parsed.data.to) {
+      const result = await sendEmail({
+        tenantId: ctx.tenantId,
+        kind: "share_link",
+        to: recipient,
+        subject: `${tenantName} shared "${prepared.label}" with you`,
+        text: buildShareEmail({
+          tenantName,
+          label: prepared.label,
+          url: prepared.url,
+          message: parsed.data.message,
+          expiresAt: prepared.expiresAt,
+        }),
+        // Derived from what the message IS, so a double-click or a retry
+        // cannot send the same person the same link twice.
+        idempotencyKey: `share:${parsed.data.shareId}:${recipient.toLowerCase()}`,
+      });
+      if (result.ok) {
+        sent += 1;
+        sentFrom = result.sentAs.fromAddress;
+      } else if (result.reason !== "invalid_recipient") {
+        return { error: result.message };
+      }
+    }
+
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        logAuditInTx(tx, {
+          action: "share.emailed",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "document_share",
+          targetId: parsed.data.shareId,
+          // Count, not addresses: recipients are third-party contacts and the
+          // audit log is identifiers-only. The addresses live in the send log.
+          meta: { recipientCount: sent },
+        }),
+      { role: ctx.role },
+    );
+
+    revalidate();
+    return { ok: true, data: { sent, sentFrom } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+function buildShareEmail(input: {
+  tenantName: string;
+  label: string;
+  url: string;
+  message: string;
+  expiresAt: Date;
+}): string {
+  const expires = input.expiresAt.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  return [
+    `${input.tenantName} has shared "${input.label}" with you.`,
+    "",
+    ...(input.message ? [input.message, ""] : []),
+    input.url,
+    "",
+    `This link stops working on ${expires}.`,
+    "",
+    `Sent by ${input.tenantName}.`,
+  ].join("\n");
 }
 
 export async function resetShareLockAction(

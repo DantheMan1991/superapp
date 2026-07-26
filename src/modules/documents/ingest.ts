@@ -28,7 +28,8 @@ export function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function readBlobBytes(pathname: string): Promise<Uint8Array> {
+/** Exported for the spreadsheet preview, which parses the bytes server-side. */
+export async function readBlobBytes(pathname: string): Promise<Uint8Array> {
   const result = await get(pathname, { access: "private", token: blobToken() });
   if (!result || result.statusCode !== 200) {
     throw new DocsError("DOCUMENT_NOT_FOUND", `blob missing: ${pathname}`);

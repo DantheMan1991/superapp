@@ -43,6 +43,9 @@ export type DocsErrorCode =
   | "VIEW_NAME_INVALID"
   | "VIEW_QUERY_EMPTY"
   | "VIEW_LIMIT"
+  | "PREVIEW_UNSUPPORTED"
+  | "PREVIEW_LEGACY_EXCEL"
+  | "PREVIEW_TOO_LARGE"
   | "SEARCH_QUERY_INVALID"
   | "SHARE_NOT_FOUND"
   | "SHARE_LIMIT"
@@ -117,6 +120,11 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
   VIEW_QUERY_EMPTY:
     "There's nothing to save yet — search for something or pick a tag first.",
   VIEW_LIMIT: "That's the maximum number of saved views.",
+  PREVIEW_UNSUPPORTED: "There's no preview for this kind of file — download it to open it.",
+  PREVIEW_LEGACY_EXCEL:
+    "This is an older .xls file, which can't be previewed. Download it, then save it as .xlsx if you want a preview next time.",
+  PREVIEW_TOO_LARGE:
+    "This spreadsheet is too large to preview — download it to open it.",
   SEARCH_QUERY_INVALID: "That search couldn't be read — try simpler terms.",
   SHARE_NOT_FOUND: "That link no longer exists.",
   SHARE_LIMIT: "That's the maximum number of active links.",

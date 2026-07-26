@@ -102,6 +102,28 @@ describe("trimming a sheet", () => {
     ]);
   });
 
+  it("crops leading blank columns, as a QuickBooks export needs", () => {
+    expect(
+      trimGrid([
+        ["", "", "Customer"],
+        ["", "", "Acme Roofing"],
+      ]),
+    ).toEqual([["Customer"], ["Acme Roofing"]]);
+  });
+
+  it("crops leading blank rows", () => {
+    expect(
+      trimGrid([
+        ["", ""],
+        ["Item", "Qty"],
+        ["Joist", "12"],
+      ]),
+    ).toEqual([
+      ["Item", "Qty"],
+      ["Joist", "12"],
+    ]);
+  });
+
   it("keeps interior blanks, which are real data", () => {
     expect(
       trimGrid([
@@ -256,6 +278,42 @@ describe("reading a workbook", () => {
     expect(out.sheets[0].rows).toHaveLength(200);
     expect(out.sheets[0].truncated).toBe(true);
     expect(out.sheets[0].totalRows).toBe(250);
+  });
+
+  /**
+   * The exact shape of a QuickBooks customer export, which is what exposed
+   * both bugs: a cover sheet with formatting but no cell values, the real data
+   * on the SECOND sheet, and that data indented into column C behind two empty
+   * columns. Every part of this was in the file that rendered as
+   * "This sheet is empty".
+   */
+  it("reads a QuickBooks-shaped export: cover sheet first, data in column C", async () => {
+    const wb = new ExcelJS.Workbook();
+    // A cover sheet with styling but nothing readable — exceljs reports
+    // rowCount > 0 for it while eachRow visits nothing.
+    const tips = wb.addWorksheet("QuickBooks Desktop Export Tips");
+    tips.getColumn(1).width = 60;
+
+    const data = wb.addWorksheet("Sheet1");
+    data.getCell("C1").value = "Customer";
+    data.getCell("C2").value = "Acme Roofing";
+    data.getCell("C3").value = "Fulton Lumber";
+
+    const out = await readXlsxPreview(await bytesOf(wb));
+    expect(out.sheets.map((s) => s.name)).toEqual([
+      "QuickBooks Desktop Export Tips",
+      "Sheet1",
+    ]);
+    // The cover sheet really is empty — the viewer must therefore open on the
+    // first sheet that has rows, and must still show the tabs.
+    expect(out.sheets[0].rows).toEqual([]);
+    // Leading blank columns A and B are cropped, so the table starts at the
+    // data rather than at two empty columns.
+    expect(out.sheets[1].rows).toEqual([
+      ["Customer"],
+      ["Acme Roofing"],
+      ["Fulton Lumber"],
+    ]);
   });
 
   it("returns an empty grid for a genuinely empty sheet", async () => {

@@ -15,6 +15,22 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 
 ### 2026-07-26 — Sheet-reading fix, remembered layout (branch `claude/documents-sheet-fix`)
 
+**The founder sent the actual file, which settled it in one probe.** A
+QuickBooks customer export is three problems at once: sheet 1 is
+"QuickBooks Desktop Export Tips" — styled, `rowCount` 40, and genuinely empty
+to a parser; the 955 rows of data are on sheet 2; and that data sits in column
+C behind two empty indent columns.
+
+**The UI bug was the one that actually hid the data.** The "this sheet is
+empty" branch returned BEFORE the sheet tabs rendered — so a workbook whose
+first sheet is a cover page showed the empty message with no way to reach sheet
+2. Tabs now render first, always, and empty sheets are labelled as such. The
+viewer also opens on the first sheet that HAS rows, because an export leading
+with a cover sheet is the normal case, not the exception.
+
+`trimGrid` now crops leading blank rows and columns as well as trailing ones,
+so the customer list starts at "Customer" rather than at two empty columns.
+
 **"This sheet is empty" on a real Excel file.** The reader indexed cells by
 `worksheet.rowCount` and `worksheet.columnCount`. Both are derived from
 metadata the WRITING application chooses to emit — and a workbook exceljs
@@ -707,6 +723,12 @@ to conflict with, which no type checker can see. `0035` restores it.
 constant from `template-ops.ts` into the editor pulled the database layer into
 the browser bundle and failed the build. Vocabulary shared with client
 components lives in `doc-templates/fields.ts`, which carries no marker.
+
+**Never let an error state hide the control that escapes it.** The spreadsheet
+viewer returned its "empty sheet" message before rendering the sheet tabs, so
+the one workbook shape where you most need to switch sheets — a cover sheet
+first — was the shape where switching became impossible. Render navigation
+before content, always.
 
 **A fixture you generated only proves you can read your own output.** The
 spreadsheet reader passed a full round-trip suite and then returned nothing for

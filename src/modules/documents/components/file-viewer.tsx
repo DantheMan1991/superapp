@@ -64,7 +64,15 @@ function SheetPreviewPane({ documentId }: { documentId: string }) {
         setError(result.error);
         return;
       }
-      setData(result.data ?? null);
+      const preview = result.data ?? null;
+      setData(preview);
+      // Open on the first sheet that has something in it. Exports routinely
+      // lead with a cover sheet — a QuickBooks customer list starts with
+      // "QuickBooks Desktop Export Tips", which is genuinely empty to a parser
+      // — and landing on it makes a 955-row file look like it failed.
+      const firstWithRows =
+        preview?.sheets.findIndex((s) => s.rows.length > 0) ?? -1;
+      setActive(firstWithRows > 0 ? firstWithRows : 0);
     })();
   }, [documentId]);
 
@@ -97,18 +105,13 @@ function SheetPreviewPane({ documentId }: { documentId: string }) {
   }
 
   const sheet = data.sheets[active];
-  if (!sheet || sheet.rows.length === 0) {
-    return (
-      <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-        This sheet is empty.
-      </p>
-    );
-  }
-
-  const [header, ...body] = sheet.rows;
+  const [header, ...body] = sheet?.rows ?? [];
 
   return (
     <div className="w-full space-y-2">
+      {/* Rendered BEFORE any empty check. The previous version returned early
+          on an empty sheet, so a workbook whose first sheet is a cover page
+          showed "This sheet is empty" with no way to reach the data. */}
       {data.sheets.length > 1 && (
         <div className="flex flex-wrap gap-1">
           {data.sheets.map((s, i) => (
@@ -121,46 +124,55 @@ function SheetPreviewPane({ documentId }: { documentId: string }) {
                 i === active
                   ? "border-brand bg-secondary font-medium"
                   : "text-muted-foreground hover:text-foreground",
+                s.rows.length === 0 && i !== active && "opacity-50",
               )}
             >
               {s.name}
+              {s.rows.length === 0 && " (empty)"}
             </button>
           ))}
         </div>
       )}
 
-      <div className="overflow-auto rounded border bg-background">
-        <table className="w-full border-collapse text-xs">
-          <thead className="sticky top-0 bg-secondary">
-            <tr>
-              {header.map((cell, i) => (
-                <th
-                  key={i}
-                  className="border-b border-r px-2 py-1 text-left font-medium"
-                >
-                  {cell}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {body.map((row, r) => (
-              <tr key={r} className="even:bg-secondary/30">
-                {row.map((cell, c) => (
-                  <td
-                    key={c}
-                    className="whitespace-nowrap border-b border-r px-2 py-1"
+      {!sheet || sheet.rows.length === 0 ? (
+        <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+          This sheet is empty.
+          {data.sheets.length > 1 && " Pick another sheet above."}
+        </p>
+      ) : (
+        <div className="overflow-auto rounded border bg-background">
+          <table className="w-full border-collapse text-xs">
+            <thead className="sticky top-0 bg-secondary">
+              <tr>
+                {header.map((cell, i) => (
+                  <th
+                    key={i}
+                    className="border-b border-r px-2 py-1 text-left font-medium"
                   >
                     {cell}
-                  </td>
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {body.map((row, r) => (
+                <tr key={r} className="even:bg-secondary/30">
+                  {row.map((cell, c) => (
+                    <td
+                      key={c}
+                      className="whitespace-nowrap border-b border-r px-2 py-1"
+                    >
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {(sheet.truncated || data.omittedSheets > 0) && (
+      {sheet && sheet.rows.length > 0 && (sheet.truncated || data.omittedSheets > 0) && (
         // Said out loud: a preview that silently shows the first 200 rows of a
         // 5,000-row takeoff is a preview someone will make a decision on.
         <p className="text-xs text-muted-foreground">

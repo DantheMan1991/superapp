@@ -146,6 +146,7 @@ export default async function SharedLinksPage() {
                       status={status}
                       isOwner={ctx.role === "owner"}
                       hasPasscode={share.passcodeHash !== null}
+                      label={share.label || "Untitled link"}
                     />
                   </TableCell>
                 </TableRow>

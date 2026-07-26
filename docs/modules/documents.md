@@ -13,6 +13,31 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-26 — Per-link activity feed (branch `claude/documents-share-activity`)
+
+"Did the inspector actually open the drawings?" — answered. An Activity sheet
+on every share link: what happened, when, which file, and how much was sent.
+
+**No migration and no new read model.** `document_share_events` has been
+written since share links shipped and `listShareEvents` already existed; the
+whole gap was UI. `loadShareActivity` adds the join for the file name and the
+visitor grouping.
+
+**Visitor codes are derived from the stored IP HASH, not an address.** `hashIp`
+is a keyed HMAC and the raw address is never stored, so the six-character code
+supports exactly one honest claim — "these opens came from the same place" —
+and cannot be reversed. An empty hash yields `null` rather than a shared
+pseudonym, because a constant would invent a visitor by merging unrelated
+events.
+
+**The feed says out loud that an open is a REQUEST, not a person.** The
+open item recorded when shares shipped — a link-scanning security appliance
+pre-fetches URLs, burning a view and logging one — is now printed under the
+feed rather than left as a trap for whoever reads it in an argument.
+
+Available on revoked links too: what happened while a link was live is exactly
+what someone asks about after switching it off.
+
 ### 2026-07-25 — File versions (branch `claude/documents-versions`)
 
 Replace a file and keep the old one: "Upload new version…", a history panel,
@@ -175,6 +200,8 @@ replaced `documents` policy, policies for the five new tables).
 - `src/lib/public-token.ts` — mint/hash/verify for anonymous credentials, plus
   scrypt passcodes and unlock-cookie signing. One `SHARE_SECRET`, derived per
   purpose.
+- `src/modules/documents/shares/activity.ts` — the per-link feed, plus the pure
+  `visitorLabel` (IP-hash pseudonym) and `isDeniedKind`.
 - `src/modules/documents/shares/` — `status.ts` (derived status truth table),
   `scope.ts` (pruning rules), `resolve.ts` (the token→tenant hop),
   `contents.ts` (what a recipient sees), `limits.ts`, `events.ts`, `shares.ts`.
@@ -398,12 +425,13 @@ to sort defeats the point of giving out the address.
   the obvious next control if one ever gets abused.
 - **No notification when a file arrives by email.** It appears in the folder
   silently; nobody is told. That wants the outbound spine.
-- **No per-link activity drawer yet** — `document_share_events` is written and
-  readable, and the list page shows an open count and last-accessed date, but
-  the full "opened from 203.0.113.x, 2 hours ago" feed is unbuilt.
-- **A link-scanning security appliance that pre-fetches URLs will burn a view
-  and log one.** Worth saying plainly if an activity feed ever implies a human
-  looked.
+- **The activity feed shows the most recent 100 events and says so** — there is
+  no paging into older history, and no export. A link hammered by a scanner
+  will push real opens out of view.
+- **Visitor codes cannot survive a `SHARE_SECRET` rotation.** `hashIp` is keyed
+  by it, so rotating the secret (the emergency lever for leaked links) also
+  re-pseudonymizes every future event: the same visitor gets a new code, and
+  old and new events cannot be grouped. Correct, but surprising in a dispute.
 - **The complete fix for serving user content is a separate origin**
   (`files.yosher-usercontent.com`). The sandbox CSP holds the line until then,
   and the stream route was written origin-agnostic so it can move.

@@ -11,6 +11,11 @@ import {
 } from "@/modules/documents/folder-ops";
 import { verifyDocumentInvariants } from "@/modules/documents/core/integrity";
 import {
+  isDeniedKind,
+  loadShareActivity,
+  visitorLabel,
+} from "@/modules/documents/shares/activity";
+import {
   addDocumentVersion,
   listDocumentVersions,
   restoreDocumentVersion,
@@ -1960,6 +1965,181 @@ d("share links (database)", () => {
  * important one: getting a prefix or a case rule wrong delivers a
  * subcontractor's drawings into the wrong feature — or the wrong business.
  * ---------------------------------------------------------------------- */
+
+describe("share activity labels", () => {
+  it("derives a short, stable pseudonym from the IP hash", () => {
+    const hash = "3f9a2c1b8e7d65a4";
+    expect(visitorLabel(hash)).toBe("3f9a2c");
+    // Same address, same code — that is the only claim the UI makes.
+    expect(visitorLabel(hash)).toBe(visitorLabel(hash));
+    expect(visitorLabel("aaaaaa111")).not.toBe(visitorLabel(hash));
+  });
+
+  it("returns null rather than a constant that would merge visitors", () => {
+    // An event recorded without a hash must not be grouped with other such
+    // events under one pseudonym — that would invent a visitor.
+    expect(visitorLabel("")).toBeNull();
+    expect(visitorLabel("   ")).toBeNull();
+    expect(visitorLabel("abc")).toBeNull();
+  });
+
+  it("separates refusals from ordinary access", () => {
+    expect(isDeniedKind("denied_passcode")).toBe(true);
+    expect(isDeniedKind("denied_scope")).toBe(true);
+    expect(isDeniedKind("budget_hit")).toBe(true);
+    expect(isDeniedKind("viewed")).toBe(false);
+    expect(isDeniedKind("downloaded")).toBe(false);
+    expect(isDeniedKind("unlocked")).toBe(false);
+  });
+});
+
+const STAMP_ACT = `dms-act-${process.pid}`;
+
+d("share activity feed", () => {
+  let tenantId: string;
+  let shareId: string;
+  let docId: string;
+
+  const asOwner = <T,>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantId, fn, { role: "owner" });
+
+  beforeAll(async () => {
+    tenantId = await withSystem(async (tx) => {
+      const [row] = await tx
+        .insert(schema.tenants)
+        .values({ clerkOrgId: STAMP_ACT, name: "DMS Act", slug: STAMP_ACT })
+        .returning();
+      return row.id;
+    });
+
+    docId = await asOwner(async (tx) => {
+      const [doc] = await tx
+        .insert(schema.documents)
+        .values({
+          tenantId,
+          origin: "dms",
+          fileName: "elevation.pdf",
+          title: "Kitchen elevation",
+          mimeType: "application/pdf",
+          blobPathname: `docs/${tenantId}/files/elevation.pdf`,
+          status: "inbox",
+        })
+        .returning();
+      return doc.id;
+    });
+
+    shareId = await asOwner(async (tx) => {
+      const [share] = await tx
+        .insert(schema.documentShares)
+        .values({
+          tenantId,
+          documentId: docId,
+          label: "For the inspector",
+          tokenHash: `hash-${STAMP_ACT}`,
+          tokenCiphertext: "cipher",
+          createdByClerkUserId: "user-act",
+          expiresAt: new Date(Date.now() + 86_400_000),
+          createdRootVisibility: "members",
+        })
+        .returning();
+      return share.id;
+    });
+
+    // The log is member_read by policy, so only trusted server code writes it.
+    await withSystem(async (tx) => {
+      const base = Date.now();
+      const events = [
+        { kind: "viewed", ipHash: "aaaaaa0000", at: base - 5000 },
+        { kind: "viewed", ipHash: "aaaaaa0000", at: base - 4000 },
+        { kind: "downloaded", ipHash: "bbbbbb1111", at: base - 3000, bytes: 2048 },
+        { kind: "denied_passcode", ipHash: "cccccc2222", at: base - 2000 },
+        { kind: "viewed", ipHash: "", at: base - 1000 },
+      ];
+      for (const e of events) {
+        await tx.insert(schema.documentShareEvents).values({
+          tenantId,
+          shareId,
+          documentId: e.kind === "downloaded" ? docId : null,
+          kind: e.kind,
+          ipHash: e.ipHash,
+          bytesSent: e.bytes ?? 0,
+          createdAt: new Date(e.at),
+        });
+      }
+    });
+  });
+
+  afterAll(async () => {
+    await withSystem((tx) =>
+      tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId)),
+    );
+  });
+
+  it("returns the feed newest first with refusals flagged", async () => {
+    const activity = await asOwner((tx) =>
+      loadShareActivity(tx, tenantId, shareId),
+    );
+    expect(activity.entries).toHaveLength(5);
+    // Newest first.
+    expect(activity.entries[0].kind).toBe("viewed");
+    expect(activity.entries[1].kind).toBe("denied_passcode");
+    expect(activity.entries[1].denied).toBe(true);
+    expect(activity.entries[0].denied).toBe(false);
+  });
+
+  it("counts distinct places without inventing one for missing hashes", async () => {
+    const activity = await asOwner((tx) =>
+      loadShareActivity(tx, tenantId, shareId),
+    );
+    // Three real hashes; the two opens from aaaaaa are ONE place, and the
+    // event with no hash contributes nobody.
+    expect(activity.distinctVisitors).toBe(3);
+    expect(activity.entries.some((e) => e.visitor === null)).toBe(true);
+  });
+
+  it("names the file a download was for, preferring its title", async () => {
+    const activity = await asOwner((tx) =>
+      loadShareActivity(tx, tenantId, shareId),
+    );
+    const download = activity.entries.find((e) => e.kind === "downloaded")!;
+    expect(download.documentName).toBe("Kitchen elevation");
+    expect(download.bytesSent).toBe(2048);
+    // Events not about one file carry no name rather than a placeholder.
+    expect(
+      activity.entries.find((e) => e.kind === "denied_passcode")!.documentName,
+    ).toBeNull();
+  });
+
+  it("flags truncation instead of implying the feed is complete", async () => {
+    const activity = await asOwner((tx) =>
+      loadShareActivity(tx, tenantId, shareId, 2),
+    );
+    expect(activity.entries).toHaveLength(2);
+    expect(activity.truncated).toBe(true);
+
+    const full = await asOwner((tx) =>
+      loadShareActivity(tx, tenantId, shareId, 100),
+    );
+    expect(full.truncated).toBe(false);
+  });
+
+  /**
+   * The log is evidence, so members read it and only withSystem code appends.
+   * A member who could write it could also fabricate an access record.
+   */
+  it("is read-only to members", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.documentShareEvents).values({
+          tenantId,
+          shareId,
+          kind: "viewed",
+          ipHash: "forged",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+});
 
 describe("inbound address routing", () => {
   const domain = "in.example.com";

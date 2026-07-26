@@ -253,6 +253,27 @@
       "when": 1785028192508,
       "tag": "0035_document_templates_name_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785030595521,
+      "tag": "0036_wet_galactus",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1785030595522,
+      "tag": "0037_document_generations",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1785030595523,
+      "tag": "0038_document_generations_rls",
+      "breakpoints": true
     }
   ]
 }

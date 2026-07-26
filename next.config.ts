@@ -6,6 +6,13 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/admin/docs": ["./docs/modules/**/*"],
     "/admin/docs/[slug]": ["./docs/modules/**/*"],
+    // Document generation reads the Noto Sans TTFs off disk and registers them
+    // with @react-pdf/renderer as buffers. Without this the fonts are absent in
+    // the serverless bundle and generation fails at request time — a failure
+    // that cannot reproduce locally, where the repo is simply there.
+    "/dashboard/m/documents/templates/[templateId]": [
+      "./src/modules/documents/doc-templates/fonts/**/*",
+    ],
   },
   experimental: {
     // Bank CSV imports travel as text through a server action (preview +

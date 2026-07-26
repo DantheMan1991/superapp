@@ -83,7 +83,13 @@ export interface DocumentRowData {
   id: string;
   fileName: string;
   mimeType: string;
-  source: "upload" | "email";
+  /**
+   * Mirrors the `document_source` column, which gained 'generated' in 0036.
+   * Receipts filters on origin='accounting' and templates produce DMS rows, so
+   * this surface should never actually see it — but the value comes off the
+   * shared table, so the type has to admit it rather than lie.
+   */
+  source: "upload" | "email" | "generated";
   emailFrom: string;
   status: "inbox" | "filed" | "trashed";
   version: number;

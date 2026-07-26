@@ -1142,7 +1142,14 @@ export const plaidItems = pgTable(
  * own link tables FK'ing documents (tenant_id, id) — zero core migration.
  * ---------------------------------------------------------------------- */
 
-export const documentSource = pgEnum("document_source", ["upload", "email"]);
+// 'generated' added in 0036, ALONE in its own migration file: a new enum value
+// cannot be USED in the transaction that adds it, so anything referencing it
+// must land in a later file (0037).
+export const documentSource = pgEnum("document_source", [
+  "upload",
+  "email",
+  "generated",
+]);
 
 export const documentStatus = pgEnum("document_status", [
   "inbox",
@@ -1722,6 +1729,75 @@ export const documentTemplateVersions = pgTable(
     check(
       "document_template_versions_published_pair",
       sql`(${t.publishedAt} is null) = (${t.publishedByClerkUserId} is null)`,
+    ),
+  ],
+);
+
+/**
+ * One document produced from a template.
+ *
+ * The row exists so "where did this PDF come from?" has an answer that survives
+ * the template being edited afterwards: it names the exact `version_no` that
+ * was current at the time, which is why publish immutability matters.
+ *
+ * `values` holds what was merged in. It is ordinary tenant data under RLS — and
+ * it is already visible in the generated PDF, so storing it adds no exposure
+ * while making a regeneration or a "what did we put in that waiver" question
+ * answerable.
+ */
+export const documentGenerations = pgTable(
+  "document_generations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    templateId: uuid("template_id").notNull(),
+    /** The frozen version used. NOT a FK to the version row — see below. */
+    templateVersionNo: integer("template_version_no").notNull(),
+    templateVersionId: uuid("template_version_id"),
+    /** The document this produced. Null only if filing somehow failed. */
+    documentId: uuid("document_id"),
+    /** Per-tenant sequence, for "Waiver #14". */
+    number: integer("number").notNull(),
+    values: jsonb("values")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    generatedByClerkUserId: text("generated_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_generations_tenant_id_id_idx").on(t.tenantId, t.id),
+    // The per-tenant number is a sequence, so it must be unique or it is not a
+    // number anyone can quote.
+    uniqueIndex("document_generations_tenant_number_idx").on(
+      t.tenantId,
+      t.number,
+    ),
+    index("document_generations_tenant_template_idx").on(
+      t.tenantId,
+      t.templateId,
+      t.createdAt,
+    ),
+    foreignKey({
+      name: "document_generations_template_fk",
+      columns: [t.tenantId, t.templateId],
+      foreignColumns: [documentTemplates.tenantId, documentTemplates.id],
+    }),
+    // Documents can be trashed; a generation record must outlive that, so this
+    // is NO ACTION and document_id is nullable rather than cascading away the
+    // evidence that a document was ever produced.
+    foreignKey({
+      name: "document_generations_document_fk",
+      columns: [t.tenantId, t.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+    }),
+    check("document_generations_number_positive", sql`${t.number} >= 1`),
+    check(
+      "document_generations_version_positive",
+      sql`${t.templateVersionNo} >= 1`,
     ),
   ],
 );
@@ -2547,6 +2623,7 @@ export type DocumentSavedView = typeof documentSavedViews.$inferSelect;
 export type DocumentTemplate = typeof documentTemplates.$inferSelect;
 export type DocumentTemplateVersion =
   typeof documentTemplateVersions.$inferSelect;
+export type DocumentGeneration = typeof documentGenerations.$inferSelect;
 export type DocumentSettings = typeof documentSettings.$inferSelect;
 export type EmailDomain = typeof emailDomains.$inferSelect;
 export type OutboundEmail = typeof outboundEmails.$inferSelect;

@@ -2,7 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { upload as uploadPresigned } from "@vercel/blob/client";
+// uploadPresigned, NOT upload — see document-controls.tsx. Private stores
+// reject classic client tokens.
+import { uploadPresigned } from "@vercel/blob/client";
 import { Download, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";

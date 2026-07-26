@@ -815,6 +815,54 @@ describe("upload allowlist", () => {
   });
 });
 
+/**
+ * The blob store is PRIVATE, which rejects classic client tokens outright, and
+ * both upload routes answer with `handleUploadPresigned`. So every client-side
+ * upload must call `uploadPresigned`, never `upload`.
+ *
+ * This is a source scan rather than a behavioural test because the two
+ * functions have IDENTICAL signatures — `import { upload as uploadPresigned }`
+ * type-checks perfectly and then fails on every single upload at runtime. That
+ * is exactly what shipped in the Documents module, and nothing but a human
+ * trying to upload a file could have caught it. Now something else can.
+ */
+describe("blob client upload flow", () => {
+  it("never imports the classic `upload` from @vercel/blob/client", async () => {
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        if (entry === "node_modules" || entry.startsWith(".")) continue;
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(entry)) continue;
+        const source = readFileSync(full, "utf8");
+        if (!source.includes("@vercel/blob/client")) continue;
+        // Matches `upload,` / `upload }` / `upload as x` in the import clause,
+        // while leaving `uploadPresigned` and the multipart helpers alone.
+        // No /s flag: `[^}]*` already spans newlines, and the flag needs an
+        // es2018 target this tsconfig does not set.
+        const importClause = source.match(
+          /import\s*\{([^}]*)\}\s*from\s*["']@vercel\/blob\/client["']/,
+        );
+        if (!importClause) continue;
+        const named = importClause[1]
+          .split(",")
+          .map((s) => s.trim().split(/\s+as\s+/)[0].trim());
+        if (named.includes("upload")) offenders.push(full);
+      }
+    };
+    walk("src");
+
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("tenant blob namespaces", () => {
   const t = "11111111-1111-4111-8111-111111111111";
   const other = "22222222-2222-4222-8222-222222222222";

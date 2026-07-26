@@ -20,6 +20,12 @@ import { wouldCreateCycle } from "../core/tree";
 import { DocumentsNav } from "./documents-nav";
 import { DocumentRowMenu, UploadButton } from "./document-controls";
 import {
+  BreadcrumbDropTarget,
+  DraggableRow,
+  FolderDropTarget,
+  UploadDropZone,
+} from "./drag-drop";
+import {
   FolderRowMenu,
   NewFolderButton,
   type FolderOption,
@@ -100,18 +106,24 @@ export async function FolderBrowser({
             {folder ? folder.name : "Documents"}
           </h1>
           <nav className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
-            <Link href={BASE} className="hover:text-foreground">
-              All folders
-            </Link>
+            {/* Crumbs are drop targets so things can be dragged UP a level.
+                Without this the only direction you can drag is deeper. */}
+            <BreadcrumbDropTarget folderId={null}>
+              <Link href={BASE} className="hover:text-foreground">
+                All folders
+              </Link>
+            </BreadcrumbDropTarget>
             {ancestors.map((crumb) => (
               <span key={crumb.id} className="flex items-center gap-1">
                 <ChevronRight className="size-3" />
-                <Link
-                  href={`${BASE}/${crumb.id}`}
-                  className="hover:text-foreground"
-                >
-                  {crumb.name}
-                </Link>
+                <BreadcrumbDropTarget folderId={crumb.id}>
+                  <Link
+                    href={`${BASE}/${crumb.id}`}
+                    className="hover:text-foreground"
+                  >
+                    {crumb.name}
+                  </Link>
+                </BreadcrumbDropTarget>
               </span>
             ))}
             {folder && (
@@ -139,21 +151,47 @@ export async function FolderBrowser({
 
       <DocumentsNav />
 
+      {/* Files dropped from the desktop anywhere that is not a folder row land
+          in the folder being viewed. */}
+      <UploadDropZone tenantId={ctx.tenant.id} folderId={folder?.id ?? null}>
       {contents.subfolders.length === 0 && contents.documents.length === 0 ? (
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          This folder is empty.
+          This folder is empty. Drop files here to upload them.
         </p>
       ) : (
         <div className="divide-y rounded-md border">
           {contents.subfolders.map((sub) => (
-            <div key={sub.id} className="flex items-center gap-3 px-4 py-3">
-              <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-              <Link
-                href={`${BASE}/${sub.id}`}
-                className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+            <FolderDropTarget
+              key={sub.id}
+              tenantId={ctx.tenant.id}
+              folderId={sub.id}
+              folderPath={sub.path}
+              className="flex items-center gap-3 px-4 py-3"
+            >
+              {/* Only owners can move a folder — it rewrites a subtree, and a
+                  staff-run rewrite would skip the rows RLS hid from it. Not
+                  draggable for staff rather than draggable-then-refused. */}
+              <DraggableRow
+                payload={{
+                  kind: "folder",
+                  id: sub.id,
+                  path: sub.path,
+                  version: sub.version,
+                }}
+                disabled={!isOwner}
+                className="flex min-w-0 flex-1 items-center gap-3"
               >
-                {sub.name}
-              </Link>
+                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                {/* draggable={false}: anchors drag natively as a URL, which
+                    would compete with the row's own drag gesture. */}
+                <Link
+                  draggable={false}
+                  href={`${BASE}/${sub.id}`}
+                  className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+                >
+                  {sub.name}
+                </Link>
+              </DraggableRow>
               {sub.effectiveVisibility === "owners" && (
                 <Badge variant="secondary" className="gap-1">
                   <Lock className="size-3" />
@@ -179,14 +217,19 @@ export async function FolderBrowser({
                 moveTargets={moveTargetsFor(sub.path)}
                 shareMaxTtlDays={shareMaxTtlDays}
               />
-            </div>
+            </FolderDropTarget>
           ))}
 
           {contents.documents.map((doc) => (
-            <div key={doc.id} className="flex items-center gap-3 px-4 py-3">
+            <DraggableRow
+              key={doc.id}
+              payload={{ kind: "document", id: doc.id }}
+              className="flex items-center gap-3 px-4 py-3"
+            >
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <a
+                  draggable={false}
                   href={`/api/documents/${doc.id}/file`}
                   target="_blank"
                   rel="noreferrer"
@@ -221,10 +264,11 @@ export async function FolderBrowser({
                 tags={tagChoices}
                 documentTags={doc.tags}
               />
-            </div>
+            </DraggableRow>
           ))}
         </div>
       )}
+      </UploadDropZone>
 
       {contents.nextCursor && (
         <div className="flex justify-center">

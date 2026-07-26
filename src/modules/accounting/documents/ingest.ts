@@ -32,6 +32,12 @@ export interface NewDocumentInput {
   mimeType: string;
   sizeBytes: number;
   sha256: string;
+  /**
+   * Deliberately NOT widened when 0036 added 'generated': accounting captures
+   * receipts, it does not produce documents from templates. Keeping this narrow
+   * is what makes the compiler refuse a generated document arriving through the
+   * receipts pipeline.
+   */
   source: "upload" | "email";
   /**
    * Which surface owns this row. `documents` is shared with the Documents

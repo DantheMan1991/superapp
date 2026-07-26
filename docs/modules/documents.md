@@ -13,6 +13,40 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-26 — PDF generation (branch `claude/documents-generate`)
+
+Plan PR 11. A published template now produces a real filed PDF: fill the
+fields, pick a folder, get a numbered document that shares, emails and versions
+like anything else in the cabinet.
+
+Three migrations, and the split is the point. **`0036` contains one statement
+and nothing else** — `ALTER TYPE document_source ADD VALUE 'generated'`. A new
+enum value cannot be USED in the transaction that adds it, and the runner wraps
+a file in one, so `0037` (the table) and every writer of `'generated'` had to
+land later. This was called in the build plan before a line was written.
+
+**`@react-pdf/renderer`, not headless Chromium** — 3MB against Vercel's 250MB
+limit rather than 50MB+ on top of `sharp`. `pdf-lib` remains the other half of
+the plan for MODIFYING existing PDFs; nothing here does that yet.
+
+**Noto Sans is vendored, and it is not decoration.** PDF's built-in Helvetica
+is WinAnsi (cp1252) only: it covers `ñ` but silently mangles `Nguyễn`,
+`Łukasz`, `Öztürk` — ordinary names on an ordinary crew list, and a lien waiver
+that misspells the payee is a defective document. All FOUR faces are registered
+because react-pdf does not synthesize; a missing italic face is a thrown error
+at render time, not a slightly wrong document. That was found by the test that
+renders every block type. `next.config.ts` traces the font directory into the
+serverless bundle — without it, generation fails in production in a way that
+cannot reproduce locally.
+
+**Generation always uses the newest PUBLISHED version, never the draft**, which
+is the practical payoff of publish immutability: a half-written waiver cannot
+leave the building, and the generation record names the exact `version_no` used.
+
+The blob is written with `access: "private"`, like every other blob in this
+module. A generated waiver reaches a browser through the authenticated stream
+route or a deliberate share link — never a public URL.
+
 ### 2026-07-26 — Document templates (branch `claude/documents-templates`)
 
 Plan PR 10, complete. Three migrations (`0033`–`0035`), the merge engine, the
@@ -251,6 +285,7 @@ Decisions.
 | `document_saved_views` | Saved filters | `query` jsonb is stored USER INPUT — re-parsed with Zod on EVERY read by `parseSavedViewQuery`. Since 2026-07-25 it resolves to search-page parameters rather than to a WHERE clause of its own; unknown keys are stripped, invalid fields degrade to absent. Unique is `(tenant, creator, name_key)`, so two people may use the same view name |
 | `document_templates` | Document template identity | `0033`/`0035`. `(tenant, name_key)` unique — restored by `0035` after a hand edit to `0033` dropped it, see Build log. Archived, never deleted, so a generated document naming it cannot dangle |
 | `document_template_versions` | Template bodies | Partial unique on `published_at is null` makes "at most one draft per template" a DB invariant. Publish immutability itself is enforced in `template-ops.ts` — Postgres cannot freeze columns on a condition without a trigger. `fields` jsonb is DERIVED from the body on every save, so it cannot drift into promising a field the document lacks; still re-parsed on read |
+| `document_generations` | What was produced from a template | `0037`/`0038`. `member_read` ONLY — provenance is evidence, so only `recordGeneration` writes it. `(tenant, number)` unique makes the per-tenant sequence quotable. `document_id` is NULLABLE with a NO ACTION FK: a document can be trashed and the record that it was ever produced must outlive that. Stores `template_version_no` as a NUMBER as well as an id, so "generated from v3" survives even if the version row does not |
 | `document_settings` | Per-tenant module knobs | `member_read` only (platform-governed). E-sign/AI columns created now, unused, so later phases need no migration |
 | `document_shares` | Anonymous link grants | `token_hash` GLOBALLY unique (the public lookup has no tenant to scope by). XOR document/folder scope. `expires_at` NOT NULL — no permanent anonymous links. `created_root_visibility` snapshot drives self-suspension |
 | `document_share_events` | Per-link access log | `member_read` ONLY — evidence in a dispute, so members read it and only `recordShareEvent` (withSystem) writes it |
@@ -301,7 +336,9 @@ replaced `documents` policy, policies for the five new tables).
 - `src/modules/documents/doc-templates/` — DOCUMENT templates (a lien waiver, a
   change order). `merge.ts` is the pure, parser-free injection engine;
   `fields.ts` is the vocabulary shared with the browser; `template-ops.ts` is
-  `server-only` and owns publish immutability.
+  `server-only` and owns publish immutability; `render-pdf.tsx` is
+  markdown→PDF; `generate.ts` files the result. `fonts/` is vendored Noto Sans
+  — see `fonts/NOTICE.md` before shipping externally.
 - `src/lib/blob-stream.ts` — **the single way a stored blob reaches a
   browser**, shared with accounting and with the future public share routes.
 - `src/lib/blob.ts` — `dmsPathPrefix(tenantId, kind)`, `isTenantBlobPath`.
@@ -465,6 +502,24 @@ unreachable from outside the business. Both are deliberate: a link to "the
 drawing" should show the drawing that is current, and superseded revisions are
 internal.
 
+**A new enum value gets its own migration file, alone.** `ALTER TYPE ... ADD
+VALUE` cannot be followed by a use of that value in the same transaction, and
+the runner wraps each file in one. `0036` therefore contains exactly one
+statement and `0037` creates the table. The same reasoning is why earlier
+sessions used `text` + CHECK instead of enums for new discriminators — this was
+the one place a real enum already existed.
+
+**Generation always uses the newest PUBLISHED version.** Never the draft. A
+half-written waiver must not be able to leave the building, and the generation
+record names the exact `version_no`, which is only meaningful because published
+versions are frozen. The two features are one design.
+
+**react-pdf does not synthesize font faces.** A missing italic is
+`Could not resolve font for NotoSans, fontStyle italic` at render time — a
+failed document, not a slightly wrong one. All four faces are registered, and
+`next.config.ts` traces the font directory into the serverless bundle. Both
+failures are invisible locally, where the repo is simply present.
+
 **A merge value is content, never syntax.** Values are injected as TEXT NODES
 into the parsed Markdown tree; they are never substituted into the source. This
 is the analogue of SQL parameterization — a client literally named `# ACME`
@@ -589,16 +644,28 @@ to sort defeats the point of giving out the address.
 - **No `doc_kind` facet yet** — the column exists and is an open taxonomy for
   industry packs ('drawing', 'permit', 'submittal'), but nothing sets or filters
   it. Tag, origin and folder facets closed 2026-07-25.
-- **A template cannot yet produce a document.** The editor writes and freezes
-  bodies; nothing renders one into a file. That is plan PR 11, and it is what
-  makes the feature useful rather than interesting.
+- **The OFL text is not vendored next to the fonts.** `fonts/NOTICE.md` names
+  Noto Sans, its copyright and its licence with a canonical URL, but the SIL
+  OFL requires the FULL text to travel with the font. Copy `OFL.txt` verbatim
+  from the upstream Noto repository before this reaches anyone outside the
+  business. It was deliberately not reproduced from memory.
+- **A crash between rendering and recording leaks a blob.** The PDF is uploaded
+  before the rows are written, so a failure in between leaves orphaned bytes —
+  the same blob-janitor gap the rest of the module has. The reverse (a document
+  row pointing at a blob that was never written) is impossible, which is the
+  ordering that matters.
+- **No regeneration.** `document_generations.values` stores what was merged, so
+  re-rendering an old document from its recorded values is a small addition —
+  but nothing does it, and there is no UI for correcting a typo other than
+  generating a fresh one.
 - **No template preview of a PUBLISHED version.** The editor always shows the
   draft (or the published body as a starting point); reading v2 while v4 is
   current means looking at the history list, which shows metadata only.
-- **PDF generation (plan PR 11) and AI template drafting (PR 12) are unbuilt.**
-  Generation needs `ALTER TYPE document_source ADD VALUE 'generated'` in its
-  OWN migration file — a new enum value cannot be used in the transaction that
-  adds it.
+- **Only one page size and no letterhead.** Generation is LETTER with a plain
+  footer. Per-tenant branding (logo, address block) is the obvious next step and
+  is exactly what `document_settings` is for.
+- **AI template drafting (plan PR 12) is unbuilt.** `document_settings` already
+  carries the cooldown columns.
 - **E-signature (plan PRs 13/14) is deliberately not started.** The plan flags
   legal review first and the reasons are real: several states mandate statutory
   lien-waiver forms and some require notarization, so an e-signed waiver can be

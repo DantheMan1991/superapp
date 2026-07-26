@@ -11,6 +11,7 @@ import {
   Loader2,
   MoreHorizontal,
   Pencil,
+  Tag as TagIcon,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -53,6 +54,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ShareDialog } from "./share-controls";
 import { NewVersionDialog, VersionHistoryDialog } from "./version-controls";
+import { TagPickerDialog, type TagChoice } from "./tag-controls";
 
 export interface FolderChoice {
   id: string;
@@ -158,6 +160,8 @@ export function DocumentRowMenu({
   tenantId,
   origin,
   fileVersionCount,
+  tags,
+  documentTags,
 }: {
   documentId: string;
   folders: FolderChoice[];
@@ -173,6 +177,9 @@ export function DocumentRowMenu({
   /** Versioning is offered for DMS files only; see below. */
   origin?: string;
   fileVersionCount?: number;
+  /** The tenant's tag registry. Undefined hides the option entirely. */
+  tags?: TagChoice[];
+  documentTags?: readonly string[];
 }) {
   const router = useRouter();
   const [filing, setFiling] = useState(false);
@@ -180,6 +187,7 @@ export function DocumentRowMenu({
   const [renaming, setRenaming] = useState(false);
   const [versioning, setVersioning] = useState(false);
   const [history, setHistory] = useState(false);
+  const [tagging, setTagging] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title ?? "");
   const [target, setTarget] = useState("__inbox__");
   const [pending, startTransition] = useTransition();
@@ -237,6 +245,17 @@ export function DocumentRowMenu({
                 <FolderInput className="size-4" />
                 File into…
               </DropdownMenuItem>
+              {tags !== undefined && (
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    setTagging(true);
+                  }}
+                >
+                  <TagIcon className="size-4" />
+                  Tags…
+                </DropdownMenuItem>
+              )}
               {canVersion && (
                 <>
                   <DropdownMenuItem
@@ -300,6 +319,19 @@ export function DocumentRowMenu({
           targetId={documentId}
           targetName={title || fileName || "this file"}
           maxTtlDays={shareMaxTtlDays}
+        />
+      )}
+
+      {/* Mounted only while open so the picker's local selection starts from
+          the document's CURRENT tags each time, not from a stale first open. */}
+      {tags !== undefined && tagging && (
+        <TagPickerDialog
+          open
+          onOpenChange={setTagging}
+          documentId={documentId}
+          fileName={title || fileName || "this file"}
+          tags={tags}
+          selected={documentTags ?? []}
         />
       )}
 

@@ -100,26 +100,57 @@ export async function readXlsxPreview(
       omittedSheets += 1;
       return;
     }
-    const grid: string[][] = [];
-    // rowCount counts to the last row with any formatting, so the bound is
-    // applied here rather than after building a grid of 50,000 empty rows.
-    const lastRow = Math.min(worksheet.rowCount, PREVIEW_MAX_ROWS);
-    for (let r = 1; r <= lastRow; r += 1) {
-      const row = worksheet.getRow(r);
+
+    /*
+     * Traversed with eachRow/eachCell rather than indexed by rowCount and
+     * columnCount.
+     *
+     * Those two counters are derived from metadata the writing application
+     * chooses to emit. A workbook exceljs itself wrote reports them correctly —
+     * which is exactly why the first version of this passed its tests and then
+     * showed "This sheet is empty" on a real file out of Excel. eachRow walks
+     * the row objects that actually exist, so a sheet with no dimension record,
+     * a sparse grid, or rows starting below row 1 still reads.
+     *
+     * Rows are keyed by their real number so a gap does not shift everything
+     * up a line.
+     */
+    const byRowNumber = new Map<number, string[]>();
+    let widestColumn = 0;
+    let highestRow = 0;
+    let clippedCols = false;
+
+    worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      highestRow = Math.max(highestRow, rowNumber);
+      if (rowNumber > PREVIEW_MAX_ROWS) return;
       const cells: string[] = [];
-      const lastCol = Math.min(worksheet.columnCount, PREVIEW_MAX_COLS);
-      for (let c = 1; c <= lastCol; c += 1) {
-        cells.push(cellText(row.getCell(c).value as SheetCellValue));
-      }
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        if (colNumber > PREVIEW_MAX_COLS) {
+          clippedCols = true;
+          return;
+        }
+        // eachCell skips leading gaps, so pad to the cell's real column.
+        while (cells.length < colNumber - 1) cells.push("");
+        cells[colNumber - 1] = cellText(cell.value as SheetCellValue);
+        widestColumn = Math.max(widestColumn, colNumber);
+      });
+      byRowNumber.set(rowNumber, cells);
+    });
+
+    const width = Math.min(widestColumn, PREVIEW_MAX_COLS);
+    const lastRow = Math.min(highestRow, PREVIEW_MAX_ROWS);
+    const grid: string[][] = [];
+    for (let r = 1; r <= lastRow; r += 1) {
+      const cells = byRowNumber.get(r) ?? [];
+      while (cells.length < width) cells.push("");
       grid.push(cells);
     }
+
     sheets.push({
       name: worksheet.name || `Sheet ${sheets.length + 1}`,
       rows: trimGrid(grid),
-      truncated:
-        worksheet.rowCount > PREVIEW_MAX_ROWS ||
-        worksheet.columnCount > PREVIEW_MAX_COLS,
-      totalRows: worksheet.rowCount,
+      truncated: highestRow > PREVIEW_MAX_ROWS || clippedCols,
+      totalRows: highestRow,
     });
   });
 

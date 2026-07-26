@@ -13,6 +13,37 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-26 — Sheet-reading fix, remembered layout (branch `claude/documents-sheet-fix`)
+
+**"This sheet is empty" on a real Excel file.** The reader indexed cells by
+`worksheet.rowCount` and `worksheet.columnCount`. Both are derived from
+metadata the WRITING application chooses to emit — and a workbook exceljs
+itself writes reports them correctly, which is precisely why the original
+version passed its tests and then failed on a file out of Excel. The tests were
+testing the library's own output, not Excel's.
+
+Now traversed with `eachRow`/`eachCell`, which walk the row objects that
+actually exist. A sheet with no dimension record, a sparse grid, or data
+starting at row 4 under a title block all read. Cells keep their real column
+(`eachCell` skips leading gaps, so the row is padded to `colNumber`) and rows
+keep their real number, so a gap does not shift everything up a line.
+
+The round-trip tests now include the shapes that broke it: rows not starting at
+row 1, sparse columns, multi-sheet, formulas, truncation. **A generated fixture
+only proves you can read your own output** — worth remembering the next time a
+parser looks well covered.
+
+Also: a workbook that yields NO sheets now says so, rather than sharing the
+"this sheet is empty" message with a genuinely blank sheet. Two different
+problems deserve two different messages, and one of them is a bug report.
+
+**The layout choice is remembered.** It was in the URL only, so walking into
+another folder — where no `?view=` exists — reset it. Now stored in a cookie,
+read on the SERVER so the first paint is already right; localStorage would
+render the list and then flip on every navigation. An explicit `?view=` still
+wins, so a link someone pastes into chat shows what they were looking at rather
+than being rewritten by the recipient's habit.
+
 ### 2026-07-26 — Spreadsheet previews (branch `claude/documents-sheets`)
 
 Excel and CSV now render as a table in the viewer, with sheet tabs.
@@ -677,6 +708,14 @@ constant from `template-ops.ts` into the editor pulled the database layer into
 the browser bundle and failed the build. Vocabulary shared with client
 components lives in `doc-templates/fields.ts`, which carries no marker.
 
+**A fixture you generated only proves you can read your own output.** The
+spreadsheet reader passed a full round-trip suite and then returned nothing for
+a real Excel file, because it indexed by `rowCount`/`columnCount` — counters
+derived from metadata the writing application chooses to emit, which exceljs
+naturally emits correctly for its own files. Traverse with `eachRow`/`eachCell`
+instead, and treat "the tests use a fixture the code under test also wrote" as
+a reason to distrust the coverage rather than to feel good about it.
+
 **A stored file is never EMBEDDED — it is fetched and drawn.** `frame-ancestors
 'none'` plus `sandbox` on every file response is what stops user-uploaded
 content executing in our origin, and together they rule out an iframe, an
@@ -824,10 +863,10 @@ to sort defeats the point of giving out the address.
   reading, never for checking a total's presentation.
 - **`document_settings` has no preview switch.** A tenant who would rather no
   spreadsheet contents be readable in-app cannot turn it off.
-- **View mode is per-URL, not per-user.** Switching to Thumbnails does not
-  stick when you navigate to another folder from the nav. Deliberate for now
-  (the URL is the single source of truth), but a stored preference is the
-  obvious follow-up.
+- **The remembered layout is per-browser, not per-account.** It is a cookie, so
+  switching machines or clearing cookies starts from List again, and two people
+  sharing a login do not share the setting. Fine for a display preference;
+  worth knowing before someone reports it as a bug.
 - **Drag and drop is mouse-only and moves one thing at a time.** No keyboard
   equivalent (the row menus remain the accessible path, and they do everything
   drag does), no multi-select, no touch support, and no drag between browser

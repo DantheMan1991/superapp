@@ -9,6 +9,7 @@ import type {
 } from "@/db/schema";
 import { normalizeSendingDomain } from "@/lib/email/identity";
 import { getMailboxHost } from "./index";
+import { guardCutover } from "./guard";
 import { describeMxProvider, mxPointsAt, resolveCurrentMx } from "./mx";
 
 /**
@@ -79,6 +80,14 @@ export async function createHostedDomain(
     row: MailboxDomain;
     currentMail: string;
     alreadyHasMail: boolean;
+    adopted: boolean;
+    /**
+     * True when the domain's MX already pointed at the host before we started,
+     * which makes the rollback record meaningless — there is no earlier state
+     * to go back to. Surfaced so the UI can say so rather than offering a
+     * restore that would change nothing.
+     */
+    rollbackUnavailable: boolean;
   }>
 > {
   const domain = normalizeSendingDomain(rawDomain);
@@ -162,6 +171,8 @@ export async function createHostedDomain(
       row,
       currentMail: describeMxProvider(previousMx),
       alreadyHasMail: previousMx.length > 0,
+      adopted: created.data.adopted === true,
+      rollbackUnavailable: mxPointsAt(previousMx, host.provider),
     },
   };
 }
@@ -245,6 +256,11 @@ export async function refreshHostedDomain(
 export async function cutoverHostedDomain(
   tenantId: string,
 ): Promise<ProvisionResult<{ row: MailboxDomain }>> {
+  // Cheapest refusal first: a preview deployment has no business redirecting
+  // anyone's mail, and there is no argument that gets it past this.
+  const blocked = guardCutover();
+  if (blocked) return { ok: false, message: blocked };
+
   const existing = await loadHostedDomain(tenantId);
   if (!existing) {
     return { ok: false, message: "No hosted domain to activate." };

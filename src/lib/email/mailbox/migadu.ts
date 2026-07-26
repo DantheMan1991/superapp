@@ -1,14 +1,18 @@
 import "server-only";
-import type { EmailDnsRecord } from "@/db/schema";
 import type {
   CreateMailboxInput,
-  HostDiagnostics,
   HostDomain,
   HostMailbox,
   HostResult,
   MailboxHost,
   UpdateMailboxInput,
 } from "./types";
+import {
+  asRecord,
+  normalizeDiagnostics,
+  normalizeMailbox,
+  normalizeRecords,
+} from "./migadu-parse";
 
 /**
  * Migadu implementation of MailboxHost.
@@ -119,124 +123,6 @@ function providerMessage(parsed: unknown): string | null {
   return null;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function asBool(value: unknown, fallback: boolean): boolean {
-  if (typeof value === "boolean") return value;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return fallback;
-}
-
-/**
- * Flatten the host's DNS payload into the one row shape the setup wizard
- * already renders (the same normalize-defensively approach the Resend sending
- * domain uses). Field names vary between hosts and across a host's own
- * versions; anything unrecognized is dropped rather than rendered as garbage.
- */
-function normalizeRecords(payload: unknown): EmailDnsRecord[] {
-  const list = Array.isArray(payload)
-    ? payload
-    : Array.isArray(asRecord(payload)?.records)
-      ? (asRecord(payload)!.records as unknown[])
-      : [];
-
-  return list.flatMap((raw): EmailDnsRecord[] => {
-    const r = asRecord(raw);
-    if (!r) return [];
-    const name = r.name ?? r.host ?? r.hostname;
-    const value = r.value ?? r.data ?? r.content ?? r.target;
-    const type = r.type ?? r.record_type;
-    if (typeof name !== "string" || typeof value !== "string") return [];
-    const priority = r.priority ?? r.prio;
-    return [
-      {
-        record: String(r.record ?? type ?? ""),
-        type: String(type ?? ""),
-        name,
-        value,
-        ttl: String(r.ttl ?? "Auto"),
-        ...(typeof priority === "number" ? { priority } : {}),
-        ...(typeof r.status === "string" ? { status: r.status } : {}),
-      },
-    ];
-  });
-}
-
-/**
- * Read the host's diagnostics.
- *
- * The critical rule here: when the payload cannot be understood, report NOT
- * ok. An unparsed response means we do not know whether the domain is ready,
- * and the cost of the two possible mistakes is wildly asymmetric — a false
- * "not ready" costs someone another click, while a false "ready" invites them
- * to redirect a business's entire mail flow on the strength of a shape we
- * failed to parse.
- */
-function normalizeDiagnostics(payload: unknown): HostDiagnostics {
-  const root = asRecord(payload);
-  if (!root) {
-    return {
-      ok: false,
-      mxOk: false,
-      findings: ["The mail host's reply couldn't be read. Check again shortly."],
-      details: payload,
-    };
-  }
-
-  const findings: string[] = [];
-  for (const key of ["messages", "errors", "warnings", "findings"]) {
-    const value = root[key];
-    if (typeof value === "string") findings.push(value);
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        if (typeof entry === "string") findings.push(entry);
-        else {
-          const e = asRecord(entry);
-          const msg = e?.message ?? e?.error ?? e?.text;
-          if (typeof msg === "string") findings.push(msg);
-        }
-      }
-    }
-  }
-
-  // MX is the field that actually matters, and it is the one we refuse to
-  // guess at: only an explicit affirmative counts.
-  const mxRaw =
-    root.mx_ok ?? root.mx ?? asRecord(root.records)?.mx ?? root.mx_valid;
-  const mxOk =
-    mxRaw === true ||
-    mxRaw === "true" ||
-    mxRaw === "ok" ||
-    (asRecord(mxRaw)?.ok === true);
-
-  const okRaw = root.ok ?? root.valid ?? root.verified ?? root.status;
-  const ok =
-    okRaw === true || okRaw === "true" || okRaw === "ok" || okRaw === "verified";
-
-  return { ok, mxOk, findings: findings.slice(0, 20), details: payload };
-}
-
-function normalizeMailbox(raw: unknown, domain: string): HostMailbox | null {
-  const r = asRecord(raw);
-  if (!r) return null;
-  const localPart = r.local_part;
-  if (typeof localPart !== "string" || localPart.length === 0) return null;
-  return {
-    localPart,
-    address:
-      typeof r.address === "string" ? r.address : `${localPart}@${domain}`,
-    displayName: typeof r.name === "string" ? r.name : "",
-    maySend: asBool(r.may_send, true),
-    mayReceive: asBool(r.may_receive, true),
-    mayAccessImap: asBool(r.may_access_imap, true),
-  };
-}
-
 /** Domains and local parts go into the URL path; neither may smuggle in a segment. */
 function safeSegment(value: string): string {
   return encodeURIComponent(value.trim().toLowerCase());
@@ -246,6 +132,30 @@ export const migaduHost: MailboxHost = {
   provider: "migadu",
 
   async createDomain(domain) {
+    // Adopt before creating.
+    //
+    // Setting a domain up in Migadu's own panel first is the normal path — it
+    // is how the founder's own domain was added, and how any client already
+    // mid-migration will arrive. A hard failure on "already exists" would
+    // dead-end the setup flow on exactly the domains most likely to matter.
+    //
+    // Checked with a GET rather than by matching the text of a POST error,
+    // because error strings are the least stable part of any API.
+    const existing = await request<unknown>(
+      "GET",
+      `/domains/${safeSegment(domain)}`,
+    );
+    if (existing.ok) {
+      // Status stays 'pending' even for a domain the host already considers
+      // live: our own flow must still run diagnostics and stamp a cutover
+      // before anything is called active. Trusting the host's word here would
+      // skip the rollback capture.
+      return { ok: true, data: { domain, status: "pending", adopted: true } };
+    }
+    // Only a genuine "not there" means go ahead and create. A 401 from a bad
+    // key must not turn into a confusing create attempt.
+    if (existing.status !== 404) return existing;
+
     // hosted_dns stays false on purpose: Migadu has signalled it intends to
     // stop offering DNS hosting, and the tenant's registrar is where their
     // records belong anyway. create_default_addresses gives us the
@@ -256,7 +166,10 @@ export const migaduHost: MailboxHost = {
       hosted_dns: "false",
     });
     if (!result.ok) return result;
-    return { ok: true, data: { domain, status: "pending" satisfies HostDomain["status"] } };
+    return {
+      ok: true,
+      data: { domain, status: "pending" satisfies HostDomain["status"] },
+    };
   },
 
   async getDomainRecords(domain) {

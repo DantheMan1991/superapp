@@ -28,6 +28,12 @@ export interface HostDomain {
   domain: string;
   /** The host's own view of whether this domain is live. */
   status: HostDomainStatus;
+  /**
+   * True when the domain already existed at the host and we took it over
+   * rather than creating it. The normal path for a domain someone set up in
+   * the host's own panel first, and for any client mid-migration.
+   */
+  adopted?: boolean;
 }
 
 /**

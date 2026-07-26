@@ -48,6 +48,45 @@ domain creation was admin-panel-only. It is not — `POST /v1/domains`,
 `/records`, `/diagnostics` and `/activate` all exist, and `/activate` being a
 separate call is what makes a staged cutover possible at all.
 
+### 2026-07-26 (later) — Reconciled against the live API; `yosherapp.com` hosted
+
+`yosherapp.com` is now active at Migadu. Its root had **no MX and no SPF**, so
+the cutover was the zero-risk case — nothing to lose. `in.yosherapp.com` (the
+shipped documents email-in path, MX → Resend/SES) was left untouched, which is
+the trap that setup presents: DNS panels list every record for a domain in one
+flat list, and Migadu's "remove any pre-existing MX records" means *on the host
+being configured*, not on subdomains.
+
+`npm run mailbox:probe -- <domain>` was added (`scripts/migadu-probe.ts`,
+strictly read-only) and immediately earned itself: **both response shapes the
+adapter had guessed at were wrong.**
+
+- **`/records` is not a list.** It is an object keyed by purpose —
+  `dns_verification`, `mx_records`, `dkim`, `spf`, `dmarc` — where some keys
+  hold one record and some hold an array. The array-shaped reader returned
+  `[]`, i.e. an empty DNS wizard that looked like a host with nothing to set up.
+- **`/diagnostics` nests under `checks`.** The gate read `root.mx`; the field
+  is `root.checks.mx`. `mxOk` was therefore permanently false and **the cutover
+  could never have unlocked**, no matter how correct the DNS was.
+
+That second one is the design working as intended: an unrecognized shape fails
+closed, so a wrong guess became a button that stayed disabled rather than a
+business's mail redirected on a misread response.
+
+Pure parsing moved to `migadu-parse.ts` (free of `server-only`, the same reason
+`mx.ts` is) and the live payloads are now golden fixtures in
+`tests/mailbox.test.ts`. This is the lesson worth keeping: a normalizer that
+returns `[]` for an unexpected shape looks perfectly healthy against invented
+input, so only real payloads prove it.
+
+Also added: **adoption**. `createDomain` now does `GET /domains/{d}` first and
+picks up a domain that already exists rather than failing on it — the normal
+path for a domain set up in the host's panel first, and for any client
+mid-migration. Detected with a GET rather than by matching the text of a POST
+error, since error strings are the least stable part of any API. An adopted
+domain still walks the local check → cutover flow, because trusting the host's
+"active" would skip the `previous_mx` capture the CHECK constraint depends on.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -91,6 +130,17 @@ Hosted mailboxes (`src/lib/email/mailbox/`):
 - `migadu.ts` — the one implementation. Everything Migadu-shaped is confined
   here: Basic auth, booleans-as-strings, and an activation endpoint that is a
   GET which mutates.
+- `migadu-parse.ts` — pure response parsing, free of `server-only` so it is
+  testable without a network. `normalizeRecords()` and
+  `normalizeDiagnostics()` live here; between them they decide what the DNS
+  wizard shows and whether a cutover is allowed, which makes them the
+  highest-value functions in this directory. Verified against live payloads,
+  which are golden fixtures in `tests/mailbox.test.ts`.
+- `guard.ts` — what the mailbox path refuses to do outside production. Pure,
+  takes the environment explicitly, tested against the Vercel preview trap.
+- `scripts/migadu-probe.ts` — `npm run mailbox:probe -- <domain>`. Read-only
+  (every request a GET), safe against a live domain. Run it whenever a shape
+  here is in doubt; it prints the current truth.
 - `mx.ts` — pure. Reads and describes a domain's live MX. Testable without a
   database or a network; `describeMxProvider()` is what turns a hostname into
   "Google Workspace" in the warning copy.
@@ -204,6 +254,60 @@ actual mailboxes stay reachable at the host while the owner sorts out where
 their mail should live. Same reasoning that kept the sending-domain teardown
 local.
 
+**The mailbox path shipped without an environment guard, and that was a worse
+hole than the one `EMAIL_DEV_REDIRECT` was written for.** The send spine has
+refused to mail real people outside production since day one; the mailbox code
+had nothing equivalent, so a branch preview with credentials could reach a real
+mail host and act on a real domain. `guard.ts` closes it with three different
+answers, chosen by how recoverable each mistake is:
+
+- **Cutover — refused outside production, no escape hatch.** Redirecting a
+  domain's mail from a preview is never legitimate, and undoing it means
+  editing DNS at a registrar while the business's mail goes nowhere.
+- **Mailbox deletion — refused.** It destroys correspondence at the host.
+- **Mailbox creation — allowed, invitation redirected** to
+  `EMAIL_DEV_REDIRECT`, refused if unset. Creating a mailbox is reversible;
+  mailing a real person a link to claim an address is not. The flow stays
+  testable end to end, and only the message to a human is diverted.
+
+Reuses `isLiveSendEnvironment()` rather than reimplementing it: it encodes the
+trap that Vercel builds previews with `NODE_ENV=production`, and two copies of
+that logic would drift silently.
+
+**Two DNS records where a duplicate is worse than none.** SPF and DMARC both
+fail *closed* when a name carries two records — receivers cannot pick the
+stricter, so they treat the check as broken rather than applying either. This
+bites during setup because a mail host's instructions describe a greenfield
+domain:
+
+- **SPF** — one `v=spf1` TXT per name, ever. A second sender means merging
+  `include:` terms into the existing record, never adding another.
+- **DMARC** — one record at `_dmarc.<domain>`. Migadu's setup page offers
+  `p=quarantine`; `yosherapp.com` already carried `p=none`, so that row was
+  deliberately skipped. Keep DMARC permissive while mail infrastructure is
+  changing and tighten afterwards as its own step, or the first misconfigured
+  sender starts landing in spam with no warning. DMARC at the organizational
+  domain also covers subdomains unless `sp=` overrides it, so tightening the
+  root would have caught `mail.yosherapp.com` — the not-yet-verified Resend
+  sending domain — too.
+
+**A subdomain's MX is not the root's MX, and DNS panels hide that.** Every
+record for a domain shows in one flat list, so `in.yosherapp.com`'s MX sits
+directly beside the root's. Migadu's "remove any pre-existing MX records"
+means on the host being configured (`@`). Deleting the subdomain's row instead
+would silently kill inbound document filing — no error anywhere, just
+drawings that stop arriving.
+
+**Response shapes are only real once a live call proves them.** Both
+normalizers in the first build were written from published docs and both were
+wrong: `/records` is a keyed object rather than a list, and `/diagnostics`
+nests under `checks`. Neither could have been caught by unit tests, because a
+normalizer that returns `[]` for an unfamiliar shape looks perfectly healthy
+against invented input. Hence `npm run mailbox:probe` and golden fixtures
+copied verbatim from a live response. The `/diagnostics` miss is also the
+fail-closed rule paying for itself — the wrong guess produced a cutover button
+that never unlocked, rather than a redirect performed on a misread reply.
+
 **drizzle-kit emits all FKs before all indexes.** Fine when the referenced
 table already exists, fatal when both tables are created in one migration: the
 composite FK on `mailboxes` needs the unique index on
@@ -213,10 +317,20 @@ by a composite tenant FK.
 
 ## Current state (2026-07-26)
 
-**Hosted mailboxes are built but not connected.** `MIGADU_ACCOUNT_EMAIL` and
-`MIGADU_API_KEY` are not set, so every provider call returns the same
-"isn't configured yet" result the Resend paths use, and the UI degrades to a
-readable error rather than a stack trace. Nothing provisions until those exist.
+**`yosherapp.com` is live at Migadu** — verification, MX, DKIM and SPF all
+published at Vercel DNS, diagnostics green on every check, and the default
+`admin@yosherapp.com` (Postmaster) mailbox exists. DMARC deliberately left at
+the pre-existing `p=none`; see Decisions.
+
+`MIGADU_ACCOUNT_EMAIL` and `MIGADU_API_KEY` are set locally in `.env`, and go
+on **Production only** in Vercel — the guards below make a preview refuse the
+dangerous operations anyway, but there is no reason for a branch deployment to
+hold live mail-host credentials in the first place.
+
+The adapter has been reconciled against live responses, but **the app's own
+flow has not been walked end to end yet** — nothing has gone through
+`/dashboard/email` to create a domain row, run a check, or provision a mailbox
+through the UI. The parsing is verified; the round trip is not.
 
 Scope stops at provisioning and cutover. There is no inbox: no sync, no
 threading, no reading or replying inside Yosher. A mailbox created here is used

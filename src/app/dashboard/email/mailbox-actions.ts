@@ -35,7 +35,13 @@ const setupSchema = z.object({ domain: z.string().min(4).max(253) });
 export async function setupHostedDomainAction(
   input: z.infer<typeof setupSchema>,
 ): Promise<
-  ActionResult<{ status: string; currentMail: string; alreadyHasMail: boolean }>
+  ActionResult<{
+    status: string;
+    currentMail: string;
+    alreadyHasMail: boolean;
+    adopted: boolean;
+    rollbackUnavailable: boolean;
+  }>
 > {
   const ctx = await requireTenantOwner();
   const parsed = setupSchema.safeParse(input);
@@ -56,6 +62,10 @@ export async function setupHostedDomainAction(
       // cutover is. Worth recording; it names a provider, not a person.
       hadExistingMail: result.data.alreadyHasMail,
       previousProvider: result.data.currentMail,
+      // Worth recording: an adopted domain has no meaningful rollback, and
+      // that is the sort of thing someone reconstructing an incident needs.
+      adopted: result.data.adopted,
+      rollbackUnavailable: result.data.rollbackUnavailable,
     },
   });
 
@@ -66,6 +76,8 @@ export async function setupHostedDomainAction(
       status: result.data.row.status,
       currentMail: result.data.currentMail,
       alreadyHasMail: result.data.alreadyHasMail,
+      adopted: result.data.adopted,
+      rollbackUnavailable: result.data.rollbackUnavailable,
     },
   };
 }

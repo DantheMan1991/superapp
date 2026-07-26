@@ -51,10 +51,19 @@ export function SetupHostedDomainForm() {
             toast.error(result.error);
             return;
           }
+          if (result.data?.rollbackUnavailable) {
+            // Say it out loud rather than showing a rollback card that would
+            // restore the state it is already in.
+            toast.warning(
+              "This domain's mail already pointed here, so there is no earlier setup to roll back to.",
+            );
+          }
           toast.success(
-            result.data?.alreadyHasMail
-              ? `Added. Your mail currently goes to ${result.data.currentMail} — nothing has changed yet.`
-              : "Added — nothing has changed yet.",
+            result.data?.adopted
+              ? "Found this domain already at the mail host and picked it up."
+              : result.data?.alreadyHasMail
+                ? `Added. Your mail currently goes to ${result.data.currentMail} — nothing has changed yet.`
+                : "Added — nothing has changed yet.",
           );
           router.refresh();
         });

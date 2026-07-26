@@ -4,6 +4,7 @@ import { schema, withSystem } from "@/db";
 import type { Mailbox, MailboxDomain } from "@/db/schema";
 import { emailDomainOf, looksLikeEmail, normalizeLocalPart } from "@/lib/email/identity";
 import { getMailboxHost } from "./index";
+import { guardInviteAddress, guardMailboxDeletion } from "./guard";
 import { loadHostedDomain, type ProvisionResult } from "./provisioning";
 
 /**
@@ -60,6 +61,13 @@ export async function createTenantMailbox(
     };
   }
 
+  // Validated against what the owner typed, then diverted. The check above
+  // must see the real address — telling someone their own address is invalid
+  // because a dev redirect happens to live on the same domain would be a
+  // baffling error to receive.
+  const guarded = guardInviteAddress(inviteEmail);
+  if ("blocked" in guarded) return { ok: false, message: guarded.blocked };
+
   const address = `${localPart}@${domainRow.domain}`;
 
   const existing = await withSystem((tx) =>
@@ -79,7 +87,7 @@ export async function createTenantMailbox(
   const created = await host.createMailbox(domainRow.domain, {
     localPart,
     displayName: input.displayName.trim().slice(0, 120),
-    inviteEmail,
+    inviteEmail: guarded.inviteEmail,
   });
   if (!created.ok) return { ok: false, message: created.message };
 
@@ -104,7 +112,9 @@ export async function createTenantMailbox(
     return inserted;
   });
 
-  return { ok: true, data: { mailbox, invitedTo: inviteEmail } };
+  // Reports where the link ACTUALLY went, not where it was addressed. A
+  // redirect the UI hides is a redirect someone waits on forever.
+  return { ok: true, data: { mailbox, invitedTo: guarded.inviteEmail } };
 }
 
 /**
@@ -119,6 +129,9 @@ export async function deleteTenantMailbox(
   tenantId: string,
   mailboxId: string,
 ): Promise<ProvisionResult<{ address: string }>> {
+  const blocked = guardMailboxDeletion();
+  if (blocked) return { ok: false, message: blocked };
+
   const row = await withSystem((tx) =>
     tx.query.mailboxes.findFirst({
       where: and(

@@ -15,6 +15,7 @@ import {
   fileKindLabel,
   parseViewMode,
 } from "@/modules/documents/lib/view-mode";
+import { displayNameFromBlobPath } from "@/modules/documents/ingest";
 import {
   isDeniedKind,
   loadShareActivity,
@@ -865,6 +866,49 @@ describe("blob client upload flow", () => {
     walk("src");
 
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("upload display names", () => {
+  /**
+   * The presigned upload asks the store for a random suffix so two people
+   * uploading `invoice.pdf` cannot collide. That suffix belongs in the storage
+   * KEY — reading the stored name straight off the pathname put it in front of
+   * the user, which is what shipped.
+   */
+  it("strips the blob store's random suffix", () => {
+    expect(
+      displayNameFromBlobPath("Invoice 3000 (1)-A76EZtxEuYMtCeXMNHHjKpQr.pdf"),
+    ).toBe("Invoice 3000 (1).pdf");
+    expect(displayNameFromBlobPath("site-photo-Zk3mPq9WdLbN2xVtRy8s.jpg")).toBe(
+      "site-photo.jpg",
+    );
+  });
+
+  /**
+   * The half that matters more: a real filename must survive untouched. These
+   * are all names a construction business genuinely has.
+   */
+  it("leaves ordinary hyphenated names alone", () => {
+    for (const name of [
+      "as-built.pdf",
+      "2026-01-15 site meeting.docx",
+      "RFI-004-response.pdf",
+      "plan-A.dwg",
+      "invoice.pdf",
+      "no-extension",
+      "Change-Order-12.pdf",
+    ]) {
+      expect(displayNameFromBlobPath(name)).toBe(name);
+    }
+  });
+
+  it("never returns an empty name", () => {
+    // A pathological upload whose whole stem looks like a suffix keeps the
+    // original rather than becoming ".pdf".
+    expect(displayNameFromBlobPath("A76EZtxEuYMtCeXMNHHjKpQr.pdf")).toBe(
+      "A76EZtxEuYMtCeXMNHHjKpQr.pdf",
+    );
   });
 });
 

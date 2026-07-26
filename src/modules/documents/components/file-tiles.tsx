@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { FileText, FolderOpen, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
 import { formatBytes } from "../lib/format";
 import { canPreview, fileKindLabel } from "../lib/view-mode";
+import { PdfThumbnail } from "./pdf-canvas";
 
 /**
  * Grid tiles for the Icons and Thumbnails views.
@@ -29,16 +29,27 @@ export function FolderTile({
     <Link
       draggable={false}
       href={`${BASE}/${id}`}
-      className="flex h-full flex-col items-center gap-2 rounded-md border p-3 text-center transition-colors hover:bg-secondary/50"
+      className="flex h-full flex-col gap-2 rounded-md border p-3 transition-colors hover:bg-secondary/50"
     >
-      <FolderOpen className="size-10 shrink-0 text-muted-foreground" />
+      {/* Same aspect-square media block as a file tile. Grid rows size to
+          their tallest member, so a folder next to a file used to stretch to
+          the file's height and every row ended up a different size. Matching
+          the two shapes is what makes the grid uniform. */}
+      <div className="flex aspect-square items-center justify-center rounded bg-secondary/40">
+        <FolderOpen className="size-10 text-muted-foreground" />
+      </div>
       <span className="line-clamp-2 break-words text-sm font-medium">{name}</span>
-      {restricted && (
-        <Badge variant="secondary" className="gap-1">
-          <Lock className="size-3" />
-          Owners
-        </Badge>
-      )}
+      <div className="mt-auto">
+        {restricted ? (
+          <Badge variant="secondary" className="gap-1">
+            <Lock className="size-3" />
+            Owners
+          </Badge>
+        ) : (
+          // Keeps the baseline aligned with a file tile's size line.
+          <span className="text-xs text-muted-foreground">Folder</span>
+        )}
+      </div>
     </Link>
   );
 }
@@ -61,6 +72,7 @@ export function FileTile({
 }) {
   const label = title || fileName;
   const preview = showPreview && canPreview(mimeType);
+  const isPdf = showPreview && mimeType === "application/pdf";
 
   return (
     <a
@@ -68,12 +80,7 @@ export function FileTile({
       href={`/api/documents/${id}/file`}
       className="flex h-full flex-col gap-2 rounded-md border p-3 transition-colors hover:bg-secondary/50"
     >
-      <div
-        className={cn(
-          "flex items-center justify-center overflow-hidden rounded bg-secondary/40",
-          preview ? "aspect-square" : "aspect-square",
-        )}
-      >
+      <div className="flex aspect-square items-center justify-center overflow-hidden rounded bg-secondary/40">
         {preview ? (
           // Same-origin and authenticated, exactly like opening the file.
           // loading="lazy" so a folder of photos does not fetch every full
@@ -87,6 +94,9 @@ export function FileTile({
             decoding="async"
             className="size-full object-cover"
           />
+        ) : isPdf ? (
+          // Drawn by pdf.js to a canvas, not framed — see pdf-canvas.tsx.
+          <PdfThumbnail url={`/api/documents/${id}/file`} />
         ) : (
           <div className="flex flex-col items-center gap-1 text-muted-foreground">
             <FileText className="size-8" />

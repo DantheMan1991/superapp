@@ -37,6 +37,30 @@ async function readBlobBytes(pathname: string): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
+/**
+ * Undo `addRandomSuffix` for display.
+ *
+ * The presigned upload asks the store for a random suffix so two people
+ * uploading `invoice.pdf` cannot collide — that suffix belongs in the STORAGE
+ * key and nowhere else. Reading the stored name straight off the pathname put
+ * it in front of the user: a file uploaded as `Invoice 3000 (1).pdf` listed as
+ * `Invoice 3000 (1)-A76EZtxEuYMtCeXMNHHj.pdf`.
+ *
+ * Vercel Blob's suffix is a hyphen plus a fixed-length alphanumeric run
+ * immediately before the extension, so it is removable without guessing. A
+ * name that does not match that shape is returned untouched — a real file
+ * called `report-2026Q1.pdf` must survive.
+ */
+export function displayNameFromBlobPath(base: string): string {
+  const dot = base.lastIndexOf(".");
+  const stem = dot === -1 ? base : base.slice(0, dot);
+  const ext = dot === -1 ? "" : base.slice(dot);
+  // The store uses a 20+ character suffix; requiring that length keeps a
+  // hyphenated word like "as-built" or a date like "2026-01" safe.
+  const stripped = stem.replace(/-[A-Za-z0-9]{20,}$/, "");
+  return stripped.length > 0 ? `${stripped}${ext}` : base;
+}
+
 export interface InspectedUpload {
   fileName: string;
   mimeType: string;
@@ -83,7 +107,7 @@ export async function inspectUploadedBlob(
   const bytes = await readBlobBytes(pathname);
   const base = pathname.slice(pathname.lastIndexOf("/") + 1);
   return {
-    fileName: base,
+    fileName: displayNameFromBlobPath(base),
     mimeType: meta.contentType ?? "",
     sizeBytes: meta.size,
     sha256: sha256Hex(bytes),

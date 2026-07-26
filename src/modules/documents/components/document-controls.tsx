@@ -2,7 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
-import { upload as uploadPresigned } from "@vercel/blob/client";
+// uploadPresigned, NOT upload. The store is PRIVATE, which rejects classic
+// client tokens outright, and /api/documents/blob/upload answers with
+// handleUploadPresigned — so `upload` sends a handshake the route cannot read.
+// This was imported as `upload as uploadPresigned` and failed every upload.
+import { uploadPresigned } from "@vercel/blob/client";
 import {
   FileUp,
   FolderInput,

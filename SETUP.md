@@ -505,6 +505,75 @@ Setup:
 - A **subdomain** (`mail.acme.com`) is strongly preferred over the root domain:
   it keeps this traffic's sending reputation separate from the owner's everyday
   email, so a bad send never affects their normal mail.
+
+### Hosted mailboxes (Migadu)
+
+Separate from everything above. The sending setup decides what *leaves*; this
+decides what *arrives* — real mailboxes on a client's own domain, reachable
+over IMAP from a phone or Outlook.
+
+- `MIGADU_ACCOUNT_EMAIL` — the Migadu account's login address.
+- `MIGADU_API_KEY` — generate at **Migadu → My Account → API Keys**. Used as
+  HTTP Basic auth against `https://api.migadu.com/v1`. Without both, every
+  provider call returns "isn't configured yet" and the UI degrades to a
+  readable message rather than a stack trace — nothing provisions.
+
+  **Set these on Production only.** Not Preview, not Development. Vercel env
+  var changes only apply to new deployments, so redeploy after adding them.
+
+**What is blocked outside production**, and why each answer differs
+(`src/lib/email/mailbox/guard.ts`):
+
+- **MX cutover — refused, no escape hatch.** There is no legitimate reason to
+  redirect a domain's mail from a branch deployment, and the mistake cannot be
+  undone from inside the app.
+- **Mailbox deletion — refused.** It destroys the correspondence inside the
+  mailbox at the host. Nothing to divert, nothing to take back.
+- **Mailbox creation — allowed, but the setup invitation is redirected** to
+  `EMAIL_DEV_REDIRECT`, and refused outright if that is unset. Creating a
+  mailbox is reversible; mailing a stranger a link to claim an address is not.
+  Same variable as the send guard on purpose — one thing to configure.
+
+This reuses `isLiveSendEnvironment()`, which keys on `VERCEL_ENV` rather than
+`NODE_ENV` because Vercel builds previews with `NODE_ENV=production`. A preview
+is treated as non-production and blocked.
+
+Verify the connection before trusting the app with it:
+
+```
+npm run mailbox:probe -- yourdomain.com
+```
+
+Strictly read-only (every request is a GET), safe against a live domain. It
+prints the raw shapes of `/records`, `/diagnostics` and `/mailboxes` so they can
+be checked against the normalizers in `src/lib/email/mailbox/migadu.ts`, which
+were written from the published docs rather than from live responses.
+
+**The MX record is the dangerous one.** Pointing a domain's MX at the mail host
+redirects everything that domain receives. Unlike a sending domain — which is
+additive, because nothing worked there before — this is a takeover, and undoing
+it means editing DNS at the registrar and waiting for it to spread. The app
+therefore stages it (create → publish → check → activate), snapshots the
+domain's existing MX at creation time as `mailbox_domains.previous_mx`, and
+requires the owner to type the domain name to confirm. See
+`docs/modules/email.md` for the full reasoning.
+
+**Watch out when publishing records:** DNS panels list every record for a
+domain in one flat list, so a subdomain's MX (for example `in.yosherapp.com`,
+which carries the shipped documents email-in feature) sits right next to the
+root. Migadu's instructions say to remove pre-existing MX records — they mean
+on the host being configured (`@`), not on subdomains. Deleting a subdomain's
+MX breaks inbound filing silently.
+
+Two records where a duplicate is worse than none, because a second one makes
+the check fail entirely rather than picking the stricter:
+
+- **SPF** — only one `v=spf1` TXT per name. Adding a second sender means
+  merging `include:` terms into the existing record, never adding another.
+- **DMARC** — only one record at `_dmarc.<domain>`. Keep it at `p=none` while
+  mail infrastructure is changing; tighten to `quarantine` and then `reject`
+  only once every sender for the domain is verified, or your own mail starts
+  landing in spam with no warning.
 - Share links with a passcode **cannot** be emailed. A link and its passcode in
   one message is one factor, not two.
 

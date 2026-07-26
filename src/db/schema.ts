@@ -2171,6 +2171,179 @@ export const outboundEmails = pgTable(
   ],
 );
 
+/**
+ * A domain whose MAIL WE HOST — the MX record points at our mailbox provider
+ * and real mailboxes live under it.
+ *
+ * Deliberately NOT the same table as `email_domains`, even though both hold a
+ * domain and a pile of DNS records, because they are different promises:
+ *
+ *   email_domains    mail.acme.com   sending only. DKIM/SPF. If it breaks,
+ *                                    outbound notifications stop.
+ *   mailbox_domains  acme.com        MX. If it breaks, the business stops
+ *                                    RECEIVING MAIL. Every order, every RFI.
+ *
+ * That second failure mode is the reason for most of the design below. A
+ * sending subdomain is additive — nothing worked there before. An MX record is
+ * a takeover of something that already works, so the flow is staged
+ * (create → publish records → diagnostics → activate) rather than one button,
+ * and `previous_mx` exists so rollback is a stored fact rather than a hope.
+ */
+export const mailboxDomains = pgTable(
+  "mailbox_domains",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Usually the root domain: acmebuilders.com */
+    domain: text("domain").notNull(),
+    /**
+     * Which mailbox host holds it. Stored per row, not inferred from env, so a
+     * migration from one host to another can run tenant by tenant instead of
+     * as a platform-wide flag day.
+     */
+    provider: text("provider").notNull().default("migadu"),
+    /**
+     * pending    — created at the provider, DNS not published yet
+     * dns_ready  — provider diagnostics pass, but MX has NOT been cut over
+     * active     — activated; this domain's mail now arrives here
+     * failed     — provider rejected it, see last_error
+     *
+     * dns_ready is the important one. It is the state where everything is
+     * proven and nothing has been taken over yet, and it is where an owner can
+     * safely sit and think before the irreversible-feeling step.
+     */
+    status: text("status").notNull().default("pending"),
+    /** Records the provider says to publish. Same shape the sending wizard renders. */
+    dnsRecords: jsonb("dns_records")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /**
+     * THE ROLLBACK RECORD. Whatever MX the domain had before we touched it,
+     * captured at cutover time.
+     *
+     * Without this, "put it back the way it was" depends on someone having
+     * taken a screenshot. A business whose mail is going to the wrong place is
+     * not in a state to reconstruct their old Google MX values from memory.
+     */
+    previousMx: jsonb("previous_mx")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** Raw provider diagnostics from the last check, for showing what's missing. */
+    lastDiagnostics: jsonb("last_diagnostics")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    lastError: text("last_error").notNull().default(""),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    /** When the owner accepted the MX change. Null until they do. */
+    mxCutoverAt: timestamp("mx_cutover_at", { withTimezone: true }),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mailbox_domains_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One hosted domain per tenant in v1.
+    uniqueIndex("mailbox_domains_tenant_idx").on(t.tenantId),
+    // Platform-wide claim: two tenants must never both host the same domain.
+    uniqueIndex("mailbox_domains_domain_idx").on(t.domain),
+    check(
+      "mailbox_domains_status_check",
+      sql`${t.status} in ('pending', 'dns_ready', 'active', 'failed')`,
+    ),
+    check("mailbox_domains_domain_not_blank", sql`length(${t.domain}) > 3`),
+    check(
+      "mailbox_domains_provider_check",
+      sql`${t.provider} in ('migadu', 'stalwart')`,
+    ),
+    // Can't be active without having recorded the moment of cutover — that
+    // would mean an activation path skipped the rollback capture.
+    check(
+      "mailbox_domains_active_has_cutover",
+      sql`${t.status} <> 'active' or ${t.mxCutoverAt} is not null`,
+    ),
+  ],
+);
+
+/**
+ * One real mailbox: dan@acmebuilders.com, with a password its owner uses in
+ * this app, on their phone, and in Outlook if they want.
+ *
+ * NO PASSWORD OR CREDENTIAL IS STORED HERE, ever. Provisioning prefers the
+ * provider's invitation flow (the provider mails a setup link and we never see
+ * a secret); where a password must be generated it is returned to the caller
+ * once, shown once, and never persisted or logged. A mailbox password is
+ * strictly more dangerous than an app password — it can read the mail that
+ * resets every other account the business owns.
+ */
+export const mailboxes = pgTable(
+  "mailboxes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    mailboxDomainId: uuid("mailbox_domain_id").notNull(),
+    /** The part before the @. */
+    localPart: text("local_part").notNull(),
+    /** Denormalized full address — every read wants it, and it never changes. */
+    address: text("address").notNull(),
+    /** Display name on outgoing mail. */
+    displayName: text("display_name").notNull().default(""),
+    /**
+     * Which platform user this mailbox belongs to, when it belongs to one.
+     * Null for shared boxes (info@, invoices@) that no single person owns.
+     */
+    clerkUserId: text("clerk_user_id"),
+    /** provisioning | active | suspended | failed */
+    status: text("status").notNull().default("provisioning"),
+    /** Mirrors the provider's per-mailbox switches. */
+    maySend: boolean("may_send").notNull().default(true),
+    mayReceive: boolean("may_receive").notNull().default(true),
+    mayAccessImap: boolean("may_access_imap").notNull().default(true),
+    /** True while the provider's invitation is outstanding. */
+    invitePending: boolean("invite_pending").notNull().default(false),
+    lastError: text("last_error").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mailboxes_tenant_id_id_idx").on(t.tenantId, t.id),
+    // No two mailboxes on the same domain can share a local part — that would
+    // be two people believing they own one address.
+    uniqueIndex("mailboxes_domain_local_part_idx").on(
+      t.mailboxDomainId,
+      t.localPart,
+    ),
+    index("mailboxes_tenant_status_idx").on(t.tenantId, t.status),
+    // House rule: the composite FK makes it structurally impossible to hang a
+    // mailbox off ANOTHER tenant's domain, RLS bug or not.
+    foreignKey({
+      name: "mailboxes_domain_fk",
+      columns: [t.tenantId, t.mailboxDomainId],
+      foreignColumns: [mailboxDomains.tenantId, mailboxDomains.id],
+    }).onDelete("cascade"),
+    check(
+      "mailboxes_status_check",
+      sql`${t.status} in ('provisioning', 'active', 'suspended', 'failed')`,
+    ),
+    check(
+      "mailboxes_local_part_format",
+      sql`${t.localPart} ~ '^[a-z0-9][a-z0-9._-]{0,62}$'`,
+    ),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -2637,6 +2810,13 @@ export type EmailDnsRecord = {
   priority?: number;
   status?: string;
 };
+export type MailboxDomain = typeof mailboxDomains.$inferSelect;
+export type Mailbox = typeof mailboxes.$inferSelect;
+/**
+ * What the domain's MX looked like before we changed it. Stored so that
+ * "put it back" is a stored fact rather than a memory test during an outage.
+ */
+export type PreviousMxRecord = { host: string; priority: number };
 export type DocumentShare = typeof documentShares.$inferSelect;
 export type DocumentShareEvent = typeof documentShareEvents.$inferSelect;
 /** Derived, never stored — see modules/documents/shares/status.ts. */

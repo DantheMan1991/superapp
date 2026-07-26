@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, Mail, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Inbox, Mail, XCircle } from "lucide-react";
 import { requireTenantOwner } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,16 +16,31 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { EmailDnsRecord } from "@/db/schema";
+import type { EmailDnsRecord, PreviousMxRecord } from "@/db/schema";
 import { loadSendingDomain } from "@/lib/email/domains";
 import { listOutboundEmails } from "@/lib/email/send";
 import { resolveSender } from "@/lib/email/identity";
+import {
+  listTenantMailboxes,
+  loadHostedDomain,
+  rollbackPlan,
+} from "@/lib/email/mailbox/provisioning";
+import { describeMxProvider } from "@/lib/email/mailbox/mx";
 import {
   ConnectDomainForm,
   DnsRecords,
   DomainActions,
   SendTestForm,
 } from "./email-controls";
+import {
+  CheckDnsButton,
+  CreateMailboxForm,
+  CutoverPanel,
+  DisconnectHostedDomainButton,
+  MailboxRowActions,
+  RollbackCard,
+  SetupHostedDomainForm,
+} from "./mailbox-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +51,12 @@ export const dynamic = "force-dynamic";
  */
 export default async function EmailSettingsPage() {
   const ctx = await requireTenantOwner();
-  const [domain, sent] = await Promise.all([
+  const [domain, sent, hosted, mailboxes, rollback] = await Promise.all([
     loadSendingDomain(ctx.tenant.id),
     listOutboundEmails(ctx.tenant.id),
+    loadHostedDomain(ctx.tenant.id),
+    listTenantMailboxes(ctx.tenant.id),
+    rollbackPlan(ctx.tenant.id),
   ]);
 
   const verified = domain?.status === "verified";
@@ -144,6 +162,148 @@ export default async function EmailSettingsPage() {
               )}
 
               <DomainActions verified={verified} />
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Inbox className="size-4 text-muted-foreground" />
+            <CardTitle className="text-base">Your own mailboxes</CardTitle>
+          </div>
+          <CardDescription>
+            Real addresses on your own domain — yours to read here, on your
+            phone, or in Outlook. This is separate from the sending setup above:
+            that decides what leaves, this decides what arrives.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {hosted === null ? (
+            <SetupHostedDomainForm />
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-mono text-sm">{hosted.domain}</span>
+                {hosted.status === "active" && (
+                  <Badge className="gap-1">
+                    <CheckCircle2 className="size-3" />
+                    Receiving mail
+                  </Badge>
+                )}
+                {hosted.status === "dns_ready" && (
+                  <Badge variant="secondary" className="gap-1">
+                    <CheckCircle2 className="size-3" />
+                    Ready to switch over
+                  </Badge>
+                )}
+                {hosted.status === "pending" && (
+                  <Badge variant="secondary" className="gap-1">
+                    <Clock className="size-3" />
+                    Waiting for DNS
+                  </Badge>
+                )}
+                {hosted.status === "failed" && (
+                  <Badge variant="secondary" className="gap-1">
+                    <XCircle className="size-3" />
+                    Rejected
+                  </Badge>
+                )}
+              </div>
+
+              {hosted.status !== "active" && (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Add these at your DNS provider. Mail keeps arriving where it
+                    does today until the MX record below actually changes —
+                    everything else here is preparation.
+                  </p>
+                  <DnsRecords
+                    records={(hosted.dnsRecords as EmailDnsRecord[]) ?? []}
+                  />
+                </>
+              )}
+
+              {hosted.status !== "failed" && (
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium">
+                    Mailboxes ({mailboxes.length})
+                  </h4>
+                  {mailboxes.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      None yet. Create everyone&apos;s mailbox before switching
+                      over, so no mail bounces during the change.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Address</TableHead>
+                            <TableHead className="hidden sm:table-cell">
+                              Name
+                            </TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {mailboxes.map((mailbox) => (
+                            <TableRow key={mailbox.id}>
+                              <TableCell className="font-mono text-sm break-all">
+                                {mailbox.address}
+                              </TableCell>
+                              <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
+                                {mailbox.displayName || "—"}
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={
+                                    mailbox.invitePending
+                                      ? "secondary"
+                                      : "default"
+                                  }
+                                >
+                                  {mailbox.invitePending
+                                    ? "setup link sent"
+                                    : mailbox.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <MailboxRowActions mailbox={mailbox} />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                  <CreateMailboxForm domain={hosted.domain} />
+                </div>
+              )}
+
+              {hosted.status === "dns_ready" && (
+                <CutoverPanel
+                  domain={hosted.domain}
+                  previousProvider={describeMxProvider(
+                    (hosted.previousMx as PreviousMxRecord[]) ?? [],
+                  )}
+                  mailboxCount={mailboxes.length}
+                />
+              )}
+
+              {hosted.status === "active" && rollback && (
+                <RollbackCard
+                  records={rollback.records}
+                  previousProvider={rollback.previousProvider}
+                />
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <CheckDnsButton status={hosted.status} />
+                <DisconnectHostedDomainButton />
+              </div>
             </>
           )}
         </CardContent>

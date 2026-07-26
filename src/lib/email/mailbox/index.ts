@@ -1,0 +1,26 @@
+import "server-only";
+import { isMigaduConfigured, migaduHost } from "./migadu";
+import type { MailboxHost } from "./types";
+
+export type * from "./types";
+export { isMigaduConfigured };
+
+/**
+ * Which host holds a tenant's mail. Lazy and keyless-safe, like getResend():
+ * the app must build and boot with no mail-host credentials configured, and
+ * every caller already handles the "not configured" result.
+ *
+ * Takes the provider from the row rather than from an env var so a future
+ * migration to a self-hosted server can move one tenant at a time instead of
+ * flipping the whole platform at once.
+ */
+export function getMailboxHost(provider: string = "migadu"): MailboxHost {
+  switch (provider) {
+    case "migadu":
+      return migaduHost;
+    default:
+      // 'stalwart' is in the DB CHECK constraint but has no implementation
+      // yet. Failing loudly beats silently mailing through the wrong host.
+      throw new Error(`No mailbox host implementation for "${provider}".`);
+  }
+}

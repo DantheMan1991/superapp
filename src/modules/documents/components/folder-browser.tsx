@@ -25,6 +25,9 @@ import {
   FolderDropTarget,
   UploadDropZone,
 } from "./drag-drop";
+import { ViewSwitch } from "./view-switch";
+import { FileTile, FolderTile, TileGrid } from "./file-tiles";
+import { DEFAULT_VIEW_MODE, type ViewMode } from "../lib/view-mode";
 import {
   FolderRowMenu,
   NewFolderButton,
@@ -45,12 +48,15 @@ export async function FolderBrowser({
   ctx,
   folderId,
   cursor,
+  view = DEFAULT_VIEW_MODE,
 }: {
   ctx: TenantContext;
   folderId: string | null;
   cursor?: string;
+  view?: ViewMode;
 }) {
   const isOwner = ctx.role === "owner";
+  const isGrid = view !== "list";
 
   const data = await withTenant(
     ctx.tenant.id,
@@ -141,6 +147,7 @@ export async function FolderBrowser({
               {folder.visibility === "owners" ? "Owners only" : "Inherited"}
             </Badge>
           )}
+          <ViewSwitch current={view} />
           <UploadButton
             tenantId={ctx.tenant.id}
             folderId={folder?.id ?? null}
@@ -158,6 +165,90 @@ export async function FolderBrowser({
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
           This folder is empty. Drop files here to upload them.
         </p>
+      ) : isGrid ? (
+        <TileGrid>
+          {contents.subfolders.map((sub) => (
+            <FolderDropTarget
+              key={sub.id}
+              tenantId={ctx.tenant.id}
+              folderId={sub.id}
+              folderPath={sub.path}
+              className="relative rounded-md"
+            >
+              <DraggableRow
+                payload={{
+                  kind: "folder",
+                  id: sub.id,
+                  path: sub.path,
+                  version: sub.version,
+                }}
+                disabled={!isOwner}
+                className="h-full"
+              >
+                <FolderTile
+                  id={sub.id}
+                  name={sub.name}
+                  restricted={sub.effectiveVisibility === "owners"}
+                />
+              </DraggableRow>
+              {/* Outside the tile's anchor — a menu nested in a link is
+                  invalid HTML and swallows its own clicks. */}
+              <div className="absolute right-1 top-1">
+                <FolderRowMenu
+                  folder={{
+                    id: sub.id,
+                    name: sub.name,
+                    version: sub.version,
+                    visibility: sub.visibility,
+                    effectiveVisibility: sub.effectiveVisibility,
+                    inherited:
+                      sub.effectiveVisibility === "owners" &&
+                      sub.visibility !== "owners",
+                    inboundAddress:
+                      sub.inboundToken && inboundDomain
+                        ? folderInboundAddress(sub.inboundToken, inboundDomain)
+                        : null,
+                  }}
+                  isOwner={isOwner}
+                  moveTargets={moveTargetsFor(sub.path)}
+                  shareMaxTtlDays={shareMaxTtlDays}
+                />
+              </div>
+            </FolderDropTarget>
+          ))}
+
+          {contents.documents.map((doc) => (
+            <DraggableRow
+              key={doc.id}
+              payload={{ kind: "document", id: doc.id }}
+              className="relative h-full"
+            >
+              <FileTile
+                id={doc.id}
+                title={doc.title}
+                fileName={doc.fileName}
+                mimeType={doc.mimeType}
+                sizeBytes={doc.sizeBytes}
+                showPreview={view === "thumbs"}
+              />
+              <div className="absolute right-1 top-1">
+                <DocumentRowMenu
+                  documentId={doc.id}
+                  folders={folderChoices}
+                  version={doc.version}
+                  title={doc.title}
+                  fileName={doc.fileName}
+                  shareMaxTtlDays={shareMaxTtlDays}
+                  tenantId={ctx.tenant.id}
+                  origin={doc.origin}
+                  fileVersionCount={doc.fileVersionCount}
+                  tags={tagChoices}
+                  documentTags={doc.tags}
+                />
+              </div>
+            </DraggableRow>
+          ))}
+        </TileGrid>
       ) : (
         <div className="divide-y rounded-md border">
           {contents.subfolders.map((sub) => (
@@ -228,11 +319,16 @@ export async function FolderBrowser({
             >
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
+                {/* Same window, not a new tab. A top-level navigation is also
+                    the only way to show a PDF at all: file responses carry
+                    `frame-ancestors 'none'` and a `sandbox` directive, so they
+                    cannot be embedded in a frame on our own pages. Types the
+                    allowlist marks attachment (Word, Excel, ZIP) download
+                    without the page moving; inline types replace it and Back
+                    returns here. */}
                 <a
                   draggable={false}
                   href={`/api/documents/${doc.id}/file`}
-                  target="_blank"
-                  rel="noreferrer"
                   className="truncate text-sm font-medium hover:underline"
                 >
                   {doc.title || doc.fileName}
@@ -273,8 +369,10 @@ export async function FolderBrowser({
       {contents.nextCursor && (
         <div className="flex justify-center">
           <Button asChild variant="outline">
+            {/* Carries the view forward — paging must not silently drop you
+                back into the list layout. */}
             <Link
-              href={`${folder ? `${BASE}/${folder.id}` : BASE}?cursor=${encodeURIComponent(contents.nextCursor)}`}
+              href={`${folder ? `${BASE}/${folder.id}` : BASE}?cursor=${encodeURIComponent(contents.nextCursor)}&view=${view}`}
             >
               Load more
             </Link>

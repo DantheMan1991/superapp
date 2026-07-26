@@ -13,6 +13,30 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-26 — Same-window open, and List/Icons/Thumbnails (branch `claude/documents-views`)
+
+Files now open in the same tab instead of a new one, everywhere (Browse, Inbox,
+Search). Types the allowlist marks `attachment` — Word, Excel, ZIP — download
+without the page moving; inline types replace it and Back returns you to the
+folder.
+
+Three layouts, chosen by `?view=list|icons|thumbs` so a view is linkable and
+survives a reload, like every other piece of browse state. Paging carries it
+forward.
+
+**Thumbnails are images only, and that is a CSP consequence rather than a gap.**
+File responses carry `frame-ancestors 'none'` *and* a `sandbox` directive: the
+first stops a PDF being framed on our own pages at all, and the second disables
+the browser's built-in PDF viewer even where framing is permitted. Showing a
+PDF inline would mean weakening both — the two controls that stop
+user-uploaded content executing in our origin — so PDFs get a typed tile
+instead. An `<img>` is subject to neither, which is why images work. The real
+fix is server-side rasterised thumbnails cached as blobs; it needs a rasteriser
+this runtime does not have. Recorded as an open item, not quietly skipped.
+
+Same-window open is also the only way a PDF renders at all, for exactly the
+same reason: a top-level navigation is not a frame.
+
 ### 2026-07-26 — Upload fix + drag and drop (branch `claude/documents-upload-fix`)
 
 **Every upload in this module was broken in production.** Both call sites did
@@ -578,6 +602,15 @@ constant from `template-ops.ts` into the editor pulled the database layer into
 the browser bundle and failed the build. Vocabulary shared with client
 components lives in `doc-templates/fields.ts`, which carries no marker.
 
+**A stored file can never be embedded in one of our pages.** `frame-ancestors
+'none'` plus `sandbox` on every file response is what stops user-uploaded
+content executing in our origin, and together they rule out an in-app PDF
+viewer, a preview iframe and a thumbnail `<object>`. Files open by TOP-LEVEL
+NAVIGATION, which is not a frame and is therefore unaffected. Images are the
+one previewable type because `<img>` is subject to neither directive. **Anyone
+adding a preview must make it work without relaxing those two headers** — the
+supported route is rasterising server-side and serving an ordinary image.
+
 **Client uploads MUST use `uploadPresigned`, never `upload`.** The blob store is
 private, which rejects classic client tokens, and both upload routes answer
 with `handleUploadPresigned`. The two SDK functions have identical signatures,
@@ -692,6 +725,16 @@ to sort defeats the point of giving out the address.
 - **`extracted_text` is still empty** — the search index reads it at weight D,
   but nothing populates it. OCR / PDF text extraction is the follow-up that
   makes search reach inside documents rather than across their metadata.
+- **No PDF thumbnails, and no resized image thumbnails either.** The tile view
+  shows the ORIGINAL image scaled by the browser, so a folder of 12-megapixel
+  site photos downloads 12-megapixel site photos (lazily, but still). The one
+  fix that solves both: rasterise page 1 / resize on upload, store the result
+  as its own blob, serve that. It needs a rasteriser the runtime does not have
+  — and it must not be solved by relaxing the file-response CSP, see Decisions.
+- **View mode is per-URL, not per-user.** Switching to Thumbnails does not
+  stick when you navigate to another folder from the nav. Deliberate for now
+  (the URL is the single source of truth), but a stored preference is the
+  obvious follow-up.
 - **Drag and drop is mouse-only and moves one thing at a time.** No keyboard
   equivalent (the row menus remain the accessible path, and they do everything
   drag does), no multi-select, no touch support, and no drag between browser

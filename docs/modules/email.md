@@ -87,6 +87,39 @@ error, since error strings are the least stable part of any API. An adopted
 domain still walks the local check → cutover flow, because trusting the host's
 "active" would skip the `previous_mx` capture the CHECK constraint depends on.
 
+### 2026-07-26 (later still) — Inbox foundation: schema, RLS, JMAP client (branch `claude/email-inbox`)
+
+First slice of the mail *client* — the tool the whole email effort was always
+aiming at. Read-only inbox is the milestone; this lands the parts that can be
+built correctly before a mail server exists.
+
+**Why the host changed.** Reading a mailbox over IMAP requires that mailbox's
+password, and provisioning was deliberately built so no credential exists
+anywhere in this system. Migadu exposes no app passwords, OAuth, or delegated
+access, so the inbox was blocked by a property we had shipped on purpose.
+Stalwart resolves it: app passwords, API keys, and a **built-in OAuth 2.0 /
+OIDC server**, so a user authorizes Yosher on their own mail server and we
+store a token instead of a password. The property survives rather than being
+reversed.
+
+Migadu was chosen on pricing, provisioning API and protocol — never on "can the
+platform read the mailboxes?", which was the goal from the first conversation.
+That is the evaluation mistake worth remembering: **check the vendor against
+the destination, not against the step in front of you.**
+
+**JMAP is why this is tractable.** RFC 8621 puts threading, search, delta sync,
+MIME parsing and charset decoding on the *server*. An IMAP client would have
+meant implementing all of it. We implement presentation and the Yosher-native
+data, nothing more.
+
+Landed: five tables + RLS (`0041`/`0042`), the JMAP client and its pure parsing
+layer, `scripts/create-mail-role.ts`, and 42 tests.
+
+Deferred deliberately: the Stalwart `MailboxHost` adapter. Domain registration
+is not in Stalwart's documented management API, and writing it blind is exactly
+what produced two wrong response shapes on Migadu. It waits for a server to
+probe.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -109,6 +142,11 @@ transport slots in without touching a single caller.
 | `outbound_emails` | The send log | `(tenant_id, idempotency_key)` unique is what makes a retry a no-op. Recipient addresses stored in the CLEAR (see Decisions). **`member_read` only** — a forgeable "delivered" is worse than no log |
 | `mailbox_domains` | A domain whose **MX we host** | One per tenant, unique platform-wide. `previous_mx` is the rollback record (see Decisions) and `mx_cutover_at` is stamped at activation — a CHECK forbids `status='active'` without it. **`member_read` only** — a member who could write `status` could assert a cutover that never happened, or erase `previous_mx` |
 | `mailboxes` | One real address on a hosted domain | Composite FK `(tenant_id, mailbox_domain_id)` makes hanging a mailbox off another tenant's domain structurally impossible. Unique on `(mailbox_domain_id, local_part)`. **No credential of any kind is stored.** **`member_read` only** |
+| `mail_directory_accounts` | **The only table the mail server can read** | Stalwart authenticates against it as `stalwart_directory`, a role with SELECT here and nothing else. Holds addresses and password hashes — no business data — so a compromised mail server leaks a bounded thing. Login unique platform-wide. **`member_read` + a `current_user`-keyed mail-server policy** |
+| `mail_accounts` | A person's OAuth connection to a mailbox | Tokens encrypted with a key held in the environment, never in this database. Separate from `mailboxes` on purpose: that table says an address exists, this says someone authorized us to read it. **`member_read` only** |
+| `mail_thread_index` | Thin thread index — subject, participants, dates | **Not a mirror.** No bodies, no search index. Exists so a module can ask "every thread on this invoice" as a SQL join instead of N+1 protocol calls. **`member_read` only** |
+| `mail_links` | Thread ↔ business entity | **MEMBER WRITABLE** — the deliberate exception. `entity_type` carries no whitelist so a future layer needs no migration |
+| `mail_annotations` | Extension-contributed metadata per thread | **MEMBER WRITABLE**. One row per extension per thread, so a layer can be reprocessed or removed without touching another's work |
 
 ## Key files & seams
 
@@ -138,6 +176,24 @@ Hosted mailboxes (`src/lib/email/mailbox/`):
   which are golden fixtures in `tests/mailbox.test.ts`.
 - `guard.ts` — what the mailbox path refuses to do outside production. Pure,
   takes the environment explicitly, tested against the Vercel preview trap.
+
+The inbox (`src/lib/email/jmap/`):
+
+- `types.ts` — JMAP object shapes, modelled from RFC 8620/8621. Only the subset
+  the inbox reads; typing unused fields invites drift nobody notices.
+- `parse.ts` — pure response parsing, free of `server-only`. Two rules run
+  through it: never invent data (a missing subject is `""`, not
+  "(no subject)"), and never throw (a malformed message parses to null and gets
+  skipped, so one bad row costs one row).
+- `client.ts` — the protocol. Batches method calls with `#ids`
+  back-references so a list view is **one** round trip that queries and fetches
+  together; doing it as two is how a JMAP client ends up as slow as the IMAP
+  one it replaced.
+- `scripts/create-mail-role.ts` — `npm run db:create-mail-role`. Creates the
+  mail server's Postgres role and then **proves** the boundary: connects as it,
+  confirms it can read the directory, and confirms it cannot read `tenants`,
+  `documents`, `invoices` or `mail_accounts`. A grant wider than intended fails
+  here rather than in production.
 - `scripts/migadu-probe.ts` — `npm run mailbox:probe -- <domain>`. Read-only
   (every request a GET), safe against a live domain. Run it whenever a shape
   here is in doubt; it prints the current truth.
@@ -332,9 +388,15 @@ flow has not been walked end to end yet** — nothing has gone through
 `/dashboard/email` to create a domain row, run a check, or provision a mailbox
 through the UI. The parsing is verified; the round trip is not.
 
-Scope stops at provisioning and cutover. There is no inbox: no sync, no
-threading, no reading or replying inside Yosher. A mailbox created here is used
-through IMAP on a phone or in Outlook until that lands.
+**The inbox is under way on `claude/email-inbox`.** Schema, RLS, the JMAP client
+and its parsing layer are built and tested; nothing is wired to a UI yet and
+there is no Stalwart server to talk to. Reading mail inside Yosher does not work
+yet — a hosted mailbox is still used over IMAP from a phone or Outlook.
+
+**Migadu stays running throughout.** `yosherapp.com` is live on it and there is
+no reason to cut a working domain over to an unproven self-hosted server. The
+`MailboxHost` interface already accepted `'stalwart'` in its provider CHECK, so
+the pivot costs one new adapter rather than a rewrite.
 
 ### Sending (unchanged from 2026-07-25)
 
@@ -389,10 +451,26 @@ code or config change.
   auto-deleting local rows hides real mailboxes, and auto-creating remote ones
   resurrects addresses somebody removed on purpose. Nothing surfaces it in the
   UI yet, though — it is callable and unreachable.
-- **No Stalwart adapter.** `'stalwart'` is allowed by the provider CHECK and
-  `getMailboxHost()` throws for it. The interface exists so that migration is a
-  data move; the trigger to actually build it is message volume making
-  per-message pricing worse than running a box.
+- **No Stalwart adapter yet, and deliberately so.** `getMailboxHost()` still
+  throws for `'stalwart'`. Mailbox creation via SQL-directory insert is
+  verified and buildable; **domain registration is not in Stalwart's documented
+  management API**, and writing that blind is precisely what produced two wrong
+  response shapes on Migadu. It waits for a server to probe. Build
+  `scripts/jmap-probe.ts` first, as `mailbox:probe` was.
+- **Password hash format is unconfirmed.** `mail_directory_accounts.password_hash`
+  holds a PHC string, but the algorithms Stalwart will actually verify have not
+  been checked against a running server. Guessing produces an account nobody
+  can log into. Confirm before wiring the invitation flow.
+- **`npm run db:create-mail-role` has never been run.** It prints a live
+  connection string, so it belongs in the operator's terminal, not a transcript.
+  Run it when the server exists; it self-verifies the role cannot read tenant
+  tables and aborts if it can.
+- **No OAuth flow, no UI, no extension registry.** Phase 1's remaining three
+  pieces.
+- **Real-time will be state polling, not push.** JMAP push needs a long-lived
+  server-side connection that serverless cannot hold. Comparing the account's
+  state string is one small request; an SSE proxy on Vercel's streaming runtime
+  is a later optimization, not a prerequisite.
 - **The `attachments → Documents` join is not wired.** Inbound mail already
   files into DMS folders via `in.yosherapp.com`; hosted mailboxes do not feed
   that path yet. Closing that loop is what makes Email and Documents worth more

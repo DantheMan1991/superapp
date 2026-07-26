@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:create-role": "tsx scripts/create-app-role.ts",
+    "db:create-mail-role": "tsx scripts/create-mail-role.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",

@@ -2344,6 +2344,308 @@ export const mailboxes = pgTable(
   ],
 );
 
+/**
+ * The mail server's directory. THE ONLY TABLE THE MAIL SERVER CAN READ.
+ *
+ * Stalwart authenticates against an external SQL directory rather than an
+ * internal store, which means provisioning a mailbox is a row here instead of
+ * a call to somebody's REST API — the reason the monolith survives having its
+ * own mail server at all.
+ *
+ * It also means the mail server holds a Postgres connection, and that is the
+ * risk this table's shape is built around. `stalwart_directory` is a dedicated
+ * role with SELECT on this table and NOTHING else (scripts/create-mail-role.ts),
+ * backed by an RLS policy keyed on `current_user`. Two independent mechanisms,
+ * because one of them being wrong should not be enough.
+ *
+ * So the worst case for a compromised mail server is: the list of email
+ * addresses on the platform, and their password hashes. Not an invoice, not a
+ * document, not a ledger. Everything else in the database is unreachable from
+ * that role.
+ *
+ * A hash is not a usable credential — the server compares a submitted password
+ * against it, it cannot be replayed — but it IS offline-attackable, which is
+ * why the algorithm matters and why nothing else lives here.
+ */
+export const mailDirectoryAccounts = pgTable(
+  "mail_directory_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    mailboxId: uuid("mailbox_id").notNull(),
+    /**
+     * What the user types into a mail client. The full address, because that is
+     * what people know and what every IMAP client prompts for.
+     * Unique platform-wide: a login that resolved to two accounts would be an
+     * authentication bug with a cross-tenant blast radius.
+     */
+    login: text("login").notNull(),
+    /**
+     * PHC-format hash, null until the invitation is accepted and the person
+     * chooses their own password. Yosher never stores the password itself and
+     * never learns it after hashing.
+     *
+     * The exact algorithm must be confirmed against the mail server's supported
+     * list before the invitation flow is wired — guessing at a format the
+     * server cannot verify produces an account nobody can log into.
+     */
+    passwordHash: text("password_hash"),
+    /** individual | group — the mail server distinguishes them. */
+    accountType: text("account_type").notNull().default("individual"),
+    description: text("description").notNull().default(""),
+    /** Switch off access without destroying the mailbox or its mail. */
+    isActive: boolean("is_active").notNull().default(true),
+    /** 0 means no limit, matching the mail host's own convention. */
+    quotaBytes: bigint("quota_bytes", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_directory_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("mail_directory_login_idx").on(t.login),
+    uniqueIndex("mail_directory_mailbox_idx").on(t.mailboxId),
+    foreignKey({
+      name: "mail_directory_mailbox_fk",
+      columns: [t.tenantId, t.mailboxId],
+      foreignColumns: [mailboxes.tenantId, mailboxes.id],
+    }).onDelete("cascade"),
+    check(
+      "mail_directory_account_type_check",
+      sql`${t.accountType} in ('individual', 'group')`,
+    ),
+  ],
+);
+
+/**
+ * A person's connection to a mailbox they can read inside Yosher.
+ *
+ * Deliberately separate from `mailboxes`: that table says an address EXISTS,
+ * this one says someone has authorized this app to read it. Provisioning a
+ * mailbox for an employee does not entitle the platform to their mail — they
+ * connect it themselves, through an OAuth consent screen on their own mail
+ * server, and can revoke it there.
+ *
+ * That distinction is why no mailbox password appears anywhere in this system.
+ * Tokens are stored encrypted with a key held in the environment and never in
+ * the database, so the ciphertext is inert to anyone reading rows.
+ *
+ * RLS is member_read, which means a colleague can see that a row exists. The
+ * app always filters by clerk_user_id on top; the encryption is what makes the
+ * residual exposure uninteresting rather than the policy.
+ */
+export const mailAccounts = pgTable(
+  "mail_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    mailboxId: uuid("mailbox_id").notNull(),
+    /** Which platform user authorized this. Not null — nobody connects a mailbox anonymously. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** Where the protocol session lives, discovered once and cached. */
+    jmapSessionUrl: text("jmap_session_url").notNull().default(""),
+    /** The account id inside the mail server's session object. */
+    jmapAccountId: text("jmap_account_id").notNull().default(""),
+    accessTokenEnc: text("access_token_enc").notNull().default(""),
+    refreshTokenEnc: text("refresh_token_enc").notNull().default(""),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+    /**
+     * The mail server's opaque state string from the last sync. Comparing it is
+     * how "has anything changed?" costs one small request instead of a refetch.
+     */
+    lastState: text("last_state").notNull().default(""),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    /** connected | needs_reauth | revoked | error */
+    status: text("status").notNull().default("connected"),
+    lastError: text("last_error").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_accounts_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One connection per person per mailbox. A shared box legitimately has
+    // several rows, one per person who connected it.
+    uniqueIndex("mail_accounts_mailbox_user_idx").on(
+      t.tenantId,
+      t.mailboxId,
+      t.clerkUserId,
+    ),
+    index("mail_accounts_user_idx").on(t.tenantId, t.clerkUserId),
+    foreignKey({
+      name: "mail_accounts_mailbox_fk",
+      columns: [t.tenantId, t.mailboxId],
+      foreignColumns: [mailboxes.tenantId, mailboxes.id],
+    }).onDelete("cascade"),
+    check(
+      "mail_accounts_status_check",
+      sql`${t.status} in ('connected', 'needs_reauth', 'revoked', 'error')`,
+    ),
+  ],
+);
+
+/**
+ * A thin index of threads, and the only place mail content is duplicated.
+ *
+ * The mail server owns the mail. It threads, searches, sorts and syncs better
+ * than a mirror of it would, so this is NOT a mirror: there are no bodies, no
+ * recipients beyond display, and no full-text index. Search goes to the mail
+ * server, always.
+ *
+ * What lives here is the minimum that lets a *module* ask a question from its
+ * own side — "every thread on this invoice" — as a SQL join rather than
+ * fetching thread ids and then asking the mail server about each one. Without
+ * it the business-object integration degrades into N+1 network calls, and that
+ * integration is the entire reason this product exists rather than Gmail.
+ */
+export const mailThreadIndex = pgTable(
+  "mail_thread_index",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    mailAccountId: uuid("mail_account_id").notNull(),
+    /** The mail server's thread id. Opaque to us, stable to it. */
+    threadId: text("thread_id").notNull(),
+    subject: text("subject").notNull().default(""),
+    /** Display-only addresses, for showing a thread without a round trip. */
+    participants: jsonb("participants")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    hasAttachment: boolean("has_attachment").notNull().default(false),
+    messageCount: integer("message_count").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_thread_index_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("mail_thread_index_thread_idx").on(
+      t.tenantId,
+      t.mailAccountId,
+      t.threadId,
+    ),
+    index("mail_thread_index_recent_idx").on(t.tenantId, t.lastMessageAt),
+    foreignKey({
+      name: "mail_thread_index_account_fk",
+      columns: [t.tenantId, t.mailAccountId],
+      foreignColumns: [mailAccounts.tenantId, mailAccounts.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * A thread attached to something the business cares about.
+ *
+ * This is the product. An inbox that cannot do this is a worse Gmail.
+ *
+ * `entity_type` deliberately carries NO check constraint. Extensions register
+ * their own linkable types — Documents contributes files and folders,
+ * Accounting contributes invoices and customers, and an industry layer will
+ * later contribute jobs, RFIs and submittals. A constraint listing today's
+ * types would have to be migrated every time a layer is added, which is
+ * exactly the coupling the extension registry exists to avoid.
+ *
+ * Member-writable, unlike most of the email module: linking a thread to an
+ * invoice is ordinary daily work, not an owner-level decision.
+ */
+export const mailLinks = pgTable(
+  "mail_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    threadId: text("thread_id").notNull(),
+    /** Which extension owns this link type, so an uninstalled layer can be ignored. */
+    extensionSlug: text("extension_slug").notNull(),
+    /** "invoice" | "customer" | "document" | later "job", "rfi", … */
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_links_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("mail_links_unique_idx").on(
+      t.tenantId,
+      t.threadId,
+      t.entityType,
+      t.entityId,
+    ),
+    // The join a module runs: "every thread on this invoice".
+    index("mail_links_entity_idx").on(t.tenantId, t.entityType, t.entityId),
+    index("mail_links_thread_idx").on(t.tenantId, t.threadId),
+    check(
+      "mail_links_entity_type_format",
+      sql`${t.entityType} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "mail_links_extension_slug_format",
+      sql`${t.extensionSlug} ~ '^[a-z][a-z0-9_-]{0,62}$'`,
+    ),
+  ],
+);
+
+/**
+ * Whatever an extension worked out about a thread.
+ *
+ * The seam that lets a layer add intelligence without the core knowing what
+ * intelligence means. A construction layer will store extracted drawing
+ * numbers here; accounting might store a detected invoice reference. The core
+ * email module reads none of it — it only hands the blob back to the extension
+ * that wrote it.
+ *
+ * One row per extension per thread, so a layer can be reprocessed or removed
+ * without touching another layer's work.
+ */
+export const mailAnnotations = pgTable(
+  "mail_annotations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    threadId: text("thread_id").notNull(),
+    extensionSlug: text("extension_slug").notNull(),
+    data: jsonb("data")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_annotations_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("mail_annotations_unique_idx").on(
+      t.tenantId,
+      t.threadId,
+      t.extensionSlug,
+    ),
+    check(
+      "mail_annotations_extension_slug_format",
+      sql`${t.extensionSlug} ~ '^[a-z][a-z0-9_-]{0,62}$'`,
+    ),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -2817,6 +3119,13 @@ export type Mailbox = typeof mailboxes.$inferSelect;
  * "put it back" is a stored fact rather than a memory test during an outage.
  */
 export type PreviousMxRecord = { host: string; priority: number };
+export type MailDirectoryAccount = typeof mailDirectoryAccounts.$inferSelect;
+export type MailAccount = typeof mailAccounts.$inferSelect;
+export type MailThreadIndexRow = typeof mailThreadIndex.$inferSelect;
+export type MailLink = typeof mailLinks.$inferSelect;
+export type MailAnnotation = typeof mailAnnotations.$inferSelect;
+/** Display-only participants on an indexed thread. */
+export type MailParticipant = { name: string; email: string };
 export type DocumentShare = typeof documentShares.$inferSelect;
 export type DocumentShareEvent = typeof documentShareEvents.$inferSelect;
 /** Derived, never stored — see modules/documents/shares/status.ts. */

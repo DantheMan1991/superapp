@@ -68,28 +68,34 @@ function formatDate(date: Date): string {
 }
 
 /**
- * Trim trailing empty columns and rows.
+ * Crop a sheet to the rectangle that actually contains data.
  *
- * Spreadsheets are full of formatted-but-empty cells, and without this a sheet
- * with one used row renders eighty blank columns of nothing.
+ * Trims LEADING as well as trailing blank rows and columns. Spreadsheets are
+ * full of formatted-but-empty cells, and exports are worse: a QuickBooks
+ * customer list puts its data in column C with two empty indent columns to the
+ * left, so without this the table opens with two blank columns before anything
+ * readable. Interior blanks are preserved — those are real data.
  */
 export function trimGrid(rows: string[][]): string[][] {
+  let firstRow = -1;
   let lastRow = -1;
+  let firstCol = -1;
   let lastCol = -1;
+
   rows.forEach((row, r) => {
     row.forEach((cell, c) => {
-      if (cell.trim() !== "") {
-        lastRow = Math.max(lastRow, r);
-        lastCol = Math.max(lastCol, c);
-      }
+      if (cell.trim() === "") return;
+      if (firstRow === -1) firstRow = r;
+      lastRow = Math.max(lastRow, r);
+      firstCol = firstCol === -1 ? c : Math.min(firstCol, c);
+      lastCol = Math.max(lastCol, c);
     });
   });
+
   if (lastRow === -1) return [];
-  return rows
-    .slice(0, lastRow + 1)
-    .map((row) => {
-      const trimmed = row.slice(0, lastCol + 1);
-      while (trimmed.length <= lastCol) trimmed.push("");
-      return trimmed;
-    });
+  return rows.slice(firstRow, lastRow + 1).map((row) => {
+    const cropped = row.slice(firstCol, lastCol + 1);
+    while (cropped.length < lastCol - firstCol + 1) cropped.push("");
+    return cropped;
+  });
 }

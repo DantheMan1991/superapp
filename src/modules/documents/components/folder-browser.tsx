@@ -11,6 +11,8 @@ import {
   loadFolderById,
 } from "../browse";
 import { listFolders, loadDocumentSettings } from "../folders";
+import { listTags } from "../tag-ops";
+import { TagChips } from "./tag-chips";
 import { formatBytes } from "../lib/format";
 import { folderOptions } from "../lib/folder-labels";
 import { folderInboundAddress } from "../inbound";
@@ -51,19 +53,29 @@ export async function FolderBrowser({
         folderId === null ? null : await loadFolderById(tx, ctx.tenant.id, folderId);
       if (folderId !== null && folder === null) return null;
 
-      const [contents, ancestors, allFolders, settings] = await Promise.all([
-        listFolderContents(tx, ctx.tenant.id, { folderId, cursor }),
-        folder ? loadAncestors(tx, ctx.tenant.id, folder) : Promise.resolve([]),
-        listFolders(tx, ctx.tenant.id),
-        loadDocumentSettings(tx, ctx.tenant.id),
-      ]);
-      return { folder, contents, ancestors, allFolders, settings };
+      const [contents, ancestors, allFolders, settings, allTags] =
+        await Promise.all([
+          listFolderContents(tx, ctx.tenant.id, { folderId, cursor }),
+          folder ? loadAncestors(tx, ctx.tenant.id, folder) : Promise.resolve([]),
+          listFolders(tx, ctx.tenant.id),
+          loadDocumentSettings(tx, ctx.tenant.id),
+          // Once per page, not once per row — the picker and the chips share it.
+          listTags(tx, ctx.tenant.id),
+        ]);
+      return { folder, contents, ancestors, allFolders, settings, allTags };
     },
     { role: ctx.role },
   );
 
   if (data === null) notFound();
-  const { folder, contents, ancestors, allFolders, settings } = data;
+  const { folder, contents, ancestors, allFolders, settings, allTags } = data;
+  const tagChoices = allTags.map((t) => ({
+    id: t.id,
+    slug: t.slug,
+    name: t.name,
+    version: t.version,
+  }));
+  const tagNames = Object.fromEntries(allTags.map((t) => [t.slug, t.name]));
   // Undefined disables the share option entirely — an unprovisioned or
   // sharing-disabled tenant should not be offered it at all.
   const shareMaxTtlDays =
@@ -187,6 +199,11 @@ export async function FolderBrowser({
                   {doc.fileVersionCount > 1 && ` · v${doc.fileVersionNo}`}
                   {doc.origin === "accounting" && " · from Receipts"}
                 </p>
+                <TagChips
+                  slugs={doc.tags}
+                  names={tagNames}
+                  className="mt-1 block"
+                />
               </div>
               <span className="hidden text-xs text-muted-foreground sm:inline">
                 {doc.createdAt.toLocaleDateString()}
@@ -201,6 +218,8 @@ export async function FolderBrowser({
                 tenantId={ctx.tenant.id}
                 origin={doc.origin}
                 fileVersionCount={doc.fileVersionCount}
+                tags={tagChoices}
+                documentTags={doc.tags}
               />
             </div>
           ))}

@@ -845,8 +845,10 @@ describe("blob client upload flow", () => {
         if (!source.includes("@vercel/blob/client")) continue;
         // Matches `upload,` / `upload }` / `upload as x` in the import clause,
         // while leaving `uploadPresigned` and the multipart helpers alone.
+        // No /s flag: `[^}]*` already spans newlines, and the flag needs an
+        // es2018 target this tsconfig does not set.
         const importClause = source.match(
-          /import\s*\{([^}]*)\}\s*from\s*["']@vercel\/blob\/client["']/s,
+          /import\s*\{([^}]*)\}\s*from\s*["']@vercel\/blob\/client["']/,
         );
         if (!importClause) continue;
         const named = importClause[1]

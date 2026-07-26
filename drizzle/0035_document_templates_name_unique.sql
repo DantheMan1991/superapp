@@ -1,0 +1,19 @@
+-- Restores the unique index that 0033 should have created.
+--
+-- 0033 was hand-edited to move `document_templates_tenant_id_id_idx` above the
+-- composite FK referencing it (the 0013/0023 trap). That edit dropped
+-- `document_templates_tenant_name_idx` on the way past, so `schema.ts` declared
+-- a unique that the database did not have, and `createTemplate`'s
+-- `onConflictDoNothing()` had nothing to conflict WITH — duplicate template
+-- names inserted silently instead of raising TEMPLATE_NAME_TAKEN.
+--
+-- Caught by the DB-backed test, not by the type checker: a missing index is
+-- invisible to Drizzle's types, and the only symptom is a constraint that
+-- quietly does not exist. Worth remembering whenever a generated migration is
+-- edited by hand — re-read the whole file against schema.ts, not just the
+-- lines being moved.
+--
+-- Safe against the running code: creating a unique index cannot break a writer
+-- that was already maintaining uniqueness in application code, and no
+-- duplicate template names can exist yet (the feature is unreleased).
+CREATE UNIQUE INDEX "document_templates_tenant_name_idx" ON "document_templates" USING btree ("tenant_id","name_key");

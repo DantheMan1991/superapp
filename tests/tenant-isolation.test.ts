@@ -1341,6 +1341,8 @@ interface DmsFixture {
   versionId: string;
   tagId: string;
   viewId: string;
+  templateId: string;
+  templateVersionId: string;
 }
 
 d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
@@ -1453,6 +1455,27 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
           })
           .returning();
 
+        const [template] = await tx
+          .insert(schema.documentTemplates)
+          .values({
+            tenantId,
+            name: `Waiver ${tag}`,
+            nameKey: `waiver ${tag}`.toLowerCase(),
+            createdByClerkUserId: `user-${tag}`,
+          })
+          .returning();
+
+        const [templateVersion] = await tx
+          .insert(schema.documentTemplateVersions)
+          .values({
+            tenantId,
+            templateId: template.id,
+            versionNo: 1,
+            body: `Received from {{payer}} — ${tag}`,
+            createdByClerkUserId: `user-${tag}`,
+          })
+          .returning();
+
         return {
           openFolderId: open.id,
           lockedFolderId: locked.id,
@@ -1461,6 +1484,8 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
           versionId: version.id,
           tagId: dmsTag.id,
           viewId: view.id,
+          templateId: template.id,
+          templateVersionId: templateVersion.id,
         };
       },
       { role: "owner" },
@@ -1497,24 +1522,102 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
   /* ---- tenant dimension ---- */
 
   it("unscoped selects return only this tenant's DMS rows", async () => {
-    const [folders, versions, tags, views] = await withTenant(
-      tenantA,
-      async (tx) =>
-        Promise.all([
-          tx.select().from(schema.documentFolders),
-          tx.select().from(schema.documentVersions),
-          tx.select().from(schema.documentTags),
-          tx.select().from(schema.documentSavedViews),
-        ]),
-      { role: "owner" },
-    );
-    expect(folders.length).toBeGreaterThan(0);
-    expect(versions.length).toBeGreaterThan(0);
-    expect(tags.length).toBeGreaterThan(0);
-    expect(views.length).toBeGreaterThan(0);
-    for (const rows of [folders, versions, tags, views]) {
+    const [folders, versions, tags, views, templates, templateVersions] =
+      await withTenant(
+        tenantA,
+        async (tx) =>
+          Promise.all([
+            tx.select().from(schema.documentFolders),
+            tx.select().from(schema.documentVersions),
+            tx.select().from(schema.documentTags),
+            tx.select().from(schema.documentSavedViews),
+            tx.select().from(schema.documentTemplates),
+            tx.select().from(schema.documentTemplateVersions),
+          ]),
+        { role: "owner" },
+      );
+    for (const rows of [
+      folders,
+      versions,
+      tags,
+      views,
+      templates,
+      templateVersions,
+    ]) {
+      expect(rows.length).toBeGreaterThan(0);
       expect(rows.every((r) => r.tenantId === tenantA)).toBe(true);
     }
+  });
+
+  it("cannot INSERT a template or template version for the other tenant", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.documentTemplates).values({
+            tenantId: tenantB,
+            name: "smuggled",
+            nameKey: "smuggled",
+            createdByClerkUserId: "user-a",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.documentTemplateVersions).values({
+            tenantId: tenantB,
+            templateId: fx.b.templateId,
+            versionNo: 2,
+            body: "smuggled",
+            createdByClerkUserId: "user-a",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  // The composite FK is what stops A's version from being attached to B's
+  // template even when the tenant_id column itself is honest.
+  it("composite FK: A's template version cannot point at B's template", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.documentTemplateVersions).values({
+            tenantId: tenantA,
+            templateId: fx.b.templateId,
+            versionNo: 2,
+            body: "cross-tenant",
+            createdByClerkUserId: "user-a",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cross-tenant UPDATE and DELETE affect zero template rows", async () => {
+    const changed = await withTenant(
+      tenantA,
+      async (tx) => {
+        const updated = await tx
+          .update(schema.documentTemplates)
+          .set({ name: "hijacked" })
+          .where(eq(schema.documentTemplates.tenantId, tenantB))
+          .returning({ id: schema.documentTemplates.id });
+        const deleted = await tx
+          .delete(schema.documentTemplateVersions)
+          .where(eq(schema.documentTemplateVersions.tenantId, tenantB))
+          .returning({ id: schema.documentTemplateVersions.id });
+        return { updated, deleted };
+      },
+      { role: "owner" },
+    );
+    expect(changed.updated).toHaveLength(0);
+    expect(changed.deleted).toHaveLength(0);
   });
 
   it("cannot INSERT a folder attributed to the other tenant", async () => {

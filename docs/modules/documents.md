@@ -15,10 +15,25 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 
 ### 2026-07-26 — Document templates: data model + merge engine (branch `claude/documents-templates`)
 
-Plan PR 10, first half. Two tables (`0033`/`0034`), the merge engine, and the
-ops layer that makes publish immutability real. **The editor UI and the
-DB-backed tests are NOT in this commit** — they need `0033`/`0034` applied
-first, and applying DDL to the live database is the founder's call.
+Plan PR 10, complete. Three migrations (`0033`–`0035`), the merge engine, the
+ops layer, the editor with a live preview, and a variable designer.
+
+**Two bugs caught by tests that types could not see, both worth remembering.**
+
+`0033` was hand-edited to move the `(tenant_id, id)` unique index above the
+composite FK referencing it — the `0013`/`0023` trap. That edit silently
+dropped `document_templates_tenant_name_idx` on the way past, so `schema.ts`
+declared a unique the database did not have and `createTemplate`'s
+`onConflictDoNothing()` had nothing to conflict WITH: duplicate template names
+inserted silently instead of raising. `0035` restores it. **After hand-editing
+a generated migration, re-read the whole file against `schema.ts`, not just
+the lines you moved.**
+
+The second: `template-ops.ts` is `server-only`, and the editor is a client
+component. Importing a mere TYPE and a constant from it dragged the database
+layer into the browser bundle and failed the build. The pure vocabulary now
+lives in `doc-templates/fields.ts`, which has no `server-only` marker; client
+code must import from there.
 
 **Naming trap, read this first:** `src/modules/documents/templates/` is the
 default FOLDER tree a tenant is provisioned with. DOCUMENT templates — a lien
@@ -185,6 +200,8 @@ Decisions.
 | `document_versions` | File revision history | Written by `versions.ts` since 2026-07-25. Partial unique on `is_current` makes "exactly one current" a DB invariant, and it is NOT deferrable, so the swap must clear the old flag before inserting. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag. A document with no history has ZERO rows here, not one — see Decisions |
 | `document_tags` | Tenant tag registry | `documents.tags text[]` stores slugs from here, so a rename never rewrites documents. Slug format enforced by CHECK |
 | `document_saved_views` | Saved filters | `query` jsonb is stored USER INPUT that becomes a WHERE clause — must be re-parsed with Zod on read |
+| `document_templates` | Document template identity | `0033`/`0035`. `(tenant, name_key)` unique — restored by `0035` after a hand edit to `0033` dropped it, see Build log. Archived, never deleted, so a generated document naming it cannot dangle |
+| `document_template_versions` | Template bodies | Partial unique on `published_at is null` makes "at most one draft per template" a DB invariant. Publish immutability itself is enforced in `template-ops.ts` — Postgres cannot freeze columns on a condition without a trigger. `fields` jsonb is DERIVED from the body on every save, so it cannot drift into promising a field the document lacks; still re-parsed on read |
 | `document_settings` | Per-tenant module knobs | `member_read` only (platform-governed). E-sign/AI columns created now, unused, so later phases need no migration |
 | `document_shares` | Anonymous link grants | `token_hash` GLOBALLY unique (the public lookup has no tenant to scope by). XOR document/folder scope. `expires_at` NOT NULL — no permanent anonymous links. `created_root_visibility` snapshot drives self-suspension |
 | `document_share_events` | Per-link access log | `member_read` ONLY — evidence in a dispute, so members read it and only `recordShareEvent` (withSystem) writes it |
@@ -222,8 +239,13 @@ replaced `documents` policy, policies for the five new tables).
   `contents.ts` (what a recipient sees), `limits.ts`, `events.ts`, `shares.ts`.
 - `src/app/s/[token]/` — the public surface. Nothing else in the app renders
   without a session.
-- `src/modules/documents/templates/apply.ts` — provisioning, called from
-  `toggleModule` in `src/app/admin/actions.ts`.
+- `src/modules/documents/templates/apply.ts` — FOLDER-tree provisioning, called
+  from `toggleModule` in `src/app/admin/actions.ts`. Unrelated to
+  `doc-templates/` below despite the shared word.
+- `src/modules/documents/doc-templates/` — DOCUMENT templates (a lien waiver, a
+  change order). `merge.ts` is the pure, parser-free injection engine;
+  `fields.ts` is the vocabulary shared with the browser; `template-ops.ts` is
+  `server-only` and owns publish immutability.
 - `src/lib/blob-stream.ts` — **the single way a stored blob reaches a
   browser**, shared with accounting and with the future public share routes.
 - `src/lib/blob.ts` — `dmsPathPrefix(tenantId, kind)`, `isTenantBlobPath`.
@@ -345,6 +367,35 @@ unreachable from outside the business. Both are deliberate: a link to "the
 drawing" should show the drawing that is current, and superseded revisions are
 internal.
 
+**A merge value is content, never syntax.** Values are injected as TEXT NODES
+into the parsed Markdown tree; they are never substituted into the source. This
+is the analogue of SQL parameterization — a client literally named `# ACME`
+must render as text, and a subcontractor called
+`[click here](http://evil.example)` must not become a link in a document the
+business is about to put its name on. `doc-templates/merge.ts` is pure and
+imports no parser, so the identical function runs as a remark plugin in the
+browser preview and server-side for generation. **Never "simplify" it into a
+string replace on the body.** Two behaviours fall out of the tree approach and
+are tested: markup SPANNING a placeholder (`**Hello {{name}}**`) survives,
+which source-splitting would break, and placeholders inside code spans are left
+alone because a template showing `{{amount}}` is documenting the syntax.
+
+**Publish immutability is application-enforced, deliberately.** Postgres cannot
+express "these columns freeze once that column is non-null" without a trigger,
+and a trigger that silently discards a write is worse than an error that
+explains itself. `saveDraft` additionally carries `published_at is null` in its
+WHERE clause, so even a mis-targeted id cannot rewrite a frozen version.
+
+**After hand-editing a generated migration, re-read the whole file against
+`schema.ts`.** Moving an index above an FK in `0033` silently deleted a
+different unique index; the symptom was `onConflictDoNothing()` having nothing
+to conflict with, which no type checker can see. `0035` restores it.
+
+**`server-only` propagates through type imports.** Importing just a TYPE and a
+constant from `template-ops.ts` into the editor pulled the database layer into
+the browser bundle and failed the build. Vocabulary shared with client
+components lives in `doc-templates/fields.ts`, which carries no marker.
+
 **No new UNIQUE index on `documents`, ever.** `createDocumentRecord` uses a
 bare `.onConflictDoNothing()`, which covers every unique constraint on the
 table — a second one would silently convert legitimate inserts into swallowed
@@ -430,12 +481,12 @@ to sort defeats the point of giving out the address.
 - **Search is global or folder-scoped only** — no tag or kind facets, because
   there is no tag UI yet. `searchDocuments` already takes `folderPath`; the
   saved-view query schema anticipates the rest.
-- **Templates: `0033`/`0034` are UNAPPLIED, and the editor UI is unbuilt.** The
-  data model, merge engine and ops layer landed 2026-07-26; the migration has
-  not been run against the live database and the DB-backed tests (including the
-  `tests/tenant-isolation.test.ts` coverage AGENTS.md requires for new tables)
-  are written against tables that do not exist yet. Apply the migration before
-  building on this.
+- **A template cannot yet produce a document.** The editor writes and freezes
+  bodies; nothing renders one into a file. That is plan PR 11, and it is what
+  makes the feature useful rather than interesting.
+- **No template preview of a PUBLISHED version.** The editor always shows the
+  draft (or the published body as a starting point); reading v2 while v4 is
+  current means looking at the history list, which shows metadata only.
 - **PDF generation (plan PR 11) and AI template drafting (PR 12) are unbuilt.**
   Generation needs `ALTER TYPE document_source ADD VALUE 'generated'` in its
   OWN migration file — a new enum value cannot be used in the transaction that

@@ -27,6 +27,7 @@ export type DocsErrorCode =
   | "VERSION_ALREADY_CURRENT"
   | "TAG_NOT_FOUND"
   | "TAG_NAME_TAKEN"
+  | "TAG_NAME_INVALID"
   | "TAG_LIMIT"
   | "TEMPLATE_NOT_FOUND"
   | "TEMPLATE_NAME_TAKEN"
@@ -36,6 +37,9 @@ export type DocsErrorCode =
   | "TEMPLATE_BODY_EMPTY"
   | "VIEW_NOT_FOUND"
   | "VIEW_NAME_TAKEN"
+  | "VIEW_NAME_INVALID"
+  | "VIEW_QUERY_EMPTY"
+  | "VIEW_LIMIT"
   | "SEARCH_QUERY_INVALID"
   | "SHARE_NOT_FOUND"
   | "SHARE_LIMIT"
@@ -89,6 +93,8 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
   VERSION_ALREADY_CURRENT: "That's already the current version.",
   TAG_NOT_FOUND: "That tag no longer exists.",
   TAG_NAME_TAKEN: "A tag with that name already exists.",
+  TAG_NAME_INVALID:
+    "That tag name can't be used — it needs at least one letter or number.",
   TAG_LIMIT: "That's the maximum number of tags.",
   TEMPLATE_NOT_FOUND: "That template no longer exists.",
   TEMPLATE_NAME_TAKEN: "A template with that name already exists.",
@@ -99,6 +105,10 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
   TEMPLATE_BODY_EMPTY: "Write the template before publishing it.",
   VIEW_NOT_FOUND: "That saved view no longer exists.",
   VIEW_NAME_TAKEN: "You already have a saved view with that name.",
+  VIEW_NAME_INVALID: "Give the view a name.",
+  VIEW_QUERY_EMPTY:
+    "There's nothing to save yet — search for something or pick a tag first.",
+  VIEW_LIMIT: "That's the maximum number of saved views.",
   SEARCH_QUERY_INVALID: "That search couldn't be read — try simpler terms.",
   SHARE_NOT_FOUND: "That link no longer exists.",
   SHARE_LIMIT: "That's the maximum number of active links.",

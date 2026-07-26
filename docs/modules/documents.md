@@ -13,7 +13,7 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
-### 2026-07-26 — Document templates: data model + merge engine (branch `claude/documents-templates`)
+### 2026-07-26 — Document templates (branch `claude/documents-templates`)
 
 Plan PR 10, complete. Three migrations (`0033`–`0035`), the merge engine, the
 ops layer, the editor with a live preview, and a variable designer.
@@ -67,8 +67,57 @@ next version number. At most one draft per template IS a database invariant
 (partial unique on `published_at is null`), so two people editing converge on
 one draft instead of forking it.
 
-`0033` needed the same hand edit as `0013` and `0023` — the `(tenant_id, id)`
-unique index moved above the composite FK that references it.
+### 2026-07-26 — Per-link activity feed (branch `claude/documents-share-activity`)
+
+"Did the inspector actually open the drawings?" — answered. An Activity sheet
+on every share link: what happened, when, which file, and how much was sent.
+
+**No migration and no new read model.** `document_share_events` has been
+written since share links shipped and `listShareEvents` already existed; the
+whole gap was UI. `loadShareActivity` adds the join for the file name and the
+visitor grouping.
+
+**Visitor codes are derived from the stored IP HASH, not an address.** `hashIp`
+is a keyed HMAC and the raw address is never stored, so the six-character code
+supports exactly one honest claim — "these opens came from the same place" —
+and cannot be reversed. An empty hash yields `null` rather than a shared
+pseudonym, because a constant would invent a visitor by merging unrelated
+events.
+
+**The feed says out loud that an open is a REQUEST, not a person.** The
+open item recorded when shares shipped — a link-scanning security appliance
+pre-fetches URLs, burning a view and logging one — is now printed under the
+feed rather than left as a trap for whoever reads it in an argument.
+
+Available on revoked links too: what happened while a link was live is exactly
+what someone asks about after switching it off.
+
+### 2026-07-25 — Tags and saved views (branch `claude/documents-tags`)
+
+A shared vocabulary for the business, and named filters over it. Registry page
+at `/tags`, a picker on every file, chips that link to the filtered list, and
+"Save this view".
+
+**No migration again** — `document_tags`, `document_saved_views`,
+`documents.tags` with its GIN index, `core/tags.ts` and six error codes all
+shipped in session 1.
+
+The move that makes saved views safe: **search grew an optional text term**, so
+it is now the one filtered-list implementation — facets, folder scope and full
+text in a single query. A saved view is therefore *the same parameter set the
+search page already reads*, stored and replayed as a URL. There is no second
+query path interpreting jsonb, which is the version of this feature the
+original note ("`query` jsonb is stored USER INPUT that becomes a WHERE
+clause") was warning about. It is still re-parsed with Zod on every read.
+
+Two rules worth carrying forward: **a tag's slug is immutable** (rename touches
+one row and no document moves — the entire reason documents store slugs), and
+**deleting a tag is owner-only** for the same correctness reason structural
+folder operations are, since the sweep rewrites documents RLS hides from staff.
+
+Found by the tests, worth knowing: interpolating a JS array into a Drizzle
+`sql` template flattens it into one parameter per element, which Postgres
+rejects as a malformed array literal. Use `inArray()` or `sql.param()`.
 
 ### 2026-07-25 — File versions (branch `claude/documents-versions`)
 
@@ -198,8 +247,8 @@ Decisions.
 | `documents` (shared) | The generic file record, now carrying DMS columns | `origin` discriminates `accounting`/`dms`; required in `$inferInsert` via `schema.ts`, and DB-defaulted to `'accounting'` so pre-Documents writers keep working (see Decisions). `member_all` policy compares `effective_visibility` against `app_current_tenant_role()`. **No new UNIQUE index may be added** — see Decisions |
 | `document_folders` | The tree | Adjacency list (`parent_id`, source of truth) **+** materialized `path`. Self composite FK, NO ACTION. Two partial name uniques (root and non-root). `text_pattern_ops` prefix index, hand-written in 0024. Same visibility policy as `documents` |
 | `document_versions` | File revision history | Written by `versions.ts` since 2026-07-25. Partial unique on `is_current` makes "exactly one current" a DB invariant, and it is NOT deferrable, so the swap must clear the old flag before inserting. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag. A document with no history has ZERO rows here, not one — see Decisions |
-| `document_tags` | Tenant tag registry | `documents.tags text[]` stores slugs from here, so a rename never rewrites documents. Slug format enforced by CHECK |
-| `document_saved_views` | Saved filters | `query` jsonb is stored USER INPUT that becomes a WHERE clause — must be re-parsed with Zod on read |
+| `document_tags` | Tenant tag registry | Written by `tag-ops.ts` since 2026-07-25. `documents.tags text[]` stores slugs from here, so a rename never rewrites documents — and the SLUG IS IMMUTABLE, see Decisions. Slug format enforced by CHECK; `(tenant, slug)` unique is what makes "As Built" and "as-built" the same tag. No FK is possible from an array element, so `setDocumentTags` is the only door |
+| `document_saved_views` | Saved filters | `query` jsonb is stored USER INPUT — re-parsed with Zod on EVERY read by `parseSavedViewQuery`. Since 2026-07-25 it resolves to search-page parameters rather than to a WHERE clause of its own; unknown keys are stripped, invalid fields degrade to absent. Unique is `(tenant, creator, name_key)`, so two people may use the same view name |
 | `document_templates` | Document template identity | `0033`/`0035`. `(tenant, name_key)` unique — restored by `0035` after a hand edit to `0033` dropped it, see Build log. Archived, never deleted, so a generated document naming it cannot dangle |
 | `document_template_versions` | Template bodies | Partial unique on `published_at is null` makes "at most one draft per template" a DB invariant. Publish immutability itself is enforced in `template-ops.ts` — Postgres cannot freeze columns on a condition without a trigger. `fields` jsonb is DERIVED from the body on every save, so it cannot drift into promising a field the document lacks; still re-parsed on read |
 | `document_settings` | Per-tenant module knobs | `member_read` only (platform-governed). E-sign/AI columns created now, unused, so later phases need no migration |
@@ -225,15 +274,22 @@ replaced `documents` policy, policies for the five new tables).
 - `src/modules/documents/components/version-controls.tsx` — the replace dialog
   and the history panel, mounted only while open so browsing a folder makes no
   version queries.
-- `src/modules/documents/search.ts` — raw-SQL full-text query. `search_tsv` is
-  deliberately absent from `schema.ts`, so this is the only place that knows
-  the column exists.
+- `src/modules/documents/search.ts` — raw-SQL query behind BOTH search and
+  every saved view: optional text term, tag/origin facets, folder scope.
+  `search_tsv` is deliberately absent from `schema.ts`, so this is the only
+  place that knows the column exists.
+- `src/modules/documents/tag-ops.ts` — the registry, and `setDocumentTags`, the
+  single door onto `documents.tags`.
+- `src/modules/documents/saved-views.ts` — `savedViewQuerySchema`,
+  `parseSavedViewQuery` (called on every read) and `savedViewHref`.
 - `src/modules/documents/lib/folder-labels.ts` — "Contracts / 2026 / Acme"
   labels derived from the materialized path; degrades gracefully when RLS has
   hidden an ancestor.
 - `src/lib/public-token.ts` — mint/hash/verify for anonymous credentials, plus
   scrypt passcodes and unlock-cookie signing. One `SHARE_SECRET`, derived per
   purpose.
+- `src/modules/documents/shares/activity.ts` — the per-link feed, plus the pure
+  `visitorLabel` (IP-hash pseudonym) and `isDeniedKind`.
 - `src/modules/documents/shares/` — `status.ts` (derived status truth table),
   `scope.ts` (pruning rules), `resolve.ts` (the token→tenant hop),
   `contents.ts` (what a recipient sees), `limits.ts`, `events.ts`, `shares.ts`.
@@ -330,6 +386,48 @@ is header injection) and emitted with an RFC 5987 `filename*`.
 **Two upload routes, not one parameterized route.** One route answering to two
 module gates has cross-module privilege escalation as its failure mode; forty
 duplicated lines are cheaper.
+
+**A tag's slug is immutable, and that is the whole design.** `documents.tags`
+stores slugs, so renaming a tag is a one-row update on the registry and not a
+single document moves. Changing a slug on rename would orphan every document
+carrying it — silently, with no error anywhere, because Postgres cannot
+foreign-key an array element. `updateTag` therefore writes `name` and `color`
+only. Somebody who truly wants a different slug creates a different tag.
+
+**`setDocumentTags` is the only door onto `documents.tags`.** It resolves every
+slug against the registry inside the transaction and refuses unknown ones. That
+check is the *substitute* for the foreign key that cannot exist, so anything
+else writing that column can create a slug the registry has never heard of.
+
+**Deleting a tag is owner-only**, for the same correctness reason structural
+folder operations are: the delete sweeps `array_remove` across the tenant's
+documents, and RLS hides owners-only documents from staff. A staff-run delete
+would remove the registry entry while silently skipping exactly the documents
+it could not see, leaving them carrying a slug that resolves to nothing.
+Creating and renaming touch one registry row and stay open to staff.
+
+**Search's text term is optional, and that is what makes saved views safe.**
+One query implementation serves full-text search, tag facets, origin and folder
+scope. A saved view is consequently the same parameter set the search page
+already reads — stored, re-parsed, and replayed as a URL. The alternative,
+a second query builder interpreting stored jsonb, is what turns "user input
+that becomes a WHERE clause" into a real problem. `parseSavedViewQuery` still
+runs on every read: unknown keys are stripped, invalid fields degrade to
+absent, and tags go through the same normalizer as every other tag path. There
+is a test that feeds it a hand-edited row containing an injection string and a
+bogus origin and asserts only the valid field survives.
+
+**A private saved view hides a shortcut, not data.** `scope` is an app-level
+courtesy with no RLS behind it; the documents a view selects are protected by
+their own policies. The dialog says so in as many words, because "only me"
+could otherwise be read as a security control.
+
+**Interpolating a JS array into a Drizzle `sql` template flattens it** into one
+parameter per element, and Postgres then rejects the result ("malformed array
+literal", or "op ANY/ALL requires array on right side"). Use `inArray()` for
+membership and `sql.param(arr)` when the array must arrive as a single
+parameter. Both bugs were caught by the DB-backed tests and neither is visible
+to the type checker.
 
 **A document with no history has ZERO version rows, not one.** The initial
 upload deliberately writes nothing to `document_versions`, so
@@ -463,8 +561,18 @@ to sort defeats the point of giving out the address.
 
 ## Open items
 
-- **Tags and saved views have tables but no UI yet** — the schema ships now so
-  the later phases need no migration. Versions closed 2026-07-25.
+- **Tag colours are stored but never rendered.** `document_tags.color` takes a
+  design-token name and the picker does not offer one yet, so every chip looks
+  the same. Cheap to add; the column is already there.
+- **No bulk tagging.** Tags are set one file at a time, which is tedious for the
+  fifty photos that just came off a job. Multi-select in the browse list is the
+  obvious follow-up.
+- **Saved views cannot be edited or reordered** — `sort_order` exists and is
+  always 0. Changing a view means deleting it and saving a new one.
+- **A saved view pointing at a deleted folder or tag silently widens** rather
+  than erroring: an unknown folder id resolves to no path, which the query reads
+  as "no folder restriction". Honest degradation, but a view can quietly start
+  matching more than its name implies.
 - **No diff or preview between versions** — the history panel lists them and
   downloads any one, but comparing v2 to v3 means opening both. Real drawing
   comparison is an industry-pack concern (overlay, not text diff).
@@ -478,9 +586,9 @@ to sort defeats the point of giving out the address.
 - **`extracted_text` is still empty** — the search index reads it at weight D,
   but nothing populates it. OCR / PDF text extraction is the follow-up that
   makes search reach inside documents rather than across their metadata.
-- **Search is global or folder-scoped only** — no tag or kind facets, because
-  there is no tag UI yet. `searchDocuments` already takes `folderPath`; the
-  saved-view query schema anticipates the rest.
+- **No `doc_kind` facet yet** — the column exists and is an open taxonomy for
+  industry packs ('drawing', 'permit', 'submittal'), but nothing sets or filters
+  it. Tag, origin and folder facets closed 2026-07-25.
 - **A template cannot yet produce a document.** The editor writes and freezes
   bodies; nothing renders one into a file. That is plan PR 11, and it is what
   makes the feature useful rather than interesting.
@@ -506,12 +614,13 @@ to sort defeats the point of giving out the address.
   the obvious next control if one ever gets abused.
 - **No notification when a file arrives by email.** It appears in the folder
   silently; nobody is told. That wants the outbound spine.
-- **No per-link activity drawer yet** — `document_share_events` is written and
-  readable, and the list page shows an open count and last-accessed date, but
-  the full "opened from 203.0.113.x, 2 hours ago" feed is unbuilt.
-- **A link-scanning security appliance that pre-fetches URLs will burn a view
-  and log one.** Worth saying plainly if an activity feed ever implies a human
-  looked.
+- **The activity feed shows the most recent 100 events and says so** — there is
+  no paging into older history, and no export. A link hammered by a scanner
+  will push real opens out of view.
+- **Visitor codes cannot survive a `SHARE_SECRET` rotation.** `hashIp` is keyed
+  by it, so rotating the secret (the emergency lever for leaked links) also
+  re-pseudonymizes every future event: the same visitor gets a new code, and
+  old and new events cannot be grouped. Correct, but surprising in a dispute.
 - **The complete fix for serving user content is a separate origin**
   (`files.yosher-usercontent.com`). The sandbox CSP holds the line until then,
   and the stream route was written origin-agnostic so it can move.

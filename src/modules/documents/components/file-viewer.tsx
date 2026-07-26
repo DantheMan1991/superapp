@@ -1,8 +1,17 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Table2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +22,10 @@ import {
 import { formatBytes } from "../lib/format";
 import { fileKindLabel } from "../lib/view-mode";
 import { PdfCanvas } from "./pdf-canvas";
+import { previewSpreadsheetAction } from "../document-actions";
+// From ./preview/types, never ./preview/spreadsheet — that module is
+// server-only and pulls exceljs with it.
+import type { SpreadsheetPreview } from "../preview/types";
 
 export interface ViewableFile {
   id: string;
@@ -28,6 +41,125 @@ const VIEWER_WIDTH = 860;
 function isImage(mimeType: string): boolean {
   return ["image/jpeg", "image/png", "image/webp", "image/gif"].includes(
     mimeType,
+  );
+}
+
+/**
+ * A spreadsheet rendered as a table.
+ *
+ * The parse happens on the server (see preview/spreadsheet.ts) and this only
+ * draws the grid, which is why there is no spreadsheet library in the browser
+ * bundle. Row one is treated as a header because in practice it always is —
+ * and if it is not, the worst outcome is one bold row.
+ */
+function SheetPreviewPane({ documentId }: { documentId: string }) {
+  const [data, setData] = useState<SpreadsheetPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+
+  useEffect(() => {
+    void (async () => {
+      const result = await previewSpreadsheetAction({ documentId });
+      if ("error" in result) {
+        setError(result.error);
+        return;
+      }
+      setData(result.data ?? null);
+    })();
+  }, [documentId]);
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+        <Table2 className="size-10 text-muted-foreground" />
+        <p className="max-w-sm text-sm text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  const sheet = data.sheets[active];
+  if (!sheet || sheet.rows.length === 0) {
+    return (
+      <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+        This sheet is empty.
+      </p>
+    );
+  }
+
+  const [header, ...body] = sheet.rows;
+
+  return (
+    <div className="w-full space-y-2">
+      {data.sheets.length > 1 && (
+        <div className="flex flex-wrap gap-1">
+          {data.sheets.map((s, i) => (
+            <button
+              key={s.name}
+              type="button"
+              onClick={() => setActive(i)}
+              className={cn(
+                "rounded border px-2 py-1 text-xs",
+                i === active
+                  ? "border-brand bg-secondary font-medium"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="overflow-auto rounded border bg-background">
+        <table className="w-full border-collapse text-xs">
+          <thead className="sticky top-0 bg-secondary">
+            <tr>
+              {header.map((cell, i) => (
+                <th
+                  key={i}
+                  className="border-b border-r px-2 py-1 text-left font-medium"
+                >
+                  {cell}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {body.map((row, r) => (
+              <tr key={r} className="even:bg-secondary/30">
+                {row.map((cell, c) => (
+                  <td
+                    key={c}
+                    className="whitespace-nowrap border-b border-r px-2 py-1"
+                  >
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {(sheet.truncated || data.omittedSheets > 0) && (
+        // Said out loud: a preview that silently shows the first 200 rows of a
+        // 5,000-row takeoff is a preview someone will make a decision on.
+        <p className="text-xs text-muted-foreground">
+          Showing the first {body.length + 1} of {sheet.totalRows} rows
+          {sheet.truncated && " (and the first 40 columns)"}
+          {data.omittedSheets > 0 &&
+            ` · ${data.omittedSheets} more sheet${data.omittedSheets === 1 ? "" : "s"} not shown`}
+          . Download the file for everything.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -57,6 +189,13 @@ export function FileViewer({
   const url = `/api/documents/${file.id}/file`;
   const label = file.title || file.fileName;
   const pdf = file.mimeType === "application/pdf";
+  // Legacy .xls is included so the pane can EXPLAIN why there is no table,
+  // rather than falling through to the generic "open it on your computer".
+  const sheet =
+    file.mimeType ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    file.mimeType === "text/csv" ||
+    file.mimeType === "application/vnd.ms-excel";
 
   return (
     <Dialog
@@ -94,6 +233,8 @@ export function FileViewer({
               alt={label}
               className="max-h-[62vh] max-w-full object-contain"
             />
+          ) : sheet ? (
+            <SheetPreviewPane documentId={file.id} />
           ) : (
             <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
               <FileText className="size-10 text-muted-foreground" />

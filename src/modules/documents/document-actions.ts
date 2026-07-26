@@ -8,7 +8,19 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { DocsError, friendlyMessage } from "./core/errors";
-import { createDmsDocument, inspectUploadedBlob } from "./ingest";
+import {
+  createDmsDocument,
+  inspectUploadedBlob,
+  readBlobBytes as readDocumentBytes,
+} from "./ingest";
+import {
+  isLegacyExcel,
+  isPreviewableSpreadsheet,
+  PREVIEW_MAX_BYTES,
+  readCsvPreview,
+  readXlsxPreview,
+  type SpreadsheetPreview,
+} from "./preview/spreadsheet";
 import {
   addDocumentVersion,
   listDocumentVersions,
@@ -504,6 +516,68 @@ export async function restoreDocumentsAction(
     );
     revalidate();
     return { ok: true, data: { restored } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const previewSchema = z.object({ documentId: z.string().uuid() });
+
+/**
+ * Read a spreadsheet for the in-app viewer.
+ *
+ * Access is re-derived from scratch: the document is loaded through RLS at the
+ * caller's role, exactly like the file stream route. A document id is not a
+ * capability, so an owners-only spreadsheet is NOT_FOUND for staff here just as
+ * it is everywhere else.
+ *
+ * Read-only, so the accountant role is allowed — reviewing a takeoff is the
+ * kind of thing they are brought in to do.
+ */
+export async function previewSpreadsheetAction(
+  input: z.infer<typeof previewSchema>,
+): Promise<ActionResult<SpreadsheetPreview>> {
+  try {
+    const ctx = await readGate();
+    const parsed = previewSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const doc = await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        tx.query.documents.findFirst({
+          where: and(
+            eq(schema.documents.tenantId, ctx.tenantId),
+            eq(schema.documents.id, parsed.data.documentId),
+          ),
+        }),
+      { role: ctx.role },
+    );
+    if (!doc || !doc.blobPathname) {
+      throw new DocsError("DOCUMENT_NOT_FOUND", "not visible");
+    }
+    if (doc.status === "trashed") {
+      throw new DocsError("DOCUMENT_TRASHED", "in the trash");
+    }
+    if (isLegacyExcel(doc.mimeType)) {
+      throw new DocsError("PREVIEW_LEGACY_EXCEL", doc.mimeType);
+    }
+    if (!isPreviewableSpreadsheet(doc.mimeType)) {
+      throw new DocsError("PREVIEW_UNSUPPORTED", doc.mimeType);
+    }
+    // Bounded before a byte is parsed: a very large workbook is a denial of
+    // service against this server, not merely a slow preview.
+    if (doc.sizeBytes > PREVIEW_MAX_BYTES) {
+      throw new DocsError("PREVIEW_TOO_LARGE", String(doc.sizeBytes));
+    }
+
+    const bytes = await readDocumentBytes(doc.blobPathname);
+    const preview =
+      doc.mimeType === "text/csv"
+        ? await readCsvPreview(bytes)
+        : await readXlsxPreview(bytes);
+
+    return { ok: true, data: preview };
   } catch (err) {
     return fail(err);
   }

@@ -13,6 +13,41 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-26 — Spreadsheet previews (branch `claude/documents-sheets`)
+
+Excel and CSV now render as a table in the viewer, with sheet tabs.
+
+**Parsed on the SERVER, and the library choice is the interesting part.** The
+obvious pick is SheetJS in the browser, but the `xlsx` package published to npm
+is pinned at **0.18.5** — the vendor moved newer community builds to their own
+CDN — and that version carries known prototype-pollution and ReDoS advisories.
+Pointing it at files strangers email into a folder address is not a trade worth
+making for a preview. exceljs is MIT, current on npm, and Node is where it is
+best supported. Parsing server-side also keeps roughly a megabyte of parser out
+of the browser bundle and matches how every other blob here is handled.
+
+**Bounded before a byte is parsed:** 200 rows × 40 columns × 12 sheets, and
+files over 25MB are refused outright. A very large workbook is a denial of
+service against this server, not merely a slow preview. Truncation is stated in
+the UI — a preview that silently shows the first 200 rows of a 5,000-row takeoff
+is a preview somebody will make a decision on.
+
+`cell.ts` exists because `cell.value` is a union of about eight shapes and the
+ugly ones only appear in real files: a formula cell is an object carrying its
+cached RESULT (show the number, not `=SUM(A1:A9)`), rich text is an array of
+runs, a hyperlink wraps its text. `String(value)` on any of those renders
+"[object Object]" in the middle of someone's takeoff, and there is a test
+asserting no shape ever does.
+
+`csv.ts` is hand-written rather than a dependency — the whole job is RFC 4180
+quoting, it is thirty lines, and it is pure. It sniffs `;` and tab delimiters
+while ignoring delimiters inside quotes, so a `"Smith, John"` address cannot
+win the vote in a semicolon file.
+
+**Legacy `.xls` is refused with an explanation**, not a broken table: exceljs
+cannot read the old binary format and the only library that can is the one
+rejected above.
+
 ### 2026-07-26 — In-app viewer, PDF previews, tile sizing, filename fix (branch `claude/documents-viewer`)
 
 **PDF previews work now, and the CSP is untouched.** The previous session
@@ -419,6 +454,13 @@ replaced `documents` policy, policies for the five new tables).
 - `src/modules/documents/templates/apply.ts` — FOLDER-tree provisioning, called
   from `toggleModule` in `src/app/admin/actions.ts`. Unrelated to
   `doc-templates/` below despite the shared word.
+- `src/modules/documents/preview/` — spreadsheet previews. `cell.ts` (exceljs
+  value shapes → text) and `csv.ts` (RFC 4180) are pure and heavily tested;
+  `spreadsheet.ts` is `server-only` and owns exceljs; `types.ts` carries the
+  shapes the client needs so nothing drags the parser into the browser bundle.
+- `src/modules/documents/components/pdf-canvas.tsx` — PDF rendering via pdf.js
+  to a canvas. Read the header before changing it: fetch-and-draw is what lets
+  previews exist without touching the file-response CSP.
 - `src/modules/documents/doc-templates/` — DOCUMENT templates (a lien waiver, a
   change order). `merge.ts` is the pure, parser-free injection engine;
   `fields.ts` is the vocabulary shared with the browser; `template-ops.ts` is
@@ -771,9 +813,17 @@ to sort defeats the point of giving out the address.
   fine on a phone tethered at a site. The fix is the same one for both:
   rasterise/resize once on upload, store the result as its own small blob, and
   serve that everywhere. It does not need a CSP change — just a rasteriser.
-- **Office files cannot be previewed at all**, only downloaded. Rendering an
-  xlsx in a browser needs a converter; the viewer says so plainly rather than
-  showing a broken frame.
+- **Word and PowerPoint cannot be previewed**, only downloaded — there is no
+  equivalent of exceljs for them that is worth the dependency. The viewer says
+  so plainly rather than showing a broken frame. Legacy `.xls` is refused with
+  its own message.
+- **A spreadsheet preview shows values, not formatting.** No number formats, no
+  cell colours, no merged cells, no column widths: `1234.5` where Excel shows
+  `$1,234.50`. Deliberate — inventing a currency symbol from a guessed locale
+  is worse than being plainly unformatted — but it means the preview is for
+  reading, never for checking a total's presentation.
+- **`document_settings` has no preview switch.** A tenant who would rather no
+  spreadsheet contents be readable in-app cannot turn it off.
 - **View mode is per-URL, not per-user.** Switching to Thumbnails does not
   stick when you navigate to another folder from the nav. Deliberate for now
   (the URL is the single source of truth), but a stored preference is the

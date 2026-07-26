@@ -14,6 +14,7 @@ import {
   canPreview,
   fileKindLabel,
   parseViewMode,
+  resolveViewMode,
 } from "@/modules/documents/lib/view-mode";
 import { displayNameFromBlobPath } from "@/modules/documents/ingest";
 import {
@@ -944,6 +945,26 @@ describe("browse view modes", () => {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       ),
     ).toBe(false);
+  });
+
+  /**
+   * The URL beats the stored preference, deliberately: a link someone pastes
+   * into chat should show what THEY were looking at, not be rewritten by the
+   * recipient's habit. Absent an explicit view, the preference carries across
+   * folders — which is the only reason it is stored at all.
+   */
+  it("prefers an explicit ?view= over the remembered choice", () => {
+    expect(resolveViewMode("icons", "thumbs")).toBe("icons");
+    expect(resolveViewMode("list", "thumbs")).toBe("list");
+  });
+
+  it("falls back to the remembered choice, then to list", () => {
+    expect(resolveViewMode(undefined, "thumbs")).toBe("thumbs");
+    expect(resolveViewMode("", "icons")).toBe("icons");
+    expect(resolveViewMode(undefined, undefined)).toBe("list");
+    // A junk cookie must not break the page.
+    expect(resolveViewMode(undefined, "gallery")).toBe("list");
+    expect(resolveViewMode("nonsense", "nonsense")).toBe("list");
   });
 
   it("labels the file types a construction business actually has", () => {

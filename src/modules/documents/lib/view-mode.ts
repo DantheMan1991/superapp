@@ -14,6 +14,36 @@ export function parseViewMode(raw: string | undefined | null): ViewMode {
     : DEFAULT_VIEW_MODE;
 }
 
+/**
+ * Where the remembered layout lives.
+ *
+ * A cookie rather than localStorage so the SERVER can read it and render the
+ * right layout on the first paint — localStorage would mean rendering the list
+ * and then flipping to thumbnails once JavaScript ran, on every navigation.
+ *
+ * It is a display preference with no security weight: readable by script (the
+ * switch writes it), Lax, and scoped to the whole app.
+ */
+export const VIEW_MODE_COOKIE = "yosher_docs_view";
+
+/**
+ * Which layout to render.
+ *
+ * An explicit `?view=` in the URL WINS over the stored preference, so a link
+ * someone pastes into chat shows what they were looking at rather than being
+ * rewritten by the recipient's habit. Absent that, the remembered choice
+ * carries across folders — which is the whole point of storing it.
+ */
+export function resolveViewMode(
+  urlParam: string | undefined | null,
+  cookieValue: string | undefined | null,
+): ViewMode {
+  if ((VIEW_MODES as readonly string[]).includes(urlParam ?? "")) {
+    return urlParam as ViewMode;
+  }
+  return parseViewMode(cookieValue);
+}
+
 export const VIEW_MODE_LABELS: Record<ViewMode, string> = {
   list: "List",
   icons: "Icons",

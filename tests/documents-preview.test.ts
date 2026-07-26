@@ -1,10 +1,17 @@
 import "dotenv/config";
 import { describe, expect, it } from "vitest";
+import ExcelJS from "exceljs";
 import { cellText, trimGrid } from "@/modules/documents/preview/cell";
 import {
   parseDelimited,
   sniffDelimiter,
 } from "@/modules/documents/preview/csv";
+import { readXlsxPreview } from "@/modules/documents/preview/spreadsheet";
+
+/** Write a workbook to the bytes the reader would receive from blob storage. */
+async function bytesOf(wb: ExcelJS.Workbook): Promise<Uint8Array> {
+  return new Uint8Array((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+}
 
 /**
  * Spreadsheet preview parsing. Pure, so these run everywhere.
@@ -161,6 +168,101 @@ describe("CSV parsing", () => {
 
   it("survives an unterminated quote instead of throwing", () => {
     expect(() => parseDelimited('a,"unterminated')).not.toThrow();
+  });
+});
+
+/**
+ * Round-trips through the REAL reader.
+ *
+ * The first version of `readXlsxPreview` indexed cells by `worksheet.rowCount`
+ * and `worksheet.columnCount`. Those are derived from metadata the writing
+ * application chooses to emit — a workbook exceljs itself writes reports them
+ * correctly, which is exactly why that version passed its tests and then showed
+ * "This sheet is empty" on a real file out of Excel. These cases exercise the
+ * shapes that broke it.
+ */
+describe("reading a workbook", () => {
+  it("reads an ordinary sheet", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Customers");
+    ws.addRow(["Name", "City", "Balance"]);
+    ws.addRow(["Acme Roofing", "Austin", 4200]);
+    ws.addRow(["Fulton Lumber", "Dallas", 980]);
+
+    const out = await readXlsxPreview(await bytesOf(wb));
+    expect(out.sheets).toHaveLength(1);
+    expect(out.sheets[0].name).toBe("Customers");
+    expect(out.sheets[0].rows).toEqual([
+      ["Name", "City", "Balance"],
+      ["Acme Roofing", "Austin", "4200"],
+      ["Fulton Lumber", "Dallas", "980"],
+    ]);
+  });
+
+  /** A sheet whose data starts below row 1 — a title block, a logo, a gap. */
+  it("reads a sheet whose rows do not start at row 1", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Offset");
+    ws.getCell("A4").value = "Item";
+    ws.getCell("B4").value = "Qty";
+    ws.getCell("A5").value = "Joist";
+    ws.getCell("B5").value = 12;
+
+    const out = await readXlsxPreview(await bytesOf(wb));
+    const rows = out.sheets[0].rows;
+    // The leading blank rows are trimmed away, but the data survives — the
+    // old indexed traversal returned nothing at all here.
+    expect(rows.some((r) => r.includes("Joist"))).toBe(true);
+    expect(rows.some((r) => r.includes("Item"))).toBe(true);
+  });
+
+  /** Gaps between populated columns must not shift cells left. */
+  it("keeps sparse cells in their real columns", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Sparse");
+    ws.getCell("A1").value = "left";
+    ws.getCell("D1").value = "right";
+
+    const out = await readXlsxPreview(await bytesOf(wb));
+    expect(out.sheets[0].rows[0]).toEqual(["left", "", "", "right"]);
+  });
+
+  it("reads every sheet and names them", async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("First").addRow(["a"]);
+    wb.addWorksheet("Second").addRow(["b"]);
+
+    const out = await readXlsxPreview(await bytesOf(wb));
+    expect(out.sheets.map((s) => s.name)).toEqual(["First", "Second"]);
+  });
+
+  it("resolves formulas to their cached result", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Totals");
+    ws.getCell("A1").value = 100;
+    ws.getCell("A2").value = 250;
+    ws.getCell("A3").value = { formula: "SUM(A1:A2)", result: 350 };
+
+    const out = await readXlsxPreview(await bytesOf(wb));
+    expect(out.sheets[0].rows[2][0]).toBe("350");
+  });
+
+  it("reports truncation rather than pretending the sheet ends", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Big");
+    for (let i = 1; i <= 250; i += 1) ws.addRow([`row ${i}`]);
+
+    const out = await readXlsxPreview(await bytesOf(wb));
+    expect(out.sheets[0].rows).toHaveLength(200);
+    expect(out.sheets[0].truncated).toBe(true);
+    expect(out.sheets[0].totalRows).toBe(250);
+  });
+
+  it("returns an empty grid for a genuinely empty sheet", async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("Blank");
+    const out = await readXlsxPreview(await bytesOf(wb));
+    expect(out.sheets[0].rows).toEqual([]);
   });
 });
 

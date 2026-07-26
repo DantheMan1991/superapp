@@ -84,6 +84,18 @@ function SheetPreviewPane({ documentId }: { documentId: string }) {
     );
   }
 
+  // Two different problems, worth two different messages: a workbook we could
+  // not get any sheets out of is a bug worth reporting, whereas a blank sheet
+  // is just a blank sheet.
+  if (data.sheets.length === 0) {
+    return (
+      <p className="px-4 py-12 text-center text-sm text-muted-foreground">
+        We couldn&apos;t read any sheets from this workbook. Download it to open
+        it — and it&apos;s worth telling us, because this shouldn&apos;t happen.
+      </p>
+    );
+  }
+
   const sheet = data.sheets[active];
   if (!sheet || sheet.rows.length === 0) {
     return (

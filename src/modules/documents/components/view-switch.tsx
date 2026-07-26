@@ -6,6 +6,7 @@ import { LayoutGrid, List, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   VIEW_MODES,
+  VIEW_MODE_COOKIE,
   VIEW_MODE_LABELS,
   type ViewMode,
 } from "../lib/view-mode";
@@ -53,6 +54,12 @@ export function ViewSwitch({ current }: { current: ViewMode }) {
             aria-label={VIEW_MODE_LABELS[mode]}
             aria-current={active ? "true" : undefined}
             title={VIEW_MODE_LABELS[mode]}
+            // Remember the choice so it survives navigating to another folder,
+            // where the URL carries no ?view= at all. Written before the
+            // navigation so the server already sees it on the next request.
+            onClick={() => {
+              document.cookie = `${VIEW_MODE_COOKIE}=${mode}; path=/; max-age=31536000; samesite=lax`;
+            }}
             className={cn(
               "px-2.5 py-2 text-muted-foreground transition-colors first:rounded-l-md last:rounded-r-md hover:text-foreground",
               active && "bg-secondary text-foreground",

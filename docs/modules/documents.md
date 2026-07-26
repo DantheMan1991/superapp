@@ -13,6 +13,35 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-26 — Upload fix + drag and drop (branch `claude/documents-upload-fix`)
+
+**Every upload in this module was broken in production.** Both call sites did
+`import { upload as uploadPresigned } from "@vercel/blob/client"` — the classic
+client-token helper, aliased to the name of the presigned one. The store is
+PRIVATE, which rejects classic client tokens outright, and both routes answer
+with `handleUploadPresigned`, so `upload` sent a handshake the route could not
+read. Accounting already carried this exact lesson in a comment; Documents was
+written against the wrong function and the alias hid it.
+
+**Why it survived review, a build, a deploy and four sessions of tests:
+`upload` and `uploadPresigned` have IDENTICAL signatures.** The alias
+type-checks perfectly. No compiler, linter or database test can see it — only a
+human selecting a file. There is now a source-scan guard test asserting nothing
+under `src/` imports `upload` from that module, verified by deliberately
+re-introducing the bug.
+
+Then drag and drop, on the same branch because it is the same subsystem: drag a
+file onto a folder to move it, drag a folder onto a folder to re-parent it,
+drop files from the desktop to upload into whatever you dropped on, and drop
+onto a breadcrumb to move something UP a level — otherwise the only direction
+you can drag is deeper.
+
+Everything routes through the server actions the menus already use, so the
+gesture adds no authority: RLS still refuses a staff member dropping into an
+owners-only folder, and the cycle check still refuses a folder dropped inside
+itself. Folder rows are not draggable at all for staff, because moving a folder
+is owner-only for the correctness reason recorded below.
+
 ### 2026-07-26 — Document templates (branch `claude/documents-templates`)
 
 Plan PR 10, complete. Three migrations (`0033`–`0035`), the merge engine, the
@@ -494,6 +523,28 @@ constant from `template-ops.ts` into the editor pulled the database layer into
 the browser bundle and failed the build. Vocabulary shared with client
 components lives in `doc-templates/fields.ts`, which carries no marker.
 
+**Client uploads MUST use `uploadPresigned`, never `upload`.** The blob store is
+private, which rejects classic client tokens, and both upload routes answer
+with `handleUploadPresigned`. The two SDK functions have identical signatures,
+so `import { upload as uploadPresigned }` type-checks and then fails every
+upload at runtime — which is exactly what shipped. A source-scan test now
+guards it, because nothing else can.
+
+**Drag and drop adds gestures, never authority.** Every drop calls the same
+server action the equivalent menu item calls. Folder rows are not draggable for
+staff at all (moving a folder is owner-only), the subtree-cycle rule is applied
+before the request as well as inside it, and a drop into an owners-only folder
+still fails at RLS. If a future drop target needs a NEW action, that is the
+signal to stop and check the permission story rather than reuse the nearest
+one.
+
+**`dragover` cannot read `dataTransfer` contents, only the type list.** That is
+why internal drags carry a private MIME type (`application/x-yosher-doc`) — a
+drop target has to decide whether to accept the drag before it can see what is
+being dragged. Also why `dragenter`/`dragleave` counting is a ref rather than a
+boolean: both fire for every child element, so a naive flag flickers as the
+pointer crosses a row's own contents.
+
 **No new UNIQUE index on `documents`, ever.** `createDocumentRecord` uses a
 bare `.onConflictDoNothing()`, which covers every unique constraint on the
 table — a second one would silently convert legitimate inserts into swallowed
@@ -586,6 +637,13 @@ to sort defeats the point of giving out the address.
 - **`extracted_text` is still empty** — the search index reads it at weight D,
   but nothing populates it. OCR / PDF text extraction is the follow-up that
   makes search reach inside documents rather than across their metadata.
+- **Drag and drop is mouse-only and moves one thing at a time.** No keyboard
+  equivalent (the row menus remain the accessible path, and they do everything
+  drag does), no multi-select, no touch support, and no drag between browser
+  tabs. It is also absent from Inbox, Search and Trash — only Browse has it.
+- **A dropped folder move has no optimistic UI.** The row stays put until the
+  server responds and the page refreshes, which on a slow connection reads as
+  the drop having failed.
 - **No `doc_kind` facet yet** — the column exists and is an open taxonomy for
   industry packs ('drawing', 'permit', 'submittal'), but nothing sets or filters
   it. Tag, origin and folder facets closed 2026-07-25.

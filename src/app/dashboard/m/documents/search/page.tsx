@@ -260,10 +260,9 @@ export default async function DocumentsSearchPage({
               <div key={hit.id} className="flex items-center gap-3 px-4 py-3">
                 <FileText className="size-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
+                  {/* Same window, matching Browse. */}
                   <a
                     href={`/api/documents/${hit.id}/file`}
-                    target="_blank"
-                    rel="noreferrer"
                     className="truncate text-sm font-medium hover:underline"
                   >
                     {hit.title || hit.fileName}

@@ -11,6 +11,11 @@ import {
 } from "@/modules/documents/folder-ops";
 import { verifyDocumentInvariants } from "@/modules/documents/core/integrity";
 import {
+  canPreview,
+  fileKindLabel,
+  parseViewMode,
+} from "@/modules/documents/lib/view-mode";
+import {
   isDeniedKind,
   loadShareActivity,
   visitorLabel,
@@ -860,6 +865,61 @@ describe("blob client upload flow", () => {
     walk("src");
 
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("browse view modes", () => {
+  it("falls back to the list layout for anything unrecognised", () => {
+    expect(parseViewMode("thumbs")).toBe("thumbs");
+    expect(parseViewMode("icons")).toBe("icons");
+    expect(parseViewMode("list")).toBe("list");
+    // A hand-typed or stale URL must render something, not throw.
+    expect(parseViewMode("gallery")).toBe("list");
+    expect(parseViewMode(undefined)).toBe("list");
+    expect(parseViewMode("")).toBe("list");
+  });
+
+  /**
+   * Only images preview, and that is a CSP consequence rather than a gap.
+   * File responses carry `frame-ancestors 'none'` and a `sandbox` directive,
+   * so a PDF cannot be framed on our own pages and the browser's PDF viewer is
+   * disabled anyway. An `<img>` is unaffected by both. If someone later adds
+   * a type here, they need to have checked it renders WITHOUT relaxing either.
+   */
+  it("previews images only — never PDFs or Office files", () => {
+    expect(canPreview("image/jpeg")).toBe(true);
+    expect(canPreview("image/png")).toBe(true);
+    expect(canPreview("image/webp")).toBe(true);
+    expect(canPreview("image/gif")).toBe(true);
+
+    expect(canPreview("application/pdf")).toBe(false);
+    expect(canPreview("text/html")).toBe(false);
+    expect(canPreview("image/svg+xml")).toBe(false);
+    expect(
+      canPreview(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      ),
+    ).toBe(false);
+  });
+
+  it("labels the file types a construction business actually has", () => {
+    expect(fileKindLabel("application/pdf", "a.pdf")).toBe("PDF");
+    expect(
+      fileKindLabel(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "takeoff.xlsx",
+      ),
+    ).toBe("Excel");
+    expect(
+      fileKindLabel(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "contract.docx",
+      ),
+    ).toBe("Word");
+    expect(fileKindLabel("image/jpeg", "site.jpg")).toBe("Image");
+    // Unknown type falls back to the extension rather than a useless "File".
+    expect(fileKindLabel("application/octet-stream", "plan.dwg")).toBe("DWG");
+    expect(fileKindLabel("application/octet-stream", "noextension")).toBe("File");
   });
 });
 

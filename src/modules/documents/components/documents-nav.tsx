@@ -11,6 +11,7 @@ const TABS = [
   { href: "/dashboard/m/documents/browse", label: "Browse" },
   { href: "/dashboard/m/documents/inbox", label: "Inbox" },
   { href: "/dashboard/m/documents/search", label: "Search" },
+  { href: "/dashboard/m/documents/tags", label: "Tags" },
   { href: "/dashboard/m/documents/shares", label: "Shared links" },
   { href: "/dashboard/m/documents/trash", label: "Trash" },
 ];

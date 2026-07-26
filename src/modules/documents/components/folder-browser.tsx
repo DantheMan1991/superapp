@@ -26,6 +26,7 @@ import {
   UploadDropZone,
 } from "./drag-drop";
 import { ViewSwitch } from "./view-switch";
+import { FileOpenTrigger } from "./file-viewer";
 import { FileTile, FolderTile, TileGrid } from "./file-tiles";
 import { DEFAULT_VIEW_MODE, type ViewMode } from "../lib/view-mode";
 import {
@@ -223,15 +224,26 @@ export async function FolderBrowser({
               payload={{ kind: "document", id: doc.id }}
               className="relative h-full"
             >
-              <FileTile
-                id={doc.id}
-                title={doc.title}
-                fileName={doc.fileName}
-                mimeType={doc.mimeType}
-                sizeBytes={doc.sizeBytes}
-                showPreview={view === "thumbs"}
-              />
-              <div className="absolute right-1 top-1">
+              <FileOpenTrigger
+                file={{
+                  id: doc.id,
+                  title: doc.title,
+                  fileName: doc.fileName,
+                  mimeType: doc.mimeType,
+                  sizeBytes: doc.sizeBytes,
+                }}
+                className="h-full"
+              >
+                <FileTile
+                  id={doc.id}
+                  title={doc.title}
+                  fileName={doc.fileName}
+                  mimeType={doc.mimeType}
+                  sizeBytes={doc.sizeBytes}
+                  showPreview={view === "thumbs"}
+                />
+              </FileOpenTrigger>
+              <div data-no-viewer className="absolute right-1 top-1">
                 <DocumentRowMenu
                   documentId={doc.id}
                   folders={folderChoices}
@@ -319,20 +331,26 @@ export async function FolderBrowser({
             >
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
-                {/* Same window, not a new tab. A top-level navigation is also
-                    the only way to show a PDF at all: file responses carry
-                    `frame-ancestors 'none'` and a `sandbox` directive, so they
-                    cannot be embedded in a frame on our own pages. Types the
-                    allowlist marks attachment (Word, Excel, ZIP) download
-                    without the page moving; inline types replace it and Back
-                    returns here. */}
-                <a
-                  draggable={false}
-                  href={`/api/documents/${doc.id}/file`}
-                  className="truncate text-sm font-medium hover:underline"
+                {/* Opens the in-app viewer. The href stays real so
+                    middle-click and "open in new tab" still work, and the file
+                    is reachable if JavaScript has not loaded. */}
+                <FileOpenTrigger
+                  file={{
+                    id: doc.id,
+                    title: doc.title,
+                    fileName: doc.fileName,
+                    mimeType: doc.mimeType,
+                    sizeBytes: doc.sizeBytes,
+                  }}
                 >
-                  {doc.title || doc.fileName}
-                </a>
+                  <a
+                    draggable={false}
+                    href={`/api/documents/${doc.id}/file`}
+                    className="truncate text-sm font-medium hover:underline"
+                  >
+                    {doc.title || doc.fileName}
+                  </a>
+                </FileOpenTrigger>
                 <p className="text-xs text-muted-foreground">
                   {formatBytes(doc.sizeBytes)}
                   {doc.fileVersionCount > 1 && ` · v${doc.fileVersionNo}`}

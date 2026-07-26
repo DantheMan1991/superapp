@@ -13,6 +13,39 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-26 — In-app viewer, PDF previews, tile sizing, filename fix (branch `claude/documents-viewer`)
+
+**PDF previews work now, and the CSP is untouched.** The previous session
+concluded they were impossible; that was half right. `frame-ancestors 'none'`
+and `sandbox` govern a stored file as a DOCUMENT — they say nothing about our
+own page fetching the same bytes and drawing them. `fetch()` answers to OUR
+page's policy, and a canvas is not a browsing context. So pdf.js reads the
+bytes and paints pixels: no frame, nothing from the file ever executes, both
+headers exactly as they were. **Reaching for the headers was the wrong instinct;
+the right question was whether a frame was needed at all.**
+
+The same component gives a real in-app viewer — click a file and it opens in a
+dialog with page navigation, never leaving Yosher. Images render as `<img>`;
+Office files get an honest card and a download, because a browser genuinely
+cannot render an xlsx without a converter. The underlying `<a href>` survives,
+so middle-click and open-in-new-tab still work and the file is reachable with
+no JavaScript.
+
+Thumbnails are lazy behind an IntersectionObserver — a folder of fifty drawings
+must not parse fifty PDFs on first paint.
+
+**Tile sizing.** Grid rows size to their tallest member, so a folder tile next
+to a file tile stretched and every row came out a different height. Folders now
+carry the same aspect-square media block as files, which makes the grid uniform
+by construction rather than by fixed heights.
+
+**Upload filenames.** `addRandomSuffix` belongs in the storage KEY, but the
+stored name was read straight off the blob pathname — so `Invoice 3000 (1).pdf`
+listed as `Invoice 3000 (1)-A76EZtxEuYMtCeXMNHHj.pdf`. `displayNameFromBlobPath`
+strips a 20+ character alphanumeric run before the extension; the tests care
+more about the other half, that `as-built.pdf` and `RFI-004-response.pdf`
+survive untouched.
+
 ### 2026-07-26 — Same-window open, and List/Icons/Thumbnails (branch `claude/documents-views`)
 
 Files now open in the same tab instead of a new one, everywhere (Browse, Inbox,
@@ -602,14 +635,20 @@ constant from `template-ops.ts` into the editor pulled the database layer into
 the browser bundle and failed the build. Vocabulary shared with client
 components lives in `doc-templates/fields.ts`, which carries no marker.
 
-**A stored file can never be embedded in one of our pages.** `frame-ancestors
+**A stored file is never EMBEDDED — it is fetched and drawn.** `frame-ancestors
 'none'` plus `sandbox` on every file response is what stops user-uploaded
-content executing in our origin, and together they rule out an in-app PDF
-viewer, a preview iframe and a thumbnail `<object>`. Files open by TOP-LEVEL
-NAVIGATION, which is not a frame and is therefore unaffected. Images are the
-one previewable type because `<img>` is subject to neither directive. **Anyone
-adding a preview must make it work without relaxing those two headers** — the
-supported route is rasterising server-side and serving an ordinary image.
+content executing in our origin, and together they rule out an iframe, an
+`<object>` and the browser's own PDF viewer. They do NOT rule out previews:
+those headers govern the file as a document, whereas `fetch()` answers to our
+page's policy and a canvas is not a browsing context. pdf.js therefore reads the
+bytes and paints them (`pdf-canvas.tsx`), images use `<img>`, and both headers
+stay as they are.
+
+The general lesson, because the first attempt got this wrong: **when a security
+header blocks a feature, check whether the feature actually needs the thing the
+header governs before proposing to weaken it.** Relaxing `frame-ancestors` here
+would have bought nothing that fetch-and-draw does not already give, at the cost
+of the module's main defence against stored XSS.
 
 **Client uploads MUST use `uploadPresigned`, never `upload`.** The blob store is
 private, which rejects classic client tokens, and both upload routes answer
@@ -725,12 +764,16 @@ to sort defeats the point of giving out the address.
 - **`extracted_text` is still empty** — the search index reads it at weight D,
   but nothing populates it. OCR / PDF text extraction is the follow-up that
   makes search reach inside documents rather than across their metadata.
-- **No PDF thumbnails, and no resized image thumbnails either.** The tile view
-  shows the ORIGINAL image scaled by the browser, so a folder of 12-megapixel
-  site photos downloads 12-megapixel site photos (lazily, but still). The one
-  fix that solves both: rasterise page 1 / resize on upload, store the result
-  as its own blob, serve that. It needs a rasteriser the runtime does not have
-  — and it must not be solved by relaxing the file-response CSP, see Decisions.
+- **Previews download the whole file.** A PDF thumbnail parses the entire
+  document to draw page 1, and an image tile is the ORIGINAL scaled by the
+  browser — so a folder of 12-megapixel site photos downloads 12-megapixel site
+  photos, lazily but fully. Fine for drawings and job photos on a desk; not
+  fine on a phone tethered at a site. The fix is the same one for both:
+  rasterise/resize once on upload, store the result as its own small blob, and
+  serve that everywhere. It does not need a CSP change — just a rasteriser.
+- **Office files cannot be previewed at all**, only downloaded. Rendering an
+  xlsx in a browser needs a converter; the viewer says so plainly rather than
+  showing a broken frame.
 - **View mode is per-URL, not per-user.** Switching to Thumbnails does not
   stick when you navigate to another folder from the nav. Deliberate for now
   (the URL is the single source of truth), but a stored preference is the

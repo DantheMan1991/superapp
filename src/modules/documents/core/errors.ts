@@ -28,6 +28,12 @@ export type DocsErrorCode =
   | "TAG_NOT_FOUND"
   | "TAG_NAME_TAKEN"
   | "TAG_LIMIT"
+  | "TEMPLATE_NOT_FOUND"
+  | "TEMPLATE_NAME_TAKEN"
+  | "TEMPLATE_NAME_INVALID"
+  | "TEMPLATE_PUBLISHED"
+  | "TEMPLATE_NO_DRAFT"
+  | "TEMPLATE_BODY_EMPTY"
   | "VIEW_NOT_FOUND"
   | "VIEW_NAME_TAKEN"
   | "SEARCH_QUERY_INVALID"
@@ -84,6 +90,13 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
   TAG_NOT_FOUND: "That tag no longer exists.",
   TAG_NAME_TAKEN: "A tag with that name already exists.",
   TAG_LIMIT: "That's the maximum number of tags.",
+  TEMPLATE_NOT_FOUND: "That template no longer exists.",
+  TEMPLATE_NAME_TAKEN: "A template with that name already exists.",
+  TEMPLATE_NAME_INVALID: "Give the template a name.",
+  TEMPLATE_PUBLISHED:
+    "That version is published, so it can't be changed — your edits start a new draft.",
+  TEMPLATE_NO_DRAFT: "There are no unpublished changes to publish.",
+  TEMPLATE_BODY_EMPTY: "Write the template before publishing it.",
   VIEW_NOT_FOUND: "That saved view no longer exists.",
   VIEW_NAME_TAKEN: "You already have a saved view with that name.",
   SEARCH_QUERY_INVALID: "That search couldn't be read — try simpler terms.",

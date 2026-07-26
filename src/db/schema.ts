@@ -1594,6 +1594,138 @@ export const documentTags = pgTable(
  * clause — it MUST be re-parsed with the same Zod schema on read. Stored
  * input, never trusted config.
  */
+/**
+ * Document templates — a lien waiver, a change order, a subcontract.
+ *
+ * NOT to be confused with `src/modules/documents/templates/`, which is the
+ * default FOLDER tree a tenant is provisioned with. Unrelated concepts that
+ * unfortunately share an English word; the module directory for these is
+ * `doc-templates/`.
+ *
+ * The row is the template's IDENTITY (name, what it is for). Every body lives
+ * in `document_template_versions`, because a published template must be
+ * immutable — a business needs to know what the waiver said on the day it was
+ * sent, and editing in place would silently rewrite history.
+ */
+export const documentTemplates = pgTable(
+  "document_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    nameKey: text("name_key").notNull(),
+    description: text("description").notNull().default(""),
+    /** Open taxonomy, same vocabulary as documents.doc_kind. */
+    docKind: text("doc_kind").notNull().default(""),
+    /** Where generated documents get filed. Null = the Inbox. */
+    defaultFolderId: uuid("default_folder_id"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_templates_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("document_templates_tenant_name_idx").on(t.tenantId, t.nameKey),
+    index("document_templates_tenant_kind_idx").on(t.tenantId, t.docKind),
+    foreignKey({
+      name: "document_templates_folder_fk",
+      columns: [t.tenantId, t.defaultFolderId],
+      foreignColumns: [documentFolders.tenantId, documentFolders.id],
+    }),
+    check(
+      "document_templates_name_not_blank",
+      sql`length(btrim(${t.name})) > 0`,
+    ),
+  ],
+);
+
+/**
+ * One revision of a template's body.
+ *
+ * **Publish immutability is the whole point.** A version with `published_at`
+ * set is frozen: editing produces a NEW draft version instead. That is what
+ * makes "this waiver was generated from v3, and here is v3" answerable a year
+ * later, and it is enforced in `doc-templates/template-ops.ts` rather than by a
+ * constraint, because Postgres cannot express "these columns are immutable
+ * once that column is non-null" without a trigger.
+ *
+ * At most ONE draft per template (partial unique) — a template with two drafts
+ * has no answer to "what am I editing?".
+ */
+export const documentTemplateVersions = pgTable(
+  "document_template_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    templateId: uuid("template_id").notNull(),
+    versionNo: integer("version_no").notNull(),
+    /** Markdown. Merge values are NEVER substituted into it — see merge.ts. */
+    body: text("body").notNull().default(""),
+    /**
+     * The declared merge fields: [{ name, label, required }]. Derived from the
+     * body on save, so it can never drift into claiming a field the body does
+     * not reference — but stored so a form can be built without re-parsing.
+     */
+    fields: jsonb("fields")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    publishedByClerkUserId: text("published_by_clerk_user_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_template_versions_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    uniqueIndex("document_template_versions_no_idx").on(
+      t.tenantId,
+      t.templateId,
+      t.versionNo,
+    ),
+    // Exactly one editable draft per template, enforced by the database.
+    uniqueIndex("document_template_versions_draft_idx")
+      .on(t.tenantId, t.templateId)
+      .where(sql`${t.publishedAt} is null`),
+    index("document_template_versions_tenant_template_idx").on(
+      t.tenantId,
+      t.templateId,
+      t.versionNo,
+    ),
+    foreignKey({
+      name: "document_template_versions_template_fk",
+      columns: [t.tenantId, t.templateId],
+      foreignColumns: [documentTemplates.tenantId, documentTemplates.id],
+    }).onDelete("cascade"),
+    check(
+      "document_template_versions_no_positive",
+      sql`${t.versionNo} >= 1`,
+    ),
+    // A published version must record who published it: the pair is the
+    // evidence, and half of it is not.
+    check(
+      "document_template_versions_published_pair",
+      sql`(${t.publishedAt} is null) = (${t.publishedByClerkUserId} is null)`,
+    ),
+  ],
+);
+
 export const documentSavedViews = pgTable(
   "document_saved_views",
   {
@@ -2412,6 +2544,9 @@ export type DocumentFolder = typeof documentFolders.$inferSelect;
 export type DocumentVersion = typeof documentVersions.$inferSelect;
 export type DocumentTag = typeof documentTags.$inferSelect;
 export type DocumentSavedView = typeof documentSavedViews.$inferSelect;
+export type DocumentTemplate = typeof documentTemplates.$inferSelect;
+export type DocumentTemplateVersion =
+  typeof documentTemplateVersions.$inferSelect;
 export type DocumentSettings = typeof documentSettings.$inferSelect;
 export type EmailDomain = typeof emailDomains.$inferSelect;
 export type OutboundEmail = typeof outboundEmails.$inferSelect;

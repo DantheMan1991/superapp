@@ -13,6 +13,48 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-07-26 — Document templates: data model + merge engine (branch `claude/documents-templates`)
+
+Plan PR 10, first half. Two tables (`0033`/`0034`), the merge engine, and the
+ops layer that makes publish immutability real. **The editor UI and the
+DB-backed tests are NOT in this commit** — they need `0033`/`0034` applied
+first, and applying DDL to the live database is the founder's call.
+
+**Naming trap, read this first:** `src/modules/documents/templates/` is the
+default FOLDER tree a tenant is provisioned with. DOCUMENT templates — a lien
+waiver, a change order — live in `doc-templates/`. Unrelated concepts that
+share an English word.
+
+**The merge engine is the security-critical part and it is done.** A merge
+value is NEVER substituted into the Markdown source; values are injected as
+TEXT NODES into the already-parsed tree. This is the exact analogue of SQL
+parameterization: a customer literally named `# ACME` must render as the text
+"# ACME", not become a heading, and a subcontractor called
+`[click here](http://evil.example)` must not become a link in a document the
+business is about to put its name on. `merge.ts` is pure and imports no parser,
+so the same code runs as a remark plugin in the browser preview and server-side
+for PDF generation. Fifteen tests, including every injection shape (heading,
+link, image, emphasis, list, blockquote, code) asserting the forbidden node
+type never appears in the output tree.
+
+Two subtleties worth keeping: markup that SPANS a placeholder (`**Hello
+{{name}}**`) survives, which source-splitting would break; and placeholders
+inside code spans are left alone, because a template showing `{{amount}}` is
+documenting the syntax, not using it. An unfilled field renders as `[field]`
+rather than a blank — a silent hole in "Received from ___ the sum of" is worse
+than something that obviously still needs filling in.
+
+**Publish immutability** is enforced in `template-ops.ts`, not by a constraint:
+Postgres cannot express "these columns freeze once that column is non-null"
+without a trigger, and a trigger that silently discards a write is worse than
+an error that says why. Editing a published template opens a NEW draft at the
+next version number. At most one draft per template IS a database invariant
+(partial unique on `published_at is null`), so two people editing converge on
+one draft instead of forking it.
+
+`0033` needed the same hand edit as `0013` and `0023` — the `(tenant_id, id)`
+unique index moved above the composite FK that references it.
+
 ### 2026-07-25 — File versions (branch `claude/documents-versions`)
 
 Replace a file and keep the old one: "Upload new version…", a history panel,
@@ -388,8 +430,23 @@ to sort defeats the point of giving out the address.
 - **Search is global or folder-scoped only** — no tag or kind facets, because
   there is no tag UI yet. `searchDocuments` already takes `folderPath`; the
   saved-view query schema anticipates the rest.
-- **Templates/generation and e-signature** — designed and phased, not built.
-  `document_settings` already carries their columns.
+- **Templates: `0033`/`0034` are UNAPPLIED, and the editor UI is unbuilt.** The
+  data model, merge engine and ops layer landed 2026-07-26; the migration has
+  not been run against the live database and the DB-backed tests (including the
+  `tests/tenant-isolation.test.ts` coverage AGENTS.md requires for new tables)
+  are written against tables that do not exist yet. Apply the migration before
+  building on this.
+- **PDF generation (plan PR 11) and AI template drafting (PR 12) are unbuilt.**
+  Generation needs `ALTER TYPE document_source ADD VALUE 'generated'` in its
+  OWN migration file — a new enum value cannot be used in the transaction that
+  adds it.
+- **E-signature (plan PRs 13/14) is deliberately not started.** The plan flags
+  legal review first and the reasons are real: several states mandate statutory
+  lien-waiver forms and some require notarization, so an e-signed waiver can be
+  void; ESIGN §101(c) consumer-disclosure mechanics plausibly apply to
+  residential construction contracts; the certificate's assertions want review
+  verbatim; and signed artifacts need a defined retention obligation before the
+  first tenant churns.
 - **Share links can be emailed, but nothing actually sends yet** — the outbound
   spine is built and `emailShareAction` uses it, but no sending domain is
   verified in Resend. See `docs/modules/email.md`.

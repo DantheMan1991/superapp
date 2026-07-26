@@ -4,7 +4,14 @@ import type { Tx } from "@/db";
 import { MAX_SEARCH_OFFSET, PAGE_SIZE } from "./core/paging";
 
 /**
- * Full-text search over the cabinet.
+ * Full-text search over the cabinet, and — since tags shipped — the filtered
+ * list behind every saved view.
+ *
+ * The text term is OPTIONAL. With one, results rank by relevance; without one,
+ * this is a plain filter ordered newest-first. That generalization is what lets
+ * a saved view be a named set of parameters rather than a second query
+ * implementation reading a jsonb blob, which is the version of saved views that
+ * would have turned stored user input into a WHERE clause.
  *
  * Written as raw SQL because `search_tsv` is a generated tsvector column that
  * deliberately does not appear in schema.ts (Drizzle has no tsvector type —
@@ -29,6 +36,7 @@ export interface SearchHit {
   sizeBytes: number;
   origin: string;
   folderId: string | null;
+  tags: string[];
   version: number;
   createdAt: Date;
   rank: number;
@@ -70,9 +78,19 @@ export async function searchDocuments(
   tx: Tx,
   tenantId: string,
   input: {
-    q: string;
+    /**
+     * Absent or empty means "no text term" — the query becomes a pure filter
+     * over the cabinet ordered newest-first. That is what makes a saved view
+     * like "everything tagged as-built" expressible without inventing a second
+     * query implementation.
+     */
+    q?: string | null;
     /** Restrict to a folder and everything beneath it. */
     folderPath?: string | null;
+    /** Tag slugs, ANDed: a hit must carry all of them. Served by the GIN index. */
+    tags?: readonly string[];
+    /** 'dms' or 'accounting'. Anything else is ignored rather than refused. */
+    origin?: string | null;
     page?: number;
     pageSize?: number;
   },
@@ -84,6 +102,25 @@ export async function searchDocuments(
   );
   const offset = page * pageSize;
   const folderPath = input.folderPath ?? null;
+  const q = input.q && input.q.length > 0 ? input.q : null;
+  const tags = input.tags && input.tags.length > 0 ? [...input.tags] : null;
+  // sql.param forces ONE bound parameter. Interpolating the array directly
+  // flattens it into a parameter per element, which arrives as a bare string
+  // and fails with "malformed array literal".
+  const tagParam = sql.param(tags);
+  const origin =
+    input.origin === "dms" || input.origin === "accounting" ? input.origin : null;
+
+  // Two shapes rather than one query full of conditionals: with a text term the
+  // tsquery is a FROM-clause item and drives the ordering, without one there is
+  // no tsquery to join at all and rank is meaningless. Everything else — the
+  // filters, the projection, the paging — is shared.
+  const tsFrom = q ? sql`, websearch_to_tsquery('english', ${q}) tsq` : sql``;
+  const rankExpr = q ? sql`ts_rank_cd(d.search_tsv, tsq)` : sql`0::float4`;
+  const tsWhere = q ? sql`and d.search_tsv @@ tsq` : sql``;
+  const orderBy = q
+    ? sql`order by rank desc, d.created_at desc, d.id desc`
+    : sql`order by d.created_at desc, d.id desc`;
 
   // limit + 1 tells us there is another page without a second count(*).
   const rows = await tx.execute(sql`
@@ -94,14 +131,14 @@ export async function searchDocuments(
            d.size_bytes    as "sizeBytes",
            d.origin,
            d.folder_id     as "folderId",
+           d.tags,
            d.version,
            d.created_at    as "createdAt",
-           ts_rank_cd(d.search_tsv, q) as rank
-      from documents d,
-           websearch_to_tsquery('english', ${input.q}) q
+           ${rankExpr} as rank
+      from documents d${tsFrom}
      where d.tenant_id = ${tenantId}
        and d.status <> 'trashed'
-       and d.search_tsv @@ q
+       ${tsWhere}
        and (
          ${folderPath}::text is null
          or d.folder_id in (
@@ -110,7 +147,9 @@ export async function searchDocuments(
               and f.path like ${folderPath}::text || '%'
          )
        )
-     order by rank desc, d.created_at desc, d.id desc
+       and (${tagParam}::text[] is null or d.tags @> ${tagParam}::text[])
+       and (${origin}::text is null or d.origin = ${origin}::text)
+     ${orderBy}
      limit ${pageSize + 1} offset ${offset}
   `);
 
@@ -125,6 +164,7 @@ export async function searchDocuments(
       sizeBytes: Number(r.sizeBytes ?? 0),
       origin: String(r.origin ?? ""),
       folderId: r.folderId === null ? null : String(r.folderId),
+      tags: Array.isArray(r.tags) ? r.tags.map(String) : [],
       version: Number(r.version ?? 1),
       createdAt: new Date(String(r.createdAt)),
       rank: Number(r.rank ?? 0),

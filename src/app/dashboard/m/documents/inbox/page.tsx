@@ -4,6 +4,8 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { listFolderContents } from "@/modules/documents/browse";
 import { listFolders } from "@/modules/documents/folders";
+import { listTags } from "@/modules/documents/tag-ops";
+import { TagChips } from "@/modules/documents/components/tag-chips";
 import { formatBytes } from "@/modules/documents/lib/format";
 import { folderOptions } from "@/modules/documents/lib/folder-labels";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
@@ -41,11 +43,19 @@ export default async function DocumentsInboxPage({
         cursor,
       }),
       folders: await listFolders(tx, ctx.tenant.id),
+      tags: await listTags(tx, ctx.tenant.id),
     }),
     { role: ctx.role },
   );
 
   const folderChoices: FolderChoice[] = folderOptions(data.folders);
+  const tagChoices = data.tags.map((t) => ({
+    id: t.id,
+    slug: t.slug,
+    name: t.name,
+    version: t.version,
+  }));
+  const tagNames = Object.fromEntries(data.tags.map((t) => [t.slug, t.name]));
 
   return (
     <div className="space-y-6">
@@ -87,6 +97,7 @@ export default async function DocumentsInboxPage({
                   {formatBytes(doc.sizeBytes)}
                   {doc.origin === "accounting" && " · from Receipts"}
                 </p>
+                <TagChips slugs={doc.tags} names={tagNames} className="mt-1 block" />
               </div>
               <span className="hidden text-xs text-muted-foreground sm:inline">
                 {doc.createdAt.toLocaleDateString()}
@@ -100,6 +111,8 @@ export default async function DocumentsInboxPage({
                 tenantId={ctx.tenant.id}
                 origin={doc.origin}
                 fileVersionCount={doc.fileVersionCount}
+                tags={tagChoices}
+                documentTags={doc.tags}
               />
             </div>
           ))}

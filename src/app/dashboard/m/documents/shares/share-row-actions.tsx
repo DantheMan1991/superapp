@@ -2,7 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Copy, Loader2, MoreHorizontal, Send, Unlock, XCircle } from "lucide-react";
+import {
+  Activity,
+  Copy,
+  Loader2,
+  MoreHorizontal,
+  Send,
+  Unlock,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { ShareStatus } from "@/db/schema";
 import { Button } from "@/components/ui/button";
@@ -30,6 +38,7 @@ import {
   revealShareUrlAction,
   revokeShareAction,
 } from "@/modules/documents/share-actions";
+import { ShareActivitySheet } from "@/modules/documents/components/share-activity";
 
 export function ShareRowActions({
   shareId,
@@ -37,17 +46,21 @@ export function ShareRowActions({
   status,
   isOwner,
   hasPasscode,
+  label,
 }: {
   shareId: string;
   version: number;
   status: ShareStatus;
   isOwner: boolean;
   hasPasscode: boolean;
+  /** What this link points at, for the activity sheet's header. */
+  label?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [, setBusy] = useState(false);
   const [emailing, setEmailing] = useState(false);
+  const [activity, setActivity] = useState(false);
   const [to, setTo] = useState("");
   const [message, setMessage] = useState("");
 
@@ -82,6 +95,18 @@ export function ShareRowActions({
         >
           <Copy className="size-4" />
           Copy link
+        </DropdownMenuItem>
+
+        {/* Available even on a revoked link — what happened while it was live
+            is exactly what someone asks about after turning it off. */}
+        <DropdownMenuItem
+          onSelect={(e) => {
+            e.preventDefault();
+            setActivity(true);
+          }}
+        >
+          <Activity className="size-4" />
+          Activity…
         </DropdownMenuItem>
 
         {/* A passcode-protected link is never emailable: the link and the
@@ -146,6 +171,16 @@ export function ShareRowActions({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+
+    {/* Mounted only while open: the sheet fetches its feed on mount. */}
+    {activity && (
+      <ShareActivitySheet
+        open
+        onOpenChange={setActivity}
+        shareId={shareId}
+        label={label ?? "this link"}
+      />
+    )}
 
     <Dialog open={emailing} onOpenChange={setEmailing}>
       <DialogContent>

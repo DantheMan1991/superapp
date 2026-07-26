@@ -17,6 +17,7 @@ import {
   resetShareLock,
   revokeShare,
 } from "./shares/shares";
+import { loadShareActivity, type ShareActivity } from "./shares/activity";
 
 /**
  * Tenant-side share management. The public surface lives in
@@ -33,6 +34,17 @@ async function gate(): Promise<DocsCtx> {
   if (ctx.role === "expert") {
     throw new DocsError("FORBIDDEN_EXPERT", "accountant access is read-only");
   }
+  return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
+}
+
+/**
+ * The same gate without the write refusal, for actions that only read. The
+ * accountant role is read-ONLY, not blind — and a share's access log is
+ * exactly the kind of evidence they are brought in to look at.
+ */
+async function readGate(): Promise<DocsCtx> {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, "documents");
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
 }
 
@@ -336,6 +348,39 @@ export async function resetShareLockAction(
     );
     revalidate();
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const activitySchema = z.object({ shareId: z.string().uuid() });
+
+/**
+ * One link's access log, fetched when the drawer opens rather than joined into
+ * the list page — a tenant with fifty links should not pay for fifty feeds
+ * nobody has asked to see.
+ */
+export async function listShareActivityAction(
+  input: z.infer<typeof activitySchema>,
+): Promise<ActionResult<ShareActivity>> {
+  try {
+    const ctx = await readGate();
+    const parsed = activitySchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const activity = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        // Prove the link belongs to this tenant before reading its log — it
+        // raises SHARE_NOT_FOUND if not. RLS would scope the events anyway,
+        // but an unknown id should read as "no such link" rather than as an
+        // empty, plausible-looking feed.
+        await loadShare(tx, ctx.tenantId, parsed.data.shareId);
+        return loadShareActivity(tx, ctx.tenantId, parsed.data.shareId);
+      },
+      { role: ctx.role },
+    );
+    return { ok: true, data: activity };
   } catch (err) {
     return fail(err);
   }

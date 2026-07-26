@@ -13,6 +13,10 @@ import {
 } from "@/modules/documents/doc-templates/template-ops";
 import { schema } from "@/db";
 import { and, eq } from "drizzle-orm";
+import { listGenerations } from "@/modules/documents/doc-templates/generate";
+import { listFolders } from "@/modules/documents/folders";
+import { folderOptions } from "@/modules/documents/lib/folder-labels";
+import { GenerateButton } from "@/modules/documents/components/generate-controls";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
 import { TemplateEditor } from "@/modules/documents/components/template-editor";
 import { ArchiveTemplateButton } from "@/modules/documents/components/template-controls";
@@ -46,18 +50,21 @@ export default async function TemplateEditorPage({
         ),
       });
       if (!template) return null;
-      const [draft, published, versions] = await Promise.all([
-        loadDraft(tx, ctx.tenant.id, templateId),
-        loadCurrentPublished(tx, ctx.tenant.id, templateId),
-        listTemplateVersions(tx, ctx.tenant.id, templateId),
-      ]);
-      return { template, draft, published, versions };
+      const [draft, published, versions, folders, generations] =
+        await Promise.all([
+          loadDraft(tx, ctx.tenant.id, templateId),
+          loadCurrentPublished(tx, ctx.tenant.id, templateId),
+          listTemplateVersions(tx, ctx.tenant.id, templateId),
+          listFolders(tx, ctx.tenant.id),
+          listGenerations(tx, ctx.tenant.id, templateId),
+        ]);
+      return { template, draft, published, versions, folders, generations };
     },
     { role: ctx.role },
   );
 
   if (data === null) notFound();
-  const { template, draft, published, versions } = data;
+  const { template, draft, published, versions, folders, generations } = data;
 
   // With nothing unpublished, the editor starts from the published body — so
   // "edit" means "carry on from what is live", and saving opens the next draft.
@@ -81,6 +88,23 @@ export default async function TemplateEditorPage({
           This template is archived. It is kept so documents generated from it
           still name something real.
         </p>
+      )}
+
+      {published && !template.archivedAt && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-4 py-3">
+          <p className="text-sm text-muted-foreground">
+            Published v{published.versionNo} is ready to use.
+            {generations.length > 0 &&
+              ` ${generations.length} document${generations.length === 1 ? "" : "s"} made so far.`}
+          </p>
+          <GenerateButton
+            templateId={template.id}
+            templateName={template.name}
+            publishedVersionNo={published.versionNo}
+            fields={parseFields(published.fields)}
+            folders={folderOptions(folders)}
+          />
+        </div>
       )}
 
       <TemplateEditor

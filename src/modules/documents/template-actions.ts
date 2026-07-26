@@ -17,6 +17,13 @@ import {
   TEMPLATE_BODY_MAX,
   TEMPLATE_NAME_MAX,
 } from "./doc-templates/template-ops";
+import {
+  nextGenerationNumber,
+  prepareGeneration,
+  recordGeneration,
+  uploadGeneratedPdf,
+} from "./doc-templates/generate";
+import { renderTemplatePdf } from "./doc-templates/render-pdf";
 
 /** Document templates. Folder templates are a different thing entirely. */
 
@@ -186,6 +193,105 @@ export async function archiveTemplateAction(
     );
     revalidate(parsed.data.templateId);
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const generateSchema = z.object({
+  templateId: z.string().uuid(),
+  values: z.record(z.string().max(80), z.string().max(2000)),
+  folderId: z.string().uuid().nullable().default(null),
+  title: z.string().max(200).default(""),
+});
+
+/**
+ * Produce a PDF from a published template and file it.
+ *
+ * The house shape: validate and read inside a transaction, do the expensive
+ * work (render, upload) OUTSIDE it, then write the rows in a second one. A PDF
+ * render holding a Postgres transaction open would be a long lock for nothing.
+ *
+ * The consequence worth knowing is that a crash between the two can leave an
+ * uploaded blob with no document row — a few orphaned bytes, which the same
+ * blob-janitor gap the rest of the module has will eventually cover. The
+ * reverse (a document row pointing at a blob that was never written) is
+ * impossible, which is the ordering that matters.
+ */
+export async function generateDocumentAction(
+  input: z.infer<typeof generateSchema>,
+): Promise<ActionResult<{ documentId: string; number: number }>> {
+  try {
+    const ctx = await gate();
+    const parsed = generateSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const prepared = await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        prepareGeneration(tx, ctx, {
+          templateId: parsed.data.templateId,
+          values: parsed.data.values,
+          folderId: parsed.data.folderId,
+        }),
+      { role: ctx.role },
+    );
+
+    const bytes = await renderTemplatePdf({
+      body: prepared.body,
+      values: prepared.values,
+      footerLeft: prepared.templateName,
+      footerRight: `v${prepared.templateVersionNo}`,
+    });
+
+    const result = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        // The number is claimed inside this transaction, and the upload needs
+        // it for the filename — so the upload happens here, between the two
+        // writes, rather than before the number exists.
+        const number = await nextGenerationNumber(tx, ctx.tenantId);
+        const uploaded = await uploadGeneratedPdf(
+          ctx.tenantId,
+          prepared,
+          bytes,
+          number,
+        );
+        const written = await recordGeneration(tx, ctx, prepared, uploaded, {
+          folderId: parsed.data.folderId,
+          title: parsed.data.title,
+          number,
+        });
+        await logAuditInTx(tx, {
+          action: "documents.generated",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "document",
+          targetId: written.document.id,
+          // Identifiers and measurements only — never the merged VALUES, which
+          // are a client's name and the amount on a waiver.
+          meta: {
+            templateId: prepared.templateId,
+            templateVersionNo: prepared.templateVersionNo,
+            number: written.generation.number,
+            sizeBytes: uploaded.sizeBytes,
+          },
+        });
+        return written;
+      },
+      { role: ctx.role },
+    );
+
+    revalidate(parsed.data.templateId);
+    revalidatePath(`${BASE}/browse`);
+    revalidatePath(`${BASE}/inbox`);
+    return {
+      ok: true,
+      data: {
+        documentId: result.document.id,
+        number: result.generation.number,
+      },
+    };
   } catch (err) {
     return fail(err);
   }

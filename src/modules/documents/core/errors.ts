@@ -35,6 +35,9 @@ export type DocsErrorCode =
   | "TEMPLATE_PUBLISHED"
   | "TEMPLATE_NO_DRAFT"
   | "TEMPLATE_BODY_EMPTY"
+  | "TEMPLATE_ARCHIVED"
+  | "TEMPLATE_NOT_PUBLISHED"
+  | "GENERATION_MISSING_FIELDS"
   | "VIEW_NOT_FOUND"
   | "VIEW_NAME_TAKEN"
   | "VIEW_NAME_INVALID"
@@ -103,6 +106,11 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
     "That version is published, so it can't be changed — your edits start a new draft.",
   TEMPLATE_NO_DRAFT: "There are no unpublished changes to publish.",
   TEMPLATE_BODY_EMPTY: "Write the template before publishing it.",
+  TEMPLATE_ARCHIVED:
+    "That template is archived — restore it before making documents from it.",
+  TEMPLATE_NOT_PUBLISHED:
+    "Publish this template before using it. Documents are only ever made from a published version.",
+  GENERATION_MISSING_FIELDS: "Fill in the required fields first.",
   VIEW_NOT_FOUND: "That saved view no longer exists.",
   VIEW_NAME_TAKEN: "You already have a saved view with that name.",
   VIEW_NAME_INVALID: "Give the view a name.",

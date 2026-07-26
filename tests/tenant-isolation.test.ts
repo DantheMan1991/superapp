@@ -1599,6 +1599,36 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
     ).rejects.toThrow();
   });
 
+  /**
+   * document_generations is member_READ-only, like document_share_events: it
+   * records what the business produced and sent, so a member who could write it
+   * could fabricate or erase a document's provenance.
+   */
+  it("generations are readable but not writable by a member", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.documentGenerations).values({
+            tenantId: tenantA,
+            templateId: fx.a.templateId,
+            templateVersionNo: 1,
+            number: 9999,
+            generatedByClerkUserId: "user-a",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+
+    // Reading is allowed and stays tenant-scoped.
+    const rows = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.documentGenerations),
+      { role: "owner" },
+    );
+    expect(rows.every((r) => r.tenantId === tenantA)).toBe(true);
+  });
+
   it("cross-tenant UPDATE and DELETE affect zero template rows", async () => {
     const changed = await withTenant(
       tenantA,

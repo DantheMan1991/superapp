@@ -542,6 +542,30 @@ over IMAP from a phone or Outlook.
   no mail is lost. It would also invalidate stored Plaid tokens — worth knowing
   before rotating.
 
+- `STALWART_BASE_URL` — where the mail server lives, e.g.
+  `https://mail.acme.com` or `http://localhost:8080` in development. Used for
+  OpenID discovery and for the JMAP session endpoint.
+- `STALWART_CLIENT_ID` / `STALWART_CLIENT_SECRET` — Yosher's OAuth client on
+  that server. Register it at the server's `/auth/register` endpoint or in its
+  admin UI, with the redirect URI **exactly**
+  `<NEXT_PUBLIC_APP_URL>/api/email/oauth/callback`. A mismatched redirect URI
+  produces one of the least helpful errors in the protocol.
+- `STALWART_MAIL_HOSTNAME` — the server's public hostname, used to build the MX
+  and SPF records the domain wizard shows.
+
+Without these the inbox reports "isn't set up yet" and nothing connects.
+
+**Endpoints are discovered, not hardcoded.** The flow reads
+`/.well-known/openid-configuration`, which means no config drift between
+environments — and it is the same shape Google and Microsoft need, so the
+deferred connectors land in `src/lib/email/oauth/config.ts` rather than beside
+the flow.
+
+One live-server quirk worth knowing: **Stalwart builds every advertised URL
+from its configured hostname, not the request's Host header.** Discovery
+rebases them onto the URL actually reached, which is a no-op in production and
+also what any reverse-proxy deployment needs.
+
 - **Local development server**: `docker/stalwart/compose.yml` runs Stalwart on
   localhost with no DNS, no domain and no cost. `npm run jmap:probe` (read-only)
   dumps live JMAP responses; run it whenever a shape here is in doubt.

@@ -156,6 +156,58 @@ Setup wizard gotcha: it **rejects any hostname without a real TLD** —
 `localhost` and `mail.yosher.test` were both refused, and the field silently
 reverts to the container id rather than saying why.
 
+### 2026-07-27 (later) — Connect a mailbox: OAuth flow + the Stalwart adapter
+
+The two halves that make "connect a mailbox" real.
+
+**OAuth.** Discovery-driven rather than hardcoded, so it works against any
+instance and is the same shape Google and Microsoft need — the deferred
+connectors land in `oauth/config.ts` rather than beside the flow. PKCE with
+S256 even though this is a confidential client: one hash, and it protects
+against a code intercepted at the redirect and replayed by somebody who never
+had the secret. Scopes are mail + `offline_access` and nothing else, though the
+server offers contacts and calendars too.
+
+The pending authorization rides in an **encrypted, httpOnly, single-use
+cookie** — the PKCE verifier cannot travel in a URL without defeating the point
+of PKCE, and a `pending_oauth` table would need a purge job while still being a
+cookie in disguise. `takePending()` clears it whether or not it validates, so a
+replayed callback finds nothing.
+
+The callback's check order IS the security of the flow: consume the cookie,
+compare state, confirm the tenant still matches, and only then exchange the
+code. It also **proves the token opens the mailbox before recording the
+connection** — storing one that turns out not to work produces a mailbox that
+looks connected and fails on every read.
+
+**The Stalwart adapter is a different shape from Migadu's, and that is the
+point.** Migadu is somebody else's API over HTTP. Stalwart authenticates against
+our own database, so provisioning is a row in `mail_directory_accounts` and
+there is no network call. The callers in `mailboxes.ts` and `provisioning.ts`
+cannot tell the difference, which is what the interface was for.
+
+That surfaced a real ordering conflict. A remote host must be called FIRST — if
+the provider refuses, no local row should exist. A database-backed host must be
+called SECOND, because its directory row carries a composite FK to the very
+mailbox being created. Rather than drop that FK (it is what stops a stale
+directory row becoming an auth bypass) or put `if (provider === 'stalwart')`
+into shared code, `MailboxHost` gained an optional **`afterMailboxCreated()`**
+hook. No-op for remote hosts; the real work for database-backed ones.
+
+Two places the Stalwart adapter is deliberately honest about doing nothing:
+`createDomain` records intent and returns `pending`, because domain
+registration is not in Stalwart's management API and returning success for work
+that did not happen is worse than saying so. `activateDomain` is a no-op with a
+real meaning — Stalwart accepts mail as soon as MX points at it, so the cutover
+already happened when DNS changed; the step survives because it is where the
+owner's consent is recorded and `mx_cutover_at` gets stamped.
+
+Also: mailbox token encryption was collapsed into the existing
+`APP_ENCRYPTION_KEY` and `src/lib/crypto.ts` rather than introducing a second
+key. Both would live in the same environment on the same server — two things to
+rotate, no additional protection. Consequence: rotating that key now
+invalidates Plaid tokens AND mailbox connections.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at

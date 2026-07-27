@@ -1,5 +1,6 @@
 import "server-only";
 import { isMigaduConfigured, migaduHost } from "./migadu";
+import { stalwartHost } from "./stalwart";
 import type { MailboxHost } from "./types";
 
 export type * from "./types";
@@ -18,9 +19,10 @@ export function getMailboxHost(provider: string = "migadu"): MailboxHost {
   switch (provider) {
     case "migadu":
       return migaduHost;
+    case "stalwart":
+      return stalwartHost;
     default:
-      // 'stalwart' is in the DB CHECK constraint but has no implementation
-      // yet. Failing loudly beats silently mailing through the wrong host.
+      // Failing loudly beats silently mailing through the wrong host.
       throw new Error(`No mailbox host implementation for "${provider}".`);
   }
 }

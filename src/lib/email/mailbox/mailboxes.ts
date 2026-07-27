@@ -112,6 +112,29 @@ export async function createTenantMailbox(
     return inserted;
   });
 
+  // Hosts backed by our own database do their real work here, now that the
+  // mailbox row exists for their directory entry to reference. A no-op for
+  // remote hosts, which were already called above.
+  if (host.afterMailboxCreated) {
+    const linked = await host.afterMailboxCreated({
+      tenantId,
+      mailboxId: mailbox.id,
+      domain: domainRow.domain,
+      localPart,
+      address,
+      displayName: mailbox.displayName,
+    });
+    if (!linked.ok) {
+      // The mailbox row exists but the mail server cannot see it, which means
+      // an address that looks provisioned and authenticates nobody. Surface it
+      // rather than reporting success; reconcileMailboxes() finds the drift.
+      return {
+        ok: false,
+        message: `${address} was created but the mail server wasn't updated: ${linked.message}`,
+      };
+    }
+  }
+
   // Reports where the link ACTUALLY went, not where it was addressed. A
   // redirect the UI hides is a redirect someone waits on forever.
   return { ok: true, data: { mailbox, invitedTo: guarded.inviteEmail } };

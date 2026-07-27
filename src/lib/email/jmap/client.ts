@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  compareMailboxes,
   parseChanges,
   parseEmail,
   parseMailbox,
@@ -37,6 +38,13 @@ import type {
 const CORE = "urn:ietf:params:jmap:core";
 const MAIL = "urn:ietf:params:jmap:mail";
 const TIMEOUT_MS = 20_000;
+/**
+ * Core `maxObjectsInGet` — 500 on the server this was verified against.
+ * Conservative rather than read from the session, because exceeding it is an
+ * error rather than a truncation, and the failure would land on whoever opened
+ * an unusually long thread.
+ */
+const MAX_OBJECTS_IN_GET = 500;
 
 /** List views never fetch bodies. That is what keeps them fast. */
 const LIST_PROPERTIES = [
@@ -233,7 +241,7 @@ export function createJmapClient(
         data: list
           .map(parseMailbox)
           .filter((m): m is JmapMailbox => m !== null)
-          .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)),
+          .sort(compareMailboxes),
       };
     },
 
@@ -296,31 +304,42 @@ export function createJmapClient(
 
     async getEmails(ids, withBodies) {
       if (ids.length === 0) return { ok: true, data: [] };
-      const result = await call([
-        [
-          "Email/get",
-          {
-            accountId,
-            ids,
-            properties: withBodies ? DETAIL_PROPERTIES : LIST_PROPERTIES,
-            ...(withBodies
-              ? { fetchTextBodyValues: true, fetchHTMLBodyValues: true }
-              : {}),
-          },
-          "g",
-        ] as unknown as MethodCall,
-      ]);
-      if (!result.ok) return result;
 
-      const taken = takeMethodResponse(result.data, "g");
-      if (!taken.ok) return { ok: false, message: taken.message };
-      const list = (taken.payload as { list?: unknown })?.list;
-      return {
-        ok: true,
-        data: Array.isArray(list)
-          ? list.map(parseEmail).filter((e): e is JmapEmail => e !== null)
-          : [],
-      };
+      // The server caps objects per get — 500 on the instance this was verified
+      // against, advertised as core `maxObjectsInGet`. Asking for more does not
+      // truncate politely, it errors, so a large thread or a bulk operation
+      // would fail rather than return fewer results. Chunking here means
+      // callers never have to know the limit exists.
+      const out: JmapEmail[] = [];
+      for (let i = 0; i < ids.length; i += MAX_OBJECTS_IN_GET) {
+        const batch = ids.slice(i, i + MAX_OBJECTS_IN_GET);
+        const result = await call([
+          [
+            "Email/get",
+            {
+              accountId,
+              ids: batch,
+              properties: withBodies ? DETAIL_PROPERTIES : LIST_PROPERTIES,
+              ...(withBodies
+                ? { fetchTextBodyValues: true, fetchHTMLBodyValues: true }
+                : {}),
+            },
+            "g",
+          ] as unknown as MethodCall,
+        ]);
+        if (!result.ok) return result;
+
+        const taken = takeMethodResponse(result.data, "g");
+        if (!taken.ok) return { ok: false, message: taken.message };
+        const list = (taken.payload as { list?: unknown })?.list;
+        if (Array.isArray(list)) {
+          for (const raw of list) {
+            const email = parseEmail(raw);
+            if (email) out.push(email);
+          }
+        }
+      }
+      return { ok: true, data: out };
     },
 
     async getThread(threadId) {

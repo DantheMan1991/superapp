@@ -120,6 +120,42 @@ is not in Stalwart's documented management API, and writing it blind is exactly
 what produced two wrong response shapes on Migadu. It waits for a server to
 probe.
 
+### 2026-07-27 — Local Stalwart, and the JMAP client verified against it
+
+Stalwart 0.16.15 running in Docker locally (`docker/stalwart/compose.yml`), so
+the mail client can be built and proved with no VPS, no DNS, no domain and no
+money. The only thing a real server adds is receiving mail from the internet.
+
+`npm run jmap:probe` (read-only) confirmed the design's two biggest bets:
+
+- **`parseSession` and `parseMailbox` match live responses exactly.**
+- **The `#ids` back-reference works** — `Email/query` and `Email/get` really do
+  complete in one round trip, which is the difference between this client and
+  one as slow as the IMAP it replaced.
+
+Three findings that only a live server could have produced:
+
+- **Stalwart builds its URLs from the CONFIGURED HOSTNAME, not the request's
+  Host header.** The session advertises `apiUrl: https://<hostname>/jmap/`, so
+  a spec-following client chases a name that may not resolve. Harmless in
+  production where the hostname is real; locally the probe rebases onto the
+  host it actually reached. Worth remembering behind any proxy.
+- **Every default mailbox comes back with `sortOrder: 0`.** Sorting by
+  sortOrder then name puts "Deleted Items" first and buries the Inbox third.
+  `compareMailboxes()` now breaks the tie by role — and still defers to a
+  server that expresses a real preference.
+- **`maxObjectsInGet` is 500**, and exceeding it errors rather than truncating.
+  `getEmails()` chunks, so a long thread fails for nobody.
+
+Also confirmed: the account directory offers a **SQL Database** type with fully
+customizable Login and Recipient queries, so `mail_directory_accounts` works
+as-is. It needs its own Postgres store pointed at Neon, separate from the
+RocksDB store holding the mail — exactly the isolation the design wanted.
+
+Setup wizard gotcha: it **rejects any hostname without a real TLD** —
+`localhost` and `mail.yosher.test` were both refused, and the field silently
+reverts to the container id rather than saying why.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at

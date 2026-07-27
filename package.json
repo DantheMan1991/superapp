@@ -13,6 +13,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
     "mailbox:probe": "tsx scripts/migadu-probe.ts",
+    "jmap:probe": "tsx scripts/jmap-probe.ts",
     "test": "vitest run",
     "test:isolation": "vitest run tests/tenant-isolation.test.ts"
   },

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  compareMailboxes,
   describeMethodError,
   parseChanges,
   parseEmail,
@@ -177,6 +178,58 @@ describe("mailboxes", () => {
     // A user folder behaves like one regardless of what the server calls it.
     expect(parseMailbox({ id: "mb3", name: "Odd", role: "invented" })!.role).toBeNull();
     expect(parseMailbox({ id: "mb4", name: "Plain" })!.role).toBeNull();
+  });
+});
+
+describe("mailbox ordering", () => {
+  /**
+   * Exactly what a live Stalwart returned: five default mailboxes, every one
+   * with sortOrder 0. Sorting by sortOrder then name puts "Deleted Items"
+   * first and the Inbox third, which no mail client has ever done.
+   */
+  const LIVE_MAILBOXES = [
+    { id: "b", name: "Deleted Items", role: "trash", sortOrder: 0 },
+    { id: "c", name: "Junk Mail", role: "junk", sortOrder: 0 },
+    { id: "a", name: "Inbox", role: "inbox", sortOrder: 0 },
+    { id: "d", name: "Drafts", role: "drafts", sortOrder: 0 },
+    { id: "e", name: "Sent Items", role: "sent", sortOrder: 0 },
+  ].map((m) => parseMailbox(m)!);
+
+  it("puts the Inbox first when the server ties every sortOrder", () => {
+    const order = [...LIVE_MAILBOXES].sort(compareMailboxes).map((m) => m.name);
+    expect(order).toEqual([
+      "Inbox",
+      "Drafts",
+      "Sent Items",
+      "Junk Mail",
+      "Deleted Items",
+    ]);
+  });
+
+  it("still defers to a server that sets sortOrder", () => {
+    // Role order only breaks ties. A server expressing an explicit preference
+    // knows something we do not.
+    const explicit = [
+      parseMailbox({ id: "a", name: "Inbox", role: "inbox", sortOrder: 9 })!,
+      parseMailbox({ id: "z", name: "Archive", role: "archive", sortOrder: 1 })!,
+    ];
+    expect(explicit.sort(compareMailboxes).map((m) => m.name)).toEqual([
+      "Archive",
+      "Inbox",
+    ]);
+  });
+
+  it("sorts the user's own folders after the well-known ones", () => {
+    const mixed = [
+      parseMailbox({ id: "1", name: "Zebra", sortOrder: 0 })!,
+      parseMailbox({ id: "2", name: "Inbox", role: "inbox", sortOrder: 0 })!,
+      parseMailbox({ id: "3", name: "Apple", sortOrder: 0 })!,
+    ];
+    expect(mixed.sort(compareMailboxes).map((m) => m.name)).toEqual([
+      "Inbox",
+      "Apple",
+      "Zebra",
+    ]);
   });
 });
 

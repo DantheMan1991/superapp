@@ -209,6 +209,34 @@ export function parseMailbox(raw: unknown): JmapMailbox | null {
   };
 }
 
+/**
+ * Where each well-known mailbox belongs in a folder list.
+ *
+ * Necessary because Stalwart returns `sortOrder: 0` for every default mailbox
+ * (verified against a live server), so sorting by sortOrder then name puts
+ * "Deleted Items" at the top and buries the Inbox in the middle. No mail client
+ * has ever done that, and users read folder order as meaning.
+ *
+ * A server that DOES set sortOrder still wins — this only breaks the tie.
+ * Unroled folders are the user's own and sort alphabetically after the rest.
+ */
+const ROLE_ORDER: Record<string, number> = {
+  inbox: 0,
+  drafts: 1,
+  sent: 2,
+  archive: 3,
+  junk: 4,
+  trash: 5,
+};
+
+export function compareMailboxes(a: JmapMailbox, b: JmapMailbox): number {
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+  const ra = a.role ? (ROLE_ORDER[a.role] ?? 90) : 99;
+  const rb = b.role ? (ROLE_ORDER[b.role] ?? 90) : 99;
+  if (ra !== rb) return ra - rb;
+  return a.name.localeCompare(b.name);
+}
+
 export function parseThread(raw: unknown): JmapThread | null {
   const r = asRecord(raw);
   if (!r || typeof r.id !== "string" || r.id.length === 0) return null;

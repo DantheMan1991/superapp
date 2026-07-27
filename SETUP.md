@@ -232,16 +232,35 @@ it IS the server; closing it stops the app. (Stop it anytime with Ctrl+C.)
 
 ### 3.6 Run the automated isolation test
 
-Stop the dev server if you like (not required) and run:
+**First, give the tests their own database.** They create and delete tenants
+directly, under `withSystem` — the god view, where RLS is not watching. That is
+correct for a certification suite and catastrophic against live data.
+
+In the Neon console, create a **branch** of your project (instant, and it starts
+as a copy of production's schema, which is what a migration-sensitive suite
+wants). Then add both of its connection strings to `.env`:
+
+```
+TEST_DATABASE_URL=postgresql://app_user:...@ep-your-branch-pooler...neon.tech/neondb?sslmode=require
+TEST_DATABASE_URL_OWNER=postgresql://neondb_owner:...@ep-your-branch-pooler...neon.tech/neondb?sslmode=require
+```
+
+Run migrations against the branch once (`DATABASE_URL_OWNER=$TEST_DATABASE_URL_OWNER npm run db:migrate`),
+then:
 
 ```
 npm run test:isolation
 ```
 
-This creates two throwaway tenants directly in the database, then attempts
-cross-tenant reads, writes, updates, and deletes — asserting Postgres blocks
-every one. All tests green = the shell is certified. This is the test that
-must pass before any deploy, forever.
+This creates two throwaway tenants, then attempts cross-tenant reads, writes,
+updates, and deletes — asserting Postgres blocks every one. All tests green =
+the shell is certified. This is the test that must pass before any deploy,
+forever.
+
+**Without `TEST_DATABASE_URL` every database-backed suite skips**, prints a
+loud warning, and `DATABASE_URL` is removed from the environment so nothing can
+reach production by accident (`tests/setup/database-guard.ts`). A skipped
+isolation run reports zero failures — do not mistake that for a pass.
 
 ---
 

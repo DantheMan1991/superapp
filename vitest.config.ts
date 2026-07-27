@@ -12,6 +12,10 @@ export default defineConfig({
   },
   test: {
     include: ["tests/**/*.test.ts"],
+    // Runs before anything imports src/db. Points DB-backed suites at a
+    // separate database, or removes DATABASE_URL so they skip — these tests
+    // create and delete tenants under withSystem, where RLS is not watching.
+    setupFiles: ["tests/setup/database-guard.ts"],
     // DB-backed tests share one Neon database; keep files sequential.
     fileParallelism: false,
     testTimeout: 30_000,

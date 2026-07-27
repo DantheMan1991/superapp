@@ -523,26 +523,24 @@ over IMAP from a phone or Outlook.
 
 ### Reading mail (the inbox)
 
-- `MAIL_TOKEN_KEY` — 32 bytes of base64, encrypting the OAuth tokens in
-  `mail_accounts`. Generate with:
+- **No new key.** OAuth tokens in `mail_accounts` are encrypted with the
+  existing `APP_ENCRYPTION_KEY` through `src/lib/crypto.ts` — the same
+  AES-256-GCM that has protected Plaid access tokens since the banking module
+  shipped. A second key was considered and rejected: both would live in the
+  same environment on the same server, reachable by the same compromise, so it
+  would be two things to rotate and no additional protection.
 
-  ```
-  openssl rand -base64 32
-  ```
-
-  **This key must never be stored in the database it protects.** An access
-  token reads someone's mail until it expires and a refresh token mints more
+  **The key must never be stored in the database it protects.** An access token
+  reads someone's mail until it expires and a refresh token mints more
   indefinitely, which makes these the most dangerous values on the platform —
   worse than a password hash, which cannot be replayed. Keeping the key in the
   environment is what makes a Postgres dump, a leaked backup or an over-broad
-  RLS policy yield ciphertext instead of mailboxes.
+  RLS policy yield ciphertext instead of mailboxes, and it is why the
+  `member_read` policy on `mail_accounts` is acceptable rather than alarming.
 
-  Rotating it invalidates every stored connection; people reconnect, and no
-  mail is lost. The stored format carries a `v1:` marker so a future rotation
-  can tell old rows from new.
-
-  Without it the inbox refuses to store a connection rather than falling back
-  to plaintext.
+  Rotating it invalidates every stored mailbox connection; people reconnect and
+  no mail is lost. It would also invalidate stored Plaid tokens — worth knowing
+  before rotating.
 
 - **Local development server**: `docker/stalwart/compose.yml` runs Stalwart on
   localhost with no DNS, no domain and no cost. `npm run jmap:probe` (read-only)

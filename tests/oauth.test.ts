@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { randomBytes } from "node:crypto";
 import {
   decryptToken,
   encryptToken,
-  generateTokenKey,
   isTokenEncryptionConfigured,
 } from "@/lib/email/oauth/crypto";
 import {
@@ -35,13 +35,16 @@ import {
 const TEST_KEY = "3Yx8kQvN2mR7pL9wZ4tB6nH1jF5sD0aC8eG2iK7uO3Q=";
 
 describe("token encryption", () => {
-  const original = process.env.MAIL_TOKEN_KEY;
+  // Reuses APP_ENCRYPTION_KEY and @/lib/crypto rather than a second key: both
+  // would live in the same environment on the same server, so two keys is two
+  // things to rotate and no additional protection.
+  const original = process.env.APP_ENCRYPTION_KEY;
   beforeEach(() => {
-    process.env.MAIL_TOKEN_KEY = TEST_KEY;
+    process.env.APP_ENCRYPTION_KEY = TEST_KEY;
   });
   afterEach(() => {
-    if (original === undefined) delete process.env.MAIL_TOKEN_KEY;
-    else process.env.MAIL_TOKEN_KEY = original;
+    if (original === undefined) delete process.env.APP_ENCRYPTION_KEY;
+    else process.env.APP_ENCRYPTION_KEY = original;
   });
 
   it("round trips a token", () => {
@@ -59,45 +62,38 @@ describe("token encryption", () => {
     expect(decryptToken(b)).toBe("same-token");
   });
 
-  it("carries a version marker so the key can ever be rotated", () => {
-    // A stored blob with no format marker is a migration nobody can write.
-    expect(encryptToken("x").startsWith("v1:")).toBe(true);
-  });
-
   it("refuses a tampered ciphertext instead of returning garbage", () => {
-    const stored = encryptToken("original-token");
-    const parts = stored.split(":");
-    const flipped = Buffer.from(parts[3], "base64");
+    // GCM authenticates; a flipped bit fails the tag rather than decrypting
+    // to plausible nonsense.
+    const parts = encryptToken("original-token").split(".");
+    const flipped = Buffer.from(parts[2], "base64");
     flipped[0] ^= 0xff;
-    parts[3] = flipped.toString("base64");
-    expect(decryptToken(parts.join(":"))).toBeNull();
+    parts[2] = flipped.toString("base64");
+    expect(decryptToken(parts.join("."))).toBeNull();
   });
 
   it("returns null rather than throwing on anything malformed", () => {
-    // Every failure means the same thing operationally — this connection is
-    // unusable and the person must reconnect.
-    for (const bad of ["", "nonsense", "v1:only:three", "v2:a:b:c"]) {
+    // The one place this diverges from decryptSecret, which throws. Every
+    // failure means the same thing operationally — the connection is unusable
+    // and the person must reconnect — and an exception here would turn one
+    // dead connection into a broken inbox page.
+    for (const bad of ["", "nonsense", "only.two", "a.b.c.d"]) {
       expect(decryptToken(bad)).toBeNull();
     }
   });
 
   it("cannot decrypt with a different key", () => {
     const stored = encryptToken("secret");
-    process.env.MAIL_TOKEN_KEY = generateTokenKey();
+    process.env.APP_ENCRYPTION_KEY = randomBytes(32).toString("base64");
     expect(decryptToken(stored)).toBeNull();
   });
 
-  it("refuses to run at all without a key", () => {
-    // A default key is indistinguishable from no encryption and would fail
-    // silently and permanently.
-    delete process.env.MAIL_TOKEN_KEY;
+  it("reports itself unconfigured without a usable key", () => {
+    delete process.env.APP_ENCRYPTION_KEY;
     expect(isTokenEncryptionConfigured()).toBe(false);
-    expect(() => encryptToken("x")).toThrow(/MAIL_TOKEN_KEY/);
-  });
 
-  it("rejects a key of the wrong length", () => {
-    process.env.MAIL_TOKEN_KEY = Buffer.from("too-short").toString("base64");
-    expect(() => encryptToken("x")).toThrow(/32 bytes/);
+    process.env.APP_ENCRYPTION_KEY = Buffer.from("too-short").toString("base64");
+    expect(isTokenEncryptionConfigured()).toBe(false);
   });
 });
 

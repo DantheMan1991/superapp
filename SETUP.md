@@ -521,6 +521,33 @@ over IMAP from a phone or Outlook.
   **Set these on Production only.** Not Preview, not Development. Vercel env
   var changes only apply to new deployments, so redeploy after adding them.
 
+### Reading mail (the inbox)
+
+- `MAIL_TOKEN_KEY` — 32 bytes of base64, encrypting the OAuth tokens in
+  `mail_accounts`. Generate with:
+
+  ```
+  openssl rand -base64 32
+  ```
+
+  **This key must never be stored in the database it protects.** An access
+  token reads someone's mail until it expires and a refresh token mints more
+  indefinitely, which makes these the most dangerous values on the platform —
+  worse than a password hash, which cannot be replayed. Keeping the key in the
+  environment is what makes a Postgres dump, a leaked backup or an over-broad
+  RLS policy yield ciphertext instead of mailboxes.
+
+  Rotating it invalidates every stored connection; people reconnect, and no
+  mail is lost. The stored format carries a `v1:` marker so a future rotation
+  can tell old rows from new.
+
+  Without it the inbox refuses to store a connection rather than falling back
+  to plaintext.
+
+- **Local development server**: `docker/stalwart/compose.yml` runs Stalwart on
+  localhost with no DNS, no domain and no cost. `npm run jmap:probe` (read-only)
+  dumps live JMAP responses; run it whenever a shape here is in doubt.
+
 **What is blocked outside production**, and why each answer differs
 (`src/lib/email/mailbox/guard.ts`):
 

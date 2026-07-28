@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
+import { EntityThreads } from "@/modules/email/components/entity-threads";
 import { getSettings } from "@/modules/accounting/core";
 import { loadInvoiceLines } from "@/modules/accounting/invoicing/invoices";
 import { paidCentsFor } from "@/modules/accounting/invoicing/payments";
@@ -306,6 +307,14 @@ export default async function InvoiceDetailPage({
         <DocumentAttachments
           tenantId={ctx.tenant.id}
           target={{ type: "invoice", id: data.invoice.id }}
+        />
+      </div>
+
+      {/* Renders nothing at all until a conversation is attached. */}
+      <div className="print:hidden">
+        <EntityThreads
+          ctx={ctx}
+          target={{ entityType: "invoice", entityId: data.invoice.id }}
         />
       </div>
     </div>

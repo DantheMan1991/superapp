@@ -2284,6 +2284,9 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
         .returning();
       await tx.insert(schema.mailLinks).values({
         tenantId,
+        // 0045: a thread id is only unique inside one mail account, so the
+        // account is part of the link's identity.
+        mailAccountId: account.id,
         threadId: `thread-${tag}`,
         extensionSlug: "documents",
         entityType: "document",
@@ -2543,6 +2546,7 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.mailLinks)
         .values({
           tenantId: tenantA,
+          mailAccountId: fx.a.accountId,
           threadId: "thread-a",
           extensionSlug: "accounting",
           entityType: "invoice",
@@ -2552,6 +2556,18 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
         .returning(),
     );
     expect(inserted).toHaveLength(1);
+
+    // The annotation counter (0045). Member-writable for the same reason the
+    // row is: a layer reprocessing a thread is ordinary work.
+    const bumped = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.mailAnnotations)
+        .set({ data: { note: "reprocessed" }, version: 2 })
+        .where(eq(schema.mailAnnotations.tenantId, tenantA))
+        .returning(),
+    );
+    expect(bumped.length).toBeGreaterThan(0);
+    expect(bumped[0].version).toBe(2);
   });
 
   it("cannot INSERT links or annotations attributed to the other tenant", async () => {
@@ -2559,6 +2575,7 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
       withTenant(tenantA, (tx) =>
         tx.insert(schema.mailLinks).values({
           tenantId: tenantB,
+          mailAccountId: fx.b.accountId,
           threadId: "thread-b",
           extensionSlug: "accounting",
           entityType: "invoice",
@@ -2616,6 +2633,95 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+
+  it("composite FK: A's link cannot point at the OTHER tenant's connection", async () => {
+    // `mail_links` is MEMBER-writable, which makes this the one composite FK in
+    // the module that an ordinary user could try to bend. RLS pins tenant_id, so
+    // the smuggled account id is the only field left to aim — and 0046's
+    // composite FK is what refuses it. Attempted as a member, not under
+    // withSystem, because that is who would actually be doing it.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.mailLinks).values({
+            tenantId: tenantA,
+            mailAccountId: fx.b.accountId,
+            threadId: "smuggled",
+            extensionSlug: "accounting",
+            entityType: "invoice",
+            entityId: fx.a.mailboxId,
+            createdByClerkUserId: "attacker",
+          }),
+        { role: "owner", userId: "user-a" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("disconnecting a mailbox KEEPS its links and nulls only the account id", async () => {
+    // The single most important behaviour 0046 buys, and the reason the FK is
+    // ON DELETE SET NULL (mail_account_id) rather than CASCADE.
+    //
+    // Linking copies the message into Documents precisely so the link survives
+    // the person who made it — their token expiring, their disconnecting the
+    // mailbox, their leaving the business — which is exactly when the
+    // correspondence behind an invoice is most wanted. CASCADE would delete it
+    // at that moment and quietly undo the whole design.
+    //
+    // The column list is load-bearing too: a plain SET NULL on a composite FK
+    // nulls EVERY key column, including tenant_id, which is NOT NULL — so the
+    // disconnect would fail outright. This asserts tenant_id survives.
+    const doomed = await withSystem(async (tx) => {
+      const [account] = await tx
+        .insert(schema.mailAccounts)
+        .values({
+          tenantId: tenantA,
+          mailboxId: fx.a.mailboxId,
+          clerkUserId: "user-a-leaver",
+          accessTokenEnc: "ciphertext-token-of-leaver",
+        })
+        .returning();
+      const [link] = await tx
+        .insert(schema.mailLinks)
+        .values({
+          tenantId: tenantA,
+          mailAccountId: account.id,
+          threadId: "thread-of-the-leaver",
+          extensionSlug: "accounting",
+          entityType: "invoice",
+          entityId: fx.a.mailboxId,
+          createdByClerkUserId: "user-a-leaver",
+        })
+        .returning();
+      return { accountId: account.id, linkId: link.id };
+    });
+
+    // Deleted the way the app does it: by the person themselves, under the
+    // member DELETE policy from 0043.
+    const removed = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.mailAccounts)
+          .where(eq(schema.mailAccounts.id, doomed.accountId))
+          .returning(),
+      { userId: "user-a-leaver" },
+    );
+    expect(removed).toHaveLength(1);
+
+    const survivors = await withTenant(tenantA, (tx) =>
+      tx
+        .select()
+        .from(schema.mailLinks)
+        .where(eq(schema.mailLinks.id, doomed.linkId)),
+    );
+    expect(survivors).toHaveLength(1);
+    expect(survivors[0].mailAccountId).toBeNull();
+    expect(survivors[0].tenantId).toBe(tenantA);
+    // The route back to the live thread is what was genuinely lost; the thread
+    // id itself is kept, so the row still records which conversation it was.
+    expect(survivors[0].threadId).toBe("thread-of-the-leaver");
   });
 
   it("composite FK: A's directory row cannot point at the OTHER tenant's mailbox", async () => {

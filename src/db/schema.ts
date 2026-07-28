@@ -2582,6 +2582,32 @@ export const mailLinks = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * Which connection minted `thread_id`. NULLABLE, and the nullability is the
+     * whole design (drizzle/0045).
+     *
+     * A thread id is opaque and only unique inside one mail account, so without
+     * this column two connected accounts in one tenant that ever produce the
+     * same id would have their links silently merged. Unlikely against one
+     * Stalwart; a coin flip the day a Graph-backed account appears.
+     *
+     * It is null ONLY as a tombstone. The composite FK is declared in SQL, not
+     * here, because it needs `ON DELETE SET NULL (mail_account_id)` — the
+     * column-list form (PG 15+) that drizzle-kit cannot express, and which
+     * matters because the plain form would try to null `tenant_id` too. That
+     * rule is the dossier's promise in DDL: a link SURVIVES the person who made
+     * it disconnecting the mailbox or leaving the business, which is exactly
+     * when the correspondence behind an invoice is most wanted. What it loses is
+     * the ability to jump back to the live thread — which is what has genuinely
+     * been lost. The filed copy in Documents is still readable, and that is the
+     * artifact the link is really for.
+     *
+     * Nothing in the app inserts null; the unique index below is therefore
+     * effectively total, and NULLS DISTINCT (the default) is deliberate — it
+     * means the SET NULL can never collide, so disconnecting a mailbox can never
+     * fail on a constraint.
+     */
+    mailAccountId: uuid("mail_account_id"),
     threadId: text("thread_id").notNull(),
     /** Which extension owns this link type, so an uninstalled layer can be ignored. */
     extensionSlug: text("extension_slug").notNull(),
@@ -2595,8 +2621,11 @@ export const mailLinks = pgTable(
   },
   (t) => [
     uniqueIndex("mail_links_tenant_id_id_idx").on(t.tenantId, t.id),
+    // The account leads the thread id: "this thread, in this mailbox" is the
+    // only globally meaningful way to name a conversation.
     uniqueIndex("mail_links_unique_idx").on(
       t.tenantId,
+      t.mailAccountId,
       t.threadId,
       t.entityType,
       t.entityId,
@@ -2639,6 +2668,15 @@ export const mailAnnotations = pgTable(
     data: jsonb("data")
       .notNull()
       .default(sql`'{}'::jsonb`),
+    /**
+     * Optimistic-concurrency counter, same contract as `documents.version`.
+     *
+     * An annotation is the one mail row two writers genuinely race for: a
+     * reprocess and a user edit can both target the same (thread, extension)
+     * pair, and last-write-wins on a jsonb blob loses the other one silently.
+     * A counter turns that into a visible conflict.
+     */
+    version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

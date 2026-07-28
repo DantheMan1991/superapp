@@ -802,6 +802,147 @@ Hobby plan does not allow** — Hobby cron runs once per day. Confirm the plan o
 widen the schedule, or the job silently will not run at the stated frequency.
 The per-tenant daily byte cap from Slice 3 is still deferred.
 
+### 2026-07-28 (later still) — Slice 5: the extension registry, and linking that means something
+
+The differentiator. An inbox that cannot put a thread next to the invoice it is
+about is a worse Gmail, and until now nothing could.
+
+**P5 exists.** `docs/extension-model.md` §4 named five extension primitives and
+said one of them — declared extension points — "does not exist yet and will be
+needed first for nav contributions and entity-type registration". It exists now,
+at `src/lib/mail-extensions/`. The other four primitives all let a layer *store*
+something; this is the first that lets one *do* something. Documents contributes
+files and folders, Accounting contributes invoices, bills, customers and
+vendors, and neither knows the other is there.
+
+The dependency graph is the same trick `src/modules/index.ts` plays for module
+renderers: **mail imports the registry, never a module; a module imports
+`types.ts`, never mail and never another module; `registry.ts` is the one file
+where both are named.** `src/modules/email/` is the single exemption to the
+second rule, and the exemption *is* the shape of a declared extension point —
+mail declares the slot and therefore runs the registry that composes the
+fillers. A filler that knew about the other fillers would not be one.
+
+**Two rules in the contract are security rather than style.** `search` and
+`resolve` take the CALLER'S `tx` — they never open their own, and never
+`withSystem` — so what an extension can find is exactly what the person asking
+may see. That is invariant S12 expressed as a function signature rather than a
+promise. And every hook is optional, nothing may throw, and `resolve.ts` wraps
+each one in `Promise.allSettled` plus a 2.5s timeout: a wedged extension costs
+its own chips, never the inbox. There is a test that hangs one deliberately.
+
+**Linking COPIES the message; it does not point at the mailbox.** Settled with
+the founder earlier and recorded in Decisions below; this is the slice that
+builds it. A mailbox is private per user (`0043`) and `mail_thread_index` holds
+no bodies, so a bare link would show a colleague *"a thread called X, with these
+people, last Tuesday"* and not one readable word. At link time the message and
+its attachments are therefore filed into Documents and the link points at that
+copy — which also closes the `attachments → Documents` loop this dossier has had
+open since the hosted-mailbox build.
+
+The copy is stored **twice, deliberately**. The `.eml` (`Email.blobId` is the
+whole RFC 5322 message) is the snapshot: complete, standard, openable in any mail
+client. A plain-text transcript goes into `documents.extracted_text`, which feeds
+`search_tsv`, so "find the email where they agreed the price" works from the
+Documents search box. Neither replaces the other — a lossy rendering filed as
+*the record* would be a comfortable lie, since a dispute about what somebody
+agreed to is settled by the message rather than by our pass over it, and an
+`.eml` nobody can search for is a file nobody finds.
+
+`message/rfc822` was added to the DMS allowlist for it. Safe for the same reason
+`application/zip` is: absent from `INLINE_SAFE`, so it can only ever be served
+`attachment` + `nosniff`, which no browser renders.
+
+**The three consequences the decision carries, all built in.** The copy is a
+point-in-time snapshot and both the picker and the reverse view say so in words
+("a later reply is a new message, not an update to this one") — the alternative
+is somebody trusting a stale record months later. Unlinking leaves the filed copy
+in place: *"this email is not about that invoice after all"* and *"destroy this
+record of correspondence"* are different intentions and only one was expressed,
+so the toast says "the filed copy is still in Documents" rather than "removed".
+And filing writes `mail.message_filed` / `mail.thread_linked` audit rows through
+`logAuditInTx`, **inside** the transaction rather than fire-and-forget — the rest
+of this module uses `logAudit` because an audit hiccup must not fail a read of
+somebody's inbox, but this action publishes one person's private correspondence
+to their colleagues, and that record must not be able to go missing while the
+copy commits.
+
+**The reverse view is two reads of one table.** "Emails on this invoice" walks
+link → thread → filed copy, so no new join table was needed: it and "the invoice
+on this email" are `mail_links` read from opposite ends, and an industry pack
+registering a `job` type gets the view for free. It deliberately shows the FILED
+COPIES rather than the threads, because the colleague reading the invoice is not
+the person whose mailbox it lives in — the thread's own subject line is invisible
+to them by RLS, correctly. It renders **nothing at all** when nothing is
+attached; a permanently empty card on every invoice in the product would be an
+advertisement rather than a feature.
+
+**`0045`/`0046`: `mail_links.mail_account_id`, and the FK that had to be written
+by hand.** A thread id is opaque and unique only inside one mail account, so two
+connected accounts in one tenant that ever minted the same id would have had
+their links merged. The table was still empty — the last free moment.
+
+The column is NULLABLE, and the nullability is the design. The FK is
+`ON DELETE SET NULL (mail_account_id)` — the column-list form (PG 15+) that
+drizzle-kit cannot express, so `0046` is hand-written with the reasoning in it.
+Two things turn on that:
+
+- **The column list is load-bearing.** A composite FK's plain `SET NULL` nulls
+  every key column, `tenant_id` included, which is NOT NULL — so disconnecting a
+  mailbox would fail outright, at the worst possible moment: someone revoking
+  access to their own private mail.
+- **SET NULL rather than CASCADE** because the entire reason linking copies the
+  message is that the link must survive the person who made it — their token
+  expiring, their disconnecting the mailbox, their leaving the business — which
+  is exactly when the correspondence behind an invoice is most wanted. CASCADE
+  would delete it at that moment and quietly undo the design. There is an
+  isolation test that disconnects a mailbox and asserts the link survives with
+  `tenant_id` intact.
+
+`NULLS DISTINCT` (the default) on the reshaped unique index is the deliberate
+partner: orphaned links compare as distinct, so a SET NULL can never collide, so
+a disconnect can never be blocked by a unique violation. Nothing in the app
+inserts a null, which is what keeps the index total in practice.
+`mail_annotations.version` landed alongside — an annotation is the one mail row
+two writers genuinely race for, and last-write-wins on a jsonb blob loses one of
+them silently.
+
+**Module isolation is now a constraint rather than discipline.** `no-restricted-imports`
+zones in `eslint.config.mjs`: no module may import another, only `registry.ts`
+may import modules, and a contributing module may import only `types.ts`.
+`docs/extension-model.md` said ship them with this slice or not at all, and it
+was right — this codebase is built largely by agents reading nearby code to infer
+what is allowed, so one cross-module import would have read as precedent forever.
+
+The first version of those zones **failed immediately, and the failure was
+mine**: `../documents/*` flagged `src/modules/accounting/documents/links.ts`,
+which is accounting's own subdirectory, not the Documents module. From inside a
+module subdirectory the single-level relative path points at a SIBLING, not at
+another module. Dropped; two levels and beyond always clear the module root and
+stay. Worth keeping because it generalizes — a lint pattern matches the import
+STRING, not the resolved path, and the two are only the same from a file you are
+not thinking about. Also deliberately unrestricted: `@/db/schema`. Tables are the
+platform's, not a module's; what isolation protects is code coupling, and RLS
+rather than an import graph is what decides who may read a row.
+
+**Verified against a real Postgres, not only in unit tests.** A throwaway suite
+seeded a tenant with an invoice, bill, customer, vendor, folder and filed message
+on the dev branch and ran every hook under a real RLS context. Twelve
+assertions, all passing — search reaching invoices through the customer join, a
+bill found by its vendor's own number, batch `resolve` answering for all six
+types in one pass, the two-hop reverse view returning the filed copy, a deleted
+target leaving its link unresolved rather than vanishing, and a bare `%`
+escaping to zero results rather than matching the table. The most valuable one
+was the shortest: **an owners-only folder was invisible to a staff caller with no
+predicate of ours anywhere in the extension** — RLS had already removed it before
+the rows reached the code. That is the whole argument for hooks taking the
+caller's transaction, demonstrated rather than asserted.
+
+Not verified in a browser: the click-through needs a signed-in session at
+`127.0.0.1:3000`, and this session had none. The SQL, the seam and the isolation
+are proved; the round trip is not — the same distinction the Migadu adapter
+carried for a while, and worth closing the same way.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -827,8 +968,8 @@ transport slots in without touching a single caller.
 | `mail_directory_accounts` | **The only table the mail server can read** | Stalwart authenticates against it as `stalwart_directory`, a role with SELECT here and nothing else. Holds addresses and password hashes — no business data — so a compromised mail server leaks a bounded thing. Login unique platform-wide. **`member_read` + a `current_user`-keyed mail-server policy** |
 | `mail_accounts` | A person's OAuth connection to a mailbox | Tokens encrypted with a key held in the environment, never in this database. Separate from `mailboxes` on purpose: that table says an address exists, this says someone authorized us to read it. **`member_read` only** |
 | `mail_thread_index` | Thin thread index — subject, participants, dates | **Not a mirror.** No bodies, no search index. Exists so a module can ask "every thread on this invoice" as a SQL join instead of N+1 protocol calls. **`member_read` only** |
-| `mail_links` | Thread ↔ business entity | **MEMBER WRITABLE** — the deliberate exception. `entity_type` carries no whitelist so a future layer needs no migration |
-| `mail_annotations` | Extension-contributed metadata per thread | **MEMBER WRITABLE**. One row per extension per thread, so a layer can be reprocessed or removed without touching another's work |
+| `mail_links` | Thread ↔ business entity | **MEMBER WRITABLE** — the deliberate exception. `entity_type` carries no whitelist so a future layer needs no migration. `mail_account_id` (`0045`) is what makes an opaque thread id unambiguous inside a tenant; its composite FK is hand-written in `0046` because it needs `ON DELETE SET NULL (mail_account_id)` — the link must SURVIVE a disconnected mailbox, and the column list is what stops the same rule nulling `tenant_id`. Unique on `(tenant_id, mail_account_id, thread_id, entity_type, entity_id)`, NULLS DISTINCT on purpose |
+| `mail_annotations` | Extension-contributed metadata per thread | **MEMBER WRITABLE**. One row per extension per thread, so a layer can be reprocessed or removed without touching another's work. `version` (`0045`) is the optimistic-concurrency counter — a reprocess and a user edit genuinely race here, and last-write-wins on jsonb loses one silently |
 
 ## Key files & seams
 
@@ -871,6 +1012,32 @@ The inbox (`src/lib/email/jmap/`):
   back-references so a list view is **one** round trip that queries and fetches
   together; doing it as two is how a JMAP client ends up as slow as the IMAP
   one it replaced.
+The extension seam (`src/lib/mail-extensions/`, neutral ground OUTSIDE
+`src/modules/` — everything under `src/modules/<slug>/` is a module and subject
+to the isolation rule):
+
+- `types.ts` — the contract, and primitive **P5**. Imports NOTHING from
+  `src/modules/**`, and must not. Read the header before adding a hook: it says
+  which two rules are security rather than style.
+- `registry.ts` — the composition root, and the ONLY file that may import
+  modules. Exactly what `src/modules/index.ts` is for module renderers.
+- `resolve.ts` — enabled-filter, entity-type index, batch resolve, and the
+  `Promise.allSettled` + timeout wrapper that keeps one wedged extension from
+  taking the reading pane with it.
+- `src/modules/documents/mail/extension.ts` — files and folders, plus the
+  **filing** capability: `.eml` snapshot + transcript into the DMS Inbox.
+- `src/modules/accounting/mail/extension.ts` — invoices, bills, customers,
+  vendors.
+- `src/modules/email/links.ts` — `mail_links` reads and writes, including the
+  two-hop join behind "emails on this invoice".
+- `src/modules/email/filing.ts` — the only place in the linking path that speaks
+  JMAP; turns a live message into the neutral payload a filing target takes.
+- `src/modules/email/render/transcript.ts` — pure. HTML → searchable text. The
+  header explains why hand-rolling a stripper is fine here when hand-rolling a
+  *sanitizer* is not.
+- `eslint.config.mjs` — the isolation zones. The only thing actually enforcing
+  any of the above.
+
 - `scripts/create-mail-role.ts` — `npm run db:create-mail-role`. Creates the
   mail server's Postgres role and then **proves** the boundary: connects as it,
   confirms it can read the directory, and confirms it cannot read `tenants`,
@@ -1123,9 +1290,15 @@ proxy so the sender never learns who opened the message.
 
 Sync, the unread badge and background freshness are in as of Slice 4.
 
-What is NOT built yet, in slice order: the extension registry and entity
-linking, then compose and send. Until compose exists this is a reader —
-replying still happens on a phone or in Outlook.
+**Entity linking is in as of Slice 5**, and it is the reason this module exists
+rather than a tab pointed at Gmail: a message can be attached to an invoice, a
+bill, a customer, a vendor, a file or a folder; attaching files a readable copy
+into Documents; and the invoice's own page shows what was attached. The seam
+other modules build on (`src/lib/mail-extensions/`) is live, and module isolation
+is enforced by ESLint rather than by discipline.
+
+What is NOT built yet, in slice order: compose and send. Until that exists this
+is a reader — replying still happens on a phone or in Outlook.
 
 Everything so far has been proven against ONE server, ONE account and ONE
 message. That is a real limit: no multi-account switching, no thread expansion
@@ -1204,27 +1377,47 @@ code or config change.
   connection string, so it belongs in the operator's terminal, not a transcript.
   Run it when the server exists; it self-verifies the role cannot read tenant
   tables and aborts if it can.
-- **No extension registry yet.** The seam that lets Documents and Accounting
-  contribute linkable entity types, annotations and reading-pane panels. Planned
-  for `src/lib/mail-extensions/` — neutral ground outside `src/modules/`, with
-  `registry.ts` as the single composition root, exactly as `src/modules/index.ts`
-  is for module renderers. Nothing enforces the module-isolation rule today; it
-  ships with ESLint `no-restricted-imports` zones or not at all.
+- **Annotations and reading-pane panels are declared but unused.** The registry
+  contributes linkable entity types and filing; `mail_annotations` still has no
+  writer, and no extension contributes a panel or an action to the reading pane.
+  Both are hooks waiting for a first caller — an industry pack extracting drawing
+  numbers is the obvious one — and adding them is a change to `types.ts` plus a
+  render site, not a change to the model.
+- **The picker searches; it does not browse.** Typing finds a record by number or
+  name. There is no "recent invoices" list for somebody who cannot remember what
+  the thing is called, and no way to create the record you meant to attach to
+  from inside the dialog.
+- **Filing lands everything in the DMS Inbox.** Deliberate — choosing a folder
+  would be guessing at a visibility decision, since folders carry
+  `effective_visibility` and the wrong guess either hides the correspondence or
+  publishes it wider than intended. But it does mean somebody has to file it
+  afterwards, and a busy inbox is where filed emails will pile up.
+- **A filed copy has no deep link.** The DMS has no per-document page, so a chip
+  points at the folder (or the Inbox) the file lives in rather than at the file.
+  Fine today; worth revisiting when Documents grows a detail route.
+- **Filing and linking are two transactions.** Blob writes must happen outside a
+  transaction (house rule), so the copy commits before the links do. If the
+  second write fails, the copy exists unlinked in the Documents inbox — a real
+  artifact, not corruption, and the retry is idempotent by content hash. Narrow
+  enough to accept; not zero.
+- **Idempotency is by content hash, checked twice rather than arbitrated.**
+  `documents.blob_pathname` carries a random suffix by design, so there is no
+  unique key to conflict on. A genuine double-submit inside the same moment can
+  produce two copies. The cost is a duplicate row in an inbox, not a wrong
+  answer.
+- **Linking is available to any member, and it publishes.** Attaching a thread
+  copies somebody's private correspondence somewhere their colleagues can read
+  it. That is the point, it is audited, and the person doing it is the person
+  whose mailbox it is — but there is no owner-only mode and no way to un-publish
+  except deleting the document. Revisit if a client asks.
 - **Truncation is carried but not yet surfaced.** `JmapEmail.bodyTruncated` is
   populated; the reading pane still needs to render a "message shortened — view
   original" affordance rather than showing a partial body as whole.
-- **`mail_links` has no `mail_account_id`.** The unique index is
-  `(tenant_id, thread_id, entity_type, entity_id)` and `thread_id` is bare text
-  with no FK, so two connected accounts in one tenant that ever mint the same
-  opaque thread id would have their links merged. Unlikely against one Stalwart;
-  a coin flip once a Graph-backed account appears. The table is empty — this is
-  the cheap moment to add the column.
-- **`resolveBody()` ignores `isTruncated`** and `client.ts` never sets
-  `maxBodyValueBytes`, so a long message can be cut mid-tag and shown as
-  complete. That is also precisely the input class a sanitizer must survive.
-- **`0043` has not been applied to production yet.** It is on the dev branch and
-  the isolation suite passes against it. `docs/security.md` §8 requires both.
-  Run `npm run db:migrate` (no flag) against production before deploying.
+- **`0043`, `0044`, `0045` and `0046` have not been applied to production yet.**
+  All four are on the dev branch and the isolation suite passes against it.
+  `docs/security.md` §8 requires both databases. Run `npm run db:migrate` (no
+  flag) against production before deploying this branch — and note it applies
+  every pending migration, so run it as a deploy step rather than mid-build.
 - **A delegated shared mailbox cannot be connected yet.** `sessionMatchesAddress`
   compares against the session's primary account only, so someone granted access
   to `info@` through their own credentials is refused. JMAP exposes that case as
@@ -1237,10 +1430,13 @@ code or config change.
   server-side connection that serverless cannot hold. Comparing the account's
   state string is one small request; an SSE proxy on Vercel's streaming runtime
   is a later optimization, not a prerequisite.
-- **The `attachments → Documents` join is not wired.** Inbound mail already
-  files into DMS folders via `in.yosherapp.com`; hosted mailboxes do not feed
-  that path yet. Closing that loop is what makes Email and Documents worth more
-  together than apart.
+- **The `attachments → Documents` join is wired, but only on demand.** Slice 5
+  files a message and its attachments into the DMS when somebody attaches the
+  thread to a record. There is still no automatic path — a hosted mailbox does
+  not file attachments the way `in.yosherapp.com` does for inbound mail, and it
+  should not: filing every attachment anybody receives would publish a mailbox
+  rather than a message. A per-folder rule ("everything from this sender") is the
+  shape that would work, and it is unbuilt.
 - **One hosted domain per tenant.** A client with two trading names needs two,
   and the unique index on `tenant_id` says no.
 - **Deliverability for hosted mailboxes is Migadu's**, not ours — which is the

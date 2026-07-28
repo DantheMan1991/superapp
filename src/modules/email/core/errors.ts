@@ -24,8 +24,13 @@ export type MailErrorCode =
   | "MESSAGE_NOT_FOUND"
   | "ATTACHMENT_NOT_FOUND"
   | "ATTACHMENT_TOO_LARGE"
+  | "MESSAGE_TOO_LARGE"
   | "SEARCH_QUERY_INVALID"
-  | "MAIL_SERVER_UNREACHABLE";
+  | "MAIL_SERVER_UNREACHABLE"
+  | "LINK_TYPE_UNKNOWN"
+  | "LINK_TARGET_NOT_FOUND"
+  | "FILING_UNAVAILABLE"
+  | "LINK_NOT_FOUND";
 
 export class MailError extends Error {
   constructor(
@@ -66,9 +71,19 @@ const FRIENDLY: Record<MailErrorCode, string> = {
   ATTACHMENT_NOT_FOUND: "That attachment is no longer on the mail server.",
   ATTACHMENT_TOO_LARGE:
     "That attachment is too large to open here — use your phone or Outlook for this one.",
+  MESSAGE_TOO_LARGE:
+    "That message is too large to file a copy of — download it and attach it by hand.",
   SEARCH_QUERY_INVALID: "That search couldn't be read — try simpler terms.",
   MAIL_SERVER_UNREACHABLE:
     "Couldn't reach the mail server. Your mail is safe — try again shortly.",
+  // Both of the "not found" answers below are also the RESTRICTED answer, on
+  // purpose and for the reason at the top of this file: a record hidden from
+  // this person by RLS must be indistinguishable from one that never existed.
+  LINK_TYPE_UNKNOWN: "That isn't something a conversation can be attached to.",
+  LINK_TARGET_NOT_FOUND: "That record no longer exists.",
+  FILING_UNAVAILABLE:
+    "Attaching needs the Documents module — a copy of the email has to go somewhere the whole business can read it.",
+  LINK_NOT_FOUND: "That attachment has already been removed.",
 };
 
 export function friendlyMessage(err: unknown): string {

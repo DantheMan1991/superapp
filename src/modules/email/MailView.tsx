@@ -143,11 +143,10 @@ export async function MailView({
                 </Link>
               </div>
               <ReadingPane
+                ctx={ctx}
                 message={view.message}
                 accountId={account.id}
                 mailboxId={account.mailboxId}
-                tenantId={ctx.tenant.id}
-                clerkUserId={ctx.userId}
                 folders={view.folders}
                 showImages={params.images === "1"}
                 showImagesHref={mailHref(params, { images: "1" })}

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { EyeOff, Paperclip, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import type { TenantContext } from "@/lib/auth";
 import { hasRemoteContent } from "../render/sanitize";
 import type { JmapEmail, JmapMailbox } from "@/lib/email/jmap/types";
 import { KEYWORD_FLAGGED, KEYWORD_SEEN } from "@/lib/email/jmap/types";
@@ -8,6 +9,7 @@ import { mailAttachmentPolicy } from "../render/attachment-policy";
 import { blobExpiry, signBlobClaim } from "../render/signing";
 import { MessageFrame } from "./message-frame";
 import { MessageActions } from "./message-actions";
+import { ThreadLinks } from "./thread-links";
 
 /**
  * The open message.
@@ -23,24 +25,24 @@ function addressLine(list: JmapEmail["to"]): string {
 }
 
 export function ReadingPane({
+  ctx,
   message,
   accountId,
   mailboxId,
-  tenantId,
-  clerkUserId,
   folders,
   showImages,
   showImagesHref,
 }: {
+  ctx: TenantContext;
   message: JmapEmail;
   accountId: string;
   mailboxId: string;
-  tenantId: string;
-  clerkUserId: string;
   folders: JmapMailbox[];
   showImages: boolean;
   showImagesHref: string;
 }) {
+  const tenantId = ctx.tenant.id;
+  const clerkUserId = ctx.userId;
   const sender = message.from[0];
   const expiresAt = blobExpiry();
 
@@ -88,6 +90,17 @@ export function ReadingPane({
             trashFolderId={trash?.id ?? null}
           />
         </div>
+
+        {/* The differentiator, and deliberately here rather than below the fold:
+            an inbox that cannot put a thread next to the invoice it is about is
+            a worse Gmail. */}
+        <ThreadLinks
+          ctx={ctx}
+          mailboxId={mailboxId}
+          mailAccountId={accountId}
+          emailId={message.id}
+          threadId={message.threadId}
+        />
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">

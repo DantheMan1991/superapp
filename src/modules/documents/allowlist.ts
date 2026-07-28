@@ -39,6 +39,22 @@ export const ALLOWED_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   // Archives
   "application/zip",
+  /**
+   * A whole email message, as filed by the mail seam (and uploadable by hand,
+   * which is the same artifact arriving by a different route).
+   *
+   * Safe for the same reason `application/zip` is: it is NOT in INLINE_SAFE, so
+   * it can only ever be served as `attachment` + `nosniff`, which no browser
+   * renders. The bytes are inert until a mail client opens them, and a mail
+   * client applies its own rules.
+   *
+   * It earns its place because it is the only lossless snapshot of a message.
+   * Filing a rendering of an email and calling it the record would be a
+   * comfortable lie — a dispute about what somebody agreed to is settled by the
+   * message, not by our HTML-to-text pass over it. The readable version lives
+   * alongside, in `documents.extracted_text`, where search can reach it.
+   */
+  "message/rfc822",
 ] as const;
 
 /** 100MB — a set of drawings is not a phone photo. */

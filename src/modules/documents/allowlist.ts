@@ -74,19 +74,8 @@ export function dispositionFor(mimeType: string): "inline" | "attachment" {
 export const UPLOAD_ACCEPT_ATTR = ALLOWED_MIME_TYPES.join(",");
 
 /**
- * Strip anything that must not reach a Content-Disposition header. Control
- * characters (CR/LF especially) are header injection; quotes break out of the
- * quoted-string form. Callers additionally emit an RFC 5987 filename* so
- * non-ASCII names survive.
+ * Moved to `src/lib/file-headers.ts` so the mail module can use it too —
+ * `src/modules/email/` may not import from `src/modules/documents/`. Re-exported
+ * here because this is where the DMS has always looked for it.
  */
-export function sanitizeFileName(raw: string): string {
-  let out = "";
-  for (const char of raw) {
-    const code = char.charCodeAt(0);
-    if (code < 32 || code === 127) continue;
-    if (char === '"' || char === "\\" || char === "/") continue;
-    out += char;
-  }
-  out = out.trim().slice(0, 120);
-  return out.length > 0 ? out : "download";
-}
+export { sanitizeFileName } from "@/lib/file-headers";

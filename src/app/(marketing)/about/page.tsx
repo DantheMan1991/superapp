@@ -8,7 +8,7 @@ import { IMAGES, SITE, TEAM } from "@/lib/site";
 export const metadata: Metadata = {
   title: "About",
   description:
-    "Why Yosher exists: small businesses grow into an administrative load that forces them to hire an office. We built the office instead.",
+    "Why Yosher exists: businesses grow into an operating load that forces them to hire an office. We built the office instead — and shaped the software around how each business actually runs.",
 };
 
 /**
@@ -29,7 +29,7 @@ const PRINCIPLES = [
   {
     icon: ScanFace,
     title: "Your business is not a template",
-    body: "Two companies in the same trade run differently, and software that ignores that gets abandoned. Yosher adapts through configuration, not through a fork of the product that quietly rots — so your setup keeps getting every improvement we ship.",
+    body: "Two companies in the same trade run differently, and software that ignores that gets abandoned next to a spreadsheet. So there are three layers: a core every business needs, a layer for what your kind of work needs, and a layer that is only yours. If what you need doesn't exist yet, we build it — as part of the platform, not as a one-off system that rots the day its developer moves on.",
   },
   {
     icon: ShieldCheck,
@@ -61,8 +61,9 @@ export default function AboutPage() {
           </h1>
           <p className="mt-6 text-lg text-pretty text-muted-foreground">
             Every business that gets good at its work eventually hits the same
-            wall — not a shortage of customers, but the administrative weight
-            that comes with them. Yosher exists to take that weight.
+            wall — not a shortage of customers, but the weight of running the
+            place once you have them. Yosher exists to take that weight,
+            wherever in your business it actually sits.
           </p>
         </div>
       </section>
@@ -89,15 +90,17 @@ export default function AboutPage() {
                 The problem
               </p>
               <h2 className="mt-3 text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
-                The paperwork grows faster than the work.
+                The overhead grows faster than the work.
               </h2>
               <div className="mt-6 space-y-4 text-muted-foreground">
                 <p>
-                  Doubling the work rarely means doubling the invoices. It means
-                  more quotes, more change orders, more receipts, more chasing,
-                  more scheduling, more of everything that happens after the
-                  real job is finished. Most owners absorb it personally, at
-                  night, until they can&apos;t — and then they hire.
+                  Doubling the work rarely means doubling the revenue. It means
+                  more jobs to schedule, more people to keep pointed in the
+                  right direction, more orders in flight, more quotes, more
+                  change orders, more receipts, more chasing. Some of that
+                  happens on a job site or a shop floor. Some of it happens at
+                  a kitchen table at 9pm. Most owners absorb all of it
+                  personally, until they can&apos;t — and then they hire.
                 </p>
                 <p>
                   Hiring works, but it&apos;s expensive and slow, and it turns a
@@ -106,11 +109,12 @@ export default function AboutPage() {
                   of people by surprise.
                 </p>
                 <p>
-                  So we built the office instead. Software handles the volume —
-                  the books, the invoicing, the contract paperwork, the
-                  follow-up that never ends. What&apos;s left is the small pile
-                  of decisions that actually need a person, and that person is
-                  still you.
+                  So we built the office instead — and the machinery around it.
+                  Software runs the volume wherever the volume actually is:
+                  tracking the work while it&apos;s happening, keeping the books
+                  current, getting the paperwork out, chasing what&apos;s owed.
+                  What&apos;s left is the small pile of decisions that really
+                  need a person, and that person is still you.
                 </p>
               </div>
             </div>

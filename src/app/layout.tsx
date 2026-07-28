@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 const DESCRIPTION =
-  "Software runs the day-to-day; a real person reviews what matters. Grow without building an office.";
+  "Software shaped around how your business actually runs — on the job site, on the floor, and in the paperwork that follows. A real person reviews what matters. Grow without building an office.";
 
 export const metadata: Metadata = {
   // Without this, Next resolves the relative OG image against localhost and

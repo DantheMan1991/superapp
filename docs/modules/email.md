@@ -965,6 +965,41 @@ truncate against and a blob-suffixed file name pushed a horizontal scrollbar
 across the picker. Mail is full of long file names, so that was the normal case
 rather than the edge one.
 
+**And a design mistake the founder found in about a minute, which no amount of
+testing would have caught.** He attached an email to the "Admin" folder, opened
+Admin, and there was no email in it — the copy had gone to the Documents Inbox.
+
+The reasoning that produced it is in the code above, and it is *correct for the
+case it was written for*: filing straight into a folder means guessing which one,
+and a guess is a visibility decision, because folders carry
+`effective_visibility` and a wrong guess either hides the correspondence or
+publishes it wider than intended. All true — when you attach a thread to an
+INVOICE, which names no folder.
+
+It is simply false when you attach to a **folder**. There is no guess to avoid:
+the destination *was* the instruction. A rule that was right about invoices got
+applied to a case it had never been reasoned about, and the result was a feature
+that quietly ignored what the person told it. **A justification is scoped to the
+case that produced it; carrying it to a neighbouring case is not the same as
+having thought about that case.**
+
+The fix: `FiledMessageInput` now carries the attach `target`, passed through
+neutrally — mail states what the person picked and expresses no opinion, and a
+filing target ignores anything it does not recognise. Documents recognises
+`folder` and files there (visibility inherited from the folder, exactly as an
+upload's is, which is the narrowing direction and therefore the safe one);
+everything else still lands in the Inbox. `FiledMessageResult` gained
+`destinationLabel`, so the toast reports where the copy ACTUALLY went rather than
+where the default would have put it — telling somebody the copy is in one place
+while it sits in another is the specific failure that started this.
+
+Two follow-ons, both found by testing the fix rather than by reasoning about it:
+an already-filed copy still sitting in the Inbox is MOVED when a later attach
+names a folder (the person has now said where it belongs; a copy already in a
+folder is left alone, because that was a deliberate act), and the move takes the
+**attachments with it** — they were filed by one act and splitting one email
+across two locations is worse than either place on its own.
+
 Still unproven: the reverse view has been verified at the query level (invoice →
 thread → filed copy, against real Postgres) but never rendered on an invoice page
 with real data, because the local tenant has no invoices.

@@ -63,6 +63,9 @@ export function filableAttachments(message: JmapEmail) {
 export async function buildFiledMessage(
   client: JmapClient,
   message: JmapEmail,
+  /** What the thread is being attached to. Passed straight through; mail has no
+   *  opinion about whether the filing target can make use of it. */
+  target?: FiledMessageInput["target"],
 ): Promise<BuiltMessage> {
   if (message.size > MAX_RAW_MESSAGE_BYTES) {
     throw new MailError(
@@ -137,6 +140,7 @@ export async function buildFiledMessage(
   return {
     skipped,
     input: {
+      ...(target ? { target } : {}),
       messageId: message.id,
       threadId: message.threadId,
       // RFC 5322 Message-Id: stable across servers and across a re-import, which

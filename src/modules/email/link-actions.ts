@@ -100,6 +100,7 @@ export interface LinkOutcome {
   attachmentsFiled: number;
   /** Allowlist refusals plus anything mail declined to download. */
   attachmentsSkipped: number;
+  /** Where the copy ACTUALLY went, as reported by the filing target. */
   destinationLabel: string;
 }
 
@@ -170,7 +171,14 @@ export async function linkThreadAction(
     const threadId = message.threadId;
     if (!threadId) throw new MailError("THREAD_NOT_FOUND", parsed.data.emailId);
 
-    const built = await buildFiledMessage(client.data, message);
+    // The target goes to the filing step, not just to the link row: attaching
+    // to a FOLDER names where the copy should go, and the first version ignored
+    // that and put every copy in the inbox — so somebody who attached an email
+    // to "Admin" then opened Admin and found nothing.
+    const built = await buildFiledMessage(client.data, message, {
+      entityType: parsed.data.entityType,
+      entityId: parsed.data.entityId,
+    });
     const filed = await filer.filing.fileMessage(ctx, built.input);
 
     // Two links, one transaction: the thread to the record somebody chose, and
@@ -224,7 +232,9 @@ export async function linkThreadAction(
         alreadyFiled: filed.alreadyFiled,
         attachmentsFiled: filed.attachmentsFiled,
         attachmentsSkipped: filed.attachmentsRejected + built.skipped,
-        destinationLabel: filer.filing.destinationLabel,
+        // From the RESULT, not from the target's default. Only the target knows
+        // whether it honoured the destination it was handed.
+        destinationLabel: filed.destinationLabel,
       },
     };
   } catch (err) {

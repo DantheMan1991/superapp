@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, ilike, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, ne, sql } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { schema, withTenant, type Tx } from "@/db";
 import { assertBlobConfigured, blobToken, dmsPathPrefix } from "@/lib/blob";
@@ -253,17 +253,38 @@ async function fileMessage(
   // with copies. sha256 rather than the message id because it is the indexed
   // column (documents_tenant_sha256_idx) and because identical bytes ARE the
   // same message however it reached us.
-  const existing = await withTenant(
+  const prepared = await withTenant(
     ctx.tenantId,
-    (tx) => findFiledMessage(tx, ctx.tenantId, rawSha),
+    async (tx) => ({
+      existing: await findFiledMessage(tx, ctx.tenantId, rawSha),
+      folder: await resolveDestination(tx, ctx, input.target),
+    }),
     { role: ctx.role, userId: ctx.userId },
   );
-  if (existing) {
+  const destination = prepared.folder;
+
+  if (prepared.existing) {
+    // The copy is already here. If it is still UNFILED and this attach named a
+    // folder, move it there — the person has now said where it belongs, and
+    // leaving it in the inbox would repeat the original mistake. If somebody has
+    // already filed it somewhere, leave it alone: that was a deliberate act and
+    // a second attach is not permission to undo it.
+    const moved =
+      destination && prepared.existing.folderId === null
+        ? await withTenant(
+            ctx.tenantId,
+            (tx) => moveToFolder(tx, ctx.tenantId, prepared.existing!.id, destination),
+            { role: ctx.role, userId: ctx.userId },
+          )
+        : false;
     return {
       entityType: "document",
-      entityId: existing.id,
-      label: existing.title || existing.fileName,
-      href: "/dashboard/m/documents/inbox",
+      entityId: prepared.existing.id,
+      label: prepared.existing.title || prepared.existing.fileName,
+      href: destinationHref(moved ? destination : null, prepared.existing.folderId),
+      destinationLabel: moved
+        ? `the ${destination!.name} folder`
+        : describeExistingHome(prepared.existing.folderId, destination),
       attachmentsFiled: 0,
       attachmentsRejected: 0,
       alreadyFiled: true,
@@ -320,7 +341,8 @@ async function fileMessage(
           entityType: "document",
           entityId: raced.id,
           label: raced.title || raced.fileName,
-          href: "/dashboard/m/documents/inbox",
+          href: destinationHref(null, raced.folderId),
+          destinationLabel: describeExistingHome(raced.folderId, destination),
           attachmentsFiled: 0,
           attachmentsRejected: rejected,
           alreadyFiled: true,
@@ -329,15 +351,25 @@ async function fileMessage(
 
       const provenance = {
         origin: "dms" as const,
-        // The system Inbox, deliberately. Filing straight into a folder would
-        // mean guessing which one, and a guess here is a visibility decision:
-        // folders carry effective_visibility, so the wrong guess either hides
-        // the correspondence from the people who need it or publishes it wider
-        // than the person intended. The Inbox is where this cabinet already puts
-        // things nobody has sorted yet.
-        folderId: null,
-        filedAt: null,
-        effectiveVisibility: "members" as const,
+        // The folder the person named, or the Inbox when they named none.
+        //
+        // The first version always used the Inbox, reasoning that filing into a
+        // folder means GUESSING which one and that a guess here is a visibility
+        // decision — folders carry effective_visibility, so a wrong guess either
+        // hides the correspondence or publishes it wider than intended. That
+        // reasoning is right for "attach this to invoice INV-1042", where no
+        // folder was named. It is simply wrong for "attach this to the Admin
+        // folder", where there is no guess to avoid: the destination was the
+        // instruction. Filing it in the inbox instead sent people to a folder
+        // that did not contain their email.
+        //
+        // Visibility follows the folder, exactly as an upload's does, so a copy
+        // filed into a restricted folder is restricted. That is the safe
+        // direction — RLS already proved the person can see the folder, and
+        // inheriting makes the copy narrower rather than wider.
+        folderId: destination?.id ?? null,
+        filedAt: destination ? new Date() : null,
+        effectiveVisibility: destination?.effectiveVisibility ?? ("members" as const),
         source: "email" as const,
         emailFrom: input.fromAddress,
         emailSubject: input.subject,
@@ -418,7 +450,10 @@ async function fileMessage(
         entityType: "document",
         entityId: message.id,
         label: message.title || message.fileName,
-        href: "/dashboard/m/documents/inbox",
+        href: destinationHref(destination, null),
+        destinationLabel: destination
+          ? `the ${destination.name} folder`
+          : "the Documents inbox",
         attachmentsFiled: attachmentBlobs.length,
         attachmentsRejected: rejected,
         alreadyFiled: false,
@@ -428,16 +463,140 @@ async function fileMessage(
   );
 }
 
+interface Destination {
+  id: string;
+  name: string;
+  effectiveVisibility: "members" | "owners";
+}
+
+/**
+ * The folder a copy should go in, when the attach target names one.
+ *
+ * Only `folder` means anything here — attaching to an invoice names a business
+ * record, not a place. Read through the caller's `tx`, so a folder RLS hides
+ * from this person resolves to nothing and the copy falls back to the Inbox
+ * rather than landing somewhere they cannot see.
+ */
+async function resolveDestination(
+  tx: Tx,
+  ctx: MailExtensionCtx,
+  target: FiledMessageInput["target"],
+): Promise<Destination | null> {
+  if (target?.entityType !== "folder") return null;
+  const rows = await tx
+    .select({
+      id: schema.documentFolders.id,
+      name: schema.documentFolders.name,
+      effectiveVisibility: schema.documentFolders.effectiveVisibility,
+    })
+    .from(schema.documentFolders)
+    .where(
+      and(
+        eq(schema.documentFolders.tenantId, ctx.tenantId),
+        eq(schema.documentFolders.id, target.entityId),
+      ),
+    )
+    .limit(1);
+  const folder = rows[0];
+  if (!folder) return null;
+  return {
+    id: folder.id,
+    name: folder.name,
+    effectiveVisibility:
+      folder.effectiveVisibility === "owners" ? "owners" : "members",
+  };
+}
+
+/**
+ * Move an already-filed copy out of the Inbox into a folder somebody named —
+ * the message AND its attachments.
+ *
+ * The attachments move too because they were filed by one act and belong in one
+ * place; leaving them behind splits a single email across two locations, which
+ * is a worse answer than either one on its own. They are found through
+ * `metadata.mail.parentDocumentId`, the P2 bag written at filing time.
+ *
+ * Both updates are scoped to `folder_id is null`, so nothing is ever dragged out
+ * of a folder somebody chose deliberately.
+ */
+async function moveToFolder(
+  tx: Tx,
+  tenantId: string,
+  documentId: string,
+  destination: Destination,
+): Promise<boolean> {
+  const values = {
+    folderId: destination.id,
+    filedAt: new Date(),
+    effectiveVisibility: destination.effectiveVisibility,
+    updatedAt: new Date(),
+  };
+  const moved = await tx
+    .update(schema.documents)
+    .set(values)
+    .where(
+      and(
+        eq(schema.documents.tenantId, tenantId),
+        eq(schema.documents.id, documentId),
+        // Only out of the Inbox, never out of a folder somebody chose.
+        isNull(schema.documents.folderId),
+      ),
+    )
+    .returning({ id: schema.documents.id });
+  if (moved.length === 0) return false;
+
+  await tx
+    .update(schema.documents)
+    .set(values)
+    .where(
+      and(
+        eq(schema.documents.tenantId, tenantId),
+        isNull(schema.documents.folderId),
+        sql`${schema.documents.metadata}->'mail'->>'parentDocumentId' = ${documentId}`,
+      ),
+    );
+  return true;
+}
+
+function destinationHref(
+  destination: Destination | null,
+  existingFolderId: string | null,
+): string {
+  const folderId = destination?.id ?? existingFolderId;
+  return folderId
+    ? `/dashboard/m/documents/browse/${folderId}`
+    : "/dashboard/m/documents/inbox";
+}
+
+/** Where an already-filed copy actually lives, said plainly. */
+function describeExistingHome(
+  existingFolderId: string | null,
+  destination: Destination | null,
+): string {
+  if (existingFolderId === null) return "the Documents inbox";
+  // It is already in SOME folder and we did not move it. Naming the folder the
+  // person just picked would be a lie, so say what is true instead.
+  return destination
+    ? "the folder it was already filed in"
+    : "Documents";
+}
+
 async function findFiledMessage(
   tx: Tx,
   tenantId: string,
   sha256: string,
-): Promise<{ id: string; title: string; fileName: string } | null> {
+): Promise<{
+  id: string;
+  title: string;
+  fileName: string;
+  folderId: string | null;
+} | null> {
   const rows = await tx
     .select({
       id: schema.documents.id,
       title: schema.documents.title,
       fileName: schema.documents.fileName,
+      folderId: schema.documents.folderId,
     })
     .from(schema.documents)
     .where(

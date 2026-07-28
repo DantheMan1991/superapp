@@ -141,6 +141,17 @@ export interface FiledAttachmentInput {
  * filing target (a future archive module, say) would not have to learn JMAP.
  */
 export interface FiledMessageInput {
+  /**
+   * What the person is attaching this conversation TO.
+   *
+   * Passed through neutrally: mail states the target and expresses no opinion
+   * about it, and a filing target ignores anything it does not recognise. It
+   * exists because "attach this to the Admin folder" names a destination, while
+   * "attach this to invoice INV-1042" does not — the first is an instruction
+   * about where the copy goes, and treating both the same put filed emails
+   * somewhere the person had not asked for.
+   */
+  target?: LinkableEntityRef;
   /** The mail server's ids. Opaque; used for provenance and idempotency only. */
   messageId: string;
   threadId: string;
@@ -173,6 +184,15 @@ export interface FiledMessageResult {
   entityId: string;
   label: string;
   href?: string;
+  /**
+   * Where the copy ACTUALLY went — "the Admin folder", "the Documents inbox".
+   *
+   * Reported by the target rather than assumed by the caller, because only the
+   * target knows whether it honoured the destination it was given. Telling
+   * somebody the copy is in one place while it sits in another is the specific
+   * failure this field exists to prevent.
+   */
+  destinationLabel: string;
   attachmentsFiled: number;
   /**
    * Attachments the filing target refused — its own upload allowlist applied to
@@ -202,7 +222,12 @@ export interface FiledMessageResult {
  * still never `withSystem`.
  */
 export interface MailFilingTarget {
-  /** "the Documents inbox" — shown in the UI so nobody has to guess where it went. */
+  /**
+   * Where copies go when the target names no destination of its own —
+   * "the Documents inbox". Shown in the picker BEFORE a target is chosen, so it
+   * describes the default rather than the outcome; the outcome comes back on
+   * `FiledMessageResult.destinationLabel`.
+   */
   destinationLabel: string;
   fileMessage(
     ctx: MailExtensionCtx,

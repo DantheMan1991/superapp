@@ -82,10 +82,14 @@ export function AttachToButton({
         return;
       }
       const data = result.data;
+      // Always names where the copy actually IS, in both branches. The first
+      // version said only "a copy was already filed" on the second attach, which
+      // told somebody nothing about where to look for it.
+      const where = data?.destinationLabel ?? "Documents";
       const parts = [
         data?.alreadyFiled
-          ? "Attached — a copy was already filed."
-          : `Attached. A copy is in ${data?.destinationLabel ?? "Documents"}.`,
+          ? `Attached. A copy was already filed — it's in ${where}.`
+          : `Attached. A copy is in ${where}.`,
       ];
       if (data && data.attachmentsFiled > 0) {
         parts.push(
@@ -119,10 +123,16 @@ export function AttachToButton({
           <DialogHeader>
             <DialogTitle>Attach this conversation</DialogTitle>
             <DialogDescription>
-              A copy of this email — and its attachments — is filed into{" "}
-              {destinationLabel} so the rest of the business can read it. Your
-              mailbox stays private. The copy is a snapshot of this message as it
-              is now; a later reply is a new message, not an update to this one.
+              {/* Deliberately does not name a destination. Picking a folder
+                  files the copy THERE; picking an invoice files it into
+                  {destinationLabel}. The dialog is shown before that choice is
+                  made, so promising one of them here would be wrong half the
+                  time — the toast names the real destination afterwards. */}
+              A copy of this email — and its attachments — is filed into
+              Documents so the rest of the business can read it, in the folder
+              you pick or in {destinationLabel} otherwise. Your mailbox stays
+              private. The copy is a snapshot of this message as it is now; a
+              later reply is a new message, not an update to this one.
             </DialogDescription>
           </DialogHeader>
 

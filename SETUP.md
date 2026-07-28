@@ -506,6 +506,27 @@ Setup:
   it keeps this traffic's sending reputation separate from the owner's everyday
   email, so a bad send never affects their normal mail.
 
+### The public contact form
+
+`/contact` emails enquiries to one fixed inbox. It is the only unauthenticated
+surface that sends mail, so it does not go through `src/lib/email/send.ts` —
+that module is tenant-scoped and a website enquiry has no tenant. It does reuse
+that module's `applyDevGuard`, so `EMAIL_DEV_REDIRECT` protects it exactly like
+everything else.
+
+- `CONTACT_INBOX` — where enquiries land. Optional; falls back to the public
+  address in `src/lib/site.ts`. The recipient is **never** taken from the
+  request, so the form cannot be turned into an open relay.
+- Needs `EMAIL_FROM_DOMAIN` and `RESEND_API_KEY` like any other send. Without
+  them the form tells the visitor to email directly rather than failing
+  silently.
+- Guardrails: 5 submissions per IP per hour and 200 platform-wide per day,
+  counted in `public_access_attempts` (the same table the share links and the
+  health check use), plus a honeypot field. IPs are hashed with
+  `INTERVIEW_IP_SALT` before storage — the raw address is never written.
+- The reply-to is set to the sender, so hitting reply reaches the person who
+  filled in the form.
+
 ### Hosted mailboxes (Migadu)
 
 Separate from everything above. The sending setup decides what *leaves*; this

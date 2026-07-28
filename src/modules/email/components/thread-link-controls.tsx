@@ -163,16 +163,22 @@ export function AttachToButton({
                             key={entity.entityId}
                             type="button"
                             disabled={pending}
-                            className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-muted/50 disabled:opacity-50"
+                            // min-w-0 on the button and w-full on the spans is
+                            // what makes `truncate` mean anything here: in a
+                            // flex column, items-start sizes children to their
+                            // content, so a long file name overflows the dialog
+                            // instead of ellipsising. Mail is full of long file
+                            // names.
+                            className="flex w-full min-w-0 flex-col items-start gap-0.5 px-3 py-2 text-left text-sm hover:bg-muted/50 disabled:opacity-50"
                             onClick={() =>
                               attach(entity.entityType, entity.entityId)
                             }
                           >
-                            <span className="truncate font-medium">
+                            <span className="w-full truncate font-medium">
                               {entity.label}
                             </span>
                             {entity.sublabel && (
-                              <span className="truncate text-xs text-muted-foreground">
+                              <span className="w-full truncate text-xs text-muted-foreground">
                                 {entity.sublabel}
                               </span>
                             )}

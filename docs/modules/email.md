@@ -938,10 +938,36 @@ predicate of ours anywhere in the extension** — RLS had already removed it bef
 the rows reached the code. That is the whole argument for hooks taking the
 caller's transaction, demonstrated rather than asserted.
 
-Not verified in a browser: the click-through needs a signed-in session at
-`127.0.0.1:3000`, and this session had none. The SQL, the seam and the isolation
-are proved; the round trip is not — the same distinction the Migadu adapter
-carried for a while, and worth closing the same way.
+**And then verified in a browser, against the local Stalwart, end to end.** The
+hostile fixture message was attached to a folder and every part of the path did
+what it claims:
+
+| | |
+| --- | --- |
+| filed `.eml` | `Invoice 4471 — façade works.eml`, `message/rfc822`, 4797 bytes |
+| `extracted_text` | `Subject: … / From: Supplier Test <…>` — the transcript, non-ASCII intact |
+| attachments filed | 2 (`Facturación año.pdf`, `notes.txt`), 0 rejected |
+| inline `cid:` logo | **not** filed — it is part of the rendering, not a file |
+| `metadata.mail` | kind, threadId, messageId, `rfcMessageId`, `filedAt` |
+| `mail_links` rows | 2 per attach, both carrying `mail_account_id` |
+| audit | `mail.message_filed` + `mail.thread_linked`, ids and counts only |
+
+Two behaviours are worth recording because only a real round trip could show
+them. **Idempotency by content hash works**: attaching the same message a second
+time, to a different folder, reused the existing copy and reported "a copy was
+already filed" rather than filing a duplicate — one message, two links, one
+document. And **unlinking left the copy**, with the toast saying so in words:
+*"Detached. The filed copy is still in Documents."*
+
+One UI bug the browser found that no test would have: in a flex column,
+`items-start` sizes children to their content, so `truncate` had nothing to
+truncate against and a blob-suffixed file name pushed a horizontal scrollbar
+across the picker. Mail is full of long file names, so that was the normal case
+rather than the edge one.
+
+Still unproven: the reverse view has been verified at the query level (invoice →
+thread → filed copy, against real Postgres) but never rendered on an invoice page
+with real data, because the local tenant has no invoices.
 
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 

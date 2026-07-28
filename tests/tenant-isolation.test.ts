@@ -2189,3 +2189,484 @@ d("share-link isolation (RLS + composite FKs + write-only-by-system log)", () =>
     for (const rows of results) expect(rows).toHaveLength(0);
   });
 });
+
+/**
+ * Mail (the inbox): RLS for the seven tables the email module owns.
+ *
+ * Three different shapes get certified here, because 0042 gives them three
+ * different policies for three different reasons:
+ *
+ *   - member_read tables (mailbox_domains, mailboxes, mail_directory_accounts,
+ *     mail_accounts, mail_thread_index) — readable within the tenant, writable
+ *     only by trusted server code. A member who could write any of them could
+ *     assert something untrue about the outside world: a cutover that never
+ *     happened, a password hash on a colleague's address, a token they control.
+ *   - member-writable tables (mail_links, mail_annotations) — the deliberate
+ *     exception, because attaching a thread to an invoice is daily work.
+ *   - composite tenant FKs, which must refuse a cross-tenant target even when
+ *     the row's own tenant_id passes RLS.
+ *
+ * The single most valuable assertion in this block is that tenant A cannot read
+ * tenant B's stored OAuth token. That row is a live credential to somebody's
+ * mail.
+ */
+const STAMP_MAIL = `iso-mail-${process.pid}`;
+
+interface MailFixture {
+  domainId: string;
+  mailboxId: string;
+  directoryId: string;
+  accountId: string;
+  threadRowId: string;
+}
+
+/** A second person inside tenant A — the colleague who must see nothing. */
+const COLLEAGUE = "user-a-colleague";
+
+d("mail isolation (RLS + composite tenant FKs)", () => {
+  let tenantA: string;
+  let tenantB: string;
+  let colleagueAccountId: string;
+  const fx: Record<string, MailFixture> = {};
+
+  /** Seeded under withSystem: members cannot write most of these by design. */
+  async function seedMail(tenantId: string, tag: string): Promise<MailFixture> {
+    return withSystem(async (tx) => {
+      const [domain] = await tx
+        .insert(schema.mailboxDomains)
+        .values({
+          tenantId,
+          domain: `${tag}-${STAMP_MAIL}.example`,
+          provider: "stalwart",
+          status: "pending",
+        })
+        .returning();
+      const [mailbox] = await tx
+        .insert(schema.mailboxes)
+        .values({
+          tenantId,
+          mailboxDomainId: domain.id,
+          localPart: tag,
+          address: `${tag}@${tag}-${STAMP_MAIL}.example`,
+          displayName: `Owner ${tag}`,
+          status: "active",
+        })
+        .returning();
+      const [directory] = await tx
+        .insert(schema.mailDirectoryAccounts)
+        .values({
+          tenantId,
+          mailboxId: mailbox.id,
+          login: `${tag}@${tag}-${STAMP_MAIL}.example`,
+          passwordHash: `$argon2id$secret-of-${tag}`,
+        })
+        .returning();
+      const [account] = await tx
+        .insert(schema.mailAccounts)
+        .values({
+          tenantId,
+          mailboxId: mailbox.id,
+          clerkUserId: `user-${tag}`,
+          jmapSessionUrl: "https://mail.example/.well-known/jmap",
+          jmapAccountId: `acct-${tag}`,
+          accessTokenEnc: `ciphertext-token-of-${tag}`,
+          refreshTokenEnc: `ciphertext-refresh-of-${tag}`,
+        })
+        .returning();
+      const [threadRow] = await tx
+        .insert(schema.mailThreadIndex)
+        .values({
+          tenantId,
+          mailAccountId: account.id,
+          threadId: `thread-${tag}`,
+          subject: `secret subject of ${tag}`,
+        })
+        .returning();
+      await tx.insert(schema.mailLinks).values({
+        tenantId,
+        threadId: `thread-${tag}`,
+        extensionSlug: "documents",
+        entityType: "document",
+        // Any uuid: the table carries no FK on entity_id on purpose, so a
+        // future layer can contribute a type without a migration.
+        entityId: domain.id,
+        createdByClerkUserId: `user-${tag}`,
+      });
+      await tx.insert(schema.mailAnnotations).values({
+        tenantId,
+        threadId: `thread-${tag}`,
+        extensionSlug: "documents",
+        data: { note: `annotation of ${tag}` },
+      });
+      return {
+        domainId: domain.id,
+        mailboxId: mailbox.id,
+        directoryId: directory.id,
+        accountId: account.id,
+        threadRowId: threadRow.id,
+      };
+    });
+  }
+
+  beforeAll(async () => {
+    [tenantA, tenantB] = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP_MAIL}-a`, name: "Mail Iso A", slug: `${STAMP_MAIL}-a` },
+          { clerkOrgId: `${STAMP_MAIL}-b`, name: "Mail Iso B", slug: `${STAMP_MAIL}-b` },
+        ])
+        .returning();
+      return [rows[0].id, rows[1].id];
+    });
+    fx.a = await seedMail(tenantA, "a");
+    fx.b = await seedMail(tenantB, "b");
+
+    // A second person in tenant A, for the per-user tests below. Created here
+    // rather than inside a test so the block does not depend on `it` order.
+    const [colleague] = await withSystem((tx) =>
+      tx
+        .insert(schema.mailAccounts)
+        .values({
+          tenantId: tenantA,
+          mailboxId: fx.a.mailboxId,
+          clerkUserId: COLLEAGUE,
+          jmapSessionUrl: "https://mail.example/.well-known/jmap",
+          jmapAccountId: "acct-colleague",
+          accessTokenEnc: "ciphertext-token-of-colleague",
+        })
+        .returning(),
+    );
+    colleagueAccountId = colleague.id;
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("unscoped selects on every mail table return only the tenant's rows", async () => {
+    // The user id is required for the two per-user tables (0043); the other
+    // five are tenant-scoped and ignore it.
+    await withTenant(
+      tenantA,
+      async (tx) => {
+        const tables = [
+          await tx.select().from(schema.mailboxDomains),
+          await tx.select().from(schema.mailboxes),
+          await tx.select().from(schema.mailDirectoryAccounts),
+          await tx.select().from(schema.mailAccounts),
+          await tx.select().from(schema.mailThreadIndex),
+          await tx.select().from(schema.mailLinks),
+          await tx.select().from(schema.mailAnnotations),
+        ];
+        for (const rows of tables) {
+          expect(rows.length).toBeGreaterThan(0);
+          expect(rows.every((r) => r.tenantId === tenantA)).toBe(true);
+        }
+      },
+      { userId: "user-a" },
+    );
+  });
+
+  it("cannot read the other tenant's stored OAuth token", async () => {
+    // That row is a live credential to somebody's mail. Encryption is what
+    // makes the residual exposure uninteresting; this proves it never arrives.
+    const rows = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.mailAccounts)
+          .where(eq(schema.mailAccounts.id, fx.b.accountId)),
+      { userId: "user-a" },
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  // ── Per-user isolation INSIDE one tenant (drizzle/0043) ──────────────────
+  //
+  // The rest of this file asks "can tenant A read tenant B?". These four ask
+  // the question the inbox actually turns on: can one employee read a
+  // COLLEAGUE'S mail? Same tenant, same RLS context, different person. Before
+  // 0043 the answer was "only because the application remembered to filter".
+
+  it("a colleague in the SAME tenant cannot read another user's connection", async () => {
+    // Deliberately NO where clause on clerk_user_id — the forgotten-predicate
+    // scenario this policy exists for.
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailAccounts),
+      { userId: "user-a" },
+    );
+    expect(asOwner.every((r) => r.clerkUserId === "user-a")).toBe(true);
+    expect(asOwner.some((r) => r.id === colleagueAccountId)).toBe(false);
+
+    // And the colleague sees theirs, so this is scoping rather than breakage.
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailAccounts),
+      { userId: COLLEAGUE },
+    );
+    expect(asColleague).toHaveLength(1);
+    expect(asColleague[0].id).toBe(colleagueAccountId);
+  });
+
+  it("omitting the user id reads NOTHING, not everything", async () => {
+    // The direction that matters: a caller who forgets `{ userId }` must be
+    // denied, never granted. Same property app.tenant_role was built with.
+    const rows = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.mailAccounts),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("a colleague cannot read another user's thread subjects", async () => {
+    // mail_thread_index has no clerk_user_id of its own — it inherits scope
+    // through mail_accounts. This proves the EXISTS in 0043 actually composes.
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailThreadIndex),
+      { userId: "user-a" },
+    );
+    expect(asOwner.length).toBeGreaterThan(0);
+    expect(asOwner.every((r) => r.threadId === "thread-a")).toBe(true);
+
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailThreadIndex),
+      { userId: COLLEAGUE },
+    );
+    expect(asColleague).toHaveLength(0);
+
+    const asNobody = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.mailThreadIndex),
+    );
+    expect(asNobody).toHaveLength(0);
+  });
+
+  it("a colleague cannot delete another user's connection, but you can delete your own", async () => {
+    const deletedTheirs = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.mailAccounts)
+          .where(eq(schema.mailAccounts.clerkUserId, "user-a"))
+          .returning(),
+      { userId: COLLEAGUE },
+    );
+    expect(deletedTheirs).toHaveLength(0);
+
+    const deletedOwn = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.mailAccounts)
+          .where(eq(schema.mailAccounts.clerkUserId, COLLEAGUE))
+          .returning(),
+      { userId: COLLEAGUE },
+    );
+    expect(deletedOwn).toHaveLength(1);
+  });
+
+  it("cannot read the other tenant's mail password hashes", async () => {
+    const rows = await withTenant(tenantA, (tx) =>
+      tx
+        .select()
+        .from(schema.mailDirectoryAccounts)
+        .where(eq(schema.mailDirectoryAccounts.id, fx.b.directoryId)),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("cannot read the other tenant's thread subjects", async () => {
+    // Passes a valid user id on purpose, so this proves CROSS-TENANT denial
+    // rather than passing trivially because no user was set.
+    const rows = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.mailThreadIndex)
+          .where(eq(schema.mailThreadIndex.threadId, "thread-b")),
+      { userId: "user-a" },
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("members cannot write the trusted-code-only mail tables, even for their own tenant", async () => {
+    // No member INSERT policy exists on any of these. A member who could write
+    // mail_accounts could point an account at a token they control; one who
+    // could write mail_directory_accounts could set a hash on a colleague's
+    // address. Both are authentication bypasses, not data errors.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.mailAccounts).values({
+          tenantId: tenantA,
+          mailboxId: fx.a.mailboxId,
+          clerkUserId: "attacker",
+          accessTokenEnc: "attacker-controlled",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.mailDirectoryAccounts).values({
+          tenantId: tenantA,
+          mailboxId: fx.a.mailboxId,
+          login: `attacker-${STAMP_MAIL}@example.test`,
+          passwordHash: "$argon2id$chosen-by-attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.mailboxes).values({
+          tenantId: tenantA,
+          mailboxDomainId: fx.a.domainId,
+          localPart: "attacker",
+          address: `attacker@a-${STAMP_MAIL}.example`,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("members CAN write links and annotations for their own tenant", async () => {
+    // The deliberate exception: attaching a thread to an invoice is ordinary
+    // daily work, not an administrative act.
+    const inserted = await withTenant(tenantA, (tx) =>
+      tx
+        .insert(schema.mailLinks)
+        .values({
+          tenantId: tenantA,
+          threadId: "thread-a",
+          extensionSlug: "accounting",
+          entityType: "invoice",
+          entityId: fx.a.mailboxId,
+          createdByClerkUserId: "user-a",
+        })
+        .returning(),
+    );
+    expect(inserted).toHaveLength(1);
+  });
+
+  it("cannot INSERT links or annotations attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.mailLinks).values({
+          tenantId: tenantB,
+          threadId: "thread-b",
+          extensionSlug: "accounting",
+          entityType: "invoice",
+          entityId: fx.b.mailboxId,
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.mailAnnotations).values({
+          tenantId: tenantB,
+          threadId: "thread-b",
+          extensionSlug: "accounting",
+          data: { planted: true },
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's mailbox cannot hang off the OTHER tenant's domain", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.mailboxes).values({
+          tenantId: tenantA,
+          mailboxDomainId: fx.b.domainId,
+          localPart: "smuggled",
+          address: `smuggled@b-${STAMP_MAIL}.example`,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's connection cannot point at the OTHER tenant's mailbox", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.mailAccounts).values({
+          tenantId: tenantA,
+          mailboxId: fx.b.mailboxId,
+          clerkUserId: "user-a",
+          accessTokenEnc: "x",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's thread index cannot point at the OTHER tenant's connection", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.mailThreadIndex).values({
+          tenantId: tenantA,
+          mailAccountId: fx.b.accountId,
+          threadId: "smuggled",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's directory row cannot point at the OTHER tenant's mailbox", async () => {
+    // This one is the authentication boundary: a directory row is what the mail
+    // server authenticates against, so a cross-tenant one is a working login
+    // for an address that belongs to somebody else.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.mailDirectoryAccounts).values({
+          tenantId: tenantA,
+          mailboxId: fx.b.mailboxId,
+          login: `smuggled-${STAMP_MAIL}@example.test`,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cross-tenant UPDATE and DELETE affect zero mail rows", async () => {
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.mailAnnotations)
+        .set({ data: { defaced: true } })
+        .where(eq(schema.mailAnnotations.tenantId, tenantB))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+
+    const deleted = await withTenant(tenantA, (tx) =>
+      tx
+        .delete(schema.mailLinks)
+        .where(eq(schema.mailLinks.tenantId, tenantB))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("default-deny: no context sees no mail rows at all", async () => {
+    const results = await withSystem(async (tx) => {
+      await tx.execute(sql`select set_config('app.role', '', true)`);
+      await tx.execute(sql`select set_config('app.tenant_id', '', true)`);
+      await tx.execute(sql`select set_config('app.tenant_role', '', true)`);
+      return Promise.all([
+        tx.select().from(schema.mailboxDomains),
+        tx.select().from(schema.mailboxes),
+        tx.select().from(schema.mailDirectoryAccounts),
+        tx.select().from(schema.mailAccounts),
+        tx.select().from(schema.mailThreadIndex),
+        tx.select().from(schema.mailLinks),
+        tx.select().from(schema.mailAnnotations),
+      ]);
+    });
+    for (const rows of results) expect(rows).toHaveLength(0);
+  });
+});

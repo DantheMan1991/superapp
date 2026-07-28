@@ -1,6 +1,6 @@
 import "server-only";
 import { and, eq } from "drizzle-orm";
-import { schema, withSystem } from "@/db";
+import { schema, withSystem, withTenant } from "@/db";
 import type { MailAccount } from "@/db/schema";
 import {
   createJmapClient,
@@ -19,6 +19,21 @@ import { needsRefresh, refreshAccessToken, type TokenSet } from "./flow";
  * through `authorizedClient()` and never sees a credential, which keeps the
  * decrypt call auditable to one file rather than spread across every route
  * that lists a folder.
+ *
+ * Which helper each function uses is deliberate, and the split is the security
+ * of this file (drizzle/0043):
+ *
+ *   withTenant(..., { userId })  READS and the user's own DELETE. RLS enforces
+ *                                "this row is mine" — the app no longer has to
+ *                                remember, and a forgotten predicate returns
+ *                                nothing instead of a colleague's mailbox.
+ *   withSystem()                 Writes that a member must never be able to
+ *                                perform: creating a connection, rewriting a
+ *                                token, marking one dead. A member who could do
+ *                                any of those could point an account at a token
+ *                                they control, which is an authentication
+ *                                bypass rather than a data error. Each such
+ *                                call carries its own justification, per S2.
  */
 
 export type ConnectionResult<T> =
@@ -33,6 +48,11 @@ export async function saveConnection(input: {
   jmapAccountId: string;
   tokens: TokenSet;
 }): Promise<MailAccount> {
+  // withSystem: mail_accounts has no member INSERT or UPDATE policy, on
+  // purpose — a member who could write these columns could point an account at
+  // a token they control. The caller is the signature-checked OAuth callback,
+  // which has already proved the tenant, the user and that the token opens the
+  // mailbox, so this is trusted sync code in the S2 sense.
   return withSystem(async (tx) => {
     const [row] = await tx
       .insert(schema.mailAccounts)
@@ -76,19 +96,30 @@ export async function saveConnection(input: {
   });
 }
 
+/**
+ * One person's connection to one mailbox.
+ *
+ * The `clerkUserId` predicate is kept even though the RLS policy already
+ * enforces it. That is not redundancy for its own sake: the predicate states
+ * the intent at the call site, and the policy guarantees it. If the two ever
+ * disagree the policy wins, which is the direction that fails safe.
+ */
 export async function loadConnection(
   tenantId: string,
   clerkUserId: string,
   mailboxId: string,
 ): Promise<MailAccount | null> {
-  const row = await withSystem((tx) =>
-    tx.query.mailAccounts.findFirst({
-      where: and(
-        eq(schema.mailAccounts.tenantId, tenantId),
-        eq(schema.mailAccounts.clerkUserId, clerkUserId),
-        eq(schema.mailAccounts.mailboxId, mailboxId),
-      ),
-    }),
+  const row = await withTenant(
+    tenantId,
+    (tx) =>
+      tx.query.mailAccounts.findFirst({
+        where: and(
+          eq(schema.mailAccounts.tenantId, tenantId),
+          eq(schema.mailAccounts.clerkUserId, clerkUserId),
+          eq(schema.mailAccounts.mailboxId, mailboxId),
+        ),
+      }),
+    { userId: clerkUserId },
   );
   return row ?? null;
 }
@@ -97,20 +128,26 @@ export async function listConnections(
   tenantId: string,
   clerkUserId: string,
 ): Promise<MailAccount[]> {
-  return withSystem((tx) =>
-    tx
-      .select()
-      .from(schema.mailAccounts)
-      .where(
-        and(
-          eq(schema.mailAccounts.tenantId, tenantId),
-          eq(schema.mailAccounts.clerkUserId, clerkUserId),
+  return withTenant(
+    tenantId,
+    (tx) =>
+      tx
+        .select()
+        .from(schema.mailAccounts)
+        .where(
+          and(
+            eq(schema.mailAccounts.tenantId, tenantId),
+            eq(schema.mailAccounts.clerkUserId, clerkUserId),
+          ),
         ),
-      ),
+    { userId: clerkUserId },
   );
 }
 
 async function markNeedsReauth(id: string, reason: string): Promise<void> {
+  // withSystem: a status write, and members cannot write this table (see
+  // saveConnection). Reached only from failure paths inside this file, never
+  // from user input — the id comes from a row we already loaded.
   await withSystem((tx) =>
     tx
       .update(schema.mailAccounts)
@@ -183,6 +220,9 @@ export async function authorizedClient(
     }
 
     accessToken = refreshed.data.accessToken;
+    // withSystem: writes a freshly minted token, which members cannot do (see
+    // saveConnection). The account row was loaded by the caller under the
+    // user's own context, so this is not a client-supplied id.
     await withSystem((tx) =>
       tx
         .update(schema.mailAccounts)
@@ -230,15 +270,23 @@ export async function disconnectMailbox(
   clerkUserId: string,
   mailboxId: string,
 ): Promise<void> {
-  await withSystem((tx) =>
-    tx
-      .delete(schema.mailAccounts)
-      .where(
-        and(
-          eq(schema.mailAccounts.tenantId, tenantId),
-          eq(schema.mailAccounts.clerkUserId, clerkUserId),
-          eq(schema.mailAccounts.mailboxId, mailboxId),
+  // Runs as the member, not as the system. mail_accounts carries a member
+  // DELETE policy scoped to (tenant, connecting user), so dropping a
+  // colleague's connection is refused by the database rather than merely
+  // unimplemented — which is what you want for the one destructive action a
+  // member can take on this table.
+  await withTenant(
+    tenantId,
+    (tx) =>
+      tx
+        .delete(schema.mailAccounts)
+        .where(
+          and(
+            eq(schema.mailAccounts.tenantId, tenantId),
+            eq(schema.mailAccounts.clerkUserId, clerkUserId),
+            eq(schema.mailAccounts.mailboxId, mailboxId),
+          ),
         ),
-      ),
+    { userId: clerkUserId },
   );
 }

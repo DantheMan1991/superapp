@@ -160,7 +160,10 @@ d("inbox tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
-  it("a member can see that a mail account exists but cannot write its tokens", async () => {
+  it("the connecting user sees their own account but cannot write its tokens", async () => {
+    // Since 0043 the read is scoped to the CONNECTING USER, not the tenant, so
+    // the user id is what makes this row visible at all — being the owner does
+    // not help, and that is the point.
     await withTenant(
       tenantA,
       async (tx) => {
@@ -174,8 +177,20 @@ d("inbox tables (RLS)", () => {
           .returning();
         expect(updated).toHaveLength(0);
       },
-      { role: "owner" },
+      { role: "owner", userId: "user-a" },
     );
+  });
+
+  it("the tenant OWNER cannot read a staff member's mailbox connection", async () => {
+    // The property the whole mail module rests on: a mailbox is one person's
+    // correspondence, and seniority does not open it. Owner role, right tenant,
+    // wrong person — no rows.
+    const rows = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailAccounts),
+      { role: "owner", userId: "someone-else" },
+    );
+    expect(rows).toHaveLength(0);
   });
 
   it("cannot read another tenant's mail accounts or directory", async () => {
@@ -186,12 +201,18 @@ d("inbox tables (RLS)", () => {
     });
   });
 
-  it("the thread index is readable but not authorable by members", async () => {
-    await withTenant(tenantA, async (tx) => {
-      const rows = await tx.select().from(schema.mailThreadIndex);
-      expect(rows).toHaveLength(1);
-      expect(rows[0].subject).toBe("Revised drawings");
-    });
+  it("the thread index is readable by its owner but not authorable by members", async () => {
+    // Also user-scoped since 0043 — it inherits scope through mail_accounts,
+    // because a subject line is still correspondence.
+    await withTenant(
+      tenantA,
+      async (tx) => {
+        const rows = await tx.select().from(schema.mailThreadIndex);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].subject).toBe("Revised drawings");
+      },
+      { userId: "user-a" },
+    );
 
     await expect(
       withTenant(tenantA, (tx) =>

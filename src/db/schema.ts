@@ -2462,6 +2462,20 @@ export const mailAccounts = pgTable(
      */
     lastState: text("last_state").notNull().default(""),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    /**
+     * Unread CONVERSATIONS in the inbox, cached here so the sidebar badge is an
+     * indexed local read.
+     *
+     * The badge renders in the dashboard layout, which is `force-dynamic` and
+     * runs on EVERY page in the product — a JMAP call there would put
+     * mail-server latency on the invoice list and the document browser. So the
+     * number is written by sync and read from Postgres, and is stale by at most
+     * one sync interval. That staleness is the entire point of the column.
+     *
+     * Threads, not messages: the app is conversation-first, so a badge counting
+     * messages would say "7" over a list showing three rows.
+     */
+    inboxUnread: integer("inbox_unread").notNull().default(0),
     /** connected | needs_reauth | revoked | error */
     status: text("status").notNull().default("connected"),
     lastError: text("last_error").notNull().default(""),

@@ -1,6 +1,7 @@
 import type { ModuleDefinition } from "./types";
 import { AccountingModule } from "./accounting/AccountingModule";
 import { DocumentsModule } from "./documents/DocumentsModule";
+import { EmailModule } from "./email/EmailModule";
 import { HelloModule } from "./hello/HelloModule";
 
 /**
@@ -27,6 +28,15 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     name: "Documents",
     icon: "folder",
     Component: DocumentsModule,
+  },
+  email: {
+    slug: "email",
+    name: "Mail",
+    icon: "mail",
+    // The one surface in the product that reads as a list beside a detail
+    // pane; the shell's centred column would spend half a monitor on margin.
+    layout: "full",
+    Component: EmailModule,
   },
 };
 

@@ -113,14 +113,21 @@ function parseBodyParts(value: unknown): JmapEmailBodyPart[] {
 function resolveBody(
   parts: unknown,
   bodyValues: Record<string, unknown> | null,
-): string | null {
+): { value: string; truncated: boolean } | null {
   if (!bodyValues || !Array.isArray(parts)) return null;
   for (const raw of parts) {
     const part = asRecord(raw);
     const partId = part?.partId;
     if (typeof partId !== "string") continue;
     const entry = asRecord(bodyValues[partId]);
-    if (entry && typeof entry.value === "string") return entry.value;
+    if (entry && typeof entry.value === "string") {
+      // `isTruncated` is carried, not dropped. A server that cut the body at
+      // maxBodyValueBytes cut it at an arbitrary byte — mid-tag for HTML — and
+      // a reader shown a partial message with no sign of it is being lied to.
+      // Verified present on a live server, which reports it as false when the
+      // body fits.
+      return { value: entry.value, truncated: asBool(entry.isTruncated) };
+    }
   }
   return null;
 }
@@ -131,6 +138,8 @@ export function parseEmail(raw: unknown): JmapEmail | null {
 
   const bodyValues = asRecord(r.bodyValues);
   const attachments = parseBodyParts(r.attachments);
+  const text = resolveBody(r.textBody, bodyValues);
+  const html = resolveBody(r.htmlBody, bodyValues);
 
   return {
     id: r.id,
@@ -149,6 +158,12 @@ export function parseEmail(raw: unknown): JmapEmail | null {
     cc: parseAddresses(r.cc),
     bcc: parseAddresses(r.bcc),
     replyTo: parseAddresses(r.replyTo),
+    // Arrays or null on the wire, never bare strings — confirmed live. Kept as
+    // null rather than [] when absent, so "not fetched" stays distinguishable
+    // from "fetched and empty".
+    messageId: Array.isArray(r.messageId) ? asStringArray(r.messageId) : null,
+    inReplyTo: Array.isArray(r.inReplyTo) ? asStringArray(r.inReplyTo) : null,
+    references: Array.isArray(r.references) ? asStringArray(r.references) : null,
     subject: asString(r.subject),
     sentAt: parseJmapDate(r.sentAt),
     receivedAt: parseJmapDate(r.receivedAt),
@@ -158,8 +173,11 @@ export function parseEmail(raw: unknown): JmapEmail | null {
     // with attachments never renders as though it had none.
     hasAttachment: asBool(r.hasAttachment, attachments.length > 0),
     attachments,
-    textBody: resolveBody(r.textBody, bodyValues),
-    htmlBody: resolveBody(r.htmlBody, bodyValues),
+    textBody: text?.value ?? null,
+    htmlBody: html?.value ?? null,
+    // Either body being cut makes the message incomplete; the reader is told
+    // once, not per part.
+    bodyTruncated: (text?.truncated ?? false) || (html?.truncated ?? false),
   };
 }
 
@@ -273,6 +291,38 @@ export function parseChanges(raw: unknown): JmapChanges | null {
 const MAIL_CAPABILITY = "urn:ietf:params:jmap:mail";
 
 /**
+ * Does this session actually belong to the address someone asked to connect?
+ *
+ * Proving a token opens *a* mailbox is not the same as proving it opens *the*
+ * mailbox. Without this, clicking Connect on `info@acme.com` and then
+ * authorizing as `dan@acme.com` records `info@` as connected while every read
+ * returns Dan's personal mail — a mailbox that looks right, reads wrong, and
+ * would go on to poison the thread index under the wrong address.
+ *
+ * `username` is the RFC 8620 field for "the credentials this session belongs
+ * to". `accountName` is the fallback, because it is where some servers put the
+ * address instead; the spec only promises it is human-friendly.
+ *
+ * Returns false when the session offers NEITHER. That is deliberate and matches
+ * the rest of this module: an unverifiable claim is treated as a failed one,
+ * because the two mistakes are wildly asymmetric — a false refusal costs a
+ * connection somebody can retry, a false accept silently files one person's
+ * correspondence under another person's address.
+ */
+export function sessionMatchesAddress(
+  session: Pick<JmapSession, "username" | "accountName">,
+  address: string,
+): boolean {
+  const want = address.trim().toLowerCase();
+  if (want.length === 0) return false;
+  const candidates = [session.username, session.accountName]
+    .map((v) => v.trim().toLowerCase())
+    .filter((v) => v.length > 0);
+  if (candidates.length === 0) return false;
+  return candidates.includes(want);
+}
+
+/**
  * The session object from the discovery endpoint.
  *
  * Returns null unless a mail account can actually be identified, because every
@@ -304,6 +354,9 @@ export function parseSession(raw: unknown): JmapSession | null {
   const account = asRecord(accounts?.[accountId]);
 
   return {
+    // Filled in by discoverJmapSession, which is the only caller that knows
+    // where it connected. Parsing cannot know.
+    sessionUrl: "",
     apiUrl,
     downloadUrl: asString(r.downloadUrl),
     uploadUrl: asString(r.uploadUrl),
@@ -311,6 +364,7 @@ export function parseSession(raw: unknown): JmapSession | null {
       typeof r.eventSourceUrl === "string" ? r.eventSourceUrl : null,
     primaryAccountId: accountId,
     accountName: asString(account?.name),
+    username: asString(r.username),
     state: asString(r.state),
     capabilities: Object.keys(asRecord(r.capabilities) ?? {}),
   };
@@ -328,7 +382,9 @@ export function parseSession(raw: unknown): JmapSession | null {
 export function takeMethodResponse(
   body: unknown,
   callId: string,
-): { ok: true; name: string; payload: unknown } | { ok: false; message: string } {
+):
+  | { ok: true; name: string; payload: unknown }
+  | { ok: false; message: string; errorType?: string } {
   const root = asRecord(body);
   const responses = root?.methodResponses;
   if (!Array.isArray(responses)) {
@@ -342,10 +398,12 @@ export function takeMethodResponse(
     const name = asString(entry[0]);
     if (name === "error") {
       const err = asRecord(entry[1]);
-      return {
-        ok: false,
-        message: describeMethodError(asString(err?.type, "unknown")),
-      };
+      const errorType = asString(err?.type, "unknown");
+      // The TYPE is carried alongside the sentence, not replaced by it. Callers
+      // have to branch on it — `cannotCalculateChanges` means "resync from
+      // scratch", and matching that on the text of an English message is the
+      // kind of thing that breaks the day the copy is improved.
+      return { ok: false, message: describeMethodError(errorType), errorType };
     }
     return { ok: true, name, payload: entry[1] };
   }

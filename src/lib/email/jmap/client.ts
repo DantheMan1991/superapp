@@ -39,6 +39,23 @@ const CORE = "urn:ietf:params:jmap:core";
 const MAIL = "urn:ietf:params:jmap:mail";
 const TIMEOUT_MS = 20_000;
 /**
+ * How much of a body to fetch. Generous enough that a normal message arrives
+ * whole, bounded so one pathological newsletter cannot blow out a serverless
+ * function's memory.
+ *
+ * Set EXPLICITLY rather than left to the server: without it the server picks,
+ * and a body silently cut mid-tag is both a message shown as complete when it
+ * is not, and the exact malformed input the sanitizer has to survive. Whatever
+ * comes back carries `isTruncated`, which parse.ts now propagates.
+ */
+const MAX_BODY_VALUE_BYTES = 512_000;
+/**
+ * Longer than a method call's timeout: an attachment is megabytes where a JMAP
+ * response is kilobytes, and a 20-second cap would fail a large PDF on a slow
+ * link that is otherwise working fine.
+ */
+const BLOB_TIMEOUT_MS = 30_000;
+/**
  * Core `maxObjectsInGet` — 500 on the server this was verified against.
  * Conservative rather than read from the session, because exceeding it is an
  * error rather than a truncation, and the failure would land on whoever opened
@@ -72,7 +89,53 @@ const DETAIL_PROPERTIES = [
   "htmlBody",
   "bodyValues",
   "attachments",
+  // Threading headers. Free on a detail fetch and useless on a list, and a
+  // reply's References chain cannot be built from data never requested.
+  "messageId",
+  "inReplyTo",
+  "references",
 ];
+
+/**
+ * Put the session's own host back on a templated URL.
+ *
+ * Stalwart builds `apiUrl`, `downloadUrl` and `uploadUrl` from its CONFIGURED
+ * HOSTNAME rather than from the request's Host header — verified twice against
+ * a live server, which advertised `https://mail.yosherdev.com/...` to a client
+ * that had reached it on `localhost:8080`.
+ *
+ * That is harmless for `apiUrl` in production, where the name resolves. It is
+ * not harmless here: the download happens SERVER-SIDE, so a name that does not
+ * resolve from the app's network 404s every attachment, in production only, and
+ * reproduces nowhere useful. Rebasing onto the host we actually authenticated
+ * against is the conservative answer — that host is known to work, because the
+ * session came back from it.
+ *
+ * Path, query and template variables are untouched; only scheme and authority
+ * are replaced.
+ */
+export function rebaseOntoSessionHost(url: string, sessionUrl: string): string {
+  try {
+    const target = new URL(url);
+    const base = new URL(sessionUrl);
+    if (target.host === base.host && target.protocol === base.protocol) {
+      return url;
+    }
+
+    // Everything after the authority is copied VERBATIM, by string surgery
+    // rather than through URL.pathname — which percent-encodes the RFC 6570
+    // braces these templates are made of, turning {blobId} into %7BblobId%7D so
+    // that downloadUrlFor's substitution silently matches nothing and every
+    // attachment 404s. There is a test for exactly that.
+    const parts = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*(.*)$/i.exec(url);
+    if (!parts) return url;
+    return `${base.protocol}//${base.host}${parts[1]}`;
+  } catch {
+    // An unparseable URL is left exactly as it was: guessing at a repair is how
+    // a bad value becomes a confidently wrong one.
+    return url;
+  }
+}
 
 interface MethodCall {
   0: string;
@@ -149,19 +212,34 @@ export async function discoverJmapSession(
   const result = await httpJson(sessionUrl, token, { method: "GET" });
   if (!result.ok) return result;
 
-  const session = parseSession(result.data);
-  if (!session) {
+  const parsed = parseSession(result.data);
+  if (!parsed) {
     return {
       ok: false,
       message: "The mail server didn't return a usable mail account.",
     };
   }
-  if (!session.capabilities.includes(MAIL)) {
+  if (!parsed.capabilities.includes(MAIL)) {
     return {
       ok: false,
       message: "That server doesn't offer mail over this protocol.",
     };
   }
+
+  // Every advertised URL is rebased onto the host we actually reached. Without
+  // this the client is unusable against any server whose configured hostname
+  // differs from its address — which is the normal case behind a proxy, in
+  // Docker, and on every local install.
+  const session: JmapSession = {
+    ...parsed,
+    sessionUrl,
+    apiUrl: rebaseOntoSessionHost(parsed.apiUrl, sessionUrl),
+    downloadUrl: rebaseOntoSessionHost(parsed.downloadUrl, sessionUrl),
+    uploadUrl: rebaseOntoSessionHost(parsed.uploadUrl, sessionUrl),
+    eventSourceUrl: parsed.eventSourceUrl
+      ? rebaseOntoSessionHost(parsed.eventSourceUrl, sessionUrl)
+      : null,
+  };
   return { ok: true, data: session };
 }
 
@@ -183,10 +261,27 @@ export interface JmapClient {
     on: boolean,
   ): Promise<JmapResult<{ updated: string[]; failed: string[] }>>;
   moveToMailbox(emailIds: string[], mailboxId: string): Promise<JmapResult<{ updated: string[] }>>;
-  emailChanges(sinceState: string): Promise<JmapResult<JmapChanges>>;
+  emailChanges(
+    sinceState: string,
+    maxChanges?: number,
+  ): Promise<JmapResult<JmapChanges>>;
   /** Cheap "has anything changed?" — one request, no payload. */
   currentState(): Promise<JmapResult<string>>;
   downloadUrlFor(blobId: string, name: string, type: string): string;
+  /**
+   * Fetch a blob's bytes, returning the raw upstream Response so a route can
+   * stream it straight through without buffering an attachment into memory.
+   *
+   * The fetch lives HERE rather than in the route because the bearer token
+   * lives here. Exposing the token so a caller could build its own request
+   * would break the property this whole layer is built on — that everything
+   * above `authorizedClient()` reads mail without ever seeing a credential.
+   */
+  downloadBlob(
+    blobId: string,
+    name: string,
+    type: string,
+  ): Promise<JmapResult<Response>>;
 }
 
 function serializeFilter(filter: JmapEmailFilter): Record<string, unknown> {
@@ -321,7 +416,11 @@ export function createJmapClient(
               ids: batch,
               properties: withBodies ? DETAIL_PROPERTIES : LIST_PROPERTIES,
               ...(withBodies
-                ? { fetchTextBodyValues: true, fetchHTMLBodyValues: true }
+                ? {
+                    fetchTextBodyValues: true,
+                    fetchHTMLBodyValues: true,
+                    maxBodyValueBytes: MAX_BODY_VALUE_BYTES,
+                  }
                 : {}),
             },
             "g",
@@ -354,6 +453,7 @@ export function createJmapClient(
             properties: DETAIL_PROPERTIES,
             fetchTextBodyValues: true,
             fetchHTMLBodyValues: true,
+            maxBodyValueBytes: MAX_BODY_VALUE_BYTES,
           },
           "g",
         ] as unknown as MethodCall,
@@ -437,14 +537,22 @@ export function createJmapClient(
       return { ok: true, data: { updated: Object.keys(payload?.updated ?? {}) } };
     },
 
-    async emailChanges(sinceState) {
+    async emailChanges(sinceState, maxChanges = 200) {
       const result = await call([
-        ["Email/changes", { accountId, sinceState, maxChanges: 200 }, "c"] as unknown as MethodCall,
+        ["Email/changes", { accountId, sinceState, maxChanges }, "c"] as unknown as MethodCall,
       ]);
       if (!result.ok) return result;
 
       const taken = takeMethodResponse(result.data, "c");
-      if (!taken.ok) return { ok: false, message: taken.message };
+      // The error TYPE is propagated, not just the sentence: the caller has to
+      // recognise `cannotCalculateChanges` to fall back to a full resync.
+      if (!taken.ok) {
+        return {
+          ok: false,
+          message: taken.message,
+          ...(taken.errorType ? { errorType: taken.errorType } : {}),
+        };
+      }
       const changes = parseChanges(taken.payload);
       if (!changes) {
         return { ok: false, message: "The mail server's change list couldn't be read." };
@@ -471,11 +579,51 @@ export function createJmapClient(
     downloadUrlFor(blobId, name, type) {
       // RFC 8620 template variables. The name is what the browser will save
       // the file as, so it is encoded rather than interpolated raw.
+      // Already rebased onto the reachable host at discovery time.
       return session.downloadUrl
         .replace("{accountId}", encodeURIComponent(accountId))
         .replace("{blobId}", encodeURIComponent(blobId))
         .replace("{name}", encodeURIComponent(name))
         .replace("{type}", encodeURIComponent(type));
+    },
+
+    /**
+     * Fetch a blob's bytes. The bearer token never leaves this closure — see
+     * the interface comment for why that matters.
+     */
+    async downloadBlob(blobId, name, type) {
+      let response: Response;
+      try {
+        response = await fetch(this.downloadUrlFor(blobId, name, type), {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(BLOB_TIMEOUT_MS),
+          cache: "no-store",
+        });
+      } catch (err) {
+        const timedOut = err instanceof Error && err.name === "TimeoutError";
+        return {
+          ok: false,
+          message: timedOut
+            ? "That attachment took too long to fetch."
+            : "Couldn't reach the mail server.",
+        };
+      }
+      if (response.status === 401) {
+        return {
+          ok: false,
+          status: 401,
+          needsReauth: true,
+          message: "This mailbox needs to be reconnected.",
+        };
+      }
+      if (!response.ok || !response.body) {
+        return {
+          ok: false,
+          status: response.status,
+          message: "That attachment is no longer on the mail server.",
+        };
+      }
+      return { ok: true, data: response };
     },
   };
 }

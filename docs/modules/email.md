@@ -208,6 +208,600 @@ key. Both would live in the same environment on the same server — two things t
 rotate, no additional protection. Consequence: rotating that key now
 invalidates Plaid tokens AND mailbox connections.
 
+### 2026-07-27 (later still) — Slice 0: the module seam, and a probe that moved the roadmap
+
+First slice of the Outlook-class mail client. Deliberately small in payload and
+wide in reach: it lands the shared-chrome changes on their own, so a layout
+regression is bisectable, and it closes two gaps that had been open since the
+foundation shipped.
+
+**The module exists now.** `email` is seeded (name **"Mail"**, sortOrder 35),
+registered in `moduleRegistry`, and renders at `/dashboard/m/email` — the route
+both OAuth routes have been redirecting to since the flow was built, and which
+until now was a 404. The owner-only `/dashboard/email` link is relabelled
+**"Email setup"**: two sidebar entries both called "Email" would have been a
+coin toss every time. Slice 0's screen is the way in — connect a mailbox,
+reconnect one that expired, disconnect — and it is honest that reading arrives
+next.
+
+**A copy correction worth keeping as a rule.** The module's first description
+read "threads beside the job, the drawing set and the invoice". The founder cut
+it immediately: *this is a core tool and should not be related to any specific
+industry — that is what the add-ons are for.* Drawing sets are construction's
+language, and putting them in a core module's description quietly tells a
+plumber, a clinic and a machine shop that this was not built for them. Core
+modules describe what every business has — jobs, customers, invoices. Anything
+narrower belongs to a Layer 2 industry template, which is the whole reason that
+layer exists. The same test applies to every core module's UI copy, not just
+this one.
+
+**Full-width layout, without naming a module in the shell.** Three panes fight
+the shell's `max-w-6xl` clamp. Rather than special-casing a pathname,
+`ModuleDefinition` gained `layout?: "standard" | "full"`; the dashboard layout
+maps *enabled* modules that ask for it into path prefixes and hands them to
+`AppShell`, which already knows the pathname because it is a client component.
+A switched-off module therefore cannot widen the shell, and the next full-width
+module is a flag rather than an edit to shared chrome. `<main>` also gained
+`min-w-0` — without it a wide grid pushes the whole flex row past the viewport
+instead of scrolling inside its own pane.
+
+**The isolation gap is closed.** The mail tables had never been added to
+`tests/tenant-isolation.test.ts` — step 5 of the AGENTS.md module workflow,
+missed when the foundation landed. Thirteen tests now certify all seven tables,
+in three groups matching the three policy shapes in `0042`: member-read tables
+refuse member writes (a member who could write `mail_accounts` could point an
+account at a token they control; one who could write
+`mail_directory_accounts` could set a hash on a colleague's address — both are
+authentication bypasses, not data errors), `mail_links`/`mail_annotations`
+accept member writes but pin `tenant_id`, and every composite FK refuses a
+cross-tenant target. The highest-value assertion is the plainest: **tenant A
+cannot read tenant B's stored OAuth token.**
+
+**`npm run jmap:probe` was extended, and immediately earned itself again.** It
+now checks capabilities and server limits, the cheap-poll shape, threading
+headers, body truncation, attachment/cid shapes, the download URL's host, and
+identities — and prints a FINDINGS block naming anything the code assumes that
+the server disagrees with. Run against the local Stalwart 0.16.15 it confirmed
+three designs and **overturned two roadmap assumptions**:
+
+Confirmed:
+
+- **`Email/get {ids: []}` is tolerated** and returns just the state string. The
+  cheap "has anything changed?" poll the sync design rests on is real.
+- **`Identity/get` works**, and identities carry `textSignature`/`htmlSignature`
+  — so signatures live on the mail server and need no table of ours.
+- **`maxObjectsInGet` is 500**, exactly what `client.ts` hardcodes. But
+  **`maxObjectsInSet` is also 500** and `maxCallsInRequest` is 16 — bulk
+  operations need the same chunking `getEmails()` already does, and a batch
+  cannot exceed sixteen method calls.
+
+Overturned — both in the direction of *less* work, which is the rarer surprise:
+
+- **Rules do not need ManageSieve.** The plan budgeted Slice 8 as "a different
+  protocol on a different port with no client in this repo". This server
+  advertises **`urn:ietf:params:jmap:sieve`** with a large extension set
+  (`fileinto`, `imap4flags`, `regex`, `vacation`, `spamtest`, …). Rules are
+  method calls on the client we already have.
+- **Contacts and calendar are JMAP here, not CalDAV/CardDAV.** The server
+  advertises `urn:ietf:params:jmap:contacts` and
+  `urn:ietf:params:jmap:calendars` (plus `:parse`, `principals`,
+  `principals:availability` for free/busy). The judgement that calendar belongs
+  to the `scheduling` module still stands on product grounds — jobs and
+  appointments are its remit — but the *protocol* cost of getting there is a
+  fraction of what was assumed, and it can reuse this client rather than
+  starting one.
+
+Also advertised and worth knowing: `urn:ietf:params:jmap:websocket` and
+`webpush-vapid` (push exists, though serverless still cannot hold a socket —
+web push may be the way in later), `urn:ietf:params:jmap:blob`,
+`:quota`, `:mail:share` (server-side ACLs, the right source of truth for
+delegation), and `:filenode` — a WebDAV-ish file store this project has no use
+for, since Documents already owns that job.
+
+**What the probe could NOT confirm, and says so loudly**: the mailbox is empty,
+so body truncation, charset decoding, `cid` shape, RFC 2047 attachment-name
+encoding and the blob download's `Content-Length` are all still unproven. The
+probe reports this as a finding rather than passing silently — an empty mailbox
+must not read as a clean bill of health. **Send the local account a message
+with an inline image and an attachment, then re-run, before Slice 2 renders
+anything.**
+
+One confirmed landmine already: the session advertises
+`downloadUrl: https://mail.yosherdev.com/jmap/download/...` while the probe
+reached `localhost:8080`. `downloadUrlFor()` uses the advertised value verbatim,
+so attachments will 404 anywhere that hostname does not resolve — and because
+the fetch is server-side, it reproduces nowhere useful. Same class of trap as
+the `apiUrl` hostname finding, and the fix is the same: rebase onto the host
+from the stored `jmapSessionUrl`.
+
+### 2026-07-27 (later) — Slice 1: per-user mailbox isolation (`0043`)
+
+The hole this closes was the largest thing standing between the foundation and
+an inbox, and it was invisible from the outside: **per-user privacy existed only
+in application code.**
+
+`mail_accounts_member_read` scoped rows to the *tenant*, and every read in
+`oauth/accounts.ts` ran under `withSystem()` — which sets
+`app.role = 'superadmin'`, so the member policy never fired on the app path at
+all. The guarantee "your mailbox is yours" was one forgotten `clerk_user_id`
+predicate away from a colleague reading somebody's mail. Survivable while the
+only caller was the OAuth callback; not survivable the moment a UI reads these
+tables on every page render.
+
+**A fourth RLS setting.** `app.clerk_user_id`, set by an optional
+`withTenant(..., { userId })`, read by `app_current_user()`. It returns NULL
+when unset, exactly like `app_current_tenant()`, so a caller who forgets it
+reads **zero** rows rather than the whole tenant's — the same fail-closed
+direction `app.tenant_role` was built with in `0024`, and the property any fifth
+setting must also have. `withTenant` writes the value on every call, `""` when
+absent, because on a pooled connection an unset variable is one still holding
+whatever the previous transaction left behind.
+
+`mail_thread_index` carries no user column of its own, so its policy reaches
+through `mail_accounts` with an EXISTS. Worth understanding why that is safe
+rather than merely correct: the subquery reads `mail_accounts`, so
+`mail_accounts`' own policy applies to it, and the two compose — there is no
+path where the thread policy is looser than the account policy it depends on,
+and tightening the account policy later tightens this one automatically. A
+subject line is not a body, but *"Re: your disciplinary hearing"* in a
+colleague's thread list is still a leak.
+
+**One policy got wider, deliberately.** `mail_accounts` gained a member DELETE
+scoped to `(tenant, connecting user)`. Disconnecting your own mailbox is
+ordinary work, and a scoped policy makes deleting a *colleague's* connection
+structurally impossible rather than merely unimplemented — while removing a
+`withSystem()` call from a user-triggered path, which is the direction S2 asks
+for. Writes stay trusted-code-only: a member who could INSERT or UPDATE here
+could point an account at a token they control, which is an authentication
+bypass rather than a data error. The three remaining `withSystem()` calls now
+each carry their justification at the call site.
+
+Four new isolation tests, and they ask a different question from the rest of
+that file. Everything else there asks "can tenant A read tenant B?"; these ask
+the one the inbox actually turns on — **can one employee read a colleague's
+mail?** Same tenant, same context, different person. The most valuable of them
+is the plainest: a `select()` with no `where` clause at all, run as the wrong
+user, returning nothing.
+
+Also landed: `npm run db:migrate -- --dev` targets the Neon dev branch.
+`docs/security.md` §8 requires every migration to run against both databases,
+and the only previous way to reach the branch was editing `.env` or splicing a
+connection string through the shell — which is how a dotenv banner once ended up
+inside a URL. **`0043` has been applied to the dev branch; production is still
+outstanding.**
+
+### 2026-07-27 (later still) — Slice 2 groundwork: the client could never have worked
+
+`npm run mail:fixture` was added — it delivers one deliberately awkward message
+to the local Stalwart over SMTP (multipart/mixed → related → alternative, an
+inline `cid:` image, a remote tracking pixel, a `<script>`, an `onerror`, a
+`javascript:` link, an RFC 2047 encoded filename, a non-ASCII subject). It is
+guarded to loopback only, because it speaks real SMTP.
+
+With a real message in the box the probe could finally answer what it had been
+refusing to guess at. **Four assumptions confirmed, one bug found, and one
+thing that would have stopped the inbox working at all.**
+
+Confirmed, and now golden fixtures in `tests/jmap.test.ts`:
+
+- **`cid` comes back WITHOUT angle brackets.** Sent as
+  `<logo-part-1@yosher.test>`, returned as `logo-part-1@yosher.test`. A cid map
+  keyed on the bracketed form would have matched nothing — and would have failed
+  as a *missing inline image*, not as an error.
+- **Attachment names arrive RFC 2047 DECODED.** `=?utf-8?B?…?=` came back as
+  `Facturación año.pdf`. No encoded-word decoder is needed.
+- **Bodies arrive as decoded UTF-8.** No iconv step.
+- **Inline parts DO appear in `attachments`**, distinguishable by
+  `disposition: "inline"` — so the cid map and the attachment chips are built
+  from one array.
+- **The blob download returns `Content-Length`**, so an oversized attachment can
+  be refused before streaming.
+- **`messageId` / `inReplyTo` / `references` are string ARRAYS or null**, never
+  bare strings, and absent means `null` rather than `[]`.
+
+**The thing that would have stopped everything.** `createJmapClient` POSTs to
+`session.apiUrl` verbatim, and Stalwart builds that from its **configured
+hostname**, not the request's Host header — it advertised
+`https://mail.yosherdev.com/jmap/` to a client that had reached it on
+`localhost:8080`. That name does not resolve. So every method call and every
+attachment fetch would have failed, and the earlier "verified against a live
+server" claim was only ever true of the *probe*, which rebases by hand.
+
+`discoverJmapSession` now rebases `apiUrl`, `downloadUrl`, `uploadUrl` and
+`eventSourceUrl` onto the host discovery actually reached — the one address in
+the session known to work, since the session came back from it. `JmapSession`
+gained `sessionUrl` to record it. This is a deliberate deviation from a strict
+reading of RFC 8620, which permits those URLs to live on another host: for a
+single self-hosted server, a misconfigured hostname is far more likely than a
+genuine split-host deployment, and the failure mode of trusting it is total.
+
+**And the bug the test caught after the "fix".** The first rebasing used
+`URL.pathname`, which **percent-encodes the RFC 6570 braces** — `{blobId}`
+became `%7BblobId%7D`, so `downloadUrlFor`'s substitution matched nothing and
+every attachment would still have 404'd, now with a URL that looked right.
+Rebasing is done by string surgery on the authority instead, and there is a test
+asserting the braces survive. Worth remembering: `new URL()` is not
+round-trip-safe for templated URLs.
+
+Also fixed here: `resolveBody` now carries `isTruncated` through to
+`JmapEmail.bodyTruncated` and `client.ts` sets `maxBodyValueBytes` explicitly
+(512 KB), so a long message is no longer silently cut mid-tag and shown as
+whole; and `takeMethodResponse` now returns the JMAP `errorType` alongside its
+English sentence, because the resync path has to branch on
+`cannotCalculateChanges` and matching that on message text breaks the day the
+copy improves.
+
+### 2026-07-28 — The first real OAuth round trip, and a mailbox-identity bug
+
+**The client has now authenticated for real.** Everything before this was
+`jmap:probe`, which uses Basic auth and predates the OAuth flow; the
+`authorizedClient()` → `createJmapClient()` path had never once run against a
+server. It does now, end to end: token decrypted from `mail_accounts`, session
+discovered, five folders listed, a message queried and fetched with bodies and
+attachments, and `currentState()` answered.
+
+Registering the client turned out to be one POST — Stalwart implements RFC 7591
+Dynamic Client Registration and accepts it **unauthenticated**, so
+`npm run mail:register-client` does it and is repeatable after a
+`docker compose down -v`. It asks for a **public** client
+(`token_endpoint_auth_method: "none"`); the flow already uses PKCE S256, and a
+secret adds nothing a stolen code could not defeat. The server's advertised
+scopes match `SCOPE_MAIL`/`offline_access` exactly.
+
+**A bug the flow only revealed by being used.** The callback proved the token
+opened *a* mailbox but never *the* mailbox being connected. Clicking Connect on
+`info@` and authorizing as `admin@` would have recorded the shared box as
+connected while every read returned the admin's personal mail — a mailbox that
+looks right, reads wrong, and would then file correspondence into the thread
+index under the wrong address. `sessionMatchesAddress()` now sits between "prove
+the session opens" and "record the connection", comparing the mailbox address to
+the session's `username` (RFC 8620's field for whose credentials these are),
+falling back to `accountName`. **It refuses when the session offers neither** —
+same asymmetry as everywhere else here: a false refusal costs a retry, a false
+accept silently misfiles somebody's mail.
+
+Deliberately deferred: a *legitimately* delegated shared mailbox appears in JMAP
+as a second entry in `session.accounts`, not as the primary. Matching against
+every account rather than just the primary is what Slice 10 needs; today, with
+no delegation, refusing is correct.
+
+Three environment traps, all now written into the code that hits them:
+
+- **Stalwart rejects `http://localhost:3000` as a redirect URI.** RFC 8252 §7.3
+  wants a loopback IP literal, because a hostname can be repointed by DNS or a
+  hosts file and the redirect URI is where an auth code lands. Local dev
+  therefore runs at `http://127.0.0.1:3000`, which is a different browser origin
+  — expect to sign in again after switching.
+- **`allowedDevOrigins` REPLACES Next's default allowlist rather than extending
+  it.** Adding `["127.0.0.1"]` for HMR silently dropped `localhost`, and the
+  symptom was `/sign-in` and `/sign-up` returning **404** while every other route
+  kept working. Both origins are listed now, with a comment saying why.
+- **A locally injected fixture lands in Junk, not the Inbox** — no SPF, no DKIM,
+  unauthenticated SMTP from a domain that does not exist. That is the spam
+  filter working. `mail:fixture` says so in its header.
+
+### 2026-07-28 (later) — Slice 2a: the message-rendering pipeline
+
+An HTML email is the most hostile input this platform accepts — anyone on the
+internet can put arbitrary markup in front of a signed-in staff user, and unlike
+an upload there is no gate to refuse it at. This is the layer that contains it.
+All pure, all free of `server-only`, so the security-critical string handling is
+testable without a network. 68 tests.
+
+**Which control is load-bearing, written into `render/policy.ts` so nobody has
+to re-derive it.** The body renders in an iframe pointed at its own route:
+
+- Against script execution — the **absence of `allow-scripts`** in the sandbox
+  attribute. A browser bit computed before any content parses, which nothing
+  inside the document can flip. `script-src 'none'` and the sanitizer are
+  defence in depth, not the boundary.
+- Against tracking — the **response CSP** (`img-src 'self'`, `connect-src
+  'none'`). The sanitizer's rewriting is what makes "show images" mean anything;
+  the CSP is what enforces it.
+
+`allow-same-origin` is present for exactly one reason: so the parent can read
+`scrollHeight` and size the frame, avoiding a nested scrollbar in a reading
+pane. It carries a boxed warning, because `allow-scripts` **together with**
+`allow-same-origin` lets a framed document delete its own sandbox attribute —
+that is not a weakened sandbox, it is none at all, on markup written by an
+anonymous sender. A test asserts the two tokens never co-occur. If script inside
+the frame is ever genuinely needed, the answer is a separate origin, not a token.
+
+**The CSP has no permissive mode.** It is byte-identical whether or not images
+are unblocked, because unblocking changes what the sanitizer *emits*, never what
+the browser *permits* — proxied images are `'self'`. A toggle that widened the
+policy would also re-open CSS exfiltration for the whole document.
+
+**`sanitize-html` was added, and the justification is that it is NOT the
+boundary.** With scripting already impossible, a bypass here is a rendering bug
+rather than a compromise, which makes the pure-Node parser proportionate against
+DOMPurify in a full DOM emulation. Hand-rolling was rejected outright: the
+instinct to hand-roll pure parsers is right in this codebase for CSV, MX records
+and JMAP payloads, and wrong for HTML, where mutation XSS lives in the
+disagreements *between* parsers.
+
+**The corpus found five real bugs in my own configuration**, which is the whole
+argument for writing it. Every payload runs through the same invariants, so
+adding one tests all of them:
+
+- `allowedAttributes` is applied AFTER `transformTags`, so the `target` and
+  `rel` the transform added were silently discarded — links shipped without
+  `rel="noopener"`.
+- An `exclusiveFilter` dropping src-less images also ate the `alt` text, which
+  is often the only description of what was withheld.
+- **`sanitize-html` does not filter `<style>` CONTENTS** — it treats them as
+  text and hands them back untouched, so a stylesheet full of `@import` and
+  remote `url()` sailed straight through. `textFilter` is never called for
+  them. Cleaned in a post-pass over already-sanitized output.
+
+Other decisions worth keeping: `sanitizeFileName` moved from
+`documents/allowlist.ts` to `lib/file-headers.ts`, because mail needs it and
+`src/modules/email/` may not import from `src/modules/documents/` — a filename
+bound for a header is a header concern anyway. The attachment policy is
+**inverted** relative to Documents: mail has no upload gate, so active types and
+dangerous extensions are served as `application/octet-stream` + `attachment` +
+`nosniff`, which no browser renders under any Content-Disposition quirk. PDFs
+are never inline — the reading pane paints them with the existing `PdfCanvas`,
+so there is one PDF path in the product. Signed URLs use labelled derivation
+from `APP_ENCRYPTION_KEY` (`public-token.ts`'s pattern), with every field in the
+payload — including the policy's own `disposition` and `servedType`, so a caller
+cannot ask for a nicer one — joined by NUL so no two claims can serialize alike.
+
+Also extracted: `src/lib/file-headers.ts`, so mail attachments and Vercel blobs
+share one header block. `blob-stream.ts` had always warned that "adding a route
+must not mean re-deriving this list", and a mail attachment cannot use it. A
+golden test asserts the emitted set is byte-identical to what it built inline.
+
+### 2026-07-28 (later still) — Slice 2b: the body and blob routes
+
+Two routes, and the hostile fixture message now renders safely end to end.
+
+**`GET /api/mail/[accountId]/messages/[emailId]/body`** — the document the
+reading pane's iframe loads. Served as its own response precisely so it carries
+its own CSP; a `srcdoc` document would inherit the embedder's, and this app has
+none. No signature: `gateMailRoute` proves the account is the caller's through
+RLS, so a fabricated `emailId` can only ever address the caller's own mail.
+
+**`GET /api/mail/[accountId]/blob/[blobId]`** — attachments AND inline images
+through ONE route, so the header block cannot drift between the two paths. This
+one IS signed, and the reason is specific: the signed payload carries the
+attachment policy's `servedType`, `fileName` and `disposition`, so a caller
+cannot ask for `text/html; inline` and get active content rendered from our own
+origin. Order of checks is the security — session and module and RLS-proved
+account ownership, then the signature **before any I/O** (pure CPU, so a flood
+costs no Neon query and no JMAP call), then the signed tenant/user against the
+live session, only then the mail server. Everything that fails returns the same
+404; a 403 would confirm a blob exists.
+
+**`downloadBlob()` was added to the JMAP client rather than exposing the token.**
+The route needs bytes, and the first version reached for `client.accessToken` —
+which does not exist and must not. `accounts.ts` states that everything above it
+"reads mail through `authorizedClient()` and never sees a credential", so the
+fetch moved inside the client and the route streams the Response it returns.
+
+**Verified against the real fixture message, in a browser, not just in tests:**
+
+| | |
+| --- | --- |
+| `<script>`, `<iframe>`, `<form>` in output | 0, 0, 0 |
+| tracker URL anywhere in the HTML | absent |
+| `javascript:` link | text kept, `href` null |
+| surviving links | `rel="noopener noreferrer nofollow"`, `target="_blank"` |
+| inline `cid:` image | resolved to a signed blob URL, **200 image/png** |
+| three remote images | blocked, `alt` preserved |
+| frame CSP | exactly `MESSAGE_FRAME_CSP`, sandbox tokens matching |
+
+And the signature was attacked from the app's own page. Swapping the type to
+`text/html`, swapping the disposition, swapping the filename, dropping the
+signature, moving the expiry, pointing at another blob, pointing at another
+account — **404 every time**, with only the untouched claim serving.
+
+One accidental proof worth recording: the first attempt to run that attack from
+*inside* the message frame failed with "Failed to fetch" — `connect-src 'none'`
+stopping the frame from making any request at all. The CSP demonstrating itself.
+
+Remote images are **always blocked in this slice** and there is no unblock path
+yet. Showing them safely means proxying them so the sender never learns the
+reader's IP, and an SSRF-guarded proxy is its own piece of work; half-wiring a
+toggle that loaded them directly would trade the entire point away for a button.
+
+### 2026-07-28 (later still) — Slice 2c: the three-pane reading UI — **you can read your mail**
+
+Folder rail, thread list, reading pane. Every one a server component; the only
+client code is the frame that measures a height, the search box, and the action
+bar. State lives entirely in the URL (`?mailbox=`, `?message=`, `?q=`, `?pos=`),
+so a view is linkable, reloadable and works with the back button — and the
+reading pane needs no client fetch, because the message came from the same load
+that built the list.
+
+`ModuleDefinition.Component` now receives `searchParams`. A module that keeps
+view state in the URL — the house pattern — previously had no way to read its
+own query string.
+
+**Verified against the hostile fixture, in a browser:** folders listed with
+unread counts, thread list populated, message opened, body rendered safely,
+attachments offered with decoded names (`Facturación año.pdf`), and a
+flag → server → unflag round trip confirmed by querying Stalwart directly
+(`$flagged` appeared, the button flipped to "Unflag", clicking it removed the
+keyword).
+
+**Three bugs found by using it, all of which tests would not have caught:**
+
+- **The message body rendered on a BLACK background.** `color-scheme: light
+  dark` let the frame follow the OS while the app is light. Mail HTML is written
+  assuming a white page — senders set text colours and leave the background
+  alone — so a dark canvas produces black text on black. The frame is now
+  forced light, and matches the app rather than the operating system.
+- **The frame height measurement was circular.** `documentElement.scrollHeight`
+  reports the height the frame ALREADY has, because the root element fills it.
+  Measured directly: a 278px message inside a 600px frame reported 600 from the
+  root and 278 from the body. Taking the larger pinned every short message at
+  whatever height it started with. It measures the BODY now — which reports real
+  content in both directions, so a frame can shrink as well as grow. Related:
+  `overflow-y: hidden` was removed from the frame's root for the same reason,
+  and the iframe uses `overflow: auto` rather than `hidden`, because a
+  mis-measure should cost a scrollbar rather than the end of a message.
+- **A backtick inside a CSS comment ended the template literal** it lived in.
+  The stylesheet is a template literal; one stray backtick is a build error
+  pointing at a line that looks fine.
+
+Also recorded: `sanitize-html` warns that allowing `<style>` is "inherently
+vulnerable", and it is right about its own guarantees — it does not filter style
+contents at all. The warning is now answered explicitly with
+`allowVulnerableTags: true` plus the reasoning, rather than left to train the
+next reader to ignore console output: contents go through `stripHostileCss`,
+CSS cannot reach script because the frame has `script-src 'none'` AND no
+`allow-scripts`, and `position: fixed|sticky` is neutralized so a stylesheet
+cannot paint over the app.
+
+**Two environment lessons worth keeping**, both of which cost real time:
+
+- **Never run `npm run build` while `next dev` is running.** They share `.next`,
+  and the dev server starts serving blank pages until it is restarted.
+- **A stale Turbopack tree silently detaches event handlers.** The flag button
+  did nothing, logged nothing, and showed no toast — and there were two copies
+  of the action bar in the DOM, one of them zero-sized. After a dev-server
+  restart there was one button and it worked first time. When a click does
+  nothing at all and the server logs are silent, suspect the bundler before the
+  code.
+
+### 2026-07-28 (later still) — Slice 3: remote images, behind an SSRF-guarded proxy
+
+Remote images can now be shown, and showing them tells the sender nothing.
+
+**Why a proxy rather than just loading them.** Loading a tracking pixel directly
+hands the sender the reader's IP, user agent and the exact moment they opened
+the message. Fetched server-side they learn only that somebody did. It also
+keeps the frame's CSP absolute: every image is `'self'`, so `img-src 'self'`
+never has to be relaxed and **the policy still has no permissive mode** — the
+same string whether images are blocked or shown.
+
+**The URL is never a parameter the caller chooses.** It lives inside a signed
+claim minted during sanitization, bound to one tenant and one user, so the proxy
+can only fetch addresses that already appeared in a message that person opened.
+Without that this endpoint would be an open SSRF proxy wearing our server's
+network position.
+
+**`src/lib/net/ssrf.ts` is pure and heavily tested (22 cases)** because the
+failure mode is silent — a wrong CIDR does not throw, it just lets an anonymous
+sender reach something internal. Each blocked range is asserted at the address
+below it, at both edges, and above. The ones that get missed, and why each is
+handled: **IPv4-mapped** (`::ffff:127.0.0.1`), **NAT64** (`64:ff9b::7f00:1`) and
+**6to4** (`2002:7f00:1::`) all carry an IPv4 address inside an IPv6 one, so a
+checker that treats the families separately waves them through; and
+`2130706433`, `0x7f000001`, `017700000001` and `127.1` are all spellings of
+127.0.0.1 that the OS resolver accepts. Non-canonical forms are **refused rather
+than decoded** — safer than trying to normalize every spelling.
+
+**DNS rebinding is closed by construction, not by checking twice.** A hostname
+that resolves publicly when validated can resolve to 127.0.0.1 when connected.
+So `fetch-image.ts` uses `node:http` with a **custom `lookup`**: the validation
+runs inside the resolver callback and returns the address it approved, so the
+socket connects to exactly what was checked. `fetch()` offers no hook at that
+point, which makes it unusable here however convenient it is elsewhere.
+
+Also: redirects are manual and every hop is re-validated (max 3), 5 MB cap,
+8 s timeout, no cookies / Referer / reader user-agent outbound, and the served
+Content-Type comes from **magic-byte sniffing** rather than what the remote
+server claimed — with SVG absent from the sniff table for the same reason it is
+refused as an attachment.
+
+**Verified end to end through a real message**, not just in unit tests. The
+fixture now carries SSRF payloads, and with images unblocked every one returned
+404 — cloud metadata, `10.0.0.1`, the IPv4-mapped and integer-encoded loopbacks,
+a database port, and `127.0.0.1:8080`, which on this machine is the live
+Stalwart admin API. Failures return 404 with no explanation, so nobody gets a
+probe oracle for what our network can reach.
+
+The "Show images" bar is rendered by the **parent, never inside the frame** — a
+bar drawn by the message could be forged by the message, and a fake "images
+blocked" notice is a perfectly good phishing button. Unblocking is per-message
+and per-visit: `?images=1` is cleared when moving to another message or folder,
+so consent never carries to mail nobody agreed to unblock.
+
+**Deferred deliberately: the per-tenant daily byte cap** and its
+`mail_fetch_events` table. The per-request caps (bytes, timeout, redirects,
+type) are the security-critical ones and they are in. Volume is already bounded
+by the signature — only URLs from messages a signed-in person actually opened —
+so an unbounded-egress abuse path does not exist today. It becomes worth adding
+when there are enough tenants for cost, rather than safety, to be the concern.
+
+### 2026-07-28 (later) — Slice 4: sync, the unread badge, and freshness
+
+Mail now updates itself, and the sidebar says how much is waiting. This is the
+first **scheduled infrastructure** in the codebase — there was no cron, no
+queue and no `vercel.json` before it.
+
+**The constraint that shapes the badge.** `dashboard/layout.tsx` is
+`force-dynamic` and renders on EVERY dashboard page. A JMAP call there would put
+mail-server latency on the invoice list and the document browser — including for
+tenants who have never opened Mail. So `mail_accounts.inbox_unread` (`0044`)
+caches the number, sync writes it, and the layout does one indexed SELECT. The
+count is stale by at most one sync interval, and accepting that staleness is the
+entire reason the column exists.
+
+It counts unread **conversations**, not messages: the app is conversation-first,
+so a badge counting messages would say "7" over a list showing three rows. When
+a mailbox needs reconnecting the badge becomes a **dot rather than a number** —
+we cannot know how much mail sits behind a credential we can no longer use, so a
+count there would be a guess. `getMailBadge` also swallows its own errors: a
+badge is decoration and must never be why a dashboard page fails to render.
+
+**Two writers, deliberately.** `indexFromEmails` piggybacks on the list view's
+existing `queryEmails` call and costs **zero** extra round trips — it is the
+primary writer in practice. It deliberately does NOT touch `lastState`, because
+it has no idea whether it saw everything, and claiming a state it cannot vouch
+for would make the next delta skip real changes. `syncMailAccount` is the
+authoritative delta: `currentState()` first, and when the state matches what we
+stored the run ends there — no changes call, no gets, no writes. That cheapness
+is what makes polling viable at all.
+
+The full-resync path branches on **`errorType === "cannotCalculateChanges"`**,
+which is why `takeMethodResponse` was made to carry the JMAP error type back in
+Slice 2. Matching that on the text of an English message would break the day
+somebody improved the copy. A resync re-indexes the most recent 500 rather than
+the whole mailbox: this is an aid for joining threads to business records, not
+an archive.
+
+**Two deliberate lies in `foldThreads`, both over-inclusive**, because the
+mistakes are not symmetric. `hasAttachment` is sticky-true and `participants`
+never shrinks: a filter that returns a thread with no attachment costs a click,
+one that hides the thread carrying the file somebody needs costs the job.
+Destroyed messages likewise do not delete thread rows — a thread whose last
+message was deleted still answers "there was correspondence here", and a link
+from an invoice to it should not evaporate. Ordering uses `receivedAt`, never
+the spoofable `sentAt`; there is a test where a sender claims 2030.
+
+**The poller is mounted on the mail route only**, never in the layout, or every
+page in the product would poll a mail server. It pauses while the tab is hidden
+(browsers throttle background timers anyway; pausing makes the intent explicit
+and stops billing an invocation for a tab nobody is looking at), polls faster
+focused than blurred, checks **immediately** on becoming visible — the
+interaction that actually matters — jitters ±15% so N tabs do not align into a
+thundering herd, backs off when quiet and again on failure, and **stops dead on
+a credential error**, because a revoked token will not fix itself and retrying
+it forever is how you get rate-limited by your own mail server.
+
+**The cron route's authentication is the only thing between it and an anonymous
+caller draining every tenant's mail server**, so it is the first check, uses a
+constant-time compare, and **fails closed when `CRON_SECRET` is unset or too
+short** — a cron that never runs is visible, an open endpoint is not. It returns
+404 rather than 401, so a caller learns nothing about whether it exists. It also
+accepts **no tenant or account id**: no caller-supplied targeting means no way to
+aim it. Verified locally: no auth, a wrong same-length secret and a short bearer
+all 404; only the real secret runs.
+
+Verified end to end against the live server — `inbox_unread` went 0 → 1 when a
+message was moved to the Inbox and marked unread, the state string advanced, the
+badge rendered on `/dashboard` (a page that never touches the mail server), and
+the needs-reauth dot rendered with `aria-label="Needs attention"`.
+
+**Not done, and needed before this works in production:** `CRON_SECRET` must be
+set in Vercel, and **`vercel.json` schedules every 10 minutes, which Vercel's
+Hobby plan does not allow** — Hobby cron runs once per day. Confirm the plan or
+widen the schedule, or the job silently will not run at the stated frequency.
+The per-tenant daily byte cap from Slice 3 is still deferred.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -338,6 +932,48 @@ passcode in one message is one factor and a longer email.
 **Bounces are the point of the webhook.** An unnoticed bounce is the most
 common way an email workflow dies silently — the sender believes the invoice
 went out and nobody finds out until someone chases payment.
+
+**A mailbox is private to one person; linking a thread is an act of publishing.**
+Settled with the founder on 2026-07-27, and it decides what `mail_links` means.
+
+The privacy model has two independent layers. Bodies never enter this database
+— they stay on the mail server, reachable only with the token that person
+authorized themselves, so a colleague has no credential to leak. `mail_accounts`
+is then scoped per user in RLS on top of that. Shared mailboxes (`info@`,
+`accounts@` — `mailboxes.clerk_user_id is null`) are the deliberate exception,
+and the platform operator holding both the encryption key and the mail server is
+the honest caveat that applies to every hosted mail product.
+
+That privacy is what creates the problem linking has to solve.
+`mail_thread_index` holds **no bodies** on purpose, so a link on its own would
+show a colleague opening an invoice only *"a thread called 'Re: quote revision',
+these three people, last Tuesday"* — and not one readable word, because the body
+still needs the other person's token. A link that cannot be read is not the
+feature.
+
+**So linking COPIES the message into the tenant's space rather than pointing at
+the mailbox.** At link time the message and its attachments are filed into
+Documents — the same "attachments → Documents" loop this dossier has had open
+since the hosted-mailbox build — and the link points at that copy. What this
+buys, and what the alternative loses:
+
+- It is an **explicit publish**, not a silent widening of who may read somebody's
+  private mail. The person doing it knows they are doing it.
+- It **survives** the linking user's token expiring, their disconnecting the
+  mailbox, or their leaving the business — which is precisely when the
+  correspondence behind an invoice is most wanted.
+- It needs **no standing credential**. Serving a linked thread through the
+  linker's token would mean the app holding an indefinite loan of one person's
+  mailbox, and every such read failing the day they revoke it.
+- It inherits Documents' RLS, retention, search and audit instead of inventing a
+  second visibility model for mail bodies — which would be a second place to be
+  wrong about who may read what.
+
+Consequences to build in when Slice 5 lands: the filed copy is a **point-in-time
+snapshot** and the UI must say so (a later reply is a new message, not an edit
+of the old one); unlinking should leave the filed copy in place with its own
+delete, since removing a link is not the same intent as destroying a record; and
+the filing action needs an audit entry naming who published what.
 
 ### Hosted mailboxes
 
@@ -476,10 +1112,25 @@ flow has not been walked end to end yet** — nothing has gone through
 `/dashboard/email` to create a domain row, run a check, or provision a mailbox
 through the UI. The parsing is verified; the round trip is not.
 
-**The inbox is under way on `claude/email-inbox`.** Schema, RLS, the JMAP client
-and its parsing layer are built and tested; nothing is wired to a UI yet and
-there is no Stalwart server to talk to. Reading mail inside Yosher does not work
-yet — a hosted mailbox is still used over IMAP from a phone or Outlook.
+**Reading mail inside Yosher works.** On `claude/email-inbox`, verified against a
+local Stalwart 0.16.15 end to end: connect a mailbox over OAuth, list folders,
+read a message with its body safely rendered, download attachments, and flag or
+archive or trash it — with every change landing on the mail server, confirmed by
+querying it directly rather than by trusting the UI.
+
+Remote images work too, blocked by default and shown through an SSRF-guarded
+proxy so the sender never learns who opened the message.
+
+Sync, the unread badge and background freshness are in as of Slice 4.
+
+What is NOT built yet, in slice order: the extension registry and entity
+linking, then compose and send. Until compose exists this is a reader —
+replying still happens on a phone or in Outlook.
+
+Everything so far has been proven against ONE server, ONE account and ONE
+message. That is a real limit: no multi-account switching, no thread expansion
+(a conversation shows its most recent message), no bulk selection, and token
+refresh has never been exercised because the first token has not expired.
 
 **Migadu stays running throughout.** `yosherapp.com` is live on it and there is
 no reason to cut a working domain over to an unproven self-hosted server. The
@@ -530,7 +1181,7 @@ code or config change.
   hosted mailbox is used over IMAP from a phone or Outlook, and Yosher only
   administers it. This is also where the module earns its keep — an inbox that
   is just a worse Gmail is not worth a tab switch; one where the thread sits
-  next to the job, the drawing set and the invoice is.
+  next to the job, the customer and the invoice is.
 - **Migadu keys are not configured**, so nothing provisions yet.
 - **No aliases or identities.** `info@` forwarding to three people, and
   send-as for a shared address, both need the alias and identity endpoints —
@@ -553,8 +1204,35 @@ code or config change.
   connection string, so it belongs in the operator's terminal, not a transcript.
   Run it when the server exists; it self-verifies the role cannot read tenant
   tables and aborts if it can.
-- **No OAuth flow, no UI, no extension registry.** Phase 1's remaining three
-  pieces.
+- **No extension registry yet.** The seam that lets Documents and Accounting
+  contribute linkable entity types, annotations and reading-pane panels. Planned
+  for `src/lib/mail-extensions/` — neutral ground outside `src/modules/`, with
+  `registry.ts` as the single composition root, exactly as `src/modules/index.ts`
+  is for module renderers. Nothing enforces the module-isolation rule today; it
+  ships with ESLint `no-restricted-imports` zones or not at all.
+- **Truncation is carried but not yet surfaced.** `JmapEmail.bodyTruncated` is
+  populated; the reading pane still needs to render a "message shortened — view
+  original" affordance rather than showing a partial body as whole.
+- **`mail_links` has no `mail_account_id`.** The unique index is
+  `(tenant_id, thread_id, entity_type, entity_id)` and `thread_id` is bare text
+  with no FK, so two connected accounts in one tenant that ever mint the same
+  opaque thread id would have their links merged. Unlikely against one Stalwart;
+  a coin flip once a Graph-backed account appears. The table is empty — this is
+  the cheap moment to add the column.
+- **`resolveBody()` ignores `isTruncated`** and `client.ts` never sets
+  `maxBodyValueBytes`, so a long message can be cut mid-tag and shown as
+  complete. That is also precisely the input class a sanitizer must survive.
+- **`0043` has not been applied to production yet.** It is on the dev branch and
+  the isolation suite passes against it. `docs/security.md` §8 requires both.
+  Run `npm run db:migrate` (no flag) against production before deploying.
+- **A delegated shared mailbox cannot be connected yet.** `sessionMatchesAddress`
+  compares against the session's primary account only, so someone granted access
+  to `info@` through their own credentials is refused. JMAP exposes that case as
+  a second entry in `session.accounts`; matching across all of them (and storing
+  the matching `accountId` rather than the primary) is Slice 10's work.
+- **Token refresh has not been exercised.** The stored token is still inside its
+  first expiry window, so `needsRefresh` → `refreshAccessToken` has never run
+  against the live server. Worth forcing before relying on it.
 - **Real-time will be state polling, not push.** JMAP push needs a long-lived
   server-side connection that serverless cannot hold. Comparing the account's
   state string is one small request; an SSE proxy on Vercel's streaming runtime

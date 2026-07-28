@@ -9,15 +9,18 @@ import {
   parseQueryResult,
   parseSession,
   parseThread,
+  sessionMatchesAddress,
   takeMethodResponse,
 } from "@/lib/email/jmap/parse";
+import { rebaseOntoSessionHost } from "@/lib/email/jmap/client";
 
 /**
  * JMAP response parsing.
  *
- * Built against RFC 8620/8621 rather than one server's behaviour, so these
- * fixtures are spec-shaped rather than captured. They will be re-checked
- * against real payloads via `npm run jmap:probe` once a server exists — the
+ * Built against RFC 8620/8621 rather than one server's behaviour, so most
+ * fixtures here are spec-shaped. The re-check against real payloads has now
+ * happened (Stalwart 0.16.15, via `npm run mail:fixture` + `npm run jmap:probe`)
+ * and the captured ones live in the "live payloads" block at the bottom — the
  * lesson from the Migadu adapter, where two shapes guessed from documentation
  * were both wrong.
  *
@@ -370,5 +373,202 @@ describe("method responses", () => {
     // Unknown types still name themselves, so a support conversation has
     // something concrete in it.
     expect(describeMethodError("weirdNewError")).toContain("weirdNewError");
+  });
+});
+
+/**
+ * Live payloads — captured verbatim from Stalwart 0.16.15 on 2026-07-27, via
+ * `npm run mail:fixture` then `npm run jmap:probe`.
+ *
+ * These exist because a parser written from a specification looks perfectly
+ * healthy against invented input. Each assertion below records something the
+ * server actually did that the code could reasonably have assumed otherwise.
+ */
+describe("live payloads (Stalwart 0.16.15)", () => {
+  const LIVE_EMAIL = {
+    id: "a",
+    blobId: "co0dqdhtw2qpbjg1cjvtqupyx0beghfrccuhqqhrs10mmv11bt0gmaiaa",
+    threadId: "a",
+    mailboxIds: { a: true },
+    keywords: {},
+    from: [{ name: "Supplier Test", email: "billing@supplier-test.example" }],
+    to: [{ name: null, email: "admin@yosher.test" }],
+    // Arrays, and null rather than [] when the header is absent.
+    messageId: ["fixture-1785201159919@yosher.test"],
+    inReplyTo: null,
+    references: null,
+    subject: "Invoice 4471 — façade works",
+    receivedAt: "2026-07-27T18:32:39Z",
+    size: 2048,
+    hasAttachment: true,
+    textBody: [{ partId: "3", type: "text/plain" }],
+    htmlBody: [{ partId: "4", type: "text/html" }],
+    bodyValues: {
+      "3": { value: "Invoice 4471\n\nHello - the invoice is attached.\n", isTruncated: false, isEncodingProblem: false },
+      "4": { value: "<html><head>\n<style>body{font-family:sans-serif}</style>\n", isTruncated: false, isEncodingProblem: false },
+    },
+    attachments: [
+      {
+        partId: "5",
+        blobId: "co0dqdhtw2qpbjg1cjvtqupyx0beghfrccuhqqhrs10mmv11bt0gmaiaahsr2za",
+        name: "logo.png",
+        type: "image/png",
+        charset: null,
+        disposition: "inline",
+        cid: "logo-part-1@yosher.test",
+        size: 70,
+      },
+      {
+        partId: "6",
+        blobId: "co0dqdhtw2qpbjg1cjvtqupyx0beghfrccuhqqhrs10mmv11bt0gmaiaagisdcac",
+        name: "Facturación año.pdf",
+        type: "application/pdf",
+        charset: null,
+        disposition: "attachment",
+        cid: null,
+        size: 192,
+      },
+    ],
+  };
+
+  it("returns cid WITHOUT angle brackets, though the message carried them", () => {
+    // The wire format was Content-ID: <logo-part-1@yosher.test>. The server
+    // strips them. A cid map keyed on the bracketed form would match nothing —
+    // and would fail as a missing inline image, not as an error.
+    const email = parseEmail(LIVE_EMAIL);
+    const inline = email?.attachments.find((a) => a.cid !== null);
+    expect(inline?.cid).toBe("logo-part-1@yosher.test");
+    expect(inline?.cid).not.toContain("<");
+  });
+
+  it("decodes RFC 2047 attachment names for us", () => {
+    // Sent as =?utf-8?B?RmFjdHVyYWNpw7NuIGHDsW8ucGRm?=. It comes back decoded,
+    // so no encoded-word decoder is needed before Content-Disposition.
+    const email = parseEmail(LIVE_EMAIL);
+    const pdf = email?.attachments.find((a) => a.type === "application/pdf");
+    expect(pdf?.name).toBe("Facturación año.pdf");
+    expect(pdf?.name).not.toContain("=?");
+  });
+
+  it("lists inline parts among attachments, with a disposition to tell them apart", () => {
+    // RFC 8621 says it should; this proves it does. The reading pane relies on
+    // it to build the cid map from the same array it renders chips from.
+    const email = parseEmail(LIVE_EMAIL);
+    expect(email?.attachments).toHaveLength(2);
+    expect(email?.attachments.filter((a) => a.disposition === "inline")).toHaveLength(1);
+  });
+
+  it("decodes bodies to UTF-8 — no iconv step required", () => {
+    const email = parseEmail(LIVE_EMAIL);
+    expect(email?.subject).toBe("Invoice 4471 — façade works");
+    expect(email?.textBody).toContain("Invoice 4471");
+  });
+
+  it("reports isTruncated, and parseEmail carries it", () => {
+    const whole = parseEmail(LIVE_EMAIL);
+    expect(whole?.bodyTruncated).toBe(false);
+
+    const cut = structuredClone(LIVE_EMAIL);
+    cut.bodyValues["4"].isTruncated = true;
+    // Either body being cut makes the message incomplete.
+    expect(parseEmail(cut)?.bodyTruncated).toBe(true);
+  });
+
+  it("treats a missing isTruncated as not truncated", () => {
+    // A server that omits the flag must not be read as "truncated" — that
+    // would put a "message cut short" warning on every message it sends.
+    const noFlag = structuredClone(LIVE_EMAIL);
+    for (const part of Object.values(noFlag.bodyValues)) {
+      delete (part as { isTruncated?: boolean }).isTruncated;
+    }
+    expect(parseEmail(noFlag)?.bodyTruncated).toBe(false);
+  });
+
+  it("keeps threading headers as arrays, and absent ones as null", () => {
+    const email = parseEmail(LIVE_EMAIL);
+    expect(email?.messageId).toEqual(["fixture-1785201159919@yosher.test"]);
+    // null, not [] — "never fetched" must stay distinguishable from "empty".
+    expect(email?.inReplyTo).toBeNull();
+    expect(email?.references).toBeNull();
+  });
+});
+
+describe("session URLs are rebased onto the host we reached", () => {
+  // Stalwart advertises its CONFIGURED hostname, not the one the request came
+  // in on. Verified live: a session fetched from localhost:8080 returned
+  // apiUrl https://mail.yosherdev.com/jmap/ — a name that does not resolve.
+  // Without rebasing, every method call and every attachment fetch fails.
+  const SESSION_URL = "http://localhost:8080/.well-known/jmap";
+
+  it("replaces a mismatched host, keeping path, query and template variables", () => {
+    expect(
+      rebaseOntoSessionHost(
+        "https://mail.yosherdev.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+        SESSION_URL,
+      ),
+    ).toBe("http://localhost:8080/jmap/download/{accountId}/{blobId}/{name}?accept={type}");
+  });
+
+  it("leaves a URL alone when the host already matches", () => {
+    const same = "http://localhost:8080/jmap/";
+    expect(rebaseOntoSessionHost(same, SESSION_URL)).toBe(same);
+  });
+
+  it("returns an unparseable URL untouched rather than guessing at a repair", () => {
+    expect(rebaseOntoSessionHost("not a url", SESSION_URL)).toBe("not a url");
+  });
+
+  it("distinguishes hosts by port, not just name", () => {
+    expect(rebaseOntoSessionHost("http://localhost:9999/jmap/", SESSION_URL)).toBe(
+      "http://localhost:8080/jmap/",
+    );
+  });
+});
+
+/**
+ * Connecting the RIGHT mailbox.
+ *
+ * The callback proves a token opens a mailbox. These cover the separate
+ * question of WHICH — without it, authorizing as one address while connecting
+ * another records a mailbox that looks right and reads wrong.
+ */
+describe("session identity check", () => {
+  const session = (username: string, accountName = "") => ({ username, accountName });
+
+  it("accepts the address the credentials belong to", () => {
+    expect(sessionMatchesAddress(session("dan@acme.example"), "dan@acme.example")).toBe(true);
+  });
+
+  it("ignores case on both sides", () => {
+    expect(sessionMatchesAddress(session("Dan@Acme.Example"), "dan@acme.example")).toBe(true);
+    expect(sessionMatchesAddress(session("dan@acme.example"), "  DAN@ACME.EXAMPLE  ")).toBe(true);
+  });
+
+  it("REFUSES a different address on the same domain", () => {
+    // The case that motivated this: connecting a shared box while signed in as
+    // yourself. Same tenant, same domain, wrong mailbox.
+    expect(sessionMatchesAddress(session("dan@acme.example"), "info@acme.example")).toBe(false);
+  });
+
+  it("falls back to accountName when username is absent", () => {
+    // Some servers put the address there instead; the spec only promises
+    // accountName is human-friendly, so it is a fallback and not the primary.
+    expect(sessionMatchesAddress(session("", "dan@acme.example"), "dan@acme.example")).toBe(true);
+  });
+
+  it("refuses when the session identifies itself with NEITHER field", () => {
+    // Unverifiable is treated as failed. A false refusal costs a retry; a false
+    // accept files one person's correspondence under another person's address.
+    expect(sessionMatchesAddress(session("", ""), "dan@acme.example")).toBe(false);
+  });
+
+  it("refuses a blank mailbox address rather than matching a blank session", () => {
+    expect(sessionMatchesAddress(session("", ""), "")).toBe(false);
+    expect(sessionMatchesAddress(session("dan@acme.example"), "   ")).toBe(false);
+  });
+
+  it("does not accept a substring or a lookalike", () => {
+    expect(sessionMatchesAddress(session("dan@acme.example"), "an@acme.example")).toBe(false);
+    expect(sessionMatchesAddress(session("dan@acme.example.evil"), "dan@acme.example")).toBe(false);
   });
 });

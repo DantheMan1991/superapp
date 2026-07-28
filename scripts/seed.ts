@@ -54,6 +54,23 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     sortOrder: 40,
   },
   {
+    id: "email",
+    name: "Mail",
+    // Description tracks what actually ships. Reading lands first; composing,
+    // linking threads to business records, and rules follow.
+    //
+    // Wording passes the neutrality test in docs/extension-model.md §3: a
+    // bookkeeping firm, a dental practice and a plumbing contractor would each
+    // recognise "customer", "invoice" and "record" as their own. Note "job"
+    // does NOT pass — §5 lists it as trade vocabulary that a profile supplies
+    // as a label, so it cannot appear in a core module's copy.
+    description:
+      "Your business mailbox, read inside Yosher — every conversation beside the customer, invoice or record it belongs to.",
+    category: "core",
+    status: "available",
+    sortOrder: 35,
+  },
+  {
     id: "documents",
     name: "Documents",
     // Description tracks what actually ships; sharing, templates and e-sign

@@ -14,6 +14,27 @@ export interface ModuleDefinition {
   name: string;
   /** lucide icon name used in nav (kept as string to stay serializable). */
   icon: string;
-  /** Server component rendered at /dashboard/m/[slug]. */
-  Component: (props: { ctx: TenantContext }) => Promise<ReactNode> | ReactNode;
+  /**
+   * How much width the module's pages want.
+   *
+   * "standard" (the default) keeps the shell's centred max-w-6xl column, which
+   * is right for every reading-and-forms surface in the product. "full" hands
+   * the module the whole viewport, for the one shape that genuinely needs it:
+   * a list beside a detail pane, where the clamp would waste half a monitor.
+   *
+   * Declared here rather than matched by pathname in the shell, so the shell
+   * never has to know a module's name to lay it out.
+   */
+  layout?: "standard" | "full";
+  /**
+   * Server component rendered at /dashboard/m/[slug].
+   *
+   * `searchParams` is already awaited. Modules that keep view state in the URL
+   * — which is the house pattern — read it from here; ones that do not can
+   * ignore it.
+   */
+  Component: (props: {
+    ctx: TenantContext;
+    searchParams: Record<string, string | string[] | undefined>;
+  }) => Promise<ReactNode> | ReactNode;
 }

@@ -91,6 +91,16 @@ export interface JmapEmail {
   cc: JmapEmailAddress[];
   bcc: JmapEmailAddress[];
   replyTo: JmapEmailAddress[];
+  /**
+   * Threading headers. All three come back as string ARRAYS or null — verified
+   * against a live server, where a message with no parent returned
+   * `messageId: ["..."]` and `inReplyTo: null` rather than empty arrays.
+   * Only populated on a detail fetch; a reply's References chain is built from
+   * them, and you cannot build a chain from data you never asked for.
+   */
+  messageId: string[] | null;
+  inReplyTo: string[] | null;
+  references: string[] | null;
   subject: string;
   /** When the sender says it was sent. Spoofable; prefer receivedAt for ordering. */
   sentAt: Date | null;
@@ -103,6 +113,15 @@ export interface JmapEmail {
   /** Populated only when bodies were requested. */
   textBody: string | null;
   htmlBody: string | null;
+  /**
+   * True when the server cut a body short at `maxBodyValueBytes`.
+   *
+   * Load-bearing rather than informational: a truncated HTML body is cut at an
+   * arbitrary byte, which means mid-tag, which is exactly the malformed input a
+   * sanitizer has to survive — and showing a partial message as though it were
+   * whole is its own kind of wrong. The UI offers "view original" when set.
+   */
+  bodyTruncated: boolean;
 }
 
 /**
@@ -117,6 +136,12 @@ export interface JmapThread {
 
 /** The session object from the discovery endpoint. */
 export interface JmapSession {
+  /**
+   * Where discovery actually happened — the URL we reached, not one the server
+   * told us about. Every other URL here is rebased onto its host, so this is
+   * the one address in the session known to work.
+   */
+  sessionUrl: string;
   /** Where method calls are POSTed. */
   apiUrl: string;
   downloadUrl: string;
@@ -125,6 +150,12 @@ export interface JmapSession {
   /** The mail account this token can act on. */
   primaryAccountId: string;
   accountName: string;
+  /**
+   * RFC 8620 §2: "the username associated with the given credentials". The
+   * address the token actually belongs to, which is not necessarily the address
+   * someone clicked Connect on — see the callback's identity check.
+   */
+  username: string;
   /** Changes whenever anything about the session does. */
   state: string;
   capabilities: string[];
@@ -176,4 +207,17 @@ export interface JmapChanges {
 /** Every call returns this shape rather than throwing — same rule as MailboxHost. */
 export type JmapResult<T> =
   | { ok: true; data: T }
-  | { ok: false; message: string; status?: number; needsReauth?: boolean };
+  | {
+      ok: false;
+      message: string;
+      status?: number;
+      needsReauth?: boolean;
+      /**
+       * The JMAP error TYPE, carried alongside the human sentence.
+       *
+       * Sync has to branch on `cannotCalculateChanges` to fall back to a full
+       * resync, and matching that on the text of an English message breaks the
+       * day somebody improves the copy.
+       */
+      errorType?: string;
+    };

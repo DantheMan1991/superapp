@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
+import { schema, withSystem } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { discoverJmapSession } from "@/lib/email/jmap/client";
+import { sessionMatchesAddress } from "@/lib/email/jmap/parse";
 import { saveConnection } from "@/lib/email/oauth/accounts";
 import {
   MAIL_OAUTH_NOT_CONFIGURED,
@@ -111,6 +114,32 @@ export async function GET(request: Request): Promise<Response> {
   if (!session.ok) {
     return back(returnTo, {
       mailError: `Signed in, but the mailbox couldn't be opened: ${session.message}`,
+    });
+  }
+
+  // ...and prove it opens THIS mailbox, not merely some mailbox. The mailbox
+  // id came from our own encrypted cookie and was checked against the tenant
+  // when the flow started, so this read is safe; what is unverified until now
+  // is which address the person actually authorized at the mail server.
+  const mailbox = await withSystem((tx) =>
+    tx.query.mailboxes.findFirst({
+      where: and(
+        eq(schema.mailboxes.tenantId, pending.tenantId),
+        eq(schema.mailboxes.id, pending.mailboxId),
+      ),
+    }),
+  );
+  if (!mailbox) {
+    return back(returnTo, { mailError: "That mailbox no longer exists." });
+  }
+  if (!sessionMatchesAddress(session.data, mailbox.address)) {
+    // Names the mismatch, because the fix is "sign in as the right person" and
+    // a vague failure here sends people round the loop repeatedly. Safe to say:
+    // both addresses already belong to whoever is looking.
+    return back(returnTo, {
+      mailError:
+        `You signed in as ${session.data.username || session.data.accountName || "another account"}, ` +
+        `but this is ${mailbox.address}. Connect it while signed in as that address.`,
     });
   }
 

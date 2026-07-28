@@ -12,8 +12,10 @@ export const dynamic = "force-dynamic";
  */
 export default async function ModulePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
   const def = getModuleDefinition(slug);
@@ -22,6 +24,9 @@ export default async function ModulePage({
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, def.slug);
 
+  // Search params are handed to the module because this codebase keeps view
+  // state in the URL — a folder, a search, an open message. A module rendering
+  // here would otherwise have no way to read its own query string.
   const Component = def.Component;
-  return <Component ctx={ctx} />;
+  return <Component ctx={ctx} searchParams={await searchParams} />;
 }

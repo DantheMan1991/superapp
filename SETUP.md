@@ -232,16 +232,35 @@ it IS the server; closing it stops the app. (Stop it anytime with Ctrl+C.)
 
 ### 3.6 Run the automated isolation test
 
-Stop the dev server if you like (not required) and run:
+**First, give the tests their own database.** They create and delete tenants
+directly, under `withSystem` — the god view, where RLS is not watching. That is
+correct for a certification suite and catastrophic against live data.
+
+In the Neon console, create a **branch** of your project (instant, and it starts
+as a copy of production's schema, which is what a migration-sensitive suite
+wants). Then add both of its connection strings to `.env`:
+
+```
+TEST_DATABASE_URL=postgresql://app_user:...@ep-your-branch-pooler...neon.tech/neondb?sslmode=require
+TEST_DATABASE_URL_OWNER=postgresql://neondb_owner:...@ep-your-branch-pooler...neon.tech/neondb?sslmode=require
+```
+
+Run migrations against the branch once (`DATABASE_URL_OWNER=$TEST_DATABASE_URL_OWNER npm run db:migrate`),
+then:
 
 ```
 npm run test:isolation
 ```
 
-This creates two throwaway tenants directly in the database, then attempts
-cross-tenant reads, writes, updates, and deletes — asserting Postgres blocks
-every one. All tests green = the shell is certified. This is the test that
-must pass before any deploy, forever.
+This creates two throwaway tenants, then attempts cross-tenant reads, writes,
+updates, and deletes — asserting Postgres blocks every one. All tests green =
+the shell is certified. This is the test that must pass before any deploy,
+forever.
+
+**Without `TEST_DATABASE_URL` every database-backed suite skips**, prints a
+loud warning, and `DATABASE_URL` is removed from the environment so nothing can
+reach production by accident (`tests/setup/database-guard.ts`). A skipped
+isolation run reports zero failures — do not mistake that for a pass.
 
 ---
 
@@ -541,6 +560,55 @@ over IMAP from a phone or Outlook.
 
   **Set these on Production only.** Not Preview, not Development. Vercel env
   var changes only apply to new deployments, so redeploy after adding them.
+
+### Reading mail (the inbox)
+
+- **No new key.** OAuth tokens in `mail_accounts` are encrypted with the
+  existing `APP_ENCRYPTION_KEY` through `src/lib/crypto.ts` — the same
+  AES-256-GCM that has protected Plaid access tokens since the banking module
+  shipped. A second key was considered and rejected: both would live in the
+  same environment on the same server, reachable by the same compromise, so it
+  would be two things to rotate and no additional protection.
+
+  **The key must never be stored in the database it protects.** An access token
+  reads someone's mail until it expires and a refresh token mints more
+  indefinitely, which makes these the most dangerous values on the platform —
+  worse than a password hash, which cannot be replayed. Keeping the key in the
+  environment is what makes a Postgres dump, a leaked backup or an over-broad
+  RLS policy yield ciphertext instead of mailboxes, and it is why the
+  `member_read` policy on `mail_accounts` is acceptable rather than alarming.
+
+  Rotating it invalidates every stored mailbox connection; people reconnect and
+  no mail is lost. It would also invalidate stored Plaid tokens — worth knowing
+  before rotating.
+
+- `STALWART_BASE_URL` — where the mail server lives, e.g.
+  `https://mail.acme.com` or `http://localhost:8080` in development. Used for
+  OpenID discovery and for the JMAP session endpoint.
+- `STALWART_CLIENT_ID` / `STALWART_CLIENT_SECRET` — Yosher's OAuth client on
+  that server. Register it at the server's `/auth/register` endpoint or in its
+  admin UI, with the redirect URI **exactly**
+  `<NEXT_PUBLIC_APP_URL>/api/email/oauth/callback`. A mismatched redirect URI
+  produces one of the least helpful errors in the protocol.
+- `STALWART_MAIL_HOSTNAME` — the server's public hostname, used to build the MX
+  and SPF records the domain wizard shows.
+
+Without these the inbox reports "isn't set up yet" and nothing connects.
+
+**Endpoints are discovered, not hardcoded.** The flow reads
+`/.well-known/openid-configuration`, which means no config drift between
+environments — and it is the same shape Google and Microsoft need, so the
+deferred connectors land in `src/lib/email/oauth/config.ts` rather than beside
+the flow.
+
+One live-server quirk worth knowing: **Stalwart builds every advertised URL
+from its configured hostname, not the request's Host header.** Discovery
+rebases them onto the URL actually reached, which is a no-op in production and
+also what any reverse-proxy deployment needs.
+
+- **Local development server**: `docker/stalwart/compose.yml` runs Stalwart on
+  localhost with no DNS, no domain and no cost. `npm run jmap:probe` (read-only)
+  dumps live JMAP responses; run it whenever a shape here is in doubt.
 
 **What is blocked outside production**, and why each answer differs
 (`src/lib/email/mailbox/guard.ts`):

@@ -47,12 +47,30 @@ export interface NavItem {
   icon: string;
   /** exact = highlight only on exact path match (for index routes) */
   exact?: boolean;
+  /** Unread count. Absent or 0 renders nothing — a zero badge is noise. */
+  badge?: number;
+  /**
+   * A dot instead of a count: "this needs you", not "this has N". Used when a
+   * mailbox needs reconnecting, where a number would be a lie — we cannot know
+   * how much unread mail is behind a credential we can no longer use.
+   */
+  badgeAlert?: boolean;
 }
 
 interface AppShellProps {
   /** Small label above the nav, e.g. tenant name or "Platform admin". */
   contextLabel: string;
   navItems: NavItem[];
+  /**
+   * Path prefixes whose pages take the whole viewport instead of the centred
+   * max-w-6xl column.
+   *
+   * Passed in rather than decided here: the layout knows which modules asked
+   * for it (ModuleDefinition.layout), and the shell only needs to match the
+   * current path. That keeps the shell free of any module's name — a new
+   * full-width module is a flag on its definition, not an edit to this file.
+   */
+  fullWidthPathPrefixes?: string[];
   /** Rendered at the bottom of the sidebar (user button, org switcher). */
   footer?: ReactNode;
   children: ReactNode;
@@ -104,7 +122,21 @@ function SidebarNav({
             )}
           >
             <Icon className="size-4 shrink-0" />
-            {item.label}
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            {item.badgeAlert ? (
+              <span
+                className="size-2 shrink-0 rounded-full bg-destructive"
+                aria-label="Needs attention"
+              />
+            ) : item.badge && item.badge > 0 ? (
+              <span
+                // tabular-nums so the badge does not change width as the count
+                // changes; 99+ so a neglected mailbox cannot blow out the rail.
+                className="min-w-5 shrink-0 rounded-full bg-sidebar-primary px-1.5 text-center text-[11px] leading-5 font-medium tabular-nums text-sidebar-primary-foreground"
+              >
+                {item.badge > 99 ? "99+" : item.badge}
+              </span>
+            ) : null}
           </Link>
         );
       })}
@@ -114,17 +146,24 @@ function SidebarNav({
 
 /**
  * The chrome both cockpits share. Desktop: fixed dark sidebar. Mobile: top
- * bar + slide-out drawer — contractors live on their phones, so this must
- * work one-handed on a job site.
+ * bar + slide-out drawer — much of this product is used away from a desk, on a
+ * phone, so it has to work one-handed.
  */
 export function AppShell({
   contextLabel,
   navItems,
+  fullWidthPathPrefixes,
   footer,
   children,
 }: AppShellProps) {
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Same prefix test the nav uses for its active state, so "full width" covers
+  // a module's sub-routes without each one having to opt in again.
+  const fullWidth = (fullWidthPathPrefixes ?? []).some(
+    (prefix) => pathname === prefix || pathname.startsWith(prefix + "/"),
+  );
 
   // Close the drawer whenever navigation completes.
   useEffect(() => {
@@ -178,10 +217,21 @@ export function AppShell({
         )}
       </aside>
 
-      <main className="flex-1 bg-background lg:ml-60 print:ml-0">
-        <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          {children}
-        </div>
+      {/*
+        min-w-0 because <main> is a flex child on lg: without it a wide grid
+        inside a full-width module pushes the whole row past the viewport
+        instead of scrolling within its own pane.
+      */}
+      <main className="min-w-0 flex-1 bg-background lg:ml-60 print:ml-0">
+        {fullWidth ? (
+          // No padding and no clamp — a module that asked for the viewport
+          // owns its own chrome, down to the edges.
+          children
+        ) : (
+          <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+            {children}
+          </div>
+        )}
       </main>
     </div>
   );

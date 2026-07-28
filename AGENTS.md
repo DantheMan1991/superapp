@@ -81,6 +81,11 @@ at `/admin/docs`.
   connects as. Required: Neon's owner role has BYPASSRLS, so the app must
   never run as it (`DATABASE_URL` = app_user).
 - `npm run test:isolation` — the two-tenant RLS certification; must pass
-  before any deploy. Needs `DATABASE_URL` (dev/staging DB, never prod).
+  before any deploy. Needs **`TEST_DATABASE_URL`** (plus
+  `TEST_DATABASE_URL_OWNER`) pointing at a database that is NOT production —
+  a Neon branch takes a minute to make. `tests/setup/database-guard.ts`
+  enforces this: without it, every DB-backed suite skips and says so loudly,
+  because these tests create and delete tenants under `withSystem` where RLS
+  is not watching. A skipped isolation run is not a passing one.
 - `npm run build` — must stay green; keys are not required for the build
   (all provider clients are lazy).

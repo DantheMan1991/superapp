@@ -39,6 +39,22 @@ export const ALLOWED_MIME_TYPES = [
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   // Archives
   "application/zip",
+  /**
+   * A whole email message, as filed by the mail seam (and uploadable by hand,
+   * which is the same artifact arriving by a different route).
+   *
+   * Safe for the same reason `application/zip` is: it is NOT in INLINE_SAFE, so
+   * it can only ever be served as `attachment` + `nosniff`, which no browser
+   * renders. The bytes are inert until a mail client opens them, and a mail
+   * client applies its own rules.
+   *
+   * It earns its place because it is the only lossless snapshot of a message.
+   * Filing a rendering of an email and calling it the record would be a
+   * comfortable lie — a dispute about what somebody agreed to is settled by the
+   * message, not by our HTML-to-text pass over it. The readable version lives
+   * alongside, in `documents.extracted_text`, where search can reach it.
+   */
+  "message/rfc822",
 ] as const;
 
 /** 100MB — a set of drawings is not a phone photo. */
@@ -74,19 +90,8 @@ export function dispositionFor(mimeType: string): "inline" | "attachment" {
 export const UPLOAD_ACCEPT_ATTR = ALLOWED_MIME_TYPES.join(",");
 
 /**
- * Strip anything that must not reach a Content-Disposition header. Control
- * characters (CR/LF especially) are header injection; quotes break out of the
- * quoted-string form. Callers additionally emit an RFC 5987 filename* so
- * non-ASCII names survive.
+ * Moved to `src/lib/file-headers.ts` so the mail module can use it too —
+ * `src/modules/email/` may not import from `src/modules/documents/`. Re-exported
+ * here because this is where the DMS has always looked for it.
  */
-export function sanitizeFileName(raw: string): string {
-  let out = "";
-  for (const char of raw) {
-    const code = char.charCodeAt(0);
-    if (code < 32 || code === 127) continue;
-    if (char === '"' || char === "\\" || char === "/") continue;
-    out += char;
-  }
-  out = out.trim().slice(0, 120);
-  return out.length > 0 ? out : "download";
-}
+export { sanitizeFileName } from "@/lib/file-headers";

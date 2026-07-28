@@ -1,0 +1,50 @@
+# Stalwart, for local development only.
+#
+# Lets the mail client be built and verified without a server, DNS, a domain,
+# or the port-25 question — the same reason the JMAP client was written against
+# the RFC rather than against a vendor. What this instance CANNOT do is receive
+# mail from the internet; that is the only thing a real VPS adds.
+#
+#   docker compose -f docker/stalwart/compose.yml up -d
+#   docker compose -f docker/stalwart/compose.yml logs -f
+#   docker compose -f docker/stalwart/compose.yml down -v      # wipe and restart
+#
+# Every port is bound to 127.0.0.1 on purpose. A mail server reachable from the
+# local network is a mail server strangers on the coffee-shop wifi can reach.
+#
+# Host ports are deliberately non-privileged and offset from the real ones, so
+# nothing collides with anything Windows already has open:
+#
+#   8080 → 8080  admin UI and HTTP (JMAP lives here too, which conveniently
+#                sidesteps the self-signed-certificate problem locally)
+#   8443 → 443   HTTPS
+#   2525 → 25    SMTP
+#   5870 → 587   submission
+#   1143 → 143   IMAP
+#   9993 → 993   IMAPS
+
+services:
+  stalwart:
+    image: stalwartlabs/stalwart:v0.16
+    container_name: stalwart-dev
+    restart: unless-stopped
+    environment:
+      # Fixed credentials so this is reproducible and nobody has to grep logs
+      # after a `down -v`. Safe ONLY because this container is bound to
+      # localhost and holds nothing real. A production install takes its
+      # temporary password from the first-run log instead — never this.
+      STALWART_RECOVERY_ADMIN: "admin:localdev-only"
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8443:443"
+      - "127.0.0.1:2525:25"
+      - "127.0.0.1:5870:587"
+      - "127.0.0.1:1143:143"
+      - "127.0.0.1:9993:993"
+    volumes:
+      - stalwart-etc:/etc/stalwart
+      - stalwart-data:/var/lib/stalwart
+
+volumes:
+  stalwart-etc:
+  stalwart-data:

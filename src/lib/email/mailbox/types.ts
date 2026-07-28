@@ -103,6 +103,29 @@ export interface MailboxHost {
     domain: string,
     input: CreateMailboxInput,
   ): Promise<HostResult<HostMailbox>>;
+
+  /**
+   * Called once the local `mailboxes` row exists, for hosts backed by our own
+   * database rather than a remote API.
+   *
+   * Necessary because the two kinds of host want opposite orders. A remote host
+   * must be called FIRST — if the provider refuses, no local row should exist.
+   * A database-backed host must be called SECOND, because its directory row
+   * carries a composite foreign key to the very mailbox being created.
+   *
+   * Optional, and a no-op for remote hosts. That keeps the ordering knowledge
+   * in the one implementation that needs it instead of putting a
+   * `if (provider === 'stalwart')` into shared code — which is the seam this
+   * interface exists to prevent.
+   */
+  afterMailboxCreated?(input: {
+    tenantId: string;
+    mailboxId: string;
+    domain: string;
+    localPart: string;
+    address: string;
+    displayName: string;
+  }): Promise<HostResult<void>>;
   updateMailbox(
     domain: string,
     localPart: string,

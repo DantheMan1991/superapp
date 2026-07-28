@@ -10,11 +10,15 @@ import * as schema from "./schema";
  * Every tenant-scoped table has Row-Level Security enabled and FORCED
  * (drizzle/0001_rls.sql). Policies read three transaction-local settings:
  *
- *   app.role        — "superadmin" | "member"
- *   app.tenant_id   — the tenant whose rows are visible when role = member
- *   app.tenant_role — "owner" | "staff" | "expert" (drizzle/0024): lets a
- *                     policy distinguish owners from staff, which the
- *                     Documents module's owners-only folders depend on
+ *   app.role           — "superadmin" | "member"
+ *   app.tenant_id      — the tenant whose rows are visible when role = member
+ *   app.tenant_role    — "owner" | "staff" | "expert" (drizzle/0024): lets a
+ *                        policy distinguish owners from staff, which the
+ *                        Documents module's owners-only folders depend on
+ *   app.clerk_user_id  — the acting user (drizzle/0043): lets a policy scope
+ *                        rows to ONE PERSON inside a tenant. Mail needs it —
+ *                        a mailbox is private correspondence, so tenant-level
+ *                        scoping is not enough
  *
  * Nothing is visible until one of the helpers below sets that context inside
  * a transaction, so a query that forgets a `where` clause returns nothing
@@ -54,13 +58,26 @@ function getDb(): Db {
  * site keeps working and is denied owners-only rows. A forgotten opt-in denies
  * a read; it can never grant one. (The role union is inlined rather than
  * imported from lib/auth, which imports this module.)
+ *
+ * `opts.userId` is the acting user's Clerk id, and carries the same rule and
+ * the same direction. It defaults to the empty string, which
+ * `app_current_user()` turns into NULL, which matches no row — so a caller who
+ * forgets it sees NOTHING from a per-user table rather than everything the
+ * tenant has. Pass it whenever reading something that belongs to one person
+ * rather than to the business: today that means the mail tables, whose rows are
+ * somebody's private correspondence.
  */
 export async function withTenant<T>(
   tenantId: string,
   fn: (tx: Tx) => Promise<T>,
-  opts?: { role?: "owner" | "staff" | "expert" },
+  opts?: { role?: "owner" | "staff" | "expert"; userId?: string },
 ): Promise<T> {
   const tenantRole = opts?.role ?? "staff";
+  // Always set, never conditionally: these are transaction-local, but on a
+  // pooled connection an unset variable is one that still holds whatever the
+  // previous transaction on this backend left behind. Writing "" explicitly is
+  // what makes "no user was passed" mean no user.
+  const clerkUserId = opts?.userId ?? "";
   return getDb().transaction(async (tx) => {
     await tx.execute(sql`select set_config('app.role', 'member', true)`);
     await tx.execute(
@@ -68,6 +85,9 @@ export async function withTenant<T>(
     );
     await tx.execute(
       sql`select set_config('app.tenant_role', ${tenantRole}, true)`,
+    );
+    await tx.execute(
+      sql`select set_config('app.clerk_user_id', ${clerkUserId}, true)`,
     );
     return fn(tx);
   });

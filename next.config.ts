@@ -19,6 +19,17 @@ const nextConfig: NextConfig = {
     // import). Server-side caps: 1M chars / 10k rows.
     serverActions: { bodySizeLimit: "4mb" },
   },
+  // Development only. Local mail work has to run on the loopback IP rather than
+  // "localhost", because Stalwart rejects a hostname OAuth redirect URI — RFC
+  // 8252 §7.3 wants a loopback IP literal, since a hostname can be repointed by
+  // DNS or a hosts file and the redirect URI is where an auth code lands.
+  // Without this, Next blocks HMR at http://127.0.0.1:3000.
+  //
+  // LIST BOTH. This option REPLACES the implicit allowlist rather than adding
+  // to it, so `["127.0.0.1"]` alone drops "localhost" — and the failure is not
+  // an origin error, it is `/sign-in` and `/sign-up` returning 404 while every
+  // other route keeps working. Half an hour of looking in the wrong place.
+  allowedDevOrigins: ["localhost", "127.0.0.1"],
   async redirects() {
     // Muscle-memory aliases for the auth pages.
     return [

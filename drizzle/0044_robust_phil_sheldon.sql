@@ -1,0 +1,1 @@
+ALTER TABLE "mail_accounts" ADD COLUMN "inbox_unread" integer DEFAULT 0 NOT NULL;

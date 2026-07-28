@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
+import { EntityThreads } from "@/modules/email/components/entity-threads";
 import { getSettings } from "@/modules/accounting/core";
 import { loadBillLines, findPossibleDuplicates } from "@/modules/accounting/payables/bills";
 import { paidCentsFor } from "@/modules/accounting/payables/payments";
@@ -322,6 +323,9 @@ export default async function BillDetailPage({
         tenantId={tenantId}
         target={{ type: "bill", id: bill.id }}
       />
+
+      {/* Renders nothing at all until a conversation is attached. */}
+      <EntityThreads ctx={ctx} target={{ entityType: "bill", entityId: bill.id }} />
     </div>
   );
 }

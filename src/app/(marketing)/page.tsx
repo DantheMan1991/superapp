@@ -6,8 +6,10 @@ import {
   ClipboardCheck,
   FileCheck2,
   Landmark,
+  Layers,
   Megaphone,
   Plug,
+  Route,
   Workflow,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,14 +17,19 @@ import { IMAGES } from "@/lib/site";
 
 const PILLARS = [
   {
+    icon: Route,
+    title: "The work, tracked end to end",
+    body: "Jobs and orders from the first call to the final sign-off — scheduled, assigned, and visible while they're happening, not reconstructed from memory on Sunday night.",
+  },
+  {
     icon: Landmark,
     title: "Books that stay clean",
     body: "Every transaction categorized, invoices out the door, and unpaid bills chased automatically — so your books are always current and ready to close.",
   },
   {
     icon: FileCheck2,
-    title: "Contracts, done right",
-    body: "Generate contracts and change orders from proven templates, with every key date tracked so nothing slips through.",
+    title: "Paperwork that keeps up",
+    body: "Quotes, contracts and change orders from proven templates, with every key date tracked so nothing slips through.",
   },
   {
     icon: Megaphone,
@@ -31,11 +38,35 @@ const PILLARS = [
   },
 ];
 
+/**
+ * The three layers are the differentiator, and the wording is load-bearing.
+ * `src/lib/discovery.ts` treats a prospect who wants one-off bespoke software
+ * as a bad fit — so this describes layers on a maintained platform, and never
+ * promises code that belongs to one client and rots when they stop paying.
+ */
+const LAYERS = [
+  {
+    label: "The core",
+    title: "What every business needs",
+    body: "Books, documents, invoicing, follow-up. Built once and maintained properly, so you are never the only person keeping them alive — and every improvement we ship reaches you.",
+  },
+  {
+    label: "Your industry",
+    title: "What your kind of work needs",
+    body: "On top of the core, the tools your trade actually runs on. They exist because a business like yours needed them, which means you inherit work already paid for and already proven.",
+  },
+  {
+    label: "Your business",
+    title: "The way you specifically do it",
+    body: "Then the layer that is only yours — your workflow, your terminology, your way of quoting and scheduling and closing out. If the thing you need doesn't exist yet, we build it.",
+  },
+];
+
 const STEPS = [
   {
     icon: ClipboardCheck,
-    title: "We look at how you actually run",
-    body: "Start with the free health check. Ten questions about the work, the crew and the paperwork, and you get a written picture of where the hours and the money are going.",
+    title: "We learn how you actually run",
+    body: "Start with the free health check. Questions about the work, your people and the paperwork — wherever the work happens — and you get a written picture of where the hours and the money are going.",
   },
   {
     icon: Plug,
@@ -44,8 +75,8 @@ const STEPS = [
   },
   {
     icon: Workflow,
-    title: "The admin stops being your evening",
-    body: "The volume work runs itself in the background. What's left is the handful of decisions that genuinely need you.",
+    title: "We fit the last part to you",
+    body: "Your layer gets shaped around your workflow, and anything genuinely missing gets built. Then the volume work runs itself and you get your evenings back.",
   },
 ];
 
@@ -70,10 +101,11 @@ export default async function LandingPage() {
             Grow without building an office.
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-pretty text-muted-foreground sm:text-xl">
-            Custom software handles the administrative volume — books,
-            invoicing, contracts, follow-up. When judgment matters, a real
-            professional reviews and signs off. You stay focused on the work
-            only you can do.
+            Software shaped around how your business actually runs — on the job
+            site, on the floor, in the dining room, and in the paperwork that
+            follows. It handles the volume. When judgment matters, a real
+            professional reviews and signs off. You stay on the work only you
+            can do.
           </p>
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button
@@ -120,16 +152,23 @@ export default async function LandingPage() {
       {/* Pillars --------------------------------------------------------- */}
       <section className="border-t bg-muted/40">
         <div className="mx-auto w-full max-w-6xl px-6 py-20">
-          <h2 className="max-w-2xl text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
-            The work that piles up after the job is done.
-          </h2>
-          <div className="mt-12 grid gap-10 md:grid-cols-3 md:gap-8">
+          <div className="max-w-2xl">
+            <h2 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
+              From the first call to the money in the bank.
+            </h2>
+            <p className="mt-4 text-pretty text-muted-foreground">
+              Not just the back office. Yosher covers the whole run of a job —
+              what your people are doing today, what it costs, what got
+              promised, and what has to happen next.
+            </p>
+          </div>
+          <div className="mt-12 grid gap-10 sm:grid-cols-2 md:gap-8 lg:grid-cols-4">
             {PILLARS.map((pillar) => (
               <div key={pillar.title}>
                 <div className="mb-4 flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <pillar.icon className="size-5" />
                 </div>
-                <h3 className="font-medium">{pillar.title}</h3>
+                <h3 className="font-medium text-pretty">{pillar.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                   {pillar.body}
                 </p>
@@ -139,8 +178,60 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* How it works ---------------------------------------------------- */}
+      {/* Three layers ---------------------------------------------------- */}
       <section className="border-t">
+        <div className="mx-auto w-full max-w-6xl px-6 py-20">
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Built for you, not for everyone
+            </p>
+            <h2 className="mt-3 text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
+              Off-the-shelf software makes you work its way. This works yours.
+            </h2>
+            <p className="mt-4 text-pretty text-muted-foreground">
+              Two companies in the same trade don&apos;t run the same way, and
+              software that pretends otherwise is the software that ends up
+              abandoned next to a spreadsheet. Yosher is built in three layers.
+            </p>
+          </div>
+
+          <ol className="mt-12 grid gap-6 md:grid-cols-3">
+            {LAYERS.map((layer, i) => (
+              <li
+                key={layer.label}
+                className="relative flex flex-col rounded-xl border bg-card p-6 shadow-sm"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="flex size-7 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <Layers className="size-4" />
+                  </span>
+                  <span className="text-xs font-semibold tracking-wide text-brand-foreground uppercase">
+                    {layer.label}
+                  </span>
+                </div>
+                <h3 className="mt-4 font-medium text-pretty">{layer.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {layer.body}
+                </p>
+                <span
+                  aria-hidden
+                  className="mt-5 block h-1 rounded-full bg-primary/15"
+                  style={{ width: `${40 + i * 30}%` }}
+                />
+              </li>
+            ))}
+          </ol>
+
+          <p className="mt-8 max-w-2xl text-sm text-pretty text-muted-foreground">
+            The difference that matters: your layer sits on a platform we keep
+            maintained. You get software fitted to your business without owning
+            a one-off system that nobody updates once the developer moves on.
+          </p>
+        </div>
+      </section>
+
+      {/* How it works ---------------------------------------------------- */}
+      <section className="border-t bg-muted/40">
         <div className="mx-auto w-full max-w-6xl px-6 py-20">
           <div className="max-w-2xl">
             <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
@@ -170,7 +261,7 @@ export default async function LandingPage() {
       </section>
 
       {/* Health check ---------------------------------------------------- */}
-      <section className="border-t bg-muted/40">
+      <section className="border-t">
         <div className="mx-auto w-full max-w-3xl px-6 py-20 text-center">
           <h2 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
             Find out where your business is bleeding time and money — free.
@@ -193,7 +284,7 @@ export default async function LandingPage() {
       </section>
 
       {/* Judgment -------------------------------------------------------- */}
-      <section className="border-t">
+      <section className="border-t bg-muted/40">
         <div className="mx-auto w-full max-w-3xl px-6 py-20 text-center">
           <h2 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
             Software does the volume. You keep the judgment.

@@ -1706,6 +1706,15 @@ code or config change.
   it. That is the point, it is audited, and the person doing it is the person
   whose mailbox it is — but there is no owner-only mode and no way to un-publish
   except deleting the document. Revisit if a client asks.
+- **There is no production Stalwart, and that is now the only thing between the
+  inbox and a person using it.** `STALWART_BASE_URL` points at a Docker
+  container on one laptop. `yosherapp.com`'s mailboxes are at Migadu, which has
+  no OAuth — which is why Stalwart was chosen in the first place — so the app
+  cannot read them. Eight slices of mail client are waiting on one box.
+  **`docs/runbooks/mail-server.md`** is the procedure, and the two things that
+  decide whether it works are port-25 egress and the fact that a fresh IP has no
+  sending reputation. The answer to the second is to relay outbound through
+  Migadu rather than reversing the original evaluation.
 - **`EMAIL_DEV_REDIRECT` must be set wherever compose is used outside
   production.** Locally it is now `admin@yosher.test`, the Stalwart mailbox in
   Docker, so a test send round-trips without leaving the machine. **It is not set

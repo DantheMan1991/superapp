@@ -2698,6 +2698,71 @@ export const mailAnnotations = pgTable(
   ],
 );
 
+/**
+ * A named mail view — "unread from the accountant", "anything with files".
+ *
+ * **Per USER, not per tenant, and that is the difference from
+ * `document_saved_views`.** A saved view in Documents can be shared with the
+ * business because it names tenant data: a folder id means the same thing to
+ * everybody. A mail search names a JMAP mailbox id, which is issued by the mail
+ * server inside ONE person's account — hand it to a colleague and it points at
+ * a folder that does not exist for them, or worse, at a different one. Sharing
+ * would produce a view that silently shows the wrong thing.
+ *
+ * So this is the second table scoped by `app.clerk_user_id` (drizzle/0043), and
+ * the reason is the same one that made mailboxes private: the row belongs to a
+ * person rather than to the business.
+ *
+ * `query` is stored USER INPUT. It is re-parsed with Zod on every read
+ * (`parseMailView`) and becomes a JMAP filter, never SQL — mail search runs on
+ * the mail server, so this blob has no path to a WHERE clause even in principle.
+ */
+export const mailSavedSearches = pgTable(
+  "mail_saved_searches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Whose search this is. Not null — nobody saves one anonymously. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** Which connection's folder ids the query refers to. */
+    mailAccountId: uuid("mail_account_id").notNull(),
+    name: text("name").notNull(),
+    /** Lowercased name, so "Unread" and "unread" cannot both exist. */
+    nameKey: text("name_key").notNull(),
+    query: jsonb("query")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_saved_searches_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One name per person per account — a colleague's "Unread" is not a clash.
+    uniqueIndex("mail_saved_searches_name_idx").on(
+      t.tenantId,
+      t.clerkUserId,
+      t.mailAccountId,
+      t.nameKey,
+    ),
+    index("mail_saved_searches_user_idx").on(t.tenantId, t.clerkUserId),
+    // Deleting a connection takes its searches with it: they name folder ids
+    // that stop meaning anything the moment the account is gone. Unlike
+    // mail_links, there is no readable artifact left behind to preserve.
+    foreignKey({
+      name: "mail_saved_searches_account_fk",
+      columns: [t.tenantId, t.mailAccountId],
+      foreignColumns: [mailAccounts.tenantId, mailAccounts.id],
+    }).onDelete("cascade"),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -3176,6 +3241,7 @@ export type MailAccount = typeof mailAccounts.$inferSelect;
 export type MailThreadIndexRow = typeof mailThreadIndex.$inferSelect;
 export type MailLink = typeof mailLinks.$inferSelect;
 export type MailAnnotation = typeof mailAnnotations.$inferSelect;
+export type MailSavedSearch = typeof mailSavedSearches.$inferSelect;
 /** Display-only participants on an indexed thread. */
 export type MailParticipant = { name: string; email: string };
 export type DocumentShare = typeof documentShares.$inferSelect;

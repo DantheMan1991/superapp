@@ -1141,6 +1141,94 @@ flushed when I looked. **Check whether the handler is actually attached
 (`__reactProps$…`) before blaming the bundler** — it is one query and it settles
 in seconds what a server restart cannot.
 
+### 2026-07-28 (later still) — Slice 7: organise (branch `claude/email-organise`)
+
+Multi-select and a bulk bar, three filter chips, folder creation, and saved
+views. The slice that turns a working mail client into one somebody can keep
+tidy.
+
+**One shape, used three ways, so they cannot drift.** `organise/filters.ts`
+owns `MailViewQuery`, and it is simultaneously what the URL carries, what
+becomes a JMAP filter, and what a saved view stores. A saved search is
+therefore not a second query language — it is these parameters written down.
+That is Documents' saved-view decision applied again ("the stored jsonb never
+becomes a WHERE clause on its own terms — it becomes a URL"), and it lands
+harder here: **mail search runs on the mail server**, so the stored blob has no
+path to SQL even in principle.
+
+Two rules live in `toJmapFilter` because they are the ones that get
+re-implemented wrongly:
+
+- **A text term drops the folder.** Hunting for something you know exists and
+  being told "no results" because you were standing in the wrong folder is the
+  worst failure a mail search has. A search spans the account; a chip narrows
+  the folder you are already in.
+- **Unread is the ABSENCE of `$seen`,** not a keyword of its own. JMAP has no
+  `isUnread`, and asking for `hasKeyword: "$unseen"` — which does not exist —
+  would silently match nothing rather than erroring.
+
+**`mail_saved_searches` is per-USER, and that is a data-model fact before it is
+a privacy one.** `document_saved_views` is tenant-wide and shareable because it
+names a folder id, and a folder id means the same thing to everybody in the
+business. A mail search names a **JMAP mailbox id**, issued by the mail server
+inside one person's account — hand it to a colleague and it points at a folder
+that does not exist for them, or at a different one. The feature cannot be
+shared because the identifiers are not shareable.
+
+The privacy consequence follows anyway and is what decided the policy: the NAME
+of a saved search is correspondence. *"Unread from the solicitor"* tells a
+colleague what somebody is dealing with. So `0048` scopes it on
+`app.clerk_user_id` — the second table in the schema to do so — with the same
+fail-closed direction `0043` established.
+
+It is **member-writable**, unlike the other per-user mail tables. `mail_accounts`
+refuses member writes because a member who could write one could point an account
+at a token they control, which is an authentication bypass. Nothing of the sort
+is true here: the worst somebody can do to their own saved views is save a bad
+one. The `WITH CHECK` pins `clerk_user_id` as well as `tenant_id`, so a member
+cannot plant a view in a colleague's rail any more than they can read one out
+of it.
+
+**The risk the plan named, handled.** `Email/set` caps at `maxObjectsInSet` —
+500 on this server — and exceeding it **errors rather than truncating**, so a
+bulk flag over a big selection would have failed entirely rather than doing as
+much as it could. `applyToEmails` chunks, the way `getEmails` already chunked
+for `maxObjectsInGet`, and both `setKeyword` and `moveToMailbox` now go through
+it. A failed chunk **does not discard the successful ones**: it stops and
+reports what got through, because returning a bare error after moving 500 of 900
+messages leaves somebody with no idea which half of their mailbox moved. The UI
+says `"300 of 900 done — the mail server refused 600"` rather than "done".
+
+**The selection is the one piece of state that does NOT belong in the URL.**
+Everything else in this module is a parameter; a list of chosen message ids is
+not something anybody wants to bookmark, share or restore with the back button,
+and putting it there would make every checkbox a navigation. So `ThreadList`
+became a client component, the rail stayed a server one, and the rows are still
+links — selecting is a checkbox beside the link rather than a mode you enter.
+
+"Select all" is scoped to the page **and says so**. "Select all" that silently
+means all 4,000 in a folder is how people trash things they meant to read.
+
+**Role folders cannot be renamed, and it is refused on the server.** Roles are
+how `archive`, `trash`, `sent` and `drafts` are resolved throughout the module —
+renaming one does not break its name, it breaks every lookup that depends on it.
+`renameFolderAction` re-reads the folder list and checks `role !== null` rather
+than trusting the UI to hide the option.
+
+**Verified against the live Stalwart, in the browser:**
+
+| | |
+| --- | --- |
+| filter chips | `?flagged=1` empty → bulk-flag → `?flagged=1` finds it |
+| bulk action | `bulkAction({action:"flag"})` landed on the mail server |
+| saved view | stored, listed in the rail, name auto-suggested as "unread, in Inbox" |
+| folder create | "Quotes" appeared in the rail — and in every other mail app |
+
+One detail worth recording because it is the design working rather than a gap:
+**this Stalwart has no `archive` role folder**, so the bulk bar has no Archive
+button. The button is conditional on the role resolving, so a mailbox without
+one simply does not offer the action instead of offering one that fails.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -1167,6 +1255,7 @@ transport slots in without touching a single caller.
 | `mail_accounts` | A person's OAuth connection to a mailbox | Tokens encrypted with a key held in the environment, never in this database. Separate from `mailboxes` on purpose: that table says an address exists, this says someone authorized us to read it. **`member_read` only** |
 | `mail_thread_index` | Thin thread index — subject, participants, dates | **Not a mirror.** No bodies, no search index. Exists so a module can ask "every thread on this invoice" as a SQL join instead of N+1 protocol calls. **`member_read` only** |
 | `mail_links` | Thread ↔ business entity | **MEMBER WRITABLE** — the deliberate exception. `entity_type` carries no whitelist so a future layer needs no migration. `mail_account_id` (`0045`) is what makes an opaque thread id unambiguous inside a tenant; its composite FK is hand-written in `0046` because it needs `ON DELETE SET NULL (mail_account_id)` — the link must SURVIVE a disconnected mailbox, and the column list is what stops the same rule nulling `tenant_id`. Unique on `(tenant_id, mail_account_id, thread_id, entity_type, entity_id)`, NULLS DISTINCT on purpose |
+| `mail_saved_searches` | A named mail view, per person | **PER-USER** (`0048`), the second table scoped on `app.clerk_user_id` — and for a data-model reason before a privacy one: a mail search names a JMAP mailbox id, which only exists inside one account, so it *cannot* be shared the way `document_saved_views` can. The privacy consequence follows anyway: the NAME of a search is correspondence. **MEMBER WRITABLE**, unlike the other per-user mail tables; `WITH CHECK` pins `clerk_user_id` as well as `tenant_id`. `query` is re-parsed with Zod on read and becomes a JMAP filter, never SQL |
 | `mail_annotations` | Extension-contributed metadata per thread | **MEMBER WRITABLE**. One row per extension per thread, so a layer can be reprocessed or removed without touching another's work. `version` (`0045`) is the optimistic-concurrency counter — a reprocess and a user edit genuinely race here, and last-write-wins on jsonb loses one silently |
 
 ## Key files & seams
@@ -1500,8 +1589,12 @@ proved to carry the submission scope before any of it was designed. Sending is
 refused locally until `EMAIL_DEV_REDIRECT` is set — that is the envelope guard,
 not a bug.
 
-What is NOT built yet, in slice order: organise (bulk actions, filters, saved
-searches), then signatures and rules, then contacts.
+**Organising is in as of Slice 7**: multi-select with a bulk bar, unread/flagged/
+has-files chips, folder creation, and per-user saved views.
+
+What is NOT built yet, in slice order: signatures, out-of-office and rules
+(Slice 8 — and the probe already overturned its cost, since this server speaks
+JMAP Sieve rather than needing ManageSieve), then contacts, then delegation.
 
 Everything so far has been proven against ONE server, ONE account and ONE
 message. That is a real limit: no multi-account switching, no thread expansion
@@ -1618,6 +1711,16 @@ code or config change.
   Docker, so a test send round-trips without leaving the machine. **It is not set
   in Vercel Preview**, so compose on a branch deployment will refuse — which is
   the safe direction, and is also the first thing somebody will report as a bug.
+- **No folder rename, move or delete in the UI.** `renameMailbox` is on the
+  client and `renameFolderAction` refuses role folders, but nothing calls them
+  yet — the rail creates and lists, nothing more. Deleting a folder is the one
+  worth thinking hardest about: it destroys mail at the host.
+- **Saved views cannot be reordered or renamed.** `sort_order` exists on the
+  table and is always 0.
+- **"Select all" is page-scoped, with no "select all N matching".** The honest
+  limitation: doing it properly means an `Email/query` for ids without bodies,
+  and a bulk action over thousands of ids that somebody triggered with one
+  click deserves a confirmation step that does not exist yet.
 - **No drafts UI.** `saveDraft()` exists on the client and nothing calls it —
   closing the composer discards what you typed. Drafts live on the SERVER by
   design (a local table would desync with the same mailbox open in Outlook), so

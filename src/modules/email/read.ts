@@ -4,6 +4,7 @@ import { authorizedClient } from "@/lib/email/oauth/accounts";
 import type { JmapEmail, JmapMailbox } from "@/lib/email/jmap/types";
 import { KEYWORD_FLAGGED, KEYWORD_SEEN } from "@/lib/email/jmap/types";
 import { loadConnection } from "@/lib/email/oauth/accounts";
+import { toJmapFilter, type MailViewQuery } from "./organise/filters";
 
 /**
  * Everything the mail view needs, in as few round trips as the protocol allows.
@@ -81,7 +82,8 @@ export interface MailViewParams {
   clerkUserId: string;
   mailboxId?: string;
   messageId?: string;
-  query?: string;
+  /** Search term and filter chips, already parsed out of the URL. */
+  view?: MailViewQuery;
   position?: number;
   /** True when a composer is open, so the signature is worth fetching. */
   composing?: boolean;
@@ -113,14 +115,11 @@ export async function loadMailView(
   const selected =
     requested ?? folders.data.find((f) => f.role === "inbox") ?? folders.data[0];
 
-  const search = params.query?.trim();
+  // The filter comes from one place — `toJmapFilter` — so the URL, the JMAP
+  // query and a saved search cannot drift apart. It also owns the rule that a
+  // text term spans the account while a filter narrows the current folder.
   const listed = await client.data.queryEmails({
-    filter: {
-      // A search spans the whole account: hunting for something you know exists
-      // and being shown "no results" because you were standing in the wrong
-      // folder is the worst failure a mail search has.
-      ...(search ? { text: search } : selected ? { inMailbox: selected.id } : {}),
-    },
+    filter: toJmapFilter(params.view ?? {}, selected?.id ?? null),
     // One row per conversation, which is what a person means by "a message".
     collapseThreads: true,
     limit: PAGE_SIZE,

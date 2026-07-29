@@ -330,6 +330,20 @@
       "when": 1785261648673,
       "tag": "0046_mail_links_account_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1785287209370,
+      "tag": "0047_deep_kingpin",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785287209371,
+      "tag": "0048_mail_saved_searches_rls",
+      "breakpoints": true
     }
   ]
 }

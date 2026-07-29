@@ -125,6 +125,29 @@ export interface JmapEmail {
 }
 
 /**
+ * An address this account may send as (RFC 8621 §6).
+ *
+ * Defined by the SUBMISSION capability rather than the mail one, which is worth
+ * knowing: a token that can read a mailbox cannot necessarily list its
+ * identities, and asking for them is therefore a real test of whether it may
+ * send.
+ *
+ * Signatures live here rather than in a table of ours — the mail server already
+ * models them, and a second copy would drift the first time somebody edited one
+ * in Outlook.
+ */
+export interface JmapIdentity {
+  id: string;
+  name: string;
+  email: string;
+  replyTo: JmapEmailAddress[] | null;
+  bcc: JmapEmailAddress[] | null;
+  textSignature: string;
+  htmlSignature: string;
+  mayDelete: boolean;
+}
+
+/**
  * A conversation. The server computes membership from Message-Id / In-Reply-To
  * / References plus subject normalization, and re-threads on out-of-order
  * arrival — none of which we implement.
@@ -202,6 +225,49 @@ export interface JmapChanges {
   updated: string[];
   destroyed: string[];
   hasMoreChanges: boolean;
+}
+
+/** An attachment already uploaded to the mail server's blob store. */
+export interface JmapUploadedBlob {
+  blobId: string;
+  type: string;
+  size: number;
+}
+
+/**
+ * A message ready to become a draft or to be sent.
+ *
+ * `envelopeRcptTo` is separate from `to`/`cc`/`bcc` ON PURPOSE, and it is the
+ * most important field here. The headers are what the recipient reads; the
+ * envelope is where the mail server actually delivers. They are normally the
+ * same, and outside production they deliberately are not — the dev guard
+ * rewrites the envelope and leaves the headers truthful, so Sent holds a real
+ * record while delivery goes only to the developer.
+ *
+ * The client does not compute it. Whoever calls `sendMessage` is responsible for
+ * having run the guard, and the field is named so that handing it a header list
+ * by accident reads as obviously wrong.
+ */
+export interface JmapComposedMessage {
+  /** Which identity to send as — from `Identity/get`. */
+  identityId: string;
+  from: JmapEmailAddress;
+  to: JmapEmailAddress[];
+  cc: JmapEmailAddress[];
+  bcc: JmapEmailAddress[];
+  subject: string;
+  textBody: string;
+  htmlBody?: string;
+  /** RFC 5322 threading, from `threadHeaders()`. */
+  inReplyTo?: string[];
+  references?: string[];
+  attachments?: { blobId: string; type: string; name: string }[];
+  /** Where the draft is created. Required — every message starts as a draft. */
+  draftsMailboxId: string;
+  /** Where it lands after sending. Absent means the server decides. */
+  sentMailboxId?: string;
+  /** Envelope recipients. See the note above; NOT the header list. */
+  envelopeRcptTo: string[];
 }
 
 /** Every call returns this shape rather than throwing — same rule as MailboxHost. */

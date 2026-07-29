@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, Mail, Search } from "lucide-react";
+import { AlertTriangle, Mail, PenSquare, Search } from "lucide-react";
 import type { MailAccount } from "@/db/schema";
 import type { TenantContext } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { FolderRail, ThreadList, mailHref } from "./components/mail-panes";
 import { ReadingPane } from "./components/reading-pane";
 import { MailSearch } from "./components/mail-search";
 import { MailPoller } from "./components/mail-poller";
+import { Composer, type ComposeMode } from "./components/composer";
 
 /**
  * The three panes.
@@ -43,8 +44,12 @@ export async function MailView({
     // Per-message and per-visit: unblocking images is a decision the reader
     // makes each time, not a preference stored against a sender.
     images: first("images"),
+    // In the URL like everything else, so a half-written reply survives the
+    // page around it refreshing.
+    compose: first("compose"),
   };
   const position = Number(params.pos ?? "0");
+  const composeMode = readComposeMode(params.compose);
 
   const view = await loadMailView(account, {
     tenantId: ctx.tenant.id,
@@ -53,6 +58,7 @@ export async function MailView({
     ...(params.message ? { messageId: params.message } : {}),
     ...(params.q ? { query: params.q } : {}),
     position: Number.isFinite(position) && position > 0 ? position : 0,
+    ...(composeMode ? { composing: true } : {}),
   });
 
   if (!view.ok) {
@@ -85,6 +91,12 @@ export async function MailView({
       <div className="flex items-center gap-3 border-b px-4 py-2.5">
         <Mail className="size-5 shrink-0 text-brand" />
         <span className="truncate text-sm font-medium">Mail</span>
+        <Button asChild size="sm" variant="outline" className="shrink-0">
+          <Link href={mailHref(params, { compose: "new", message: undefined })}>
+            <PenSquare className="size-4" />
+            <span className="hidden sm:inline">Write</span>
+          </Link>
+        </Button>
         <MailSearch initial={params.q ?? ""} params={params} />
       </div>
 
@@ -131,8 +143,23 @@ export async function MailView({
           )}
         </section>
 
-        <section className={`min-h-0 ${view.message ? "block" : "hidden lg:block"}`}>
-          {view.message ? (
+        <section
+          className={`min-h-0 ${view.message || composeMode ? "block" : "hidden lg:block"}`}
+        >
+          {composeMode ? (
+            // The composer takes the reading pane rather than floating over it:
+            // a modal that covers the message you are replying to is the thing
+            // every mail client eventually regrets.
+            <Composer
+              mailboxId={account.mailboxId}
+              accountId={account.id}
+              selfAddress={view.selfAddress}
+              mode={composeMode}
+              parent={view.message}
+              signature={view.signature}
+              closeHref={mailHref(params, { compose: undefined })}
+            />
+          ) : view.message ? (
             <>
               <div className="border-b px-4 py-2 lg:hidden">
                 <Link
@@ -150,6 +177,9 @@ export async function MailView({
                 folders={view.folders}
                 showImages={params.images === "1"}
                 showImagesHref={mailHref(params, { images: "1" })}
+                replyHref={mailHref(params, { compose: "reply" })}
+                replyAllHref={mailHref(params, { compose: "reply_all" })}
+                forwardHref={mailHref(params, { compose: "forward" })}
               />
             </>
           ) : (
@@ -164,6 +194,19 @@ export async function MailView({
       </div>
     </div>
   );
+}
+
+/** `?compose=` → a mode, or nothing. An unknown value opens no composer. */
+function readComposeMode(raw: string | undefined): ComposeMode | null {
+  switch (raw) {
+    case "new":
+    case "reply":
+    case "reply_all":
+    case "forward":
+      return raw;
+    default:
+      return null;
+  }
 }
 
 const PAGE = 40;

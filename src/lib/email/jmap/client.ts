@@ -3,6 +3,7 @@ import {
   compareMailboxes,
   parseChanges,
   parseEmail,
+  parseIdentity,
   parseMailbox,
   parseQueryResult,
   parseSession,
@@ -11,14 +12,18 @@ import {
 } from "./parse";
 import type {
   JmapChanges,
+  JmapComposedMessage,
   JmapEmail,
+  JmapEmailAddress,
   JmapEmailFilter,
+  JmapIdentity,
   JmapMailbox,
   JmapQueryResult,
   JmapQuerySort,
   JmapResult,
   JmapSession,
   JmapThread,
+  JmapUploadedBlob,
 } from "./types";
 
 /**
@@ -37,6 +42,13 @@ import type {
 
 const CORE = "urn:ietf:params:jmap:core";
 const MAIL = "urn:ietf:params:jmap:mail";
+/**
+ * RFC 8621 §7. Carries `EmailSubmission` **and `Identity`** — the identity
+ * object is defined by the submission spec, not the mail one, which is why
+ * asking for an identity is also the cheapest honest test of whether a token
+ * may send at all.
+ */
+export const SUBMISSION = "urn:ietf:params:jmap:submission";
 const TIMEOUT_MS = 20_000;
 /**
  * How much of a body to fetch. Generous enough that a normal message arrives
@@ -141,6 +153,117 @@ interface MethodCall {
   0: string;
   1: Record<string, unknown>;
   2: string;
+}
+
+/**
+ * A composed message as a JMAP Email object.
+ *
+ * Bodies go in as `bodyValues` keyed by part id, with `textBody`/`htmlBody`
+ * naming which part is which — RFC 8621 §4.1.4. Supplying both makes the server
+ * build the `multipart/alternative` itself, which is the whole reason not to
+ * assemble MIME by hand: getting boundaries, encodings and charsets right is a
+ * job the server already does correctly.
+ *
+ * `$draft` is set on creation whether or not this is going straight out. A
+ * message that exists on the server without it, before submission, is one that
+ * shows up in the mailbox as ordinary mail if the send then fails.
+ */
+function draftObject(message: JmapComposedMessage): Record<string, unknown> {
+  const bodyValues: Record<string, { value: string }> = {
+    text: { value: message.textBody },
+  };
+  const body: Record<string, unknown> = {
+    textBody: [{ partId: "text", type: "text/plain" }],
+  };
+  if (message.htmlBody && message.htmlBody.trim().length > 0) {
+    bodyValues.html = { value: message.htmlBody };
+    body.htmlBody = [{ partId: "html", type: "text/html" }];
+  }
+
+  return {
+    mailboxIds: { [message.draftsMailboxId]: true },
+    keywords: { $draft: true },
+    from: [addressObject(message.from)],
+    to: message.to.map(addressObject),
+    ...(message.cc.length > 0 ? { cc: message.cc.map(addressObject) } : {}),
+    ...(message.bcc.length > 0 ? { bcc: message.bcc.map(addressObject) } : {}),
+    subject: message.subject,
+    ...(message.inReplyTo && message.inReplyTo.length > 0
+      ? { inReplyTo: message.inReplyTo }
+      : {}),
+    ...(message.references && message.references.length > 0
+      ? { references: message.references }
+      : {}),
+    ...(message.attachments && message.attachments.length > 0
+      ? {
+          attachments: message.attachments.map((a) => ({
+            blobId: a.blobId,
+            type: a.type,
+            name: a.name,
+            disposition: "attachment",
+          })),
+        }
+      : {}),
+    bodyValues,
+    ...body,
+  };
+}
+
+/** JMAP wants `name: null` rather than an absent key for a bare address. */
+function addressObject(a: JmapEmailAddress): { name: string | null; email: string } {
+  return { name: a.name && a.name.length > 0 ? a.name : null, email: a.email };
+}
+
+/**
+ * Read one creation out of a `/set` response.
+ *
+ * `notCreated` is the branch that matters: a `/set` returns HTTP 200 with the
+ * failure inside it, so treating a 200 as success is how a message silently
+ * fails to send. The per-creation error carries its own type — `tooLarge`,
+ * `invalidEmail`, `forbiddenFrom` — and those are the sentences a person can
+ * actually act on.
+ */
+function readCreated(
+  payload: unknown,
+  creationId: string,
+): { ok: true; id: string } | { ok: false; message: string } {
+  const r = payload as {
+    created?: Record<string, { id?: unknown }>;
+    notCreated?: Record<string, { type?: unknown; description?: unknown }>;
+  };
+  const made = r?.created?.[creationId];
+  if (made && typeof made.id === "string" && made.id.length > 0) {
+    return { ok: true, id: made.id };
+  }
+  const failed = r?.notCreated?.[creationId];
+  if (failed) {
+    const type = typeof failed.type === "string" ? failed.type : "unknown";
+    return { ok: false, message: describeSetError(type) };
+  }
+  return { ok: false, message: "The mail server didn't say what happened to that message." };
+}
+
+/** `/set` errors are their own vocabulary (RFC 8620 §5.3), not method errors. */
+function describeSetError(type: string): string {
+  switch (type) {
+    case "tooLarge":
+      return "That message is larger than the mail server allows.";
+    case "invalidEmail":
+    case "invalidProperties":
+      return "The mail server rejected that message as malformed.";
+    case "forbiddenFrom":
+      return "You're not allowed to send from that address.";
+    case "forbiddenToSend":
+      return "The mail server refused to send that message.";
+    case "overQuota":
+      return "That mailbox is out of space.";
+    case "rateLimit":
+      return "The mail server is rate-limiting sends. Try again shortly.";
+    case "notFound":
+      return "That folder no longer exists on the mail server.";
+    default:
+      return `The mail server refused that message (${type}).`;
+  }
 }
 
 async function httpJson(
@@ -265,6 +388,37 @@ export interface JmapClient {
     sinceState: string,
     maxChanges?: number,
   ): Promise<JmapResult<JmapChanges>>;
+  /**
+   * The addresses this account may send as.
+   *
+   * Declares the SUBMISSION capability, because the identity object belongs to
+   * that spec rather than to mail. That makes this the cheapest honest answer to
+   * "may this token send?" — it is a read, so it costs nothing and sends
+   * nothing, and a token without the scope fails here rather than after somebody
+   * has typed a message.
+   */
+  identities(): Promise<JmapResult<JmapIdentity[]>>;
+  /** True when the SERVER offers submission. Says nothing about the token. */
+  supportsSubmission(): boolean;
+  /**
+   * Put bytes in the mail server's blob store so a draft can reference them.
+   *
+   * Goes to the session's `uploadUrl`, NOT through a server action: Next caps a
+   * server action's payload at 4 MB by default, which would quietly make that
+   * the attachment limit. The mail server's own limit is the one that should
+   * apply.
+   */
+  uploadBlob(bytes: Uint8Array, type: string): Promise<JmapResult<JmapUploadedBlob>>;
+  /** Create a draft on the server. No local drafts table — see the seam's note. */
+  saveDraft(message: JmapComposedMessage): Promise<JmapResult<{ emailId: string }>>;
+  /**
+   * Create the message and send it, in ONE request: `Email/set create`, an
+   * `EmailSubmission/set` that back-references it, and `onSuccessUpdateEmail` to
+   * strip `$draft` and move it to Sent.
+   */
+  sendMessage(
+    message: JmapComposedMessage,
+  ): Promise<JmapResult<{ emailId: string; submissionId: string }>>;
   /** Cheap "has anything changed?" — one request, no payload. */
   currentState(): Promise<JmapResult<string>>;
   downloadUrlFor(blobId: string, name: string, type: string): string;
@@ -308,12 +462,27 @@ export function createJmapClient(
 ): JmapClient {
   const accountId = session.primaryAccountId;
 
+  /**
+   * `using` is per-call, not fixed.
+   *
+   * It was hardcoded to `[CORE, MAIL]`, which is correct for every read in the
+   * inbox and silently fatal for sending: a server rejects a method whose
+   * capability the request did not declare, so `EmailSubmission/set` — and
+   * `Identity/get`, which the submission spec also owns — would have come back
+   * `unknownCapability` no matter how well-formed the call was.
+   *
+   * Declared per call rather than always including submission, because `using`
+   * is a statement about what this request needs. A read that announces it might
+   * send is a worse description of itself, and on a server that scopes tokens by
+   * capability it would fail reads for a token that may only read.
+   */
   async function call(
     methodCalls: MethodCall[],
+    using: string[] = [CORE, MAIL],
   ): Promise<JmapResult<unknown>> {
     return httpJson(session.apiUrl, token, {
       method: "POST",
-      body: { using: [CORE, MAIL], methodCalls },
+      body: { using, methodCalls },
     });
   }
 
@@ -558,6 +727,203 @@ export function createJmapClient(
         return { ok: false, message: "The mail server's change list couldn't be read." };
       }
       return { ok: true, data: changes };
+    },
+
+    supportsSubmission() {
+      return session.capabilities.includes(SUBMISSION);
+    },
+
+    async uploadBlob(bytes, type) {
+      const url = session.uploadUrl.replace(
+        "{accountId}",
+        encodeURIComponent(accountId),
+      );
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            // The server stores what we declare. It re-sniffs on its own terms;
+            // this is a hint, not a promise.
+            "Content-Type": type || "application/octet-stream",
+          },
+          body: bytes as unknown as BodyInit,
+          signal: AbortSignal.timeout(BLOB_TIMEOUT_MS),
+          cache: "no-store",
+        });
+      } catch (err) {
+        const timedOut = err instanceof Error && err.name === "TimeoutError";
+        return {
+          ok: false,
+          message: timedOut
+            ? "That attachment took too long to upload."
+            : "Couldn't reach the mail server.",
+        };
+      }
+      if (response.status === 401) {
+        return {
+          ok: false,
+          status: 401,
+          needsReauth: true,
+          message: "This mailbox needs to be reconnected.",
+        };
+      }
+      if (response.status === 413) {
+        // Named specifically: "too big" is the one upload failure a person can
+        // do something about.
+        return {
+          ok: false,
+          status: 413,
+          message: "That attachment is larger than the mail server allows.",
+        };
+      }
+      if (!response.ok) {
+        return {
+          ok: false,
+          status: response.status,
+          message: `The mail server wouldn't accept that attachment (${response.status}).`,
+        };
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(await response.text());
+      } catch {
+        return { ok: false, message: "The mail server's upload reply wasn't valid JSON." };
+      }
+      const r = parsed as { blobId?: unknown; size?: unknown; type?: unknown };
+      if (typeof r?.blobId !== "string" || r.blobId.length === 0) {
+        return { ok: false, message: "The mail server didn't return a usable attachment id." };
+      }
+      return {
+        ok: true,
+        data: {
+          blobId: r.blobId,
+          size: typeof r.size === "number" ? r.size : bytes.byteLength,
+          type: typeof r.type === "string" ? r.type : type,
+        },
+      };
+    },
+
+    async saveDraft(message) {
+      const result = await call(
+        [
+          [
+            "Email/set",
+            { accountId, create: { draft: draftObject(message) } },
+            "c",
+          ] as unknown as MethodCall,
+        ],
+        [CORE, MAIL],
+      );
+      if (!result.ok) return result;
+      const taken = takeMethodResponse(result.data, "c", "Email/set");
+      if (!taken.ok) return { ok: false, message: taken.message };
+      const created = readCreated(taken.payload, "draft");
+      return created.ok
+        ? { ok: true, data: { emailId: created.id } }
+        : { ok: false, message: created.message };
+    },
+
+    async sendMessage(message) {
+      // One request. `#draft` is a creation-id back-reference to the Email/set
+      // above, so the message is built and submitted without a round trip in
+      // between — which also means there is no window where a draft exists that
+      // nobody ever decided to send.
+      const onSuccess: Record<string, unknown> = {
+        // Strip $draft, or the copy in Sent shows as an unsent draft forever.
+        "keywords/$draft": null,
+        [`mailboxIds/${message.draftsMailboxId}`]: null,
+      };
+      if (message.sentMailboxId) {
+        onSuccess[`mailboxIds/${message.sentMailboxId}`] = true;
+      }
+
+      const result = await call(
+        [
+          [
+            "Email/set",
+            { accountId, create: { draft: draftObject(message) } },
+            "c",
+          ] as unknown as MethodCall,
+          [
+            "EmailSubmission/set",
+            {
+              accountId,
+              create: {
+                sub: {
+                  emailId: "#draft",
+                  identityId: message.identityId,
+                  envelope: {
+                    mailFrom: { email: message.from.email },
+                    // THE envelope, from the guard — not the header list.
+                    rcptTo: message.envelopeRcptTo.map((email) => ({ email })),
+                  },
+                },
+              },
+              onSuccessUpdateEmail: { "#sub": onSuccess },
+            },
+            "s",
+          ] as unknown as MethodCall,
+        ],
+        [CORE, MAIL, SUBMISSION],
+      );
+      if (!result.ok) return result;
+
+      const emailTaken = takeMethodResponse(result.data, "c", "Email/set");
+      if (!emailTaken.ok) return { ok: false, message: emailTaken.message };
+      const created = readCreated(emailTaken.payload, "draft");
+      if (!created.ok) return { ok: false, message: created.message };
+
+      // Named explicitly, because onSuccessUpdateEmail emits a SECOND response
+      // under this same call id.
+      const subTaken = takeMethodResponse(result.data, "s", "EmailSubmission/set");
+      if (!subTaken.ok) return { ok: false, message: subTaken.message };
+      const submitted = readCreated(subTaken.payload, "sub");
+      if (!submitted.ok) {
+        // The message exists as a draft but did not go out. Say exactly that —
+        // "send failed" would leave somebody retyping a message that is sitting
+        // in their Drafts folder.
+        return {
+          ok: false,
+          message: `${submitted.message} The message was saved to Drafts.`,
+        };
+      }
+
+      return {
+        ok: true,
+        data: { emailId: created.id, submissionId: submitted.id },
+      };
+    },
+
+    async identities() {
+      const result = await call(
+        [["Identity/get", { accountId, ids: null }, "i"] as unknown as MethodCall],
+        // The submission capability, declared explicitly. Without it a
+        // spec-following server answers `unknownCapability` — which is exactly
+        // the failure this method exists to surface early.
+        [CORE, MAIL, SUBMISSION],
+      );
+      if (!result.ok) return result;
+
+      const taken = takeMethodResponse(result.data, "i");
+      if (!taken.ok) {
+        return {
+          ok: false as const,
+          message: taken.message,
+          ...(taken.errorType ? { errorType: taken.errorType } : {}),
+        };
+      }
+      const list = (taken.payload as { list?: unknown })?.list;
+      if (!Array.isArray(list)) {
+        return { ok: false as const, message: "The mail server didn't return any send addresses." };
+      }
+      return {
+        ok: true as const,
+        data: list
+          .map(parseIdentity)
+          .filter((i): i is JmapIdentity => i !== null),
+      };
     },
 
     async currentState() {

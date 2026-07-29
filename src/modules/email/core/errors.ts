@@ -30,7 +30,13 @@ export type MailErrorCode =
   | "LINK_TYPE_UNKNOWN"
   | "LINK_TARGET_NOT_FOUND"
   | "FILING_UNAVAILABLE"
-  | "LINK_NOT_FOUND";
+  | "LINK_NOT_FOUND"
+  | "SEND_UNSUPPORTED"
+  | "SEND_BLOCKED"
+  | "SEND_FAILED"
+  | "NO_DRAFTS_FOLDER"
+  | "RECIPIENT_INVALID"
+  | "ATTACHMENT_REJECTED";
 
 export class MailError extends Error {
   constructor(
@@ -84,6 +90,18 @@ const FRIENDLY: Record<MailErrorCode, string> = {
   FILING_UNAVAILABLE:
     "Attaching needs the Documents module — a copy of the email has to go somewhere the whole business can read it.",
   LINK_NOT_FOUND: "That attachment has already been removed.",
+  SEND_UNSUPPORTED:
+    "This mailbox can't send from inside Yosher — the mail server didn't grant permission to. Reconnect it, or send from your phone or Outlook.",
+  // Deliberately vague to the USER and specific in the log: the reason is
+  // usually EMAIL_DEV_REDIRECT being unset, which is an operator problem, and
+  // spelling out an environment variable to a client is noise.
+  SEND_BLOCKED: "Sending is switched off in this environment.",
+  SEND_FAILED:
+    "The mail server wouldn't send that message. Nothing was delivered — check Drafts.",
+  NO_DRAFTS_FOLDER:
+    "This mailbox has no Drafts folder, so there's nowhere to compose from.",
+  RECIPIENT_INVALID: "That doesn't look like an email address.",
+  ATTACHMENT_REJECTED: "That file couldn't be attached.",
 };
 
 export function friendlyMessage(err: unknown): string {

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { EyeOff, Paperclip, ShieldAlert } from "lucide-react";
+import { CornerUpLeft, CornerUpRight, EyeOff, Paperclip, ReplyAll, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { TenantContext } from "@/lib/auth";
 import { hasRemoteContent } from "../render/sanitize";
 import type { JmapEmail, JmapMailbox } from "@/lib/email/jmap/types";
@@ -32,6 +33,9 @@ export function ReadingPane({
   folders,
   showImages,
   showImagesHref,
+  replyHref,
+  replyAllHref,
+  forwardHref,
 }: {
   ctx: TenantContext;
   message: JmapEmail;
@@ -40,6 +44,9 @@ export function ReadingPane({
   folders: JmapMailbox[];
   showImages: boolean;
   showImagesHref: string;
+  replyHref: string;
+  replyAllHref: string;
+  forwardHref: string;
 }) {
   const tenantId = ctx.tenant.id;
   const clerkUserId = ctx.userId;
@@ -79,6 +86,35 @@ export function ReadingPane({
             To {addressLine(message.to)}
           </p>
         )}
+
+        {/* Links, not buttons: opening a composer is a navigation, so it works
+            with the back button and can be opened in a new tab like every other
+            state in this module. */}
+        <div className="mt-3 flex flex-wrap items-center gap-1">
+          <Button asChild size="sm" variant="outline">
+            <Link href={replyHref}>
+              <CornerUpLeft className="size-4" />
+              Reply
+            </Link>
+          </Button>
+          {/* Only offered when there IS somebody else on the message. A
+              reply-all that goes to exactly one person is a reply wearing a
+              more dangerous name. */}
+          {message.to.length + message.cc.length > 1 && (
+            <Button asChild size="sm" variant="outline">
+              <Link href={replyAllHref}>
+                <ReplyAll className="size-4" />
+                Reply all
+              </Link>
+            </Button>
+          )}
+          <Button asChild size="sm" variant="outline">
+            <Link href={forwardHref}>
+              <CornerUpRight className="size-4" />
+              Forward
+            </Link>
+          </Button>
+        </div>
 
         <div className="mt-3">
           <MessageActions

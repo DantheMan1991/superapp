@@ -3,6 +3,7 @@ import type {
   JmapEmail,
   JmapEmailAddress,
   JmapEmailBodyPart,
+  JmapIdentity,
   JmapKeywords,
   JmapMailbox,
   JmapMailboxRole,
@@ -261,6 +262,38 @@ export function parseThread(raw: unknown): JmapThread | null {
   return { id: r.id, emailIds: asStringArray(r.emailIds) };
 }
 
+/**
+ * An identity — an address this account may send as.
+ *
+ * `replyTo` and `bcc` stay NULL when the server sends null rather than becoming
+ * `[]`, because the distinction is real: null means "this identity sets no
+ * Reply-To", and an empty array would read the same while being a different
+ * statement. A live server returns null for both.
+ *
+ * An identity with no address is not an identity as far as this app is
+ * concerned — you cannot send from it — so it parses to null and gets skipped,
+ * the same rule the rest of this file follows.
+ */
+export function parseIdentity(raw: unknown): JmapIdentity | null {
+  const r = asRecord(raw);
+  if (!r || typeof r.id !== "string" || r.id.length === 0) return null;
+  const email = asString(r.email);
+  if (email.length === 0) return null;
+  return {
+    id: r.id,
+    name: asString(r.name),
+    email,
+    replyTo:
+      r.replyTo === null || r.replyTo === undefined
+        ? null
+        : parseAddresses(r.replyTo),
+    bcc: r.bcc === null || r.bcc === undefined ? null : parseAddresses(r.bcc),
+    textSignature: asString(r.textSignature),
+    htmlSignature: asString(r.htmlSignature),
+    mayDelete: asBool(r.mayDelete),
+  };
+}
+
 export function parseQueryResult(raw: unknown): JmapQueryResult | null {
   const r = asRecord(raw);
   if (!r) return null;
@@ -382,6 +415,17 @@ export function parseSession(raw: unknown): JmapSession | null {
 export function takeMethodResponse(
   body: unknown,
   callId: string,
+  /**
+   * Which method's response is wanted, when more than one shares the call id.
+   *
+   * `EmailSubmission/set` with `onSuccessUpdateEmail` emits TWO responses under
+   * the same id — its own, and an `Email/set` for the patch it performed. The
+   * spec appends the second, so first-match happens to be right today, and
+   * relying on ordering that a server is free to change is how a send starts
+   * reporting the wrong half of its own result. Name it and the ambiguity is
+   * gone.
+   */
+  methodName?: string,
 ):
   | { ok: true; name: string; payload: unknown }
   | { ok: false; message: string; errorType?: string } {
@@ -394,6 +438,9 @@ export function takeMethodResponse(
   for (const entry of responses) {
     if (!Array.isArray(entry) || entry.length < 3) continue;
     if (entry[2] !== callId) continue;
+    // An `error` response always matches, whatever method was asked for —
+    // otherwise a failed call with a name filter would look like no answer.
+    if (methodName && entry[0] !== methodName && entry[0] !== "error") continue;
 
     const name = asString(entry[0]);
     if (name === "error") {

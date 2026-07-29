@@ -41,6 +41,19 @@ export interface MailView {
   total: number | null;
   position: number;
   message: JmapEmail | null;
+  /**
+   * The address this connection sends and receives as, from the session's
+   * `username` — RFC 8620's field for whose credentials these are. Free, and
+   * it is what stops a reply-all including the person writing it.
+   */
+  selfAddress: string;
+  /**
+   * The signature from the mail server's Identity, fetched ONLY when a composer
+   * is open. Signatures live on the server rather than in a table of ours, and
+   * paying a round trip for one on every inbox render would be a cost every
+   * reader carries for a feature only writers use.
+   */
+  signature: string;
 }
 
 export type MailViewResult =
@@ -70,6 +83,8 @@ export interface MailViewParams {
   messageId?: string;
   query?: string;
   position?: number;
+  /** True when a composer is open, so the signature is worth fetching. */
+  composing?: boolean;
 }
 
 export async function loadMailView(
@@ -121,6 +136,21 @@ export async function loadMailView(
     message = detail.ok ? (detail.data[0] ?? null) : null;
   }
 
+  let signature = "";
+  if (params.composing) {
+    const identities = await client.data.identities();
+    // A missing signature is not a reason to refuse to compose. If the server
+    // will not tell us, the composer opens without one — which is exactly what
+    // an empty signature looks like anyway.
+    if (identities.ok) {
+      const self = client.data.session.username.trim().toLowerCase();
+      const identity =
+        identities.data.find((i) => i.email.trim().toLowerCase() === self) ??
+        identities.data[0];
+      signature = identity?.textSignature ?? "";
+    }
+  }
+
   return {
     ok: true,
     account,
@@ -130,6 +160,8 @@ export async function loadMailView(
     total: listed.data.query.total,
     position: params.position ?? 0,
     message,
+    selfAddress: client.data.session.username,
+    signature,
   };
 }
 

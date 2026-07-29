@@ -1004,6 +1004,143 @@ Still unproven: the reverse view has been verified at the query level (invoice �
 thread → filed copy, against real Postgres) but never rendered on an invoice page
 with real data, because the local tenant has no invoices.
 
+### 2026-07-28 (later still) — Slice 6: compose, reply, forward, send (branch `claude/email-compose`)
+
+The reader became a mail client.
+
+**The risk was retired before anything was designed, which is the only reason
+this slice was cheap.** The plan flagged one thing that could sink it: if the
+token granted by `SCOPE_MAIL` did not cover
+`urn:ietf:params:jmap:submission`, sending would fail *after* somebody had typed
+a message, and fixing it would mean a scope change — which forces every
+connected user to reconnect.
+
+`npm run jmap:probe` could not answer it. It authenticates with Basic auth and
+predates the OAuth flow, so it proves what the SERVER offers, not what the TOKEN
+may do. A throwaway suite ran `Identity/get` through `authorizedClient()` with
+the real stored connection instead, and that is the cheapest honest test
+available: **the identity object belongs to the submission capability, not to
+mail**, so a token that cannot send cannot list identities either. It answered
+yes — one identity, `admin@yosher.test`, no scope change needed.
+
+**The `using` array was hardcoded and would have broken everything.** `client.ts`
+sent `using: [CORE, MAIL]` on every request. A server rejects a method whose
+capability the request did not declare, so `EmailSubmission/set` *and*
+`Identity/get` would have come back `unknownCapability` however well-formed they
+were. It is per-call now — and deliberately not "always include submission",
+because `using` is a statement about what a request needs, and on a server that
+scopes tokens by capability, a read announcing it might send would fail for a
+read-only token.
+
+**Send is one round trip.** `Email/set create` builds the draft, an
+`EmailSubmission/set` back-references it with `#draft`, and
+`onSuccessUpdateEmail` strips `$draft` and moves it to Sent — one request, so
+there is no window in which a draft exists that nobody decided to send. That
+also collected the correction Slice 0 predicted: `onSuccessUpdateEmail` emits a
+SECOND response under the same call id, so `takeMethodResponse` now takes an
+optional method name. First-match happens to be right today; relying on ordering
+a server may change is how a send starts reporting the wrong half of its result.
+
+**A `/set` returns HTTP 200 with the failure inside it.** `readCreated` reads
+`notCreated` and translates its own error vocabulary — `tooLarge`,
+`forbiddenFrom`, `overQuota` — because treating 200 as success is precisely how
+a message silently fails to send. When the draft is created but submission
+fails, the message says so and names Drafts, rather than leaving somebody
+retyping something that is already saved.
+
+**The envelope guard, and why it is not a copy of `applyDevGuard`.** That one
+rewrites the `to` HEADER and mangles the subject, which is right for a
+transactional send where header and envelope are the same thing. It is wrong for
+a composed message twice over: the message is filed into the person's own Sent
+folder, so a rewritten header would leave a record of a message they never wrote;
+and the point of testing compose is seeing the real thing.
+
+So `guardComposedRecipients()` rewrites the **envelope** — SMTP `RCPT TO`, which
+JMAP models as `EmailSubmission.envelope.rcptTo` — and leaves `To:`/`Cc:`
+untouched. The developer sees a truthful message, Sent holds a truthful record,
+delivery goes only to them. Headers and envelope disagreeing is not a trick: it
+is how every mailing list, bcc and forwarding rule on the internet already works.
+It refuses outright when `EMAIL_DEV_REDIRECT` is unset, and it reuses
+`isLiveSendEnvironment()` for the third time — the trap that Vercel builds
+previews with `NODE_ENV=production` is now encoded once and depended on by the
+send spine, the mailbox host and the composer.
+
+**The envelope is built in exactly one place.** `compose/send.ts` runs the guard
+and hands the answer to the client; `JmapComposedMessage.envelopeRcptTo` is
+populated on that one line and nowhere else. That is what makes "a preview cannot
+mail a customer" a property rather than a habit — one door, with the guard in it.
+
+**Attachments do not go through a server action.** Next caps an action's body at
+4 MB, which would have made that the attachment limit for the whole product — a
+limit nobody chose, that does not match the mail server's, and that would surface
+as an inexplicable failure on a normal set of drawings. `POST
+/api/mail/[accountId]/upload` streams to the session's `uploadUrl`; the bytes
+never touch our storage, and only the returned `blobId` is kept.
+
+**The recipient rules are where a mistake actually costs something**, so they are
+pure and tested hard (45 cases). Reply-To beats From; reply-all keeps the
+original To in To rather than demoting people to Cc; self is excluded
+case-insensitively — and the case the naive rule breaks on, **replying to your
+own sent message**, writes to the people you wrote to instead of producing a
+draft addressed to nobody. Subject markers are stripped to a fixed point and
+handle `Re[2]:`, `AW:`, `SV:`, while leaving "Review: Q3" and "Reference: 4471"
+alone. A forward starts with NO recipients, deliberately: prefilling the
+originals is how a private thread gets sent back to the people it was about, and
+it carries no threading headers, or it lands inside the original conversation.
+
+**Quoting never passes the original markup through.** A quoted body is
+attacker-controlled markup about to be sent under our user's name — a different
+threat from rendering it, since the danger is not script running here but our
+user unknowingly forwarding something hostile over their own signature. So the
+HTML path converts to text and re-emits escaped markup we built. Structure is
+lost; the recipient already has the original, and the `.eml` filed by Slice 5 is
+where a faithful copy lives.
+
+**Two corrections worth keeping.** `stripMarkers` was capped at 20 iterations as
+a guard against "unbounded loops on hostile input" — a hazard that did not exist,
+since each pass strictly shortens the string. The cap quietly became a
+correctness bug that left `Re: Re: Re: …` on absurd input. And clamping the
+subject BEFORE stripping cut mid-marker and left a bare `Re` behind as though it
+were the real subject; the length limit belongs on the output.
+
+**Verified against the live server**: the composer prefills a real reply from the
+hostile fixture — To resolved through Reply-To, `Re: Invoice 4471 — façade works`
+with the ç and é intact, an attribution line stamped from `receivedAt` and a
+`>`-quoted body — and **pressing Send was refused by the guard**, with
+`inReplyTo` correctly derived from the parent, the specific reason in the server
+log and the vague one on screen.
+
+**Then `EMAIL_DEV_REDIRECT` was pointed at the local Stalwart mailbox and a real
+message went out**, which proved the parts no unit test reaches:
+
+| | |
+| --- | --- |
+| draft → submitted → filed | Sent Items **1**, Drafts empty — `$draft` stripped |
+| actually delivered | Inbox **1 → 2**: it came back through real delivery |
+| envelope redirected | went to `admin@yosher.test`, not to the supplier |
+| **header left truthful** | the sent copy still reads **"To Supplier Test"** |
+| threading | Stalwart put it in the parent's thread — the References chain held |
+
+That fourth row is the one worth keeping. The envelope and the `To:` header
+disagree on purpose, and the sent copy in the person's own folder is a record of
+the message they actually wrote rather than of a redirect. `applyDevGuard` could
+not have produced that, which is why this is a third answer rather than a reuse.
+
+A pleasant consequence nobody designed: the Slice 5 chips appear on the reply
+too. Links are per THREAD, so a new message in a linked conversation inherits
+them — the invoice an email was attached to is still attached to the answer.
+
+**A debugging lesson, recorded because I got it wrong first.** The Send button
+appeared to do nothing: no toast, no server log. There were two copies of the
+composer in the DOM, one zero-sized — the exact symptom the Slice 2c entry
+attributes to a stale Turbopack tree — so I restarted the dev server, and it
+persisted. Both readings were wrong. The zero-sized twin carries **no React keys
+at all**, so it is inert non-React DOM rather than a second tree, and the visible
+button had `onClick` attached the whole time. The action had run; the log had not
+flushed when I looked. **Check whether the handler is actually attached
+(`__reactProps$…`) before blaming the bundler** — it is one query and it settles
+in seconds what a server restart cannot.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -1358,8 +1495,13 @@ into Documents; and the invoice's own page shows what was attached. The seam
 other modules build on (`src/lib/mail-extensions/`) is live, and module isolation
 is enforced by ESLint rather than by discipline.
 
-What is NOT built yet, in slice order: compose and send. Until that exists this
-is a reader — replying still happens on a phone or in Outlook.
+**Compose, reply, forward and send are in as of Slice 6**, and the token was
+proved to carry the submission scope before any of it was designed. Sending is
+refused locally until `EMAIL_DEV_REDIRECT` is set — that is the envelope guard,
+not a bug.
+
+What is NOT built yet, in slice order: organise (bulk actions, filters, saved
+searches), then signatures and rules, then contacts.
 
 Everything so far has been proven against ONE server, ONE account and ONE
 message. That is a real limit: no multi-account switching, no thread expansion
@@ -1471,6 +1613,24 @@ code or config change.
   it. That is the point, it is audited, and the person doing it is the person
   whose mailbox it is — but there is no owner-only mode and no way to un-publish
   except deleting the document. Revisit if a client asks.
+- **`EMAIL_DEV_REDIRECT` must be set wherever compose is used outside
+  production.** Locally it is now `admin@yosher.test`, the Stalwart mailbox in
+  Docker, so a test send round-trips without leaving the machine. **It is not set
+  in Vercel Preview**, so compose on a branch deployment will refuse — which is
+  the safe direction, and is also the first thing somebody will report as a bug.
+- **No drafts UI.** `saveDraft()` exists on the client and nothing calls it —
+  closing the composer discards what you typed. Drafts live on the SERVER by
+  design (a local table would desync with the same mailbox open in Outlook), so
+  this is a surface, not a schema change.
+- **No HTML composing.** The composer sends `text/plain`; `htmlBody` is wired
+  through the whole path and unused. Quoting already produces both forms.
+- **No Bcc field.** The action accepts it and the form does not offer it.
+- **No signature editing.** Signatures are read from the mail server's Identity
+  and prefilled; changing one still means using another client.
+- **Send is not idempotent.** A double-submit is guarded only by the disabled
+  button — unlike the outbound spine, which derives an idempotency key from what
+  the message IS. A composed message has no such natural key, and inventing one
+  from a hash of the body would refuse a legitimate "same message, sent twice".
 - **Truncation is carried but not yet surfaced.** `JmapEmail.bodyTruncated` is
   populated; the reading pane still needs to render a "message shortened — view
   original" affordance rather than showing a partial body as whole.

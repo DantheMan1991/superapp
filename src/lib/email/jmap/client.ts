@@ -74,6 +74,22 @@ const BLOB_TIMEOUT_MS = 30_000;
  * an unusually long thread.
  */
 const MAX_OBJECTS_IN_GET = 500;
+/**
+ * Core `maxObjectsInSet` — also 500 on the server this was verified against.
+ *
+ * Same asymmetry as the get limit and a worse consequence: exceeding it errors
+ * rather than truncating, so a bulk flag over a big selection would fail
+ * ENTIRELY rather than doing as much as it could. Chunked for the same reason
+ * `getEmails` is — callers should not have to know the limit exists.
+ */
+const MAX_OBJECTS_IN_SET = 500;
+
+/** Split ids into request-sized batches. */
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
 
 /** List views never fetch bodies. That is what keeps them fast. */
 const LIST_PROPERTIES = [
@@ -384,6 +400,18 @@ export interface JmapClient {
     on: boolean,
   ): Promise<JmapResult<{ updated: string[]; failed: string[] }>>;
   moveToMailbox(emailIds: string[], mailboxId: string): Promise<JmapResult<{ updated: string[] }>>;
+  /**
+   * Create a folder. `parentId` null makes it top-level.
+   *
+   * Folders are the mail server's, not ours — there is no local mirror to keep
+   * in step, and one created here shows up in Outlook on the next sync.
+   */
+  createMailbox(
+    name: string,
+    parentId: string | null,
+  ): Promise<JmapResult<{ id: string }>>;
+  /** Rename a folder. Refuses nothing here; the caller decides what is renameable. */
+  renameMailbox(mailboxId: string, name: string): Promise<JmapResult<void>>;
   emailChanges(
     sinceState: string,
     maxChanges?: number,
@@ -484,6 +512,61 @@ export function createJmapClient(
       method: "POST",
       body: { using, methodCalls },
     });
+  }
+
+  /**
+   * Patch many emails, in server-sized batches.
+   *
+   * The one shape every bulk action in the inbox reduces to: read/unread, flag,
+   * archive, move to junk, trash. `patch` builds the JMAP patch object for one
+   * id, and this handles the part callers should not have to think about.
+   *
+   * **A failed chunk does not discard the successful ones.** It stops and
+   * reports what got through, because the alternative — returning a bare error
+   * after moving 500 of 900 messages — leaves somebody with no idea which half
+   * of their mailbox moved. Partial success is the honest answer, and the UI
+   * says so.
+   */
+  async function applyToEmails(
+    emailIds: readonly string[],
+    patch: (id: string) => Record<string, unknown>,
+  ): Promise<JmapResult<{ updated: string[]; failed: string[] }>> {
+    if (emailIds.length === 0) {
+      return { ok: true, data: { updated: [], failed: [] } };
+    }
+
+    const updated: string[] = [];
+    const failed: string[] = [];
+
+    for (const batch of chunk(emailIds, MAX_OBJECTS_IN_SET)) {
+      const update: Record<string, unknown> = {};
+      for (const id of batch) update[id] = patch(id);
+
+      const result = await call([
+        ["Email/set", { accountId, update }, "s"] as unknown as MethodCall,
+      ]);
+      if (!result.ok) {
+        // Nothing in THIS batch landed, and nothing after it will be attempted.
+        return updated.length > 0
+          ? { ok: true, data: { updated, failed: [...failed, ...batch] } }
+          : result;
+      }
+
+      const taken = takeMethodResponse(result.data, "s", "Email/set");
+      if (!taken.ok) {
+        return updated.length > 0
+          ? { ok: true, data: { updated, failed: [...failed, ...batch] } }
+          : { ok: false, message: taken.message };
+      }
+      const payload = taken.payload as {
+        updated?: Record<string, unknown>;
+        notUpdated?: Record<string, unknown>;
+      };
+      updated.push(...Object.keys(payload?.updated ?? {}));
+      failed.push(...Object.keys(payload?.notUpdated ?? {}));
+    }
+
+    return { ok: true, data: { updated, failed } };
   }
 
   return {
@@ -656,54 +739,68 @@ export function createJmapClient(
     },
 
     async setKeyword(emailIds, keyword, on) {
-      if (emailIds.length === 0) {
-        return { ok: true, data: { updated: [], failed: [] } };
-      }
       // Patch syntax touches one keyword and leaves the rest alone. Sending a
       // whole keywords object would clobber flags set by another client
       // between our read and our write.
-      const update: Record<string, unknown> = {};
-      for (const id of emailIds) {
-        update[id] = { [`keywords/${keyword}`]: on ? true : null };
-      }
-
-      const result = await call([
-        ["Email/set", { accountId, update }, "s"] as unknown as MethodCall,
-      ]);
-      if (!result.ok) return result;
-
-      const taken = takeMethodResponse(result.data, "s");
-      if (!taken.ok) return { ok: false, message: taken.message };
-      const payload = taken.payload as {
-        updated?: Record<string, unknown>;
-        notUpdated?: Record<string, unknown>;
-      };
-      return {
-        ok: true,
-        data: {
-          updated: Object.keys(payload?.updated ?? {}),
-          failed: Object.keys(payload?.notUpdated ?? {}),
-        },
-      };
+      return applyToEmails(emailIds, () => ({
+        [`keywords/${keyword}`]: on ? true : null,
+      }));
     },
 
     async moveToMailbox(emailIds, mailboxId) {
-      if (emailIds.length === 0) return { ok: true, data: { updated: [] } };
       // Replacing mailboxIds wholesale is correct here: a move means "be in
       // this folder and no other", unlike a keyword change which is additive.
-      const update: Record<string, unknown> = {};
-      for (const id of emailIds) {
-        update[id] = { mailboxIds: { [mailboxId]: true } };
-      }
+      const result = await applyToEmails(emailIds, () => ({
+        mailboxIds: { [mailboxId]: true },
+      }));
+      return result.ok
+        ? { ok: true, data: { updated: result.data.updated } }
+        : result;
+    },
+
+    async createMailbox(name, parentId) {
       const result = await call([
-        ["Email/set", { accountId, update }, "s"] as unknown as MethodCall,
+        [
+          "Mailbox/set",
+          {
+            accountId,
+            create: { folder: { name, parentId, isSubscribed: true } },
+          },
+          "m",
+        ] as unknown as MethodCall,
       ]);
       if (!result.ok) return result;
-
-      const taken = takeMethodResponse(result.data, "s");
+      const taken = takeMethodResponse(result.data, "m", "Mailbox/set");
       if (!taken.ok) return { ok: false, message: taken.message };
-      const payload = taken.payload as { updated?: Record<string, unknown> };
-      return { ok: true, data: { updated: Object.keys(payload?.updated ?? {}) } };
+      const created = readCreated(taken.payload, "folder");
+      return created.ok
+        ? { ok: true as const, data: { id: created.id } }
+        : { ok: false as const, message: created.message };
+    },
+
+    async renameMailbox(mailboxId, name) {
+      const result = await call([
+        [
+          "Mailbox/set",
+          { accountId, update: { [mailboxId]: { name } } },
+          "m",
+        ] as unknown as MethodCall,
+      ]);
+      if (!result.ok) return result;
+      const taken = takeMethodResponse(result.data, "m", "Mailbox/set");
+      if (!taken.ok) return { ok: false, message: taken.message };
+      const payload = taken.payload as {
+        updated?: Record<string, unknown>;
+        notUpdated?: Record<string, { type?: unknown }>;
+      };
+      const refused = payload?.notUpdated?.[mailboxId];
+      if (refused) {
+        const type = typeof refused.type === "string" ? refused.type : "unknown";
+        return { ok: false as const, message: describeSetError(type) };
+      }
+      // `updated` can legitimately be an empty object when nothing changed, so
+      // absence of an entry is not a failure — only `notUpdated` is.
+      return { ok: true as const, data: undefined };
     },
 
     async emailChanges(sinceState, maxChanges = 200) {
@@ -732,6 +829,8 @@ export function createJmapClient(
     supportsSubmission() {
       return session.capabilities.includes(SUBMISSION);
     },
+
+    /* Chunked `Email/set update`. See the note on `applyToEmails` below. */
 
     async uploadBlob(bytes, type) {
       const url = session.uploadUrl.replace(

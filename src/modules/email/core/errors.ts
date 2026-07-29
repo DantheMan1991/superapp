@@ -36,7 +36,15 @@ export type MailErrorCode =
   | "SEND_FAILED"
   | "NO_DRAFTS_FOLDER"
   | "RECIPIENT_INVALID"
-  | "ATTACHMENT_REJECTED";
+  | "ATTACHMENT_REJECTED"
+  | "SEARCH_NAME_INVALID"
+  | "SEARCH_NAME_TAKEN"
+  | "SEARCH_QUERY_EMPTY"
+  | "SEARCH_LIMIT"
+  | "SEARCH_NOT_FOUND"
+  | "FOLDER_NAME_INVALID"
+  | "FOLDER_PROTECTED"
+  | "NOTHING_SELECTED";
 
 export class MailError extends Error {
   constructor(
@@ -102,6 +110,18 @@ const FRIENDLY: Record<MailErrorCode, string> = {
     "This mailbox has no Drafts folder, so there's nowhere to compose from.",
   RECIPIENT_INVALID: "That doesn't look like an email address.",
   ATTACHMENT_REJECTED: "That file couldn't be attached.",
+  SEARCH_NAME_INVALID: "Give the saved search a name.",
+  SEARCH_NAME_TAKEN: "You already have a saved search with that name.",
+  SEARCH_QUERY_EMPTY:
+    "There's nothing to save — add a search term or a filter first.",
+  SEARCH_LIMIT: "That's as many saved searches as one mailbox can hold.",
+  SEARCH_NOT_FOUND: "That saved search has already been removed.",
+  FOLDER_NAME_INVALID: "Give the folder a name.",
+  // Roles are how archive, trash, sent and drafts are resolved — renaming one
+  // does not break the NAME, it breaks the lookup everything else depends on.
+  FOLDER_PROTECTED:
+    "That's a standard folder and can't be renamed — Inbox, Sent, Drafts, Archive, Junk and Trash are how the rest of the app finds them.",
+  NOTHING_SELECTED: "Nothing is selected.",
 };
 
 export function friendlyMessage(err: unknown): string {

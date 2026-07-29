@@ -2474,6 +2474,99 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
     expect(deletedOwn).toHaveLength(1);
   });
 
+  it("a colleague cannot see, or delete, another user's saved searches", async () => {
+    // mail_saved_searches (0048) is the SECOND per-user table. The name of a
+    // saved search is correspondence — "unread from the solicitor" tells a
+    // colleague what somebody is dealing with — so it gets the same scoping
+    // mail_accounts and mail_thread_index got in 0043.
+    const [mine] = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .insert(schema.mailSavedSearches)
+          .values({
+            tenantId: tenantA,
+            clerkUserId: "user-a",
+            mailAccountId: fx.a.accountId,
+            name: "Unread from the solicitor",
+            nameKey: "unread from the solicitor",
+            query: { unread: true },
+          })
+          .returning(),
+      { userId: "user-a" },
+    );
+    expect(mine.id).toBeTruthy();
+
+    // Member-writable, unlike the other per-user mail tables: the worst a
+    // member can do to their own saved searches is save a bad one.
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailSavedSearches),
+      { userId: "user-a" },
+    );
+    expect(asOwner.some((r) => r.id === mine.id)).toBe(true);
+
+    // Deliberately no where clause — the forgotten-predicate scenario.
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailSavedSearches),
+      { userId: COLLEAGUE },
+    );
+    expect(asColleague).toHaveLength(0);
+
+    const asNobody = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.mailSavedSearches),
+    );
+    expect(asNobody).toHaveLength(0);
+
+    const deletedByColleague = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.mailSavedSearches)
+          .where(eq(schema.mailSavedSearches.id, mine.id))
+          .returning(),
+      { userId: COLLEAGUE },
+    );
+    expect(deletedByColleague).toHaveLength(0);
+  });
+
+  it("cannot create a saved search attributed to a colleague", async () => {
+    // The WITH CHECK pins clerk_user_id as well as tenant_id, so a member
+    // cannot plant a view in somebody else's rail any more than they can read
+    // one out of it.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.mailSavedSearches).values({
+            tenantId: tenantA,
+            clerkUserId: COLLEAGUE,
+            mailAccountId: fx.a.accountId,
+            name: "planted",
+            nameKey: "planted",
+            query: {},
+          }),
+        { userId: "user-a" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: a saved search cannot point at the OTHER tenant's connection", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.mailSavedSearches).values({
+          tenantId: tenantA,
+          clerkUserId: "user-a",
+          mailAccountId: fx.b.accountId,
+          name: "smuggled",
+          nameKey: "smuggled",
+          query: {},
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("cannot read the other tenant's mail password hashes", async () => {
     const rows = await withTenant(tenantA, (tx) =>
       tx
@@ -2771,6 +2864,7 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
         tx.select().from(schema.mailThreadIndex),
         tx.select().from(schema.mailLinks),
         tx.select().from(schema.mailAnnotations),
+        tx.select().from(schema.mailSavedSearches),
       ]);
     });
     for (const rows of results) expect(rows).toHaveLength(0);

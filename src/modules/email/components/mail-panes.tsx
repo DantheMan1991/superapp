@@ -1,9 +1,8 @@
 import Link from "next/link";
 import {
   Archive,
-  Flag,
+  Bookmark,
   Inbox as InboxIcon,
-  Paperclip,
   Send,
   FileText,
   ShieldAlert,
@@ -12,15 +11,21 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { JmapMailbox } from "@/lib/email/jmap/types";
-import type { ThreadRow } from "../read";
+import type { SavedSearchEntry } from "../organise/saved-searches";
+import { DeleteSearchButton, NewFolderButton } from "./organise-controls";
 
 /**
- * The folder rail and the thread list — both server components, both made of
- * links.
+ * The folder rail: folders, a way to make one, and this person's saved views.
  *
- * State lives in the URL, exactly as it does in Documents: a folder, a search
- * and an open message are all parameters, so any view can be linked, bookmarked,
- * reloaded and reached with the back button. There is no client state to lose.
+ * Still a server component made of links. State lives in the URL, exactly as it
+ * does in Documents — a folder, a search and an open message are all
+ * parameters, so any view can be linked, bookmarked, reloaded and reached with
+ * the back button.
+ *
+ * The thread list moved to `thread-list.tsx` when it gained a selection: a set
+ * of chosen message ids is the one piece of state in this module that genuinely
+ * should NOT be in the URL, since nobody wants to bookmark it and every
+ * checkbox would become a navigation.
  */
 
 const BASE = "/dashboard/m/email";
@@ -51,10 +56,14 @@ export function FolderRail({
   folders,
   selectedId,
   params,
+  mailboxId,
+  savedSearches,
 }: {
   folders: JmapMailbox[];
   selectedId: string | null;
   params: Record<string, string | undefined>;
+  mailboxId: string;
+  savedSearches: SavedSearchEntry[];
 }) {
   return (
     <nav className="space-y-0.5 p-2">
@@ -90,98 +99,33 @@ export function FolderRail({
           </Link>
         );
       })}
-    </nav>
-  );
-}
 
-/** Dates in a mail list: time for today, day for this week, date beyond. */
-function listDate(value: Date | null): string {
-  if (!value) return "";
-  const now = new Date();
-  const sameDay = value.toDateString() === now.toDateString();
-  if (sameDay) {
-    return value.toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-  const days = (now.getTime() - value.getTime()) / 86_400_000;
-  if (days < 7) return value.toLocaleDateString(undefined, { weekday: "short" });
-  return value.toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
-
-export function ThreadList({
-  rows,
-  selectedId,
-  params,
-  emptyMessage,
-}: {
-  rows: ThreadRow[];
-  selectedId: string | undefined;
-  params: Record<string, string | undefined>;
-  emptyMessage: string;
-}) {
-  if (rows.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
-        <InboxIcon className="size-6 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+      <div className="pt-1">
+        <NewFolderButton mailboxId={mailboxId} />
       </div>
-    );
-  }
 
-  return (
-    <ul className="divide-y">
-      {rows.map((row) => {
-        const active = row.emailId === selectedId;
-        return (
-          <li key={row.emailId}>
-            <Link
-              // `images` is cleared: unblocking is a decision about ONE
-              // message, and carrying it to the next one would silently show
-              // remote content in a message nobody agreed to unblock.
-              href={mailHref(params, { message: row.emailId, images: undefined })}
-              className={cn(
-                "block px-3 py-2.5 transition-colors",
-                active ? "bg-accent" : "hover:bg-accent/40",
-              )}
-            >
-              <div className="flex items-baseline gap-2">
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-sm",
-                    row.seen ? "text-muted-foreground" : "font-semibold",
-                  )}
-                >
-                  {row.fromName || row.from || "Unknown sender"}
-                </span>
-                {row.flagged && (
-                  <Flag className="size-3 shrink-0 fill-current text-amber-500" />
-                )}
-                {row.hasAttachment && (
-                  <Paperclip className="size-3 shrink-0 text-muted-foreground" />
-                )}
-                <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                  {listDate(row.receivedAt)}
-                </span>
-              </div>
-              <p
-                className={cn(
-                  "truncate text-sm",
-                  row.seen ? "text-muted-foreground" : "text-foreground",
-                )}
+      {savedSearches.length > 0 && (
+        <div className="pt-2">
+          <p className="px-2.5 pb-1 text-[0.7rem] font-medium tracking-wide text-muted-foreground uppercase">
+            Saved
+          </p>
+          {savedSearches.map((saved) => (
+            <div key={saved.id} className="group flex items-center">
+              {/* A saved view IS its href — there is no separate query engine
+                  behind it. Clicking one is the same as having typed the
+                  filters yourself. */}
+              <Link
+                href={saved.href}
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
               >
-                {/* A missing subject stays missing — parse.ts never invents
-                    "(no subject)", so neither does this. */}
-                {row.subject || <span className="italic opacity-60">No subject</span>}
-              </p>
-              {row.preview && (
-                <p className="truncate text-xs text-muted-foreground">{row.preview}</p>
-              )}
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+                <Bookmark className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{saved.name}</span>
+              </Link>
+              <DeleteSearchButton searchId={saved.id} />
+            </div>
+          ))}
+        </div>
+      )}
+    </nav>
   );
 }

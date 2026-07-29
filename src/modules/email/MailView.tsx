@@ -3,8 +3,13 @@ import { AlertTriangle, Mail, PenSquare, Search } from "lucide-react";
 import type { MailAccount } from "@/db/schema";
 import type { TenantContext } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { withTenant } from "@/db";
 import { loadMailView, visibleFolders } from "./read";
-import { FolderRail, ThreadList, mailHref } from "./components/mail-panes";
+import { FolderRail, mailHref } from "./components/mail-panes";
+import { ThreadList } from "./components/thread-list";
+import { FilterBar } from "./components/filter-bar";
+import { readMailView, isEmptyView } from "./organise/filters";
+import { listSavedSearches } from "./organise/saved-searches";
 import { ReadingPane } from "./components/reading-pane";
 import { MailSearch } from "./components/mail-search";
 import { MailPoller } from "./components/mail-poller";
@@ -47,7 +52,11 @@ export async function MailView({
     // In the URL like everything else, so a half-written reply survives the
     // page around it refreshing.
     compose: first("compose"),
+    unread: first("unread"),
+    flagged: first("flagged"),
+    attach: first("attach"),
   };
+  const viewQuery = readMailView(params);
   const position = Number(params.pos ?? "0");
   const composeMode = readComposeMode(params.compose);
 
@@ -56,7 +65,7 @@ export async function MailView({
     clerkUserId: ctx.userId,
     ...(params.mailbox ? { mailboxId: params.mailbox } : {}),
     ...(params.message ? { messageId: params.message } : {}),
-    ...(params.q ? { query: params.q } : {}),
+    view: viewQuery,
     position: Number.isFinite(position) && position > 0 ? position : 0,
     ...(composeMode ? { composing: true } : {}),
   });
@@ -81,6 +90,17 @@ export async function MailView({
 
   const folders = visibleFolders(view.folders);
   const searching = Boolean(params.q);
+  const selectedFolder = folders.find((f) => f.id === view.mailboxId) ?? null;
+  const archiveFolder = view.folders.find((f) => f.role === "archive");
+  const trashFolder = view.folders.find((f) => f.role === "trash");
+
+  // Saved views are per-user (drizzle/0048), so this read MUST carry userId —
+  // without it the policy matches nothing and the rail silently shows none.
+  const savedSearches = await withTenant(
+    ctx.tenant.id,
+    (tx) => listSavedSearches(tx, ctx.tenant.id, account.id),
+    { role: ctx.role, userId: ctx.userId },
+  );
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col lg:h-screen">
@@ -107,6 +127,8 @@ export async function MailView({
             folders={folders}
             selectedId={view.mailboxId}
             params={params}
+            mailboxId={account.mailboxId}
+            savedSearches={savedSearches}
           />
         </aside>
 
@@ -117,6 +139,13 @@ export async function MailView({
             view.message ? "hidden lg:block" : "block"
           }`}
         >
+          <FilterBar
+            view={viewQuery}
+            params={params}
+            mailboxId={account.mailboxId}
+            folderName={selectedFolder?.name ?? null}
+            canSave={!isEmptyView(viewQuery)}
+          />
           {searching && (
             <p className="border-b px-3 py-2 text-xs text-muted-foreground">
               {view.total === null
@@ -137,6 +166,9 @@ export async function MailView({
                 ? "Nothing matched that search."
                 : "Nothing here yet. New mail will appear as it arrives."
             }
+            mailboxId={account.mailboxId}
+            archiveFolderId={archiveFolder?.id ?? null}
+            trashFolderId={trashFolder?.id ?? null}
           />
           {view.rows.length > 0 && (
             <Pager params={params} position={view.position} total={view.total} count={view.rows.length} />

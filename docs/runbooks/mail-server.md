@@ -181,17 +181,27 @@ Follow the vendor's install; the parts specific to us:
 - TLS via ACME/Let's Encrypt on `jmap.yosherapp.com`. **Do not skip this:** the
   JMAP client is server-side `fetch`, which will not accept a self-signed
   certificate, and the failure looks like "couldn't reach the mail server".
-- **Directory: SQL, pointed at Neon**, reading `mail_directory_accounts`. That
-  table and `npm run db:create-mail-role` already exist for exactly this. The
-  role has SELECT on that one table and nothing else, and the script *proves*
-  the boundary by connecting as it and confirming it cannot read `tenants`,
-  `documents`, `invoices` or `mail_accounts`.
-  - `npm run db:create-mail-role` **has never been run.** It prints a live
-    connection string, so run it in your own terminal, not in a transcript.
-  - **Password hash format is still unconfirmed** (open item in the dossier).
-    Verify Stalwart accepts what `mail_directory_accounts.password_hash` holds
-    *before* provisioning anybody — guessing produces an account nobody can log
-    into.
+- **Do NOT wire the SQL directory yet. Use Stalwart's own internal directory**
+  and create your mailbox by hand in the admin UI.
+
+  This reverses what an earlier draft of this runbook said, and the reason is
+  concrete: **nothing in this codebase ever writes a password hash.**
+  `stalwartHost.afterMailboxCreated` always inserts `passwordHash: null`, there
+  is no hashing dependency in `package.json`, and **no invitation flow was ever
+  built for Stalwart.** Migadu's host sent those setup links itself; Stalwart has
+  no equivalent, and Yosher never grew one.
+
+  So a SQL-backed directory pointed at Neon today would authenticate against a
+  table whose `password_hash` is null for every row — an account nobody can ever
+  log into. That is the failure the schema comment warned about, arriving from a
+  direction it did not anticipate: not a wrong hash format, but no hash at all.
+
+  The SQL directory is for **programmatic multi-tenant provisioning**, which is a
+  later problem and needs three things first: a password-set flow (token, email,
+  form), a hashing choice verified against Stalwart's supported list, and
+  `npm run db:create-mail-role`. None of it is needed to prove the loop with one
+  mailbox.
+
 - **Outbound relay to Amazon SES** on 587 (Settings → SMTP → Outbound → Relay
   Hosts, then Routing), using SMTP credentials generated in the SES console —
   which are NOT your AWS keys. Region **us-east-2**, matching where the domain

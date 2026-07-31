@@ -45,3 +45,8 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# .env.example is the ONE env file that belongs in the repo: SETUP.md tells you to
+# copy it, and docs/security.md §5 defines it as "names and shapes, never values".
+# The broad .env* rules above catch it by accident, so opt it back in.
+!.env.example

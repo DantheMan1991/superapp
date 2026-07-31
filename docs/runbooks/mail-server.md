@@ -170,45 +170,64 @@ misconfiguration starts landing in spam with no warning. DMARC at the
 organizational domain covers subdomains unless `sp=` overrides it, so the
 existing `p=none` already applies to `bounce.` and anything else added here.
 
-### 3.3 Stalwart
+### 3.3 Stalwart — what actually happened, 2026-07-30
 
-Follow the vendor's install; the parts specific to us:
+The install took far longer than it should have. Recorded so it does not
+repeat.
 
-- **Hostname must have a real TLD.** The setup wizard silently rejects
-  `localhost` and `mail.yosher.test` and reverts the field to the container id
-  without saying why — recorded in the dossier and worth an hour of nobody's
-  time to rediscover.
-- TLS via ACME/Let's Encrypt on `jmap.yosherapp.com`. **Do not skip this:** the
-  JMAP client is server-side `fetch`, which will not accept a self-signed
-  certificate, and the failure looks like "couldn't reach the mail server".
-- **Do NOT wire the SQL directory yet. Use Stalwart's own internal directory**
-  and create your mailbox by hand in the admin UI.
+**The config file is tiny, and it IS the DataStore object.** Stalwart docs say
+`config.json` "only needs to contain the DataStore object", and that is literal.
+Everything else — hostname, directory, accounts, TLS — lives inside the store,
+which is why `--console` also needs `--config` to open. The whole file:
 
-  This reverses what an earlier draft of this runbook said, and the reason is
-  concrete: **nothing in this codebase ever writes a password hash.**
-  `stalwartHost.afterMailboxCreated` always inserts `passwordHash: null`, there
-  is no hashing dependency in `package.json`, and **no invitation flow was ever
-  built for Stalwart.** Migadu's host sent those setup links itself; Stalwart has
-  no equivalent, and Yosher never grew one.
+```json
+{
+  "@type": "RocksDb",
+  "path": "/var/lib/stalwart/data"
+}
+```
 
-  So a SQL-backed directory pointed at Neon today would authenticate against a
-  table whose `password_hash` is null for every row — an account nobody can ever
-  log into. That is the failure the schema comment warned about, arriving from a
-  direction it did not anticipate: not a wrong hash format, but no hash at all.
+Wrapping it in a `storage` object with per-role paths fails with
+`missing field '@type' at line 9 column 1`, where line 9 is the closing brace —
+meaning it wanted `@type` at the TOP level.
 
-  The SQL directory is for **programmatic multi-tenant provisioning**, which is a
-  later problem and needs three things first: a password-set flow (token, email,
-  form), a hashing choice verified against Stalwart's supported list, and
-  `npm run db:create-mail-role`. None of it is needed to prove the loop with one
-  mailbox.
+**Bind-mount `/etc/stalwart`, do not use a named volume.** You will edit this
+file, and reaching inside a named volume to do that is miserable.
 
-- **Outbound relay to Amazon SES** on 587 (Settings → SMTP → Outbound → Relay
-  Hosts, then Routing), using SMTP credentials generated in the SES console —
-  which are NOT your AWS keys. Region **us-east-2**, matching where the domain
-  identity is verified. See §1.1 for why this is not optional.
-- Take the admin password from the **first-run log**. Never the fixed
-  `STALWART_RECOVERY_ADMIN` from `docker/stalwart/compose.yml` — that exists
-  because the container is bound to localhost and holds nothing real.
+**Without a config file the server sits in bootstrap mode** on port 8080 with a
+listener named `http-recovery`, reporting `hostname = <container id>`. The web
+UI in that state authenticates over OAuth with a PKCE challenge in the URL, and
+**every container restart wipes the server-side OAuth state**. Reloading a
+`/login?...code_challenge=...` URL after a restart therefore fails, and the UI
+reports it as "Invalid username or password" because that is the only error it
+draws. Hours went into that one sentence.
+
+**`STALWART_RECOVERY_ADMIN=user:password` is real** and documented, and when set
+no temporary password is generated. It is a rescue credential, not a login —
+take it back out of the compose file once a real admin exists.
+
+**`docker compose up -d --force-recreate` did not reliably recreate the
+container.** It printed only `Started`, and a stale container kept an old
+environment. `docker compose down` then `up -d` prints `Removed`, which is the
+one to trust when an env var change must land.
+
+**`docker compose logs --tail N` shows accumulated crash-loop output.** A fixed
+container that is `Up (healthy)` will still show pages of the old error. Check
+`docker ps` status and probe the ports from outside before believing the log.
+
+### 3.3b Verified working, 2026-07-30
+
+```
+220 <hostname> Stalwart ESMTP at your service     ← inbound 25, from the internet
+```
+
+Ports 25, 443 and 993 serving. 80 and 587 still closed, expected until ACME and
+submission are configured. **Inbound port 25 reachability is the thing that
+could have made self-hosting impossible, and it is confirmed.**
+
+Still to do: hostname (currently the container id, and receivers check HELO
+against reverse DNS), TLS via ACME, the mail domain, a mailbox, the SES relay,
+and `npm run mail:register-client`.
 
 ### 3.4 Register the OAuth client
 

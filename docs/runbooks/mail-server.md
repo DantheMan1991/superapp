@@ -1,7 +1,7 @@
 # Runbook — putting Stalwart on the internet
 
-> **Read before:** buying a server for the inbox. The two things that decide
-> whether this works are in §1, and neither of them is DNS.
+> **Read before:** buying a server for the inbox. §1 is the reasoning the whole
+> shape rests on; §3 is what is left to do.
 > **Update when:** a step turns out to be wrong, or the hosting choice changes.
 
 Slices 0–7 built a mail client. It reads a Docker container on one laptop
@@ -10,98 +10,106 @@ and a mailbox a person can actually use.
 
 ---
 
-## 1. The two things that will actually stop you
+## 1. The decision this runbook rests on
 
-Everything else here is ordinary sysadmin work. These two are why "just rent a
-VPS" is not the whole answer, and they need deciding **before** money is spent.
+Everything else here is ordinary sysadmin work. This is the part that was
+actually contentious, and it was settled before any money was spent.
 
-### 1.1 Port 25 outbound is blocked almost everywhere
+### 1.1 A fresh IP has no sending reputation — and this project already ruled on that
 
-A mail server that cannot open outbound connections on port 25 cannot deliver
-mail to anybody. Most providers block it by default to stop spam:
-
-| Provider | Outbound 25 |
-| --- | --- |
-| DigitalOcean | Blocked. Unblock is discretionary and often refused |
-| Vultr | Blocked on new accounts |
-| Google Cloud | Blocked permanently, no exceptions |
-| AWS EC2 | Throttled; unblock form, usually granted |
-| Oracle Cloud | Blocked |
-| **Hetzner** | Blocked at signup, **unblocked on request** — usually granted for an aged account with a reason |
-| **Fly.io** | Allowed with a dedicated IPv4 |
-| OVH / Scaleway | Generally allowed |
-
-**Check this before paying for anything.** Discovering it after the box is
-built is the single most common way this project stalls.
-
-### 1.2 A fresh IP has no sending reputation — and this project already decided that matters
-
-The original evaluation (dossier, 2026-07-26) rejected running mail servers with
+The original evaluation (dossier, 2026-07-26) rejected running mail servers in
 one line: *"deliverability is a multi-year reputation problem."* That judgement
-has not been overturned. Stalwart was chosen for the **inbox** — because Migadu
-offers no OAuth and so the app could never read those mailboxes — not because
-self-hosted delivery became a good idea.
+was never overturned. Stalwart was chosen for the **inbox** — because Migadu
+offers no OAuth, so the app could never read those mailboxes — not because
+self-hosted *delivery* became a good idea.
 
-A new VPS IP will land in spam at Gmail and be rejected outright by some
-providers, whatever the SPF/DKIM/DMARC say.
+A new VPS IP lands in spam at Gmail and gets rejected outright by some
+providers, whatever the SPF/DKIM/DMARC say. And it fails **silently**: the
+sender sees "Sent", the recipient never sees anything, and nobody finds out
+until an invoice goes unpaid.
 
-**So do not send directly from Stalwart.** Split the two jobs:
+**So Stalwart does not deliver mail itself.** The two jobs are split:
 
 ```
-   inbound mail  ──MX──▶  Stalwart  ──▶  stored, read over JMAP by Yosher
-   outbound mail          Stalwart  ──relay──▶  Migadu (or SES/Postmark)
-                                                  ↑ reputation already earned
+   inbound   ──MX──▶  Stalwart  ──▶  stored, read over JMAP by Yosher
+   outbound            Stalwart  ──relay :587──▶  Amazon SES  ──▶  the internet
+                                                   ↑ reputation already earned
 ```
 
 Stalwart handles receiving, storage, IMAP/JMAP and OAuth — the parts we need and
-the parts nobody else will give us. Outbound relays through a smarthost whose
-reputation is somebody else's problem. Migadu is already paid for and already
-delivers for `yosherapp.com`, which makes it the obvious first choice.
+that nobody else will give us. Egress goes through a relay whose reputation is
+somebody else's problem. This preserves the original evaluation rather than
+quietly reversing it: a bad week for the VPS costs you *receiving*, not your
+sending reputation.
 
-This preserves the original evaluation instead of quietly reversing it, and it
-means a bad week for the VPS costs you *receiving*, not your sending reputation.
+Stalwart supports this natively — Settings → SMTP → Outbound → Relay Hosts. Its
+own documentation names the reason: relays are useful *"when the originating
+server should not perform direct delivery, for example because of firewall
+constraints or IP-reputation issues."*
+
+### 1.2 Why SES and not Resend
+
+Resend was the first instinct because it is already in the stack. That was the
+wrong test — the same one that picked Migadu, which the dossier already names:
+**check the vendor against the destination, not against the step in front of
+you.**
+
+Every client domain must be *verified at the relay*, so "number of verified
+domains" is the client ceiling:
+
+| | Verified domains | Cost |
+| --- | --- | --- |
+| Resend Free | 1 | already spent on `in.yosherapp.com` |
+| Resend Pro | **10** | $20–35/mo |
+| Resend Scale | 1,000 | $90–1,150/mo |
+| **Amazon SES (Essentials)** | **10,000 per region** | $0.16 per 1,000 |
+
+Resend Pro walls you at ten clients. At 20 clients (~66k emails/month) SES
+Essentials is about **$10/month** against Resend Scale's **$90+**.
+
+Fit matters more than price: Resend divides the world into *Transactional* and
+*Marketing*, and relaying a mail server's human correspondence is neither. SES is
+literally a relay service. Resend keeps the jobs it is built for — the
+transactional spine and inbound-to-Documents.
+
+**On the SES plan:** take **Essentials**. Pro adds $105/month *and* a higher
+per-email rate, and its headline feature is **Dedicated IPs** — a dedicated IP
+starts with zero reputation, which is the exact problem SES was chosen to avoid.
+
+### 1.3 Port 25 is not the blocker it looks like
+
+Most providers block **outbound** 25 to stop spam, and an earlier draft of this
+runbook called that the likely project-killer. With a relay it mostly evaporates:
+
+- **Receiving** — other servers connect *to* you on 25. Nobody blocks inbound.
+- **Sending** — you connect *out* to SES on **587**, not to the world on 25.
+
+So no unblock request is needed. Do not go asking for one.
 
 ---
 
-## 2. The domain decision
+## 2. Domains
 
-**Live state, verified by DNS lookup on 2026-07-28:**
+**Live state, verified by DNS lookup 2026-07-28:**
 
-| Name | MX | What depends on it |
+| Name | Purpose | Status |
 | --- | --- | --- |
-| `yosherapp.com` | `aspmx1/2.migadu.com` | The real mailboxes. **Working.** |
-| `in.yosherapp.com` | `inbound-smtp.us-east-1.amazonaws.com` | **Documents email-in — shipped and in use.** |
-| `mail.yosherapp.com` | none | Reserved: `EMAIL_FROM_DOMAIN`, the Resend sending domain |
+| `yosherapp.com` | MX at Migadu — the working mailboxes | Untouched |
+| `in.yosherapp.com` | MX at SES inbound — **shipped documents email-in** | **Never touch** |
+| `mail.yosherapp.com` | Reserved: `EMAIL_FROM_DOMAIN`, Resend sending domain | Leave alone |
+| `bounce.yosherapp.com` | SES custom MAIL FROM | **Live** |
+| `jmap.yosherapp.com` | Stalwart's HTTPS/JMAP endpoint | Awaiting the VPS |
 
-Three rules fall out of that:
+**Sending and receiving are independent**, and separating them is what made this
+safe. SES verification is about sending; MX is about receiving. `yosherapp.com`
+is verified for sending through SES **while its MX still points at Migadu** —
+nothing broke, and the cutover became a separate decision to make later on its
+own merits.
 
-1. **Do not touch `in.yosherapp.com`.** It carries the folder-inbound feature.
-   The dossier already records this trap: DNS panels list every record for a
-   domain in one flat list, so a mail host's "remove any pre-existing MX
-   records" reads as though it means all of them. It means the host being
-   configured.
-2. **Do not use `mail.yosherapp.com`.** `EMAIL_FROM_DOMAIN` is already set to it
-   in Vercel. Pointing an MX there would collide with the sending domain.
-3. **Do not move `yosherapp.com`'s MX yet.** That is the takeover the dossier
-   warns about — *"when an MX cutover breaks, the business stops receiving, and
-   nobody notices for hours because a quiet inbox looks exactly like a quiet
-   day."*
-
-### Recommended: prove it on a name nothing depends on
-
-Give Stalwart its own subdomain for the **HTTPS/JMAP endpoint**, and host mail
-for a **separate name** to start:
-
-```
-jmap.yosherapp.com   A → <VPS IP>     the app connects here (TLS, no MX)
-m.yosherapp.com      MX → jmap.yosherapp.com    addresses live here
-```
-
-Addresses are then `dan@m.yosherapp.com`. Not beautiful, and it does not have to
-be — it proves the whole loop (receive → store → OAuth → read in Yosher → reply)
-without putting a single working mailbox at risk. Moving `yosherapp.com` off
-Migadu afterwards is the *same procedure* run once more, with the
-already-built cutover flow, `previous_mx` capture and all.
+The `in.yosherapp.com` rule is worth restating because the dossier already
+records the trap: DNS panels list every record for a domain in one flat list, so
+a mail host's "remove any pre-existing MX records" reads as though it means all
+of them. It means the host being configured.
 
 ---
 
@@ -112,32 +120,55 @@ already-built cutover flow, `previous_mx` capture and all.
 Smallest thing that works: 2 vCPU / 4 GB / 40 GB SSD. Hetzner CX22 (~€4/mo) or
 equivalent. Ubuntu 24.04.
 
-- Request the port-25 unblock **first**, and wait for it.
+- **You do NOT need an outbound port-25 unblock.** Outbound goes to SES on 587;
+  inbound 25 (which nobody blocks) is what receiving needs. An earlier draft of
+  this runbook said the unblock was the likely project-killer — that was written
+  before the relay decision and is wrong.
 - Set a **PTR / reverse DNS** record for the IP to `jmap.yosherapp.com`. Missing
   rDNS alone is enough for some receivers to reject you.
 - Firewall: allow 25, 443, 587, 993. Do **not** expose 8080 — the admin UI.
 
 ### 3.2 DNS
 
+**Egress is DONE.** Amazon SES was chosen over Resend as the relay (see §1.2), the
+domain identity is `yosherapp.com` in **us-east-2**, and these are live and
+verified as of 2026-07-28:
+
 ```
-jmap.yosherapp.com.   A     <VPS IP>
-m.yosherapp.com.      MX 10 jmap.yosherapp.com.
-m.yosherapp.com.      TXT   "v=spf1 include:spf.migadu.com -all"     ← the RELAY, not the VPS
-_dmarc.m.yosherapp.com. TXT "v=DMARC1; p=none; rua=mailto:…"
+<token>._domainkey.yosherapp.com.  CNAME  <token>.dkim.amazonses.com   × 3
+bounce.yosherapp.com.              MX 10  feedback-smtp.us-east-2.amazonses.com
+bounce.yosherapp.com.              TXT    "v=spf1 include:amazonses.com ~all"
 ```
 
-Two notes that will otherwise cost an afternoon:
+A custom **MAIL FROM** subdomain (`bounce`) was used deliberately, and it is the
+reason the root SPF never had to be edited: the envelope sender lands on
+`bounce.yosherapp.com`, so SES's `include:` goes on that subdomain's own record.
+`yosherapp.com`'s SPF still reads `v=spf1 include:spf.migadu.com -all`, untouched,
+and Migadu keeps receiving. Both SPF and DKIM align, so DMARC has two
+independent ways to pass rather than resting on DKIM alone.
 
-- **SPF names the smarthost, not the VPS**, because the smarthost is what
-  actually connects to the recipient. Getting this backwards is why relayed mail
-  fails SPF.
-- **`p=none` to start.** The dossier's rule: keep DMARC permissive while mail
-  infrastructure is changing and tighten later as its own step, or the first
-  misconfiguration starts landing in spam with no warning. Note DMARC at the
-  organizational domain covers subdomains unless `sp=` overrides it — so
-  `yosherapp.com`'s existing `p=none` already applies here.
-- DKIM comes **from Stalwart** once it generates a key; add that record after
-  §3.3.
+`_dmarc.yosherapp.com` already carried `v=DMARC1; p=none;`. SES lists a DMARC
+record among its suggestions; **adding it would have created a second one**, and
+DMARC fails closed on duplicates — it was skipped.
+
+Still to add, once the VPS exists:
+
+```
+jmap.yosherapp.com.   A     <VPS IP>        the app's JMAP endpoint (TLS, no MX)
+```
+
+Plus reverse DNS on the VPS IP → `jmap.yosherapp.com`.
+
+The MX cutover for `yosherapp.com` (Migadu → Stalwart) is a **separate, later**
+decision. Sending and receiving are different records; the egress above works
+regardless of where MX points.
+
+One rule that still applies to everything above: **DMARC stays at `p=none`**
+while this infrastructure is changing, and tightens later as its own deliberate
+step. The dossier's reasoning holds — tighten too early and the first
+misconfiguration starts landing in spam with no warning. DMARC at the
+organizational domain covers subdomains unless `sp=` overrides it, so the
+existing `p=none` already applies to `bounce.` and anything else added here.
 
 ### 3.3 Stalwart
 
@@ -161,7 +192,10 @@ Follow the vendor's install; the parts specific to us:
     Verify Stalwart accepts what `mail_directory_accounts.password_hash` holds
     *before* provisioning anybody — guessing produces an account nobody can log
     into.
-- **Outbound relay** to Migadu on 587 with the Migadu credentials, per §1.2.
+- **Outbound relay to Amazon SES** on 587 (Settings → SMTP → Outbound → Relay
+  Hosts, then Routing), using SMTP credentials generated in the SES console —
+  which are NOT your AWS keys. Region **us-east-2**, matching where the domain
+  identity is verified. See §1.1 for why this is not optional.
 - Take the admin password from the **first-run log**. Never the fixed
   `STALWART_RECOVERY_ADMIN` from `docker/stalwart/compose.yml` — that exists
   because the container is bound to localhost and holds nothing real.
@@ -186,8 +220,8 @@ origin — production uses the normal hostname.
 | --- | --- | --- |
 | `STALWART_BASE_URL` | `https://jmap.yosherapp.com` | |
 | `STALWART_CLIENT_ID` | from §3.4 | |
-| `CRON_SECRET` | 32+ random bytes | Sync **fails closed** without it |
-| `EMAIL_DEV_REDIRECT` | your own address | **Preview only.** Compose refuses to send without it |
+| `CRON_SECRET` | 32+ random bytes | **DONE** (Production, confirmed 2026-07-28) |
+| `EMAIL_DEV_REDIRECT` | your own address | **DONE** (Development + Preview, confirmed 2026-07-28) |
 | `APP_ENCRYPTION_KEY` | already set | Mailbox tokens depend on it |
 
 Rotating `APP_ENCRYPTION_KEY` now invalidates Plaid tokens **and** every mailbox
@@ -235,9 +269,11 @@ Stop at the first failure; each step depends on the one above.
 
 ## 5. What this does not solve
 
-- **Deliverability is still the smarthost's**, which is the point. If Migadu
-  ever stops relaying, outbound stops — the same dependency the send spine
-  already has.
+- **Deliverability is still the relay's**, which is the point. If SES suspends
+  the account, outbound stops — and SES enforces at the ACCOUNT level, so one
+  compromised client mailbox spamming could take out every client's sending.
+  Mitigate with a configuration set per tenant so the reputation dashboard shows
+  whose mail is causing it, and watch the bounce/complaint rates.
 - **One server, no redundancy.** A VPS reboot is a mail outage. Receiving mail
   retries for days, so this is survivable, but it is not a mail *service* yet.
 - **Backups are yours now.** Stalwart's store holds the only copy of received

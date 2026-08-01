@@ -8,7 +8,7 @@ import type {
   PreviousMxRecord,
 } from "@/db/schema";
 import { normalizeSendingDomain } from "@/lib/email/identity";
-import { getMailboxHost } from "./index";
+import { defaultMailboxProvider, getMailboxHost } from "./index";
 import { guardCutover } from "./guard";
 import { describeMxProvider, mxPointsAt, resolveCurrentMx } from "./mx";
 
@@ -129,7 +129,7 @@ export async function createHostedDomain(
   // BEFORE anything changes anywhere.
   const previousMx = await resolveCurrentMx(domain);
 
-  const host = getMailboxHost();
+  const host = getMailboxHost(defaultMailboxProvider());
   const created = await host.createDomain(domain);
   if (!created.ok) return { ok: false, message: created.message };
 

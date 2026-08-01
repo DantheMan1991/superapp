@@ -26,3 +26,23 @@ export function getMailboxHost(provider: string = "migadu"): MailboxHost {
       throw new Error(`No mailbox host implementation for "${provider}".`);
   }
 }
+
+/**
+ * Which host a NEW domain is provisioned against.
+ *
+ * The default above answers "who holds this existing row's mail", and reading
+ * it from the row is what lets tenants move one at a time. But a domain being
+ * created has no row yet, and `createHostedDomain()` called `getMailboxHost()`
+ * with no argument — so every domain was provisioned against Migadu whatever
+ * the platform actually ran, and the caller then stored `migadu` as the row's
+ * provider, making the wrong answer permanent.
+ *
+ * That is a one-way mistake: the records the wizard renders are MX records,
+ * and publishing the wrong ones points a live domain's mail at a host that
+ * is not holding its mailboxes.
+ *
+ * Unset keeps the historical behaviour, so nothing already provisioned moves.
+ */
+export function defaultMailboxProvider(): string {
+  return process.env.MAILBOX_PROVIDER?.trim() || "migadu";
+}

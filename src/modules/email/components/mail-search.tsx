@@ -5,6 +5,15 @@ import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 /**
+ * How `/` finds this box.
+ *
+ * An id rather than a ref because the keymap lives in the thread list, which is
+ * a sibling several levels away — threading a ref up through the pane layout
+ * and back down would be a lot of plumbing to serve one keystroke.
+ */
+export const MAIL_SEARCH_INPUT_ID = "mail-search-input";
+
+/**
  * Search, as a plain form that pushes a URL.
  *
  * Same doctrine as the Documents search box: the query belongs in the URL so a
@@ -47,6 +56,7 @@ export function MailSearch({
       <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         key={initial}
+        id={MAIL_SEARCH_INPUT_ID}
         type="search"
         name="q"
         defaultValue={initial}

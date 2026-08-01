@@ -93,6 +93,18 @@ export async function MailView({
   const selectedFolder = folders.find((f) => f.id === view.mailboxId) ?? null;
   const archiveFolder = view.folders.find((f) => f.role === "archive");
   const trashFolder = view.folders.find((f) => f.role === "trash");
+  /**
+   * Where a snoozed message comes BACK to: the folder being viewed, so
+   * deferring something out of a project folder returns it there rather than
+   * into a pile with everything else.
+   *
+   * A SEARCH has no folder — `view.mailboxId` is null — and results can span
+   * every folder in the account. The inbox is the honest fallback: it is where
+   * the message would have been looked for anyway, and guessing per-message
+   * would need a round trip to ask the server where each one currently lives.
+   */
+  const snoozeReturnFolderId =
+    view.mailboxId ?? view.folders.find((f) => f.role === "inbox")?.id ?? null;
 
   // Saved views are per-user (drizzle/0048), so this read MUST carry userId —
   // without it the policy matches nothing and the rail silently shows none.
@@ -169,6 +181,7 @@ export async function MailView({
             mailboxId={account.mailboxId}
             archiveFolderId={archiveFolder?.id ?? null}
             trashFolderId={trashFolder?.id ?? null}
+            snoozeReturnFolderId={snoozeReturnFolderId}
           />
           {view.rows.length > 0 && (
             <Pager params={params} position={view.position} total={view.total} count={view.rows.length} />

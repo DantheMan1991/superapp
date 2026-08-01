@@ -82,6 +82,21 @@ export interface UpdateMailboxInput {
 export interface MailboxHost {
   readonly provider: "migadu" | "stalwart";
 
+  /**
+   * What a live MX record must contain for mail to be arriving HERE.
+   *
+   * Cannot be derived from `provider`. That happens to work for Migadu only
+   * because their MX hostnames carry the brand — `aspmx1.migadu.com` contains
+   * "migadu". A self-hosted server's MX is the operator's own hostname, so it
+   * will never contain the string "stalwart", and matching on the provider
+   * name means the check can never pass.
+   *
+   * Returns "" when the host is not configured. Callers must treat that as
+   * "no answer" rather than a match — a substring test against "" is true for
+   * every record, which would report mail as arriving somewhere it is not.
+   */
+  mxNeedle(): string;
+
   /** Register the domain with the host. Does NOT redirect any mail yet. */
   createDomain(domain: string): Promise<HostResult<HostDomain>>;
 

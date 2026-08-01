@@ -172,7 +172,7 @@ export async function createHostedDomain(
       currentMail: describeMxProvider(previousMx),
       alreadyHasMail: previousMx.length > 0,
       adopted: created.data.adopted === true,
-      rollbackUnavailable: mxPointsAt(previousMx, host.provider),
+      rollbackUnavailable: mxPointsAt(previousMx, host.mxNeedle()),
     },
   };
 }
@@ -291,7 +291,7 @@ export async function cutoverHostedDomain(
   // Confirm against public DNS too, not just the host's own view. Two
   // independent sources have to agree before a business's mail is redirected.
   const live = await resolveCurrentMx(existing.domain);
-  if (live.length > 0 && !mxPointsAt(live, existing.provider)) {
+  if (live.length > 0 && !mxPointsAt(live, host.mxNeedle())) {
     return {
       ok: false,
       message: `Public DNS still shows mail for ${existing.domain} going to ${describeMxProvider(live)}. Give the change time to spread, then check again.`,

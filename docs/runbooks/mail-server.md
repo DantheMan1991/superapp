@@ -206,6 +206,139 @@ draws. Hours went into that one sentence.
 no temporary password is generated. It is a rescue credential, not a login —
 take it back out of the compose file once a real admin exists.
 
+**`STALWART_PUBLIC_URL` is REQUIRED, and omitting it locks you out of the admin
+UI.** This cost a second evening. With no hostname configured the server builds
+every OAuth, OIDC and JMAP discovery URL from the container id:
+
+```
+issuer                   https://1053706f429e
+authorization_endpoint   https://1053706f429e/login
+token_endpoint           https://1053706f429e/auth/token
+```
+
+The admin UI is an OAuth client. It posts your credentials, the server accepts
+them and returns a code, and then the browser tries to redeem that code against
+a hostname that resolves nowhere. The UI draws the resulting failure as
+"Invalid username or password" — the same string as a genuinely wrong password,
+on a completely healthy server with a completely valid credential. Set it in
+the compose environment alongside the recovery admin:
+
+```yaml
+STALWART_PUBLIC_URL: "https://jmap.yosherapp.com"
+```
+
+Setting the hostname is not cosmetic housekeeping for SMTP HELO. It is a
+prerequisite for logging in at all.
+
+**Test a credential without a browser — do this BEFORE touching anything.**
+The login form posts to `/api/auth`, which is POST-only (a GET returns 404 and
+means nothing):
+
+```bash
+curl -sk -X POST https://<host>/api/auth -H "Content-Type: application/json" \
+  -d '{"type":"authCode","accountName":"admin","accountSecret":"<pw>",
+       "clientId":"webadmin","redirectUri":"https://<host>/admin/oauth/callback"}'
+```
+
+A valid credential returns `{"type":"authenticated","client_code":...,"iss":...}`
+and an invalid one returns `{"type":"failure"}`. **Both are HTTP 200** — read
+the body, not the status. Always run it a second time with a deliberately wrong
+password as a control, then read `iss` in the success response: that is where
+the hostname bug announces itself.
+
+**The admin UI lives at `/admin/`.** The root 302-redirects to `/account`, which
+is the end-user login and authenticates against the mail directory — so the
+recovery admin is correctly rejected there. **`/account/` is self-service only
+(settings, credentials, mailbox counters, sieve). Stalwart ships no webmail**,
+so there is no way to read a message in a browser. Use an IMAP client on 993,
+or Yosher — which is the point.
+
+**Stalwart logs NOTHING once it has a config file.** No stdout, nothing in
+Observability, not even at boot. Telemetry subscribers are opt-in and none
+exists by default. **Configure one before doing anything else** — Settings →
+Telemetry, console subscriber at `info`. Every hard problem here (the OAuth
+hostname, ACME's silence) was diagnosed by probing from outside because the
+server would not speak. That is a terrible way to run a mail server and it
+wasted two evenings.
+
+**ACME certificates are bound to Domain records, not configured server-wide,
+and are NOT obtained on demand via SNI.** The AcmeProvider only holds the
+account; each Domain sets `certificateManagement` to `Automatic` carrying an
+`acmeProviderId`. A provider with a registered Let's Encrypt account and no
+domain referencing it sits idle forever and says nothing. Because the cert is
+needed for the HTTPS host rather than the mail domain, **create a Domain record
+for `jmap.yosherapp.com` purely to own the certificate** — the mail domain
+(`m.yosherapp.com`) has only an MX record, so TLS-ALPN-01 has nothing to
+connect to on 443 and would fail.
+
+**A self-signed cert is NOT cosmetic — it blocks the app.** SMTP tolerates it
+via opportunistic TLS, so mail flows fine. Node.js does not: every JMAP call
+from Yosher fails verification (`verify error:num=18`). TLS is a prerequisite
+for connecting the app, not a finishing touch.
+
+**ACME errors are NEVER written to the log. They live on the task object.**
+This is the single most expensive thing on this page. The log only ever repeats
+`WARN No TLS certificates available (tls.no-certificates-available) total = 0`,
+which tells you nothing. The real error is in `x:Task/get`:
+
+```
+@type: AcmeRenewal, attemptNumber: 1, @type(status): Retry
+failureReason: "Status: invalid; Challenge type: tls-alpn-01,
+  error: DNS problem: NXDOMAIN looking up A for ua-auto-config.jmap.yosherapp.com"
+```
+
+**The cause: Stalwart adds its own auto-configuration hostnames to the
+certificate request** (`ua-auto-config.`, `autoconfig.`, `autodiscover.` — see
+the domain's `dnsZoneFile` property for the full list). None of them exist in
+DNS, and Let's Encrypt fails the WHOLE order if any single identifier does not
+resolve. **The fix is to pin `certificateManagement.subjectAlternativeNames` to
+exactly the hostname you want**, which constrains the request to that one name.
+Adding the CNAMEs also works but is not necessary.
+
+**A failed AcmeRenewal task does NOT retry on its own** even once `due` has
+passed. Destroy it and re-trigger, or nothing happens no matter how many times
+you restart:
+
+```
+x:Task/set   {"destroy": ["<taskId>"]}
+x:Domain/set {"update": {"<id>": {"certificateManagement": {"@type": "Manual"}}}}
+x:Domain/set {"update": {"<id>": {"certificateManagement": {"@type": "Automatic",
+               "acmeProviderId": "...", "subjectAlternativeNames": {"host": true}}}}}
+```
+
+Issuance then takes seconds. Verify with
+`curl -s -o /dev/null -w "%{ssl_verify_result}"` (no `-k`) — `0` means a strict
+client such as Node will accept it.
+
+**Logging writes to a FILE and the directory must exist AND be writable by uid
+2000.** The default tracer is `{"@type":"Log","path":"/var/log/stalwart",
+"enable":true,"level":"info"}` — nothing goes to stdout, so `docker compose
+logs` is always empty, and Observability in the UI is Enterprise-only
+(`x:Trace` returns `forbidden`). Bind-mount `./logs:/var/log/stalwart` in
+compose and `chown -R 2000:2000 logs`. Without the chown the container cannot
+write and fails silently.
+
+**The management API is JMAP with `x:`-prefixed types**, not `/api/*` (those all
+404). Useful ones: `x:Domain`, `x:AcmeProvider`, `x:Certificate`, `x:Task`,
+`x:NetworkListener`, `x:Tracer`, `x:Principal`. Get a bearer token via
+`/api/auth` then `/auth/token`, and POST to `/jmap/` with
+`using: ["urn:ietf:params:jmap:core","urn:stalwart:jmap"]`. This is how the
+whole certificate problem was diagnosed without shell access.
+
+**`Emails → Delivery tests` bypasses outbound routing** and traces DIRECT MX
+delivery, so it never exercises the relay. On Hetzner it always fails —
+outbound port 25 is blocked (IPv4 connections hang the full 30s, the signature
+of a silent drop; IPv6 returns `Network is unreachable (os error 101)` because
+the box has no IPv6 route). **This is expected and is not a relay failure.**
+Testing the SES relay requires a real queued message. Do not request the
+Hetzner port-25 unblock: nothing needs it, and an unused open egress port is
+only useful to an attacker.
+
+**Do not use SES "Mail Manager SMTP"** even though the console marks it
+Recommended. It bills per message processed and rotates the password via
+Secrets Manager; Stalwart stores a static secret and cannot follow a rotation,
+so outbound would fail silently on rotation day. Use **IAM SMTP credentials**.
+
 **`docker compose up -d --force-recreate` did not reliably recreate the
 container.** It printed only `Started`, and a stale container kept an old
 environment. `docker compose down` then `up -d` prints `Removed`, which is the

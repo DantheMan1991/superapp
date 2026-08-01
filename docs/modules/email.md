@@ -1659,12 +1659,15 @@ code or config change.
   auto-deleting local rows hides real mailboxes, and auto-creating remote ones
   resurrects addresses somebody removed on purpose. Nothing surfaces it in the
   UI yet, though — it is callable and unreachable.
-- **No Stalwart adapter yet, and deliberately so.** `getMailboxHost()` still
-  throws for `'stalwart'`. Mailbox creation via SQL-directory insert is
-  verified and buildable; **domain registration is not in Stalwart's documented
-  management API**, and writing that blind is precisely what produced two wrong
-  response shapes on Migadu. It waits for a server to probe. Build
-  `scripts/jmap-probe.ts` first, as `mailbox:probe` was.
+- **No password-set flow for a Stalwart mailbox, and it blocks the SQL
+  directory.** `stalwartHost.afterMailboxCreated` always writes
+  `passwordHash: null`, there is no hashing dependency, and no invitation flow
+  was ever built — Migadu's host sent those setup links itself and Stalwart has
+  no equivalent. So pointing Stalwart's SQL directory at Neon today would
+  authenticate against a table where every `password_hash` is null: an account
+  nobody can log into. Needs a token/email/form flow plus a hashing choice
+  verified against Stalwart's supported list. Until then use Stalwart's internal
+  directory (see `docs/runbooks/mail-server.md`).
 - **Password hash format is unconfirmed.** `mail_directory_accounts.password_hash`
   holds a PHC string, but the algorithms Stalwart will actually verify have not
   been checked against a running server. Guessing produces an account nobody
@@ -1706,6 +1709,15 @@ code or config change.
   it. That is the point, it is audited, and the person doing it is the person
   whose mailbox it is — but there is no owner-only mode and no way to un-publish
   except deleting the document. Revisit if a client asks.
+- **There is no production Stalwart, and that is now the only thing between the
+  inbox and a person using it.** `STALWART_BASE_URL` points at a Docker
+  container on one laptop. `yosherapp.com`'s mailboxes are at Migadu, which has
+  no OAuth — which is why Stalwart was chosen in the first place — so the app
+  cannot read them. Eight slices of mail client are waiting on one box.
+  **`docs/runbooks/mail-server.md`** is the procedure, and the two things that
+  decide whether it works are port-25 egress and the fact that a fresh IP has no
+  sending reputation. The answer to the second is to relay outbound through
+  Migadu rather than reversing the original evaluation.
 - **`EMAIL_DEV_REDIRECT` must be set wherever compose is used outside
   production.** Locally it is now `admin@yosher.test`, the Stalwart mailbox in
   Docker, so a test send round-trips without leaving the machine. **It is not set

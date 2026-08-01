@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   Archive,
   Flag,
@@ -18,7 +18,15 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { ThreadRow } from "../read";
 import { bulkAction } from "../organise-actions";
+import {
+  isEditingTarget,
+  moveCursor,
+  resolveShortcut,
+  SHORTCUT_HELP,
+  type EditableTargetLike,
+} from "../triage/keymap";
 import { mailHref } from "./mail-panes";
+import { MAIL_SEARCH_INPUT_ID } from "./mail-search";
 
 /**
  * The thread list, with a selection.
@@ -53,6 +61,18 @@ export function ThreadList({
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, startTransition] = useTransition();
+  /**
+   * Flags the user just set, held only until the refreshed rows carry them.
+   *
+   * Flagging one message is a reflex, not a decision — you do it while reading
+   * the list and move on. A star that waits for a round trip before filling in
+   * reads as a click that missed, so people click again and unflag it. The
+   * entry is dropped after router.refresh() resolves, so `row.flagged` is the
+   * source of truth for everything except the moment in between.
+   */
+  const [flagPending, setFlagPending] = useState<Map<string, boolean>>(new Map());
+  const [flagTransitioning, startFlagTransition] = useTransition();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   function toggle(id: string) {
     setSelected((prior) => {
@@ -63,13 +83,59 @@ export function ThreadList({
     });
   }
 
+  function toggleFlag(row: ThreadRow) {
+    const current = flagPending.get(row.emailId) ?? row.flagged;
+    const next = !current;
+    setFlagPending((prior) => new Map(prior).set(row.emailId, next));
+
+    startFlagTransition(async () => {
+      const result = await bulkAction({
+        mailboxId,
+        emailIds: [row.emailId],
+        action: next ? "flag" : "unflag",
+      });
+      // The mail server is the only thing that decides. Anything short of a
+      // clean single success puts the star back where it was, because a star
+      // that stays lit on a message the server never flagged is worse than one
+      // that visibly refuses.
+      const rejected = "error" in result || (result.data?.failed ?? 0) > 0;
+      if (rejected) {
+        setFlagPending((prior) => {
+          const revert = new Map(prior);
+          revert.delete(row.emailId);
+          return revert;
+        });
+        toast.error(
+          "error" in result ? result.error : "The mail server refused that.",
+        );
+        return;
+      }
+      router.refresh();
+      setFlagPending((prior) => {
+        const settled = new Map(prior);
+        settled.delete(row.emailId);
+        return settled;
+      });
+    });
+  }
+
   const allSelected = rows.length > 0 && selected.size === rows.length;
 
   function run(
     action: "read" | "unread" | "flag" | "unflag" | "move",
     targetMailboxId?: string,
+    /**
+     * Explicit ids for the keyboard, which acts on the message under the
+     * cursor. The bulk bar passes nothing and means "what I ticked".
+     *
+     * Keeping them one function matters: a second copy of this would be a
+     * second place for the partial-success reporting to be got wrong, and
+     * "300 of 900 moved" reported as "done" is how somebody loses an
+     * afternoon looking for their mail.
+     */
+    ids?: string[],
   ) {
-    const emailIds = [...selected];
+    const emailIds = ids ?? [...selected];
     if (emailIds.length === 0) return;
     startTransition(async () => {
       const result = await bulkAction({
@@ -97,11 +163,173 @@ export function ThreadList({
     });
   }
 
+  /**
+   * The keyboard.
+   *
+   * Bound to the window rather than to the list, because the whole point is
+   * that you never have to click into anything first. What decides whether a
+   * keystroke is ours lives in triage/keymap.ts and is tested there; this is
+   * only the wiring.
+   *
+   * Rebinding every render is deliberate. The handler closes over `rows`,
+   * `selected` and the cursor, and a stale closure here archives the wrong
+   * message — addEventListener is far cheaper than that bug.
+   */
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const action = resolveShortcut(event, {
+        isEditing: isEditingTarget(event.target as EditableTargetLike | null),
+      });
+      if (!action) return;
+
+      const index = rows.findIndex((row) => row.emailId === selectedId);
+      const cursor = index >= 0 ? rows[index] : undefined;
+      // Keyboard actions follow the ticked messages when there are any, and
+      // otherwise the one under the cursor. Same rule as every mail client:
+      // the selection wins because making it and then ignoring it is worse
+      // than having no shortcut at all.
+      const targets =
+        selected.size > 0 ? [...selected] : cursor ? [cursor.emailId] : [];
+
+      switch (action) {
+        case "next":
+        case "previous": {
+          const to = moveCursor(rows.length, index, action);
+          // At the ends the key is deliberately NOT consumed, so ArrowDown
+          // still scrolls the page once the cursor has nowhere left to go.
+          if (to === null) return;
+          event.preventDefault();
+          router.push(
+            mailHref(params, { message: rows[to].emailId, images: undefined }),
+          );
+          return;
+        }
+        case "open": {
+          if (!cursor) return;
+          event.preventDefault();
+          router.push(
+            mailHref(params, { message: cursor.emailId, images: undefined }),
+          );
+          return;
+        }
+        case "close": {
+          // Unwinds one layer at a time. Escape that closes everything at once
+          // loses a selection somebody spent a minute building.
+          event.preventDefault();
+          if (helpOpen) {
+            setHelpOpen(false);
+          } else if (selected.size > 0) {
+            setSelected(new Set());
+          } else {
+            router.push(
+              mailHref(params, { message: undefined, compose: undefined }),
+            );
+          }
+          return;
+        }
+        case "select": {
+          if (!cursor) return;
+          event.preventDefault();
+          toggle(cursor.emailId);
+          return;
+        }
+        case "star": {
+          if (!cursor) return;
+          event.preventDefault();
+          toggleFlag(cursor);
+          return;
+        }
+        case "archive":
+        case "trash": {
+          // A mailbox without the folder simply has no shortcut, the same way
+          // the bulk bar hides the button. Offering one that fails is worse.
+          const folder = action === "archive" ? archiveFolderId : trashFolderId;
+          if (!folder || targets.length === 0) return;
+          event.preventDefault();
+          run("move", folder, targets);
+          return;
+        }
+        case "read":
+        case "unread": {
+          if (targets.length === 0) return;
+          event.preventDefault();
+          run(action, undefined, targets);
+          return;
+        }
+        case "reply": {
+          if (!cursor) return;
+          event.preventDefault();
+          router.push(
+            mailHref(params, { compose: "reply", message: cursor.emailId }),
+          );
+          return;
+        }
+        case "compose": {
+          event.preventDefault();
+          router.push(
+            mailHref(params, { compose: "new", message: undefined }),
+          );
+          return;
+        }
+        case "search": {
+          const box = document.getElementById(MAIL_SEARCH_INPUT_ID);
+          if (!(box instanceof HTMLInputElement)) return;
+          // preventDefault matters here: without it the "/" lands in the box
+          // it just focused, and every search starts with a slash.
+          event.preventDefault();
+          box.focus();
+          box.select();
+          return;
+        }
+        case "help": {
+          event.preventDefault();
+          setHelpOpen((open) => !open);
+          return;
+        }
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  /**
+   * Rendered in both branches, because an empty folder is exactly where
+   * somebody presses `?` to find out why nothing is happening.
+   */
+  const help = helpOpen ? (
+    <div
+      role="dialog"
+      aria-label="Keyboard shortcuts"
+      className="fixed inset-x-0 bottom-0 z-50 mx-auto mb-4 w-[min(28rem,calc(100vw-2rem))] rounded-lg border bg-popover p-4 shadow-lg"
+    >
+      <div className="mb-2 flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold">Keyboard shortcuts</h2>
+        <button
+          type="button"
+          onClick={() => setHelpOpen(false)}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          Esc
+        </button>
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+        {SHORTCUT_HELP.map((entry) => (
+          <div key={entry.keys} className="contents">
+            <dt className="font-mono text-muted-foreground">{entry.keys}</dt>
+            <dd>{entry.does}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  ) : null;
+
   if (rows.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
         <InboxIcon className="size-6 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+        {help}
       </div>
     );
   }
@@ -179,6 +407,7 @@ export function ThreadList({
         {rows.map((row) => {
           const active = row.emailId === selectedId;
           const checked = selected.has(row.emailId);
+          const flagged = flagPending.get(row.emailId) ?? row.flagged;
           return (
             <li key={row.emailId} className={cn("flex", active && "bg-accent")}>
               <label className="flex shrink-0 cursor-pointer items-center pl-3">
@@ -190,6 +419,28 @@ export function ThreadList({
                   aria-label={`Select ${row.subject || "message"}`}
                 />
               </label>
+              {/* Beside the checkbox rather than in the row's text, because a
+                  <button> inside the <Link> is invalid HTML and every click
+                  would have to fight the navigation it sits inside. */}
+              <button
+                type="button"
+                onClick={() => toggleFlag(row)}
+                disabled={flagTransitioning}
+                className="flex shrink-0 items-center px-2 text-muted-foreground transition-colors hover:text-amber-500 disabled:opacity-50"
+                aria-pressed={flagged}
+                aria-label={
+                  flagged
+                    ? `Remove flag from ${row.subject || "message"}`
+                    : `Flag ${row.subject || "message"}`
+                }
+              >
+                <Flag
+                  className={cn(
+                    "size-3.5",
+                    flagged && "fill-current text-amber-500",
+                  )}
+                />
+              </button>
               <Link
                 // `images` is cleared: unblocking is a decision about ONE
                 // message, and carrying it to the next one would silently show
@@ -209,9 +460,6 @@ export function ThreadList({
                   >
                     {row.fromName || row.from || "Unknown sender"}
                   </span>
-                  {row.flagged && (
-                    <Flag className="size-3 shrink-0 fill-current text-amber-500" />
-                  )}
                   {row.hasAttachment && (
                     <Paperclip className="size-3 shrink-0 text-muted-foreground" />
                   )}
@@ -237,6 +485,7 @@ export function ThreadList({
           );
         })}
       </ul>
+      {help}
     </>
   );
 }

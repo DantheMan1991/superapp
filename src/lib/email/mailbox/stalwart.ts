@@ -92,6 +92,13 @@ export const stalwartHost: MailboxHost = {
   provider: "stalwart",
 
   /**
+   * The server's own hostname — whatever the operator called it. Unconfigured
+   * returns "", which mxPointsAt() treats as no match rather than as every
+   * match.
+   */
+  mxNeedle: () => mailHostname().toLowerCase(),
+
+  /**
    * Registering a domain is a change to the mail server's own configuration,
    * which its management API does not expose — verified against a live 0.16
    * instance, whose API the documentation itself calls "deliberately small".

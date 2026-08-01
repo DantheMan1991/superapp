@@ -26,12 +26,25 @@ export function describeMxProvider(records: PreviousMxRecord[]): string {
   return hosts[0];
 }
 
-/** True once the live MX actually points at the given host's mail servers. */
+/**
+ * True once the live MX actually points at the given host's mail servers.
+ *
+ * `hostNeedle` is a HOSTNAME (`host.mxNeedle()`), not a provider name. Passing
+ * the provider silently never matches for a self-hosted server, whose MX is the
+ * operator's own hostname.
+ *
+ * An empty needle answers false. `"anything".includes("")` is true, so an
+ * unconfigured host would otherwise report that mail arrives there — and the
+ * two callers use this to decide whether a cutover is safe and whether a
+ * rollback record is meaningful. Both want "no" when the answer is unknown.
+ */
 export function mxPointsAt(
   records: PreviousMxRecord[],
   hostNeedle: string,
 ): boolean {
-  return records.some((r) => r.host.toLowerCase().includes(hostNeedle));
+  const needle = hostNeedle.trim().toLowerCase();
+  if (!needle) return false;
+  return records.some((r) => r.host.toLowerCase().includes(needle));
 }
 
 export function normalizeMxRecords(raw: unknown): PreviousMxRecord[] {

@@ -131,6 +131,9 @@ function safeSegment(value: string): string {
 export const migaduHost: MailboxHost = {
   provider: "migadu",
 
+  /** Every Migadu MX is `aspmx{1,2}.migadu.com`, so the brand is the match. */
+  mxNeedle: () => "migadu",
+
   async createDomain(domain) {
     // Adopt before creating.
     //

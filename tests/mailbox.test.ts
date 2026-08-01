@@ -76,6 +76,30 @@ describe("reading a domain's current mail provider", () => {
     );
   });
 
+  it("matches a self-hosted MX, which carries no provider name at all", () => {
+    // The bug this replaces: callers passed the PROVIDER, and "migadu" happens
+    // to appear in every Migadu MX hostname. A self-hosted server's MX is the
+    // operator's own hostname, so matching on "stalwart" could never be true
+    // and the cutover refused itself with a message that named the correct
+    // destination as if it were the wrong one.
+    const selfHosted = [{ host: "jmap.yosherapp.com", priority: 10 }];
+    expect(mxPointsAt(selfHosted, "stalwart")).toBe(false);
+    expect(mxPointsAt(selfHosted, "jmap.yosherapp.com")).toBe(true);
+  });
+
+  it("treats an unconfigured host as no match rather than every match", () => {
+    // "anything".includes("") is true. Both callers decide whether it is safe
+    // to redirect a business's mail, so an unknown answer has to read as no.
+    const anything = [{ host: "aspmx.l.google.com", priority: 1 }];
+    expect(mxPointsAt(anything, "")).toBe(false);
+    expect(mxPointsAt(anything, "   ")).toBe(false);
+  });
+
+  it("ignores case and padding in the needle", () => {
+    const selfHosted = [{ host: "jmap.yosherapp.com", priority: 10 }];
+    expect(mxPointsAt(selfHosted, " JMAP.YosherApp.com ")).toBe(true);
+  });
+
   it("normalizes resolver output and drops the trailing dot", () => {
     expect(
       normalizeMxRecords([

@@ -1229,6 +1229,66 @@ One detail worth recording because it is the design working rather than a gap:
 button. The button is conditional on the role resolving, so a mailbox without
 one simply does not offer the action instead of offering one that fails.
 
+### 2026-08-01 — Production: the module reads a real mailbox on our own server
+
+**The loop closed.** A message sent from Gmail to `dan@m.yosherapp.com` arrived
+at a Stalwart instance we run, and was read in Yosher. Every prior entry in this
+log was written against a container on a laptop that could not receive mail from
+the internet.
+
+What that took, beyond the runbook (`docs/runbooks/mail-server.md` carries the
+server-side detail): a Hetzner box, `m.yosherapp.com` as the mail domain with
+the apex left on Migadu untouched, a Let's Encrypt certificate, migrations
+`0041`–`0048` against production, the `email` module seeded and enabled, and
+`STALWART_CLIENT_ID` from `mail:register-client`.
+
+**A self-signed certificate is not cosmetic — it blocks the app.** SMTP tolerates
+it through opportunistic TLS, so mail flowed for hours while the app could not
+connect at all. Node rejects it outright (`verify error:num=18`). TLS is a
+prerequisite for the module, not a finishing touch, and it is worth stating here
+because the mail arriving made everything *look* finished.
+
+**Three Migadu assumptions were baked into supposedly shared code**, all found in
+the space of an hour by being the first caller that was not Migadu:
+
+| Where | What | Fix |
+| --- | --- | --- |
+| `createHostedDomain()` | called `getMailboxHost()` with no argument, so every new domain was provisioned against Migadu whatever the platform ran — and the wizard then rendered Migadu's **MX** records for a Stalwart domain | #33, `defaultMailboxProvider()` reading `MAILBOX_PROVIDER` |
+| `mxPointsAt()` | substring-matched the live MX against the **provider name**, which only works because Migadu's MX hostnames carry the brand. A self-hosted MX is the operator's own hostname, so the cutover refused itself while naming the correct destination as the wrong one | #35, `MailboxHost.mxNeedle()` |
+| the SPF record the wizard suggests | `v=spf1 mx a:<host> -all` authorizes the server but not the relay it sends through, and hard-fails. Publishing it makes every relayed message fail SPF | **not fixed** — the right record depends on the relay, which is a design decision |
+
+The pattern is worth naming: the seam existed in all three cases. `provider` was
+already a column, `getMailboxHost` already took an argument, `mxPointsAt` already
+took a needle. What was missing was any caller that exercised the second
+implementation, so the defaults silently hard-coded the first one. **A seam with
+one user is a seam that has never been tested.**
+
+**Two gaps this surfaced, both unbuilt rather than broken:**
+
+**The invite flow does not exist.** `createTenantMailbox()` validates the invite
+address, sets `invitePending: true`, and returns — there is no send anywhere in
+that path. The UI reports "setup link sent" regardless, driven purely by that
+flag. So the copy asserts something that never happened, which is how it stayed
+invisible.
+
+**And it could not work if it did send.** The link would set a password in
+`mail_directory_accounts`, the SQL directory table, while this Stalwart runs on
+its **internal** directory (`Directory: None` on the domain, deliberately — the
+runbook explains why the SQL route would have locked everyone out). The two
+account stores do not meet. `afterMailboxCreated` writes to one and
+authentication reads the other.
+
+Consequence: **nobody but the founder can get a password on a mailbox**, because
+his was set by hand in Stalwart's admin UI. Client onboarding needs the invite
+sent, a set-password page, and a decision on which directory is authoritative —
+either wire Stalwart to read the SQL directory, or teach the adapter to call
+`x:Principal/set`. The latter is now a known quantity: the whole certificate
+diagnosis was done through that API.
+
+**`STALWART_MAIL_HOSTNAME` is documented in SETUP.md but not `.env.example`**,
+which is why it surfaced as a runtime error mid-deploy rather than while filling
+in config. Folded into the next docs change.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at

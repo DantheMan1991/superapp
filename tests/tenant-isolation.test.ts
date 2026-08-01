@@ -2567,6 +2567,100 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
     ).rejects.toThrow();
   });
 
+  it("a colleague cannot see, or delete, another user's snoozes", async () => {
+    // mail_snoozes (0050) is the THIRD per-user table. A row here is a diary
+    // entry: it says what somebody is putting off and until when, message by
+    // message. Same scoping as 0043 and 0048, for the same two reasons — the
+    // mailbox ids are not shareable, and the list is nobody else's business.
+    const [mine] = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .insert(schema.mailSnoozes)
+          .values({
+            tenantId: tenantA,
+            clerkUserId: "user-a",
+            mailAccountId: fx.a.accountId,
+            emailId: "M-snooze-1",
+            returnToMailboxId: "mbx-inbox",
+            snoozeMailboxId: "mbx-snoozed",
+            dueAt: new Date(Date.now() + 3_600_000),
+          })
+          .returning(),
+      { userId: "user-a" },
+    );
+    expect(mine.id).toBeTruthy();
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailSnoozes),
+      { userId: "user-a" },
+    );
+    expect(asOwner.some((r) => r.id === mine.id)).toBe(true);
+
+    // Deliberately no where clause — the forgotten-predicate scenario.
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailSnoozes),
+      { userId: COLLEAGUE },
+    );
+    expect(asColleague).toHaveLength(0);
+
+    const asNobody = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.mailSnoozes),
+    );
+    expect(asNobody).toHaveLength(0);
+
+    const deletedByColleague = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.mailSnoozes)
+          .where(eq(schema.mailSnoozes.id, mine.id))
+          .returning(),
+      { userId: COLLEAGUE },
+    );
+    expect(deletedByColleague).toHaveLength(0);
+  });
+
+  it("cannot snooze on a colleague's behalf", async () => {
+    // The WITH CHECK pins clerk_user_id as well as tenant_id. Planting a snooze
+    // in somebody else's account would move THEIR mail out of THEIR inbox,
+    // which is a good deal worse than planting a saved search.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.mailSnoozes).values({
+            tenantId: tenantA,
+            clerkUserId: COLLEAGUE,
+            mailAccountId: fx.a.accountId,
+            emailId: "M-planted",
+            returnToMailboxId: "mbx-inbox",
+            snoozeMailboxId: "mbx-snoozed",
+            dueAt: new Date(Date.now() + 3_600_000),
+          }),
+        { userId: "user-a" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: a snooze cannot point at the OTHER tenant's connection", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.mailSnoozes).values({
+          tenantId: tenantA,
+          clerkUserId: "user-a",
+          mailAccountId: fx.b.accountId,
+          emailId: "M-smuggled",
+          returnToMailboxId: "mbx-inbox",
+          snoozeMailboxId: "mbx-snoozed",
+          dueAt: new Date(Date.now() + 3_600_000),
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("cannot read the other tenant's mail password hashes", async () => {
     const rows = await withTenant(tenantA, (tx) =>
       tx

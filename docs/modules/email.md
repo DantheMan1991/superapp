@@ -1229,6 +1229,88 @@ One detail worth recording because it is the design working rather than a gap:
 button. The button is conditional on the role resolving, so a mailbox without
 one simply does not offer the action instead of offering one that fails.
 
+### 2026-08-01 (later) — Triage: a keyboard, a working star, and snooze
+
+The first slice aimed at a mailbox somebody has to get through rather than one
+they are admiring. Prompted by a straight comparison against Gmail's feature
+surface; the gaps that mattered were triage speed, rules, compose polish and
+labels, and this is the first of those.
+
+**Attachment indicators were already built** — `hasAttachment` was on
+`ThreadRow` and already drew a paperclip. Dropped from the plan rather than
+reimplemented.
+
+**The star was drawn and did nothing.** `row.flagged` rendered a filled flag
+inside the row's `<Link>`. A `<button>` nested in a link is invalid HTML and
+would have fought the navigation around it, so there was no way to flag from
+the list at all — only from the bulk bar, having ticked something first. Moved
+out to sit between the checkbox and the link. Optimistic, reverting on refusal:
+flagging is a reflex performed while reading, and a star that fills in only
+after a round trip reads as a click that missed, so people click again and
+unflag what they just flagged.
+
+**The keyboard** is `triage/keymap.ts` plus wiring, split so the rules are
+testable without a DOM. Two of them are the whole feature. Escape is the only
+key that survives a text field, because `e` inside the composer is a letter and
+typing "There" into a reply must not archive the thread on the E and trash it
+on the R. And modified keys are always declined — Ctrl-R is reload, Cmd-F is
+find, and stealing those breaks the browser rather than extending it.
+
+`moveCursor()` is pure for the same reason: edges in a key handler stay
+invisible until somebody holds a key down. It clamps rather than wrapping,
+because holding `j` at the bottom of a wrapping list teleports you to the top
+and the next `#` deletes something you were not looking at.
+
+#### Snooze, and the decision underneath it
+
+**The message really moves**, into a folder called Snoozed on the mail server.
+Hiding it in Yosher's list instead would have been a fraction of the code and
+quietly wrong: the same mailbox is open on a phone and in Outlook, and mail
+hidden in one client has not been dealt with — it has been dealt with in one
+window.
+
+That decision is what shapes `mail_snoozes` (`0049`/`0050`). The table is a
+REMINDER, not custody. The mail server holds the truth, and losing every row
+here would lose no mail — it would leave a pile of messages sitting in a
+visible folder called Snoozed, waiting to be dragged back by hand. Every
+failure path is chosen to land there.
+
+**Third per-user table**, after `mail_accounts`/`mail_thread_index` (`0043`) and
+`mail_saved_searches` (`0048`), and the reasoning stacks: the mailbox ids are
+issued inside one person's account so they cannot be shared even in principle,
+and a row is a diary entry saying what somebody is deferring and until when.
+
+**Due times are computed in the BROWSER.** "Tomorrow morning" is a statement
+about the user's calendar and the server's clock is UTC; resolving it
+server-side would wake messages at 08:00 UTC, the middle of the night for a
+good share of the people being reminded. The server bounds the instant rather
+than recomputing it — it cannot, the timezone is not in the request. It
+rejects past times instead of clamping them, because clamping to "now" would
+move mail into a folder and straight back out, which reads as flickering rather
+than as a bug worth reporting.
+
+**Waking rides on the existing mail-sync cron** rather than getting one of its
+own. Vercel's Hobby plan runs each cron ONCE A DAY, so a second job would mean
+"later today" arriving tomorrow. Bounded separately and run last so a large
+batch cannot eat the sync's 60 seconds.
+
+**Idempotent by construction, in the one direction that matters.** The row is
+deleted only after the mail server confirms the move. A run that dies halfway
+leaves rows whose messages are already back, and the next run asks the server
+to move them somewhere they already are — a no-op that reports success. The
+other order would strand a message in Snoozed with nothing left to remember it.
+
+**Not verified in a browser.** The dev server would need `.env`, which points
+at the production database and a live mailbox, so exercising `e`, `#` and
+snooze would archive, trash and hide real mail. 28 unit tests cover the keymap,
+the cursor edges and every due-time boundary — snoozing at 11pm, on a Saturday,
+asking for "next week" on a Monday — plus three isolation tests for the new
+table. The wiring wants a preview deployment.
+
+Open, and worth knowing: `j`/`k` does not scroll the cursor row into view; the
+Snoozed folder has no view of its own, so a snoozed message is findable only by
+opening that folder; and there is no un-snooze beyond moving it back by hand.
+
 ### 2026-08-01 — Production: the module reads a real mailbox on our own server
 
 **The loop closed.** A message sent from Gmail to `dan@m.yosherapp.com` arrived

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   Archive,
+  Clock,
   Flag,
   Inbox as InboxIcon,
   Loader2,
@@ -17,7 +18,12 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { ThreadRow } from "../read";
-import { bulkAction } from "../organise-actions";
+import { bulkAction, snoozeAction } from "../organise-actions";
+import {
+  snoozeDueAt,
+  SNOOZE_PRESETS,
+  type SnoozePreset,
+} from "../triage/snooze-times";
 import {
   isEditingTarget,
   moveCursor,
@@ -49,6 +55,7 @@ export function ThreadList({
   mailboxId,
   archiveFolderId,
   trashFolderId,
+  snoozeReturnFolderId,
 }: {
   rows: ThreadRow[];
   selectedId: string | undefined;
@@ -57,6 +64,7 @@ export function ThreadList({
   mailboxId: string;
   archiveFolderId: string | null;
   trashFolderId: string | null;
+  snoozeReturnFolderId: string | null;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -73,6 +81,44 @@ export function ThreadList({
   const [flagPending, setFlagPending] = useState<Map<string, boolean>>(new Map());
   const [flagTransitioning, startFlagTransition] = useTransition();
   const [helpOpen, setHelpOpen] = useState(false);
+  /** Ids the snooze menu is open for, or null. Empty means "use the cursor". */
+  const [snoozeFor, setSnoozeFor] = useState<string[] | null>(null);
+
+  function snooze(preset: SnoozePreset, emailIds: string[]) {
+    setSnoozeFor(null);
+    if (emailIds.length === 0) return;
+    // Nowhere to come back to means no snooze. Parking mail with no return
+    // address is how a message disappears; better to refuse out loud.
+    if (!snoozeReturnFolderId) {
+      toast.error("Nowhere to return this to. Open a folder and try again.");
+      return;
+    }
+    // Resolved HERE, in the browser. "Tomorrow morning" is a fact about this
+    // person's calendar, and the server's clock is UTC.
+    const dueAt = snoozeDueAt(preset, new Date());
+    startTransition(async () => {
+      const result = await snoozeAction({
+        mailboxId,
+        emailIds,
+        dueAt: dueAt.toISOString(),
+        returnToMailboxId: snoozeReturnFolderId,
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      const moved = result.data?.moved ?? 0;
+      toast.success(
+        `${moved} snoozed until ${dueAt.toLocaleString(undefined, {
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        })}.`,
+      );
+      setSelected(new Set());
+      router.refresh();
+    });
+  }
 
   function toggle(id: string) {
     setSelected((prior) => {
@@ -216,7 +262,9 @@ export function ThreadList({
           // Unwinds one layer at a time. Escape that closes everything at once
           // loses a selection somebody spent a minute building.
           event.preventDefault();
-          if (helpOpen) {
+          if (snoozeFor !== null) {
+            setSnoozeFor(null);
+          } else if (helpOpen) {
             setHelpOpen(false);
           } else if (selected.size > 0) {
             setSelected(new Set());
@@ -237,6 +285,15 @@ export function ThreadList({
           if (!cursor) return;
           event.preventDefault();
           toggleFlag(cursor);
+          return;
+        }
+        case "snooze": {
+          if (targets.length === 0) return;
+          event.preventDefault();
+          // Opens the menu rather than picking a time. "Snooze until when" is
+          // the actual question, and a key that silently chose one would be a
+          // key that moves mail somewhere you did not ask for.
+          setSnoozeFor(targets);
           return;
         }
         case "archive":
@@ -294,6 +351,61 @@ export function ThreadList({
   });
 
   /**
+   * The "until when" menu, shown for whatever `b` or the bulk button targeted.
+   *
+   * A sheet rather than a dropdown anchored to the button, because the keyboard
+   * can open this with no button involved — there is nothing to anchor to when
+   * the trigger was a keystroke.
+   */
+  const snoozeMenu =
+    snoozeFor !== null ? (
+      <div
+        role="dialog"
+        aria-label="Snooze until"
+        className="fixed inset-x-0 bottom-0 z-50 mx-auto mb-4 w-[min(20rem,calc(100vw-2rem))] rounded-lg border bg-popover p-3 shadow-lg"
+      >
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold">
+            Snooze {snoozeFor.length} until
+          </h2>
+          <button
+            type="button"
+            onClick={() => setSnoozeFor(null)}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Esc
+          </button>
+        </div>
+        <div className="flex flex-col">
+          {SNOOZE_PRESETS.map((option) => {
+            const when = snoozeDueAt(option.preset, new Date());
+            return (
+              <button
+                key={option.preset}
+                type="button"
+                disabled={pending}
+                onClick={() => snooze(option.preset, snoozeFor)}
+                className="flex items-baseline justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-50"
+              >
+                <span>{option.label}</span>
+                {/* The resolved time, because "next week" means different days
+                    to different people and the whole feature is a promise
+                    about when something comes back. */}
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {when.toLocaleString(undefined, {
+                    weekday: "short",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    ) : null;
+
+  /**
    * Rendered in both branches, because an empty folder is exactly where
    * somebody presses `?` to find out why nothing is happening.
    */
@@ -329,6 +441,7 @@ export function ThreadList({
       <div className="flex flex-col items-center gap-2 px-4 py-16 text-center">
         <InboxIcon className="size-6 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+        {snoozeMenu}
         {help}
       </div>
     );
@@ -355,6 +468,15 @@ export function ThreadList({
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => run("flag")}>
             <Flag className="size-3.5" />
             Flag
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => setSnoozeFor([...selected])}
+          >
+            <Clock className="size-3.5" />
+            Snooze
           </Button>
           {archiveFolderId && (
             <Button
@@ -485,6 +607,7 @@ export function ThreadList({
           );
         })}
       </ul>
+      {snoozeMenu}
       {help}
     </>
   );

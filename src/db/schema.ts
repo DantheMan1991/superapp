@@ -2763,6 +2763,78 @@ export const mailSavedSearches = pgTable(
   ],
 );
 
+/**
+ * A message put out of sight until a date.
+ *
+ * THE MESSAGE REALLY MOVES. Snoozing files it into a "Snoozed" folder on the
+ * mail server and this row remembers where it came from and when to put it
+ * back. The alternative — leaving it in the inbox and hiding it in Yosher —
+ * would be far less code and quietly wrong: the same mailbox is open on a
+ * phone and in Outlook, and a message that is only hidden in one client has
+ * not been dealt with, it has been dealt with in one window.
+ *
+ * So this table is a REMINDER, not the truth. The mail server holds the truth.
+ * If every row here were lost, no mail would be lost — a pile of messages would
+ * simply sit in a visible folder called Snoozed, waiting to be dragged back by
+ * hand. That is the failure mode this shape is chosen for.
+ *
+ * PER-USER, like mail_saved_searches and for a stronger reason. A snooze names
+ * a JMAP mailbox id issued inside ONE person's account, so it cannot be shared
+ * even in principle — and "remind me about this on Tuesday" is a statement
+ * about somebody's week that a colleague has no business reading.
+ */
+export const mailSnoozes = pgTable(
+  "mail_snoozes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Whose reminder this is. Nobody snoozes anonymously. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** Which connection's ids the two mailbox columns below refer to. */
+    mailAccountId: uuid("mail_account_id").notNull(),
+    /** The JMAP Email id. Text, because the mail server issues it, not us. */
+    emailId: text("email_id").notNull(),
+    /**
+     * Where it was, so waking it can put it back exactly there rather than
+     * assuming the inbox. Somebody who snoozes out of a project folder wants it
+     * to return to that folder.
+     */
+    returnToMailboxId: text("return_to_mailbox_id").notNull(),
+    /** The folder it is parked in, so the sweep can tell it has already moved. */
+    snoozeMailboxId: text("snooze_mailbox_id").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_snoozes_tenant_id_id_idx").on(t.tenantId, t.id),
+    /**
+     * One live snooze per message per person. Snoozing something twice is a
+     * double-click, not an intention, and two rows would race each other to
+     * move the same message back.
+     */
+    uniqueIndex("mail_snoozes_message_idx").on(
+      t.tenantId,
+      t.clerkUserId,
+      t.mailAccountId,
+      t.emailId,
+    ),
+    /** The sweep's only query: everything due, oldest first, across tenants. */
+    index("mail_snoozes_due_idx").on(t.dueAt),
+    // Same reasoning as saved searches: the ids stop meaning anything when the
+    // connection goes. The MAIL is untouched — it stays in the Snoozed folder
+    // on the server, which is exactly where a person would look for it.
+    foreignKey({
+      name: "mail_snoozes_account_fk",
+      columns: [t.tenantId, t.mailAccountId],
+      foreignColumns: [mailAccounts.tenantId, mailAccounts.id],
+    }).onDelete("cascade"),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -3242,6 +3314,7 @@ export type MailThreadIndexRow = typeof mailThreadIndex.$inferSelect;
 export type MailLink = typeof mailLinks.$inferSelect;
 export type MailAnnotation = typeof mailAnnotations.$inferSelect;
 export type MailSavedSearch = typeof mailSavedSearches.$inferSelect;
+export type MailSnooze = typeof mailSnoozes.$inferSelect;
 /** Display-only participants on an indexed thread. */
 export type MailParticipant = { name: string; email: string };
 export type DocumentShare = typeof documentShares.$inferSelect;

@@ -15,6 +15,8 @@ import {
   deleteSavedSearch,
   type SavedSearchEntry,
 } from "./organise/saved-searches";
+import { snoozeMessages, type SnoozeOutcome } from "./triage/snooze";
+import { isAcceptableDueAt } from "./triage/snooze-times";
 
 /**
  * Organising: bulk actions, folders, saved searches.
@@ -266,6 +268,81 @@ export async function deleteSearchAction(
 
     revalidatePath(BASE);
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const snoozeSchema = z.object({
+  mailboxId: z.string().uuid(),
+  emailIds: z.array(z.string().min(1).max(255)).min(1).max(BULK_MAX),
+  /**
+   * An absolute instant, resolved in the BROWSER.
+   *
+   * "Tomorrow morning" is a statement about the user's calendar, and this
+   * server's clock is UTC — resolving it here would wake a message at 08:00
+   * UTC, the middle of the night for a good share of the people being
+   * reminded. The timezone is not in the request and is not worth putting
+   * there, so the client sends the answer and the server only bounds it.
+   */
+  dueAt: z.string().datetime(),
+  /** Where it goes back to. Usually the inbox, but not necessarily. */
+  returnToMailboxId: z.string().min(1).max(255),
+});
+
+/**
+ * Put messages out of sight until a date.
+ *
+ * The mail really moves, into a folder called Snoozed on the mail server —
+ * triage/snooze.ts explains why hiding it in this list instead would have been
+ * a fraction of the code and quietly wrong.
+ */
+export async function snoozeAction(
+  input: z.infer<typeof snoozeSchema>,
+): Promise<ActionResult<SnoozeOutcome>> {
+  try {
+    const ctx = await gate();
+    const parsed = snoozeSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const dueAt = new Date(parsed.data.dueAt);
+    // Bounded, not corrected. A time already gone means a broken client, and
+    // silently rewriting it to "now" would move somebody's mail into a folder
+    // and straight back out — which reads as the feature flickering rather
+    // than as a bug worth reporting.
+    if (!isAcceptableDueAt(dueAt, new Date())) {
+      return { error: "Pick a time in the future, within the next year." };
+    }
+
+    const { account, client } = await clientFor(ctx, parsed.data.mailboxId);
+    const result = await snoozeMessages({
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      role: ctx.role,
+      account,
+      client,
+      emailIds: parsed.data.emailIds,
+      returnToMailboxId: parsed.data.returnToMailboxId,
+      dueAt,
+    });
+    if (!result.ok) return { error: result.message };
+
+    await logAudit({
+      action: "mail.snooze",
+      tenantId: ctx.tenantId,
+      actorClerkUserId: ctx.userId,
+      targetType: "mailbox",
+      targetId: parsed.data.mailboxId,
+      // Counts and a time, never ids or subjects (S9).
+      meta: {
+        requested: parsed.data.emailIds.length,
+        moved: result.data.moved,
+        dueAt: dueAt.toISOString(),
+      },
+    });
+
+    revalidatePath(BASE);
+    return { ok: true, data: result.data };
   } catch (err) {
     return fail(err);
   }

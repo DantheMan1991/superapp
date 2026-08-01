@@ -21,6 +21,7 @@ export type MailShortcut =
   | "star"
   | "archive"
   | "trash"
+  | "snooze"
   | "read"
   | "unread"
   | "reply"
@@ -57,6 +58,7 @@ const KEYS: Record<string, MailShortcut> = {
   x: "select",
   s: "star",
   e: "archive",
+  b: "snooze",
   "#": "trash",
   I: "read",
   U: "unread",
@@ -151,6 +153,7 @@ export const SHORTCUT_HELP: ReadonlyArray<{ keys: string; does: string }> = [
   { keys: "x", does: "Select" },
   { keys: "s", does: "Flag" },
   { keys: "e", does: "Archive" },
+  { keys: "b", does: "Snooze" },
   { keys: "#", does: "Trash" },
   { keys: "Shift + I / U", does: "Mark read or unread" },
   { keys: "r", does: "Reply" },

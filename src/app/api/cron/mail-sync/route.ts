@@ -4,6 +4,7 @@ import {
   markAccountsErrored,
   syncMailAccount,
 } from "@/lib/email/sync/account";
+import { wakeDueSnoozes } from "@/modules/email/triage/snooze";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +30,8 @@ export const maxDuration = 60;
  */
 
 const BATCH = 25;
+/** Due snoozes per tick. Bounded separately so it cannot starve the sync. */
+const WAKE_BATCH = 200;
 
 function authorized(request: Request): boolean {
   const expected = process.env.CRON_SECRET;
@@ -80,11 +83,26 @@ export async function GET(request: Request): Promise<Response> {
     await markAccountsErrored(broken, "sync could not authenticate");
   }
 
+  /**
+   * Snoozed mail rides along on this schedule rather than getting a cron of
+   * its own, for a boring reason with a real consequence: Vercel's Hobby plan
+   * runs each cron ONCE A DAY. A second job would mean "later today" arriving
+   * tomorrow, which is not the feature. Here it wakes at whatever cadence this
+   * route actually gets, and needs no new configuration to deploy.
+   *
+   * Its own cap, and last, so a large batch of due messages cannot eat the
+   * sync's 60 seconds. Anything left over is picked up on the next tick —
+   * waking late is a small harm, and waking is idempotent.
+   */
+  const woken = await wakeDueSnoozes(new Date(), WAKE_BATCH);
+
   // Counts only — never an address, a subject or a tenant name (S9).
   return Response.json({
     considered: due.length,
     synced,
     failed,
     markedNeedsReauth: broken.length,
+    woken: woken.woken,
+    wakeFailed: woken.failed,
   });
 }

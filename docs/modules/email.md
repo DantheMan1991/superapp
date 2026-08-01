@@ -1229,6 +1229,66 @@ One detail worth recording because it is the design working rather than a gap:
 button. The button is conditional on the role resolving, so a mailbox without
 one simply does not offer the action instead of offering one that fails.
 
+### 2026-08-01 — Production: the module reads a real mailbox on our own server
+
+**The loop closed.** A message sent from Gmail to `dan@m.yosherapp.com` arrived
+at a Stalwart instance we run, and was read in Yosher. Every prior entry in this
+log was written against a container on a laptop that could not receive mail from
+the internet.
+
+What that took, beyond the runbook (`docs/runbooks/mail-server.md` carries the
+server-side detail): a Hetzner box, `m.yosherapp.com` as the mail domain with
+the apex left on Migadu untouched, a Let's Encrypt certificate, migrations
+`0041`–`0048` against production, the `email` module seeded and enabled, and
+`STALWART_CLIENT_ID` from `mail:register-client`.
+
+**A self-signed certificate is not cosmetic — it blocks the app.** SMTP tolerates
+it through opportunistic TLS, so mail flowed for hours while the app could not
+connect at all. Node rejects it outright (`verify error:num=18`). TLS is a
+prerequisite for the module, not a finishing touch, and it is worth stating here
+because the mail arriving made everything *look* finished.
+
+**Three Migadu assumptions were baked into supposedly shared code**, all found in
+the space of an hour by being the first caller that was not Migadu:
+
+| Where | What | Fix |
+| --- | --- | --- |
+| `createHostedDomain()` | called `getMailboxHost()` with no argument, so every new domain was provisioned against Migadu whatever the platform ran — and the wizard then rendered Migadu's **MX** records for a Stalwart domain | #33, `defaultMailboxProvider()` reading `MAILBOX_PROVIDER` |
+| `mxPointsAt()` | substring-matched the live MX against the **provider name**, which only works because Migadu's MX hostnames carry the brand. A self-hosted MX is the operator's own hostname, so the cutover refused itself while naming the correct destination as the wrong one | #35, `MailboxHost.mxNeedle()` |
+| the SPF record the wizard suggests | `v=spf1 mx a:<host> -all` authorizes the server but not the relay it sends through, and hard-fails. Publishing it makes every relayed message fail SPF | **not fixed** — the right record depends on the relay, which is a design decision |
+
+The pattern is worth naming: the seam existed in all three cases. `provider` was
+already a column, `getMailboxHost` already took an argument, `mxPointsAt` already
+took a needle. What was missing was any caller that exercised the second
+implementation, so the defaults silently hard-coded the first one. **A seam with
+one user is a seam that has never been tested.**
+
+**Two gaps this surfaced, both unbuilt rather than broken:**
+
+**The invite flow does not exist.** `createTenantMailbox()` validates the invite
+address, sets `invitePending: true`, and returns — there is no send anywhere in
+that path. The UI reports "setup link sent" regardless, driven purely by that
+flag. So the copy asserts something that never happened, which is how it stayed
+invisible.
+
+**And it could not work if it did send.** The link would set a password in
+`mail_directory_accounts`, the SQL directory table, while this Stalwart runs on
+its **internal** directory (`Directory: None` on the domain, deliberately — the
+runbook explains why the SQL route would have locked everyone out). The two
+account stores do not meet. `afterMailboxCreated` writes to one and
+authentication reads the other.
+
+Consequence: **nobody but the founder can get a password on a mailbox**, because
+his was set by hand in Stalwart's admin UI. Client onboarding needs the invite
+sent, a set-password page, and a decision on which directory is authoritative —
+either wire Stalwart to read the SQL directory, or teach the adapter to call
+`x:Principal/set`. The latter is now a known quantity: the whole certificate
+diagnosis was done through that API.
+
+**`STALWART_MAIL_HOSTNAME` is documented in SETUP.md but not `.env.example`**,
+which is why it surfaced as a runtime error mid-deploy rather than while filling
+in config. Folded into the next docs change.
+
 ### 2026-08-01 (later) — Triage: a keyboard, a working star, and snooze
 
 The first slice aimed at a mailbox somebody has to get through rather than one
@@ -1311,65 +1371,64 @@ Open, and worth knowing: `j`/`k` does not scroll the cursor row into view; the
 Snoozed folder has no view of its own, so a snoozed message is findable only by
 opening that folder; and there is no un-snooze beyond moving it back by hand.
 
-### 2026-08-01 — Production: the module reads a real mailbox on our own server
+### 2026-08-01 (later still) — Auto-replies, and the badge that is the feature
 
-**The loop closed.** A message sent from Gmail to `dan@m.yosherapp.com` arrived
-at a Stalwart instance we run, and was read in Yosher. Every prior entry in this
-log was written against a container on a laptop that could not receive mail from
-the internet.
+Out-of-office, using `urn:ietf:params:jmap:vacationresponse` — one of three
+capabilities the server was advertising and the product ignored. First half of
+"rules and auto-replies"; Sieve rules follow separately, because turning user
+input into a script the mail server executes deserves its own diff.
 
-What that took, beyond the runbook (`docs/runbooks/mail-server.md` carries the
-server-side detail): a Hetzner box, `m.yosherapp.com` as the mail domain with
-the apex left on Migadu untouched, a Let's Encrypt certificate, migrations
-`0041`–`0048` against production, the `email` module seeded and enabled, and
-`STALWART_CLIENT_ID` from `mail:register-client`.
+**The mail server sends these, not us.** That is the entire reason the feature
+works: it fires while nobody is signed in, which is exactly when somebody is
+away. So nothing is stored locally — `VacationResponse` is a JMAP singleton
+with the fixed id `singleton`, updated in place, never created and never
+destroyed.
 
-**A self-signed certificate is not cosmetic — it blocks the app.** SMTP tolerates
-it through opportunistic TLS, so mail flowed for hours while the app could not
-connect at all. Node rejects it outright (`verify error:num=18`). TLS is a
-prerequisite for the module, not a finishing touch, and it is worth stating here
-because the mail arriving made everything *look* finished.
+**Verified against the live server before writing the client**, including the
+failure shape: an invalid `fromDate` comes back as
+`notUpdated.singleton.type = "invalidProperties"`, with `oldState` equal to
+`newState`, so a refused write changes nothing.
 
-**Three Migadu assumptions were baked into supposedly shared code**, all found in
-the space of an hour by being the first caller that was not Migadu:
+**THE BADGE IS THE FEATURE.** The way an auto-reply goes wrong is never that it
+failed to send — it is somebody getting back from a week away and leaving it on
+for a fortnight, answering customers on their behalf. So the header reads the
+setting on every mail page load and says so, at the cost of one extra JMAP
+call. Reading it only when the form was open would have made the badge
+impossible, which would have left the actual failure invisible.
 
-| Where | What | Fix |
-| --- | --- | --- |
-| `createHostedDomain()` | called `getMailboxHost()` with no argument, so every new domain was provisioned against Migadu whatever the platform ran — and the wizard then rendered Migadu's **MX** records for a Stalwart domain | #33, `defaultMailboxProvider()` reading `MAILBOX_PROVIDER` |
-| `mxPointsAt()` | substring-matched the live MX against the **provider name**, which only works because Migadu's MX hostnames carry the brand. A self-hosted MX is the operator's own hostname, so the cutover refused itself while naming the correct destination as the wrong one | #35, `MailboxHost.mxNeedle()` |
-| the SPF record the wizard suggests | `v=spf1 mx a:<host> -all` authorizes the server but not the relay it sends through, and hard-fails. Publishing it makes every relayed message fail SPF | **not fixed** — the right record depends on the relay, which is a design decision |
+`autoReplyState()` exists because `isEnabled` answers a different question from
+"is this replying to anyone right now". A response enabled since March, with a
+window that closed in April, is both on and inert. Calling that "On" is how
+somebody believes their customers are being answered when they are not, so
+scheduled and finished are distinct states with their own wording.
 
-The pattern is worth naming: the seam existed in all three cases. `provider` was
-already a column, `getMailboxHost` already took an argument, `mxPointsAt` already
-took a needle. What was missing was any caller that exercised the second
-implementation, so the defaults silently hard-coded the first one. **A seam with
-one user is a seam that has never been tested.**
+**Validation refuses an end date that has already passed.** That is the quiet
+failure this module is shaped around: it saves, it reports success, and it
+never sends anything. Nothing about using the product would reveal it.
+Everything else in `validate.ts` is ordinary bounds — except that a DISABLED
+reply is never validated at all, because somebody switching it off is not
+somebody making a mistake, and refusing to save would trap them in a form they
+are trying to leave.
 
-**Two gaps this surfaced, both unbuilt rather than broken:**
+**Dates cross the boundary twice and must not drift.** The form uses
+`datetime-local`, which is wall-clock with no zone — correct, since "back on
+Monday the 18th" is a statement about the person's calendar. It converts to an
+absolute instant on submit and back to local on load. Appending a "Z" on the
+way back would shift the window by the user's offset on every open-and-save.
 
-**The invite flow does not exist.** `createTenantMailbox()` validates the invite
-address, sets `invitePending: true`, and returns — there is no send anywhere in
-that path. The UI reports "setup link sent" regardless, driven purely by that
-flag. So the copy asserts something that never happened, which is how it stayed
-invisible.
+**The audit row records whether it is on and whether it has a window — never
+the subject or the body.** An out-of-office message is the most quotable thing
+in a mailbox: it routinely says who is covering, where somebody is, and until
+when. That belongs in the mail server, not in an audit row (S9).
 
-**And it could not work if it did send.** The link would set a password in
-`mail_directory_accounts`, the SQL directory table, while this Stalwart runs on
-its **internal** directory (`Directory: None` on the domain, deliberately — the
-runbook explains why the SQL route would have locked everyone out). The two
-account stores do not meet. `afterMailboxCreated` writes to one and
-authentication reads the other.
+A mail server that will not answer leaves the badge absent rather than claiming
+the reply is off, and the form says so rather than showing a confident blank
+one somebody might save over the top of.
 
-Consequence: **nobody but the founder can get a password on a mailbox**, because
-his was set by hand in Stalwart's admin UI. Client onboarding needs the invite
-sent, a set-password page, and a decision on which directory is authoritative —
-either wire Stalwart to read the SQL directory, or teach the adapter to call
-`x:Principal/set`. The latter is now a known quantity: the whole certificate
-diagnosis was done through that API.
-
-**`STALWART_MAIL_HOSTNAME` is documented in SETUP.md but not `.env.example`**,
-which is why it surfaced as a runtime error mid-deploy rather than while filling
-in config. Folded into the next docs change.
+Not verified in a browser, same constraint as the triage slices: the dev server
+needs `.env`, which points at the production database and a live mailbox.
+15 unit tests cover the validation and state machine, including both window
+boundaries.
 
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 

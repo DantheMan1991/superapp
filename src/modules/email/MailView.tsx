@@ -14,6 +14,10 @@ import { ReadingPane } from "./components/reading-pane";
 import { MailSearch } from "./components/mail-search";
 import { MailPoller } from "./components/mail-poller";
 import { Composer, type ComposeMode } from "./components/composer";
+import { AutoReplyBadge } from "./auto-reply/badge";
+import { AutoReplyForm } from "./auto-reply/form";
+import { loadAutoReply } from "./auto-reply/load";
+import { autoReplyState } from "./auto-reply/validate";
 
 /**
  * The three panes.
@@ -55,10 +59,12 @@ export async function MailView({
     unread: first("unread"),
     flagged: first("flagged"),
     attach: first("attach"),
+    away: first("away"),
   };
   const viewQuery = readMailView(params);
   const position = Number(params.pos ?? "0");
   const composeMode = readComposeMode(params.compose);
+  const showAway = params.away === "1";
 
   const view = await loadMailView(account, {
     tenantId: ctx.tenant.id,
@@ -114,6 +120,25 @@ export async function MailView({
     { role: ctx.role, userId: ctx.userId },
   );
 
+  /**
+   * The out-of-office setting, read on every mail page load.
+   *
+   * One extra JMAP call, and worth it. An auto-reply is the only setting in
+   * this product that speaks to customers with nobody present, and the failure
+   * that matters is forgetting it is on. Reading it only when the form is open
+   * would mean the badge could never appear — and the badge is the feature.
+   *
+   * A failure is swallowed to null. The mail server declining to answer a
+   * question about holidays is not a reason to refuse somebody their inbox.
+   */
+  const away = await loadAutoReply(account);
+  const awayState = away
+    ? autoReplyState(
+        { isEnabled: away.isEnabled, fromDate: away.fromDate, toDate: away.toDate },
+        new Date(),
+      )
+    : null;
+
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col lg:h-screen">
       {/* Mounted here, on the mail route only — never in the dashboard layout,
@@ -129,6 +154,10 @@ export async function MailView({
             <span className="hidden sm:inline">Write</span>
           </Link>
         </Button>
+        {/* Reads as status, not as a settings link: when a reply is going out
+            on your behalf, that is the single most important thing on this
+            screen, and it must be visible without opening anything. */}
+        <AutoReplyBadge state={awayState} params={params} />
         <MailSearch initial={params.q ?? ""} params={params} />
       </div>
 
@@ -189,9 +218,24 @@ export async function MailView({
         </section>
 
         <section
-          className={`min-h-0 ${view.message || composeMode ? "block" : "hidden lg:block"}`}
+          className={`min-h-0 ${view.message || composeMode || showAway ? "block" : "hidden lg:block"}`}
         >
-          {composeMode ? (
+          {showAway ? (
+            // Same choice the composer made: it takes the pane rather than
+            // floating over it, so the inbox stays visible behind the decision.
+            <AutoReplyForm
+              mailboxId={account.mailboxId}
+              unavailable={away === null}
+              initial={{
+                isEnabled: away?.isEnabled ?? false,
+                fromDate: toLocalInput(away?.fromDate ?? null),
+                toDate: toLocalInput(away?.toDate ?? null),
+                subject: away?.subject ?? "",
+                textBody: away?.textBody ?? "",
+              }}
+              closeHref={mailHref(params, { away: undefined })}
+            />
+          ) : composeMode ? (
             // The composer takes the reading pane rather than floating over it:
             // a modal that covers the message you are replying to is the thing
             // every mail client eventually regrets.
@@ -305,4 +349,20 @@ function Pager({
       )}
     </div>
   );
+}
+
+/**
+ * An absolute instant back into what `datetime-local` wants: wall-clock time
+ * with no zone, in the viewer's zone. Losing the trailing "Z" is the point —
+ * the input has no concept of one, and appending it would shift every date by
+ * the user's offset every time the form is opened and saved.
+ */
+function toLocalInput(iso: string | null): string | null {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(
+    parsed.getDate(),
+  )}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
 }

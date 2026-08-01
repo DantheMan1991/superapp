@@ -49,6 +49,32 @@ const MAIL = "urn:ietf:params:jmap:mail";
  * may send at all.
  */
 export const SUBMISSION = "urn:ietf:params:jmap:submission";
+/**
+ * RFC 8621 §8. The out-of-office reply.
+ *
+ * A SINGLETON — exactly one object per account, with the fixed id `singleton`.
+ * There is no create and no destroy; you update the one that is always there.
+ * Verified against Stalwart 0.16.15, which returns it with every field null and
+ * `isEnabled: false` on an account that has never touched it.
+ *
+ * The reply is sent BY THE MAIL SERVER, not by us. That is the whole point:
+ * it fires while nobody is signed in, which is exactly when somebody is away.
+ */
+export const VACATION = "urn:ietf:params:jmap:vacationresponse";
+const VACATION_SINGLETON = "singleton";
+
+export interface VacationResponse {
+  isEnabled: boolean;
+  /** RFC 3339, or null for "from now". The server compares against its clock. */
+  fromDate: string | null;
+  toDate: string | null;
+  subject: string | null;
+  textBody: string | null;
+  htmlBody: string | null;
+}
+
+/** Only the fields being changed. Anything omitted is left as it was. */
+export type VacationPatch = Partial<VacationResponse>;
 const TIMEOUT_MS = 20_000;
 /**
  * How much of a body to fetch. Generous enough that a normal message arrives
@@ -412,6 +438,9 @@ export interface JmapClient {
   ): Promise<JmapResult<{ id: string }>>;
   /** Rename a folder. Refuses nothing here; the caller decides what is renameable. */
   renameMailbox(mailboxId: string, name: string): Promise<JmapResult<void>>;
+  /** The out-of-office reply. Always present; never absent, only disabled. */
+  vacationResponse(): Promise<JmapResult<VacationResponse>>;
+  setVacationResponse(patch: VacationPatch): Promise<JmapResult<void>>;
   emailChanges(
     sinceState: string,
     maxChanges?: number,
@@ -800,6 +829,83 @@ export function createJmapClient(
       }
       // `updated` can legitimately be an empty object when nothing changed, so
       // absence of an entry is not a failure — only `notUpdated` is.
+      return { ok: true as const, data: undefined };
+    },
+
+    async vacationResponse() {
+      const result = await call(
+        [
+          [
+            "VacationResponse/get",
+            { accountId, ids: null },
+            "v",
+          ] as unknown as MethodCall,
+        ],
+        [CORE, VACATION],
+      );
+      if (!result.ok) return result;
+      const taken = takeMethodResponse(result.data, "v", "VacationResponse/get");
+      if (!taken.ok) return { ok: false as const, message: taken.message };
+
+      const payload = taken.payload as { list?: unknown };
+      const row = Array.isArray(payload?.list) ? payload.list[0] : undefined;
+      // A server that returns an empty list is describing an account with the
+      // feature off, not an error. Reading that as a failure would put an error
+      // banner in front of every user who has never been on holiday.
+      if (!row || typeof row !== "object") {
+        return {
+          ok: true as const,
+          data: {
+            isEnabled: false,
+            fromDate: null,
+            toDate: null,
+            subject: null,
+            textBody: null,
+            htmlBody: null,
+          },
+        };
+      }
+      const r = row as Record<string, unknown>;
+      const str = (v: unknown) => (typeof v === "string" && v !== "" ? v : null);
+      return {
+        ok: true as const,
+        data: {
+          isEnabled: r.isEnabled === true,
+          fromDate: str(r.fromDate),
+          toDate: str(r.toDate),
+          subject: str(r.subject),
+          textBody: str(r.textBody),
+          htmlBody: str(r.htmlBody),
+        },
+      };
+    },
+
+    async setVacationResponse(patch) {
+      const result = await call(
+        [
+          [
+            "VacationResponse/set",
+            // A singleton: updated by its fixed id, never created and never
+            // destroyed. Sending `create` here is how this gets written wrongly
+            // — the server would reject it, and the account already has one.
+            { accountId, update: { [VACATION_SINGLETON]: patch } },
+            "v",
+          ] as unknown as MethodCall,
+        ],
+        [CORE, VACATION],
+      );
+      if (!result.ok) return result;
+      const taken = takeMethodResponse(result.data, "v", "VacationResponse/set");
+      if (!taken.ok) return { ok: false as const, message: taken.message };
+
+      const payload = taken.payload as {
+        notUpdated?: Record<string, { type?: unknown }>;
+      };
+      const refused = payload?.notUpdated?.[VACATION_SINGLETON];
+      if (refused) {
+        const type = typeof refused.type === "string" ? refused.type : "unknown";
+        return { ok: false as const, message: describeSetError(type) };
+      }
       return { ok: true as const, data: undefined };
     },
 

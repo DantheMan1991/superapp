@@ -149,16 +149,41 @@ export function forwardHtml(
 }
 
 /**
- * The full starting body for a reply or forward: the person's own signature
- * space above, the quote below.
+ * A plain-text signature rendered as HTML, for the rich composer.
  *
- * The blank lines at the top are not decoration — a composer that opens with
- * the cursor jammed against a quote is one people have to fight before typing.
+ * Escaped rather than passed through, because `textSignature` is a text field on
+ * the mail server's Identity and an `<` in it is a less-than sign somebody
+ * typed, not markup. The RFC 3676 separator (`-- `) is emitted as written: mail
+ * clients key their signature folding off it, which is what stops a signature
+ * being quoted back in every reply for the rest of the thread.
  */
-export function openingBody(
-  signature: string,
-  quoted: string,
+export function textSignatureToHtml(signature: string): string {
+  const trimmed = signature.replace(/\r\n|\r/g, "\n").trim();
+  if (trimmed.length === 0) return "";
+  const lines = trimmed.split("\n").map((line) => escapeHtml(line));
+  return `<div>${lines.join("<br>\n")}</div>`;
+}
+
+/**
+ * The starting document for the rich composer — the HTML sibling of
+ * `openingBody`.
+ *
+ * The empty paragraph at the top is doing real work. A `contenteditable` whose
+ * first child is a `<blockquote>` gives most browsers nowhere to put the caret
+ * ABOVE the quote, so the person's first keystroke lands inside what they are
+ * replying to — and top-posting into somebody else's words is a mess to get out
+ * of once it has happened.
+ *
+ * `signatureHtml` must already be sanitized: it is either built by
+ * `textSignatureToHtml` above, or it is the identity's own `htmlSignature`, and
+ * that one is markup from the mail server that has to go through
+ * `sanitizeOutboundHtml` before it reaches here. The caller does it — see
+ * `composer.tsx`.
+ */
+export function openingBodyHtml(
+  signatureHtml: string,
+  quotedHtml: string,
 ): string {
-  const sig = signature.trim().length > 0 ? `\n\n${signature.trim()}` : "";
-  return `${sig}${quoted}`;
+  const sig = signatureHtml.trim().length > 0 ? `${signatureHtml}\n` : "";
+  return `<p><br></p>\n${sig}${quotedHtml}`;
 }

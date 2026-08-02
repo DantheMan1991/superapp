@@ -55,6 +55,16 @@ export interface MailView {
    * reader carries for a feature only writers use.
    */
   signature: string;
+  /**
+   * The identity's `htmlSignature`, when it has one — the rich composer prefers
+   * it, since a signature somebody built in another client carries their links
+   * and their layout and rebuilding it from the text version would throw both
+   * away. UNSANITIZED here on purpose: it is markup from the mail server bound
+   * for a message we are about to send, so it goes through
+   * `sanitizeOutboundHtml` at the point it is composed into a draft, not on the
+   * way out of a loader.
+   */
+  htmlSignature: string;
 }
 
 export type MailViewResult =
@@ -136,6 +146,7 @@ export async function loadMailView(
   }
 
   let signature = "";
+  let htmlSignature = "";
   if (params.composing) {
     const identities = await client.data.identities();
     // A missing signature is not a reason to refuse to compose. If the server
@@ -147,6 +158,7 @@ export async function loadMailView(
         identities.data.find((i) => i.email.trim().toLowerCase() === self) ??
         identities.data[0];
       signature = identity?.textSignature ?? "";
+      htmlSignature = identity?.htmlSignature ?? "";
     }
   }
 
@@ -161,6 +173,7 @@ export async function loadMailView(
     message,
     selfAddress: client.data.session.username,
     signature,
+    htmlSignature,
   };
 }
 

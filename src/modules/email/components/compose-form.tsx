@@ -7,28 +7,39 @@ import { Loader2, Paperclip, Send, ShieldAlert, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { parseRecipients } from "../compose/addresses";
 import { sendMessageAction } from "../compose-actions";
+import { RichTextEditor, type RichTextEditorHandle } from "./rich-text-editor";
 
 /**
  * Where somebody types.
  *
- * Holds text and nothing else — every rule about what a reply should contain was
- * applied on the server before this rendered. The one piece of logic here is
- * parsing recipient lines, and that lives in a pure tested file rather than in
- * this component.
+ * Holds a document and nothing else — every rule about what a reply should
+ * contain was applied on the server before this rendered. The one piece of logic
+ * here is parsing recipient lines, and that lives in a pure tested file rather
+ * than in this component.
  *
  * No optimistic state, and here that is not a style choice: a message either
  * left the building or it did not, and there is no version of "probably sent"
  * worth showing anybody.
+ *
+ * THE BODY IS NOT REACT STATE. A `contenteditable` owns its own DOM, and
+ * re-rendering it from state on every keystroke is what makes the caret jump to
+ * the end of the document mid-word. The markup is read out of the editor once,
+ * on submit, through a ref — which also means the send path handles exactly what
+ * is on screen at the moment the button was pressed.
+ *
+ * The HTML is sanitized AGAIN on the server. Nothing this component produces is
+ * trusted: see the header of `compose/html.ts` for why the write path is the
+ * strictest boundary in the module.
  */
 
 export interface ComposeDraft {
   to: string;
   cc: string;
   subject: string;
-  body: string;
+  /** The starting document for the rich editor, built and sanitized server-side. */
+  bodyHtml: string;
   inReplyTo: string[];
   references: string[];
   showCc: boolean;
@@ -62,11 +73,11 @@ export function ComposeForm({
   const [cc, setCc] = useState(draft.cc);
   const [showCc, setShowCc] = useState(draft.showCc);
   const [subject, setSubject] = useState(draft.subject);
-  const [body, setBody] = useState(draft.body);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [pending, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
+  const editor = useRef<RichTextEditorHandle | null>(null);
 
   async function upload(files: FileList) {
     setUploading(true);
@@ -113,6 +124,10 @@ export function ComposeForm({
       return;
     }
 
+    // Read once, at submit. See the header: the editor owns its own DOM and this
+    // is the only moment its contents matter.
+    const htmlBody = editor.current?.html() ?? "";
+
     startTransition(async () => {
       const result = await sendMessageAction({
         mailboxId,
@@ -120,7 +135,12 @@ export function ComposeForm({
         cc: parsedCc.addresses,
         bcc: [],
         subject,
-        textBody: body,
+        // The action sanitizes this and DERIVES the text alternative from what
+        // survives, so the two parts can never describe different messages.
+        // Sending a textBody from here as well would be a second source of
+        // truth for the same words.
+        textBody: "",
+        htmlBody,
         ...(draft.inReplyTo.length > 0 ? { inReplyTo: draft.inReplyTo } : {}),
         ...(draft.references.length > 0 ? { references: draft.references } : {}),
         ...(attachments.length > 0
@@ -220,13 +240,14 @@ export function ComposeForm({
           />
         </div>
 
-        <Textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          // Tall enough to write in. A composer you have to scroll to see three
-          // lines of is one people take to their phone instead.
-          className="min-h-[18rem] font-sans"
-          placeholder="Write your message…"
+        {/*
+          Tall enough to write in — a composer you have to scroll to see three
+          lines of is one people take to their phone instead.
+        */}
+        <RichTextEditor
+          initialHtml={draft.bodyHtml}
+          editorRef={editor}
+          disabled={busy}
         />
 
         {attachments.length > 0 && (

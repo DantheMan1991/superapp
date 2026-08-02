@@ -9,6 +9,7 @@ import { looksLikeEmail } from "@/lib/email/identity";
 import { authorizedClient, loadConnection } from "@/lib/email/oauth/accounts";
 import { MailError, friendlyMessage } from "./core/errors";
 import { sendComposedMessage, type SendOutcome } from "./compose/send";
+import { composeBodies } from "./compose/bodies";
 
 /**
  * Sending.
@@ -23,6 +24,20 @@ import { sendComposedMessage, type SendOutcome } from "./compose/send";
  * The dev guard is NOT here. It lives inside `compose/send.ts`, which is the one
  * place an envelope is built — putting it in the action would mean every future
  * caller had to remember it.
+ *
+ * THE BODY IS SANITIZED HERE AND THE TEXT PART IS DERIVED FROM THE RESULT, in
+ * that order and nowhere else. Two reasons it is the action's job rather than
+ * the composer's:
+ *
+ *   • A server action is a public boundary. The rich editor sanitizes nothing —
+ *     it does not ship a sanitizer to the browser at all — so if this did not
+ *     run, arbitrary markup would reach a recipient under this tenant's own
+ *     From header. Zod proves the shape; only `sanitizeOutboundHtml` decides
+ *     what a body may contain.
+ *   • Deriving the text alternative from the SANITIZED html is what makes the
+ *     two parts of a `multipart/alternative` the same message. Derive it from
+ *     the raw input instead and a recipient on a text-only client reads words
+ *     that were stripped from the version everyone else got.
  */
 
 const BASE = "/dashboard/m/email";
@@ -121,6 +136,10 @@ export async function sendMessageAction(
       );
     }
 
+    // See the header. Sanitize, THEN derive — the text part is a rendering of
+    // what actually goes out, never of what was submitted.
+    const bodies = composeBodies(data.htmlBody, data.textBody);
+
     const outcome = await sendComposedMessage(
       client.data,
       client.data.session.username,
@@ -129,8 +148,8 @@ export async function sendMessageAction(
         cc: data.cc,
         bcc: data.bcc,
         subject: data.subject,
-        textBody: data.textBody,
-        ...(data.htmlBody ? { htmlBody: data.htmlBody } : {}),
+        textBody: bodies.textBody,
+        ...(bodies.htmlBody ? { htmlBody: bodies.htmlBody } : {}),
         ...(data.inReplyTo ? { inReplyTo: data.inReplyTo } : {}),
         ...(data.references ? { references: data.references } : {}),
         ...(data.attachments ? { attachments: data.attachments } : {}),
@@ -153,6 +172,10 @@ export async function sendMessageAction(
         attachments: data.attachments?.length ?? 0,
         isReply: Boolean(data.inReplyTo?.length),
         redirected: outcome.redirected,
+        // Whether it went as HTML, never the body. An operator debugging "the
+        // formatting arrived wrong" needs to know which shape was sent; nobody
+        // needs the words (S9).
+        html: Boolean(bodies.htmlBody),
       },
     });
 

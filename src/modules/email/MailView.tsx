@@ -294,6 +294,7 @@ export async function MailView({
               mode={composeMode}
               parent={view.message}
               signature={view.signature}
+              htmlSignature={view.htmlSignature}
               closeHref={mailHref(params, { compose: undefined })}
             />
           ) : view.message ? (

@@ -144,21 +144,35 @@ export async function listConnections(
   );
 }
 
-async function markNeedsReauth(id: string, reason: string): Promise<void> {
+async function markStatus(
+  id: string,
+  status: "needs_reauth" | "revoked",
+  reason: string,
+): Promise<void> {
   // withSystem: a status write, and members cannot write this table (see
   // saveConnection). Reached only from failure paths inside this file, never
   // from user input — the id comes from a row we already loaded.
   await withSystem((tx) =>
     tx
       .update(schema.mailAccounts)
-      .set({
-        status: "needs_reauth",
-        lastError: reason.slice(0, 500),
-        updatedAt: new Date(),
-      })
+      .set({ status, lastError: reason.slice(0, 500), updatedAt: new Date() })
       .where(eq(schema.mailAccounts.id, id)),
   );
 }
+
+const markNeedsReauth = (id: string, reason: string): Promise<void> =>
+  markStatus(id, "needs_reauth", reason);
+
+/**
+ * The grant is gone, and signing in again will not bring it back.
+ *
+ * Distinct from `needs_reauth` on purpose: that one means "your token expired,
+ * click Connect", which for a withdrawn delegation would send somebody round
+ * the OAuth loop successfully and leave them exactly where they started. The
+ * fix here is somebody else's — whoever administers the shared mailbox.
+ */
+const markRevoked = (id: string, reason: string): Promise<void> =>
+  markStatus(id, "revoked", reason);
 
 /**
  * A JMAP client for a stored connection, with the token refreshed if it is
@@ -255,7 +269,43 @@ export async function authorizedClient(
     };
   }
 
-  return { ok: true, data: createJmapClient(session.data, accessToken) };
+  // WHICH ACCOUNT, and this is the whole of delegation's safety.
+  //
+  // A connection to a shared mailbox stores the id of the GRANTED account,
+  // which is not the primary — the primary is the delegate's own mailbox. The
+  // session is re-discovered on every call, so the stored id has to be checked
+  // against it every time rather than trusted from connect time.
+  //
+  // **A grant that has been revoked at the mail server MUST fail closed.** The
+  // tempting fallback — use the primary when the stored id is missing — is the
+  // worst available behaviour: the person would open `info@` and be shown their
+  // OWN mail under the shared box's name, with no error anywhere. That is
+  // exactly the bug `matchSessionAccount` exists to prevent, arriving later and
+  // by a different route.
+  const accountId = account.jmapAccountId;
+  if (accountId.length > 0) {
+    const granted = session.data.accounts.some((a) => a.id === accountId);
+    if (!granted) {
+      await markRevoked(
+        account.id,
+        "the mail server no longer grants this account access to that mailbox",
+      );
+      return {
+        ok: false,
+        message:
+          "You no longer have access to this mailbox. Ask whoever administers " +
+          "it to grant it again.",
+      };
+    }
+  }
+  // An empty stored id is a row from before connections recorded one. Those
+  // could only ever have been the primary account, so defaulting to it
+  // reproduces exactly the behaviour that row was created under.
+
+  return {
+    ok: true,
+    data: createJmapClient(session.data, accessToken, accountId || undefined),
+  };
 }
 
 /**

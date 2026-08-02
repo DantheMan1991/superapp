@@ -42,12 +42,30 @@ export interface SyncOutcome {
   needsReauth?: boolean;
 }
 
-/** Self, so a thread's participant list is other people rather than you. */
+/**
+ * Self, so a thread's participant list is other people rather than you.
+ *
+ * "Self" IS THE MAILBOX BEING SYNCED, not the person holding the token, and on
+ * a delegated shared box those differ. Syncing `info@` as Dan must treat
+ * `info@` as self — otherwise every thread in the shared inbox lists `info@` as
+ * a participant (it is on every message) and Dan's own address disappears from
+ * threads he is genuinely a party to. So the account being acted on is read
+ * from `client.accountId` and its name looked up in the session, with
+ * `username` kept as well: a reply Dan sends from the shared box still carries
+ * his address in some headers, and he is not a third party to it.
+ */
 function selfAddresses(client: JmapClient, account: MailAccount): Set<string> {
   const out = new Set<string>();
   if (client.session.username) out.add(client.session.username.toLowerCase());
+
+  const acting = client.session.accounts.find((a) => a.id === client.accountId);
+  const actingName = acting?.name.toLowerCase();
+  if (actingName?.includes("@")) out.add(actingName);
+
   if (account.jmapAccountId) {
-    // accountName is often the address on servers that populate it.
+    // accountName is often the address on servers that populate it. Only
+    // meaningful for the primary account, which is why the lookup above comes
+    // first rather than instead.
     const name = client.session.accountName?.toLowerCase();
     if (name?.includes("@")) out.add(name);
   }

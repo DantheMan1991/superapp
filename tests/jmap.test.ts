@@ -9,7 +9,7 @@ import {
   parseQueryResult,
   parseSession,
   parseThread,
-  sessionMatchesAddress,
+  matchSessionAccount,
   takeMethodResponse,
 } from "@/lib/email/jmap/parse";
 import { rebaseOntoSessionHost } from "@/lib/email/jmap/client";
@@ -533,42 +533,187 @@ describe("session URLs are rebased onto the host we reached", () => {
  * another records a mailbox that looks right and reads wrong.
  */
 describe("session identity check", () => {
-  const session = (username: string, accountName = "") => ({ username, accountName });
+  /** A single-account session: one person, their own mailbox, nothing shared. */
+  const session = (username: string, accountName = "") => ({
+    username,
+    accountName,
+    primaryAccountId: "a",
+    accounts: [
+      { id: "a", name: accountName, isPersonal: true, isReadOnly: false },
+    ],
+  });
+  const matched = (...args: Parameters<typeof matchSessionAccount>) =>
+    matchSessionAccount(...args)?.id ?? null;
 
   it("accepts the address the credentials belong to", () => {
-    expect(sessionMatchesAddress(session("dan@acme.example"), "dan@acme.example")).toBe(true);
+    expect(matched(session("dan@acme.example"), "dan@acme.example")).toBe("a");
   });
 
   it("ignores case on both sides", () => {
-    expect(sessionMatchesAddress(session("Dan@Acme.Example"), "dan@acme.example")).toBe(true);
-    expect(sessionMatchesAddress(session("dan@acme.example"), "  DAN@ACME.EXAMPLE  ")).toBe(true);
+    expect(matched(session("Dan@Acme.Example"), "dan@acme.example")).toBe("a");
+    expect(matched(session("dan@acme.example"), "  DAN@ACME.EXAMPLE  ")).toBe("a");
   });
 
-  it("REFUSES a different address on the same domain", () => {
-    // The case that motivated this: connecting a shared box while signed in as
-    // yourself. Same tenant, same domain, wrong mailbox.
-    expect(sessionMatchesAddress(session("dan@acme.example"), "info@acme.example")).toBe(false);
+  it("REFUSES a different address when the session does not offer it", () => {
+    // The case that motivated the original check: connecting a shared box while
+    // signed in as yourself, with NO grant. Same tenant, same domain, wrong
+    // mailbox — and still refused now that delegation exists, because being
+    // granted access is what makes the difference, not sharing a domain.
+    expect(matched(session("dan@acme.example"), "info@acme.example")).toBe(null);
   });
 
   it("falls back to accountName when username is absent", () => {
     // Some servers put the address there instead; the spec only promises
     // accountName is human-friendly, so it is a fallback and not the primary.
-    expect(sessionMatchesAddress(session("", "dan@acme.example"), "dan@acme.example")).toBe(true);
+    expect(matched(session("", "dan@acme.example"), "dan@acme.example")).toBe("a");
   });
 
   it("refuses when the session identifies itself with NEITHER field", () => {
     // Unverifiable is treated as failed. A false refusal costs a retry; a false
     // accept files one person's correspondence under another person's address.
-    expect(sessionMatchesAddress(session("", ""), "dan@acme.example")).toBe(false);
+    expect(matched(session("", ""), "dan@acme.example")).toBe(null);
   });
 
   it("refuses a blank mailbox address rather than matching a blank session", () => {
-    expect(sessionMatchesAddress(session("", ""), "")).toBe(false);
-    expect(sessionMatchesAddress(session("dan@acme.example"), "   ")).toBe(false);
+    expect(matched(session("", ""), "")).toBe(null);
+    expect(matched(session("dan@acme.example"), "   ")).toBe(null);
   });
 
   it("does not accept a substring or a lookalike", () => {
-    expect(sessionMatchesAddress(session("dan@acme.example"), "an@acme.example")).toBe(false);
-    expect(sessionMatchesAddress(session("dan@acme.example.evil"), "dan@acme.example")).toBe(false);
+    expect(matched(session("dan@acme.example"), "an@acme.example")).toBe(null);
+    expect(matched(session("dan@acme.example.evil"), "dan@acme.example")).toBe(null);
+  });
+});
+
+/**
+ * DELEGATION — a shared mailbox reached through somebody's own credentials.
+ *
+ * The fixture is the shape `npm run mail:probe-delegation` read back from a
+ * live Stalwart 0.16.15 after granting one principal access to another: the
+ * delegate's own account is primary and `isPersonal: true`, the shared box is a
+ * second entry with `isPersonal: false`, and `name` is the ADDRESS on both.
+ * Addresses renamed; the structure is verbatim.
+ */
+describe("matchSessionAccount across a delegated session", () => {
+  const delegated = {
+    username: "dan@acme.example",
+    accountName: "dan@acme.example",
+    primaryAccountId: "j",
+    accounts: [
+      { id: "j", name: "dan@acme.example", isPersonal: true, isReadOnly: false },
+      { id: "i", name: "info@acme.example", isPersonal: false, isReadOnly: false },
+    ],
+  };
+
+  it("finds the SHARED mailbox and returns its account id, not the primary", () => {
+    // The whole slice. Returning "j" here would connect info@ and then read
+    // Dan's personal mail through it — the exact bug the identity check exists
+    // to prevent, one layer further down.
+    const match = matchSessionAccount(delegated, "info@acme.example");
+    expect(match?.id).toBe("i");
+    expect(match?.isPersonal).toBe(false);
+  });
+
+  it("still finds the person's own mailbox in the same session", () => {
+    expect(matchSessionAccount(delegated, "dan@acme.example")?.id).toBe("j");
+  });
+
+  it("refuses an address the session does not list at all", () => {
+    // The negative that matters: a grant is what makes a mailbox reachable, and
+    // the probe confirmed the server itself answers `forbidden` for anything
+    // else. This is the client agreeing rather than relying on it.
+    expect(matchSessionAccount(delegated, "accounts@acme.example")).toBe(null);
+  });
+
+  it("REFUSES when two accounts claim the same address", () => {
+    // Ambiguity is refused rather than resolved by taking the first, because
+    // "resolved by taking the first" is how the wrong mailbox gets connected in
+    // the one case nobody tested.
+    const ambiguous = {
+      ...delegated,
+      accounts: [
+        { id: "x", name: "info@acme.example", isPersonal: false, isReadOnly: false },
+        { id: "y", name: "info@acme.example", isPersonal: false, isReadOnly: true },
+      ],
+    };
+    expect(matchSessionAccount(ambiguous, "info@acme.example")).toBe(null);
+  });
+
+  it("carries isReadOnly through, so a read-only grant is knowable", () => {
+    const readOnly = {
+      ...delegated,
+      accounts: [
+        delegated.accounts[0],
+        { id: "i", name: "info@acme.example", isPersonal: false, isReadOnly: true },
+      ],
+    };
+    expect(matchSessionAccount(readOnly, "info@acme.example")?.isReadOnly).toBe(true);
+  });
+
+  it("never resolves the credentials fallback to a DELEGATED account", () => {
+    // If `name` were a display name rather than an address, matching would fall
+    // back to `username`. That fallback must only ever land on the primary — a
+    // delegated mailbox is not "the credentials this session belongs to".
+    const displayNames = {
+      username: "dan@acme.example",
+      accountName: "Dan Rasmussen",
+      primaryAccountId: "j",
+      accounts: [
+        { id: "j", name: "Dan Rasmussen", isPersonal: true, isReadOnly: false },
+        { id: "i", name: "Reception", isPersonal: false, isReadOnly: false },
+      ],
+    };
+    expect(matchSessionAccount(displayNames, "dan@acme.example")?.id).toBe("j");
+    expect(matchSessionAccount(displayNames, "info@acme.example")).toBe(null);
+  });
+
+  it("refuses rather than guessing when the primary is missing from accounts", () => {
+    const broken = { ...delegated, accounts: [], primaryAccountId: "j" };
+    expect(matchSessionAccount(broken, "dan@acme.example")).toBe(null);
+  });
+});
+
+/**
+ * parseSession must keep every account, because the second one IS the feature.
+ */
+describe("parseSession account list", () => {
+  const raw = {
+    apiUrl: "https://mail.example/jmap/",
+    username: "dan@acme.example",
+    primaryAccounts: { "urn:ietf:params:jmap:mail": "j" },
+    accounts: {
+      j: { name: "dan@acme.example", isPersonal: true, isReadOnly: false },
+      i: { name: "info@acme.example", isPersonal: false, isReadOnly: false },
+    },
+  };
+
+  it("keeps both accounts, with the primary still identified", () => {
+    const parsed = parseSession(raw);
+    expect(parsed?.primaryAccountId).toBe("j");
+    expect(parsed?.accounts.map((a) => a.id).sort()).toEqual(["i", "j"]);
+    expect(parsed?.accounts.find((a) => a.id === "i")?.name).toBe(
+      "info@acme.example",
+    );
+  });
+
+  it("defaults isReadOnly to TRUE when the server omits it", () => {
+    // The cautious value, matching how parseMailbox treats myRights: a grant we
+    // could not read must not present as writable, because offering an action
+    // that will be refused is worse than not offering it.
+    const parsed = parseSession({
+      ...raw,
+      accounts: { j: { name: "dan@acme.example" } },
+    });
+    expect(parsed?.accounts[0].isReadOnly).toBe(true);
+    expect(parsed?.accounts[0].isPersonal).toBe(false);
+  });
+
+  it("survives an accounts map with a malformed entry", () => {
+    // The file's rule: one bad row costs one row, never the listing.
+    const parsed = parseSession({
+      ...raw,
+      accounts: { j: { name: "dan@acme.example", isPersonal: true }, bad: null },
+    });
+    expect(parsed?.accounts.map((a) => a.id)).toEqual(["j"]);
   });
 });

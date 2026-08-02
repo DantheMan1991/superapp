@@ -112,6 +112,16 @@ export async function MailView({
   }
 
   const folders = visibleFolders(view.folders);
+  /**
+   * Rules are refused on a shared mailbox, and this closes the URL as well as
+   * the link — `?rules=1` is typed, bookmarked and shared, so hiding the link
+   * alone would leave the editor reachable and it would fail on save instead.
+   *
+   * Computed here rather than beside the other `params` reads because only the
+   * mail server can say whether this account is a delegated one, and that is
+   * not known until the view has loaded.
+   */
+  const showRulesEditor = showRules && !view.isDelegated;
   const searching = Boolean(params.q);
   const selectedFolder = folders.find((f) => f.id === view.mailboxId) ?? null;
   const archiveFolder = view.folders.find((f) => f.role === "archive");
@@ -154,7 +164,7 @@ export async function MailView({
    * script is already running on the mail server whether or not this page
    * knows about it.
    */
-  const rules: EditorRule[] = showRules
+  const rules: EditorRule[] = showRulesEditor
     ? (await loadRules(ctx.tenant.id, ctx.userId, ctx.role, account.id)).map(
         (row): EditorRule => {
           const action = (row.action ?? {}) as Record<string, unknown>;
@@ -214,12 +224,32 @@ export async function MailView({
             on your behalf, that is the single most important thing on this
             screen, and it must be visible without opening anything. */}
         <AutoReplyBadge state={awayState} params={params} />
-        <Link
-          href={mailHref(params, { rules: "1", away: undefined, signature: undefined, compose: undefined, message: undefined })}
-          className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
-        >
-          Rules
-        </Link>
+        {/* Says whose mailbox this is, because on a shared one the auto-reply
+            and the signature beside it are everybody's. A person who does not
+            know they are in `info@` is the one who changes it by accident. */}
+        {view.isDelegated && (
+          <span
+            className="hidden shrink-0 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground sm:block"
+            title={`${view.selfAddress} is a shared mailbox. Settings here apply to everyone who uses it.`}
+          >
+            Shared
+          </span>
+        )}
+        {/* Absent rather than disabled on a shared mailbox: the mail server
+            keeps ONE Sieve script per mailbox while `mail_rules` is per-user,
+            so publishing would overwrite a colleague's rules with your own.
+            A control that cannot work is better missing than present and
+            broken — the same call the composer makes for the picture button in
+            a signature. `saveRulesAction` refuses it as well; this only keeps
+            people from finding the form. */}
+        {!view.isDelegated && (
+          <Link
+            href={mailHref(params, { rules: "1", away: undefined, signature: undefined, compose: undefined, message: undefined })}
+            className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
+          >
+            Rules
+          </Link>
+        )}
         <Link
           href={mailHref(params, { signature: "1", away: undefined, rules: undefined, compose: undefined, message: undefined })}
           className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
@@ -289,15 +319,16 @@ export async function MailView({
         </section>
 
         <section
-          className={`min-h-0 ${view.message || composeMode || showAway || showRules || showSignature ? "block" : "hidden lg:block"}`}
+          className={`min-h-0 ${view.message || composeMode || showAway || showRulesEditor || showSignature ? "block" : "hidden lg:block"}`}
         >
           {showSignature ? (
             <SignatureForm
               mailboxId={account.mailboxId}
               signature={signature}
               closeHref={mailHref(params, { signature: undefined })}
+              {...(view.isDelegated ? { sharedAddress: view.selfAddress } : {})}
             />
-          ) : showRules ? (
+          ) : showRulesEditor ? (
             <RulesEditor
               mailboxId={account.mailboxId}
               folders={folders}
@@ -310,6 +341,7 @@ export async function MailView({
             <AutoReplyForm
               mailboxId={account.mailboxId}
               unavailable={away === null}
+              {...(view.isDelegated ? { sharedAddress: view.selfAddress } : {})}
               initial={{
                 isEnabled: away?.isEnabled ?? false,
                 fromDate: toLocalInput(away?.fromDate ?? null),

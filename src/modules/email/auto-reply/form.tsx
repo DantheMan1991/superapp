@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SharedMailboxNotice } from "../components/shared-mailbox-notice";
 import { saveAutoReplyAction } from "./actions";
 import {
   autoReplyState,
@@ -32,12 +33,18 @@ export function AutoReplyForm({
   initial,
   closeHref,
   unavailable,
+  sharedAddress,
 }: {
   mailboxId: string;
   initial: AutoReplyDraft;
   closeHref: string;
   /** The mail server would not say what the current setting is. */
   unavailable: boolean;
+  /**
+   * Set when this is a DELEGATED mailbox, to the address it belongs to. One
+   * auto-reply exists per mailbox, so on a shared box this is everybody's.
+   */
+  sharedAddress?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -82,6 +89,9 @@ export function AutoReplyForm({
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-auto px-4 py-4">
+        {sharedAddress && (
+          <SharedMailboxNotice address={sharedAddress} what="auto-reply" />
+        )}
         {unavailable && (
           <p className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
             The mail server didn&apos;t say what the current setting is, so this

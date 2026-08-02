@@ -2540,6 +2540,86 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
   });
 
   /**
+   * DELEGATION — a shared mailbox, two people, one set of policies.
+   *
+   * The founding property of this module was "your mail is yours", enforced by
+   * scoping five tables to one person. A shared `info@` looks like it must
+   * break that, and the finding of the delegation slice is that it does not:
+   * **the property becomes "your ACCESS is yours"**. Each person who is granted
+   * the box gets their OWN `mail_accounts` row with their OWN token and their
+   * OWN JMAP account id, so everything hanging off `mail_account_id` stays
+   * per-person while the MAIL — which lives on the mail server — is genuinely
+   * shared.
+   *
+   * The fixture above already builds exactly that shape: `user-a` and
+   * `COLLEAGUE` are both connected to `fx.a.mailboxId`. These assertions name
+   * the property rather than leaving it as a side effect of a fixture, because
+   * a future migration that "tidied up" the unique index to one row per mailbox
+   * would pass every other test in this file and silently make a shared mailbox
+   * impossible to connect twice.
+   */
+  it("two people can connect the SAME mailbox, each with their own row", async () => {
+    const rows = await withSystem((tx) =>
+      tx
+        .select()
+        .from(schema.mailAccounts)
+        .where(eq(schema.mailAccounts.mailboxId, fx.a.mailboxId)),
+    );
+    const users = rows.map((r) => r.clerkUserId).sort();
+    expect(users).toEqual(["user-a", COLLEAGUE].sort());
+    // Different tokens and different JMAP accounts: nobody is sharing a
+    // credential, which is the entire point of delegation over a password.
+    expect(new Set(rows.map((r) => r.accessTokenEnc)).size).toBe(2);
+  });
+
+  it("a delegated connection does not let a colleague read your rows for it", async () => {
+    // The sharp version of the per-user tests above: same tenant, same MAILBOX,
+    // different person. Sharing a mailbox must not share the snoozes, saved
+    // searches, rules or scheduled sends somebody keeps against it.
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.mailAccounts)
+          .where(eq(schema.mailAccounts.mailboxId, fx.a.mailboxId)),
+      { userId: "user-a" },
+    );
+    expect(asOwner).toHaveLength(1);
+    expect(asOwner[0].clerkUserId).toBe("user-a");
+
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.mailAccounts)
+          .where(eq(schema.mailAccounts.mailboxId, fx.a.mailboxId)),
+      { userId: COLLEAGUE },
+    );
+    expect(asColleague).toHaveLength(1);
+    expect(asColleague[0].clerkUserId).toBe(COLLEAGUE);
+  });
+
+  it("the same mailbox cannot be connected twice by ONE person", async () => {
+    // The other half of the index: one row per (tenant, mailbox, user).
+    // Reconnecting replaces the tokens; it must never accumulate rows, or a
+    // stale token would go on being used alongside a fresh one.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.mailAccounts).values({
+          tenantId: tenantA,
+          mailboxId: fx.a.mailboxId,
+          clerkUserId: COLLEAGUE,
+          jmapSessionUrl: "https://mail.example/.well-known/jmap",
+          jmapAccountId: "acct-colleague-again",
+          accessTokenEnc: "ciphertext-duplicate",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  /**
    * Recipient autocomplete, over the same per-user scope.
    *
    * THE PRIVACY FAILURE THIS RULES OUT is specific and easy to ship by accident:

@@ -10,6 +10,7 @@ import type {
   JmapMailboxRole,
   JmapQueryResult,
   JmapSession,
+  JmapSessionAccount,
   JmapThread,
 } from "./types";
 
@@ -325,35 +326,76 @@ export function parseChanges(raw: unknown): JmapChanges | null {
 const MAIL_CAPABILITY = "urn:ietf:params:jmap:mail";
 
 /**
- * Does this session actually belong to the address someone asked to connect?
+ * WHICH account in this session is the mailbox someone asked to connect?
  *
  * Proving a token opens *a* mailbox is not the same as proving it opens *the*
- * mailbox. Without this, clicking Connect on `info@acme.com` and then
+ * mailbox. Without this check, clicking Connect on `info@acme.com` and then
  * authorizing as `dan@acme.com` records `info@` as connected while every read
  * returns Dan's personal mail — a mailbox that looks right, reads wrong, and
  * would go on to poison the thread index under the wrong address.
  *
- * `username` is the RFC 8620 field for "the credentials this session belongs
- * to". `accountName` is the fallback, because it is where some servers put the
- * address instead; the spec only promises it is human-friendly.
+ * IT RETURNS THE ACCOUNT RATHER THAN A BOOLEAN, and that is the delegation
+ * slice in one sentence. This used to compare the address against the session's
+ * PRIMARY account only, which turned away exactly the case a shared mailbox
+ * needs: somebody granted access to `info@` signs in as themselves, so the
+ * primary account is *their* mailbox and `info@` is a second entry in
+ * `session.accounts`. Matching across all of them finds it — and the caller
+ * needs the id that matched, because storing the primary would connect the
+ * shared box and then read the delegate's personal mail through it. Precisely
+ * the bug this function exists to prevent, one layer further down.
  *
- * Returns false when the session offers NEITHER. That is deliberate and matches
- * the rest of this module: an unverifiable claim is treated as a failed one,
- * because the two mistakes are wildly asymmetric — a false refusal costs a
- * connection somebody can retry, a false accept silently files one person's
- * correspondence under another person's address.
+ * A boolean plus a separate lookup was the other shape and is worse: two code
+ * paths that can disagree about which account was matched, where disagreeing
+ * means showing one person's mail under another's name.
+ *
+ * `accounts[].name` is the address on this server, verified by
+ * `npm run mail:probe-delegation` rather than assumed — the spec only promises
+ * a human-readable label. `username` and `accountName` remain accepted for the
+ * PRIMARY account, because they are where some servers put the address instead.
+ *
+ * Three ways to get nothing back, all deliberate and all the same principle —
+ * a false refusal costs a connection somebody can retry, a false accept
+ * silently files one person's correspondence under another person's address:
+ *
+ *   • no account matches
+ *   • the session identifies none of its accounts at all
+ *   • MORE THAN ONE account matches. Ambiguity is refused rather than resolved
+ *     by picking the first, because "resolved by picking the first" is how the
+ *     wrong mailbox gets connected in the one case nobody tested.
  */
-export function sessionMatchesAddress(
-  session: Pick<JmapSession, "username" | "accountName">,
+export function matchSessionAccount(
+  session: Pick<
+    JmapSession,
+    "username" | "accountName" | "accounts" | "primaryAccountId"
+  >,
   address: string,
-): boolean {
+): JmapSessionAccount | null {
   const want = address.trim().toLowerCase();
-  if (want.length === 0) return false;
-  const candidates = [session.username, session.accountName]
-    .map((v) => v.trim().toLowerCase())
+  if (want.length === 0) return null;
+
+  const named = (session.accounts ?? []).filter(
+    (a) => a.name.trim().toLowerCase() === want,
+  );
+  if (named.length > 1) return null;
+  if (named.length === 1) return named[0];
+
+  // Nothing matched by account name. The session may still identify its own
+  // account through the credentials' fields, which is how this worked before
+  // delegation and still how a server that puts a display name in `name`
+  // behaves. Only ever resolves to the PRIMARY account — a delegated mailbox
+  // is not "the credentials this session belongs to" by definition.
+  const credentials = [session.username, session.accountName]
+    .map((v) => (v ?? "").trim().toLowerCase())
     .filter((v) => v.length > 0);
-  if (candidates.length === 0) return false;
-  return candidates.includes(want);
+  if (!credentials.includes(want)) return null;
+
+  // Resolved by id rather than by `isPersonal`, which is the server's flag and
+  // defaults to false here when absent — inferring the primary from it would
+  // refuse every session on a server that does not send it.
+  return (
+    (session.accounts ?? []).find((a) => a.id === session.primaryAccountId) ??
+    null
+  );
 }
 
 /**
@@ -398,10 +440,38 @@ export function parseSession(raw: unknown): JmapSession | null {
       typeof r.eventSourceUrl === "string" ? r.eventSourceUrl : null,
     primaryAccountId: accountId,
     accountName: asString(account?.name),
+    accounts: parseSessionAccounts(accounts),
     username: asString(r.username),
     state: asString(r.state),
     capabilities: Object.keys(asRecord(r.capabilities) ?? {}),
   };
+}
+
+/**
+ * Every account in the session, in the order the server listed them.
+ *
+ * `isPersonal` and `isReadOnly` default to the CAUTIOUS value rather than the
+ * common one — the same rule `parseMailbox` follows for `myRights`. An account
+ * whose flags we could not read is treated as delegated and read-only, so a
+ * failure to parse costs a disabled button rather than an action that gets
+ * refused after somebody has typed a reply.
+ */
+function parseSessionAccounts(
+  accounts: Record<string, unknown> | null,
+): JmapSessionAccount[] {
+  if (!accounts) return [];
+  const out: JmapSessionAccount[] = [];
+  for (const [id, raw] of Object.entries(accounts)) {
+    const a = asRecord(raw);
+    if (!a || id.length === 0) continue;
+    out.push({
+      id,
+      name: asString(a.name),
+      isPersonal: asBool(a.isPersonal),
+      isReadOnly: asBool(a.isReadOnly, true),
+    });
+  }
+  return out;
 }
 
 /**

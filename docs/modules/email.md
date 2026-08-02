@@ -465,6 +465,11 @@ as a second entry in `session.accounts`, not as the primary. Matching against
 every account rather than just the primary is what Slice 10 needs; today, with
 no delegation, refusing is correct.
 
+> **Superseded 2026-08-02** — that is now built. `sessionMatchesAddress` was
+> replaced by `matchSessionAccount()`, which matches across every account and
+> returns the one that matched, so the connection stores the granted account's
+> id rather than the primary. See the delegation entry at the end of this log.
+
 Three environment traps, all now written into the code that hits them:
 
 - **Stalwart rejects `http://localhost:3000` as a redirect URI.** RFC 8252 §7.3
@@ -2423,6 +2428,132 @@ new unit tests, and the 20 existing organise tests still passing unchanged.
 **Not verified in a browser** — worth checking that the panel does not overflow
 on a phone, and that the date inputs render sensibly outside Chrome.
 
+### 2026-08-02 (later still) — Delegation, and the property that survived it
+
+A shared mailbox — `info@`, `accounts@` — reached through somebody's OWN
+credentials instead of a password three people know. `sessionMatchesAddress`
+refused it: it compared only against the session's primary account, so a person
+granted access to `info@` was turned away at the OAuth callback.
+
+**THE PROBE ANSWERED SIX QUESTIONS AND FOUND THE SEVENTH.**
+`npm run mail:probe-delegation` creates a Group principal, a delegate, and the
+grant between them, then signs in AS THE DELEGATE. Eleven confirmations:
+
+| | |
+| --- | --- |
+| a shared mailbox | a first-class `@type: Group` principal with its own address |
+| the delegate's session | **two** entries in `accounts`, one token |
+| the management id vs the session id | the same string |
+| `accounts[id].name` | the ADDRESS, not a display name |
+| `isPersonal` | false on the shared box, true on their own |
+| read, file, flag on the shared account | all work |
+| an Identity for the shared address | present — so a reply comes FROM `info@` |
+
+**THE NEGATIVE IS THE ONE WORTH HAVING.** Every read in this app passes an
+`accountId` to the server. If naming somebody else's id were enough, the column
+this slice relies on would be the only thing between one person and another's
+mail — and a column is not a permission. Naming a non-granted account returns
+`forbidden`, and the session lists only what the token may use. **The account
+list is itself the entitlement**, which is what makes matching across it safe.
+
+**NO MIGRATION, AND NO NEW COLUMN.** `mail_accounts.jmap_account_id` has existed
+since the first slice, storing `primaryAccountId` — and *nothing read it*, because
+`createJmapClient` re-derived the primary from the session on every call. So the
+fix is not a schema change, it is making the stored value load-bearing: the
+callback stores the id that MATCHED, and the client takes an explicit account.
+The same shape as the labels slice's "table that was not needed", arrived at from
+the other direction — this one was already there.
+
+**WHAT A SHARED MAILBOX DOES TO THE PER-USER RLS: nothing, and that is the
+finding.** Five tables are scoped to one person and "your mail is yours" was the
+founding property. Delegation does not weaken it because **it was never one row
+per mailbox** — the unique index is `(tenant, mailbox, clerk_user_id)` and its
+comment has said "a shared box legitimately has several rows" since Slice 1. Each
+person granted `info@` gets their own row, their own token, their own account id,
+and everything hanging off `mail_account_id` stays theirs. **The property becomes
+"your ACCESS is yours"**, and the mail — which lives on the mail server — is
+genuinely shared. Three isolation tests name it, because a later migration
+"tidying" that index to one row per mailbox would pass every other test in the
+file and make a shared mailbox impossible to connect twice.
+
+**THE SEVENTH QUESTION, WHICH THE PROBE WAS EXTENDED TO ASK AND WHICH CHANGED THE
+SLICE.** Three features store nothing of ours: rules are a Sieve script,
+auto-reply is a VacationResponse, signature is on an Identity. All three are
+**singletons PER ACCOUNT**, and the probe confirmed a delegate can write all
+three on the shared account. So one person's change applies to everybody.
+
+The line that decides what to do about it is not "does it touch shared state" —
+snooze moves a message and scheduled send leaves a draft, and both are fine. It
+is:
+
+> **A feature may act on a shared mailbox when its effect is VISIBLE to everyone
+> using it. Not when the effect is invisible AND the record of it is private.**
+
+- *snooze* — the message is in a Snoozed folder everyone can see. Allowed.
+- *scheduled send* — the draft is in the shared Drafts. Allowed.
+- *auto-reply, signature* — shared, and **no per-user table of ours to
+  contradict them**. Allowed, with a notice naming the mailbox. A shared box is
+  the case an auto-reply most exists for; refusing would be safe and useless.
+- **rules — REFUSED.** `mail_rules` IS per-user. A rule would be recorded
+  privately and act publicly, the only person able to see it existed would be
+  its author, and the next colleague to open the editor would see an empty list
+  and publish over the script silently, because publishing writes the whole
+  script from that person's rows. Fixing it means moving `mail_rules` to
+  per-mailbox RLS — a policy change with its own certification, so a slice
+  rather than a line. Refused in the action AND at `?rules=1`, since that URL is
+  typed and bookmarked; the link is absent rather than disabled.
+
+**A REVOKED GRANT MUST FAIL CLOSED, and the tempting fallback is the worst
+available behaviour.** The session is re-discovered on every call, so the stored
+id is re-checked every time. If it is gone, falling back to the primary would
+show the person their OWN mail under the shared box's name, silently — the exact
+bug the identity check exists to prevent, arriving later and by another route.
+It marks the connection `revoked`, which is deliberately NOT `needs_reauth`:
+that one means "click Connect", which here would take somebody round the OAuth
+loop successfully and leave them where they started. The fix is somebody else's.
+
+**Two bugs that were already there and only delegation makes visible.**
+`selfAddress` came from the session's `username` — the token holder — so a
+reply-all from `info@` would have kept `info@` in the recipients (the mailbox
+mailing itself) while dropping the reader's own address. And `selfAddresses()`
+in sync had the same fault, which would have listed `info@` as a participant on
+every thread in its own inbox. Both now read the address of the account being
+ACTED ON, which is identical to the old value for a personal mailbox.
+
+**`isDelegated` is `accountId !== primaryAccountId`, NOT `isPersonal`.** The
+flag is optional and this parser defaults it closed, so keying off it would mark
+every mailbox on a server that omits it as delegated — refusing rules for
+everybody to guard a case that server does not have. "The primary account" is
+RFC 8620's own term for the account the credentials belong to; it cannot be
+absent. The probe confirmed the two agree here.
+
+**Ambiguity is refused rather than resolved.** Two accounts claiming one address
+returns null instead of the first match, on this file's standing rule that a
+false refusal costs a retry and a false accept files one person's correspondence
+under another's name.
+
+**A correction to the undo/schedule entry above.** It records the submission
+capability as `{}` with "no `maxDelayedSend` at all". That is true of the
+SESSION-level capabilities object and not of the per-account one, which
+advertises `maxDelayedSend: 2592000`. The conclusion is unchanged and is now
+better evidenced: the server advertises delayed send at the account level **and
+still refuses `sendAt` with `invalidProperties`**, which is a sharper instance
+of the same lesson rather than a different one.
+
+Also fixed in the probe itself: destroying a group while somebody is still a
+member is refused with `objectIsLinked`, and a destroy list is processed in
+order — so the member has to go first, or cleanup silently leaves the shared box
+behind while reporting success. It now sweeps `probe-*` leftovers on startup too,
+because a probe that creates principals will be killed halfway at least once.
+
+Verified: 11 probe confirmations plus the shared-settings finding against a live
+Stalwart 0.16.15 (the same version production runs), 16 new unit tests including
+a golden fixture of a real delegated session, and 3 new isolation tests — 114
+passing against the dev branch. **Not verified in a browser**, the same
+constraint as every slice since the composer: the things to try are the Shared
+badge on a delegated box, the notice on the auto-reply and signature forms, and
+`?rules=1` typed by hand on a shared mailbox.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -3172,11 +3303,24 @@ code or config change.
   `docs/security.md` §8 requires both databases. Run `npm run db:migrate` (no
   flag) against production before deploying this branch — and note it applies
   every pending migration, so run it as a deploy step rather than mid-build.
-- **A delegated shared mailbox cannot be connected yet.** `sessionMatchesAddress`
-  compares against the session's primary account only, so someone granted access
-  to `info@` through their own credentials is refused. JMAP exposes that case as
-  a second entry in `session.accounts`; matching across all of them (and storing
-  the matching `accountId` rather than the primary) is Slice 10's work.
+- **Rules are refused on a shared mailbox**, and this is the one thing
+  delegation takes away rather than adds. A Sieve script is a singleton per
+  ACCOUNT while `mail_rules` is per-user, so a rule saved against `info@` would
+  be recorded privately and act publicly — and the next colleague to publish
+  would overwrite it without ever seeing it. Fixing it means moving `mail_rules`
+  from per-user to per-mailbox RLS, which is a policy change with its own
+  isolation certification. Auto-reply and signature ARE allowed there, labelled
+  as shared, because neither has a per-user table to contradict.
+- **A read-only grant is parsed but not acted on.** `isReadOnly` is carried
+  through from the session and defaults closed, but nothing branches on it yet,
+  so a mailbox somebody may only read would offer Archive and Reply and fail at
+  the server. `myRights` already covers the per-folder case; this is the
+  per-account one.
+- **Nobody can grant delegation from inside Yosher.** The access itself is
+  granted on the mail server (a Group principal, with the person as a member),
+  and `mail_directory_accounts` already carries `account_type: individual |
+  group` but nothing writes the membership. Until there is a UI for it, adding
+  somebody to `info@` is a manual step in Stalwart's admin.
 - **Token refresh has not been exercised.** The stored token is still inside its
   first expiry window, so `needsRefresh` → `refreshAccessToken` has never run
   against the live server. Worth forcing before relying on it.

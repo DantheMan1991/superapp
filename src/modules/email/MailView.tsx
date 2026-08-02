@@ -12,6 +12,7 @@ import { readMailView, isEmptyView } from "./organise/filters";
 import { listSavedSearches } from "./organise/saved-searches";
 import { ReadingPane } from "./components/reading-pane";
 import { MailSearch } from "./components/mail-search";
+import { SearchBuilder } from "./components/search-builder";
 import { MailPoller } from "./components/mail-poller";
 import { Composer, type ComposeMode } from "./components/composer";
 import { AutoReplyBadge } from "./auto-reply/badge";
@@ -66,6 +67,14 @@ export async function MailView({
     away: first("away"),
     rules: first("rules"),
     signature: first("signature"),
+    // The advanced search builder's fields. In the URL like everything else, so
+    // a search is linkable, reloadable and saveable without a second model.
+    from: first("from"),
+    to: first("to"),
+    subject: first("subject"),
+    body: first("body"),
+    after: first("after"),
+    before: first("before"),
   };
   const viewQuery = readMailView(params);
   const position = Number(params.pos ?? "0");
@@ -218,6 +227,7 @@ export async function MailView({
           Signature
         </Link>
         <MailSearch initial={params.q ?? ""} params={params} />
+        <SearchBuilder query={viewQuery} params={params} folders={folders} />
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[13rem_22rem_minmax(0,1fr)]">

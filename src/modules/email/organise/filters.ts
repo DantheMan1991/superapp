@@ -20,7 +20,20 @@ import { KEYWORD_FLAGGED, KEYWORD_SEEN } from "@/lib/email/jmap/types";
  * the MAIL SERVER, so a stored blob could not reach SQL even if somebody tried.
  */
 
-/** The whole vocabulary. Anything not here cannot be expressed or stored. */
+/**
+ * The whole vocabulary. Anything not here cannot be expressed or stored.
+ *
+ * EVERY FIELD WAS VERIFIED AGAINST THE LIVE SERVER before being offered —
+ * `npm run mail:probe-search` runs each JMAP condition against a message built
+ * to match and a decoy built not to. That double check exists because the
+ * dangerous outcome is not a rejected condition, it is an ACCEPTED AND IGNORED
+ * one: a `from` filter that is silently dropped turns "find mail from Dan" into
+ * "here is everything", which reads as a bad search rather than a bug, and
+ * nobody reports it.
+ *
+ * `header` is deliberately absent — it is the one condition the probe could not
+ * make work, so it is not offered rather than offered and unreliable.
+ */
 export const mailViewSchema = z.object({
   /** A JMAP mailbox id — opaque, server-issued, meaningless in another account. */
   mailbox: z.string().min(1).max(255).optional().catch(undefined),
@@ -28,6 +41,14 @@ export const mailViewSchema = z.object({
   unread: z.boolean().optional().catch(undefined),
   flagged: z.boolean().optional().catch(undefined),
   attach: z.boolean().optional().catch(undefined),
+  /* -- the builder's fields ---------------------------------------------- */
+  from: z.string().min(1).max(200).optional().catch(undefined),
+  to: z.string().min(1).max(200).optional().catch(undefined),
+  subject: z.string().min(1).max(200).optional().catch(undefined),
+  body: z.string().min(1).max(200).optional().catch(undefined),
+  /** `YYYY-MM-DD`, from a date input. Converted to an instant in the filter. */
+  after: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined),
+  before: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined),
 });
 
 export type MailViewQuery = z.infer<typeof mailViewSchema>;
@@ -47,7 +68,24 @@ export function readMailView(
     ...(flag(params.unread) ? { unread: true } : {}),
     ...(flag(params.flagged) ? { flagged: true } : {}),
     ...(flag(params.attach) ? { attach: true } : {}),
+    ...text(params.from, "from"),
+    ...text(params.to, "to"),
+    ...text(params.subject, "subject"),
+    ...text(params.body, "body"),
+    ...date(params.after, "after"),
+    ...date(params.before, "before"),
   };
+}
+
+/** One of the builder's text fields, trimmed and capped like `q`. */
+function text(raw: string | undefined, key: string): Record<string, string> {
+  const value = raw?.trim().slice(0, 200);
+  return value ? { [key]: value } : {};
+}
+
+/** A date field, kept only when it is really `YYYY-MM-DD`. */
+function date(raw: string | undefined, key: string): Record<string, string> {
+  return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? { [key]: raw } : {};
 }
 
 /**
@@ -66,7 +104,25 @@ export function parseMailView(raw: unknown): MailViewQuery {
 
 /** True when a view selects everything — not worth saving as a search. */
 export function isEmptyView(query: MailViewQuery): boolean {
-  return !query.q && !query.unread && !query.flagged && !query.attach;
+  return (
+    !query.q &&
+    !query.unread &&
+    !query.flagged &&
+    !query.attach &&
+    !query.from &&
+    !query.to &&
+    !query.subject &&
+    !query.body &&
+    !query.after &&
+    !query.before
+  );
+}
+
+/** True when the builder — rather than the quick search box — is in use. */
+export function usesBuilder(query: MailViewQuery): boolean {
+  return Boolean(
+    query.from || query.to || query.subject || query.body || query.after || query.before,
+  );
 }
 
 /**
@@ -84,11 +140,48 @@ export function toJmapFilter(
 ): JmapEmailFilter {
   const filter: JmapEmailFilter = {};
 
-  if (query.q) {
-    filter.text = query.q;
-  } else if (query.mailbox ?? fallbackMailboxId) {
+  /**
+   * ONE CONDITION OBJECT, NOT AN `AND` OPERATOR.
+   *
+   * RFC 8621 §4.4.1 already ANDs the properties within a single
+   * FilterCondition, so every field the builder offers composes without an
+   * operator at all. `npm run mail:probe-search` verified AND, OR and NOT
+   * against the live server — they work, and they are still not needed here,
+   * which is the better outcome. The builder only ever means "all of these".
+   *
+   * OR would be needed for an "any of these" mode, and NOT for exclusions.
+   * Neither is offered, so neither is generated.
+   */
+
+  /**
+   * THE FOLDER RULE, and the builder changes it in one direction only.
+   *
+   * A quick search spans the account: hunting for something you know exists and
+   * being told "no results" because you were standing in the wrong folder is the
+   * worst failure a mail search has. But when somebody has opened the BUILDER
+   * and chosen a folder, they have said where to look, and ignoring that would
+   * be its own kind of wrong. So an explicit folder from the builder is
+   * honoured; the fallback folder is dropped once any search term exists.
+   */
+  const searching = Boolean(query.q) || usesBuilder(query);
+  if (query.mailbox && usesBuilder(query)) {
+    filter.inMailbox = query.mailbox;
+  } else if (!searching && (query.mailbox ?? fallbackMailboxId)) {
     filter.inMailbox = (query.mailbox ?? fallbackMailboxId) as string;
   }
+
+  if (query.q) filter.text = query.q;
+  if (query.from) filter.from = query.from;
+  if (query.to) filter.to = query.to;
+  if (query.subject) filter.subject = query.subject;
+  if (query.body) filter.body = query.body;
+
+  // A date input gives a local calendar day; JMAP wants an instant. `before` is
+  // the start of the NEXT day, so "before 3 August" includes everything sent on
+  // the 3rd — which is what the words mean to a person, and not what a naive
+  // conversion produces.
+  if (query.after) filter.after = new Date(`${query.after}T00:00:00Z`);
+  if (query.before) filter.before = new Date(`${nextDay(query.before)}T00:00:00Z`);
 
   // Unread is the ABSENCE of $seen. JMAP has no "isUnread", and asking for
   // hasKeyword:"$unseen" — which does not exist — would silently match nothing.
@@ -97,6 +190,13 @@ export function toJmapFilter(
   if (query.attach) filter.hasAttachment = true;
 
   return filter;
+}
+
+/** The calendar day after `YYYY-MM-DD`, in the same form. */
+export function nextDay(day: string): string {
+  const at = new Date(`${day}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() + 1);
+  return at.toISOString().slice(0, 10);
 }
 
 export interface FilterChip {
@@ -124,12 +224,23 @@ export function describeView(
 ): string {
   const parts: string[] = [];
   if (query.q) parts.push(`“${query.q}”`);
+  if (query.from) parts.push(`from ${query.from}`);
+  if (query.to) parts.push(`to ${query.to}`);
+  if (query.subject) parts.push(`subject ${query.subject}`);
+  if (query.body) parts.push(`body ${query.body}`);
+  if (query.after && query.before) parts.push(`${query.after} to ${query.before}`);
+  else if (query.after) parts.push(`after ${query.after}`);
+  else if (query.before) parts.push(`before ${query.before}`);
   if (query.unread) parts.push("unread");
   if (query.flagged) parts.push("flagged");
   if (query.attach) parts.push("with files");
-  // The folder only earns a mention when there is no text term, because a text
-  // search ignores the folder — saying otherwise would describe a view that is
-  // not the one being run.
-  if (!query.q && folderName) parts.push(`in ${folderName}`);
+  /**
+   * The folder earns a mention only when it is actually applied.
+   *
+   * A quick search ignores the folder, so naming it would describe a view that
+   * is not the one being run — the same trap the original version avoided. The
+   * BUILDER honours an explicit folder, so there it is part of the description.
+   */
+  if (folderName && (!query.q || usesBuilder(query))) parts.push(`in ${folderName}`);
   return parts.length > 0 ? parts.join(", ") : "All mail";
 }

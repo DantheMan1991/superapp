@@ -20,6 +20,7 @@
     "mail:probe-contacts": "tsx scripts/jmap-contacts-probe.ts",
     "mail:probe-send": "tsx scripts/jmap-send-probe.ts",
     "mail:probe-labels": "tsx scripts/jmap-labels-probe.ts",
+    "mail:probe-search": "tsx scripts/jmap-search-probe.ts",
     "test": "vitest run",
     "test:isolation": "vitest run tests/tenant-isolation.test.ts"
   },

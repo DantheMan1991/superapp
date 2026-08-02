@@ -2342,6 +2342,87 @@ tables, so no migration and no isolation changes. **Not verified in a browser** 
 the things to try are the partial-label dash across a mixed selection, and
 whether the chips crowd a narrow thread list.
 
+### 2026-08-02 (later still) — The search builder, and the probe that had to be debugged first
+
+From, To, Subject, Body, a date range and a folder, on top of the quick search
+box and the three filter chips. A saved search picks them all up for free,
+because a saved search was already "these parameters, written down".
+
+**THE PROBE IS THE INTERESTING PART, TWICE OVER.**
+
+RFC 8621 §4.4.1 defines about fifteen filter conditions and a server need not
+implement them all. There are three outcomes per field and **only the third is
+dangerous**: supported, honestly rejected (fine — hide the field), or **accepted
+and silently ignored**. A `from` condition that is dropped turns "find mail from
+Dan" into "here is everything", which reads as a *bad search* rather than a bug.
+Nobody reports that; they stop using the search.
+
+So `npm run mail:probe-search` checks every condition **twice**: it must match a
+message built to match, AND exclude a decoy built not to. A condition that
+returns both is being ignored, whatever the response said.
+
+**Then the probe itself turned out to be wrong, three times, and that is the
+lesson worth keeping.** Its first run reported `from`, `header` and `minSize` as
+broken. Two of those were my bugs:
+
+- `minSize: 1` matches every message, so it looked "accepted but ignored" — a
+  probe bug that presents exactly as the server bug the script exists to catch.
+  It now sizes the two messages and picks a value between them.
+- The target was dated 2020 so `before` could be tested, and an old message
+  falls outside a small result page. "Not in the first 100 results" reads
+  identically to "condition not supported".
+
+**And the third was real, but not what it said.** `from` failed; then on the next
+run `to` failed too, and `from` passed. Whichever condition ran FIRST failed.
+**The server's full-text index is asynchronous** — a message just created is not
+findable by text for a moment. Bisecting it took four hand-written checks against
+the live server, and it is worth knowing well beyond this feature: anything that
+files a message and immediately searches for it will intermittently find nothing.
+The probe now settles for three seconds before asserting.
+
+With that fixed, thirteen conditions are confirmed working against a decoy:
+`from`, `to`, `subject`, `body`, `text`, `hasKeyword`, `notKeyword`, `before`,
+`after`, `minSize`, and the `AND` / `OR` / `NOT` operators. **`header` is the one
+that never behaved**, so it is not offered — an unreliable field is worse than an
+absent one.
+
+**AND THE OPERATORS TURNED OUT NOT TO BE NEEDED, which is the better outcome.**
+The first implementation built `{operator: "AND", conditions: [...]}` and broke
+three existing tests. The tests were right: RFC 8621 already ANDs the properties
+*within a single* `FilterCondition`, so every field the builder offers composes
+in one flat object. The operator plumbing was removed from `JmapEmailFilter` and
+`serializeFilter` rather than left in unused — this file's own rule is that
+typing unused fields invites drift nobody notices. OR and NOT are verified and
+available the day the builder grows an "any of these" mode.
+
+**The folder rule changed in exactly one direction.** A quick search still spans
+the account: being told "no results" because you were standing in the wrong
+folder is the worst failure a mail search has, and that reasoning has been in
+`toJmapFilter` since Slice 7. But somebody who opens the BUILDER and picks a
+folder has said where to look, and ignoring that would be its own kind of wrong.
+So an explicit folder from the builder is honoured; the *fallback* folder is
+still dropped the moment any search term exists. "Anywhere" is the default in the
+select, for the same reason.
+
+**Dates include both ends.** A date input gives a calendar day; JMAP wants an
+instant. `before` becomes the start of the NEXT day, so "before 3 August"
+includes everything sent on the 3rd — which is what the words mean to a person
+and not what a naive conversion produces. The panel says "Both dates are
+included" rather than leaving it to be discovered.
+
+**It writes to the URL**, like every other piece of state in this module, so an
+advanced search is linkable, reloadable, works with the back button, and is
+saveable with no second model. `describeView` names each field, so saving one
+still does not require inventing a name. And `parseMailView` already re-parses
+stored blobs with `.catch()` on every field and Zod's default strip — so a
+hand-edited saved search cannot smuggle `header`, or anything else, into a
+filter. There is a test asserting exactly that.
+
+Verified: thirteen conditions confirmed against a decoy on the live server, 18
+new unit tests, and the 20 existing organise tests still passing unchanged.
+**Not verified in a browser** — worth checking that the panel does not overflow
+on a phone, and that the date inputs render sensibly outside Chrome.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -2454,6 +2535,16 @@ Composing (`src/modules/email/compose/`, all pure and free of `server-only`):
   rule at all because they are characters rather than images.
 - `link-url.ts` — `normalizeLinkInput`. Pure and separate from the editor so the
   security-relevant half of a client component is testable without a DOM.
+- `organise/filters.ts` — the ONE shape used three ways: the URL, the JMAP
+  filter and a saved search. Every field in its vocabulary was verified against
+  the live server before being offered; `header` is absent because it never
+  behaved. Read the folder rule before changing it.
+- `scripts/jmap-search-probe.ts` — `npm run mail:probe-search`. Checks each
+  condition against a target AND a decoy, because the dangerous outcome is a
+  filter that is accepted and ignored. **It also proved the server's full-text
+  index is asynchronous**, which is why it settles before asserting — anything
+  that files a message and immediately searches for it will intermittently find
+  nothing.
 - `organise/labels.ts` — **the whole of labels**, pure and with no table behind
   it. A label IS a mailbox; the difference from a folder is the verb. Read the
   header before adding anything: it records why keywords were rejected, and the
@@ -2832,9 +2923,17 @@ finished message in Drafts rather than losing it.
 label is a mailbox and the difference from a folder is whether the old
 membership is removed. Chips derive from data the list view already had.
 
-What is NOT built yet, in priority order: websocket push
-(`urn:ietf:params:jmap:websocket`, `supportsPush`), and an advanced search
-builder. Then delegation.
+**The advanced search builder is in**: from, to, subject, body, a date range and
+a folder, on top of the quick search and the chips. Saved searches picked it up
+for free, since a saved search was already these parameters written down.
+
+**Real-time push is closed rather than pending** — see
+[ADR 0005](../decisions/0005-polling-over-push-for-mail-freshness.md). A socket
+needs a process that outlives a request and serverless has none; the staleness
+people would actually feel is the cron cadence, which is a plan question.
+
+What is NOT built yet: delegation (a shared `info@` connected through somebody's
+own credentials), and templates.
 
 Everything so far has been proven against ONE server, ONE account and ONE
 message. That is a real limit: no multi-account switching, no thread expansion
@@ -3036,10 +3135,17 @@ code or config change.
   With paste-as-text and a fixed toolbar the divergence should be nil, but if it
   ever is not, the message simply arrives as less than it looked like.
 - **A scheduled send is only as punctual as the cron.** The sweep rides the
-  mail-sync schedule, and `vercel.json` asks for every 10 minutes while Vercel's
-  Hobby plan runs cron ONCE A DAY — the open item from Slice 4, which now backs a
-  user-visible promise rather than only freshness. **Confirm the plan before
-  telling anyone messages go out at the time they picked.**
+  mail-sync schedule. `vercel.json` asks for every 10 minutes; Vercel's Hobby
+  plan runs cron once a day. **The founder moved to Pro on 2026-08-02**, which
+  restores minute-level cron — verify the first scheduled send actually goes out
+  on time before relying on it.
+- **Search is not instant after filing.** The server's full-text index is
+  asynchronous (found by `mail:probe-search`), so a message just moved or filed
+  can be missing from results for a moment. Nothing in the UI says so, and the
+  honest fix is probably to say nothing — but it is why a search that "should"
+  match sometimes does not.
+- **No `header` search**, and no OR/NOT in the builder. Both are available on the
+  server; the builder only ever means "all of these".
 - **A label cannot be created from the label menu** — only from the folder rail,
   since a label IS a folder. That is honest but it means "label as something
   new" is two steps.

@@ -19,7 +19,7 @@ import { AutoReplyForm } from "./auto-reply/form";
 import { loadAutoReply } from "./auto-reply/load";
 import { autoReplyState } from "./auto-reply/validate";
 import { RulesEditor, type EditorRule } from "./rules/editor";
-import { loadRules } from "./rules/actions";
+import { loadRules } from "./rules/load";
 
 /**
  * The three panes.
@@ -194,7 +194,7 @@ export async function MailView({
             screen, and it must be visible without opening anything. */}
         <AutoReplyBadge state={awayState} params={params} />
         <Link
-          href={mailHref(params, { rules: "1", compose: undefined, message: undefined })}
+          href={mailHref(params, { rules: "1", away: undefined, compose: undefined, message: undefined })}
           className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
         >
           Rules

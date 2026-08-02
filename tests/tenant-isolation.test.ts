@@ -2645,6 +2645,83 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
     ).rejects.toThrow();
   });
 
+  it("a colleague cannot see, or write, another user's rules", async () => {
+    // mail_rules (0051/0052) is the FOURTH per-user table. Reading somebody
+    // else's rules is a privacy problem; WRITING one is worse than anything
+    // the other three allow — a planted rule files a colleague's mail
+    // somewhere they never look, server-side and invisible from the inbox.
+    const [mine] = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .insert(schema.mailRules)
+          .values({
+            tenantId: tenantA,
+            clerkUserId: "user-a",
+            mailAccountId: fx.a.accountId,
+            name: "Anything from the solicitor",
+            matchMode: "all",
+            tests: [{ field: "from", contains: "solicitor.example" }],
+            action: { fileIntoMailboxId: "mbx1", fileIntoName: "Legal", markRead: false, flag: true },
+          })
+          .returning(),
+      { userId: "user-a" },
+    );
+    expect(mine.id).toBeTruthy();
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailRules),
+      { userId: "user-a" },
+    );
+    expect(asOwner.some((r) => r.id === mine.id)).toBe(true);
+
+    // Deliberately no where clause — the forgotten-predicate scenario.
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailRules),
+      { userId: COLLEAGUE },
+    );
+    expect(asColleague).toHaveLength(0);
+
+    const asNobody = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.mailRules),
+    );
+    expect(asNobody).toHaveLength(0);
+
+    const deleted = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.mailRules)
+          .where(eq(schema.mailRules.id, mine.id))
+          .returning(),
+      { userId: COLLEAGUE },
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("cannot plant a rule in a colleague's script", async () => {
+    // The one that matters most on this table: a rule attributed to somebody
+    // else would be compiled into THEIR Sieve script and run on THEIR mail.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.mailRules).values({
+            tenantId: tenantA,
+            clerkUserId: COLLEAGUE,
+            mailAccountId: fx.a.accountId,
+            name: "planted",
+            matchMode: "all",
+            tests: [{ field: "from", contains: "x" }],
+            action: { fileIntoMailboxId: "mbx1", fileIntoName: "X", markRead: false, flag: false },
+          }),
+        { userId: "user-a" },
+      ),
+    ).rejects.toThrow();
+  });
+
   it("composite FK: a snooze cannot point at the OTHER tenant's connection", async () => {
     await expect(
       withSystem((tx) =>

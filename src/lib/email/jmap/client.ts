@@ -62,6 +62,20 @@ export const SUBMISSION = "urn:ietf:params:jmap:submission";
  */
 export const VACATION = "urn:ietf:params:jmap:vacationresponse";
 const VACATION_SINGLETON = "singleton";
+/**
+ * draft-ietf-jmap-sieve. Server-side rules.
+ *
+ * The script is uploaded as a BLOB first, then referenced by id — there is no
+ * way to pass the text inline.
+ */
+export const SIEVE = "urn:ietf:params:jmap:sieve";
+
+export interface SieveScript {
+  id: string;
+  name: string;
+  blobId: string;
+  isActive: boolean;
+}
 
 export interface VacationResponse {
   isEnabled: boolean;
@@ -441,6 +455,16 @@ export interface JmapClient {
   /** The out-of-office reply. Always present; never absent, only disabled. */
   vacationResponse(): Promise<JmapResult<VacationResponse>>;
   setVacationResponse(patch: VacationPatch): Promise<JmapResult<void>>;
+  listSieveScripts(): Promise<JmapResult<SieveScript[]>>;
+  /**
+   * Upload a script and make it the active one.
+   *
+   * Takes a NAME rather than an id and decides for itself whether to create or
+   * update, because the alternative — delete then recreate — is not available:
+   * the server refuses to destroy an active script, so that path would need a
+   * window with no rules running at all.
+   */
+  putSieveScript(name: string, source: string): Promise<JmapResult<{ id: string }>>;
   emailChanges(
     sinceState: string,
     maxChanges?: number,
@@ -937,6 +961,114 @@ export function createJmapClient(
     },
 
     /* Chunked `Email/set update`. See the note on `applyToEmails` below. */
+
+    async listSieveScripts() {
+      const result = await call(
+        [
+          [
+            "SieveScript/get",
+            { accountId, ids: null },
+            "s",
+          ] as unknown as MethodCall,
+        ],
+        [CORE, SIEVE],
+      );
+      if (!result.ok) return result;
+      const taken = takeMethodResponse(result.data, "s", "SieveScript/get");
+      if (!taken.ok) return { ok: false as const, message: taken.message };
+      const payload = taken.payload as { list?: unknown };
+      const rows = Array.isArray(payload?.list) ? payload.list : [];
+      return {
+        ok: true as const,
+        data: rows.flatMap((row): SieveScript[] => {
+          if (typeof row !== "object" || row === null) return [];
+          const r = row as Record<string, unknown>;
+          if (typeof r.id !== "string") return [];
+          return [
+            {
+              id: r.id,
+              name: typeof r.name === "string" ? r.name : "",
+              blobId: typeof r.blobId === "string" ? r.blobId : "",
+              isActive: r.isActive === true,
+            },
+          ];
+        }),
+      };
+    },
+
+    async putSieveScript(name, source) {
+      // The script text can only reach the server as a blob; SieveScript/set
+      // takes a blobId and has no inline form.
+      const blob = await this.uploadBlob(
+        new TextEncoder().encode(source),
+        "application/sieve",
+      );
+      if (!blob.ok) return blob;
+
+      const existing = await this.listSieveScripts();
+      if (!existing.ok) return existing;
+      const mine = existing.data.find((script) => script.name === name);
+
+      /**
+       * UPDATE IN PLACE when it already exists, and never delete.
+       *
+       * The server refuses to destroy an active script
+       * (`scriptIsActive: "Deactivate Sieve script before deletion."`), so a
+       * delete-then-recreate path would have to deactivate first — leaving a
+       * window with NO rules running, during which arriving mail lands
+       * unsorted. Updating the blob of the existing script has no such gap.
+       */
+      const args = mine
+        ? {
+            accountId,
+            update: { [mine.id]: { blobId: blob.data.blobId } },
+            onSuccessActivateScript: mine.id,
+          }
+        : {
+            accountId,
+            create: { script: { name, blobId: blob.data.blobId } },
+            onSuccessActivateScript: "#script",
+          };
+
+      const result = await call(
+        [["SieveScript/set", args, "s"] as unknown as MethodCall],
+        [CORE, SIEVE],
+      );
+      if (!result.ok) return result;
+      const taken = takeMethodResponse(result.data, "s", "SieveScript/set");
+      if (!taken.ok) return { ok: false as const, message: taken.message };
+
+      const payload = taken.payload as {
+        created?: Record<string, { id?: unknown }>;
+        notCreated?: Record<string, { type?: unknown; description?: unknown }>;
+        notUpdated?: Record<string, { type?: unknown; description?: unknown }>;
+      };
+
+      /**
+       * A refusal here is usually `invalidScript`, and its `description`
+       * carries the line and column the mail server objected to. That is far
+       * more use than a generic message, and it is the only signal that a
+       * generated script is malformed — so it is passed through rather than
+       * flattened into "could not save".
+       */
+      const refused =
+        payload?.notCreated?.script ?? (mine ? payload?.notUpdated?.[mine.id] : undefined);
+      if (refused) {
+        const detail =
+          typeof refused.description === "string" ? refused.description : "";
+        const type = typeof refused.type === "string" ? refused.type : "unknown";
+        return {
+          ok: false as const,
+          message: detail || describeSetError(type),
+        };
+      }
+
+      if (mine) return { ok: true as const, data: { id: mine.id } };
+      const created = readCreated(taken.payload, "script");
+      return created.ok
+        ? { ok: true as const, data: { id: created.id } }
+        : { ok: false as const, message: created.message };
+    },
 
     async uploadBlob(bytes, type) {
       const url = session.uploadUrl.replace(

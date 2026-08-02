@@ -1430,6 +1430,64 @@ needs `.env`, which points at the production database and a live mailbox.
 15 unit tests cover the validation and state machine, including both window
 boundaries.
 
+### 2026-08-01 (later still) — Rules: the compiler, and what the server caught
+
+Second half of "rules and auto-replies". This lands the parts with teeth —
+the Sieve compiler, `mail_rules` (`0051`/`0052`) and the JMAP script methods.
+**The editing UI is not here**; it follows in its own PR.
+
+**The compiler generates code the mail server executes.** Everything a user
+types is interpolated into a program, which makes `sieveString()` the most
+important function in the module. A quote that escapes its string does not
+throw — it changes what happens to every message that arrives afterwards.
+Backslash is escaped before quote (the other order re-escapes what the first
+pass introduced), and control characters are stripped rather than escaped,
+because a comment runs to the end of a line and nothing legitimate in "subject
+contains" needs a newline.
+
+**THE LESSON OF THIS SLICE: seventeen passing unit tests, and the output was
+invalid.** The compiler emitted `require ["fileinto", "mailboxid"];` — which
+is what RFC 9042 reads like — and Stalwart rejected the entire script with
+`Undeclared capability 'mailbox' at line 7, column 12`, pointing at the
+`:mailboxid` tag. Nothing in a unit test could have found that; the assertions
+were checking the output matched what I believed correct. It was caught by
+uploading a generated script to the real server and letting it compile.
+The exact `require` line is now pinned in a test as the regression guard.
+
+**Rules file by mailbox ID, not by name.** The server advertises the
+`mailboxid` extension, so `fileinto :mailboxid "id" "Name"` survives a folder
+being renamed, and carries the name only as the fallback for when the id stops
+resolving — which is what stops a deleted folder turning into silently dropped
+mail.
+
+**Scripts are updated in place and never deleted.** The server refuses to
+destroy an active script (`scriptIsActive: "Deactivate Sieve script before
+deletion."`), so delete-then-recreate would need a window with NO rules
+running, during which arriving mail lands unsorted. `putSieveScript()` looks
+up the existing script by name and swaps its blob instead.
+
+**The mail server goes first on every save.** If it refuses the script, nothing
+is written to the database — so the rules somebody is looking at always
+describe the script actually running. The other order leaves a list with no
+relationship to how mail is being sorted, which is worse than a failed save.
+
+**Every write recompiles everything.** There is no incremental path, because
+`stop` makes rules order-dependent: a script assembled from a partial view of
+them would sort mail differently from the list on screen.
+
+**Two rule shapes are refused rather than emitted**, and reported as inert: one
+with no tests (it would match EVERY message, filing a whole mailbox into one
+folder on the strength of a half-finished form) and one with no action.
+
+`mail_rules` is the fourth per-user table. The privacy argument is the usual
+one, but the write side is sharper than on any table before it: a rule planted
+in somebody else's script would file THEIR mail somewhere they never look,
+server-side and invisible from the inbox. That is what the `WITH CHECK` on
+`clerk_user_id` is holding.
+
+Open: no UI yet, so rules can only be written through the action; `discard` is
+deliberately not offered as an action; and the isolation suite has not been run.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at

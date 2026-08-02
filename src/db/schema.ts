@@ -2835,6 +2835,65 @@ export const mailSnoozes = pgTable(
   ],
 );
 
+/**
+ * A rule the mail server runs on arrival.
+ *
+ * These rows are the SOURCE, not the truth. They compile to one Sieve script
+ * (`rules/compile.ts`) that lives on the mail server and executes there — which
+ * is the entire point, because it fires for mail that arrives while nobody is
+ * signed in, and it applies to the phone and Outlook as much as to Yosher.
+ *
+ * Losing this table would leave the last compiled script still running. That is
+ * the right failure: mail keeps being sorted, and the rules simply cannot be
+ * edited until they are rebuilt.
+ *
+ * PER-USER, like snoozes and saved searches. `file_into_mailbox_id` is a JMAP
+ * id issued inside one person's account, and a Sieve script belongs to the
+ * account it runs in — a colleague's rule is not merely private, it is
+ * meaningless in anyone else's mailbox.
+ */
+export const mailRules = pgTable(
+  "mail_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    mailAccountId: uuid("mail_account_id").notNull(),
+    name: text("name").notNull(),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    /** Every test must match, or any one of them. */
+    matchMode: text("match_mode").notNull().default("all"),
+    /** `RuleTest[]` from rules/compile.ts. Validated by Zod at the boundary. */
+    tests: jsonb("tests").notNull().default(sql`'[]'::jsonb`),
+    /** `RuleAction` from rules/compile.ts. */
+    action: jsonb("action").notNull().default(sql`'{}'::jsonb`),
+    /** Stop processing later rules once this one matches. */
+    stopAfter: boolean("stop_after").notNull().default(true),
+    /**
+     * Evaluation order, and it is semantic rather than cosmetic: `stop` means
+     * "and nothing after this", so reordering rules changes where mail lands.
+     */
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_rules_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("mail_rules_user_idx").on(t.tenantId, t.clerkUserId, t.mailAccountId),
+    foreignKey({
+      name: "mail_rules_account_fk",
+      columns: [t.tenantId, t.mailAccountId],
+      foreignColumns: [mailAccounts.tenantId, mailAccounts.id],
+    }).onDelete("cascade"),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -3315,6 +3374,7 @@ export type MailLink = typeof mailLinks.$inferSelect;
 export type MailAnnotation = typeof mailAnnotations.$inferSelect;
 export type MailSavedSearch = typeof mailSavedSearches.$inferSelect;
 export type MailSnooze = typeof mailSnoozes.$inferSelect;
+export type MailRuleRow = typeof mailRules.$inferSelect;
 /** Display-only participants on an indexed thread. */
 export type MailParticipant = { name: string; email: string };
 export type DocumentShare = typeof documentShares.$inferSelect;

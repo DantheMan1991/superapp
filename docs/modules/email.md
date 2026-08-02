@@ -2149,6 +2149,113 @@ and two isolation tests against the dev branch. **Not verified in a browser** �
 the things to try are arrow-key navigation, Tab to commit, and pasting a list of
 addresses to confirm the dropdown stays out of the way.
 
+### 2026-08-02 (later still) — Undo send and schedule send, and the answer that changed both
+
+**THE PROBE DID NOT CONFIRM A DESIGN THIS TIME. IT DEMOLISHED ONE.**
+
+Undo and schedule look like two features and are really one question: will the
+mail server hold a message back? RFC 8621 §7 says a submission may carry
+`sendAt`, and the capability advertises `maxDelayedSend` in seconds. The plan was
+one line of JMAP. `npm run mail:probe-send` asked first, and Stalwart 0.16.15
+answered:
+
+```
+"notCreated": { "s": {
+  "type": "invalidProperties",
+  "description": "Field could not be set.",
+  "properties": ["sendAt"] } }
+```
+
+**Refused outright**, and the submission capability object is `{}` — no
+`maxDelayedSend` at all. Neither feature could be built the obvious way, and the
+failure mode of not asking is the worst one available: a server that ACCEPTED
+`sendAt` and ignored it would have sent everything immediately while the UI
+showed a countdown, and nobody would have found out until a customer received a
+message hours early. The probe checks for exactly that third case too.
+
+**SO BOTH FEATURES BECAME ONE SHAPE: create the draft now, decide later.** The
+composer no longer sends — `holdComposedMessage` creates the message on the mail
+server as a draft, and `schedule/actions.ts` decides what happens to it: release
+after an undo window, queue for a time, or destroy.
+
+That indirection buys the thing that makes a client-side delay acceptable at all.
+**If the tab closes mid-countdown the message is not lost.** It is a finished
+draft in Drafts, which is where anyone would look. A composer that held the text
+in browser memory would lose it silently, having already said "Sending…" — the
+one outcome worse than not offering undo.
+
+**`mail_scheduled_sends` (`0053`/`0054`) is a REMINDER, not custody**, and the
+comparison to `mail_snoozes` is exact. The message is a draft on the mail server;
+these rows hold ids, an envelope and a time. **No body, no attachment, no
+recipient name ever enters this database**, which keeps the invariant the whole
+module rests on — bodies live on the mail server, reachable only with the token
+that person authorized. Losing every row loses no writing: it leaves finished
+messages in Drafts.
+
+`envelope_rcpt_to` is the one column that looks like content and is not. It is
+there because the release runs from a cron with no memory of the composer, and
+`EMAIL_DEV_REDIRECT` refusing to mail a real customer from a preview has to hold
+**at the moment the message actually leaves**, not when somebody pressed a
+button. The guard therefore runs twice: at hold, so a blocked send fails fast
+with the text still on screen, and at release, over the stored envelope.
+
+**THE SWEEP'S ORDERING IS THE OPPOSITE OF THE SNOOZE SWEEP'S, deliberately.**
+`wakeDueSnoozes` deletes its row only after the mail server confirms the move,
+because waking twice is a no-op and stranding a message is not. `sendDueMessages`
+deletes the row FIRST, in its own transaction, before submitting:
+
+| | |
+| --- | --- |
+| row deleted, send fails | a finished message sits in Drafts, unsent — the person finds it and sends it by hand |
+| send succeeds, row survives | **the next sweep sends it again**, to a customer, with no undoing it |
+
+One is an inconvenience; the other is an apology. So the claim is taken before
+the irreversible act rather than after it — the same reasoning the outbound
+spine's idempotency key encodes, applied where no natural key exists.
+
+It rides the mail-sync cron rather than getting its own, like snooze and for the
+same Hobby-plan reason, and runs LAST of the three steps: it is the only one that
+does something irreversible on somebody's behalf, so it takes what budget is left
+rather than risking starving the sync. Its batch is smaller than the snooze cap
+(50 against 200) because releasing a message is a full submission with an SMTP
+handoff behind it, not a folder move.
+
+**The fifth per-user table, and its `WITH CHECK` carries more weight than any
+before it.** A forged row would make the sweep submit a draft **on somebody
+else's behalf, from their address** — and the sweep runs under `withSystem`, so
+RLS is not standing behind it. The policy refusing the insert is the only thing
+between a member and queueing mail as a colleague. There is an isolation test for
+exactly that, alongside the usual invisible-to-a-colleague and
+fail-closed-without-`userId` assertions.
+
+**Times are computed in the BROWSER**, the same call `triage/snooze-times.ts`
+made and for the same reason: "tomorrow morning" is a statement about the user's
+calendar and the server's clock is UTC. Resolving it server-side would schedule
+mail for 08:00 UTC — the middle of the night for a good share of the people being
+written to. The server BOUNDS the instant it receives; it cannot recompute it,
+because the timezone is not in the request. It **rejects rather than clamps** in
+both directions: clamping a past time to "now" would send immediately, which is
+the one thing somebody choosing a schedule did not ask for.
+
+Two smaller calls worth recording. **Undo destroys the draft** rather than
+leaving it — somebody who pressed Undo has decided not to send this, and the text
+is still in the composer they were looking at; a draft left after an explicit
+cancel is litter, where one left after a FAILURE is a rescue. And the undo window
+is asserted shorter than the minimum schedule, so the two features cannot claim
+the same delay and leave neither obviously right.
+
+Also: **`sendMessageAction` no longer audits `mail.sent`.** It logs `mail.held`,
+because nothing has left. The send is audited by whichever action releases it, so
+the log never claims a message went out because somebody pressed a button.
+
+Verified: the probe's refusal (which is the finding), 12 unit tests over the time
+boundaries, and 2 isolation tests against the dev branch. **Not verified in a
+browser** — the things to try are pressing Undo at the very end of the window,
+and closing the tab mid-window to confirm the draft is really there.
+
+**Not applied to production**: `0053` and `0054` are on the dev branch only.
+`docs/security.md` §8 requires both.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -2176,6 +2283,7 @@ transport slots in without touching a single caller.
 | `mail_thread_index` | Thin thread index — subject, participants, dates | **Not a mirror.** No bodies, no search index. Exists so a module can ask "every thread on this invoice" as a SQL join instead of N+1 protocol calls. **`member_read` only** |
 | `mail_links` | Thread ↔ business entity | **MEMBER WRITABLE** — the deliberate exception. `entity_type` carries no whitelist so a future layer needs no migration. `mail_account_id` (`0045`) is what makes an opaque thread id unambiguous inside a tenant; its composite FK is hand-written in `0046` because it needs `ON DELETE SET NULL (mail_account_id)` — the link must SURVIVE a disconnected mailbox, and the column list is what stops the same rule nulling `tenant_id`. Unique on `(tenant_id, mail_account_id, thread_id, entity_type, entity_id)`, NULLS DISTINCT on purpose |
 | `mail_saved_searches` | A named mail view, per person | **PER-USER** (`0048`), the second table scoped on `app.clerk_user_id` — and for a data-model reason before a privacy one: a mail search names a JMAP mailbox id, which only exists inside one account, so it *cannot* be shared the way `document_saved_views` can. The privacy consequence follows anyway: the NAME of a search is correspondence. **MEMBER WRITABLE**, unlike the other per-user mail tables; `WITH CHECK` pins `clerk_user_id` as well as `tenant_id`. `query` is re-parsed with Zod on read and becomes a JMAP filter, never SQL |
+| `mail_scheduled_sends` | A message written and held, waiting to go out | **PER-USER** (`0053`/`0054`), the fifth. A REMINDER, not custody: the message is a draft on the mail server and these rows hold ids, an envelope and a time — no body, no attachment, no recipient name, so the module's founding invariant survives. Exists because `mail:probe-send` found the server REFUSES `sendAt` (`invalidProperties`), so a delay cannot be a future-dated JMAP submission. Its `WITH CHECK` carries more weight than any other per-user table's: the sweep runs under `withSystem`, so this policy is the only thing stopping a member queueing mail as a colleague, from their address |
 | `mail_annotations` | Extension-contributed metadata per thread | **MEMBER WRITABLE**. One row per extension per thread, so a layer can be reprocessed or removed without touching another's work. `version` (`0045`) is the optimistic-concurrency counter — a reprocess and a user edit genuinely race here, and last-write-wins on jsonb loses one silently |
 
 ## Key files & seams
@@ -2260,6 +2368,19 @@ Composing (`src/modules/email/compose/`, all pure and free of `server-only`):
   rule at all because they are characters rather than images.
 - `link-url.ts` — `normalizeLinkInput`. Pure and separate from the editor so the
   security-relevant half of a client component is testable without a DOM.
+- `schedule/times.ts` — pure. The offered times, and the bounds the server
+  applies to what the browser computed. Rejects rather than clamps, in both
+  directions; the header says why each direction matters.
+- `schedule/sweep.ts` — releases due messages on the mail-sync cron. **Read its
+  header before changing the ordering**: it deletes the row BEFORE submitting,
+  which is the opposite of the snooze sweep, because sending twice is the
+  failure that cannot be undone.
+- `compose/send.ts` — `holdComposedMessage` / `releaseHeldMessage`. The composer
+  no longer sends; it holds, and something else decides. The envelope guard runs
+  in both, because a scheduled message is released days later by a cron.
+- `scripts/jmap-send-probe.ts` — `npm run mail:probe-send`. **Submits**, so
+  loopback-only and self-addressed. Run it against any new mail server: whether
+  it honours `sendAt` decides what undo and schedule can even be.
 - `contacts/rank.ts` — **the ranking**, pure. One rule decides whether the
   recipient box feels clever or stupid: somebody you have written to beats a
   directory entry. Read it before adding a fourth source.
@@ -2609,8 +2730,13 @@ correspondents (per-user, from `mail_thread_index`), the extension registry
 (Accounting's customers and vendors today, a CRM later) and the mail server's own
 `ContactCard` address book.
 
-What is NOT built yet, in priority order: undo/schedule send, labels, websocket
-push (`urn:ietf:params:jmap:websocket`, `supportsPush`), and an advanced search
+**Undo send and schedule send are in**, both as a draft created on the mail
+server plus a decision recorded separately — because `mail:probe-send` found this
+server refuses `sendAt` outright. An interrupted undo window therefore leaves a
+finished message in Drafts rather than losing it.
+
+What is NOT built yet, in priority order: labels, websocket push
+(`urn:ietf:params:jmap:websocket`, `supportsPush`), and an advanced search
 builder. Then delegation.
 
 Everything so far has been proven against ONE server, ONE account and ONE
@@ -2812,6 +2938,17 @@ code or config change.
 - **The editor does not warn when the sanitizer will change what you wrote.**
   With paste-as-text and a fixed toolbar the divergence should be nil, but if it
   ever is not, the message simply arrives as less than it looked like.
+- **A scheduled send is only as punctual as the cron.** The sweep rides the
+  mail-sync schedule, and `vercel.json` asks for every 10 minutes while Vercel's
+  Hobby plan runs cron ONCE A DAY — the open item from Slice 4, which now backs a
+  user-visible promise rather than only freshness. **Confirm the plan before
+  telling anyone messages go out at the time they picked.**
+- **No list of what is queued.** A scheduled message can be cancelled only by
+  finding its draft; there is no "Scheduled" view showing what is waiting, which
+  is the obvious next piece.
+- **The undo window is client-side.** Closing the tab inside it leaves the
+  message in Drafts unsent — recoverable and honest, but it does mean "Sending…"
+  can end in a draft rather than a sent message.
 - **Send is not idempotent.** A double-submit is guarded only by the disabled
   button — unlike the outbound spine, which derives an idempotency key from what
   the message IS. A composed message has no such natural key, and inventing one

@@ -2641,6 +2641,103 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
     expect(fromB.map((c) => c.email)).toEqual(["isolation-contact@b.example"]);
   });
 
+  /**
+   * mail_scheduled_sends — the fifth per-user table.
+   *
+   * The WITH CHECK matters more here than on any table before it. A forged row
+   * would make the CRON SWEEP submit a draft on somebody else's behalf, from
+   * their address — the sweep runs under `withSystem`, so RLS is not standing
+   * behind it and the only thing stopping a member queueing mail as a colleague
+   * is this policy refusing the insert.
+   */
+  it("a queued send is invisible to a colleague and refuses a forged owner", async () => {
+    const queued = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .insert(schema.mailScheduledSends)
+          .values({
+            tenantId: tenantA,
+            clerkUserId: "user-a",
+            mailAccountId: fx.a.accountId,
+            emailId: "draft-iso-a",
+            identityId: "identity-a",
+            fromEmail: "a@example.com",
+            draftsMailboxId: "drafts-a",
+            sentMailboxId: "sent-a",
+            envelopeRcptTo: ["them@example.com"],
+            sendAt: new Date(Date.now() + 3_600_000),
+          })
+          .returning({ id: schema.mailScheduledSends.id }),
+      { userId: "user-a" },
+    );
+    expect(queued).toHaveLength(1);
+
+    // Yours.
+    const mine = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailScheduledSends),
+      { userId: "user-a" },
+    );
+    expect(mine.map((r) => r.emailId)).toContain("draft-iso-a");
+
+    // Not a colleague's, and not a caller who forgot to say who they are.
+    const theirs = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailScheduledSends),
+      { userId: COLLEAGUE },
+    );
+    expect(theirs).toHaveLength(0);
+    const anonymous = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.mailScheduledSends),
+    );
+    expect(anonymous).toHaveLength(0);
+
+    // THE ONE THAT MATTERS: a member cannot queue mail attributed to somebody
+    // else, because the sweep would then send it as them.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.mailScheduledSends).values({
+            tenantId: tenantA,
+            clerkUserId: "user-a",
+            mailAccountId: fx.a.accountId,
+            emailId: "draft-iso-forged",
+            identityId: "identity-a",
+            fromEmail: "a@example.com",
+            draftsMailboxId: "drafts-a",
+            envelopeRcptTo: ["them@example.com"],
+            sendAt: new Date(Date.now() + 3_600_000),
+          }),
+        { userId: COLLEAGUE },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a queued send cannot point at another tenant's mail account", async () => {
+    // The composite FK is what makes this structural rather than a check
+    // somebody has to remember, exactly as it is for mail_links and snoozes.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.mailScheduledSends).values({
+            tenantId: tenantA,
+            clerkUserId: "user-a",
+            mailAccountId: fx.b.accountId,
+            emailId: "draft-iso-cross",
+            identityId: "identity-a",
+            fromEmail: "a@example.com",
+            draftsMailboxId: "drafts-a",
+            envelopeRcptTo: ["them@example.com"],
+            sendAt: new Date(Date.now() + 3_600_000),
+          }),
+        { userId: "user-a" },
+      ),
+    ).rejects.toThrow();
+  });
+
   it("a colleague cannot delete another user's connection, but you can delete your own", async () => {
     const deletedTheirs = await withTenant(
       tenantA,

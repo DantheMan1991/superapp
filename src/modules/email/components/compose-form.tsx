@@ -3,12 +3,20 @@
 import Link from "next/link";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Paperclip, Send, ShieldAlert, Type, X } from "lucide-react";
+import { Loader2, Paperclip, ShieldAlert, Type, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseRecipients } from "../compose/addresses";
 import { sendMessageAction } from "../compose-actions";
+import type { HeldMessage } from "../compose/send";
+import {
+  cancelHeldMessageAction,
+  releaseHeldMessageAction,
+  scheduleHeldMessageAction,
+} from "../schedule/actions";
+import { describeSendAt, UNDO_SECONDS } from "../schedule/times";
+import { SendButton } from "./send-button";
 import { Textarea } from "@/components/ui/textarea";
 import { RichTextEditor, type RichTextEditorHandle } from "./rich-text-editor";
 import { RecipientInput } from "./recipient-input";
@@ -153,7 +161,7 @@ export function ComposeForm({
     setPlainText(false);
   }
 
-  function send() {
+  function send(at?: Date) {
     const parsedTo = parseRecipients(to);
     const parsedCc = parseRecipients(cc);
     const parsedBcc = parseRecipients(bcc);
@@ -209,18 +217,94 @@ export function ComposeForm({
             }
           : {}),
       });
-      if ("error" in result) {
-        toast.error(result.error);
+      if ("error" in result || !result.data) {
+        toast.error("error" in result ? result.error : "Couldn't prepare that message.");
         return;
       }
-      toast.success(
-        result.data?.redirected
-          ? `Sent — delivered only to ${result.data.deliveredTo.join(", ")} (not production).`
-          : "Sent.",
-      );
+
+      const held = result.data;
+      // The composer closes NOW, before the message has actually gone. It is a
+      // finished message on the mail server either way, and keeping the pane
+      // open behind a countdown would suggest there is still something to edit.
       router.push(closeHref);
-      router.refresh();
+
+      if (at) {
+        const queued = await scheduleHeldMessageAction({ ...heldPayload(held), sendAt: at.toISOString() });
+        if ("error" in queued) {
+          toast.error(queued.error);
+          return;
+        }
+        toast.success(`Scheduled for ${describeSendAt(at, new Date())}.`);
+        router.refresh();
+        return;
+      }
+
+      startUndoWindow(held);
     });
+  }
+
+  /**
+   * The undo window.
+   *
+   * A client-side countdown over a draft that is ALREADY on the mail server —
+   * the only shape available, because `mail:probe-send` found this server
+   * refuses a future-dated submission outright. If the tab closes mid-window the
+   * message is not lost: it is a finished draft in Drafts, which is where anyone
+   * would look for it. That recoverability is the whole reason the draft is
+   * created up front rather than the text being held in the browser.
+   */
+  function startUndoWindow(held: HeldMessage) {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      void releaseHeldMessageAction(heldPayload(held)).then((sent) => {
+        if ("error" in sent) {
+          toast.error(`${sent.error} The message is still in your drafts.`);
+          return;
+        }
+        toast.success(
+          held.redirected
+            ? `Sent — delivered only to ${held.deliveredTo.join(", ")} (not production).`
+            : "Sent.",
+        );
+        router.refresh();
+      });
+    }, UNDO_SECONDS * 1000);
+
+    toast(`Sending in ${UNDO_SECONDS}s…`, {
+      duration: UNDO_SECONDS * 1000,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          cancelled = true;
+          clearTimeout(timer);
+          void cancelHeldMessageAction({
+            mailboxId,
+            emailId: held.emailId,
+          }).then((result) => {
+            toast.success(
+              "error" in result
+                ? "Held back. The message is in your drafts."
+                : "Not sent.",
+            );
+            router.refresh();
+          });
+        },
+      },
+    });
+  }
+
+  /** The fields both follow-up actions need, in one place. */
+  function heldPayload(held: HeldMessage) {
+    return {
+      mailboxId,
+      emailId: held.emailId,
+      identityId: held.identityId,
+      fromEmail: held.fromEmail,
+      draftsMailboxId: held.draftsMailboxId,
+      sentMailboxId: held.sentMailboxId,
+      envelopeRcptTo: held.deliveredTo,
+    };
   }
 
   const busy = pending || uploading;
@@ -378,14 +462,12 @@ export function ComposeForm({
       </div>
 
       <div className="flex items-center gap-2 border-t px-4 py-3">
-        <Button onClick={send} disabled={busy} size="sm">
-          {pending ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <Send className="size-4" />
-          )}
-          Send
-        </Button>
+        <SendButton
+          busy={busy}
+          pending={pending}
+          onSend={() => send()}
+          onSchedule={(at) => send(at)}
+        />
         <Button
           variant="outline"
           size="sm"

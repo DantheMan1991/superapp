@@ -156,3 +156,138 @@ export async function sendComposedMessage(
     deliveredTo: envelope.rcptTo,
   };
 }
+
+/** What a held message needs to be released later. */
+export interface HeldMessage {
+  emailId: string;
+  identityId: string;
+  fromEmail: string;
+  draftsMailboxId: string;
+  sentMailboxId: string | null;
+  /** Where it will actually be delivered, so the UI never has to guess. */
+  deliveredTo: string[];
+  redirected: boolean;
+}
+
+/**
+ * Put a composed message on the mail server WITHOUT sending it.
+ *
+ * The first half of both undo-send and schedule-send, which are one feature
+ * wearing two hats: `npm run mail:probe-send` found this server refuses `sendAt`
+ * outright (`invalidProperties`, naming the field) and advertises no
+ * `maxDelayedSend`, so neither can be a JMAP feature. What they can be is OUR
+ * delay over a draft that is already safely on the mail server.
+ *
+ * THAT IS WHY THE DRAFT IS CREATED NOW RATHER THAN HELD IN THE BROWSER. If the
+ * tab closes during an undo window, or the scheduler never runs, the message is
+ * sitting in Drafts where the person can find it. A composer that held the text
+ * in memory would lose it, silently, having already said "Sending…" — which is
+ * the one outcome worse than not offering the feature.
+ *
+ * THE GUARD STILL RUNS HERE, and again at release. Refusing at hold time costs a
+ * typed message that is still on screen; refusing only at release would leave a
+ * draft nobody knew was undeliverable.
+ */
+export async function holdComposedMessage(
+  client: JmapClient,
+  mailboxAddress: string,
+  input: ComposeInput,
+): Promise<HeldMessage> {
+  if (!client.supportsSubmission()) {
+    throw new MailError(
+      "SEND_UNSUPPORTED",
+      "server does not advertise the submission capability",
+    );
+  }
+
+  const headerRecipients = [...input.to, ...input.cc, ...input.bcc].map(
+    (a) => a.email,
+  );
+  const envelope = guardComposedRecipients(headerRecipients);
+  if ("blocked" in envelope) throw new MailError("SEND_BLOCKED", envelope.blocked);
+
+  const folders = await client.listMailboxes();
+  if (!folders.ok) throw new MailError("MAIL_SERVER_UNREACHABLE", folders.message);
+  const draftsId = roleId(folders.data, "drafts");
+  if (!draftsId) throw new MailError("NO_DRAFTS_FOLDER", "no mailbox with role=drafts");
+  const sentId = roleId(folders.data, "sent");
+
+  const identities = await client.identities();
+  if (!identities.ok) {
+    throw new MailError(
+      identities.needsReauth ? "ACCOUNT_NEEDS_REAUTH" : "SEND_UNSUPPORTED",
+      identities.message,
+    );
+  }
+  const identity = pickIdentity(identities.data, mailboxAddress);
+  if (!identity) throw new MailError("SEND_UNSUPPORTED", "no identity to send as");
+
+  const draft = await client.saveDraft({
+    identityId: identity.id,
+    from: { name: identity.name || null, email: identity.email },
+    to: input.to,
+    cc: input.cc,
+    bcc: input.bcc,
+    subject: input.subject,
+    textBody: input.textBody,
+    ...(input.htmlBody ? { htmlBody: input.htmlBody } : {}),
+    ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+    ...(input.references ? { references: input.references } : {}),
+    ...(input.attachments ? { attachments: input.attachments } : {}),
+    ...(input.inlineImages ? { inlineImages: input.inlineImages } : {}),
+    draftsMailboxId: draftsId,
+    ...(sentId ? { sentMailboxId: sentId } : {}),
+    envelopeRcptTo: envelope.rcptTo,
+  });
+  if (!draft.ok) {
+    throw new MailError(
+      draft.needsReauth ? "ACCOUNT_NEEDS_REAUTH" : "SEND_FAILED",
+      draft.message,
+    );
+  }
+
+  return {
+    emailId: draft.data.emailId,
+    identityId: identity.id,
+    fromEmail: identity.email,
+    draftsMailboxId: draftsId,
+    sentMailboxId: sentId,
+    deliveredTo: envelope.rcptTo,
+    redirected: envelope.redirected,
+  };
+}
+
+/**
+ * Actually send a message that was held.
+ *
+ * The recipients are re-read from the DRAFT rather than carried from the hold,
+ * and the guard runs over them again. That is not belt-and-braces: a scheduled
+ * send can be released days later, in a different environment, by a cron with no
+ * memory of the composer — and `EMAIL_DEV_REDIRECT` refusing to mail a real
+ * customer from a preview has to hold at the moment the message actually leaves,
+ * not at the moment somebody pressed a button.
+ */
+export async function releaseHeldMessage(
+  client: JmapClient,
+  held: Omit<HeldMessage, "deliveredTo" | "redirected">,
+  recipients: readonly string[],
+): Promise<{ submissionId: string; deliveredTo: string[] }> {
+  const envelope = guardComposedRecipients([...recipients]);
+  if ("blocked" in envelope) throw new MailError("SEND_BLOCKED", envelope.blocked);
+
+  const submitted = await client.submitDraft({
+    emailId: held.emailId,
+    identityId: held.identityId,
+    fromEmail: held.fromEmail,
+    envelopeRcptTo: envelope.rcptTo,
+    draftsMailboxId: held.draftsMailboxId,
+    ...(held.sentMailboxId ? { sentMailboxId: held.sentMailboxId } : {}),
+  });
+  if (!submitted.ok) {
+    throw new MailError(
+      submitted.needsReauth ? "ACCOUNT_NEEDS_REAUTH" : "SEND_FAILED",
+      submitted.message,
+    );
+  }
+  return { submissionId: submitted.data.submissionId, deliveredTo: envelope.rcptTo };
+}

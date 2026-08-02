@@ -8,7 +8,7 @@ import { logAudit } from "@/lib/audit";
 import { looksLikeEmail } from "@/lib/email/identity";
 import { authorizedClient, loadConnection } from "@/lib/email/oauth/accounts";
 import { MailError, friendlyMessage } from "./core/errors";
-import { sendComposedMessage, type SendOutcome } from "./compose/send";
+import { holdComposedMessage, type HeldMessage } from "./compose/send";
 import { composeBodies } from "./compose/bodies";
 import {
   isInlineImageType,
@@ -131,7 +131,7 @@ const sendSchema = z.object({
 
 export async function sendMessageAction(
   input: z.infer<typeof sendSchema>,
-): Promise<ActionResult<SendOutcome>> {
+): Promise<ActionResult<HeldMessage>> {
   try {
     const ctx = await gate();
     const parsed = sendSchema.safeParse(input);
@@ -189,7 +189,18 @@ export async function sendMessageAction(
       bodies.htmlBody?.includes(`cid:${image.cid}`),
     );
 
-    const outcome = await sendComposedMessage(
+    /**
+     * HELD, not sent. The draft is created on the mail server and the decision
+     * about what happens to it — release now, release after an undo window, or
+     * queue for later — belongs to `schedule/actions.ts`.
+     *
+     * This is not an extra step for its own sake. `npm run mail:probe-send`
+     * found this server refuses `sendAt` outright, so a delay cannot be a JMAP
+     * submission dated in the future; it has to be a draft plus a decision. The
+     * upside is that an interrupted undo window leaves a finished message in
+     * Drafts rather than losing it.
+     */
+    const outcome = await holdComposedMessage(
       client.data,
       client.data.session.username,
       {
@@ -207,7 +218,10 @@ export async function sendMessageAction(
     );
 
     await logAudit({
-      action: "mail.sent",
+      // NOT `mail.sent` — nothing has left yet. The send is audited by whichever
+      // action releases it, so the log never claims a message went out because
+      // somebody pressed a button.
+      action: "mail.held",
       tenantId: ctx.tenantId,
       actorClerkUserId: ctx.userId,
       targetType: "mailbox",

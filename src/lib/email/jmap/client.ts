@@ -476,6 +476,30 @@ export interface JmapClient {
   /** Create a draft on the server. No local drafts table — see the seam's note. */
   saveDraft(message: JmapComposedMessage): Promise<JmapResult<{ emailId: string }>>;
   /**
+   * Submit a draft that already exists on the server.
+   *
+   * THE OTHER HALF OF `sendMessage`, split out because this server will not hold
+   * a message back for us. `npm run mail:probe-send` found `sendAt` refused with
+   * `invalidProperties` and no `maxDelayedSend` advertised, so "send in thirty
+   * seconds" and "send at 7am" both have to be OUR delay over a draft that is
+   * already safely on the mail server — rather than a JMAP feature.
+   *
+   * Split rather than parameterised: `sendMessage` still does both in one round
+   * trip for the ordinary case, and a message that is going out immediately
+   * should not pay for a feature it is not using.
+   */
+  submitDraft(params: {
+    emailId: string;
+    identityId: string;
+    fromEmail: string;
+    /** From the guard. NOT the header list. */
+    envelopeRcptTo: string[];
+    draftsMailboxId: string;
+    sentMailboxId?: string;
+  }): Promise<JmapResult<{ submissionId: string }>>;
+  /** Destroy messages by id. Used to call off a held send. */
+  destroyEmails(ids: readonly string[]): Promise<JmapResult<undefined>>;
+  /**
    * Create the message and send it, in ONE request: `Email/set create`, an
    * `EmailSubmission/set` that back-references it, and `onSuccessUpdateEmail` to
    * strip `$draft` and move it to Sent.
@@ -1143,6 +1167,71 @@ export function createJmapClient(
       return created.ok
         ? { ok: true, data: { emailId: created.id } }
         : { ok: false, message: created.message };
+    },
+
+    async submitDraft(params) {
+      const onSuccess: Record<string, unknown> = {
+        // Strip $draft, or the copy in Sent shows as an unsent draft forever.
+        "keywords/$draft": null,
+        [`mailboxIds/${params.draftsMailboxId}`]: null,
+      };
+      if (params.sentMailboxId) {
+        onSuccess[`mailboxIds/${params.sentMailboxId}`] = true;
+      }
+
+      const result = await call(
+        [
+          [
+            "EmailSubmission/set",
+            {
+              accountId,
+              create: {
+                sub: {
+                  emailId: params.emailId,
+                  identityId: params.identityId,
+                  envelope: {
+                    mailFrom: { email: params.fromEmail },
+                    rcptTo: params.envelopeRcptTo.map((email) => ({ email })),
+                  },
+                },
+              },
+              onSuccessUpdateEmail: { "#sub": onSuccess },
+            },
+            "s",
+          ] as unknown as MethodCall,
+        ],
+        [CORE, MAIL, SUBMISSION],
+      );
+      if (!result.ok) return result;
+
+      // Named explicitly, because onSuccessUpdateEmail emits a SECOND response
+      // under this same call id.
+      const taken = takeMethodResponse(result.data, "s", "EmailSubmission/set");
+      if (!taken.ok) return { ok: false, message: taken.message };
+      const submitted = readCreated(taken.payload, "sub");
+      return submitted.ok
+        ? { ok: true, data: { submissionId: submitted.id } }
+        : {
+            // The draft is still there. Saying so is the difference between
+            // somebody retrying and somebody retyping.
+            ok: false,
+            message: `${submitted.message} The message is still in your drafts.`,
+          };
+    },
+
+    async destroyEmails(ids) {
+      if (ids.length === 0) return { ok: true, data: undefined };
+      const result = await call(
+        [
+          ["Email/set", { accountId, destroy: [...ids] }, "d"] as unknown as MethodCall,
+        ],
+        [CORE, MAIL],
+      );
+      if (!result.ok) return result;
+      const taken = takeMethodResponse(result.data, "d", "Email/set");
+      return taken.ok
+        ? { ok: true, data: undefined }
+        : { ok: false, message: taken.message };
     },
 
     async sendMessage(message) {

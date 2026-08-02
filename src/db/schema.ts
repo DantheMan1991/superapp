@@ -2836,6 +2836,89 @@ export const mailSnoozes = pgTable(
 );
 
 /**
+ * A message written and held, waiting to go out.
+ *
+ * WHY THIS TABLE EXISTS AT ALL, given the mail server could in principle do it:
+ * `npm run mail:probe-send` asked, and this server REFUSES `sendAt` outright —
+ * `invalidProperties` naming the field, and no `maxDelayedSend` advertised. So
+ * "send at 7am" cannot be a JMAP submission dated in the future; it has to be a
+ * draft on the mail server plus a reminder here.
+ *
+ * WHICH MAKES IT A REMINDER, NOT CUSTODY — exactly like `mail_snoozes`, and the
+ * same failure analysis applies. **The message itself is a draft on the mail
+ * server**, so losing every row in this table loses no writing: it leaves a pile
+ * of finished messages sitting in Drafts, which is where somebody would look for
+ * them. No body, no recipient names and no attachment ever enters this database,
+ * which keeps the invariant the whole module is built on — bodies live on the
+ * mail server, reachable only with the token that person authorized.
+ *
+ * `envelope_rcpt_to` is the one thing that looks like content and is not: it is
+ * the delivery envelope, needed because the release runs from a cron with no
+ * memory of the composer, and the dev guard has to be applied again at the
+ * moment the message actually leaves. Addresses only, no names, no bodies.
+ *
+ * PER-USER, the fifth such table. Same two reasons as snoozes: the mailbox ids
+ * are issued inside one account and mean nothing in another, and a list of what
+ * somebody has queued to send — and to whom, and when — is correspondence.
+ */
+export const mailScheduledSends = pgTable(
+  "mail_scheduled_sends",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Whose message this is. Nobody schedules anonymously. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /** Which connection's ids every text column below refers to. */
+    mailAccountId: uuid("mail_account_id").notNull(),
+    /** The JMAP Email id of the draft. Text: the mail server issues it. */
+    emailId: text("email_id").notNull(),
+    /** Which identity it goes out as, and the address on the envelope. */
+    identityId: text("identity_id").notNull(),
+    fromEmail: text("from_email").notNull(),
+    draftsMailboxId: text("drafts_mailbox_id").notNull(),
+    /** Null when the server names no Sent folder; the server then decides. */
+    sentMailboxId: text("sent_mailbox_id"),
+    /**
+     * The delivery envelope, re-guarded at release. Addresses only — see the
+     * table comment for why this is not a body by another name.
+     */
+    envelopeRcptTo: jsonb("envelope_rcpt_to")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    sendAt: timestamp("send_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_scheduled_sends_tenant_id_id_idx").on(t.tenantId, t.id),
+    /**
+     * One pending send per draft. Scheduling the same message twice is a
+     * double-click, and two rows would race to submit the same draft — which
+     * would send it twice.
+     */
+    uniqueIndex("mail_scheduled_sends_message_idx").on(
+      t.tenantId,
+      t.clerkUserId,
+      t.mailAccountId,
+      t.emailId,
+    ),
+    /** The sweep's only query: everything due, oldest first, across tenants. */
+    index("mail_scheduled_sends_due_idx").on(t.sendAt),
+    // Same reasoning as snoozes: the ids stop meaning anything when the
+    // connection goes. The DRAFT is untouched and stays in the mail server's
+    // Drafts folder, which is exactly where a person would look for it.
+    foreignKey({
+      name: "mail_scheduled_sends_account_fk",
+      columns: [t.tenantId, t.mailAccountId],
+      foreignColumns: [mailAccounts.tenantId, mailAccounts.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
  * A rule the mail server runs on arrival.
  *
  * These rows are the SOURCE, not the truth. They compile to one Sieve script
@@ -3375,6 +3458,7 @@ export type MailAnnotation = typeof mailAnnotations.$inferSelect;
 export type MailSavedSearch = typeof mailSavedSearches.$inferSelect;
 export type MailSnooze = typeof mailSnoozes.$inferSelect;
 export type MailRuleRow = typeof mailRules.$inferSelect;
+export type MailScheduledSend = typeof mailScheduledSends.$inferSelect;
 /** Display-only participants on an indexed thread. */
 export type MailParticipant = { name: string; email: string };
 export type DocumentShare = typeof documentShares.$inferSelect;

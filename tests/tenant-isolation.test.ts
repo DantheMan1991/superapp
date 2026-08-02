@@ -2,6 +2,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
+import { documentsMailExtension } from "../src/modules/documents/mail/extension";
 
 /**
  * THE test that certifies the shell: two tenants, and neither can read,
@@ -1768,6 +1769,92 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
     expect(result.own.map((r) => r.id)).toContain(fx.a.lockedDocId);
     expect(result.own.map((r) => r.id)).toContain(fx.a.openDocId);
     expect(result.other).toHaveLength(0);
+  });
+
+  /**
+   * The composer's image picker, through the extension seam.
+   *
+   * THE POINT OF THIS TEST is that `src/modules/documents/mail/extension.ts` has
+   * no visibility predicate in it at all — `searchImages` filters on tenant,
+   * status, type and size, and nothing else. What keeps an owners-only folder's
+   * photograph out of a staff user's picker is RLS, reached through the CALLER'S
+   * transaction, exactly as the `MailImageSource` contract requires.
+   *
+   * That is the property the seam exists for, and it is worth asserting rather
+   * than believing: a future refactor that opened its own `withTenant`, or
+   * reached for `withSystem`, would still pass every unit test in the module.
+   */
+  it("the mail image source inherits Documents' visibility, with no predicate of its own", async () => {
+    const ctxFor = (role: "owner" | "staff") => ({
+      tenantId: tenantA,
+      userId: "user_iso_images",
+      role,
+    });
+
+    // A picture inside the owners-only folder. Created as owner, because the
+    // member policy's WITH CHECK would correctly refuse it as staff.
+    const hiddenImageId = await withTenant(
+      tenantA,
+      async (tx) => {
+        const [row] = await tx
+          .insert(schema.documents)
+          .values({
+            tenantId: tenantA,
+            origin: "dms",
+            folderId: fx.a.lockedFolderId,
+            title: "Confidential site photo",
+            fileName: "confidential.png",
+            mimeType: "image/png",
+            sizeBytes: 2048,
+            blobPathname: `tenants/${tenantA}/files/confidential.png`,
+            effectiveVisibility: "owners",
+          })
+          .returning({ id: schema.documents.id });
+        return row.id;
+      },
+      { role: "owner" },
+    );
+
+    const images = documentsMailExtension.images!;
+
+    // STAFF: the picker cannot offer it, and cannot open it by id either —
+    // knowing the id is not permission, and `open` returns the same null for
+    // "not yours" as for "not there" so it cannot be used to probe.
+    const asStaff = await withTenant(
+      tenantA,
+      async (tx) => ({
+        found: await images.search(tx, ctxFor("staff"), "", 50),
+        opened: await images.open(tx, ctxFor("staff"), hiddenImageId),
+      }),
+      { role: "staff" },
+    );
+    expect(asStaff.found.map((i) => i.id)).not.toContain(hiddenImageId);
+    expect(asStaff.opened).toBeNull();
+
+    // OWNER: the same call, the same code, a different row set.
+    const asOwner = await withTenant(
+      tenantA,
+      async (tx) => ({
+        found: await images.search(tx, ctxFor("owner"), "", 50),
+        opened: await images.open(tx, ctxFor("owner"), hiddenImageId),
+      }),
+      { role: "owner" },
+    );
+    expect(asOwner.found.map((i) => i.id)).toContain(hiddenImageId);
+    expect(asOwner.opened?.type).toBe("image/png");
+
+    // And never across tenants, whatever the role.
+    const asOtherTenantOwner = await withTenant(
+      tenantB,
+      (tx) =>
+        images.open(
+          tx,
+          { tenantId: tenantB, userId: "user_iso_images", role: "owner" },
+          hiddenImageId,
+        ),
+      { role: "owner" },
+    );
+    expect(asOtherTenantOwner).toBeNull();
   });
 
   it("versions inherit visibility with no flag of their own", async () => {

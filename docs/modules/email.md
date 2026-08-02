@@ -1789,6 +1789,144 @@ selected (does the selection survive), Quote versus Indent (do they render
 differently in the received message), and the colour picker over a multi-block
 selection.
 
+### 2026-08-02 (later) — Inline images, and the MIME tree a `cid:` actually needs
+
+The last thing on the Gmail compose review. A picture can now go IN the message
+rather than beside it, from the laptop **or from the tenant's own Documents** —
+the founder's addition, and the half a webmail cannot do.
+
+**THE PROBE EARNED ITSELF AGAIN, AND THIS TIME BEFORE A LINE WAS WRITTEN.** The
+plan was the obvious one: an attachment with `disposition: "inline"` and a `cid`,
+which is exactly what RFC 8621 §4.1.4 describes. `npm run mail:probe-compose` was
+extended to try it against the live server first, and the tree that came back
+was:
+
+```
+multipart/mixed
+├── multipart/alternative  (text/plain, text/html)
+└── image/png              (inline, cid)
+```
+
+**The picture is a SIBLING of the alternative.** A `cid:` reference resolves
+inside a `multipart/related` (RFC 2387), and in that shape it does not — so the
+recipient gets a broken image with the file listed underneath as an attachment.
+Every unit test in the world would have passed: the request matched the spec, the
+server accepted it, the message existed. Only reading the MIME back showed it.
+
+The fix is the same spec's other door. Supplying `bodyStructure` explicitly
+instead of the convenience properties describes the tree yourself, and the probe
+confirmed Stalwart honours it verbatim:
+
+```
+multipart/mixed
+├── multipart/related
+│   ├── multipart/alternative  (text/plain, text/html)
+│   └── image/png              (inline, cid)
+└── application/pdf            (a real attachment)
+```
+
+Boundaries, encodings and charsets stay the server's job — which is the part
+worth not hand-rolling — and only the SHAPE becomes ours. The probe also checked
+the thing that would have been worse than a broken image: `Email/get` still
+reports an `htmlBody` part afterwards, so **our own reading pane still finds the
+body it just sent**.
+
+A real attachment stays OUTSIDE the related part. A PDF is not a resource the
+body renders, and putting it inside invites clients to treat it as one and hide
+it from the attachment list.
+
+**`draftObject` moved out of `client.ts` into a pure `jmap/draft.ts`**, free of
+`server-only`, mirroring `parse.ts` — and for the same reason. The probe could
+not import `client.ts` at all (`server-only` throws outside a React server
+context), so it had been sending a hand-written request. **A probe that verifies
+a hand-written request proves the server behaves and proves nothing about the
+client.** It calls `draftObject` now, so the tree on the wire is the tree the
+composer sends, and the unit tests assert the same function.
+
+**THE `<img>` RULE IS NOT "IMAGES ARE ALLOWED".** An `<img>` survives only if it
+names a `data-cid` this message actually minted, and the `src` is then REBUILT
+from that cid rather than read. There is no code path in which a caller-supplied
+`src` reaches a recipient — so a tracking pixel cannot be smuggled through by
+pairing it with a valid cid, which is the obvious attack on a naive version. The
+allowlist comes from the send action's own `inlineImages` list, and its default
+is an EMPTY set, so a caller who forgets to pass it loses images rather than
+admitting unchecked ones.
+
+Two halves are both needed, and the tests caught that: stripping the attributes
+is what loses the URL, and an `exclusiveFilter` removing the element is what
+stops a refused image shipping as a bare `<img>` that renders in the recipient's
+client as a broken-image icon — which reads as "the sender attached something
+that did not arrive" rather than as the nothing it actually is.
+
+**The editor shows a signed preview URL, never the `cid:`.** A browser cannot
+render `cid:`, so an editor that inserted the final form would show a broken
+image for the whole time somebody was writing. The identity travels in
+`data-cid` and the two are swapped once, at the boundary. The preview reuses the
+existing signed blob route, so the composer's picture and a received message's
+inline image travel one path rather than two.
+
+**Only the pictures the SANITIZED body still references are attached.** Somebody
+who inserts an image and then deletes it leaves the upload in the composer's
+list; attaching it anyway would put a file in the message with nothing pointing
+at it, which most clients show as an ordinary attachment. So the body decides,
+not the list — and the composer never has to watch a contenteditable for
+deletions.
+
+**Documents, through the seam, and the seam is the security.** Mail may not
+import the Documents module — `eslint.config.mjs` forbids it and that rule is
+why `src/lib/mail-extensions/` exists — so `MailExtension` gained an optional
+`images` capability with `search` and `open`. **Both take the CALLER'S `tx`**,
+like `search`/`resolve` and unlike `filing`, which opens its own because it
+writes blobs. This one only reads, so it inherits the caller's visibility for
+free.
+
+`extension.ts` therefore has NO visibility predicate in it — it filters on
+tenant, status, type and size and nothing else. What keeps an owners-only
+folder's photograph out of a staff user's picker is RLS, reached through that
+transaction. **There is an isolation test asserting exactly that**: the same
+code, the same call, a different row set for owner and staff, and null across
+tenants. It is worth having because a refactor that opened its own `withTenant`
+would still pass every unit test in the module.
+
+`open()` returns null for "not yours" and "not there" identically, so it cannot
+be used to probe for files in folders somebody cannot open. The permission check
+runs inside the transaction; the bytes are fetched by a thunk AFTER it closes,
+because network work never happens inside a transaction; and the upload to the
+mail server happens last, so nothing is created anywhere until the caller has
+been proved entitled to the file.
+
+**SVG is refused**, the only interesting entry in the type list. It is a document
+that can carry script and external references rather than a picture — the same
+reason it is refused as a mail attachment and left out of the read path's
+magic-byte sniff table — and this one leaves under the user's own name where
+nothing of ours looks at it again.
+
+**Content-IDs are minted SERVER-SIDE**, at upload. A client-chosen value would be
+untrusted input in a MIME header and inside a `cid:` URL, so every later use
+would have to treat it as such; minted here, `isValidCid` is an assertion rather
+than a guard. The pattern is deliberately far narrower than RFC 2392 allows,
+because anything carrying a quote, an angle bracket or whitespace would make it
+a header-injection question.
+
+**Gmail's third source — "Web Address (URL)" — is deliberately absent.** A remote
+`<img>` in an outbound message is a tracking pixel aimed at the person you are
+writing to, it reports whenever they open the mail, and it breaks the day the URL
+stops resolving. There is no code path that copies a `src`, so there would be
+nothing to hand it.
+
+**An image is not nothing in the text part.** `htmlToPlainText` emits
+`[image: alt text]`, because silently dropping it is how "see the photo below"
+arrives with nothing below it for anyone reading the plain alternative.
+
+Verified: 21 confirmations from the probe against the live server with no
+findings, 22 new unit tests, and one isolation test against the dev branch.
+
+**Not verified in a browser**, the same constraint as every slice since the
+composer began. The specific things to try on a preview deployment: inserting a
+picture with the caret mid-sentence, deleting an inserted picture and sending
+(the attachment should not follow it), and whether the Documents picker's search
+feels fast enough to leave debounced at 250 ms.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -1900,6 +2038,15 @@ Composing (`src/modules/email/compose/`, all pure and free of `server-only`):
   rule at all because they are characters rather than images.
 - `link-url.ts` — `normalizeLinkInput`. Pure and separate from the editor so the
   security-relevant half of a client component is testable without a DOM.
+- `inline.ts` — the inline-image rules: types (no SVG), caps, and the
+  server-minted Content-ID. Shared by the upload route, the Documents insert
+  action, the send action and the sanitizer's caller, so those four cannot
+  disagree about what a picture is.
+- `src/lib/email/jmap/draft.ts` — **`draftObject`, the request builder**, moved
+  out of `client.ts` and free of `server-only` for the same reason `parse.ts`
+  is. It decides whether a message is described with the convenience properties
+  or an explicit `bodyStructure`; read its comment before changing either. The
+  probe imports it, so what goes on the wire is what ships.
 - `bodies.ts` — the sanitize-THEN-derive ordering, in a file of its own so a test
   can assert it. Outside `compose-actions.ts` because a `"use server"` module may
   only export async functions.
@@ -2204,9 +2351,13 @@ declaration the toolbar can produce and the sanitizer accepts nothing else, so
 both sides read one file and cannot drift. That is the property to preserve when
 adding any further formatting control.
 
-What is NOT built yet, in priority order: **inline images** (upload plus a picker
-over Yosher Documents, through the `src/lib/mail-extensions/` seam — mail may not
-import the Documents module), **signature editing** (they are read
+**Inline images are in.** A picture goes in the body from the laptop or from the
+tenant's own Documents, through the `src/lib/mail-extensions/` seam. The MIME is
+an explicit `multipart/related` because the convenience properties produce
+`multipart/mixed`, where a `cid:` reference does not resolve — found by probing
+the live server before the feature was designed.
+
+What is NOT built yet, in priority order: **signature editing** (they are read
 from the server's Identity and prefilled, never written), contact autocomplete —
 the server has advertised `urn:ietf:params:jmap:contacts` since the first probe
 and nothing uses it — undo/schedule send, labels, websocket push
@@ -2370,10 +2521,17 @@ code or config change.
   would mean shipping a sanitizer to the browser AND trusting it, and the thing
   being pasted is routinely another email. Revisit only with a sanitize-on-paste
   that runs the same allowlist as the server.
-- **No image insertion in a composed message**, and it is not a small gap to
-  close: an inline image means uploading a blob, minting a `cid:`, and emitting
-  `multipart/related` around the alternative. `<img>` is not in the outbound
-  allowlist at all until that exists.
+- **Inline images are never resized or re-encoded.** A 9 MB photograph straight
+  off a phone is sent at 9 MB, with only a `max-width` to keep it from blowing
+  out the layout. Downscaling server-side would be the kind thing to do and
+  needs a decision about what the sender is entitled to expect back.
+- **A deleted inline image's blob stays on the mail server.** The send path
+  attaches only the pictures the body still references, so nothing wrong reaches
+  the recipient, but the orphaned upload is not cleaned up. The mail server's
+  own blob expiry is what collects it.
+- **No drag-and-drop or paste of an image into the composer.** Paste is plain
+  text by design, and an image on the clipboard is currently dropped silently
+  rather than offered — which is the one place that rule reads as a bug.
 - **No templates / canned responses.** The one compose feature from the Gmail
   review that needs storage rather than markup — a per-user table, so it is its
   own slice with a migration and isolation tests.

@@ -262,6 +262,14 @@ export interface JmapComposedMessage {
   inReplyTo?: string[];
   references?: string[];
   attachments?: { blobId: string; type: string; name: string }[];
+  /**
+   * Pictures the HTML part references with `cid:`.
+   *
+   * Separate from `attachments` because the MIME they need is a different SHAPE,
+   * not a different disposition — see `draftObject`. A `cid` here must match one
+   * in the html body or the recipient gets a file with nothing pointing at it.
+   */
+  inlineImages?: { blobId: string; cid: string; type: string; name: string }[];
   /** Where the draft is created. Required — every message starts as a draft. */
   draftsMailboxId: string;
   /** Where it lands after sending. Absent means the server decides. */

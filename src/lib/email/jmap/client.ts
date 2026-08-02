@@ -10,11 +10,11 @@ import {
   parseThread,
   takeMethodResponse,
 } from "./parse";
+import { draftObject } from "./draft";
 import type {
   JmapChanges,
   JmapComposedMessage,
   JmapEmail,
-  JmapEmailAddress,
   JmapEmailFilter,
   JmapIdentity,
   JmapMailbox,
@@ -211,64 +211,6 @@ interface MethodCall {
   2: string;
 }
 
-/**
- * A composed message as a JMAP Email object.
- *
- * Bodies go in as `bodyValues` keyed by part id, with `textBody`/`htmlBody`
- * naming which part is which — RFC 8621 §4.1.4. Supplying both makes the server
- * build the `multipart/alternative` itself, which is the whole reason not to
- * assemble MIME by hand: getting boundaries, encodings and charsets right is a
- * job the server already does correctly.
- *
- * `$draft` is set on creation whether or not this is going straight out. A
- * message that exists on the server without it, before submission, is one that
- * shows up in the mailbox as ordinary mail if the send then fails.
- */
-function draftObject(message: JmapComposedMessage): Record<string, unknown> {
-  const bodyValues: Record<string, { value: string }> = {
-    text: { value: message.textBody },
-  };
-  const body: Record<string, unknown> = {
-    textBody: [{ partId: "text", type: "text/plain" }],
-  };
-  if (message.htmlBody && message.htmlBody.trim().length > 0) {
-    bodyValues.html = { value: message.htmlBody };
-    body.htmlBody = [{ partId: "html", type: "text/html" }];
-  }
-
-  return {
-    mailboxIds: { [message.draftsMailboxId]: true },
-    keywords: { $draft: true },
-    from: [addressObject(message.from)],
-    to: message.to.map(addressObject),
-    ...(message.cc.length > 0 ? { cc: message.cc.map(addressObject) } : {}),
-    ...(message.bcc.length > 0 ? { bcc: message.bcc.map(addressObject) } : {}),
-    subject: message.subject,
-    ...(message.inReplyTo && message.inReplyTo.length > 0
-      ? { inReplyTo: message.inReplyTo }
-      : {}),
-    ...(message.references && message.references.length > 0
-      ? { references: message.references }
-      : {}),
-    ...(message.attachments && message.attachments.length > 0
-      ? {
-          attachments: message.attachments.map((a) => ({
-            blobId: a.blobId,
-            type: a.type,
-            name: a.name,
-            disposition: "attachment",
-          })),
-        }
-      : {}),
-    bodyValues,
-    ...body,
-  };
-}
-
-/** JMAP wants `name: null` rather than an absent key for a bare address. */
-function addressObject(a: JmapEmailAddress): { name: string | null; email: string } {
-  return { name: a.name && a.name.length > 0 ? a.name : null, email: a.email };
-}
 
 /**
  * Read one creation out of a `/set` response.

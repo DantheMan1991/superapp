@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { sanitizeOutboundHtml } from "../src/modules/email/compose/html";
 import { htmlToPlainText } from "../src/modules/email/compose/to-text";
+import { draftObject } from "../src/lib/email/jmap/draft";
 
 /**
  * Does the mail server actually build the `multipart/alternative` we think it
@@ -290,6 +291,374 @@ async function main(): Promise<void> {
     ]);
     const gone = (destroyed[1].destroyed ?? []).includes(emailId);
     console.log(`\ncleanup   draft ${gone ? "destroyed" : "NOT DESTROYED — remove it by hand"}`);
+  }
+
+  // ===========================================================================
+  // SCENARIO 2: an inline image.
+  //
+  // THE QUESTION THIS ANSWERS, and the reason it is probed before the feature is
+  // designed: RFC 8621 says an attachment may carry `disposition: "inline"` and
+  // a `cid`, and an `<img src="cid:...">` in the HTML part refers to it. What it
+  // does NOT say is whether a given server then wraps the alternative in a
+  // `multipart/related` — which is what makes that reference resolve in the
+  // recipient's client. Assemble it by hand and you are back to writing MIME;
+  // assume it and every inline image arrives as a broken icon with the picture
+  // sitting underneath as an attachment.
+  // ===========================================================================
+  const PNG_1X1 = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGA" +
+      "hKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  const uploadUrl = rebase(session.uploadUrl as string, rawUrl).replace(
+    "{accountId}",
+    encodeURIComponent(accountId),
+  );
+  const uploaded = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { Authorization: `Basic ${auth}`, "Content-Type": "image/png" },
+    body: PNG_1X1,
+    redirect: "follow",
+  });
+  if (!uploaded.ok) fail(`blob upload returned ${uploaded.status}`);
+  const blob = (await uploaded.json()) as Json;
+  confirmed.push(`Blob upload works (${blob.size} bytes, type ${blob.type}).`);
+
+  const cid = "probe-inline-1@yosher.test";
+  // The sanitizer's rule, checked here as well as in the unit tests, because
+  // this is the one place the whole path runs end to end: an `<img>` is
+  // admitted ONLY for a cid the message minted, and its `src` is rebuilt from
+  // that cid rather than copied.
+  const withAllowlist = sanitizeOutboundHtml(
+    `<img src="https://tracker.example/p.gif" data-cid="${cid}">`,
+    { allowedCids: new Set([cid]) },
+  );
+  if (withAllowlist.includes(`cid:${cid}`) && !withAllowlist.includes("tracker")) {
+    confirmed.push("The sanitizer rebuilds an inline image's src from its cid.");
+  } else {
+    findings.push("The sanitizer did not rebuild the inline image's src.");
+  }
+  if (sanitizeOutboundHtml(`<img src="x" data-cid="${cid}">`).includes("img")) {
+    findings.push(
+      "An <img> survived with NO allowlist supplied. The default must admit " +
+        "nothing, or every path that is not the composer admits images.",
+    );
+  } else {
+    confirmed.push("With no allowlist, no image survives at all.");
+  }
+
+  const inlineDraft = {
+    mailboxIds: { [drafts.id]: true },
+    keywords: { $draft: true },
+    from: [{ name: null, email: session.username }],
+    to: [{ name: "Probe", email: session.username }],
+    subject: "Compose probe - inline image",
+    bodyValues: {
+      text: { value: "Above.\n\n[image]\n\nBelow." },
+      html: {
+        value: `<p>Above.</p><img src="cid:${cid}" alt="a dot"><p>Below.</p>`,
+      },
+    },
+    textBody: [{ partId: "text", type: "text/plain" }],
+    htmlBody: [{ partId: "html", type: "text/html" }],
+    attachments: [
+      {
+        blobId: blob.blobId,
+        type: "image/png",
+        name: "dot.png",
+        disposition: "inline",
+        cid,
+      },
+    ],
+  };
+
+  const [madeInline] = await call([
+    ["Email/set", { accountId, create: { inline: inlineDraft } }, "i"],
+  ]);
+  if (madeInline[1].notCreated?.inline) {
+    findings.push(
+      `The server REFUSED an inline attachment: ${JSON.stringify(
+        madeInline[1].notCreated.inline,
+      )}`,
+    );
+  } else {
+    const inlineId = madeInline[1].created.inline.id as string;
+    const inlineBlobId = madeInline[1].created.inline.blobId as string;
+    try {
+      const [gotInline] = await call([
+        [
+          "Email/get",
+          {
+            accountId,
+            ids: [inlineId],
+            properties: ["bodyStructure", "attachments"],
+            bodyProperties: [
+              "partId",
+              "type",
+              "disposition",
+              "cid",
+              "name",
+              "subParts",
+            ],
+          },
+          "gi",
+        ],
+      ]);
+      const built = gotInline[1].list[0];
+      console.log("\n--- bodyStructure for the INLINE-IMAGE message");
+      console.log(
+        JSON.stringify(built.bodyStructure, null, 2)
+          .split("\n")
+          .map((l) => `    ${l}`)
+          .join("\n"),
+      );
+
+      const topType = built.bodyStructure?.type as string | undefined;
+      if (topType === "multipart/related") {
+        confirmed.push(
+          "The server wraps the alternative in multipart/related for an inline " +
+            "attachment. No hand-built MIME needed.",
+        );
+      } else {
+        confirmed.push(
+          `KNOWN AND WORKED AROUND: the convenience properties produce ` +
+            `"${topType}" for an inline attachment, not multipart/related, so ` +
+            "a cid reference would not resolve. This is why the client builds " +
+            "an explicit bodyStructure instead — see scenario 3.",
+        );
+      }
+
+      const attached = (built.attachments ?? []) as Json[];
+      const roundTripped = attached.find((a) => a.cid === cid);
+      if (roundTripped) {
+        confirmed.push(
+          `The cid round-trips through Email/get as "${roundTripped.cid}" ` +
+            `with disposition "${roundTripped.disposition}".`,
+        );
+      } else {
+        findings.push(
+          `No attachment came back carrying our cid. Got: ${JSON.stringify(
+            attached.map((a) => ({ cid: a.cid, disposition: a.disposition })),
+          )}`,
+        );
+      }
+
+      const rawInline = await fetch(
+        downloadUrl
+          .replace("{accountId}", encodeURIComponent(accountId))
+          .replace("{blobId}", encodeURIComponent(inlineBlobId))
+          .replace("{type}", "message%2Frfc822")
+          .replace("{name}", "inline.eml"),
+        { headers: { Authorization: `Basic ${auth}` }, redirect: "follow" },
+      );
+      const rawText = await rawInline.text();
+      console.log(`\n--- raw inline message (${rawText.length} bytes), structure only`);
+      console.log(
+        rawText
+          .split(/\r?\n/)
+          .filter((l) => /^(Content-|--\w)/i.test(l))
+          .slice(0, 24)
+          .map((l) => `    ${l}`)
+          .join("\n"),
+      );
+
+      // The Content-ID is what a `cid:` URL actually resolves against. A server
+      // that rewrites or drops it breaks every inline image silently.
+      if (rawText.includes(`<${cid}>`)) {
+        confirmed.push("Content-ID is emitted in angle brackets, verbatim.");
+      } else if (rawText.includes(cid)) {
+        confirmed.push("Content-ID survives, though not in the bracketed form.");
+      } else {
+        findings.push("The server did not emit our Content-ID at all.");
+      }
+      if (/Content-Disposition:\s*inline/i.test(rawText)) {
+        confirmed.push("Content-Disposition: inline survives.");
+      } else {
+        findings.push("The inline disposition was not preserved.");
+      }
+    } finally {
+      await call([["Email/set", { accountId, destroy: [inlineId] }, "di"]]);
+      console.log("cleanup   inline draft destroyed");
+    }
+  }
+
+  // ===========================================================================
+  // SCENARIO 3: can we ASK for multipart/related?
+  //
+  // Scenario 2 found that letting the server assemble the MIME from
+  // `htmlBody` + `attachments` produces `multipart/mixed`, with the inline image
+  // as a SIBLING of the alternative rather than a resource inside a
+  // `multipart/related`. RFC 2387 is what makes a `cid:` reference resolvable,
+  // and clients that follow it will show a broken image with the file listed
+  // underneath as an attachment.
+  //
+  // RFC 8621 section 4.1.4 offers the other door: supply `bodyStructure`
+  // explicitly instead of the convenience properties, and the server builds
+  // exactly the tree you describe. Boundaries, encodings and charsets stay its
+  // job — which is the part worth not hand-rolling — while the SHAPE becomes
+  // ours. This asks whether Stalwart honours that.
+  //
+  // The tree being requested is the canonical one, including a real attachment
+  // alongside the inline image, because that combination is where a naive
+  // structure goes wrong first:
+  //
+  //   multipart/mixed
+  //   ├── multipart/related
+  //   │   ├── multipart/alternative
+  //   │   │   ├── text/plain
+  //   │   │   └── text/html
+  //   │   └── image/png   (inline, cid)
+  //   └── text/plain      (a real attachment)
+  // ===========================================================================
+  const relatedCid = "probe-related-1@yosher.test";
+
+  const attachUpload = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { Authorization: `Basic ${auth}`, "Content-Type": "text/plain" },
+    body: Buffer.from("a genuine attachment", "utf8"),
+    redirect: "follow",
+  });
+  if (!attachUpload.ok) fail(`attachment upload returned ${attachUpload.status}`);
+  const attachBlob = (await attachUpload.json()) as Json;
+
+  /**
+   * BUILT BY THE SHIPPING CODE, not by hand.
+   *
+   * `draftObject` is the function `sendMessage` uses, moved into a pure module
+   * precisely so this script can call it. A probe that verifies a hand-written
+   * request proves the SERVER behaves; it proves nothing about the client. This
+   * way the tree being sent is the tree the composer sends.
+   */
+  const relatedDraft = draftObject({
+    identityId: "probe",
+    from: { name: null, email: session.username as string },
+    to: [{ name: "Probe", email: session.username as string }],
+    cc: [],
+    bcc: [],
+    subject: "Compose probe - multipart/related",
+    textBody: "Above.\n\n[image]\n\nBelow.",
+    htmlBody: `<p>Above.</p><img src="cid:${relatedCid}" alt="a dot"><p>Below.</p>`,
+    inlineImages: [
+      {
+        blobId: blob.blobId as string,
+        cid: relatedCid,
+        type: "image/png",
+        name: "dot.png",
+      },
+    ],
+    attachments: [
+      {
+        blobId: attachBlob.blobId as string,
+        type: "text/plain",
+        name: "notes.txt",
+      },
+    ],
+    draftsMailboxId: drafts.id as string,
+    envelopeRcptTo: [session.username as string],
+  });
+
+  const [madeRelated] = await call([
+    ["Email/set", { accountId, create: { rel: relatedDraft } }, "r"],
+  ]);
+  if (madeRelated[1].notCreated?.rel) {
+    findings.push(
+      "The server REFUSED an explicit bodyStructure: " +
+        `${JSON.stringify(madeRelated[1].notCreated.rel)}. Inline images would ` +
+        "have to live in the multipart/mixed the convenience properties build, " +
+        "or the MIME would have to be assembled by hand and imported.",
+    );
+  } else {
+    const relId = madeRelated[1].created.rel.id as string;
+    const relBlobId = madeRelated[1].created.rel.blobId as string;
+    try {
+      const [gotRel] = await call([
+        [
+          "Email/get",
+          {
+            accountId,
+            ids: [relId],
+            properties: ["bodyStructure", "attachments", "htmlBody", "textBody"],
+            bodyProperties: [
+              "partId",
+              "type",
+              "disposition",
+              "cid",
+              "name",
+              "subParts",
+            ],
+          },
+          "gr",
+        ],
+      ]);
+      const built = gotRel[1].list[0];
+      console.log("\n--- bodyStructure the server built from an EXPLICIT one");
+      console.log(
+        JSON.stringify(built.bodyStructure, null, 2)
+          .split("\n")
+          .map((l) => `    ${l}`)
+          .join("\n"),
+      );
+
+      const top = built.bodyStructure?.type as string | undefined;
+      const inner = built.bodyStructure?.subParts?.[0]?.type as string | undefined;
+      if (top === "multipart/mixed" && inner === "multipart/related") {
+        confirmed.push(
+          "An EXPLICIT bodyStructure is honoured: mixed > related > alternative " +
+            "is exactly what came back. Inline images can be done properly.",
+        );
+      } else {
+        findings.push(
+          `An explicit bodyStructure came back as "${top}" > "${inner}", not ` +
+            "mixed > related. The server rewrote the tree.",
+        );
+      }
+
+      // A message that says multipart/related but whose reading side no longer
+      // reports the html part would be a different kind of broken.
+      const htmlPart = (built.htmlBody ?? []) as Json[];
+      if (htmlPart.some((p) => p.type === "text/html")) {
+        confirmed.push("The html part is still discoverable via Email/get.");
+      } else {
+        findings.push(
+          "Email/get no longer reports an htmlBody part for this message, so " +
+            "our own reading pane would not find the body it just sent.",
+        );
+      }
+
+      const rawRel = await fetch(
+        downloadUrl
+          .replace("{accountId}", encodeURIComponent(accountId))
+          .replace("{blobId}", encodeURIComponent(relBlobId))
+          .replace("{type}", "message%2Frfc822")
+          .replace("{name}", "related.eml"),
+        { headers: { Authorization: `Basic ${auth}` }, redirect: "follow" },
+      );
+      const rawRelText = await rawRel.text();
+      console.log(`\n--- raw related message (${rawRelText.length} bytes), structure only`);
+      console.log(
+        rawRelText
+          .split(/\r?\n/)
+          .filter((l) => /^Content-(Type|ID|Disposition)/i.test(l))
+          .slice(0, 20)
+          .map((l) => `    ${l}`)
+          .join("\n"),
+      );
+
+      if (/Content-Type:\s*multipart\/related/i.test(rawRelText)) {
+        confirmed.push("The WIRE FORMAT carries multipart/related.");
+      } else {
+        findings.push("The raw message does not contain multipart/related.");
+      }
+      if (rawRelText.includes(`<${relatedCid}>`)) {
+        confirmed.push("Content-ID survives inside the related part.");
+      } else {
+        findings.push("Content-ID did not survive inside the related part.");
+      }
+    } finally {
+      await call([["Email/set", { accountId, destroy: [relId] }, "dr"]]);
+      console.log("cleanup   related draft destroyed");
+    }
   }
 
   console.log("\n─── CONFIRMED");

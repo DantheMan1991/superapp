@@ -10,6 +10,11 @@ import { authorizedClient, loadConnection } from "@/lib/email/oauth/accounts";
 import { MailError, friendlyMessage } from "./core/errors";
 import { sendComposedMessage, type SendOutcome } from "./compose/send";
 import { composeBodies } from "./compose/bodies";
+import {
+  isInlineImageType,
+  isValidCid,
+  MAX_INLINE_IMAGES,
+} from "./compose/inline";
 
 /**
  * Sending.
@@ -103,6 +108,25 @@ const sendSchema = z.object({
     )
     .max(25)
     .optional(),
+  /**
+   * Pictures the html body references with `cid:`.
+   *
+   * Every field is re-checked rather than trusted, even though the upload route
+   * minted the cid and settled the type: this is a server action, so the shape
+   * arriving here is whatever the caller sent, and "we generated it earlier" is
+   * a fact about a different request.
+   */
+  inlineImages: z
+    .array(
+      z.object({
+        blobId: z.string().min(1).max(512),
+        cid: z.string().refine(isValidCid, "not a content id we minted"),
+        type: z.string().refine(isInlineImageType, "not an inline image type"),
+        name: z.string().max(255),
+      }),
+    )
+    .max(MAX_INLINE_IMAGES)
+    .optional(),
 });
 
 export async function sendMessageAction(
@@ -136,9 +160,34 @@ export async function sendMessageAction(
       );
     }
 
+    /**
+     * The cids this message is allowed to reference, and nothing else.
+     *
+     * Built from the inline list the caller sent, which Zod has already checked
+     * for shape and type. That is what makes an `<img>` in the body meaningful:
+     * the sanitizer rebuilds every `src` from a cid in THIS set, so a body
+     * naming a picture that is not attached loses the picture rather than
+     * shipping a dangling reference — and one naming a remote URL never had a
+     * `src` copied in the first place.
+     */
+    const inlineImages = data.inlineImages ?? [];
+    const allowedCids = new Set(inlineImages.map((i) => i.cid));
+
     // See the header. Sanitize, THEN derive — the text part is a rendering of
     // what actually goes out, never of what was submitted.
-    const bodies = composeBodies(data.htmlBody, data.textBody);
+    const bodies = composeBodies(data.htmlBody, data.textBody, allowedCids);
+
+    /**
+     * Only the pictures the SANITIZED body still points at are attached.
+     *
+     * A person who inserts an image and then deletes it from the editor leaves
+     * the upload behind in the composer's list, and attaching it anyway would
+     * put a file in the message with nothing referencing it — which most clients
+     * show as an ordinary attachment. So the body decides, not the list.
+     */
+    const referenced = inlineImages.filter((image) =>
+      bodies.htmlBody?.includes(`cid:${image.cid}`),
+    );
 
     const outcome = await sendComposedMessage(
       client.data,
@@ -153,6 +202,7 @@ export async function sendMessageAction(
         ...(data.inReplyTo ? { inReplyTo: data.inReplyTo } : {}),
         ...(data.references ? { references: data.references } : {}),
         ...(data.attachments ? { attachments: data.attachments } : {}),
+        ...(referenced.length > 0 ? { inlineImages: referenced } : {}),
       },
     );
 
@@ -176,6 +226,7 @@ export async function sendMessageAction(
         // formatting arrived wrong" needs to know which shape was sent; nobody
         // needs the words (S9).
         html: Boolean(bodies.htmlBody),
+        inlineImages: referenced.length,
       },
     });
 

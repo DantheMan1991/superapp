@@ -31,8 +31,11 @@ import {
  * produce.** Bold, italic, underline, lists, links, paragraphs, and the quote
  * block replies are built from. Nothing else has a way in:
  *
- *   • no `<img>` — a pasted tracking pixel would make our user's message track
- *     its recipient, which is a thing done on their behalf without their knowing
+ *   • no REMOTE image, ever. `<img>` is admitted only for a `cid:` this message
+ *     minted, and its `src` is REBUILT from that cid rather than read — so there
+ *     is no code path in which a caller-supplied URL reaches a recipient. A
+ *     pasted tracking pixel would otherwise make our user's message track the
+ *     person they wrote to, on their behalf and without their knowing.
  *   • no `<style>` block, ever
  *   • no `<table>` — nothing in the toolbar makes one, so anything that arrives
  *     as one came from somewhere else
@@ -79,6 +82,19 @@ const QUOTE_STYLE =
   "margin:0 0 0 0.8em;padding-left:0.8em;border-left:2px solid #ccc;";
 
 /**
+ * What every inline image is emitted with.
+ *
+ * EMITTED, never passed through, like the quote styling. A photograph off a
+ * phone is 4000px wide, and without this it arrives at its natural size and
+ * blows out the layout of the message around it in every client that does not
+ * clamp images itself.
+ */
+const INLINE_IMAGE_STYLE = "max-width:100%;height:auto;";
+
+/** Shared empty set, so the default costs no allocation per call. */
+const EMPTY_CIDS: ReadonlySet<string> = new Set();
+
+/**
  * Strip the characters used to smuggle a scheme past a naive check —
  * `java\tscript:`, a leading NUL, an embedded newline. Anything suspicious means
  * the href is dropped rather than repaired.
@@ -117,8 +133,21 @@ function isSafeHref(value: string): boolean {
  * and the worst case is a message that sends as less than it looked like rather
  * than one that refuses to send at all.
  */
-export function sanitizeOutboundHtml(html: string): string {
+export interface OutboundOptions {
+  /**
+   * Content-IDs the composer minted for THIS message, and the only ones an
+   * `<img>` may reference. Absent means no images at all, which is the default
+   * and what every path that is not the composer gets.
+   */
+  allowedCids?: ReadonlySet<string>;
+}
+
+export function sanitizeOutboundHtml(
+  html: string,
+  options: OutboundOptions = {},
+): string {
   const input = html.length > MAX_HTML_CHARS ? html.slice(0, MAX_HTML_CHARS) : html;
+  const allowedCids = options.allowedCids ?? EMPTY_CIDS;
 
   return sanitizeHtml(input, {
     allowedTags: [
@@ -132,10 +161,14 @@ export function sanitizeOutboundHtml(html: string): string {
       "ul", "ol", "li",
       // Links
       "a",
+      // Inline images, and ONLY the ones this message minted a cid for — see
+      // the transform below. Listing the tag here is not what admits an image;
+      // the transform is, and it drops any `<img>` it cannot account for.
+      "img",
     ],
     // Dropped tag AND contents. `<style>` and `<script>` would otherwise have
     // their source rendered as visible prose in the recipient's client, which is
-    // worse than dropping them; `<img>` is void and simply goes.
+    // worse than dropping them.
     nonTextTags: ["script", "style", "textarea", "option", "noscript", "title", "head"],
     allowedAttributes: {
       a: ["href"],
@@ -145,6 +178,9 @@ export function sanitizeOutboundHtml(html: string): string {
       // shipped links with no rel="noopener" on the read path, and it is why
       // there is a regression test asserting the emitted attributes survive.
       blockquote: ["style", "type"],
+      // Emitted by the transform, never passed through. `src` is rebuilt from
+      // the cid, so nothing the caller wrote in it survives.
+      img: ["src", "alt", "width", "height", "style"],
       span: ["style"],
       p: ["style"],
       div: ["style"],
@@ -153,9 +189,24 @@ export function sanitizeOutboundHtml(html: string): string {
       ol: ["style"],
     },
     allowedSchemes: SAFE_SCHEMES,
-    // No `img` entry: images are not an allowed tag at all, so there is no
-    // scheme that admits one.
+    // `cid` is listed for `img` alone. It is belt rather than the control — the
+    // transform rebuilds every `src` from a cid it has already checked against
+    // the allowlist, so no caller-supplied URL reaches this stage in the first
+    // place — but a future edit that started copying `src` should still find a
+    // scheme allowlist standing in front of it.
+    allowedSchemesByTag: { img: ["cid"] },
     allowProtocolRelative: false,
+    /**
+     * Remove an `<img>` that the transform could not account for.
+     *
+     * The transform strips its attributes, which is what loses the URL; this is
+     * what loses the element. Without it a refused image ships as a bare `<img>`
+     * and renders in the recipient's client as a broken-image icon — which reads
+     * as "the sender attached something that did not arrive" rather than as the
+     * nothing it actually is.
+     */
+    exclusiveFilter: (frame) =>
+      frame.tag === "img" && !(frame.attribs.src ?? "").startsWith("cid:"),
     // NOT sanitize-html's own style filtering. Its `allowedStyles` matches
     // values with regexes, and a regex over CSS is the losing side of this
     // problem. Every surviving declaration goes through `sanitizeStyle`, which
@@ -196,6 +247,51 @@ export function sanitizeOutboundHtml(html: string): string {
         const style = sanitizeStyle(declarations.join(";"));
         const attrs: Record<string, string> = style ? { style } : {};
         return { tagName: "span", attribs: attrs };
+      },
+      /**
+       * An inline image.
+       *
+       * THE RULE IS NOT "IMAGES ARE ALLOWED". It is: an `<img>` survives if and
+       * only if it names a `data-cid` this message actually minted, and the
+       * `src` is then REBUILT from that cid rather than read. Nothing the caller
+       * wrote in `src` reaches the output, which is what makes a remote tracking
+       * pixel impossible to smuggle in — there is no code path where a `src`
+       * attribute is copied.
+       *
+       * The composer works this way round because the editor has to SHOW the
+       * picture while somebody writes, and a browser cannot render `cid:`. So it
+       * carries a signed preview URL in `src` and the identity in `data-cid`,
+       * and the two are swapped here, at the boundary, once.
+       *
+       * `alt` is kept because it is what a recipient with images off reads, and
+       * it is the sender's own words. `width`/`height` are kept only as bare
+       * integers. `max-width` is EMITTED rather than allowed: a photograph
+       * straight off a phone is 4000px wide and would otherwise blow out the
+       * layout of the message it arrives in.
+       */
+      img: (tagName, attribs) => {
+        const cid = (attribs["data-cid"] ?? "").trim();
+        // An image with no accounted-for cid keeps no attributes here and is
+        // then REMOVED by the exclusiveFilter below. Both halves are needed:
+        // stripping the attributes is what loses the remote URL, and the filter
+        // is what stops the empty `<img>` rendering as a broken-image icon in a
+        // message whose sender believed it carried a picture.
+        if (!cid || !allowedCids.has(cid)) return { tagName: "img", attribs: {} };
+
+        const kept: Record<string, string> = {
+          src: `cid:${cid}`,
+          style: INLINE_IMAGE_STYLE,
+        };
+        if (typeof attribs.alt === "string" && attribs.alt.length > 0) {
+          kept.alt = attribs.alt.slice(0, 300);
+        }
+        for (const dimension of ["width", "height"] as const) {
+          const value = attribs[dimension];
+          if (typeof value === "string" && /^[0-9]{1,5}$/.test(value)) {
+            kept[dimension] = value;
+          }
+        }
+        return { tagName, attribs: kept };
       },
       /**
        * A blockquote is either a QUOTE or an INDENT, and telling them apart is

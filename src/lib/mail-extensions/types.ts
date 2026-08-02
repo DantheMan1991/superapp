@@ -235,6 +235,82 @@ export interface MailFilingTarget {
   ): Promise<FiledMessageResult>;
 }
 
+/* -- Images a message can be composed with ------------------------------- */
+
+/** One picture the caller may insert, as the picker needs to show it. */
+export interface MailImageCandidate {
+  /** Opaque to Mail. Handed straight back to `open()`. */
+  id: string;
+  /** "Site photo 3.jpg" — already formatted, rendered verbatim. */
+  label: string;
+  /** "Drawings · 2.1 MB". Optional second line. */
+  sublabel?: string;
+  /** Bytes, for the composer's own size cap. */
+  size: number;
+  /** An image/* type the composer will refuse if it does not recognize it. */
+  type: string;
+}
+
+/** A picture resolved far enough to put in a message. */
+export interface MailImageBlob {
+  /** The file name the recipient sees. */
+  name: string;
+  type: string;
+  size: number;
+  /**
+   * The bytes, fetched OUTSIDE the transaction that authorized them.
+   *
+   * A thunk rather than a buffer because of the house rule that network work
+   * never happens inside a transaction — `open()` proves the caller may have
+   * this file while the tx is open, and the download happens after it closes.
+   * Returning null means the file has gone since the row was read, which is a
+   * missing image rather than an error.
+   */
+  fetch(): Promise<ArrayBuffer | null>;
+}
+
+/**
+ * Somewhere the composer can insert a picture from, besides the user's disk.
+ *
+ * The founder asked for this on 2026-08-02: an inline image should be reachable
+ * from the business's own files, not only from whatever is on the laptop in
+ * front of somebody. Documents implements it; nothing else needs to.
+ *
+ * BOTH HOOKS TAKE THE CALLER'S `tx`, like `search` and `resolve` and for the
+ * same reason — invariant S12. What an extension can find here is exactly what
+ * the person asking may see, so an owners-only folder's photograph is invisible
+ * to a staff user with no predicate anywhere in Mail's code. That property is
+ * demonstrated rather than asserted: there is a test that puts an image in an
+ * owners-only folder and calls this as staff.
+ *
+ * It is deliberately NOT the filing capability's shape. Filing opens its own
+ * `withTenant` because it writes blobs; this only READS, so it can take the
+ * caller's transaction and inherit the caller's visibility for free.
+ */
+export interface MailImageSource {
+  /** Section heading in the picker: "Documents". */
+  label: string;
+  /**
+   * Images the caller may insert. An empty `query` should return recent ones
+   * rather than nothing — this is a picker somebody browses, unlike the entity
+   * search, where an empty query means "not asked yet".
+   */
+  search(
+    tx: Tx,
+    ctx: MailExtensionCtx,
+    query: string,
+    limit: number,
+  ): Promise<MailImageCandidate[]>;
+  /**
+   * Resolve one id to something the composer can upload.
+   *
+   * Returns null when the caller may not see it, which is the same answer as
+   * "it does not exist" — deliberately, so this cannot be used to probe for the
+   * existence of files in folders somebody cannot open.
+   */
+  open(tx: Tx, ctx: MailExtensionCtx, id: string): Promise<MailImageBlob | null>;
+}
+
 /* -- The extension itself ------------------------------------------------ */
 
 export interface MailExtension {
@@ -254,4 +330,6 @@ export interface MailExtension {
   entityTypes: MailEntityType[];
   /** Only one extension needs to implement this, and only Documents does. */
   filing?: MailFilingTarget;
+  /** Somewhere the composer can insert a picture from. Documents implements it. */
+  images?: MailImageSource;
 }

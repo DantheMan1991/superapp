@@ -117,12 +117,21 @@ async function main(): Promise<void> {
 
   // ── A message with every construct the composer can emit ─────────────────
   const composed = sanitizeOutboundHtml(
-    "<p>Hello <b>bold</b> and <i>italic</i> and <u>underline</u>.</p>" +
+    "<p>Hello <b>bold</b>, <i>italic</i>, <u>underline</u> and <s>struck</s>.</p>" +
+      // Everything the toolbar gained: colour, highlight, font, size, alignment,
+      // indent and emoji. All of it goes through the same sanitizer the action
+      // uses, so what the server receives here is what a real send produces.
+      '<p><font color="#cc4125">red</font> and ' +
+      '<span style="background-color:#ffe599">highlighted</span> and ' +
+      '<font face="Georgia" size="5">Georgia large</font>.</p>' +
+      '<p style="text-align:center">centred</p>' +
+      '<div style="margin-left:2.5em">indented</div>' +
+      "<p>Emoji: 🎉 ✅ 🚚 — characters, not images.</p>" +
       "<ul><li>first</li><li>second</li></ul>" +
       "<ol><li>one</li><li>two</li></ol>" +
       '<p>A <a href="https://example.com/terms">link</a> and ' +
       "an accent: Facturación año — £5.</p>" +
-      "<blockquote>quoted line one<br>quoted line two</blockquote>",
+      '<blockquote type="cite">quoted line one<br>quoted line two</blockquote>',
   );
   const text = htmlToPlainText(composed);
 
@@ -239,6 +248,27 @@ async function main(): Promise<void> {
       findings.push(
         "Non-ASCII did NOT round-trip through the server's encoding. " +
           "Check the charset on the text parts.",
+      );
+    }
+
+    // Inline styling is the new surface. A server that stripped or rewrote it
+    // would make the colour picker look broken for reasons no unit test sees.
+    if (decoded.includes("color:#cc4125") || decoded.includes("#cc4125")) {
+      confirmed.push("Inline colour survived into the sent HTML part.");
+    } else {
+      findings.push("The server dropped or rewrote the inline colour.");
+    }
+    if (decoded.includes("text-align:center")) {
+      confirmed.push("Alignment survived into the sent HTML part.");
+    } else {
+      findings.push("The server dropped the text-align declaration.");
+    }
+    if (decoded.includes("🎉") && decoded.includes("✅")) {
+      confirmed.push("Emoji survived as characters in BOTH parts.");
+    } else {
+      findings.push(
+        "Emoji did not survive the transfer encoding — check the charset on " +
+          "the parts, since these are 4-byte UTF-8 sequences.",
       );
     }
 

@@ -1662,6 +1662,133 @@ the quote on mount, what `formatBlock` does to a selection spanning two
 paragraphs, and whether `execCommand` behaves at all under React 19's event
 delegation. That file is the one to look at first on a preview deployment.
 
+### 2026-08-02 — The rest of the toolbar, and how `style` was reopened safely
+
+The founder opened Gmail beside Yosher and asked for a full review of the
+compose surface rather than a feature or two. The previous slice shipped nine
+controls; the live inventory found twenty-odd. This closes everything that is
+not an inline image.
+
+**Landed:** text and highlight colour, font family, font size, alignment,
+indent/outdent, strikethrough, emoji, undo/redo, Ctrl-K and Ctrl-Shift-7/8,
+browser spell check, a Bcc field, a link box that takes display text as well as a
+URL, and plain-text mode.
+
+**THE ONE REAL DECISION, and it is the whole slice.** The previous entry's
+sanitizer dropped the `style` attribute wholesale, with the reasoning written
+into `compose/html.ts`: the write path has no sandbox behind it, so hidden text,
+white-on-white and `position:fixed` would leave our origin under the user's own
+From header. Colour, font, size, alignment and indent are ALL style features.
+Every one of them needed that attribute back.
+
+The naive version opens it and teaches the sanitizer to judge declarations —
+parse the CSS, decide what is hostile. That is the losing side of the problem
+and it is how every "we filter dangerous CSS" bug gets written.
+
+**What settled it was looking at Gmail rather than reasoning about it.** Its
+fonts are a list of eleven. Its sizes are four named steps, not points. Its
+colours are a fixed grid of swatches with no hex field anywhere. Alignment is
+three buttons. **Every style feature in a mature composer is a fixed
+enumeration, never free input** — which means the sanitizer never has to
+understand CSS at all. It only has to RECOGNIZE it.
+
+So `compose/formatting.ts` holds the tables, `ALLOWED_DECLARATIONS` is generated
+from them, and `sanitizeStyle` keeps a declaration if and only if it is an exact
+member of that set. `display:none` is not refused by a rule about hiding things;
+it is simply not in any table. The same file builds the toolbar's menus, so
+**the toolbar can only emit what the sanitizer accepts, because both read one
+file** — structural rather than diligent. There is a test that walks every table
+in both directions, so adding a swatch without the sanitizer learning about it
+is a failing test rather than a message that silently loses its colour.
+
+**Three things the browser does that the tables had to absorb.**
+
+- **`execCommand` is handed `#cc4125` and the DOM returns `rgb(204, 65, 37)`.**
+  A sanitizer comparing raw strings would have rejected every colour the toolbar
+  had just applied, and the picker would have looked broken while being
+  perfectly safe. `normalizeColor` exists for that one fact.
+- **Colour, font and size come back as `<font>`**, not as CSS, because
+  `styleWithCSS` is deliberately left OFF — that is also what makes bold come out
+  as `<b>` rather than a span the style allowlist has to vouch for. So the
+  sanitizer TRANSLATES `<font color|face|size>` into a span carrying one of our
+  own declarations, and a `<font>` holding values we do not recognize becomes a
+  bare span.
+- **`rgba()` is refused rather than flattened.** Alpha is how text is made
+  almost-invisible without ever naming a colour that looks wrong on inspection,
+  and no swatch produces it.
+
+**THE BUG THE TESTS FOUND, and it would have shipped.** `execCommand("indent")`
+does not emit an indented div — it wraps the block in a `<blockquote>`, in every
+engine. So Quote and Indent produce THE SAME TAG, and an indented paragraph would
+have arrived in the recipient's client looking as though the writer were quoting
+somebody. The first fix keyed off `type="cite"`… which `formatBlock` does not
+emit either, so the Quote button became an indent instead. Two signals now, and
+the DEFAULT is what makes it safe to get wrong: `type="cite"` means quote (the
+toolbar stamps it onto the element `formatBlock` just made), a `border` reset
+means indent (what the engines emit), and anything else defaults to quote —
+because if the stamping fails, the person pressed Quote.
+
+**A second bug from the same test run, and a sanitize-html fact worth keeping:
+`transformTags["*"]` runs IN ADDITION to a tag's own transform, after it.** It is
+not a fallback. The wildcard style filter was therefore re-filtering the quote
+styling the `blockquote` transform had just emitted, and quotes shipped with no
+left border. The tags are listed explicitly now. Same family as the
+`allowedAttributes`-after-`transformTags` trap recorded in the previous entry:
+this library's ordering is not what reading the option names suggests.
+
+**Emoji were the cheapest thing on the list, for one reason: they are
+characters.** `insertText`, no markup, no sanitizer rule, and they land in the
+plain-text alternative for free. The `<img>`-based emoji some clients use would
+have needed the opposite of everything `compose/html.ts` is built around. The
+table is hand-written (~330 entries with search terms) rather than a dependency:
+the full Unicode set is 1,900 characters and the libraries that ship it carry a
+megabyte plus a picker with its own opinions.
+
+**Plain-text mode converts rather than discards.** Switching into it runs the
+same `htmlToPlainText` the send path already derives its text part with, so the
+words survive and only the formatting goes — and switching back gives a rich
+editor seeded with that text. Deliberately NOT sanitized client-side on the way:
+`compose/html.ts` pulls in sanitize-html, and importing it from a client
+component would have shipped a ~100 KB parser to every reader of the mail page.
+It is unnecessary as well as expensive — paste is plain text, so the editor's
+contents are only ever its own toolbar's output, and the server sanitizes on
+send regardless.
+
+**Two font-table bugs the invariant test caught**, both of the kind that only an
+assertion over the whole table finds: `ALLOWED_DECLARATIONS` stored a lowercased
+font stack while `sanitizeStyle` emitted the real one, so no font would ever have
+matched; and "Serif" led with Georgia, which meant a bare `face="Georgia"` — what
+`execCommand("fontName")` round-trips as — matched Serif first and the Georgia
+menu entry was unreachable. No two stacks may lead with the same family, and
+there is now a test saying so.
+
+**Verified against the live server again.** `npm run mail:probe-compose` was
+extended to carry colour, highlight, font, size, alignment, indent and emoji
+through the real `Email/set`. Ten confirmations, no findings: the server still
+builds a real `multipart/alternative` with `text/plain` first, and the inline
+colour, the alignment and the emoji all survive the transfer encoding into the
+sent parts. Emoji were worth checking specifically — they are four-byte UTF-8
+sequences and a charset mistake shows up there first.
+
+**Deliberately not built.** `justify` is absent: justified text in a mail client
+produces rivers of whitespace on the narrow columns mail is read in, and it is
+measurably worse for dyslexic readers. Templates need storage and are their own
+slice. Confidential mode is Google-proprietary — expiry and SMS passcodes served
+off their servers — and is not a JMAP feature.
+
+**Accepted rather than fixed: a palette makes white-on-white reachable.** Gmail
+allows it too. It is the sender's own message, and refusing the white swatch
+would be strange in a product where somebody legitimately writes on a coloured
+background.
+
+**Still not verified in a browser**, and the surface that needs it grew rather
+than shrank: nine controls became twenty-odd, six of them popovers with saved and
+restored selections. `rich-text-editor.tsx` is the file to open first on a
+preview deployment, and the specific things to try are a toolbar click with text
+selected (does the selection survive), Quote versus Indent (do they render
+differently in the received message), and the colour picker over a multi-block
+selection.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -1764,6 +1891,15 @@ Composing (`src/modules/email/compose/`, all pure and free of `server-only`):
   `render/transcript.ts`'s `htmlToText`, which flattens for a tsvector and drops
   hrefs, list numbering and quote depth. The quote depth is the one that matters:
   it is what makes a plain-text reply chain survive four exchanges.
+- `formatting.ts` — **the tables**: fonts, sizes, palette, alignments, indent
+  steps, and the `ALLOWED_DECLARATIONS` set generated from them. Read by the
+  toolbar to build its menus AND by the sanitizer to build its allowlist, which
+  is what makes "the toolbar can only emit what the sanitizer accepts" true by
+  construction. Adding a swatch is one edit here; a test walks both directions.
+- `emoji.ts` — a hand-written table, not a dependency. Emoji needed no sanitizer
+  rule at all because they are characters rather than images.
+- `link-url.ts` — `normalizeLinkInput`. Pure and separate from the editor so the
+  security-relevant half of a client component is testable without a DOM.
 - `bodies.ts` — the sanitize-THEN-derive ordering, in a file of its own so a test
   can assert it. Outside `compose-actions.ts` because a `"use server"` module may
   only export async functions.
@@ -2055,12 +2191,22 @@ has-files chips, folder creation, and per-user saved views.
 by us — `vacationresponse` for the first, a compiled Sieve script for the second
 — so they fire while nobody is signed in, which is the only time either matters.
 
-**Composing is rich text**: bold, italic, underline, lists, links and quoting,
-sent as a `multipart/alternative` whose text part is derived from the HTML rather
-than typed alongside it. The MIME the server assembles has been read back off a
-live draft (`npm run mail:probe-compose`), not assumed from RFC 8621.
+**Composing is rich text**, and as of 2026-08-02 the toolbar is complete bar
+inline images: bold, italic, underline, strikethrough, text and highlight colour,
+font, size, alignment, indent, lists, links, quoting, emoji, undo/redo and a
+plain-text mode. Everything goes out as a `multipart/alternative` whose text part
+is derived from the HTML rather than typed alongside it, and the MIME the server
+assembles has been read back off a live draft (`npm run mail:probe-compose`)
+rather than assumed from RFC 8621.
 
-What is NOT built yet, in priority order: **signature editing** (they are read
+The `style` attribute is open, narrowly: `compose/formatting.ts` enumerates every
+declaration the toolbar can produce and the sanitizer accepts nothing else, so
+both sides read one file and cannot drift. That is the property to preserve when
+adding any further formatting control.
+
+What is NOT built yet, in priority order: **inline images** (upload plus a picker
+over Yosher Documents, through the `src/lib/mail-extensions/` seam — mail may not
+import the Documents module), **signature editing** (they are read
 from the server's Identity and prefilled, never written), contact autocomplete —
 the server has advertised `urn:ietf:params:jmap:contacts` since the first probe
 and nothing uses it — undo/schedule send, labels, websocket push
@@ -2208,16 +2354,17 @@ code or config change.
   closing the composer discards what you typed. Drafts live on the SERVER by
   design (a local table would desync with the same mailbox open in Outlook), so
   this is a surface, not a schema change.
-- **No Bcc field.** The action accepts it and the form does not offer it.
 - **No signature editing.** Signatures are read from the mail server's Identity
   and prefilled — `htmlSignature` preferred over `textSignature` since rich text
   landed — but changing one still means using another client.
-- **The rich composer has never run in a browser.** Every pure part is tested and
-  the protocol is probed, but `rich-text-editor.tsx` itself is unexercised:
-  toolbar-click selection preservation, where the caret lands on mount,
-  `formatBlock` over a multi-paragraph selection, and whether `execCommand`
-  behaves under React 19's event delegation at all. First thing to look at on a
-  preview deployment.
+- **The rich composer has never run in a browser**, and the surface needing it
+  grew with the toolbar slice: nine controls became twenty-odd, six of them
+  popovers that save and restore a selection. Every pure part is tested and the
+  protocol is probed, but `rich-text-editor.tsx` itself is unexercised. First
+  thing to look at on a preview deployment, and specifically: a toolbar click
+  with text selected (does the selection survive), Quote versus Indent (do they
+  render differently in the received message), and the colour picker over a
+  selection spanning two blocks.
 - **Pasting into the composer loses formatting**, deliberately — paste is
   inserted as plain text so hostile markup cannot enter the document. Keeping it
   would mean shipping a sanitizer to the browser AND trusting it, and the thing
@@ -2227,13 +2374,18 @@ code or config change.
   close: an inline image means uploading a blob, minting a `cid:`, and emitting
   `multipart/related` around the alternative. `<img>` is not in the outbound
   allowlist at all until that exists.
-- **No plain-text mode.** Every message now goes as `multipart/alternative`.
-  Mailing lists and a few correspondents genuinely want text only, and the
-  toggle would be cheap — the text part is already derived and correct.
-- **No font, colour, size or alignment controls**, on purpose for now: they are
-  the `style`-attribute features, and the outbound sanitizer strips `style`
-  wholesale. Adding any one of them means a narrow, regex-validated style
-  allowlist rather than opening the attribute.
+- **No templates / canned responses.** The one compose feature from the Gmail
+  review that needs storage rather than markup — a per-user table, so it is its
+  own slice with a migration and isolation tests.
+- **No `justify` alignment**, deliberately: it produces rivers of whitespace on
+  the narrow columns mail is read in and is worse for dyslexic readers.
+- **Confidential mode has no equivalent and probably never will.** It is
+  Google-proprietary — expiry and SMS passcodes served off their own servers —
+  rather than anything JMAP describes.
+- **A colour palette makes white-on-white text reachable**, and that is accepted
+  rather than fixed. It is the sender's own message, and refusing the white
+  swatch would be strange in a product where somebody legitimately writes on a
+  coloured background.
 - **The editor does not warn when the sanitizer will change what you wrote.**
   With paste-as-text and a fixed toolbar the divergence should be nil, but if it
   ever is not, the message simply arrives as less than it looked like.

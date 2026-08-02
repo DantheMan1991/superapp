@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Paperclip, Send, ShieldAlert, X } from "lucide-react";
+import { Loader2, Paperclip, Send, ShieldAlert, Type, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseRecipients } from "../compose/addresses";
 import { sendMessageAction } from "../compose-actions";
+import { Textarea } from "@/components/ui/textarea";
 import { RichTextEditor, type RichTextEditorHandle } from "./rich-text-editor";
+import { htmlToPlainText } from "../compose/to-text";
 
 /**
  * Where somebody types.
@@ -71,8 +73,22 @@ export function ComposeForm({
   const router = useRouter();
   const [to, setTo] = useState(draft.to);
   const [cc, setCc] = useState(draft.cc);
+  const [bcc, setBcc] = useState("");
   const [showCc, setShowCc] = useState(draft.showCc);
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState(draft.subject);
+  /**
+   * Plain-text mode.
+   *
+   * Switching INTO it converts what is written rather than discarding it — the
+   * text alternative is already the thing the send path derives, so the
+   * conversion is the same function the server would have run anyway. Switching
+   * back gives a rich editor seeded with that text: the words survive both ways
+   * and the formatting does not, which is the honest behaviour and the one every
+   * other composer has.
+   */
+  const [plainText, setPlainText] = useState(false);
+  const [plainBody, setPlainBody] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -109,10 +125,25 @@ export function ComposeForm({
     }
   }
 
+  function togglePlainText() {
+    if (!plainText) {
+      // NOT sanitized here. `compose/html.ts` pulls in sanitize-html, and
+      // importing it from a client component would ship a ~100 KB parser to
+      // every reader of the mail page. It is unnecessary as well as expensive:
+      // paste is plain text, so the editor's contents are only ever its own
+      // toolbar's output, and the server sanitizes on send regardless.
+      setPlainBody(htmlToPlainText(editor.current?.html() ?? ""));
+      setPlainText(true);
+      return;
+    }
+    setPlainText(false);
+  }
+
   function send() {
     const parsedTo = parseRecipients(to);
     const parsedCc = parseRecipients(cc);
-    const bad = [...parsedTo.invalid, ...parsedCc.invalid];
+    const parsedBcc = parseRecipients(bcc);
+    const bad = [...parsedTo.invalid, ...parsedCc.invalid, ...parsedBcc.invalid];
     if (bad.length > 0) {
       // Named rather than silently dropped: a message that goes to three people
       // when you meant four is worse than one that refuses to send.
@@ -126,21 +157,22 @@ export function ComposeForm({
 
     // Read once, at submit. See the header: the editor owns its own DOM and this
     // is the only moment its contents matter.
-    const htmlBody = editor.current?.html() ?? "";
+    const htmlBody = plainText ? "" : (editor.current?.html() ?? "");
 
     startTransition(async () => {
       const result = await sendMessageAction({
         mailboxId,
         to: parsedTo.addresses,
         cc: parsedCc.addresses,
-        bcc: [],
+        bcc: parsedBcc.addresses,
         subject,
-        // The action sanitizes this and DERIVES the text alternative from what
-        // survives, so the two parts can never describe different messages.
-        // Sending a textBody from here as well would be a second source of
-        // truth for the same words.
-        textBody: "",
-        htmlBody,
+        // In rich mode the action sanitizes the HTML and DERIVES the text
+        // alternative from what survives, so the two parts can never describe
+        // different messages — sending a textBody from here as well would be a
+        // second source of truth for the same words. In plain-text mode there
+        // is no HTML at all and this IS the message.
+        textBody: plainText ? plainBody : "",
+        ...(htmlBody ? { htmlBody } : {}),
         ...(draft.inReplyTo.length > 0 ? { inReplyTo: draft.inReplyTo } : {}),
         ...(draft.references.length > 0 ? { references: draft.references } : {}),
         ...(attachments.length > 0
@@ -209,6 +241,15 @@ export function ComposeForm({
               Cc
             </button>
           )}
+          {!showBcc && (
+            <button
+              type="button"
+              className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setShowBcc(true)}
+            >
+              Bcc
+            </button>
+          )}
         </div>
 
         {showCc && (
@@ -220,6 +261,20 @@ export function ComposeForm({
               id="mail-cc"
               value={cc}
               onChange={(e) => setCc(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+        )}
+
+        {showBcc && (
+          <div className="flex items-center gap-2">
+            <label htmlFor="mail-bcc" className="w-12 shrink-0 text-xs text-muted-foreground">
+              Bcc
+            </label>
+            <Input
+              id="mail-bcc"
+              value={bcc}
+              onChange={(e) => setBcc(e.target.value)}
               autoComplete="off"
             />
           </div>
@@ -244,11 +299,21 @@ export function ComposeForm({
           Tall enough to write in — a composer you have to scroll to see three
           lines of is one people take to their phone instead.
         */}
-        <RichTextEditor
-          initialHtml={draft.bodyHtml}
-          editorRef={editor}
-          disabled={busy}
-        />
+        {plainText ? (
+          <Textarea
+            value={plainBody}
+            onChange={(e) => setPlainBody(e.target.value)}
+            className="min-h-[18rem] font-sans"
+            placeholder="Write your message…"
+            aria-label="Message body"
+          />
+        ) : (
+          <RichTextEditor
+            initialHtml={draft.bodyHtml}
+            editorRef={editor}
+            disabled={busy}
+          />
+        )}
 
         {attachments.length > 0 && (
           <ul className="flex flex-wrap gap-2">
@@ -301,6 +366,20 @@ export function ComposeForm({
             <Paperclip className="size-4" />
           )}
           Attach
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={togglePlainText}
+          title={
+            plainText
+              ? "Back to formatting"
+              : "Plain text only — formatting is discarded"
+          }
+        >
+          <Type className="size-4" />
+          {plainText ? "Rich text" : "Plain text"}
         </Button>
         <input
           ref={fileInput}

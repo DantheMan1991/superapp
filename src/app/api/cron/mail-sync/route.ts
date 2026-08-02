@@ -5,6 +5,7 @@ import {
   syncMailAccount,
 } from "@/lib/email/sync/account";
 import { wakeDueSnoozes } from "@/modules/email/triage/snooze";
+import { sendDueMessages } from "@/modules/email/schedule/sweep";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,13 @@ export const maxDuration = 60;
 const BATCH = 25;
 /** Due snoozes per tick. Bounded separately so it cannot starve the sync. */
 const WAKE_BATCH = 200;
+/**
+ * Due scheduled sends per tick. SMALLER than the snooze cap on purpose: waking
+ * a message is one folder move, while releasing one is a full submission with
+ * an SMTP handoff behind it, and a hundred of those would not fit in the same
+ * budget.
+ */
+const SEND_BATCH = 50;
 
 function authorized(request: Request): boolean {
   const expected = process.env.CRON_SECRET;
@@ -96,6 +104,18 @@ export async function GET(request: Request): Promise<Response> {
    */
   const woken = await wakeDueSnoozes(new Date(), WAKE_BATCH);
 
+  /**
+   * Scheduled messages ride the same schedule, for the same Hobby-plan reason,
+   * and run LAST — after the sync and after the snooze sweep.
+   *
+   * Order matters here in a way it does not for the other two. This is the only
+   * step that performs an irreversible act on somebody's behalf, so it runs when
+   * everything else has had its budget: a batch cut short leaves messages queued
+   * for the next tick, which is late, whereas a batch that ran first and then
+   * timed out could leave the sync perpetually starved.
+   */
+  const released = await sendDueMessages(new Date(), SEND_BATCH);
+
   // Counts only — never an address, a subject or a tenant name (S9).
   return Response.json({
     considered: due.length,
@@ -104,5 +124,7 @@ export async function GET(request: Request): Promise<Response> {
     markedNeedsReauth: broken.length,
     woken: woken.woken,
     wakeFailed: woken.failed,
+    scheduledSent: released.sent,
+    scheduledFailed: released.failed,
   });
 }

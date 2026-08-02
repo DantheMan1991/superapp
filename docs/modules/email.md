@@ -1488,6 +1488,42 @@ server-side and invisible from the inbox. That is what the `WITH CHECK` on
 Open: no UI yet, so rules can only be written through the action; `discard` is
 deliberately not offered as an action; and the isolation suite has not been run.
 
+### 2026-08-01 (later still) — The rules editor
+
+The UI over the compiler from the previous entry. Reached from the header, and
+it takes the reading pane like the composer and the auto-reply form.
+
+**ONE FORM, ONE SAVE, for the whole list.** Rules are order-dependent —
+`stop` means "and nothing after this" — so a per-rule save would let somebody
+publish rule 3 while rules 1 and 2 sat unsaved, and the script would sort mail
+differently from the list they were looking at. Saving everything at once is
+the only version where what is on screen is what is running.
+
+For the same reason the reorder buttons are not cosmetic, and the Save button
+says what it does: *"Replaces the rules running on the mail server."* These
+stop being a list in a form the moment it is pressed and start being a program.
+
+**The editor refuses what the compiler would silently drop.** A rule with no
+tests compiles to nothing, because a test-less rule matches EVERY message —
+correct, but baffling if it happens without explanation. So the three
+unfinishable shapes (no name, an empty condition, no action at all) are named
+in the form instead, and Save is disabled until they are resolved.
+
+**Rules are loaded only when the editor is open**, unlike the auto-reply
+setting, which is read on every page load. Rules need no badge: the script is
+already running on the mail server whether or not this page knows about it.
+An auto-reply left on is invisible and costly, which is why that one is worth
+a read on every load and this is not.
+
+Not verified in a browser, and for a harder reason than the previous slices:
+the dev server is behind Clerk, so seeing this page at all requires signing in,
+and there is no way to do that here. The rendering, the reorder behaviour and
+the folder select are unexercised.
+
+Open: no way to test a rule against an existing message; no `discard` action,
+deliberately; and the editor cannot show which rules the compiler considered
+inert until after a save.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at

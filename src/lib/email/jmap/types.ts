@@ -148,6 +148,30 @@ export interface JmapIdentity {
 }
 
 /**
+ * One entry in the mail server's address book.
+ *
+ * Flattened from a JSContact `ContactCard` (RFC 9553), which is deliberately
+ * richer than this — it models nicknames, several organizations, phonetic
+ * spellings and a dozen contexts per address. The composer needs a name and an
+ * address, so the parser keeps those and drops the rest rather than modelling
+ * fields nothing reads. Typing unused fields invites drift nobody notices, which
+ * is the rule `types.ts` has followed since the inbox foundation.
+ *
+ * ONE ENTRY PER ADDRESS, not per person: somebody with a work and a personal
+ * address is two rows in an autocomplete, because picking "which Aoife" from a
+ * single row is a decision the list cannot express.
+ */
+export interface JmapContact {
+  /** The card's id. Several entries can share one — see above. */
+  id: string;
+  /** Already assembled by the server; see `parseContactCard`. */
+  name: string;
+  email: string;
+  /** "Probe Construction Ltd", when the card names one. */
+  organization: string;
+}
+
+/**
  * A conversation. The server computes membership from Message-Id / In-Reply-To
  * / References plus subject normalization, and re-threads on out-of-order
  * arrival — none of which we implement.

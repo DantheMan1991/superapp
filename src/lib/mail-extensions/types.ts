@@ -311,6 +311,56 @@ export interface MailImageSource {
   open(tx: Tx, ctx: MailExtensionCtx, id: string): Promise<MailImageBlob | null>;
 }
 
+/* -- People the composer can address -------------------------------------- */
+
+/** One suggestion for a recipient field. */
+export interface MailContactCandidate {
+  /** The address that goes in the header. Required — a suggestion without one
+   * cannot be picked, so a record with no email must not be returned at all. */
+  email: string;
+  /** "Aoife Ó Braonáin", or "" when only an address is known. */
+  name: string;
+  /** "Customer · Probe Construction Ltd". Says WHERE this came from. */
+  sublabel?: string;
+}
+
+/**
+ * Somewhere the composer can find people to write to.
+ *
+ * The founder asked for this on 2026-08-02 alongside the mail server's own
+ * address book, and specifically so **a future CRM contributes its people
+ * without Mail knowing it exists**. That is the same requirement the image
+ * source had, and the answer is the same: a capability on the registry rather
+ * than an import.
+ *
+ * Accounting implements it TODAY, over customers and vendors — which matters
+ * beyond the feature. `docs/modules/email.md` records that "a seam with one user
+ * is a seam that has never been tested", from the day three Migadu assumptions
+ * turned out to be baked into supposedly shared code. This one ships with a real
+ * implementation rather than a placeholder.
+ *
+ * TAKES THE CALLER'S `tx`, like `search`, `resolve` and the image source, and
+ * for the same reason — invariant S12. Which people an extension can offer is
+ * exactly which rows the person composing may read.
+ */
+export interface MailContactSource {
+  /**
+   * People matching `query`, which is raw user input and must be bound rather
+   * than interpolated.
+   *
+   * An empty query returns NOTHING rather than everyone. Unlike the image
+   * picker, which is browsed, this fires while somebody types an address — and
+   * listing the whole customer table the moment a recipient field is focused
+   * would be a query per composer for suggestions nobody asked for.
+   */
+  search(
+    tx: Tx,
+    ctx: MailExtensionCtx,
+    query: string,
+    limit: number,
+  ): Promise<MailContactCandidate[]>;
+}
+
 /* -- The extension itself ------------------------------------------------ */
 
 export interface MailExtension {
@@ -332,4 +382,6 @@ export interface MailExtension {
   filing?: MailFilingTarget;
   /** Somewhere the composer can insert a picture from. Documents implements it. */
   images?: MailImageSource;
+  /** People the composer can address. Accounting implements it; a CRM would too. */
+  contacts?: MailContactSource;
 }

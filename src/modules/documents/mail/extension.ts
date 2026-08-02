@@ -11,9 +11,11 @@ import type {
   LinkableEntity,
   MailExtension,
   MailExtensionCtx,
+  MailImageBlob,
+  MailImageCandidate,
 } from "@/lib/mail-extensions/types";
 import { isAllowedUpload } from "../allowlist";
-import { sha256Hex } from "../ingest";
+import { readBlobBytes, sha256Hex } from "../ingest";
 
 /**
  * What Documents contributes to Mail: two linkable types, and the one capability
@@ -652,4 +654,145 @@ export const documentsMailExtension: MailExtension = {
     destinationLabel: "the Documents inbox",
     fileMessage,
   },
+  images: {
+    label: "Documents",
+    search: searchImages,
+    open: openImage,
+  },
 };
+
+/* -- Pictures the composer can insert ------------------------------------ */
+
+/**
+ * The image types a composed message may carry inline.
+ *
+ * Narrower than the DMS allowlist on purpose. SVG is absent for the same reason
+ * it is refused as a mail attachment and absent from the read path's sniff
+ * table: it is a document that can carry script, not a picture, and this one is
+ * going OUT under the user's own name where nothing of ours sanitizes it again.
+ */
+const INLINE_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/** Cap per inline image. Well under the mail server's own attachment limit. */
+const MAX_INLINE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Documents as a source of pictures for the composer.
+ *
+ * Both hooks take the CALLER'S transaction, which is the whole security model:
+ * `documents` carries RLS keyed on tenant and, through its folder, on
+ * `effective_visibility`, so an owners-only folder's photograph is invisible to
+ * a staff user without one predicate of ours. Nothing here filters on
+ * visibility, and that is not an omission — it is the point.
+ */
+async function searchImages(
+  tx: Tx,
+  ctx: MailExtensionCtx,
+  query: string,
+  limit: number,
+): Promise<MailImageCandidate[]> {
+  const term = query.trim();
+  const rows = await tx
+    .select({
+      id: schema.documents.id,
+      title: schema.documents.title,
+      fileName: schema.documents.fileName,
+      mimeType: schema.documents.mimeType,
+      sizeBytes: schema.documents.sizeBytes,
+      createdAt: schema.documents.createdAt,
+    })
+    .from(schema.documents)
+    .where(
+      and(
+        eq(schema.documents.tenantId, ctx.tenantId),
+        ne(schema.documents.status, "trashed"),
+        // A row with no blob is a placeholder, not a picture.
+        sql`${schema.documents.blobPathname} is not null`,
+        inArray(schema.documents.mimeType, [...INLINE_IMAGE_TYPES]),
+        sql`${schema.documents.sizeBytes} <= ${MAX_INLINE_BYTES}`,
+        // An empty query lists the most recent rather than nothing: this is a
+        // picker somebody BROWSES, unlike the entity search, where an empty
+        // query means the question has not been asked yet.
+        ...(term.length > 0
+          ? [
+              sql`(${schema.documents.title} ilike ${contains(term)} or ${schema.documents.fileName} ilike ${contains(term)})`,
+            ]
+          : []),
+      ),
+    )
+    .orderBy(desc(schema.documents.createdAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    id: row.id,
+    label: row.title || row.fileName || "Untitled",
+    sublabel: describeSize(row.sizeBytes),
+    size: row.sizeBytes,
+    type: row.mimeType,
+  }));
+}
+
+function describeSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function openImage(
+  tx: Tx,
+  ctx: MailExtensionCtx,
+  id: string,
+): Promise<MailImageBlob | null> {
+  const [row] = await tx
+    .select({
+      blobPathname: schema.documents.blobPathname,
+      fileName: schema.documents.fileName,
+      title: schema.documents.title,
+      mimeType: schema.documents.mimeType,
+      sizeBytes: schema.documents.sizeBytes,
+    })
+    .from(schema.documents)
+    .where(
+      and(
+        eq(schema.documents.id, id),
+        eq(schema.documents.tenantId, ctx.tenantId),
+        ne(schema.documents.status, "trashed"),
+      ),
+    )
+    .limit(1);
+
+  // Null covers "not yours to see" and "not there" identically, deliberately:
+  // a different answer for each would let somebody probe for the existence of
+  // files in folders they cannot open.
+  if (!row || !row.blobPathname) return null;
+  if (!INLINE_IMAGE_TYPES.has(row.mimeType)) return null;
+  if (row.sizeBytes > MAX_INLINE_BYTES) return null;
+
+  const pathname = row.blobPathname;
+  return {
+    name: sanitizeFileName(row.fileName || row.title || "image"),
+    type: row.mimeType,
+    size: row.sizeBytes,
+    // The fetch happens OUTSIDE this transaction — the house rule about network
+    // work, and the reason this returns a thunk rather than bytes. By the time
+    // it runs the row has already proved the caller may have the file.
+    fetch: async () => {
+      try {
+        const bytes = await readBlobBytes(pathname);
+        return bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer;
+      } catch {
+        // A blob that has gone since the row was read is a missing picture, not
+        // an error worth failing a composer over.
+        return null;
+      }
+    },
+  };
+}

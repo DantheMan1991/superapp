@@ -17,6 +17,7 @@ import {
   Quote,
   Redo2,
   RemoveFormatting,
+  ImagePlus,
   Smile,
   Strikethrough,
   Underline,
@@ -26,6 +27,8 @@ import { cn } from "@/lib/utils";
 import { FONTS, PALETTE, SIZES } from "../compose/formatting";
 import { EMOJI_GROUPS, searchEmoji, type EmojiEntry } from "../compose/emoji";
 import { normalizeLinkInput } from "../compose/link-url";
+import type { InlineImage } from "../compose/inline";
+import { ImagePicker } from "./image-picker";
 
 /**
  * The composer's editing surface.
@@ -84,7 +87,7 @@ export interface RichTextEditorHandle {
  * its members. Describing what each button DOES and resolving it in the click
  * handler keeps ref access where it belongs — in an event handler.
  */
-type Panel = "font" | "size" | "colour" | "align" | "emoji" | "link";
+type Panel = "font" | "size" | "colour" | "align" | "emoji" | "link" | "image";
 
 type Action =
   | { kind: "exec"; command: string; arg?: string }
@@ -119,6 +122,7 @@ const TOOLBAR: readonly (ToolbarButton | "divider")[] = [
   { key: "link", label: "Insert link", Icon: Link2, shortcut: "Ctrl+K", action: { kind: "panel", panel: "link" } },
   { key: "unlink", label: "Remove link", Icon: Link2Off, action: { kind: "exec", command: "unlink" } },
   { key: "emoji", label: "Insert emoji", Icon: Smile, action: { kind: "panel", panel: "emoji" } },
+  { key: "image", label: "Insert picture", Icon: ImagePlus, action: { kind: "panel", panel: "image" } },
   { key: "clear", label: "Clear formatting", Icon: RemoveFormatting, action: { kind: "exec", command: "removeFormat" } },
 ];
 
@@ -126,6 +130,9 @@ export function RichTextEditor({
   initialHtml,
   editorRef,
   disabled,
+  accountId,
+  mailboxId,
+  onImageInserted,
   ariaLabel = "Message body",
 }: {
   /**
@@ -136,6 +143,15 @@ export function RichTextEditor({
   initialHtml: string;
   editorRef: React.RefObject<RichTextEditorHandle | null>;
   disabled?: boolean;
+  accountId: string;
+  mailboxId: string;
+  /**
+   * Told about every picture put in the body, so the form can send the parts
+   * alongside the markup. The editor holds the MARKUP; the form holds the
+   * blob ids, because they are what the send action needs and the DOM is not a
+   * place to keep them.
+   */
+  onImageInserted: (image: InlineImage) => void;
   ariaLabel?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -331,6 +347,28 @@ export function RichTextEditor({
       setPanel(null);
     },
     [restoreSelection, run],
+  );
+
+  /**
+   * Put a picture in the document.
+   *
+   * `src` is the SIGNED PREVIEW URL, not the `cid:` the recipient will get — a
+   * browser cannot render `cid:`, so an editor that inserted the final form
+   * would show a broken image for the whole time somebody was writing. The
+   * identity travels in `data-cid`, and `compose/html.ts` swaps the two at the
+   * boundary, rebuilding `src` from the cid and never reading what is here.
+   */
+  const insertImage = useCallback(
+    (image: InlineImage) => {
+      onImageInserted(image);
+      restoreSelection();
+      run(
+        "insertHTML",
+        `<img src="${escapeAttr(image.previewUrl)}" data-cid="${escapeAttr(image.cid)}" ` +
+          `alt="${escapeAttr(image.name)}" style="max-width:100%;height:auto;"><br>`,
+      );
+    },
+    [onImageInserted, restoreSelection, run],
   );
 
   const emojiResults = emojiQuery.trim() ? searchEmoji(emojiQuery) : null;
@@ -533,6 +571,17 @@ export function RichTextEditor({
         </Popover>
       )}
 
+      {panel === "image" && (
+        <Popover onClose={() => setPanel(null)}>
+          <ImagePicker
+            accountId={accountId}
+            mailboxId={mailboxId}
+            onInsert={insertImage}
+            onClose={() => setPanel(null)}
+          />
+        </Popover>
+      )}
+
       {panel === "link" && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-secondary/40 px-2 py-1.5">
           <input
@@ -603,6 +652,7 @@ export function RichTextEditor({
 .y-compose ol { list-style: decimal; padding-left: 1.5em; margin: 0.4em 0; }
 .y-compose li { display: list-item; }
 .y-compose a { text-decoration: underline; }
+.y-compose img { max-width: 100%; height: auto; }
 `}</style>
     </div>
   );

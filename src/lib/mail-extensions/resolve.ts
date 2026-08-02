@@ -8,6 +8,7 @@ import type {
   MailEntityType,
   MailExtension,
   MailExtensionCtx,
+  MailImageCandidate,
 } from "./types";
 
 /**
@@ -112,6 +113,42 @@ export function filingTargetFor(
   extensions: readonly MailExtension[],
 ): MailExtension | null {
   return extensions.find((e) => e.filing) ?? null;
+}
+
+/**
+ * Every extension the composer can insert a picture from, if its module is on.
+ *
+ * A LIST rather than the single answer `filingTargetFor` gives, even though only
+ * Documents implements it today: filing has to pick one destination and this
+ * does not, so a second source (an industry pack's photo library, say) is a
+ * registry entry rather than a decision about which one wins.
+ */
+export function imageSourcesFrom(
+  extensions: readonly MailExtension[],
+): MailExtension[] {
+  return extensions.filter((e) => e.images);
+}
+
+/** Images from every source, each behind its own timeout. */
+export async function searchInsertableImages(
+  tx: Tx,
+  ctx: MailExtensionCtx,
+  query: string,
+  limit: number,
+): Promise<{ extensionSlug: string; label: string; images: MailImageCandidate[] }[]> {
+  const sources = imageSourcesFrom(await enabledMailExtensions(ctx.tenantId));
+  const groups = await Promise.all(
+    sources.map(async (extension) => ({
+      extensionSlug: extension.slug,
+      label: extension.images!.label,
+      images: await guarded<MailImageCandidate[]>(
+        `${extension.slug}.images.search`,
+        [],
+        () => extension.images!.search(tx, ctx, query, limit),
+      ),
+    })),
+  );
+  return groups.filter((g) => g.images.length > 0);
 }
 
 export interface SearchGroup {

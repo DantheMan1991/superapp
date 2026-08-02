@@ -166,6 +166,21 @@ export function htmlToPlainText(html: string): string {
       continue;
     }
 
+    if (name === "img") {
+      // An image is not nothing in a text part — a recipient reading the plain
+      // alternative should know a picture was there and, where the sender gave
+      // it alt text, what it showed. Silently dropping it is how "see the photo
+      // below" arrives with nothing below it.
+      if (!closing) {
+        // The word boundary matters: without it this also matches `data-alt`.
+        const alt = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(match[2]);
+        const label = decodeEntities((alt?.[1] ?? alt?.[2] ?? alt?.[3] ?? "").trim());
+        if (line.length > 0 && !line.endsWith(" ")) line += " ";
+        line += label.length > 0 ? `[image: ${label}]` : "[image]";
+      }
+      continue;
+    }
+
     if (name === "a") {
       if (!closing) {
         const href = HREF.exec(match[2]);

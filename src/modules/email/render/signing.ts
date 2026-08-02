@@ -143,3 +143,47 @@ export function verifyImageClaim(
   if (claim.expiresAt <= now) return false;
   return safeEqual(signImageClaim(claim), signature);
 }
+
+/**
+ * A signed URL the composer can display an inline image from.
+ *
+ * The bytes are already on the mail server after upload, and this is the route
+ * that already knows how to serve them with the right headers. Reusing it means
+ * the editor's preview and a received message's inline image travel the same
+ * path, rather than the composer growing a second way to show a picture.
+ *
+ * PREVIEW ONLY. This URL never leaves the browser: `compose/html.ts` rebuilds
+ * every `src` from the `cid`, so what the recipient gets is `cid:...` and this
+ * string is not in the message at all.
+ */
+export function inlinePreviewUrl(params: {
+  tenantId: string;
+  clerkUserId: string;
+  mailAccountId: string;
+  blobId: string;
+  type: string;
+  fileName: string;
+}): string {
+  const expiresAt = blobExpiry();
+  const claim: BlobClaim = {
+    tenantId: params.tenantId,
+    clerkUserId: params.clerkUserId,
+    mailAccountId: params.mailAccountId,
+    blobId: params.blobId,
+    servedType: params.type,
+    fileName: params.fileName,
+    // `inline` so the browser paints it rather than downloading it. The signed
+    // claim carries the disposition precisely so a caller cannot ask for a
+    // different one — see the blob route.
+    disposition: "inline",
+    expiresAt,
+  };
+  const query = new URLSearchParams({
+    type: claim.servedType,
+    name: claim.fileName,
+    disp: claim.disposition,
+    exp: String(expiresAt),
+    sig: signBlobClaim(claim),
+  });
+  return `/api/mail/${encodeURIComponent(params.mailAccountId)}/blob/${encodeURIComponent(params.blobId)}?${query}`;
+}

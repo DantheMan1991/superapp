@@ -19,10 +19,17 @@ import { htmlToPlainText } from "./to-text";
 export function composeBodies(
   htmlBody: string | undefined,
   textBody: string,
+  /**
+   * Content-IDs this message minted. An `<img>` naming anything else is dropped
+   * — the allowlist is the ONLY thing that admits an image, and it is threaded
+   * from the action rather than defaulted here so that a caller who forgets it
+   * gets no images rather than unchecked ones.
+   */
+  allowedCids: ReadonlySet<string> = new Set(),
 ): { textBody: string; htmlBody: string | null } {
   if (!htmlBody) return { textBody, htmlBody: null };
 
-  const clean = sanitizeOutboundHtml(htmlBody);
+  const clean = sanitizeOutboundHtml(htmlBody, { allowedCids });
   if (!htmlHasContent(clean)) {
     // Nothing visible survived, so there is no HTML message. Sending it anyway
     // would produce a `multipart/alternative` whose HTML half is blank — and

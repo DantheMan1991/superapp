@@ -12,6 +12,7 @@ import { sendMessageAction } from "../compose-actions";
 import { Textarea } from "@/components/ui/textarea";
 import { RichTextEditor, type RichTextEditorHandle } from "./rich-text-editor";
 import { htmlToPlainText } from "../compose/to-text";
+import type { InlineImage } from "../compose/inline";
 
 /**
  * Where somebody types.
@@ -90,6 +91,18 @@ export function ComposeForm({
   const [plainText, setPlainText] = useState(false);
   const [plainBody, setPlainBody] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  /**
+   * Pictures put in the body, kept HERE rather than in the editor.
+   *
+   * The editor owns the markup; these are the blob ids and content ids the send
+   * action needs, and the DOM is not a place to keep them. The list only grows —
+   * deleting an image from the body leaves its entry behind, and the ACTION is
+   * what drops it, by attaching only the pictures the sanitized body still
+   * references. Pruning here would mean watching the contenteditable for
+   * deletions, which is a mutation observer for a problem the server already
+   * answers correctly.
+   */
+  const [inlineImages, setInlineImages] = useState<InlineImage[]>([]);
   const [uploading, setUploading] = useState(false);
   const [pending, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
@@ -175,6 +188,16 @@ export function ComposeForm({
         ...(htmlBody ? { htmlBody } : {}),
         ...(draft.inReplyTo.length > 0 ? { inReplyTo: draft.inReplyTo } : {}),
         ...(draft.references.length > 0 ? { references: draft.references } : {}),
+        ...(inlineImages.length > 0
+          ? {
+              inlineImages: inlineImages.map((i) => ({
+                blobId: i.blobId,
+                cid: i.cid,
+                type: i.type,
+                name: i.name,
+              })),
+            }
+          : {}),
         ...(attachments.length > 0
           ? {
               attachments: attachments.map((a) => ({
@@ -312,6 +335,11 @@ export function ComposeForm({
             initialHtml={draft.bodyHtml}
             editorRef={editor}
             disabled={busy}
+            accountId={accountId}
+            mailboxId={mailboxId}
+            onImageInserted={(image) =>
+              setInlineImages((prior) => [...prior, image])
+            }
           />
         )}
 

@@ -2,6 +2,12 @@ import { NextRequest } from "next/server";
 import { authorizedClient } from "@/lib/email/oauth/accounts";
 import { sanitizeFileName } from "@/lib/file-headers";
 import { gateMailRoute, mailRouteNotFound } from "@/modules/email/route-auth";
+import {
+  isInlineImageType,
+  MAX_INLINE_IMAGE_BYTES,
+  mintCid,
+} from "@/modules/email/compose/inline";
+import { inlinePreviewUrl } from "@/modules/email/render/signing";
 
 /**
  * `POST /api/mail/[accountId]/upload` — put an attachment in the mail server's
@@ -69,11 +75,54 @@ export async function POST(
     return Response.json({ error: uploaded.message }, { status: 502 });
   }
 
+  /**
+   * An inline image gets two extra things: a Content-ID, and a URL the editor
+   * can actually display.
+   *
+   * THE CID IS MINTED HERE rather than in the browser. It ends up in a MIME
+   * header and inside a `cid:` URL in the body, so a client-chosen value would
+   * be untrusted input everywhere it is later used. Minted server-side it is
+   * ours, and the send action's format check is an assertion rather than a
+   * guard.
+   *
+   * The caller asks for this with `x-inline: 1`. Asking is not enough — the
+   * TYPE the mail server settled on has to be an image we allow inline, and the
+   * size has to be under the inline cap, which is far below the attachment one.
+   * A file that fails either comes back as an ordinary attachment rather than
+   * an error: the person attached something, and it did attach.
+   */
+  const wantsInline = request.headers.get("x-inline") === "1";
+  const inlineOk =
+    wantsInline &&
+    isInlineImageType(uploaded.data.type) &&
+    uploaded.data.size <= MAX_INLINE_IMAGE_BYTES;
+
+  if (!inlineOk) {
+    return Response.json({
+      blobId: uploaded.data.blobId,
+      // The type the SERVER settled on, not the one the client claimed.
+      type: uploaded.data.type,
+      size: uploaded.data.size,
+      name,
+      inline: false,
+    });
+  }
+
+  const cid = mintCid();
   return Response.json({
     blobId: uploaded.data.blobId,
-    // The type the SERVER settled on, not the one the client claimed.
     type: uploaded.data.type,
     size: uploaded.data.size,
     name,
+    inline: true,
+    cid,
+    previewUrl: inlinePreviewUrl({
+      tenantId: gate.tenantId,
+      clerkUserId: gate.userId,
+      mailAccountId: gate.account.id,
+      blobId: uploaded.data.blobId,
+      type: uploaded.data.type,
+      fileName: name,
+    }),
   });
 }

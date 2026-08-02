@@ -34,6 +34,13 @@ export interface ComposeInput {
   inReplyTo?: string[];
   references?: string[];
   attachments?: { blobId: string; type: string; name: string }[];
+  /**
+   * Pictures the html body references with `cid:`. Kept apart from
+   * `attachments` because the MIME they need is a different SHAPE — the client
+   * builds an explicit `multipart/related` for them, which is the only tree a
+   * `cid:` reference resolves in.
+   */
+  inlineImages?: { blobId: string; cid: string; type: string; name: string }[];
 }
 
 export interface SendOutcome {
@@ -127,6 +134,9 @@ export async function sendComposedMessage(
     ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
     ...(input.references ? { references: input.references } : {}),
     ...(input.attachments ? { attachments: input.attachments } : {}),
+    ...(input.inlineImages && input.inlineImages.length > 0
+      ? { inlineImages: input.inlineImages }
+      : {}),
     draftsMailboxId: draftsId,
     ...(sentId ? { sentMailboxId: sentId } : {}),
     // The ONLY place this is populated. See the file header.

@@ -78,31 +78,49 @@ describe("sanitizeOutboundHtml — what may leave the building", () => {
     expect(out).toContain("text");
   });
 
-  it("strips every style attribute — hidden text is how a paste becomes a lie", () => {
+  it("drops every declaration that is not something the toolbar can make", () => {
+    // The toolbar gained colours, fonts and sizes, so `style` is no longer
+    // dropped wholesale — see `formatting.ts`. What replaced the blanket rule is
+    // narrower and stronger: a declaration survives only if it is an exact
+    // member of the set the toolbar generates from. `display:none` is not
+    // refused by a rule about hiding things; it is simply not in any table.
     const out = sanitizeOutboundHtml(
       '<p style="display:none">invisible</p>' +
-        '<div style="color:#fff;background:#fff">white on white</div>' +
-        '<span style="position:fixed;top:0">over the app</span>',
+        '<div style="visibility:hidden;opacity:0">gone</div>' +
+        '<span style="position:fixed;top:0">over the app</span>' +
+        '<p style="font-size:1px">tiny</p>' +
+        '<div style="background-image:url(https://tracker.example/x)">pixel</div>' +
+        '<p style="color:rgba(0,0,0,0.02)">almost invisible</p>',
     );
-    expect(out).not.toContain("display:none");
-    expect(out).not.toContain("position:fixed");
-    expect(out).not.toMatch(/style="/);
+    for (const gone of [
+      "display:none",
+      "visibility:hidden",
+      "opacity",
+      "position:fixed",
+      "font-size:1px",
+      "background-image",
+      "tracker.example",
+      "rgba",
+    ]) {
+      expect(out).not.toContain(gone);
+    }
     // The TEXT survives. A sanitizer that deleted words would change the
     // meaning of a message somebody is sending under their own name.
-    expect(out).toContain("invisible");
-    expect(out).toContain("white on white");
+    for (const kept of ["invisible", "gone", "over the app", "tiny", "pixel"]) {
+      expect(out).toContain(kept);
+    }
   });
 
   it("unwraps tags it does not allow, keeping their text", () => {
     const out = sanitizeOutboundHtml(
-      "<table><tr><td>cell</td></tr></table><span>spanned</span><font size=7>big</font>",
+      "<table><tr><td>cell</td></tr></table><h1>heading</h1><marquee>moving</marquee>",
     );
-    expect(tags(out)).not.toContain("table");
-    expect(tags(out)).not.toContain("span");
-    expect(tags(out)).not.toContain("font");
-    expect(out).toContain("cell");
-    expect(out).toContain("spanned");
-    expect(out).toContain("big");
+    for (const tag of ["table", "tr", "td", "h1", "marquee"]) {
+      expect(tags(out)).not.toContain(tag);
+    }
+    for (const text of ["cell", "heading", "moving"]) {
+      expect(out).toContain(text);
+    }
   });
 
   it("drops iframes, forms and objects", () => {
@@ -180,7 +198,7 @@ describe("sanitizeOutboundHtml — what may leave the building", () => {
   describe("blockquote", () => {
     it("emits our own styling and discards whatever arrived", () => {
       const out = sanitizeOutboundHtml(
-        '<blockquote style="position:fixed;background:url(https://tracker.example/x)" ' +
+        '<blockquote type="cite" style="position:fixed;background:url(https://tracker.example/x)" ' +
           'class="gmail_quote" id="q1">quoted</blockquote>',
       );
       expect(out).toContain("quoted");
@@ -209,6 +227,28 @@ describe("sanitizeOutboundHtml — what may leave the building", () => {
         "<blockquote>outer<blockquote>inner</blockquote></blockquote>",
       );
       expect(tags(out).filter((t) => t === "blockquote")).toHaveLength(4);
+    });
+
+    it("defaults an unmarked blockquote to a quote, not an indent", () => {
+      // `execCommand("formatBlock", "blockquote")` emits a BARE blockquote, so
+      // the Quote button would be indistinguishable from Indent without this
+      // default. The editor stamps `type="cite"` as well; this is the fallback
+      // for when that stamping does not find its element.
+      const out = sanitizeOutboundHtml("<blockquote>pressed Quote</blockquote>");
+      expect(out).toContain('type="cite"');
+      expect(out).toContain("border-left");
+    });
+
+    it("reads an engine's indent wrapper as an indent, not a quote", () => {
+      // What `execCommand("indent")` actually produces. The border reset is the
+      // signal — no quote in this codebase has ever carried one.
+      const out = sanitizeOutboundHtml(
+        '<blockquote style="margin: 0 0 0 40px; border: none; padding: 0px;">indented</blockquote>',
+      );
+      expect(tags(out)).not.toContain("blockquote");
+      expect(out).toContain("margin-left:2.5em");
+      expect(out).not.toContain("border-left");
+      expect(out).toContain("indented");
     });
   });
 

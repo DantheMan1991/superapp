@@ -1,4 +1,11 @@
 import sanitizeHtml from "sanitize-html";
+import {
+  fontFromFace,
+  INDENT_STEP_EM,
+  normalizeColor,
+  sanitizeStyle,
+  sizeFromLegacy,
+} from "./formatting";
 
 /**
  * The WRITE path: HTML on its way out of this building.
@@ -26,12 +33,23 @@ import sanitizeHtml from "sanitize-html";
  *
  *   • no `<img>` — a pasted tracking pixel would make our user's message track
  *     its recipient, which is a thing done on their behalf without their knowing
- *   • no `<style>` and no `style` attribute (except the one we EMIT ourselves,
- *     below) — hidden text, white-on-white and `position:fixed` are how a pasted
- *     block turns into something the sender never saw
+ *   • no `<style>` block, ever
  *   • no `<table>` — nothing in the toolbar makes one, so anything that arrives
  *     as one came from somewhere else
  *   • no classes, ids, or `target`/`rel`, which mean nothing in a mail client
+ *
+ * THE `style` ATTRIBUTE IS THE ONE PLACE THAT RULE HAD TO GROW TEETH RATHER
+ * THAN JUST SAY NO. Colours, fonts, sizes, alignment and indent are all style
+ * features, and the first version of this file dropped the attribute outright
+ * for exactly the reasons above — hidden text, white-on-white, `position:fixed`.
+ *
+ * What makes them safe to offer is that every one of them is a FIXED
+ * ENUMERATION. `formatting.ts` holds the tables, the toolbar builds its menus
+ * from them, and `sanitizeStyle` keeps a declaration only if it is an exact
+ * member of the set generated from the same tables. So this file never parses
+ * CSS — it recognizes strings — and the toolbar can only emit what the
+ * sanitizer accepts, because both read one file. `display:none` is not rejected
+ * by a rule about hiding things; it simply is not in any table.
  *
  * The editor is the other half of this. It pastes as PLAIN TEXT (see
  * `rich-text-editor.tsx`), so hostile markup never enters the document at all
@@ -105,7 +123,7 @@ export function sanitizeOutboundHtml(html: string): string {
   return sanitizeHtml(input, {
     allowedTags: [
       // Structure
-      "p", "div", "br", "blockquote",
+      "p", "div", "br", "blockquote", "span",
       // Emphasis — both the semantic and the presentational spellings, because
       // execCommand emits `<b>`/`<i>` in some browsers and `<strong>`/`<em>` in
       // others and normalizing them apart would be a distinction with no reader.
@@ -121,19 +139,28 @@ export function sanitizeOutboundHtml(html: string): string {
     nonTextTags: ["script", "style", "textarea", "option", "noscript", "title", "head"],
     allowedAttributes: {
       a: ["href"],
-      // `style` and `type` are listed HERE because transformTags ADDS them —
-      // sanitize-html applies the allowlist AFTER the transform, so anything
-      // omitted from this map is silently discarded again. That exact mistake
-      // shipped links with no rel="noopener" on the read path and was caught
-      // only by asserting the output. Asserted here too.
+      // `style` is listed on every tag that can carry one because transformTags
+      // ADDS it — sanitize-html applies this allowlist AFTER the transform, so
+      // anything omitted here is silently discarded again. That exact mistake
+      // shipped links with no rel="noopener" on the read path, and it is why
+      // there is a regression test asserting the emitted attributes survive.
       blockquote: ["style", "type"],
+      span: ["style"],
+      p: ["style"],
+      div: ["style"],
+      li: ["style"],
+      ul: ["style"],
+      ol: ["style"],
     },
     allowedSchemes: SAFE_SCHEMES,
     // No `img` entry: images are not an allowed tag at all, so there is no
     // scheme that admits one.
     allowProtocolRelative: false,
-    // Belt for a future widening of allowedAttributes: even if `style` were
-    // added somewhere, no declaration would survive.
+    // NOT sanitize-html's own style filtering. Its `allowedStyles` matches
+    // values with regexes, and a regex over CSS is the losing side of this
+    // problem. Every surviving declaration goes through `sanitizeStyle`, which
+    // does not parse CSS at all — it recognizes the exact strings the toolbar
+    // is able to generate. See `formatting.ts`.
     allowedStyles: {},
     transformTags: {
       a: (tagName, attribs) => {
@@ -146,15 +173,101 @@ export function sanitizeOutboundHtml(html: string): string {
           href && isSafeHref(href) ? { href } : {};
         return { tagName, attribs: kept };
       },
-      // Every quote gets OUR styling, whatever it arrived with. Nothing the
-      // caller supplied reaches the output, so there is no attacker-controlled
-      // CSS to reason about — and nested quotes from a long reply chain all
-      // render the same way instead of inheriting whatever four different mail
-      // clients did to them on the way here.
-      blockquote: () => ({
-        tagName: "blockquote",
-        attribs: { type: "cite", style: QUOTE_STYLE },
-      }),
+      /**
+       * `<font>` is what a browser emits for colour, family and size when
+       * `styleWithCSS` is off — which is the mode the editor runs in, because it
+       * is also what makes bold come out as `<b>` rather than a span full of
+       * CSS. So the tag is not banned, it is TRANSLATED: its three attributes
+       * are looked up in the tables and re-emitted as a span whose style is one
+       * of ours. An unrecognized value produces no declaration, and a `<font>`
+       * carrying nothing recognizable becomes a bare span the browser ignores.
+       */
+      font: (_tagName, attribs) => {
+        const declarations: string[] = [];
+        const colour = attribs.color ? normalizeColor(attribs.color) : null;
+        if (colour) declarations.push(`color:${colour}`);
+        const face = attribs.face ? fontFromFace(attribs.face) : null;
+        if (face) declarations.push(`font-family:${face.css}`);
+        const size = attribs.size ? sizeFromLegacy(attribs.size) : null;
+        if (size) declarations.push(`font-size:${size.css}`);
+        // Back through sanitizeStyle rather than trusted directly: it is the one
+        // gate, and a lookup that started returning something unexpected must
+        // not get a second door.
+        const style = sanitizeStyle(declarations.join(";"));
+        const attrs: Record<string, string> = style ? { style } : {};
+        return { tagName: "span", attribs: attrs };
+      },
+      /**
+       * A blockquote is either a QUOTE or an INDENT, and telling them apart is
+       * the whole job here.
+       *
+       * `execCommand("indent")` does not emit an indented div. It wraps the
+       * block in a `<blockquote>` — in every engine — so an indented paragraph
+       * would arrive in the recipient's client looking as though the writer were
+       * quoting somebody. Both buttons produce the same tag.
+       *
+       * TWO SIGNALS, and the DEFAULT is what makes this safe to get wrong:
+       *
+       *   • `type="cite"` means quote, definitively. `quoteHtml` emits it, this
+       *     transform re-emits it, and the toolbar's Quote button stamps it onto
+       *     the element `formatBlock` just created — because `formatBlock`
+       *     itself produces a BARE blockquote, which is the bug this ordering
+       *     was written to fix.
+       *   • a `border` reset means indent. Engines emit
+       *     `margin: 0 0 0 40px; border: none` for `indent`, and no quote in
+       *     this codebase has ever carried a border reset.
+       *
+       * Anything else defaults to QUOTE, deliberately. If the editor's stamping
+       * fails, the user pressed Quote and gets a quote; the cost of the opposite
+       * default was an indent button silently relabelling itself. Both mistakes
+       * are cosmetic, which is what makes a heuristic acceptable here when it
+       * would not be for anything security-bearing.
+       */
+      blockquote: (tagName, attribs) => {
+        const quoteAttrs: Record<string, string> = { type: "cite", style: QUOTE_STYLE };
+        const indentAttrs: Record<string, string> = {
+          style: `margin-left:${INDENT_STEP_EM}em`,
+        };
+        const declaredQuote = (attribs.type ?? "").trim().toLowerCase() === "cite";
+        const style = (attribs.style ?? "").toLowerCase();
+        const looksIndented =
+          !declaredQuote && /border(?:-[a-z]+)?\s*:\s*(?:none|0)/.test(style);
+
+        if (looksIndented) {
+          // Re-emitted as a plain div so no recipient's client draws a
+          // quotation bar around what was only ever an indent.
+          return { tagName: "div", attribs: indentAttrs };
+        }
+        // Nothing the caller supplied reaches the output, so there is no
+        // attacker-controlled CSS to reason about — and nested quotes from a
+        // long reply chain all render the same way instead of inheriting
+        // whatever four different mail clients did to them on the way here.
+        return { tagName, attribs: quoteAttrs };
+      },
+      // Everything else that may carry a style: filtered, never trusted.
+      //
+      // LISTED EXPLICITLY RATHER THAN AS `"*"`, and that is not cosmetic.
+      // sanitize-html runs a `"*"` transform IN ADDITION to a tag's own, after
+      // it — so a wildcard here re-filtered the style that the `blockquote`
+      // transform had just emitted, and quotes shipped with no left border. The
+      // tests caught it; the lesson is that `"*"` is not a fallback.
+      //
+      // The list is exactly the tags `allowedAttributes` lets keep a `style`,
+      // minus `blockquote`, which sets its own. Any other tag loses the
+      // attribute to the allowlist regardless of what happens here.
+      ...Object.fromEntries(
+        (["span", "p", "div", "li", "ul", "ol"] as const).map((tag) => [
+          tag,
+          (tagName: string, attribs: sanitizeHtml.Attributes) => {
+            if (typeof attribs.style !== "string") return { tagName, attribs };
+            const style = sanitizeStyle(attribs.style);
+            const rest: Record<string, string> = { ...attribs };
+            if (style) rest.style = style;
+            else delete rest.style;
+            return { tagName, attribs: rest };
+          },
+        ]),
+      ),
     },
   });
 }

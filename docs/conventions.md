@@ -1,0 +1,243 @@
+# Code conventions
+
+> **Read before:** writing a server action, adding a module slice, handling
+> money or dates, or writing tests.
+> **Update when:** a pattern here is deliberately superseded. If you find
+> yourself deviating, either follow the convention or change this file — do not
+> leave the codebase holding two patterns silently.
+
+These are descriptive, not aspirational: they are the shapes already in the
+tree. Match the surrounding code.
+
+---
+
+## 1. The canonical server action
+
+Every server action follows one shape:
+
+```
+gate → Zod → withTenant(core + audit) → revalidate
+```
+
+Written out ([src/modules/documents/actions.ts](../src/modules/documents/actions.ts)
+is the reference implementation):
+
+```ts
+"use server";
+
+const Schema = z.object({ folderId: z.string().uuid(), name: z.string().min(1) });
+
+export async function renameFolderAction(input: unknown): Promise<ActionResult> {
+  try {
+    const ctx = await gate();                    // 1. authorize + entitlement
+    const { folderId, name } = Schema.parse(input);  // 2. validate
+    await withTenant(                            // 3. one transaction
+      ctx.tenantId,
+      async (tx) => {
+        await renameFolder(tx, ctx, folderId, name);   // pure-ish core
+        await logAuditInTx(tx, { /* identifiers only */ });
+      },
+      { role: ctx.role },                        // never omit if visibility matters
+    );
+    revalidate();                                // 4. cache
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+```
+
+Rules that fall out of that shape:
+
+- **`gate()` is the first statement.** A module-local helper wrapping
+  `requireTenant()` + `requireModuleEnabled()` + any role rules. Each module
+  defines its own; do not inline the calls.
+- **Zod parses before anything else touches the input.** Never index into
+  unvalidated input, not even to log it.
+- **The mutation and its audit row share one transaction** for anything
+  financial (`logAuditInTx`). See [security.md S10](security.md).
+- **`{ role: ctx.role }`** whenever the query reads visibility-bearing data.
+  Omitting it denies a read; it can never grant one — preserve that direction.
+- **One `withTenant` per action.** Two transactions means a half-applied
+  mutation is reachable.
+
+### Return type
+
+A discriminated union, never a thrown error crossing the client boundary:
+
+```ts
+type ActionResult<T = undefined> = { ok: true; data?: T } | { error: string };
+```
+
+### Errors
+
+Each module defines its own error type and a `friendlyMessage()` translator
+(`core/errors.ts`). A `fail()` helper converts unknown errors into
+`{ error }`, logging the real one server-side:
+
+```ts
+function fail(err: unknown): { error: string } {
+  if (err instanceof DocsError) return { error: friendlyMessage(err) };
+  console.error("documents action failed", err);
+  return { error: friendlyMessage(err) };
+}
+```
+
+Never return a raw Postgres or provider error to the client — it leaks schema
+and internals.
+
+### Fail closed on roles
+
+The `expert` role (the platform's bookkeeper working inside a client's
+workspace) is read-only in modules that have no read-only-safe writes. Deny
+explicitly rather than letting the default carry it:
+
+```ts
+if (ctx.role === "expert") throw new DocsError("FORBIDDEN_EXPERT", "…");
+```
+
+---
+
+## 2. Module structure
+
+Modules grow into slices. The shape that has held up:
+
+```
+src/modules/<slug>/
+  <Slug>Module.tsx      registry-rendered entry component
+  actions.ts            server actions — gate/Zod/withTenant/revalidate
+  core/                 pure domain logic. No auth, no I/O, no React
+    errors.ts           module error type + friendlyMessage
+    types.ts
+  components/           client components
+  <slice>/              a bounded area (banking/, invoicing/, shares/)
+  ai/                   prompt construction + response validation
+```
+
+**`core/` is pure.** It takes a `tx` and plain arguments, returns data or
+throws a module error. It never calls `requireTenant`, never reads env, never
+imports React. That is what makes it testable without a database session and
+what keeps the authorization story in one place.
+
+`ai/` splits three ways every time: `*-prompt.ts` builds the prompt (pure),
+`*-validate.ts` Zod-parses the response, and the caller orchestrates. Model
+output is untrusted input.
+
+---
+
+## 3. Money
+
+Integer cents in JS numbers. Never floats, anywhere, for any reason.
+
+- `parseMoneyToCents()` for user input — returns `null` on anything
+  unparseable, negative, over two decimals, or beyond `MAX_AMOUNT_CENTS`.
+- `formatCents()` for display.
+- `toSafeCents()` for Postgres `bigint` aggregates, which arrive as strings —
+  it throws rather than silently losing precision.
+- DB columns are `bigint`.
+- CSV amounts are built by integer construction, never `toFixed()`.
+
+[src/modules/accounting/lib/money.ts](../src/modules/accounting/lib/money.ts) is
+the only place this logic lives. If you are writing `/100` or `* 100` outside
+it, stop.
+
+---
+
+## 4. Database
+
+- Migrations: `npm run db:generate` for schema, then a **second `--custom`
+  migration** for RLS policies. Drizzle does not generate RLS.
+- Run every migration against **both** the dev branch and production.
+- Indexes on tenant tables lead with `tenant_id`.
+- Prefer a `NOT NULL DEFAULT` over a nullable column — `metadata jsonb NOT NULL
+  DEFAULT '{}'` means `metadata->>'x'` is always safe.
+- Discriminator columns that must be declared at every insert site get **no**
+  database default, so `$inferInsert` makes them required. `documents.origin`
+  does this deliberately.
+- Comment the *why* in `schema.ts`. It is the most-read file in the repo, and
+  its comments are load-bearing documentation.
+
+---
+
+## 5. Naming
+
+| Thing | Convention |
+| --- | --- |
+| Module / pack slug | lowercase kebab, matches `modules.id` and the directory |
+| DB tables/columns | `snake_case` |
+| TS | `camelCase` values, `PascalCase` types/components |
+| Server actions | verb-first, `Action` suffix (`renameFolderAction`) |
+| Zod schemas | `PascalCase` (`CreateFolderSchema`) |
+| Files | kebab-case (`bill-prompt.ts`); components `PascalCase.tsx` |
+| Branches | `claude/<area>-<topic>` |
+
+Do not name anything after an industry. See
+[extension-model.md](extension-model.md).
+
+---
+
+## 6. Comments
+
+This codebase's comments carry unusual weight — they are what the next agent
+reads to infer intent. The existing standard, which is worth keeping:
+
+- Explain **why**, not what. The diff shows what.
+- File-header block comments state the file's job and its invariants.
+- Document the trap you just avoided. Comments like *"Forgetting it does not
+  open a hole — the GUC defaults to 'staff'"* prevent a future regression.
+- Justify every `withSystem()` call at the call site.
+- **Do not use industry vocabulary in core comments.** An agent reading
+  "a subcontractor sends drawings" in a core file infers that core is a
+  construction product and writes accordingly.
+
+---
+
+## 7. Tests
+
+- Vitest. `tests/<area>.test.ts`.
+- **`tests/tenant-isolation.test.ts` is the certification suite** and must cover
+  every tenant table: a second tenant attempting both read and write, both
+  denied. Extend it in the same PR that adds the table.
+- DB-backed suites require `TEST_DATABASE_URL`;
+  `tests/setup/database-guard.ts` replaces `DATABASE_URL` for the run so tests
+  physically cannot reach production. Without it suites **skip** — a skipped
+  isolation run is not a passing one.
+- `core/` logic is tested without a database. Prefer pushing logic there.
+- `live-*.test.ts` hit real provider APIs and are not part of the default gate.
+
+```bash
+npm test
+npm run test:isolation   # required before deploy
+```
+
+---
+
+## 8. UI
+
+- Server components by default; `"use client"` only where interaction requires.
+- shadcn/ui + Tailwind. Check `src/components/ui` before adding a dependency.
+- Modules declare layout needs via `ModuleDefinition.layout`; the shell never
+  branches on a module slug.
+- Mobile matters — a real share of usage is one-handed, in the field, on a
+  phone. Test narrow viewports for anything a non-office user touches.
+
+---
+
+## 9. Next.js
+
+This version has breaking changes from what you likely remember. **Read the
+relevant guide in `node_modules/next/dist/docs/` before writing framework-level
+code**, and heed deprecation notices. Do not pattern-match from memory of an
+older App Router.
+
+---
+
+## 10. Definition of done
+
+- [ ] `npm run build` green
+- [ ] `npm test` green; `npm run test:isolation` green (not skipped)
+- [ ] New tables covered in the isolation suite
+- [ ] Migration applied to dev branch **and** production
+- [ ] Module dossier build-log entry added ([docs/modules/](modules/))
+- [ ] Security checklist for the surface you touched ([security.md §4](security.md))
+- [ ] No industry vocabulary added to Layer 1

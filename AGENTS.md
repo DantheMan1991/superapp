@@ -56,18 +56,29 @@ that matter for code:
 Modules stay "coming_soon" empty slots until a paying client pulls them in —
 that discipline is the whole point of the build brief.
 
-## Module dossiers (source of truth for humans AND agents)
+## Build docs (source of truth for humans AND agents)
 
-`docs/modules/<slug>.md` is the living record of each module (and of
-platform machinery like retainer-hours): purpose, build log, data model,
-decisions & gotchas, open items. Rendered read-only in the superadmin UI
-at `/admin/docs`.
+Everything under `docs/` is the build record, rendered read-only in the
+superadmin UI at `/admin/docs` (`src/lib/build-docs.ts` walks the whole
+tree — a new file appears on the page with no code change):
 
-- **Every PR that touches a module MUST add a build-log entry to its
-  dossier** (date, short title, what/why) and update the other sections if
+| Where | What | When it changes |
+| --- | --- | --- |
+| `docs/modules/<slug>.md` | Dossier per module *and* per platform-level area (retainer-hours, public-site, health-check, mail-infrastructure): purpose, build log, data model, decisions & gotchas, open items | Every PR that touches that area |
+| `docs/*.md` | `architecture`, `security`, `conventions`, `extension-model` — the invariants every module inherits | When a boundary moves or a statement stops being true |
+| `docs/decisions/` | ADRs. Immutable once accepted — reverse one by writing a new ADR that supersedes it | When a decision closes off a credible alternative |
+| `docs/runbooks/` | Operational procedures | When a step turns out to be wrong |
+
+- **Every PR MUST update the doc for what it changed** — a build-log entry
+  (date, short title, what/why) in the dossier, plus the other sections if
   the data model or a decision changed. This is not optional documentation
-  polish — the dossiers are the context agents read before making changes.
-- **At the start of a session that modifies a module, read its dossier
+  polish; these files are the context agents read before making changes.
+  Work that has no dossier yet gets one, from `docs/modules/_TEMPLATE.md`.
+- **Write the doc in the same PR.** The four platform docs above sat
+  uncommitted for a week while the module dossiers stayed current — a doc
+  that is not committed does not exist, and one the page cannot read may as
+  well not be.
+- **At the start of a session that modifies an area, read its dossier
   first** — it's cheaper and more reliable than re-deriving state from git
   history.
 - Per-client differences live in config/data, never forked code — the

@@ -3,7 +3,7 @@ import { asc, isNotNull, sql as dsql } from "drizzle-orm";
 import { BookOpen } from "lucide-react";
 import { withSystem, schema } from "@/db";
 import { moduleRegistry } from "@/modules";
-import { listModuleDocs } from "@/lib/module-docs";
+import { listModuleDocs } from "@/lib/build-docs";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -53,7 +53,8 @@ export default async function AdminModulesPage() {
     listModuleDocs(),
   ]);
 
-  const docSlugs = new Set(docs.map((d) => d.slug));
+  // Dossier filename is the module id; the URL now carries its section.
+  const docHref = new Map(docs.map((d) => [d.name, `/admin/docs/${d.slug}`]));
   const cell = new Map(
     tenantModules.map((tm) => [`${tm.tenantId}:${tm.moduleId}`, tm]),
   );
@@ -101,9 +102,9 @@ export default async function AdminModulesPage() {
                   <TableCell>
                     <div className="flex items-center gap-1.5 font-medium">
                       {mod.name}
-                      {docSlugs.has(mod.id) && (
+                      {docHref.has(mod.id) && (
                         <Link
-                          href={`/admin/docs/${mod.id}`}
+                          href={docHref.get(mod.id)!}
                           className="text-muted-foreground hover:text-foreground"
                           title="Open build docs"
                         >

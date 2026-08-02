@@ -41,7 +41,7 @@ import { injectValues, type MdNode } from "./merge";
 let fontsReady = false;
 function ensureFonts(): void {
   if (fontsReady) return;
-  // Absolute paths off process.cwd(), matching src/lib/module-docs.ts, which
+  // Absolute paths off process.cwd(), matching src/lib/build-docs.ts, which
   // already reads repo files at request time on this deployment.
   const dir = path.join(
     process.cwd(),

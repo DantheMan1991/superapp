@@ -18,6 +18,8 @@ import { AutoReplyBadge } from "./auto-reply/badge";
 import { AutoReplyForm } from "./auto-reply/form";
 import { loadAutoReply } from "./auto-reply/load";
 import { autoReplyState } from "./auto-reply/validate";
+import { RulesEditor, type EditorRule } from "./rules/editor";
+import { loadRules } from "./rules/actions";
 
 /**
  * The three panes.
@@ -60,11 +62,13 @@ export async function MailView({
     flagged: first("flagged"),
     attach: first("attach"),
     away: first("away"),
+    rules: first("rules"),
   };
   const viewQuery = readMailView(params);
   const position = Number(params.pos ?? "0");
   const composeMode = readComposeMode(params.compose);
   const showAway = params.away === "1";
+  const showRules = params.rules === "1";
 
   const view = await loadMailView(account, {
     tenantId: ctx.tenant.id,
@@ -131,6 +135,37 @@ export async function MailView({
    * A failure is swallowed to null. The mail server declining to answer a
    * question about holidays is not a reason to refuse somebody their inbox.
    */
+  /**
+   * Only when the editor is open, unlike the auto-reply read above. Rules have
+   * no badge and no consequence anybody needs to see from the inbox — the
+   * script is already running on the mail server whether or not this page
+   * knows about it.
+   */
+  const rules: EditorRule[] = showRules
+    ? (await loadRules(ctx.tenant.id, ctx.userId, ctx.role, account.id)).map(
+        (row): EditorRule => {
+          const action = (row.action ?? {}) as Record<string, unknown>;
+          return {
+            name: row.name,
+            isEnabled: row.isEnabled,
+            matchMode: row.matchMode === "any" ? "any" : "all",
+            tests: Array.isArray(row.tests)
+              ? (row.tests as EditorRule["tests"])
+              : [],
+            fileIntoMailboxId:
+              typeof action.fileIntoMailboxId === "string"
+                ? action.fileIntoMailboxId
+                : null,
+            fileIntoName:
+              typeof action.fileIntoName === "string" ? action.fileIntoName : null,
+            markRead: action.markRead === true,
+            flag: action.flag === true,
+            stopAfter: row.stopAfter,
+          };
+        },
+      )
+    : [];
+
   const away = await loadAutoReply(account);
   const awayState = away
     ? autoReplyState(
@@ -158,6 +193,12 @@ export async function MailView({
             on your behalf, that is the single most important thing on this
             screen, and it must be visible without opening anything. */}
         <AutoReplyBadge state={awayState} params={params} />
+        <Link
+          href={mailHref(params, { rules: "1", compose: undefined, message: undefined })}
+          className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
+        >
+          Rules
+        </Link>
         <MailSearch initial={params.q ?? ""} params={params} />
       </div>
 
@@ -218,9 +259,16 @@ export async function MailView({
         </section>
 
         <section
-          className={`min-h-0 ${view.message || composeMode || showAway ? "block" : "hidden lg:block"}`}
+          className={`min-h-0 ${view.message || composeMode || showAway || showRules ? "block" : "hidden lg:block"}`}
         >
-          {showAway ? (
+          {showRules ? (
+            <RulesEditor
+              mailboxId={account.mailboxId}
+              folders={folders}
+              initial={rules}
+              closeHref={mailHref(params, { rules: undefined })}
+            />
+          ) : showAway ? (
             // Same choice the composer made: it takes the pane rather than
             // floating over it, so the inbox stays visible behind the decision.
             <AutoReplyForm

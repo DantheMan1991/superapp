@@ -1524,6 +1524,144 @@ Open: no way to test a rule against an existing message; no `discard` action,
 deliberately; and the editor cannot show which rules the compiler considered
 inert until after a save.
 
+### 2026-08-01 (later still) — Rich text, and why the write path is the strict one
+
+The composer sent `text/plain` until now. It sends a `multipart/alternative`
+with bold, italic, underline, lists, links and quoting, and a plain-text
+alternative derived from it. `htmlBody` had been wired through the whole path
+since Slice 6 and unused; this is what fills it.
+
+**THE ASYMMETRY THAT SHAPES ALL OF IT.** `render/sanitize.ts` is the read path
+and `compose/html.ts` is its mirror, and the mirror is deliberately much
+STRICTER — which is the opposite of what you would guess from the fact that
+reading handles mail from anonymous strangers and composing handles what our own
+user typed.
+
+The read path has a sandbox behind it. Its own header says so: no
+`allow-scripts`, `script-src 'none'`, so a bypass there is a rendering bug rather
+than a compromise, and that is what makes a permissive allowlist — tables,
+`<style>`, inline CSS, proxied remote images — proportionate.
+
+**The write path has nothing behind it.** Whatever survives leaves our origin,
+arrives in a stranger's client, and renders there under OUR USER'S From header.
+No sandbox, no CSP we control, no second chance. `quote.ts` already stated the
+threat for quoted bodies — "our user unknowingly forwarding something hostile
+over their own signature" — and this generalizes it to everything the composer
+can emit. So the rule for the allowlist is one sentence: **the composer emits
+only what its own toolbar can produce.** No `<img>` (a pasted tracking pixel
+would make our user's message track its recipient), no `<style>` and no `style`
+attribute, no tables, no classes, no `target`/`rel`.
+
+**Paste is plain text, always, and that is a control rather than a
+convenience.** The default paste inserts the source document's markup straight
+into the editable — stylesheets, pixels, hidden text, whatever the page carried
+— which would then leave under somebody's own name. Intercepting it means
+hostile markup never enters the document at all, so the server sanitizer is
+defence in depth rather than the only guard. The cost is real and accepted:
+pasting from Word or another email loses its formatting. It also means the
+editor ships NO sanitizer to the browser, which is what kept a 200 KB library
+out of the client bundle.
+
+**`contenteditable` + `execCommand`, deprecated and chosen anyway.** There is no
+replacement API, every browser still implements it, and the alternatives were a
+300 KB editor framework or reimplementing selection and undo by hand. What makes
+it safe is that nothing the component produces is trusted: execCommand emits
+`<b>` in one browser and `<span style="font-weight:bold">` in another, and the
+server normalizes both down to the same dozen tags. Browser variance is absorbed
+rather than fought.
+
+**ONE BODY, NOT TWO.** The composer edits an HTML document and the text
+alternative is DERIVED from it at send time. Building a parallel plain-text
+draft was the obvious design and is wrong: the two would disagree the moment
+somebody edited or deleted the quote in the editor, which is a normal thing to
+do, and the message would have gone out as one thing to clients that render HTML
+and a different thing to clients that do not. `openingBody` is gone; the text
+draft it built has no reader.
+
+**SANITIZE, THEN DERIVE** — `compose/bodies.ts` exists to make that ordering
+testable rather than a comment. Both orders read identically at the call site
+and only one is right: derive from the submitted markup and the text part
+carries the words the sanitizer removed, which is the exact shape of "the HTML
+looks clean and the text part still has the phishing link in it". Half the
+recipients would read a message nobody checked. It lives outside
+`compose-actions.ts` because a `"use server"` module may only export async
+functions — a constraint that did us a favour.
+
+An HTML body that sanitizes to nothing visible is dropped rather than sent as an
+empty part: a `multipart/alternative` whose HTML half is blank renders as an
+empty message in every client that prefers HTML, which is most of them.
+
+**Verified against the live server, because the last three slices were not.**
+`npm run mail:probe-compose` creates a real draft with every construct the
+toolbar can emit, reads back the MIME the server actually assembled, downloads
+the raw RFC 5322, and destroys the draft. It WRITES, unlike `jmap:probe`, so it
+is guarded to a loopback server for the same reason `mail:fixture` is. Against
+Stalwart 0.16.15 every assumption held, which is the rarer outcome here:
+
+| | |
+| --- | --- |
+| two `bodyValues` + `textBody`/`htmlBody` | accepted |
+| what the server built | a real `multipart/alternative` |
+| part order | `text/plain` first, `text/html` last — RFC 2046's worst-to-best |
+| charsets | `utf-8` on both, `quoted-printable` transfer encoding |
+| `Facturación año — £5` | survived end to end |
+| `<blockquote>` | survived into the HTML part |
+| `> ` prefixes | survived into the text part |
+
+That matters because `client.ts` bets on the server assembling the MIME rather
+than doing it by hand, and "implements the spec" and "behaves as you assumed"
+are different claims. The probe cost one wrong guess of its own: **there is no
+`primaryAccountId` field on a JMAP session.** RFC 8620 calls it
+`primaryAccounts`, a map keyed by capability URI. `parse.ts` had it right; the
+probe was written from memory and failed on its first call.
+
+**Three bugs the tests found, all in the HTML→text converter, none of them
+findable without asserting the exact output:**
+
+- **A blank line between every list item.** `</li>` ended a line and `<li>`
+  started one, and an empty flush was pushing a blank line. Fixed by making
+  `gap()` the ONLY source of blank lines — a flush now emits a line or nothing.
+- **The same for ordered lists**, which is the same bug and is listed separately
+  only because the numbering made it look like a different one.
+- **Quoted paragraph breaks vanished.** `quoteText` renders a blank line inside a
+  quote as `>`, and the derived version dropped it — so a two-paragraph quote
+  arrived as one. Fixed by distinguishing a HARD line ending (`<br>`, which the
+  author asked for) from a soft one (a block boundary doing bookkeeping): a hard
+  flush on an empty line inside a quote emits the prefix alone.
+
+Two more hazards handled before they could bite. **RFC 3676's signature
+separator is `-- ` WITH the trailing space**, and that space is what mail clients
+fold a signature on — a blanket `trimEnd()` eats it and the signature gets quoted
+back in every reply for the rest of the thread. And a `contenteditable`'s
+non-breaking spaces are the browser's, not the author's; left alone they arrive
+in a recipient's text part as bytes that look like spaces and do not wrap like
+them.
+
+**`quoteText` is now a specification rather than a caller.** Nothing in the
+product calls it, but there is a test asserting that
+`htmlToPlainText(sanitizeOutboundHtml(quoteHtml(m)))` produces the same
+meaningful lines as `quoteText(m)` — the same role the golden test in
+`file-headers.ts` plays for the blob header block. If the derived text
+alternative ever stops being as good as the purpose-built one, that test says so.
+
+**Signatures got half a fix, not a whole one.** The `signature` prop that was
+already threaded into `Composer` carried only `textSignature`; the identity's
+`htmlSignature` is now read alongside it and preferred, sanitized on the way in
+because it is markup from the mail server heading into a message. So a signature
+somebody built in another client keeps its links and layout instead of being
+rebuilt from the text version. **Editing one still means using another client** —
+that is the next slice.
+
+**Not verified in a browser, and this slice has more riding on that than the
+previous three.** The dev server needs `.env`, which points at the production
+database and a live mailbox. The pure code is covered by 43 new tests and the
+protocol by the probe, but every judgement inside `rich-text-editor.tsx` is
+unexercised: whether the `onMouseDown` preventDefault really preserves the
+selection across a toolbar click in each browser, whether the caret lands above
+the quote on mount, what `formatBlock` does to a selection spanning two
+paragraphs, and whether `execCommand` behaves at all under React 19's event
+delegation. That file is the one to look at first on a preview deployment.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -1614,6 +1752,32 @@ to the isolation rule):
   two-hop join behind "emails on this invoice".
 - `src/modules/email/filing.ts` — the only place in the linking path that speaks
   JMAP; turns a live message into the neutral payload a filing target takes.
+Composing (`src/modules/email/compose/`, all pure and free of `server-only`):
+
+- `html.ts` — **`sanitizeOutboundHtml`, the write path's sanitizer.** Read its
+  header before widening anything: it explains why this allowlist is far
+  stricter than the reading pane's, which is that the read path has a sandbox
+  behind it and this one has nothing. The `<blockquote>` styling is EMITTED by
+  `transformTags` rather than allowed through, so no caller-supplied CSS ever
+  reaches a recipient.
+- `to-text.ts` — `htmlToPlainText`, the alternative a person actually reads. Not
+  `render/transcript.ts`'s `htmlToText`, which flattens for a tsvector and drops
+  hrefs, list numbering and quote depth. The quote depth is the one that matters:
+  it is what makes a plain-text reply chain survive four exchanges.
+- `bodies.ts` — the sanitize-THEN-derive ordering, in a file of its own so a test
+  can assert it. Outside `compose-actions.ts` because a `"use server"` module may
+  only export async functions.
+- `quote.ts` — attribution, quoting and forwarding in both forms, plus
+  `openingBodyHtml`. `quoteText` has no caller in the product any more; it is the
+  SPECIFICATION the derived text alternative is asserted against.
+- `components/rich-text-editor.tsx` — the only client-side piece. Two rules in it
+  are security rather than style (paste-as-plain-text, and never handing
+  `createLink` raw input); the header says which and why.
+- `scripts/jmap-compose-probe.ts` — `npm run mail:probe-compose`. **Writes**, so
+  it is loopback-guarded like `mail:fixture`. Run it whenever the composed
+  message shape changes; it is what proves the server builds the
+  `multipart/alternative` rather than the spec saying it should.
+
 - `src/modules/email/render/transcript.ts` — pure. HTML → searchable text. The
   header explains why hand-rolling a stripper is fine here when hand-rolling a
   *sanitizer* is not.
@@ -1887,9 +2051,21 @@ not a bug.
 **Organising is in as of Slice 7**: multi-select with a bulk bar, unread/flagged/
 has-files chips, folder creation, and per-user saved views.
 
-What is NOT built yet, in slice order: signatures, out-of-office and rules
-(Slice 8 — and the probe already overturned its cost, since this server speaks
-JMAP Sieve rather than needing ManageSieve), then contacts, then delegation.
+**Out-of-office and rules are in**, both executed by the mail server rather than
+by us — `vacationresponse` for the first, a compiled Sieve script for the second
+— so they fire while nobody is signed in, which is the only time either matters.
+
+**Composing is rich text**: bold, italic, underline, lists, links and quoting,
+sent as a `multipart/alternative` whose text part is derived from the HTML rather
+than typed alongside it. The MIME the server assembles has been read back off a
+live draft (`npm run mail:probe-compose`), not assumed from RFC 8621.
+
+What is NOT built yet, in priority order: **signature editing** (they are read
+from the server's Identity and prefilled, never written), contact autocomplete —
+the server has advertised `urn:ietf:params:jmap:contacts` since the first probe
+and nothing uses it — undo/schedule send, labels, websocket push
+(`urn:ietf:params:jmap:websocket`, `supportsPush`), and an advanced search
+builder. Then delegation.
 
 Everything so far has been proven against ONE server, ONE account and ONE
 message. That is a real limit: no multi-account switching, no thread expansion
@@ -2032,11 +2208,35 @@ code or config change.
   closing the composer discards what you typed. Drafts live on the SERVER by
   design (a local table would desync with the same mailbox open in Outlook), so
   this is a surface, not a schema change.
-- **No HTML composing.** The composer sends `text/plain`; `htmlBody` is wired
-  through the whole path and unused. Quoting already produces both forms.
 - **No Bcc field.** The action accepts it and the form does not offer it.
 - **No signature editing.** Signatures are read from the mail server's Identity
-  and prefilled; changing one still means using another client.
+  and prefilled — `htmlSignature` preferred over `textSignature` since rich text
+  landed — but changing one still means using another client.
+- **The rich composer has never run in a browser.** Every pure part is tested and
+  the protocol is probed, but `rich-text-editor.tsx` itself is unexercised:
+  toolbar-click selection preservation, where the caret lands on mount,
+  `formatBlock` over a multi-paragraph selection, and whether `execCommand`
+  behaves under React 19's event delegation at all. First thing to look at on a
+  preview deployment.
+- **Pasting into the composer loses formatting**, deliberately — paste is
+  inserted as plain text so hostile markup cannot enter the document. Keeping it
+  would mean shipping a sanitizer to the browser AND trusting it, and the thing
+  being pasted is routinely another email. Revisit only with a sanitize-on-paste
+  that runs the same allowlist as the server.
+- **No image insertion in a composed message**, and it is not a small gap to
+  close: an inline image means uploading a blob, minting a `cid:`, and emitting
+  `multipart/related` around the alternative. `<img>` is not in the outbound
+  allowlist at all until that exists.
+- **No plain-text mode.** Every message now goes as `multipart/alternative`.
+  Mailing lists and a few correspondents genuinely want text only, and the
+  toggle would be cheap — the text part is already derived and correct.
+- **No font, colour, size or alignment controls**, on purpose for now: they are
+  the `style`-attribute features, and the outbound sanitizer strips `style`
+  wholesale. Adding any one of them means a narrow, regex-validated style
+  allowlist rather than opening the attribute.
+- **The editor does not warn when the sanitizer will change what you wrote.**
+  With paste-as-text and a fixed toolbar the divergence should be nil, but if it
+  ever is not, the message simply arrives as less than it looked like.
 - **Send is not idempotent.** A double-submit is guarded only by the disabled
   button — unlike the outbound spine, which derives an idempotency key from what
   the message IS. A composed message has no such natural key, and inventing one

@@ -8,7 +8,13 @@ import {
   threadHeaders,
   type ReplyMode,
 } from "../compose/reply";
-import { forwardText, openingBody, quoteText } from "../compose/quote";
+import {
+  forwardHtml,
+  openingBodyHtml,
+  quoteHtml,
+  textSignatureToHtml,
+} from "../compose/quote";
+import { sanitizeOutboundHtml } from "../compose/html";
 import { ComposeForm, type ComposeDraft } from "./compose-form";
 
 /**
@@ -22,6 +28,14 @@ import { ComposeForm, type ComposeDraft } from "./compose-form";
  *
  * `mode` comes from the URL like every other piece of state in this module, so a
  * half-written reply survives a refresh of the page around it.
+ *
+ * ONE BODY IS BUILT HERE, not two. The composer edits an HTML document and the
+ * text alternative is DERIVED from it at send time (`compose-actions.ts`), so
+ * there is a single source of truth for the words in a message. Building a
+ * parallel plain-text draft would produce two, and they would disagree the
+ * moment somebody edited or deleted the quote in the editor — which is a normal
+ * thing to do and would have silently sent one message to clients that render
+ * HTML and a different one to clients that do not.
  */
 
 export type ComposeMode = "new" | "reply" | "reply_all" | "forward";
@@ -33,6 +47,7 @@ export function Composer({
   mode,
   parent,
   signature,
+  htmlSignature,
   closeHref,
 }: {
   mailboxId: string;
@@ -43,9 +58,11 @@ export function Composer({
   /** The message being answered. Absent for a new message. */
   parent: JmapEmail | null;
   signature: string;
+  /** The identity's own HTML signature, still unsanitized. */
+  htmlSignature: string;
   closeHref: string;
 }) {
-  const draft = buildDraft(mode, parent, selfAddress, signature);
+  const draft = buildDraft(mode, parent, selfAddress, signature, htmlSignature);
   return (
     <ComposeForm
       mailboxId={mailboxId}
@@ -69,18 +86,38 @@ const TITLES: Record<ComposeMode, string> = {
   forward: "Forward",
 };
 
+/**
+ * The signature, as markup the composer can start from.
+ *
+ * Prefers the identity's `htmlSignature` — somebody who built one in another
+ * client has links and layout in it, and rebuilding it from the text version
+ * would throw both away. It is sanitized on the way in, because it is markup
+ * from the mail server heading into a message we are about to send under this
+ * person's name: exactly the input `sanitizeOutboundHtml` exists for.
+ */
+function signatureMarkup(signature: string, htmlSignature: string): string {
+  const rich = sanitizeOutboundHtml(htmlSignature);
+  // Tags with no text are not a signature — an empty `<div>` from a server that
+  // stores one for every identity would push the quote down for no reason.
+  if (rich.replace(/<[^>]*>/g, "").trim().length > 0) return rich;
+  return textSignatureToHtml(signature);
+}
+
 function buildDraft(
   mode: ComposeMode,
   parent: JmapEmail | null,
   selfAddress: string,
   signature: string,
+  htmlSignature: string,
 ): ComposeDraft {
+  const sigHtml = signatureMarkup(signature, htmlSignature);
+
   if (mode === "new" || !parent) {
     return {
       to: "",
       cc: "",
       subject: "",
-      body: signature.trim().length > 0 ? `\n\n${signature.trim()}` : "",
+      bodyHtml: openingBodyHtml(sigHtml, ""),
       inReplyTo: [],
       references: [],
       showCc: false,
@@ -97,7 +134,7 @@ function buildDraft(
       to: "",
       cc: "",
       subject: forwardSubject(parent.subject),
-      body: openingBody(signature, forwardText(parent)),
+      bodyHtml: openingBodyHtml(sigHtml, forwardHtml(parent)),
       // A forward is a NEW message, not a reply — no threading headers, or it
       // lands inside the original conversation in the recipient's client.
       inReplyTo: [],
@@ -114,7 +151,7 @@ function buildDraft(
     to: recipients.to.map(formatAddress).join(", "),
     cc: recipients.cc.map(formatAddress).join(", "),
     subject: replySubject(parent.subject),
-    body: openingBody(signature, quoteText(parent)),
+    bodyHtml: openingBodyHtml(sigHtml, quoteHtml(parent)),
     inReplyTo: headers.inReplyTo,
     references: headers.references,
     showCc: recipients.cc.length > 0,

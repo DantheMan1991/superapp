@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -182,28 +182,4 @@ export async function saveRulesAction(
     if (!(err instanceof MailError)) console.error("rules save failed", err);
     return { error: friendlyMessage(err) };
   }
-}
-
-/** Everything this person has configured for this connection, in order. */
-export async function loadRules(
-  tenantId: string,
-  userId: string,
-  role: "owner" | "staff" | "expert",
-  mailAccountId: string,
-) {
-  return withTenant(
-    tenantId,
-    (tx) =>
-      tx
-        .select()
-        .from(schema.mailRules)
-        .where(
-          and(
-            eq(schema.mailRules.tenantId, tenantId),
-            eq(schema.mailRules.mailAccountId, mailAccountId),
-          ),
-        )
-        .orderBy(asc(schema.mailRules.sortOrder)),
-    { role, userId },
-  );
 }

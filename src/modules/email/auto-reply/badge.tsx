@@ -30,7 +30,14 @@ export function AutoReplyBadge({
   // claiming the reply is off, which is a statement we cannot support.
   if (state === null) return null;
 
-  const href = mailHref(params, { away: "1", compose: undefined, message: undefined });
+  const href = mailHref(params, {
+    away: "1",
+    // Clears the other pane. Without this, opening one from the other leaves
+    // ?away=1&rules=1 in the URL asking for both at once.
+    rules: undefined,
+    compose: undefined,
+    message: undefined,
+  });
 
   if (state.state === "active") {
     return (

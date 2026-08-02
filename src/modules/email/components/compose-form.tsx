@@ -11,6 +11,7 @@ import { parseRecipients } from "../compose/addresses";
 import { sendMessageAction } from "../compose-actions";
 import { Textarea } from "@/components/ui/textarea";
 import { RichTextEditor, type RichTextEditorHandle } from "./rich-text-editor";
+import { RecipientInput } from "./recipient-input";
 import { htmlToPlainText } from "../compose/to-text";
 import type { InlineImage } from "../compose/inline";
 
@@ -248,12 +249,13 @@ export function ComposeForm({
           <label htmlFor="mail-to" className="w-12 shrink-0 text-xs text-muted-foreground">
             To
           </label>
-          <Input
+          <RecipientInput
             id="mail-to"
             value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder="name@example.com, another@example.com"
-            autoComplete="off"
+            onChange={setTo}
+            mailboxId={mailboxId}
+            placeholder="Start typing a name or address"
+            otherFields={`${cc}, ${bcc}`}
           />
           {!showCc && (
             <button
@@ -280,11 +282,12 @@ export function ComposeForm({
             <label htmlFor="mail-cc" className="w-12 shrink-0 text-xs text-muted-foreground">
               Cc
             </label>
-            <Input
+            <RecipientInput
               id="mail-cc"
               value={cc}
-              onChange={(e) => setCc(e.target.value)}
-              autoComplete="off"
+              onChange={setCc}
+              mailboxId={mailboxId}
+              otherFields={`${to}, ${bcc}`}
             />
           </div>
         )}
@@ -294,11 +297,12 @@ export function ComposeForm({
             <label htmlFor="mail-bcc" className="w-12 shrink-0 text-xs text-muted-foreground">
               Bcc
             </label>
-            <Input
+            <RecipientInput
               id="mail-bcc"
               value={bcc}
-              onChange={(e) => setBcc(e.target.value)}
-              autoComplete="off"
+              onChange={setBcc}
+              mailboxId={mailboxId}
+              otherFields={`${to}, ${cc}`}
             />
           </div>
         )}

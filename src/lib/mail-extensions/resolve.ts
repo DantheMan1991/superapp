@@ -8,6 +8,7 @@ import type {
   MailEntityType,
   MailExtension,
   MailExtensionCtx,
+  MailContactCandidate,
   MailImageCandidate,
 } from "./types";
 
@@ -149,6 +150,39 @@ export async function searchInsertableImages(
     })),
   );
   return groups.filter((g) => g.images.length > 0);
+}
+
+/** Every extension that can offer people, if its module is on. */
+export function contactSourcesFrom(
+  extensions: readonly MailExtension[],
+): MailExtension[] {
+  return extensions.filter((e) => e.contacts);
+}
+
+/**
+ * People from every contributing module, each behind its own timeout.
+ *
+ * Flattened rather than grouped, unlike the image sources: a recipient
+ * autocomplete is one ranked list, and which module supplied a row is a
+ * sublabel rather than a heading. `contacts/rank.ts` does the ordering.
+ */
+export async function searchExtensionContacts(
+  tx: Tx,
+  ctx: MailExtensionCtx,
+  query: string,
+  limit: number,
+): Promise<MailContactCandidate[]> {
+  const sources = contactSourcesFrom(await enabledMailExtensions(ctx.tenantId));
+  const groups = await Promise.all(
+    sources.map((extension) =>
+      guarded<MailContactCandidate[]>(
+        `${extension.slug}.contacts.search`,
+        [],
+        () => extension.contacts!.search(tx, ctx, query, limit),
+      ),
+    ),
+  );
+  return groups.flat();
 }
 
 export interface SearchGroup {

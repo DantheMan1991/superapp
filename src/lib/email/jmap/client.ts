@@ -2,6 +2,7 @@ import "server-only";
 import {
   compareMailboxes,
   parseChanges,
+  parseContactCard,
   parseEmail,
   parseIdentity,
   parseMailbox,
@@ -13,6 +14,7 @@ import {
 import { draftObject } from "./draft";
 import type {
   JmapChanges,
+  JmapContact,
   JmapComposedMessage,
   JmapEmail,
   JmapEmailFilter,
@@ -69,6 +71,17 @@ const VACATION_SINGLETON = "singleton";
  * way to pass the text inline.
  */
 export const SIEVE = "urn:ietf:params:jmap:sieve";
+/**
+ * draft-ietf-jmap-contacts. The address book.
+ *
+ * A DRAFT rather than a published RFC, and it changed object models mid-flight:
+ * the old one had `Contact` with `emails: [{type, value}]`, the current one has
+ * `ContactCard` following JSContact (RFC 9553) with `emails: {key: {address}}`.
+ * `npm run mail:probe-contacts` establishes which a given server speaks; this
+ * client implements the current one, because that is what the probe found and
+ * because `Contact/get` came back `unknownMethod`.
+ */
+export const CONTACTS = "urn:ietf:params:jmap:contacts";
 
 export interface SieveScript {
   id: string;
@@ -421,6 +434,20 @@ export interface JmapClient {
    * has typed a message.
    */
   identities(): Promise<JmapResult<JmapIdentity[]>>;
+  /**
+   * Search the address book.
+   *
+   * ONE ROUND TRIP: `ContactCard/query` with a text filter, then
+   * `ContactCard/get` back-referencing its result with `#ids` — the same trick
+   * the list view uses, and the difference between an autocomplete that keeps up
+   * with typing and one people stop waiting for.
+   *
+   * The server does the matching. The probe confirmed a `text` filter matches on
+   * both the address and the name, including non-ASCII surnames, which is what
+   * makes this viable against a synced corporate directory rather than only a
+   * handful of cards.
+   */
+  searchContacts(query: string, limit: number): Promise<JmapResult<JmapContact[]>>;
   /**
    * Write the signature onto an identity.
    *
@@ -1272,6 +1299,41 @@ export function createJmapClient(
         };
       }
       return { ok: true as const, data: undefined };
+    },
+
+    async searchContacts(query, limit) {
+      const result = await call(
+        [
+          [
+            "ContactCard/query",
+            { accountId, filter: { text: query }, limit },
+            "q",
+          ] as unknown as MethodCall,
+          [
+            "ContactCard/get",
+            { accountId, "#ids": { resultOf: "q", name: "ContactCard/query", path: "/ids" } },
+            "g",
+          ] as unknown as MethodCall,
+        ],
+        [CORE, CONTACTS],
+      );
+      if (!result.ok) return result;
+
+      const taken = takeMethodResponse(result.data, "g");
+      if (!taken.ok) {
+        return {
+          ok: false as const,
+          message: taken.message,
+          ...(taken.errorType ? { errorType: taken.errorType } : {}),
+        };
+      }
+      const list = (taken.payload as { list?: unknown })?.list;
+      // An address book that answers with something unrecognizable yields NO
+      // suggestions rather than an error: autocomplete is an aid, and a composer
+      // that refuses to open because a directory is confused is worse than one
+      // with no suggestions in it.
+      if (!Array.isArray(list)) return { ok: true as const, data: [] };
+      return { ok: true as const, data: list.flatMap(parseContactCard) };
     },
 
     async currentState() {

@@ -2031,6 +2031,124 @@ since the composer began — the specific thing to try is the Clear button, whic
 remounts the editor by changing its React key, because `initialHtml` is applied
 once on mount by design.
 
+### 2026-08-02 (later still) — Contact autocomplete, from three places at once
+
+The server has advertised `urn:ietf:params:jmap:contacts` since the very first
+probe and nothing has ever used it. Recipient fields now suggest people while you
+type — and the founder's instruction shaped the architecture more than the
+feature: **a future CRM has to contribute its people too.**
+
+**THE PROBE MATTERED MORE HERE THAN ANYWHERE SO FAR, because contacts is not a
+published RFC.** It is a draft, and it changed object models mid-flight:
+
+- the OLD draft has `Contact`, with `firstName`/`lastName` and
+  `emails: [{ type, value }]` — an ARRAY
+- the CURRENT one has `ContactCard`, following JSContact (RFC 9553), with
+  `name: { components }` and `emails: { key: { address } }` — a keyed OBJECT
+
+Those are not variations on a theme; they are different objects with different
+method names. A parser written from the wrong one finds **no addresses at all**
+and reports an empty address book — which looks exactly like a tenant who has not
+added any contacts yet. `npm run mail:probe-contacts` asked instead:
+`ContactCard/get` works and `Contact/get` answers `unknownMethod`.
+
+**And the address book was empty, which the probe refused to treat as an
+answer.** Slice 0 made precisely that mistake — an empty mailbox reading as a
+clean bill of health — so this probe CREATES one card against a loopback server,
+reads it back, and destroys it. Same guard as `mail:fixture`. Three things only a
+real card could establish:
+
+- `emails` is keyed by context and each value carries `address`.
+- **the server COMPUTES `name.full`** ("Aoife Ó Braonáin") from the components.
+  That matters because component order is locale-dependent, and assembling a
+  display name by hand renames people. `full` is optional in the spec, so the
+  parser prefers it and falls back — but the fallback is the worse answer and it
+  is good to know it is rarely needed.
+- a `text` filter matches on the address AND the name, **including a non-ASCII
+  surname**. Without that, anybody with an accented name would be unfindable by
+  typing their own name, and autocomplete would have had to download the whole
+  address book and filter locally.
+
+The live card is now a golden fixture in `tests/mail-contacts.test.ts`, verbatim,
+including a test asserting the OLD draft's shape yields nothing — so a future
+server speaking the other model fails loudly rather than silently.
+
+**THREE SOURCES, AND THE RANKING IS THE FEATURE.** `contacts/rank.ts` is pure and
+carries the one rule that decides whether a recipient box feels clever or stupid:
+**somebody you have actually written to beats a directory entry.** Type three
+letters and be offered a supplier from 2019 ahead of the person you emailed this
+morning, and people stop reading the list. Everything else is tie-breaking — an
+exact address beats everything, a match at the start of a local part or on any
+word of a name beats one in the middle.
+
+- **Recent correspondents** read `mail_thread_index`, which sync already
+  maintains, so the best source costs no protocol call at all. The participants
+  column was put there for display; this is a second use for data on hand.
+- **The extension registry** — Accounting's customers and vendors today.
+- **The mail server's address book** — one round trip, `ContactCard/query` with
+  `#ids` back-referenced into `ContactCard/get`.
+
+Deduplication is by lowercased address, and the merge rule is worth keeping:
+**the better origin wins the slot, but the NAME comes from whichever entry has
+one.** A recent correspondent is often a bare address while the customer record
+for the same address carries the business's real name, so showing
+`acme@example.com` when we know it is Acme Ltd would be a worse answer than
+either source alone. The sublabel follows the name, so a row cannot read
+"Acme Ltd · emailed today" with the name taken from somewhere else.
+
+**The contact source is a capability on `MailExtension`, and it ships with a real
+implementation rather than a placeholder.** The founder asked for a CRM to plug
+in later; Accounting implements the same hook now, over customers and vendors.
+That is deliberate: this dossier already records that **"a seam with one user is
+a seam that has never been tested"**, learned the day three Migadu assumptions
+turned out to be baked into supposedly shared code. A CRM is now a registry entry
+and nothing else — Mail will never learn it exists.
+
+Like `search`, `resolve` and the image source, it takes the CALLER'S `tx`, so
+which people an extension can offer is exactly which rows the person composing
+may read.
+
+**THE PRIVACY PROPERTY, and it has its own isolation test.** Recent
+correspondents come from a per-user table (migration 0043), so the suggestions
+are who YOU have written to. An autocomplete that offered a colleague's
+correspondents would leak **who somebody else writes to** — from a feature nobody
+thinks of as sensitive, which is exactly how that kind of leak ships. The test
+asserts all three directions: the owner sees their own, the colleague sees
+nothing, and a caller who forgets `userId` sees nothing rather than everything.
+
+Writing that test also demonstrated the other half: seeding participants needed
+`withSystem`, because `mail_thread_index` is member-READ only. A member cannot
+forge a correspondent into somebody's suggestions.
+
+**The field stays a text field**, which is the load-bearing UI decision. Every
+other composer turns recipients into chips, which moves the value into component
+state and makes pasting six addresses out of a spreadsheet a fight. Suggestions
+only ever replace the LAST FRAGMENT — everything after the final comma — so
+what is already typed is untouched, `parseRecipients` still decides what an
+address is, and somebody who ignores the dropdown gets exactly the behaviour they
+had before. A suggestion is a shortcut, never a commitment.
+
+Two client-side details that are bugs if missed. **A stale answer is dropped
+rather than rendered**: server actions do not cancel, so a slow request for "da"
+can resolve after a fast one for "dank" and repopulate the list backwards. And
+**the list closes on an outside click rather than on blur**, because blur fires
+before the click that picked a row — closing on blur means the list vanishes
+before it can be used.
+
+The results are stored WITH the query that produced them, so "are these still
+about what is being typed?" is a comparison rather than a cleanup. That removed a
+`setState` inside an effect, which React 19's lint rule correctly refuses, and it
+also closes the window where a list from a previous fragment renders against a
+new one.
+
+`Promise.allSettled` across the sources: a directory that is slow or down costs
+its own rows and never the suggestions from the other two.
+
+Verified: the probe's four confirmations plus the golden fixture, 21 unit tests,
+and two isolation tests against the dev branch. **Not verified in a browser** —
+the things to try are arrow-key navigation, Tab to commit, and pasting a list of
+addresses to confirm the dropdown stays out of the way.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -2142,6 +2260,19 @@ Composing (`src/modules/email/compose/`, all pure and free of `server-only`):
   rule at all because they are characters rather than images.
 - `link-url.ts` — `normalizeLinkInput`. Pure and separate from the editor so the
   security-relevant half of a client component is testable without a DOM.
+- `contacts/rank.ts` — **the ranking**, pure. One rule decides whether the
+  recipient box feels clever or stupid: somebody you have written to beats a
+  directory entry. Read it before adding a fourth source.
+- `contacts/recent.ts` — correspondents from `mail_thread_index`. Per-user by
+  RLS; the caller MUST pass `{ userId }` or it returns nothing, which is the
+  fail-closed direction.
+- `contacts/actions.ts` — fans out across the three sources with
+  `Promise.allSettled`, so a slow directory costs its own rows and nothing else.
+- `scripts/jmap-contacts-probe.ts` — `npm run mail:probe-contacts`. Read-only
+  except against loopback, where it creates one card to learn the real shape.
+  Run it against any new server: contacts is a DRAFT with two incompatible
+  object models, and picking the wrong one reports an empty address book rather
+  than an error.
 - `signature/validate.ts` — `prepareSignature`: sanitize, derive the text half,
   and add the RFC 3676 separator. Pure, and asserted idempotent because the form
   re-saves what it loaded. Read its header before relaxing anything: a signature
@@ -2473,10 +2604,13 @@ on a phone and in Outlook too; the text half is derived from the HTML; and the
 identity's address was proved immutable before the form was built, which is what
 stops a signature form becoming a send-as-anyone form.
 
-What is NOT built yet, in priority order: contact autocomplete —
-the server has advertised `urn:ietf:params:jmap:contacts` since the first probe
-and nothing uses it — undo/schedule send, labels, websocket push
-(`urn:ietf:params:jmap:websocket`, `supportsPush`), and an advanced search
+**Contact autocomplete is in**, from three sources at once: recent
+correspondents (per-user, from `mail_thread_index`), the extension registry
+(Accounting's customers and vendors today, a CRM later) and the mail server's own
+`ContactCard` address book.
+
+What is NOT built yet, in priority order: undo/schedule send, labels, websocket
+push (`urn:ietf:params:jmap:websocket`, `supportsPush`), and an advanced search
 builder. Then delegation.
 
 Everything so far has been proven against ONE server, ONE account and ONE
@@ -2628,6 +2762,17 @@ code or config change.
   referencing one would show a broken image on every mail it was pasted into.
   Doing it properly means re-attaching the picture to each message at send time.
 - **No "signature off for this message" toggle**, and no per-reply variant.
+- **Nothing WRITES to the address book.** Autocomplete reads `ContactCard`; there
+  is no "add to contacts" from a message, so the directory only ever grows
+  through another client. Recent correspondents cover the common case, which is
+  why this has not bitten.
+- **No contact groups.** `AddressBook/get` works but `ContactGroup/get` is
+  `unknownMethod` on this server, so "email the whole site team" has nothing to
+  resolve against.
+- **Recent correspondents include people you only ever RECEIVED from**, since
+  `mail_thread_index` participants do not record direction. A newsletter sender
+  you have never written to can therefore be suggested. Fixing it means storing
+  direction at sync time, which is a schema change for a small win.
 - **The rich composer has never run in a browser**, and the surface needing it
   grew with the toolbar slice: nine controls became twenty-odd, six of them
   popovers that save and restore a selection. Every pure part is tested and the

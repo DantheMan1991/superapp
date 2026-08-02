@@ -3,6 +3,7 @@ import type {
   JmapEmail,
   JmapEmailAddress,
   JmapEmailBodyPart,
+  JmapContact,
   JmapIdentity,
   JmapKeywords,
   JmapMailbox,
@@ -482,4 +483,80 @@ export function describeMethodError(type: string): string {
     default:
       return `The mail server refused that request (${type}).`;
   }
+}
+
+/**
+ * A JSContact `ContactCard` (RFC 9553) → one flat entry per address.
+ *
+ * EVERY DECISION HERE CAME FROM `npm run mail:probe-contacts` RATHER THAN FROM
+ * THE DRAFT, because the draft has two incompatible object models and this
+ * server implements the newer one. What the probe established, against a card it
+ * created and read back:
+ *
+ *   • `emails` is a KEYED OBJECT (`{ work: { address } }`), not the old draft's
+ *     array of `{ type, value }`. A parser written from the old model would have
+ *     found no addresses at all and reported an empty address book.
+ *   • **the server computes `name.full`** ("Aoife Ó Braonáin") from the
+ *     components, so a display name does not have to be assembled by hand —
+ *     which matters because component order is locale-dependent and getting it
+ *     wrong renames people.
+ *   • `@type` and `version` are filled in by the server.
+ *
+ * `name.full` is still only PREFERRED, not required: it is optional in the
+ * spec, so the fallback assembles the components in the order given. That is the
+ * best a client can do without a locale, and it is why the server computing it
+ * is worth relying on where offered.
+ *
+ * Never throws and never invents: a card with no usable address yields nothing
+ * rather than an entry the composer would offer and then fail to send to.
+ */
+export function parseContactCard(raw: unknown): JmapContact[] {
+  const r = asRecord(raw);
+  if (!r || typeof r.id !== "string" || r.id.length === 0) return [];
+
+  const name = contactName(r.name);
+  const organization = firstOrganizationName(r.organizations);
+
+  const emails = asRecord(r.emails);
+  if (!emails) return [];
+
+  const out: JmapContact[] = [];
+  const seen = new Set<string>();
+  for (const value of Object.values(emails)) {
+    const entry = asRecord(value);
+    const address = asString(entry?.address).trim();
+    if (address.length === 0) continue;
+    // One card can list the same address under two contexts; the composer must
+    // not offer it twice.
+    const key = address.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ id: r.id, name, email: address, organization });
+  }
+  return out;
+}
+
+/** `name.full` when the server computed one, else the components in order. */
+function contactName(raw: unknown): string {
+  const name = asRecord(raw);
+  if (!name) return "";
+  const full = asString(name.full).trim();
+  if (full.length > 0) return full;
+
+  const components = Array.isArray(name.components) ? name.components : [];
+  return components
+    .map((c) => asString(asRecord(c)?.value).trim())
+    .filter((v) => v.length > 0)
+    .join(" ");
+}
+
+/** Cards carry organizations as a keyed object too; the first one is enough. */
+function firstOrganizationName(raw: unknown): string {
+  const organizations = asRecord(raw);
+  if (!organizations) return "";
+  for (const value of Object.values(organizations)) {
+    const name = asString(asRecord(value)?.name).trim();
+    if (name.length > 0) return name;
+  }
+  return "";
 }

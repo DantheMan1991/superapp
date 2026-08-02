@@ -1,9 +1,10 @@
 import "server-only";
-import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type {
   LinkableEntity,
   MailExtension,
+  MailContactCandidate,
   MailExtensionCtx,
 } from "@/lib/mail-extensions/types";
 import { formatCents } from "../lib/money";
@@ -373,4 +374,74 @@ export const accountingMailExtension: MailExtension = {
   moduleSlug: "accounting",
   name: "Accounting",
   entityTypes: [invoiceEntity, billEntity, customerEntity, vendorEntity],
+  contacts: { search: searchContacts },
 };
+
+/* -- People the composer can address ------------------------------------- */
+
+/**
+ * Customers and vendors as recipient suggestions.
+ *
+ * The addresses a business actually writes to are, overwhelmingly, the ones it
+ * already invoices and pays. Offering them costs one query over tables the
+ * caller can already read — and it means the contact seam ships with a REAL
+ * implementation rather than waiting for the CRM it was designed for.
+ *
+ * Uses the CALLER'S transaction, so this is exactly the set of customers and
+ * vendors that person may see. Nothing here filters on visibility.
+ */
+async function searchContacts(
+  tx: Tx,
+  ctx: MailExtensionCtx,
+  query: string,
+  limit: number,
+): Promise<MailContactCandidate[]> {
+  const term = query.trim();
+  if (term.length === 0) return [];
+  const like = contains(term);
+
+  // Two selects rather than a UNION: drizzle's union typing across differently
+  // named columns costs more than it saves for six rows, and these run
+  // concurrently inside the one transaction anyway.
+  const [customerRows, vendorRows] = await Promise.all([
+    tx
+      .select({ name: schema.customers.name, email: schema.customers.email })
+      .from(schema.customers)
+      .where(
+        and(
+          eq(schema.customers.tenantId, ctx.tenantId),
+          // A row with no address cannot be picked, so it must not be offered —
+          // a suggestion that does nothing when clicked is worse than absent.
+          ne(schema.customers.email, ""),
+          sql`(${schema.customers.name} ilike ${like} or ${schema.customers.email} ilike ${like})`,
+        ),
+      )
+      .limit(limit),
+    tx
+      .select({ name: schema.vendors.name, email: schema.vendors.email })
+      .from(schema.vendors)
+      .where(
+        and(
+          eq(schema.vendors.tenantId, ctx.tenantId),
+          ne(schema.vendors.email, ""),
+          sql`(${schema.vendors.name} ilike ${like} or ${schema.vendors.email} ilike ${like})`,
+        ),
+      )
+      .limit(limit),
+  ]);
+
+  return [
+    ...customerRows.map((r) => ({
+      email: r.email,
+      name: r.name,
+      // Says WHERE it came from. Two rows reading "Acme Ltd" with no other
+      // difference is a choice nobody can make.
+      sublabel: "Customer",
+    })),
+    ...vendorRows.map((r) => ({
+      email: r.email,
+      name: r.name,
+      sublabel: "Vendor",
+    })),
+  ];
+}

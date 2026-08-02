@@ -17,6 +17,7 @@
     "mail:fixture": "tsx scripts/mail-fixture.ts",
     "mail:register-client": "tsx scripts/stalwart-register-client.ts",
     "mail:probe-compose": "tsx scripts/jmap-compose-probe.ts",
+    "mail:probe-contacts": "tsx scripts/jmap-contacts-probe.ts",
     "test": "vitest run",
     "test:isolation": "vitest run tests/tenant-isolation.test.ts"
   },

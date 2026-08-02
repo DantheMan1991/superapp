@@ -2,6 +2,8 @@ import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
+import { recentCorrespondents } from "../src/modules/email/contacts/recent";
+import { accountingMailExtension } from "../src/modules/accounting/mail/extension";
 import { documentsMailExtension } from "../src/modules/documents/mail/extension";
 
 /**
@@ -2535,6 +2537,108 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
       tx.select().from(schema.mailThreadIndex),
     );
     expect(asNobody).toHaveLength(0);
+  });
+
+  /**
+   * Recipient autocomplete, over the same per-user scope.
+   *
+   * THE PRIVACY FAILURE THIS RULES OUT is specific and easy to ship by accident:
+   * an autocomplete that offered a colleague's correspondents would leak WHO
+   * SOMEBODY ELSE WRITES TO, from a feature nobody thinks of as sensitive. It is
+   * the same class of leak `mail_thread_index`'s policy exists for — a subject
+   * line in a colleague's thread list is already too much — and it is reached
+   * here through a different door, so it deserves its own assertion.
+   *
+   * `recentCorrespondents` has no user predicate of its own. What scopes it is
+   * the `withTenant(..., { userId })` the action passes, and RLS.
+   */
+  it("recipient suggestions never offer a colleague's correspondents", async () => {
+    // Seeded under withSystem, and that is itself worth noticing:
+    // `mail_thread_index` is member-READ only, so a member update is silently
+    // refused. Sync writes it as trusted code, which is exactly why a member
+    // cannot forge a correspondent into somebody's suggestions.
+    await withSystem((tx) =>
+      tx
+        .update(schema.mailThreadIndex)
+        .set({
+          participants: [{ name: "A Supplier", email: "supplier-iso@example.com" }],
+        })
+        .where(eq(schema.mailThreadIndex.id, fx.a.threadRowId)),
+    );
+
+    const mine = await withTenant(
+      tenantA,
+      (tx) => recentCorrespondents(tx, tenantA, "supplier-iso", 10),
+      { userId: "user-a" },
+    );
+    expect(mine.map((c) => c.email)).toContain("supplier-iso@example.com");
+
+    const theirs = await withTenant(
+      tenantA,
+      (tx) => recentCorrespondents(tx, tenantA, "supplier-iso", 10),
+      { userId: COLLEAGUE },
+    );
+    expect(theirs).toEqual([]);
+
+    // The fail-closed direction: a caller that forgets `userId` gets NOTHING
+    // rather than everything, which is what `app_current_user()` returning NULL
+    // is for.
+    const anonymous = await withTenant(tenantA, (tx) =>
+      recentCorrespondents(tx, tenantA, "supplier-iso", 10),
+    );
+    expect(anonymous).toEqual([]);
+  });
+
+  /**
+   * The contact SEAM, over Accounting's customers.
+   *
+   * `extension.ts` filters on tenant and a non-empty address and nothing else,
+   * so this asserts that the CALLER'S transaction is what keeps one tenant's
+   * customers out of another's recipient field — the same property the image
+   * source is tested for, reached through the other capability.
+   */
+  it("the contact source cannot reach another tenant's customers", async () => {
+    for (const [tenant, tag] of [
+      [tenantA, "a"],
+      [tenantB, "b"],
+    ] as const) {
+      await withTenant(
+        tenant,
+        (tx) =>
+          tx.insert(schema.customers).values({
+            tenantId: tenant,
+            name: `Isolation Contact ${tag}`,
+            email: `isolation-contact@${tag}.example`,
+          }),
+        { role: "owner", userId: `user-${tag}` },
+      );
+    }
+
+    const fromA = await withTenant(
+      tenantA,
+      (tx) =>
+        accountingMailExtension.contacts!.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          "isolation-contact",
+          10,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(fromA.map((c) => c.email)).toEqual(["isolation-contact@a.example"]);
+
+    const fromB = await withTenant(
+      tenantB,
+      (tx) =>
+        accountingMailExtension.contacts!.search(
+          tx,
+          { tenantId: tenantB, userId: "user-b", role: "owner" },
+          "isolation-contact",
+          10,
+        ),
+      { role: "owner", userId: "user-b" },
+    );
+    expect(fromB.map((c) => c.email)).toEqual(["isolation-contact@b.example"]);
   });
 
   it("a colleague cannot delete another user's connection, but you can delete your own", async () => {

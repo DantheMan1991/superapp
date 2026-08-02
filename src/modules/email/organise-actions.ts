@@ -16,6 +16,7 @@ import {
   type SavedSearchEntry,
 } from "./organise/saved-searches";
 import { snoozeMessages, type SnoozeOutcome } from "./triage/snooze";
+import { wouldOrphan } from "./organise/labels";
 import { isAcceptableDueAt } from "./triage/snooze-times";
 
 /**
@@ -343,6 +344,119 @@ export async function snoozeAction(
 
     revalidatePath(BASE);
     return { ok: true, data: result.data };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const labelSchema = z.object({
+  mailboxId: z.string().uuid(),
+  emailIds: z.array(z.string().min(1).max(512)).min(1).max(500),
+  add: z.array(z.string().min(1).max(512)).max(50).default([]),
+  remove: z.array(z.string().min(1).max(512)).max(50).default([]),
+});
+
+/**
+ * Apply and remove labels across a selection.
+ *
+ * A LABEL IS A MAILBOX — see `organise/labels.ts` — so this is a mailbox
+ * membership patch and nothing else. There is no labels table, no migration and
+ * no second model of where a message lives, because `mail:probe-labels`
+ * confirmed the protocol already allows a message to be in several places at
+ * once and that this server honours it.
+ *
+ * The ids are CLAIMS from the browser. They are the mail server's own ids and it
+ * refuses the ones that are not real, which is the same trust boundary every
+ * other bulk action here sits behind: RLS proves the ACCOUNT is the caller's,
+ * and after that a fabricated email id can only ever address the caller's own
+ * mail.
+ */
+export async function applyLabelsAction(
+  input: z.infer<typeof labelSchema>,
+): Promise<ActionResult<{ updated: number; skipped: number }>> {
+  try {
+    const ctx = await gate();
+    const parsed = labelSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+    const data = parsed.data;
+    if (data.add.length === 0 && data.remove.length === 0) {
+      return { ok: true, data: { updated: 0, skipped: 0 } };
+    }
+
+    const account = await loadConnection(ctx.tenantId, ctx.userId, data.mailboxId);
+    if (!account) throw new MailError("ACCOUNT_NOT_FOUND", "no connection");
+    const client = await authorizedClient(account);
+    if (!client.ok) {
+      throw new MailError(
+        client.needsReauth ? "ACCOUNT_NEEDS_REAUTH" : "MAIL_SERVER_UNREACHABLE",
+        client.message,
+      );
+    }
+
+    /**
+     * A removal that would leave a message in NO mailbox is skipped.
+     *
+     * An empty `mailboxIds` does not delete a message — it ORPHANS it, visible
+     * in no folder and reachable only by search, which is worse than either
+     * deleting it or leaving it alone. It is reachable in practice: a rule that
+     * files into a label and removes the inbox leaves a message whose only home
+     * is that label, and taking it off is an ordinary click.
+     *
+     * The messages are re-read rather than trusting the browser's idea of where
+     * they live. One extra round trip, and only when something is being removed.
+     */
+    let targets = data.emailIds;
+    let skipped = 0;
+    if (data.remove.length > 0) {
+      const current = await client.data.getEmails(data.emailIds, false);
+      if (current.ok) {
+        const safe = new Set<string>();
+        for (const email of current.data) {
+          if (!wouldOrphan(email.mailboxIds, data.add, data.remove)) {
+            safe.add(email.id);
+          }
+        }
+        // Anything the server did not return is left in — it may have been
+        // moved or deleted elsewhere, and refusing to act on a message we
+        // simply could not read would be the wrong direction.
+        const known = new Set(current.data.map((e) => e.id));
+        targets = data.emailIds.filter((id) => safe.has(id) || !known.has(id));
+        skipped = data.emailIds.length - targets.length;
+      }
+    }
+    if (targets.length === 0) {
+      throw new MailError(
+        "SEND_FAILED",
+        "That would leave those messages in no folder at all. Move them somewhere first.",
+      );
+    }
+
+    const applied = await client.data.applyLabels(targets, data.add, data.remove);
+    if (!applied.ok) throw new MailError("SEND_FAILED", applied.message);
+
+    await logAudit({
+      action: "mail.labels_applied",
+      tenantId: ctx.tenantId,
+      actorClerkUserId: ctx.userId,
+      targetType: "mailbox",
+      targetId: data.mailboxId,
+      // Counts only — a label NAME is the tenant's own vocabulary for their own
+      // correspondence, and it is no more a superadmin's business than a
+      // subject line is (S9).
+      meta: {
+        messages: targets.length,
+        added: data.add.length,
+        removed: data.remove.length,
+        updated: applied.data.updated.length,
+        skippedWouldOrphan: skipped,
+      },
+    });
+
+    revalidatePath(BASE);
+    return {
+      ok: true,
+      data: { updated: applied.data.updated.length, skipped },
+    };
   } catch (err) {
     return fail(err);
   }

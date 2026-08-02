@@ -2256,6 +2256,92 @@ and closing the tab mid-window to confirm the draft is really there.
 **Not applied to production**: `0053` and `0054` are on the dev branch only.
 `docs/security.md` §8 requires both.
 
+### 2026-08-02 (later still) — Labels, and the table that was not needed
+
+Labels were the most architectural thing left on the Gmail list — the one that
+was going to change how `organise/filters.ts` models where a message lives.
+
+**It changed nothing, and that is the finding.** `npm run mail:probe-labels`
+asked the live server which of two mechanisms it supports, and **both work**:
+
+- **Multi-mailbox membership.** `Email.mailboxIds` is a MAP, not a value, so a
+  message being in several places at once is native to JMAP rather than
+  something to build. The probe confirmed it end to end: a message added to a
+  second mailbox **stayed in the inbox**, `Email/query` found it from both
+  sides, and removing the second left the first alone.
+- **Custom keywords.** They round-trip and `Email/query` filters on them with
+  `hasKeyword`.
+
+Multi-mailbox membership won, and the reason is the module's founding property
+rather than anything technical: **a keyword is invisible to every other mail
+client.** Everything else this module does — rules, snooze, the auto-reply,
+signatures — applies on a phone and in Outlook because the mail server owns it.
+A label that existed only inside our UI would be the single piece of organising
+that did not travel, and the first time somebody sorted their mail on a phone
+they would find it gone.
+
+**So a label IS a mailbox, and the difference from a folder is the VERB:**
+
+- *move* — replace the membership; the message leaves where it was
+- *label* — add a membership; the message stays
+
+No table, no migration, no second model of where a message lives, and every
+existing query works unchanged: the folder rail lists them, `inMailbox` finds
+them, the Sieve compiler's `fileinto` already targets them, and search spans
+them. The chips on a row are DERIVED from `mailboxIds`, which the list view was
+already fetching — so showing a label costs nothing and can never drift from the
+truth, because it *is* the truth.
+
+**What "labelable" means, since JMAP offers no flag.** Structural roles are
+excluded — inbox, sent, drafts, trash, junk, archive and the rest — because a
+message being in the inbox is not a tag somebody applied, it is where the server
+put it. Showing "Inbox" as a chip on every row in the inbox is noise, and
+offering "apply Drafts" is a mistake somebody could actually make. `mayAddItems`
+does the rest: a read-only shared folder never reaches the menu, since offering a
+label that fails on apply is worse than not offering it.
+
+Each row's chips are its memberships **minus the folder being viewed**. That
+subtraction is the whole of the presentation logic — inside a folder, saying
+every row is in that folder tells nobody anything, while the other places it
+lives are exactly what a chip is for. In a SEARCH there is no current folder and
+every membership shows, because "where is this?" is the question a search result
+raises.
+
+**THREE STATES IN THE BULK MENU, not two.** Every selected message has a label,
+some do, or none do. Collapsing "some" into either of the others is how a bulk
+action quietly strips a label from the messages that already had it — so a
+partial label draws a dash, and clicking it ADDS to everything rather than
+toggling. Adding is the reading people expect and the one that never destroys
+information.
+
+**The patch syntax is a safety property, not a micro-optimisation.**
+`mailboxIds/<id>` touches only the ids named; sending a whole `mailboxIds`
+object would overwrite memberships this client never knew about — a folder
+another client filed it into, or the inbox itself.
+
+**And the orphan guard, which is the one genuinely new failure this feature
+creates.** A message whose `mailboxIds` becomes empty is not deleted, it is
+ORPHANED: visible in no folder, reachable only by search. It is reachable in
+practice rather than theoretically — a rule that files into a label and removes
+the inbox leaves a message whose only home is that label, and taking the label
+off is an ordinary click. So a removal that would empty a message is skipped,
+the messages are RE-READ from the server rather than trusting the browser's idea
+of where they live, and the toast says how many were left alone. A bulk action
+that silently does less than it claims is the kind of lie that costs somebody an
+afternoon.
+
+**One structural note.** `applyLabels` on the JMAP client builds its own patch
+rather than importing `labelPatch` from the module: `src/lib` is the platform and
+`src/modules` sits above it, so a dependency in that direction would invert the
+graph the whole extension seam is built on. There is a golden test asserting the
+two copies agree — the same role the header-block test plays for
+`file-headers.ts`.
+
+Verified: six probe confirmations with no findings, and 18 unit tests. No new
+tables, so no migration and no isolation changes. **Not verified in a browser** —
+the things to try are the partial-label dash across a mixed selection, and
+whether the chips crowd a narrow thread list.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -2368,6 +2454,13 @@ Composing (`src/modules/email/compose/`, all pure and free of `server-only`):
   rule at all because they are characters rather than images.
 - `link-url.ts` — `normalizeLinkInput`. Pure and separate from the editor so the
   security-relevant half of a client component is testable without a DOM.
+- `organise/labels.ts` — **the whole of labels**, pure and with no table behind
+  it. A label IS a mailbox; the difference from a folder is the verb. Read the
+  header before adding anything: it records why keywords were rejected, and the
+  orphan guard is the one genuinely new failure the feature creates.
+- `scripts/jmap-labels-probe.ts` — `npm run mail:probe-labels`. Writes, so
+  loopback-only. Run it against any new mail server: whether a message may be in
+  two mailboxes at once decides whether labels can exist at all.
 - `schedule/times.ts` — pure. The offered times, and the bounds the server
   applies to what the browser computed. Rejects rather than clamps, in both
   directions; the header says why each direction matters.
@@ -2735,7 +2828,11 @@ server plus a decision recorded separately — because `mail:probe-send` found t
 server refuses `sendAt` outright. An interrupted undo window therefore leaves a
 finished message in Drafts rather than losing it.
 
-What is NOT built yet, in priority order: labels, websocket push
+**Labels are in**, and they needed no table: JMAP's `mailboxIds` is a map, so a
+label is a mailbox and the difference from a folder is whether the old
+membership is removed. Chips derive from data the list view already had.
+
+What is NOT built yet, in priority order: websocket push
 (`urn:ietf:params:jmap:websocket`, `supportsPush`), and an advanced search
 builder. Then delegation.
 
@@ -2943,6 +3040,14 @@ code or config change.
   Hobby plan runs cron ONCE A DAY — the open item from Slice 4, which now backs a
   user-visible promise rather than only freshness. **Confirm the plan before
   telling anyone messages go out at the time they picked.**
+- **A label cannot be created from the label menu** — only from the folder rail,
+  since a label IS a folder. That is honest but it means "label as something
+  new" is two steps.
+- **No colours on labels**, and JMAP has nowhere to put one. It would need a
+  per-user table mapping mailbox id to colour, which is the drift the current
+  design avoids entirely.
+- **No nested labels in the menu.** Mailboxes have a `parentId` and the menu
+  renders a flat sorted list, so a deep folder tree reads as a long list.
 - **No list of what is queued.** A scheduled message can be cancelled only by
   finding its draft; there is no "Scheduled" view showing what is waiting, which
   is the obvious next piece.

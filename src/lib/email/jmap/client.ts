@@ -396,6 +396,20 @@ export interface JmapClient {
   ): Promise<JmapResult<{ updated: string[]; failed: string[] }>>;
   moveToMailbox(emailIds: string[], mailboxId: string): Promise<JmapResult<{ updated: string[] }>>;
   /**
+   * Add and remove mailbox memberships without disturbing the others.
+   *
+   * The difference from `moveToMailbox` is the whole of what a label is.
+   * `mail:probe-labels` confirmed this server keeps a message in every mailbox
+   * it is added to, so labelling is a PATCH (`mailboxIds/<id>`) rather than a
+   * replacement — which is also what stops it clobbering a membership this
+   * client never knew about, like a folder another client filed it into.
+   */
+  applyLabels(
+    emailIds: string[],
+    add: readonly string[],
+    remove: readonly string[],
+  ): Promise<JmapResult<{ updated: string[] }>>;
+  /**
    * Create a folder. `parentId` null makes it top-level.
    *
    * Folders are the mail server's, not ours — there is no local mirror to keep
@@ -805,6 +819,28 @@ export function createJmapClient(
       return applyToEmails(emailIds, () => ({
         [`keywords/${keyword}`]: on ? true : null,
       }));
+    },
+
+    async applyLabels(emailIds, add, remove) {
+      if (add.length === 0 && remove.length === 0) {
+        return { ok: true, data: { updated: [] } };
+      }
+      /**
+       * Built here rather than imported from the module: `src/lib` is the
+       * platform and `src/modules` sits above it, so a dependency in that
+       * direction would invert the graph the whole extension seam is built on.
+       * `organise/labels.ts` has its own copy for the UI, and a test asserts
+       * the two agree.
+       */
+      const patch: Record<string, true | null> = {};
+      for (const id of remove) patch[`mailboxIds/${id}`] = null;
+      // Added second, so an id in both lists ends up applied rather than
+      // removed — the non-destructive reading.
+      for (const id of add) patch[`mailboxIds/${id}`] = true;
+      const result = await applyToEmails(emailIds, () => patch);
+      return result.ok
+        ? { ok: true, data: { updated: result.data.updated } }
+        : result;
     },
 
     async moveToMailbox(emailIds, mailboxId) {

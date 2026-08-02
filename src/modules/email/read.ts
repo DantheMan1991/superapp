@@ -31,6 +31,12 @@ export interface ThreadRow {
   seen: boolean;
   flagged: boolean;
   hasAttachment: boolean;
+  /**
+   * Every mailbox this message is in. Carried so the list can show LABELS —
+   * a label is a mailbox, so the chips are derived from this rather than
+   * fetched. See `organise/labels.ts`.
+   */
+  mailboxIds: Record<string, boolean>;
 }
 
 export interface MailView {
@@ -84,6 +90,7 @@ function toRow(email: JmapEmail): ThreadRow {
     seen: email.keywords[KEYWORD_SEEN] === true,
     flagged: email.keywords[KEYWORD_FLAGGED] === true,
     hasAttachment: email.hasAttachment,
+    mailboxIds: email.mailboxIds,
   };
 }
 

@@ -270,6 +270,8 @@ export async function MailView({
             archiveFolderId={archiveFolder?.id ?? null}
             trashFolderId={trashFolder?.id ?? null}
             snoozeReturnFolderId={snoozeReturnFolderId}
+            folders={folders}
+            currentMailboxId={view.mailboxId}
           />
           {view.rows.length > 0 && (
             <Pager params={params} position={view.position} total={view.total} count={view.rows.length} />

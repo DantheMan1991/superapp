@@ -18,7 +18,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { ThreadRow } from "../read";
-import { bulkAction, snoozeAction } from "../organise-actions";
+import { applyLabelsAction, bulkAction, snoozeAction } from "../organise-actions";
+import type { JmapMailbox } from "@/lib/email/jmap/types";
+import { labelsFor } from "../organise/labels";
+import { LabelChips, LabelMenu } from "./label-menu";
 import {
   snoozeDueAt,
   SNOOZE_PRESETS,
@@ -56,6 +59,8 @@ export function ThreadList({
   archiveFolderId,
   trashFolderId,
   snoozeReturnFolderId,
+  folders,
+  currentMailboxId,
 }: {
   rows: ThreadRow[];
   selectedId: string | undefined;
@@ -65,6 +70,10 @@ export function ThreadList({
   archiveFolderId: string | null;
   trashFolderId: string | null;
   snoozeReturnFolderId: string | null;
+  /** Every folder, so labels can be named without another round trip. */
+  folders: JmapMailbox[];
+  /** The folder being viewed, excluded from each row's chips. Null in a search. */
+  currentMailboxId: string | null;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -500,6 +509,42 @@ export function ThreadList({
               Trash
             </Button>
           )}
+          <LabelMenu
+            folders={folders}
+            selection={rows
+              .filter((r) => selected.has(r.emailId))
+              .map((r) => r.mailboxIds)}
+            disabled={pending}
+            onApply={(add, remove) => {
+              startTransition(async () => {
+                const result = await applyLabelsAction({
+                  mailboxId,
+                  emailIds: [...selected],
+                  add,
+                  remove,
+                });
+                if ("error" in result) {
+                  toast.error(result.error);
+                  return;
+                }
+                const skipped = result.data?.skipped ?? 0;
+                toast.success(
+                  skipped > 0
+                    // Said plainly rather than reported as a clean success: a
+                    // bulk action that silently did less than it claimed is the
+                    // kind of lie that costs somebody an afternoon.
+                    ? `Labels updated. ${skipped} left alone — removing that would have left them in no folder.`
+                    : add.length > 0 && remove.length === 0
+                      ? "Labelled."
+                      : remove.length > 0 && add.length === 0
+                        ? "Labels removed."
+                        : "Labels updated.",
+                );
+                setSelected(new Set());
+                router.refresh();
+              });
+            }}
+          />
           <button
             type="button"
             className="ml-auto px-1 text-xs text-muted-foreground hover:text-foreground"
@@ -582,6 +627,11 @@ export function ThreadList({
                   >
                     {row.fromName || row.from || "Unknown sender"}
                   </span>
+                  <LabelChips
+                    names={labelsFor(row.mailboxIds, folders, currentMailboxId).map(
+                      (l) => l.name,
+                    )}
+                  />
                   {row.hasAttachment && (
                     <Paperclip className="size-3 shrink-0 text-muted-foreground" />
                   )}

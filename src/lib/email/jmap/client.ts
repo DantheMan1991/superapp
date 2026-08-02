@@ -421,6 +421,20 @@ export interface JmapClient {
    * has typed a message.
    */
   identities(): Promise<JmapResult<JmapIdentity[]>>;
+  /**
+   * Write the signature onto an identity.
+   *
+   * ONLY the two signature fields are ever sent, and that is a security choice
+   * rather than tidiness. `Identity/set` can in principle move `email` too, and
+   * an identity whose address could be rewritten would turn a signature form
+   * into a send-as-anyone form. `npm run mail:probe-compose` confirms this
+   * server refuses an address change — but "the server refuses it" is a fact
+   * about one server, and the caller here cannot even ask.
+   */
+  setSignature(
+    identityId: string,
+    signature: { textSignature: string; htmlSignature: string },
+  ): Promise<JmapResult<undefined>>;
   /** True when the SERVER offers submission. Says nothing about the token. */
   supportsSubmission(): boolean;
   /**
@@ -1203,6 +1217,61 @@ export function createJmapClient(
           .map(parseIdentity)
           .filter((i): i is JmapIdentity => i !== null),
       };
+    },
+
+    async setSignature(identityId, signature) {
+      const result = await call(
+        [
+          [
+            "Identity/set",
+            {
+              accountId,
+              update: {
+                // Constructed field by field. Spreading a caller's object here
+                // is what would let `email` through — see the interface note.
+                [identityId]: {
+                  textSignature: signature.textSignature,
+                  htmlSignature: signature.htmlSignature,
+                },
+              },
+            },
+            "s",
+          ] as unknown as MethodCall,
+        ],
+        [CORE, MAIL, SUBMISSION],
+      );
+      if (!result.ok) return result;
+
+      const taken = takeMethodResponse(result.data, "s");
+      if (!taken.ok) {
+        return {
+          ok: false as const,
+          message: taken.message,
+          ...(taken.errorType ? { errorType: taken.errorType } : {}),
+        };
+      }
+      /**
+       * A REFUSED UPDATE IS NOT AN ERROR RESPONSE. `Identity/set` answers 200
+       * with the id under `notUpdated`, so a caller that only checked the
+       * method response would report a save that never happened — which for a
+       * signature means every message afterwards going out with the old one and
+       * nobody knowing why. RFC 8621 §6 permits a server to refuse identity
+       * changes outright, so this is a shape to expect rather than an edge.
+       */
+      const refusal = (
+        (taken.payload as { notUpdated?: Record<string, unknown> })?.notUpdated ?? {}
+      )[identityId];
+      if (refusal) {
+        const description =
+          (refusal as { description?: string })?.description ??
+          (refusal as { type?: string })?.type ??
+          "the mail server refused the change";
+        return {
+          ok: false as const,
+          message: `Your mail server wouldn't save the signature: ${description}`,
+        };
+      }
+      return { ok: true as const, data: undefined };
     },
 
     async currentState() {

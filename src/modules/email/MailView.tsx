@@ -20,6 +20,8 @@ import { loadAutoReply } from "./auto-reply/load";
 import { autoReplyState } from "./auto-reply/validate";
 import { RulesEditor, type EditorRule } from "./rules/editor";
 import { loadRules } from "./rules/load";
+import { SignatureForm } from "./signature/form";
+import { loadSignature } from "./signature/load";
 
 /**
  * The three panes.
@@ -63,12 +65,14 @@ export async function MailView({
     attach: first("attach"),
     away: first("away"),
     rules: first("rules"),
+    signature: first("signature"),
   };
   const viewQuery = readMailView(params);
   const position = Number(params.pos ?? "0");
   const composeMode = readComposeMode(params.compose);
   const showAway = params.away === "1";
   const showRules = params.rules === "1";
+  const showSignature = params.signature === "1";
 
   const view = await loadMailView(account, {
     tenantId: ctx.tenant.id,
@@ -166,6 +170,14 @@ export async function MailView({
       )
     : [];
 
+  /**
+   * Only when the editor is open, like the rules and unlike the auto-reply
+   * setting. A signature needs no badge: it is not a state that can be wrong in
+   * the background, so paying a round trip for it on every inbox render would
+   * be a cost every reader carries for a thing only writers change.
+   */
+  const signature = showSignature ? await loadSignature(account) : null;
+
   const away = await loadAutoReply(account);
   const awayState = away
     ? autoReplyState(
@@ -194,10 +206,16 @@ export async function MailView({
             screen, and it must be visible without opening anything. */}
         <AutoReplyBadge state={awayState} params={params} />
         <Link
-          href={mailHref(params, { rules: "1", away: undefined, compose: undefined, message: undefined })}
+          href={mailHref(params, { rules: "1", away: undefined, signature: undefined, compose: undefined, message: undefined })}
           className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
         >
           Rules
+        </Link>
+        <Link
+          href={mailHref(params, { signature: "1", away: undefined, rules: undefined, compose: undefined, message: undefined })}
+          className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
+        >
+          Signature
         </Link>
         <MailSearch initial={params.q ?? ""} params={params} />
       </div>
@@ -259,9 +277,15 @@ export async function MailView({
         </section>
 
         <section
-          className={`min-h-0 ${view.message || composeMode || showAway || showRules ? "block" : "hidden lg:block"}`}
+          className={`min-h-0 ${view.message || composeMode || showAway || showRules || showSignature ? "block" : "hidden lg:block"}`}
         >
-          {showRules ? (
+          {showSignature ? (
+            <SignatureForm
+              mailboxId={account.mailboxId}
+              signature={signature}
+              closeHref={mailHref(params, { signature: undefined })}
+            />
+          ) : showRules ? (
             <RulesEditor
               mailboxId={account.mailboxId}
               folders={folders}

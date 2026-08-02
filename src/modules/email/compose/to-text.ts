@@ -34,8 +34,24 @@ import { decodeEntities } from "../render/transcript";
 const OPENS_LINE = new Set(["p", "div", "blockquote", "ul", "ol", "li", "pre"]);
 /** Tags that end the current line when they close. */
 const CLOSES_LINE = new Set(["p", "div", "blockquote", "ul", "ol", "li", "pre"]);
-/** Tags after which a blank line separates the block from what follows. */
-const BLOCK_GAP = new Set(["p", "div", "blockquote", "pre"]);
+/**
+ * Tags after which a blank line separates the block from what follows.
+ *
+ * `div` IS DELIBERATELY ABSENT, and it was a bug that it used to be here. A
+ * `<div>` carries no default margin, so `<div>a</div><div>b</div>` renders as
+ * two ADJACENT lines in every browser and mail client — while a `<p>` has one,
+ * and renders with a gap. Treating them alike put a blank line between every
+ * line of a composed message in the text alternative.
+ *
+ * That is not a corner case: a contenteditable emits a `<div>` for every press
+ * of Enter, so it was the NORMAL shape of anything typed in the composer. It
+ * surfaced while building the signature editor, where a three-line signature
+ * arrived double-spaced for anyone reading the plain part.
+ *
+ * A deliberate blank line still works, because it arrives as a `<br>` on an
+ * empty line, which is a hard flush.
+ */
+const BLOCK_GAP = new Set(["p", "blockquote", "pre"]);
 
 /** One `<ul>`/`<ol>` we are currently inside. */
 interface ListLevel {

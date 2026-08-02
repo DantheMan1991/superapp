@@ -661,6 +661,140 @@ async function main(): Promise<void> {
     }
   }
 
+  // ===========================================================================
+  // SCENARIO 4: can a signature actually be WRITTEN?
+  //
+  // Reading them has worked since the first probe — `Identity/get` returns
+  // `textSignature` and `htmlSignature`, which is why the composer can prefill
+  // one. Writing is a different question and the spec does not settle it: RFC
+  // 8621 section 6 defines Identity/set, but it also says a server MAY refuse
+  // to create, update or destroy identities, and several do — an identity can be
+  // a projection of an account rather than a record. `mayDelete: false` on every
+  // identity here is a hint that at least part of the object is fixed.
+  //
+  // So this asks, before a form is built: which properties move, which are
+  // rejected, and what the refusal looks like.
+  //
+  // EVERY VALUE IS RESTORED in the finally block. This is the founder's local
+  // Docker container and the signature is his, so the probe must leave the
+  // identity exactly as it found it even when an assertion fails.
+  // ===========================================================================
+  const [identityList] = await call([
+    ["Identity/get", { accountId, ids: null }, "id"],
+  ]);
+  const identities = (identityList[1].list ?? []) as Json[];
+  const identity = identities[0];
+  if (!identity) {
+    findings.push("Identity/get returned nothing; signatures cannot be read at all.");
+  } else {
+    console.log(`\n--- identity ${identity.email} (mayDelete: ${identity.mayDelete})`);
+    const originalText = (identity.textSignature ?? "") as string;
+    const originalHtml = (identity.htmlSignature ?? "") as string;
+    const originalName = (identity.name ?? "") as string;
+
+    try {
+      const [updated] = await call([
+        [
+          "Identity/set",
+          {
+            accountId,
+            update: {
+              [identity.id as string]: {
+                textSignature: "-- \nProbe Signature\nYosher",
+                htmlSignature:
+                  '<div>-- <br>Probe <b>Signature</b><br>' +
+                  '<a href="https://example.com">Yosher</a></div>',
+              },
+            },
+          },
+          "is",
+        ],
+      ]);
+
+      const refusal = (updated[1].notUpdated ?? {})[identity.id as string];
+      if (refusal) {
+        findings.push(
+          "The server REFUSED to update the identity: " +
+            `${JSON.stringify(refusal)}. Signature EDITING is not possible ` +
+            "through JMAP here — the feature would need its own table and the " +
+            "signature would stop being visible to other mail clients.",
+        );
+      } else {
+        confirmed.push("Identity/set accepted a signature update.");
+
+        const [readBack] = await call([
+          [
+            "Identity/get",
+            { accountId, ids: [identity.id], properties: ["textSignature", "htmlSignature"] },
+            "ir",
+          ],
+        ]);
+        const after = (readBack[1].list ?? [])[0] as Json | undefined;
+        if (after?.textSignature === "-- \nProbe Signature\nYosher") {
+          confirmed.push("textSignature round-trips byte for byte, trailing space and all.");
+        } else {
+          findings.push(
+            `textSignature came back as ${JSON.stringify(after?.textSignature)}, ` +
+              "not what was written. RFC 3676's '-- ' separator needs its " +
+              "trailing space to survive.",
+          );
+        }
+        if (typeof after?.htmlSignature === "string" && after.htmlSignature.includes("<b>")) {
+          confirmed.push("htmlSignature round-trips with its markup intact.");
+        } else {
+          findings.push(
+            `htmlSignature came back as ${JSON.stringify(after?.htmlSignature)}. ` +
+              "The server rewrote or dropped the markup.",
+          );
+        }
+      }
+
+      // Is the ADDRESS settable? It must not be: an identity whose email can be
+      // changed to any string would let somebody send as anyone from inside our
+      // own UI, and the whole hosted-mail design turns on not being able to.
+      const [addressAttempt] = await call([
+        [
+          "Identity/set",
+          {
+            accountId,
+            update: { [identity.id as string]: { email: "someone-else@example.com" } },
+          },
+          "ie",
+        ],
+      ]);
+      if ((addressAttempt[1].notUpdated ?? {})[identity.id as string]) {
+        confirmed.push(
+          "The identity's ADDRESS is refused as immutable, which is what stops " +
+            "a signature form becoming a send-as-anyone form.",
+        );
+      } else {
+        findings.push(
+          "THE SERVER ALLOWED THE IDENTITY'S EMAIL TO BE CHANGED. Any form that " +
+            "PATCHes an identity must therefore send ONLY signature fields, and " +
+            "never spread user input into the update object.",
+        );
+      }
+    } finally {
+      await call([
+        [
+          "Identity/set",
+          {
+            accountId,
+            update: {
+              [identity.id as string]: {
+                textSignature: originalText,
+                htmlSignature: originalHtml,
+                name: originalName,
+              },
+            },
+          },
+          "irestore",
+        ],
+      ]);
+      console.log("cleanup   identity restored");
+    }
+  }
+
   console.log("\n─── CONFIRMED");
   for (const line of confirmed) console.log(`    ✓ ${line}`);
   console.log("\n─── FINDINGS");

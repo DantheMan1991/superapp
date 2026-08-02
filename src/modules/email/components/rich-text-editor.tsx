@@ -143,15 +143,24 @@ export function RichTextEditor({
   initialHtml: string;
   editorRef: React.RefObject<RichTextEditorHandle | null>;
   disabled?: boolean;
-  accountId: string;
-  mailboxId: string;
+  /**
+   * All three together, or none: they are what the image picker needs, and
+   * leaving them out REMOVES the picture button.
+   *
+   * The signature editor is the caller that does so, and not for tidiness — a
+   * `cid:` is minted per message and lives in that message's MIME, so a stored
+   * signature referencing one would show a broken image on every mail it was
+   * pasted into. A control that cannot work is better absent than disabled.
+   */
+  accountId?: string;
+  mailboxId?: string;
   /**
    * Told about every picture put in the body, so the form can send the parts
    * alongside the markup. The editor holds the MARKUP; the form holds the
    * blob ids, because they are what the send action needs and the DOM is not a
    * place to keep them.
    */
-  onImageInserted: (image: InlineImage) => void;
+  onImageInserted?: (image: InlineImage) => void;
   ariaLabel?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -360,7 +369,7 @@ export function RichTextEditor({
    */
   const insertImage = useCallback(
     (image: InlineImage) => {
-      onImageInserted(image);
+      onImageInserted?.(image);
       restoreSelection();
       run(
         "insertHTML",
@@ -372,6 +381,12 @@ export function RichTextEditor({
   );
 
   const emojiResults = emojiQuery.trim() ? searchEmoji(emojiQuery) : null;
+  // Filtered rather than conditionally rendered inside the map, so the divider
+  // grouping stays whole when the picture button is absent.
+  const canInsertImages = Boolean(accountId && mailboxId);
+  const toolbar = canInsertImages
+    ? TOOLBAR
+    : TOOLBAR.filter((item) => item === "divider" || item.key !== "image");
 
   return (
     <div className="rounded-md border">
@@ -401,7 +416,7 @@ export function RichTextEditor({
           <span className="text-xs">Size</span>
         </PanelButton>
 
-        {TOOLBAR.map((item, index) =>
+        {toolbar.map((item, index) =>
           item === "divider" ? (
             <span
               key={`divider-${index}`}
@@ -571,11 +586,11 @@ export function RichTextEditor({
         </Popover>
       )}
 
-      {panel === "image" && (
+      {panel === "image" && canInsertImages && (
         <Popover onClose={() => setPanel(null)}>
           <ImagePicker
-            accountId={accountId}
-            mailboxId={mailboxId}
+            accountId={accountId!}
+            mailboxId={mailboxId!}
             onInsert={insertImage}
             onClose={() => setPanel(null)}
           />

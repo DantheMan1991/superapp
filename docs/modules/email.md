@@ -1927,6 +1927,110 @@ picture with the caret mid-sentence, deleting an inserted picture and sending
 (the attachment should not follow it), and whether the Documents picker's search
 feels fast enough to leave debounced at 250 ms.
 
+### 2026-08-02 (later still) — Signature editing, and a blank line between every line
+
+Signatures have been READ since the composer was built — `Identity/get` returns
+`textSignature` and `htmlSignature`, which is what prefills a reply. Changing one
+still meant opening another mail client. This closes it.
+
+**Probed before designing, and the spec genuinely did not settle it.** RFC 8621
+§6 defines `Identity/set`, and it also says a server MAY refuse to create, update
+or destroy identities — an identity can be a projection of an account rather than
+a record, and `mayDelete` exists precisely because some of them are fixed. So
+`mail:probe-compose` grew a fourth scenario before any form was written. Four
+answers, all of them load-bearing:
+
+- **`Identity/set` accepts a signature update.** Had it not, the feature would
+  have needed its own table and the signature would have stopped applying to mail
+  sent from Outlook and a phone — which is most of the value.
+- **`textSignature` round-trips byte for byte**, trailing space and all. That
+  matters more than it sounds: RFC 3676's separator is `-- ` WITH the space, and
+  a server that trimmed it would silently break signature folding everywhere.
+- **`htmlSignature` round-trips with its markup intact.**
+- **The identity's ADDRESS is refused as immutable.** This is the one worth
+  keeping. `Identity/set` can in principle move `email`, and an identity whose
+  address could be rewritten would turn a signature form into a **send-as-anyone
+  form** — inside a product whose entire hosted-mail design turns on not being
+  able to do that. The server refuses it here, but "this server refuses it" is a
+  fact about one server, so `setSignature()` constructs its update field by field
+  and the caller cannot even ask. There is no object spread anywhere on that
+  path, deliberately.
+
+**A refused update is NOT an error response**, and that is the shape most likely
+to be got wrong by the next person. `Identity/set` answers 200 with the id under
+`notUpdated`, so a client that only checked the method response would report a
+save that never happened — and for a signature that means every message
+afterwards going out with the old one and nobody knowing why. `setSignature`
+reads `notUpdated` explicitly and surfaces the server's own sentence.
+
+**Nothing is stored locally.** The signature lives on the mail server's Identity,
+so it applies to every client pointed at the mailbox. That is why this module has
+never needed a signatures table, and it is the same reasoning as the auto-reply
+and the Sieve rules: the mail server is the thing that is always running.
+
+**The text version is DERIVED, never typed alongside.** Same rule as the message
+body and for the same reason — two fields would disagree the moment somebody
+edited one, and the recipient whose client prefers text would read a different
+signature from everyone else, silently, for months. The action's schema has no
+`textSignature` field at all, so there is nothing to disagree with.
+
+**It goes through the same outbound sanitizer a message body does**, not a laxer
+one on the grounds that it is "our own" content. It is the user's content and the
+user can paste. And a signature is **the most-sent markup in the product**: a
+body goes out once, this goes out on every message the person ever writes. A
+mistake here is not one bad email, it is every email until somebody notices.
+
+**No inline image in a signature**, and the reason is structural rather than
+cautious: a `cid:` is minted per message and lives in that message's MIME, so a
+stored signature referencing one would show a broken image on every mail it was
+later pasted into. `prepareSignature` passes no cid allowlist, and
+`RichTextEditor` grew optional `accountId`/`mailboxId` props so the picture
+button is ABSENT rather than disabled — a control that cannot work is better
+missing than present and broken.
+
+**The separator is added rather than required.** Nobody types `-- ` on purpose
+and a form that refused to save without it would be a puzzle, so it is prepended
+when the first line is not already one. Recognition runs on the TEXT rendering
+rather than by matching markup, because `<div>-- </div>`, `<p>--&nbsp;</p>` and a
+bare `-- ` all mean the same thing depending on which client last edited it.
+
+**THE BUG THIS SLICE FOUND, and it was in the message body all along.**
+`htmlToPlainText` treated `</div>` exactly like `</p>` and put a blank line after
+both. But a `<div>` carries **no default margin** — `<div>a</div><div>b</div>`
+renders as two ADJACENT lines in every browser and mail client, while `<p>` has
+one and renders with a gap.
+
+That is not a corner case. **A contenteditable emits a `<div>` for every press of
+Enter**, so it was the normal shape of anything typed in the composer: every
+multi-line message has been going out with a blank line between every line in its
+plain-text alternative since rich text shipped. It surfaced here only because a
+three-line signature makes it obvious where a paragraph of prose does not.
+Fixed, and pinned with a regression test asserting the div/p distinction in both
+directions — plus one asserting a deliberate blank line still survives, since it
+arrives as a `<br>` on an empty line rather than as a block boundary.
+
+Also worth recording: `prepareSignature` is asserted **idempotent**. The form
+loads what was saved and saves it again on every edit, so a transform that grew a
+separator or a wrapper on each pass would compound quietly.
+
+The editor is the composer's own, not a second one — a signature written in a
+different control from the one it appears in is how a signature ends up looking
+wrong only in real messages. There is no separate preview pane for the same
+reason: everything the editor can produce is a declaration the sanitizer keeps,
+so what is on screen is what gets saved, and a second rendering underneath would
+only be somewhere for the two to disagree.
+
+Reached from the mail header beside Rules, and it takes the reading pane like the
+composer, the auto-reply form and the rules editor. Loaded only when opened,
+unlike the auto-reply setting: a signature is not a state that can be wrong in
+the background, so it needs no badge and no round trip on every inbox render.
+
+Verified: 25 probe confirmations against the live server with no findings, and 15
+new unit tests. **Not verified in a browser**, same constraint as every slice
+since the composer began — the specific thing to try is the Clear button, which
+remounts the editor by changing its React key, because `initialHtml` is applied
+once on mount by design.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -2038,6 +2142,13 @@ Composing (`src/modules/email/compose/`, all pure and free of `server-only`):
   rule at all because they are characters rather than images.
 - `link-url.ts` — `normalizeLinkInput`. Pure and separate from the editor so the
   security-relevant half of a client component is testable without a DOM.
+- `signature/validate.ts` — `prepareSignature`: sanitize, derive the text half,
+  and add the RFC 3676 separator. Pure, and asserted idempotent because the form
+  re-saves what it loaded. Read its header before relaxing anything: a signature
+  is the most-sent markup in the product.
+- `signature/load.ts` — picks the identity by the SAME rule `read.ts` uses, and
+  that agreement is the point: editing a signature the composer would not choose
+  saves successfully and changes nothing anybody can see.
 - `inline.ts` — the inline-image rules: types (no SVG), caps, and the
   server-minted Content-ID. Shared by the upload route, the Documents insert
   action, the send action and the sanitizer's caller, so those four cannot
@@ -2357,8 +2468,12 @@ an explicit `multipart/related` because the convenience properties produce
 `multipart/mixed`, where a `cid:` reference does not resolve — found by probing
 the live server before the feature was designed.
 
-What is NOT built yet, in priority order: **signature editing** (they are read
-from the server's Identity and prefilled, never written), contact autocomplete —
+**Signature editing is in.** Written to the mail server's Identity, so it applies
+on a phone and in Outlook too; the text half is derived from the HTML; and the
+identity's address was proved immutable before the form was built, which is what
+stops a signature form becoming a send-as-anyone form.
+
+What is NOT built yet, in priority order: contact autocomplete —
 the server has advertised `urn:ietf:params:jmap:contacts` since the first probe
 and nothing uses it — undo/schedule send, labels, websocket push
 (`urn:ietf:params:jmap:websocket`, `supportsPush`), and an advanced search
@@ -2505,9 +2620,14 @@ code or config change.
   closing the composer discards what you typed. Drafts live on the SERVER by
   design (a local table would desync with the same mailbox open in Outlook), so
   this is a surface, not a schema change.
-- **No signature editing.** Signatures are read from the mail server's Identity
-  and prefilled — `htmlSignature` preferred over `textSignature` since rich text
-  landed — but changing one still means using another client.
+- **One signature per mailbox, not per identity.** The editor writes to the
+  identity the composer sends from. A mailbox with several send addresses shows a
+  note saying so; a picker is unbuilt, and needs the composer to grow an identity
+  chooser first or the two would disagree.
+- **No signature images.** A `cid:` is minted per message, so a stored signature
+  referencing one would show a broken image on every mail it was pasted into.
+  Doing it properly means re-attaching the picture to each message at send time.
+- **No "signature off for this message" toggle**, and no per-reply variant.
 - **The rich composer has never run in a browser**, and the surface needing it
   grew with the toolbar slice: nine controls became twenty-odd, six of them
   popovers that save and restore a selection. Every pure part is tested and the

@@ -288,6 +288,23 @@ describe("htmlToPlainText — the alternative a person actually reads", () => {
     );
   });
 
+  it("REGRESSION: a div is a line, a p is a paragraph", () => {
+    // A `<div>` carries no default margin, so `<div>a</div><div>b</div>` renders
+    // as two ADJACENT lines everywhere — while `<p>` has one and renders with a
+    // gap. Treating them alike put a blank line between every line of a composed
+    // message, and a contenteditable emits a div for every press of Enter, so
+    // that was the NORMAL shape of anything typed in the composer.
+    expect(htmlToPlainText("<div>one</div><div>two</div>")).toBe("one\ntwo");
+    expect(htmlToPlainText("<p>one</p><p>two</p>")).toBe("one\n\ntwo");
+  });
+
+  it("still honours a blank line the author actually asked for", () => {
+    // It arrives as a `<br>` on an empty line, which is a hard flush.
+    expect(htmlToPlainText("<div>one</div><div><br></div><div>two</div>")).toBe(
+      "one\n\ntwo",
+    );
+  });
+
   it("bullets an unordered list", () => {
     expect(htmlToPlainText("<ul><li>alpha</li><li>beta</li></ul>")).toBe(
       "- alpha\n- beta",

@@ -2554,6 +2554,113 @@ constraint as every slice since the composer: the things to try are the Shared
 badge on a delegated box, the notice on the auto-reply and signature forms, and
 `?rules=1` typed by hand on a shared mailbox.
 
+### 2026-08-03 — Templates, and the first thing that does not travel
+
+Canned responses: save the reply you keep writing, insert it while composing.
+The last item from the Gmail compose review, and the only one that needed
+storage rather than markup.
+
+**THE PROBE WAS RUN TO TALK ME OUT OF THE TABLE, and it failed — which is the
+useful outcome.** Every organising feature in this module lives on the mail
+server on purpose: rules are a Sieve script, the auto-reply is a
+VacationResponse, the signature is on an Identity, a label IS a mailbox. That is
+why they all work on a phone. A table is the one shape that does not travel, so
+`npm run mail:probe-templates` asked the server first, and the answer was yes on
+every mechanical question:
+
+| | |
+| --- | --- |
+| a `$draft` message in a mailbox of its own | accepted — literally Gmail's original canned responses |
+| does it pollute the Drafts folder? | **no** — the mailbox decides where it shows, not the keyword |
+| does the markup round-trip? | intact |
+| `FileNode/set` (the advertised, never-used file store) | also works |
+
+**And it is still the wrong home, for a reason no amount of protocol support
+fixes: every one of those locations is scoped to ONE ACCOUNT.** The delegation
+slice established that naming an account you were not granted returns
+`forbidden`. So sharing the company's payment-terms wording with a colleague
+would mean granting them the mailbox holding it — and every message in it.
+**There is no way to share the wording without sharing the correspondence**, and
+a template that dies when its author leaves is not a business asset.
+
+**So `mail_templates` (`0055`/`0056`) is the first mail table scoped to the
+BUSINESS rather than to one person.** Five tables before it are per-user, and
+every one of those migrations gives the same two reasons — the rows hold
+correspondence, or they hold ids the mail server issued inside one account. A
+template holds neither. It is boilerplate somebody wrote *so that* it would be
+reused, and a copy per employee is the problem it exists to solve. There is no
+`clerk_user_id` and no `mail_account_id` either: the same wording is available
+from a personal box and from a shared `info@` without being stored twice.
+
+**The accepted cost, stated plainly: a template does NOT appear on a phone or in
+Outlook**, and it is the first mail feature since Slice 0 of which that is true.
+Usable by the whole company beat usable in another client — the opposite of how
+every previous call in this module went, which is why it is worth writing down.
+
+The dossier's own open item predicted "a per-user table". It was wrong on the
+scope, and `document_templates` (`0033`/`0034`) had already settled the same
+question the same way for the other module that has templates — tenant-scoped,
+`member_all`, author recorded rather than enforced. A colleague correcting the
+payment terms is somebody doing their job.
+
+**INSERT, NEVER REPLACE**, and it is the one decision a user would notice.
+Replacing the body is the obvious reading of "apply a template" and is wrong the
+first time somebody uses one in a REPLY: the quoted message and the signature
+are already in that editor, and both would vanish. `RichTextEditorHandle` grew
+`insertHtml`, which puts the markup at the caret. In plain-text mode the text
+rendering goes in instead — via the same `htmlToPlainText` the send path already
+derives its text alternative with, rather than a second converter.
+
+**The subject is filled only when empty**, so applying a template to a reply
+cannot rewrite "Re: …", and a template with no subject of its own never touches
+it either way. The form says so rather than leaving it to be discovered, because
+the other reading — "this template sets the subject" — is the one that would
+quietly damage a thread.
+
+**Sanitized on WRITE as well as at send.** The send path sanitizes every body
+regardless, so this is not the guarantee; it is what stops the editor showing
+one thing and the recipient receiving another, which for a template repeats on
+every use. Same reasoning the signature slice recorded, and a template is in the
+same class — markup written once and sent many times.
+
+**No inline images, and it is the signature's rule rather than a new one.** A
+`cid:` is minted per message and lives in that message's MIME, so a stored
+template referencing one would show a broken image on every mail it was later
+inserted into. No cid allowlist is passed, so the sanitizer's default empty set
+drops them, and the editor has no picture button because `accountId`/`mailboxId`
+are not passed to it.
+
+**A BUG THE TESTS FOUND, and the fix was to correct the claim rather than the
+code.** `prepareTemplateBody` slices its input to the cap and then sanitizes —
+and 20,000 characters in came back as 20,004 out, because the slice cut through
+a tag and the sanitizer closed it. Truncating the sanitized result instead would
+reintroduce exactly the unbalanced markup it had just fixed. So the cap is on the
+INPUT, the doc comment says so, and the test asserts the property that actually
+matters: a paste twice the size and one ten times the size store the *same*
+bounded amount.
+
+**Two isolation tests assert the OPPOSITE of every other mail test**, and that is
+deliberate. The rest of the file proves a colleague sees nothing; these prove a
+colleague DOES see the business's templates, and that omitting `{ userId }`
+still returns them. A suite that only ever asserts "the colleague sees nothing"
+would pass just as well if the policy were broken shut — and a template nobody
+else can read is the feature not working. A third still asserts they never cross
+a tenant, and a fourth pins the folded-name unique index.
+
+Reached from the mail header beside Signature, and it takes the reading pane
+like the composer, the rules editor and the auto-reply form. Templates are
+loaded when the manager is open OR a composer is — a local indexed SELECT rather
+than a protocol call, which is what being in our own database buys.
+
+Verified: 5 probe confirmations and the finding that decided the design, 14 new
+unit tests, and 4 new isolation tests — 118 passing against the dev branch.
+**Not verified in a browser** — the things to try are inserting a template
+mid-sentence in a reply (the quote must survive), applying one in plain-text
+mode, and the name collision message.
+
+**Not applied to production**: `0055` and `0056` are on the dev branch only.
+`docs/security.md` §8 requires both.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -3063,8 +3170,10 @@ for free, since a saved search was already these parameters written down.
 needs a process that outlives a request and serverless has none; the staleness
 people would actually feel is the cron cadence, which is a plan question.
 
-What is NOT built yet: delegation (a shared `info@` connected through somebody's
-own credentials), and templates.
+Delegation (a shared `info@` through somebody's own credentials) and templates
+were both built on 2026-08-02/03 — see the build log. What is NOT built yet:
+placeholders in templates, and granting delegation from inside Yosher rather
+than in the mail server's admin.
 
 Everything so far has been proven against ONE server, ONE account and ONE
 message. That is a real limit: no multi-account switching, no thread expansion
@@ -3250,9 +3359,26 @@ code or config change.
 - **No drag-and-drop or paste of an image into the composer.** Paste is plain
   text by design, and an image on the clipboard is currently dropped silently
   rather than offered — which is the one place that rule reads as a bug.
-- **No templates / canned responses.** The one compose feature from the Gmail
-  review that needs storage rather than markup — a per-user table, so it is its
-  own slice with a migration and isolation tests.
+- **Templates have no placeholders.** They insert fixed wording; there is no
+  `{{customer}}` or invoice number. That is the obvious next step and the one
+  that would make them better than Gmail's rather than equal to them, since
+  filling a template from a business object is the whole reason this module sits
+  next to Accounting. Unbuilt on purpose — the substitution, the field picker
+  and the "what if the object is missing" case are a slice of their own.
+- **A template does not appear on a phone or in Outlook.** The first mail
+  feature since Slice 0 of which that is true, and it is the accepted price of
+  being shareable across the business — see the build log for why no
+  mail-server location can hold one. Anyone who works mostly from another client
+  gets no benefit from them.
+- **Clicking a thread while a settings pane is open leaves the pane up.** The
+  header links clear each other, but a row click only sets `message`, so the
+  third column keeps showing Templates/Signature/Rules. Pre-existing — templates
+  behave exactly like the signature pane here — and it is a papercut rather than
+  a bug, but it is the kind that reads as the app ignoring a click.
+- **Any member can edit or delete any template**, matching `document_templates`.
+  Fine while a tenant is a handful of people who know each other; a business
+  with thirty staff would want the author, or an owner, to be the only one who
+  can delete.
 - **No `justify` alignment**, deliberately: it produces rivers of whitespace on
   the narrow columns mail is read in and is worse for dyslexic readers.
 - **Confidential mode has no equivalent and probably never will.** It is

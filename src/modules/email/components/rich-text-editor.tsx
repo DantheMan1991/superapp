@@ -76,6 +76,19 @@ import { ImagePicker } from "./image-picker";
 export interface RichTextEditorHandle {
   /** Current markup. Read on submit — never mirrored into React state. */
   html: () => string;
+  /**
+   * Insert markup at the caret, leaving everything else alone.
+   *
+   * For templates. INSERTS rather than replaces, which is the whole decision:
+   * applying a template to a REPLY must not destroy the quoted message and the
+   * signature already sitting in the editor. Gmail inserts at the cursor and so
+   * does this.
+   *
+   * The markup handed in is the SANITIZED body already stored on the template,
+   * so this is not a hole in the paste-is-plain-text rule — nothing here
+   * originates from a clipboard or from a page.
+   */
+  insertHtml: (html: string) => void;
 }
 
 /**
@@ -200,7 +213,24 @@ export function RichTextEditor({
   }, []);
 
   useEffect(() => {
-    editorRef.current = { html: () => host.current?.innerHTML ?? "" };
+    editorRef.current = {
+      html: () => host.current?.innerHTML ?? "",
+      insertHtml: (html: string) => {
+        // Focus before inserting, for the same reason `run` does: execCommand
+        // acts on the document's selection, and an editor that never had focus
+        // has none — the insert would silently go nowhere. A freshly focused
+        // editor puts the caret at the start, which is where a template lands
+        // when somebody has not clicked into the body yet. That is the right
+        // place for a reply: above the quote.
+        host.current?.focus();
+        try {
+          document.execCommand("insertHTML", false, html);
+        } catch {
+          // Same tolerance as every other command here: a failure is a control
+          // that did nothing, not a broken composer.
+        }
+      },
+    };
     return () => {
       editorRef.current = null;
     };

@@ -21,6 +21,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { RichTextEditor, type RichTextEditorHandle } from "./rich-text-editor";
 import { RecipientInput } from "./recipient-input";
 import { htmlToPlainText } from "../compose/to-text";
+import { applyTemplateSubject } from "../templates/validate";
+import { TemplatePicker, type PickableTemplate } from "../templates/picker";
 import type { InlineImage } from "../compose/inline";
 
 /**
@@ -71,6 +73,7 @@ export function ComposeForm({
   devNotice,
   closeHref,
   title,
+  templates,
 }: {
   mailboxId: string;
   accountId: string;
@@ -79,6 +82,8 @@ export function ComposeForm({
   closeHref: string;
   /** "Reply", "Forward" … — what the person actually pressed. */
   title: string;
+  /** The business's canned responses. Bodies are already sanitized. */
+  templates: PickableTemplate[];
 }) {
   const router = useRouter();
   const [to, setTo] = useState(draft.to);
@@ -116,6 +121,31 @@ export function ComposeForm({
   const [pending, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
   const editor = useRef<RichTextEditorHandle | null>(null);
+
+  /**
+   * Drop a canned response into what is already being written.
+   *
+   * INSERTS AT THE CARET, never replaces. Replacing the body is the obvious
+   * reading of "apply a template" and is wrong the first time somebody uses one
+   * in a reply: the quoted message and the signature are already in that editor
+   * and both would vanish. Gmail inserts; so does this.
+   *
+   * The SUBJECT is filled only when empty, so a template cannot rewrite
+   * "Re: …" on a reply. A template with no subject of its own never touches it.
+   *
+   * In plain-text mode the markup would arrive as literal tags in a textarea, so
+   * the text rendering goes in instead — the same `htmlToPlainText` the send
+   * path derives its text alternative with, rather than a second converter.
+   */
+  function insertTemplate(template: PickableTemplate) {
+    setSubject((current) => applyTemplateSubject(current, template.subject));
+    if (plainText) {
+      const text = htmlToPlainText(template.bodyHtml);
+      setPlainBody((current) => (current.length > 0 ? `${current}\n${text}` : text));
+      return;
+    }
+    editor.current?.insertHtml(template.bodyHtml);
+  }
 
   async function upload(files: FileList) {
     setUploading(true);
@@ -467,6 +497,11 @@ export function ComposeForm({
           pending={pending}
           onSend={() => send()}
           onSchedule={(at) => send(at)}
+        />
+        <TemplatePicker
+          templates={templates}
+          disabled={busy}
+          onPick={insertTemplate}
         />
         <Button
           variant="outline"

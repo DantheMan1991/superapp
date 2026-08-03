@@ -386,6 +386,20 @@
       "when": 1785701615858,
       "tag": "0054_mail_scheduled_sends_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1785715660351,
+      "tag": "0055_faithful_carlie_cooper",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1785715701372,
+      "tag": "0056_mail_templates_rls",
+      "breakpoints": true
     }
   ]
 }

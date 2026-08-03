@@ -13,6 +13,7 @@ import {
 } from "../components/rich-text-editor";
 import { deleteTemplateAction, saveTemplateAction } from "./actions";
 import { MAX_TEMPLATE_NAME, MAX_TEMPLATE_SUBJECT } from "./validate";
+import { PLACEHOLDERS } from "./placeholders";
 
 export interface EditorTemplate {
   id: string;
@@ -224,6 +225,29 @@ export function TemplatesEditor({
               Inserted where your cursor is, so it adds to what you have written
               rather than replacing it.
             </p>
+
+            {/* The vocabulary is CLOSED, so it can be listed exhaustively —
+                and listing it is the point: a placeholder somebody guesses at
+                is refused on save, and this is what stops the guessing. */}
+            <details className="rounded-md border px-3 py-2">
+              <summary className="cursor-pointer text-xs font-medium">
+                Fill-in-the-blanks you can use
+              </summary>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Type these anywhere in the template. They are filled in when you
+                insert it into a message, so you see the result before you send.
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {PLACEHOLDERS.map((p) => (
+                  <li key={p.key} className="text-xs">
+                    <code className="rounded bg-secondary px-1 py-0.5">
+                      {`{{${p.key}}}`}
+                    </code>{" "}
+                    <span className="text-muted-foreground">{p.hint}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
 
             <div className="flex items-center gap-2 pt-1">
               <Button onClick={save} disabled={pending} size="sm">

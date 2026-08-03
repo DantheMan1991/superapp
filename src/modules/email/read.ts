@@ -82,6 +82,14 @@ export interface MailView {
    * way out of a loader.
    */
   htmlSignature: string;
+  /**
+   * The display name on the identity being sent from, for `{{me.name}}`.
+   *
+   * Empty when the mail server names no display name, which is common — the
+   * placeholder is then left unfilled rather than substituted blank, so the
+   * writer sees the gap while there is still someone there to fix it.
+   */
+  senderName: string;
 }
 
 export type MailViewResult =
@@ -178,18 +186,28 @@ export async function loadMailView(
 
   let signature = "";
   let htmlSignature = "";
+  /** The display name on the identity, for `{{me.name}}`. */
+  let senderName = "";
   if (params.composing) {
     const identities = await client.data.identities();
     // A missing signature is not a reason to refuse to compose. If the server
     // will not tell us, the composer opens without one — which is exactly what
     // an empty signature looks like anyway.
     if (identities.ok) {
-      const self = client.data.session.username.trim().toLowerCase();
+      // Matched against the address of the ACCOUNT being read, not against the
+      // session's `username`. On a delegated shared mailbox those differ — the
+      // username is the delegate's own address and the identities all belong to
+      // the shared account, so matching on it never hit and the code reached
+      // `[0]` by accident. Same class as the `selfAddress` bug the delegation
+      // slice fixed; it happened to pick the right identity and would stop the
+      // moment a shared box had two.
+      const self = actingAddress(client.data).trim().toLowerCase();
       const identity =
         identities.data.find((i) => i.email.trim().toLowerCase() === self) ??
         identities.data[0];
       signature = identity?.textSignature ?? "";
       htmlSignature = identity?.htmlSignature ?? "";
+      senderName = identity?.name ?? "";
     }
   }
 
@@ -211,6 +229,7 @@ export async function loadMailView(
     isDelegated: client.data.isDelegated,
     signature,
     htmlSignature,
+    senderName,
   };
 }
 

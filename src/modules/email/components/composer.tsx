@@ -51,6 +51,8 @@ export function Composer({
   htmlSignature,
   closeHref,
   templates,
+  senderName,
+  businessName,
 }: {
   mailboxId: string;
   accountId: string;
@@ -65,6 +67,10 @@ export function Composer({
   closeHref: string;
   /** The business's canned responses, tenant-wide. Bodies already sanitized. */
   templates: PickableTemplate[];
+  /** For `{{me.name}}` — the identity's display name, often empty. */
+  senderName: string;
+  /** For `{{business.name}}` — the tenant's name. */
+  businessName: string;
 }) {
   const draft = buildDraft(mode, parent, selfAddress, signature, htmlSignature);
   return (
@@ -79,6 +85,9 @@ export function Composer({
       closeHref={closeHref}
       title={TITLES[mode]}
       templates={templates}
+      senderName={senderName}
+      senderEmail={selfAddress}
+      businessName={businessName}
     />
   );
 }

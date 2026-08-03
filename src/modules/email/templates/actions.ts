@@ -8,6 +8,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { schema, withTenant } from "@/db";
 import { logAudit } from "@/lib/audit";
 import { MailError, friendlyMessage } from "../core/errors";
+import { PLACEHOLDERS, validateTemplateBody } from "./placeholders";
 import {
   MAX_TEMPLATE_HTML,
   MAX_TEMPLATE_NAME,
@@ -74,6 +75,38 @@ export async function saveTemplateAction(
       // and a template that inserts nothing reads as a broken feature rather
       // than as an empty template.
       return { error: "The template is empty. Write the message it should insert." };
+    }
+
+    /**
+     * PLACEHOLDERS ARE CHECKED HERE BECAUSE THIS IS THE LAST MOMENT SOMEBODY IS
+     * LOOKING AT THEM.
+     *
+     * A template is written once and sent many times, so a mistake in one is
+     * not one bad email — it is every email until somebody notices. Both
+     * failures below would otherwise reach a customer as literal braces in the
+     * middle of a sentence.
+     *
+     * Checked AFTER sanitizing, so the answer is about the markup that will
+     * actually be stored rather than about whatever the editor happened to emit.
+     */
+    const problem = validateTemplateBody(bodyHtml);
+    if (problem?.kind === "unknown") {
+      return {
+        error:
+          `Yosher doesn't know ${problem.keys.map((k) => `{{${k}}}`).join(", ")}. ` +
+          `You can use: ${PLACEHOLDERS.map((p) => `{{${p.key}}}`).join(", ")}.`,
+      };
+    }
+    if (problem?.kind === "split") {
+      // The editor's doing: bolding part of a token, or a browser splitting a
+      // text node mid-word, leaves `{{recipient.<b>name}}</b>` — which reads
+      // correctly and can never be substituted.
+      return {
+        error:
+          `${problem.keys.map((k) => `{{${k}}}`).join(", ")} has formatting ` +
+          "inside it, so it can't be filled in. Delete it and type it again " +
+          "without changing the formatting part-way through.",
+      };
     }
 
     const nameKey = templateNameKey(name);

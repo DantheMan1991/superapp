@@ -11,6 +11,10 @@ import { MailError, friendlyMessage } from "./core/errors";
 import { holdComposedMessage, type HeldMessage } from "./compose/send";
 import { composeBodies } from "./compose/bodies";
 import {
+  stripQuotedRegions,
+  unfilledPlaceholders,
+} from "./templates/placeholders";
+import {
   isInlineImageType,
   isValidCid,
   MAX_INLINE_IMAGES,
@@ -176,6 +180,42 @@ export async function sendMessageAction(
     // See the header. Sanitize, THEN derive — the text part is a rendering of
     // what actually goes out, never of what was submitted.
     const bodies = composeBodies(data.htmlBody, data.textBody, allowedCids);
+
+    /**
+     * A TEMPLATE NOBODY FINISHED DOES NOT GO OUT.
+     *
+     * Placeholders are filled in the browser when a template is inserted, so
+     * reaching here with one still in the body means the value could not be
+     * resolved — usually because the template was inserted before a recipient
+     * was chosen — and nobody noticed the toast that said so. Sending it puts
+     * `{{recipient.name}}` in front of a customer under our user's own name.
+     *
+     * NARROW BY CONSTRUCTION, which is what makes refusing safe: only EXACT
+     * members of the closed vocabulary count. Somebody writing to a developer
+     * about `{{mustache}}` syntax, or pasting a config file, is unaffected —
+     * the same "exact member of the set" test the style sanitizer applies
+     * rather than a rule about what braces might mean.
+     *
+     * Checked on the SANITIZED bodies, so it judges what would actually be
+     * sent, and on the text rendering too — a placeholder surviving only in the
+     * plain-text alternative would reach exactly the recipients who never see
+     * the HTML.
+     *
+     * The QUOTE is excluded. Somebody replying to "how do I use
+     * {{recipient.name}}?" did not write that token and must not be stopped
+     * from answering the question — see `stripQuotedRegions`.
+     */
+    const unfilled = unfilledPlaceholders(
+      stripQuotedRegions(bodies.htmlBody ?? "", bodies.textBody ?? ""),
+    );
+    if (unfilled.length > 0) {
+      return {
+        error:
+          `This message still has ${unfilled.map((k) => `{{${k}}}`).join(", ")} in it. ` +
+          "Fill those in before sending — a template was inserted before there " +
+          "was anything to fill them from.",
+      };
+    }
 
     /**
      * Only the pictures the SANITIZED body still points at are attached.

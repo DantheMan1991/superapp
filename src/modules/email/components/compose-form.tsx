@@ -22,6 +22,11 @@ import { RichTextEditor, type RichTextEditorHandle } from "./rich-text-editor";
 import { RecipientInput } from "./recipient-input";
 import { htmlToPlainText } from "../compose/to-text";
 import { applyTemplateSubject } from "../templates/validate";
+import {
+  composerPlaceholderValues,
+  fillPlaceholders,
+  unfilledPlaceholders,
+} from "../templates/placeholders";
 import { TemplatePicker, type PickableTemplate } from "../templates/picker";
 import type { InlineImage } from "../compose/inline";
 
@@ -74,6 +79,9 @@ export function ComposeForm({
   closeHref,
   title,
   templates,
+  senderName,
+  senderEmail,
+  businessName,
 }: {
   mailboxId: string;
   accountId: string;
@@ -84,6 +92,10 @@ export function ComposeForm({
   title: string;
   /** The business's canned responses. Bodies are already sanitized. */
   templates: PickableTemplate[];
+  /** Placeholder values that do not change while a message is being written. */
+  senderName: string;
+  senderEmail: string;
+  businessName: string;
 }) {
   const router = useRouter();
   const [to, setTo] = useState(draft.to);
@@ -138,13 +150,56 @@ export function ComposeForm({
    * path derives its text alternative with, rather than a second converter.
    */
   function insertTemplate(template: PickableTemplate) {
-    setSubject((current) => applyTemplateSubject(current, template.subject));
+    /**
+     * PLACEHOLDERS ARE FILLED HERE, AT INSERT, NOT AT SEND.
+     *
+     * The alternative — carry `{{recipient.name}}` through and substitute on
+     * the server — would mean somebody sends a message they have never read in
+     * its final form, and a value that failed to resolve arrives at a customer
+     * as literal braces with nobody having had a chance to see it. Filling now
+     * puts the result on screen while there is still a person there.
+     *
+     * It is the same rule the signature editor states: what is on screen is
+     * what gets sent, and a second rendering somewhere else is only a place for
+     * the two to disagree.
+     *
+     * The recipient is read from the To field AS IT IS RIGHT NOW, which is why
+     * this reads `to` rather than a memoized value: somebody who types the
+     * address first gets a filled greeting, and somebody who inserts first sees
+     * the token and can fix it.
+     */
+    const first = parseRecipients(to).addresses[0];
+    const values = composerPlaceholderValues({
+      recipientName: first?.name ?? null,
+      recipientEmail: first?.email ?? null,
+      senderName,
+      senderEmail,
+      businessName,
+      today: new Date(),
+    });
+
+    const filledHtml = fillPlaceholders(template.bodyHtml, values);
+    const leftOver = unfilledPlaceholders(filledHtml);
+    if (leftOver.length > 0) {
+      // Said once, now, rather than discovered by the recipient. Not an error:
+      // inserting a template before choosing who it is for is a normal order to
+      // work in, and the tokens are visible in the body to be filled by hand.
+      toast.message(
+        leftOver.length === 1
+          ? `{{${leftOver[0]}}} still needs filling in.`
+          : `${leftOver.length} placeholders still need filling in.`,
+      );
+    }
+
+    setSubject((current) =>
+      applyTemplateSubject(current, fillPlaceholders(template.subject, values)),
+    );
     if (plainText) {
-      const text = htmlToPlainText(template.bodyHtml);
+      const text = htmlToPlainText(filledHtml);
       setPlainBody((current) => (current.length > 0 ? `${current}\n${text}` : text));
       return;
     }
-    editor.current?.insertHtml(template.bodyHtml);
+    editor.current?.insertHtml(filledHtml);
   }
 
   async function upload(files: FileList) {

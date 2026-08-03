@@ -462,6 +462,8 @@ export async function MailView({
               htmlSignature={view.htmlSignature}
               closeHref={mailHref(params, { compose: undefined })}
               templates={pickableTemplates}
+              senderName={view.senderName}
+              businessName={ctx.tenant.name}
             />
           ) : view.message ? (
             <>

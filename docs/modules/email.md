@@ -2801,6 +2801,99 @@ owners-only.
 **Not applied to production**: `0057` and `0058` are on the dev branch only.
 `docs/security.md` §8 requires both.
 
+### 2026-08-03 (later still) — Placeholders, and the token the editor can break
+
+Templates were fixed wording. They now leave blanks —
+`Hi {{recipient.first_name}},` — filled from what the composer already knows.
+
+**NO PROBE THIS TIME, AND THAT IS A DECISION RATHER THAN AN OMISSION.** Every
+slice since Slice 0 has asked the live server first, because protocol behaviour
+is where the surprises are. Placeholders touch no protocol: the mail server
+never sees a `{{token}}`, because substitution happens in the browser before a
+draft exists. Running a JMAP probe here would have been a ritual, not a check.
+What needed proving instead was the editor's behaviour, and that is a test.
+
+**A CLOSED VOCABULARY, the same call `compose/formatting.ts` made for colours
+and fonts.** If any `{{word}}` were substitutable then a typo would be
+indistinguishable from a feature: `{{cusotmer}}` would save happily and reach a
+client verbatim, and nobody would find out until they read the sent copy.
+Because the set is closed, the save action refuses the typo and lists what is
+available — at the one moment somebody is looking at it. The editor lists the
+same table, so the thing you can type and the thing that resolves come from one
+file.
+
+**FILLED AT INSERT, NOT AT SEND**, and this is the decision the feature turns
+on. Carrying `{{recipient.name}}` through to the server would mean somebody
+sends a message they have never read in its final form, and a value that failed
+to resolve arrives at a customer as literal braces with no one having had a
+chance to see it. Filling in the browser puts the result on screen while there
+is still a person there. It is the signature editor's rule restated: what is on
+screen is what gets sent.
+
+**AN UNRESOLVED PLACEHOLDER IS LEFT AS ITS TOKEN, never blanked.** "Hi ," with a
+hole where a name should be reads as a message somebody wrote carelessly — it
+sails past the writer and out to the customer. `{{recipient.name}}` in the
+middle of a sentence is unmistakable. The composer also says so in a toast, and
+inserting a template before choosing a recipient is a normal order to work in
+rather than an error.
+
+**THE FAILURE NOBODY WOULD GUESS: the editor can break a token in half.** The
+template body is rich text, so bolding part of `{{recipient.name}}` — or a
+browser splitting a text node mid-word — stores
+`{{recipient.<b>name}}</b>`. It reads perfectly to a human and no regex over
+the HTML can match it, so it would survive substitution untouched and go out as
+braces. It is detected by comparing the two renderings: **a token present in the
+TEXT, where markup has been flattened, but absent from the HTML can only have
+been broken up by tags.** That reuses `htmlToPlainText` rather than parsing a
+DOM on the server. Ordering matters — an unknown key is reported before a split
+one, because a split token is a *valid* key and checking the HTML first would
+have produced a nonsense name like `recipient.` in the error message.
+
+**THE SEND GUARD, and the false positive that shaped it.** A body still carrying
+an exact member of the vocabulary is a template nobody finished, so
+`sendMessageAction` refuses it. Narrow by construction: somebody writing about
+`{{mustache}}` syntax or pasting a config file is unaffected, the same
+"exact member of the set" test the style sanitizer applies.
+
+But the first version guarded the whole body, and that would have been
+infuriating in a case that really happens: **a customer asks "how do I use
+`{{recipient.name}}`?", you hit Reply, and the quoted original carries the token
+into your message.** The guard would refuse the reply, every time, about
+something the writer never wrote, and the only escape would be deleting the
+quote. `stripQuotedRegions` removes `<blockquote>` from the rich body and
+`>`-prefixed lines from the plain-text one before checking. Over-stripping is
+the safe direction — a placeholder inside a quote is text somebody is
+deliberately reproducing.
+
+**Values are escaped on the way in.** A recipient's display name is chosen by
+whoever emailed us, so `<img src=x onerror=…>` as a name would otherwise inject
+markup that then goes out under our user's signature. The outbound sanitizer
+would strip it at send, but relying on that would mean the editor showed one
+thing and the recipient received another.
+
+**A latent bug fixed on the way, and it is the third of its family.**
+`read.ts` picked the identity by matching `session.username`, which on a
+delegated shared mailbox is the DELEGATE's address while the identities all
+belong to the shared account — so the match never hit and the code reached
+`identities[0]` by accident. It happened to be right and would have stopped the
+moment a shared box had two identities. Same class as the `selfAddress` and
+`selfAddresses()` bugs the delegation slice fixed; all three came from treating
+"the token holder" and "the mailbox being acted on" as the same thing.
+
+**What is deliberately NOT here: business-object fields.** An invoice number or
+a job reference cannot resolve from the composer's own state — "which invoice?"
+is a question only a person can answer — so they need an entity picker in the
+insert flow AND a new capability on `MailExtension` to read fields off the
+chosen record. `LinkableEntity` carries `label` and `sublabel` for display and
+nothing structured, and parsing a formatted sublabel to recover a number is
+exactly what this module refuses to do. It is the next slice, and it needs the
+closed vocabulary underneath it to be worth building.
+
+Verified: 30 new unit tests. **Not verified in a browser** — the specific things
+to try are bolding half a token and confirming the save is refused, inserting a
+template with the To field empty, and replying to a message that quotes a
+placeholder.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -3499,12 +3592,18 @@ code or config change.
 - **No drag-and-drop or paste of an image into the composer.** Paste is plain
   text by design, and an image on the clipboard is currently dropped silently
   rather than offered — which is the one place that rule reads as a bug.
-- **Templates have no placeholders.** They insert fixed wording; there is no
-  `{{customer}}` or invoice number. That is the obvious next step and the one
-  that would make them better than Gmail's rather than equal to them, since
-  filling a template from a business object is the whole reason this module sits
-  next to Accounting. Unbuilt on purpose — the substitution, the field picker
-  and the "what if the object is missing" case are a slice of their own.
+- **Placeholders resolve from the composer only — no business-object fields
+  yet.** `{{recipient.*}}`, `{{me.*}}`, `{{business.name}}` and `{{date.today}}`
+  are built; an invoice number or a job reference is not. Those cannot come from
+  the composer's own state ("which invoice?" needs a person), so they want an
+  entity picker in the insert flow plus a new `MailExtension` capability that
+  reads structured fields off a chosen record — `LinkableEntity` carries only
+  `label`/`sublabel` for display. That is the next slice and it is the one that
+  makes templates better than Gmail's rather than equal.
+- **A placeholder inside a quote is ignored by the send guard.** Deliberate —
+  replying to somebody who asked about `{{recipient.name}}` must not be blocked
+  — but it does mean a template inserted *below* a quote in a reply would slip
+  past the guard. The composer's toast still names it at insert.
 - **A template does not appear on a phone or in Outlook.** The first mail
   feature since Slice 0 of which that is true, and it is the accepted price of
   being shareable across the business — see the build log for why no

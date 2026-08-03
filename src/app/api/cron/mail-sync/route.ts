@@ -6,6 +6,7 @@ import {
 } from "@/lib/email/sync/account";
 import { wakeDueSnoozes } from "@/modules/email/triage/snooze";
 import { sendDueMessages } from "@/modules/email/schedule/sweep";
+import { runAutofileRules } from "@/modules/email/autofile/sweep";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,13 @@ const WAKE_BATCH = 200;
  * budget.
  */
 const SEND_BATCH = 50;
+/**
+ * Auto-filing rules per tick. The SMALLEST cap of the three, because this is
+ * the only step that downloads whole messages and their attachments — a rule
+ * page is 10 messages, so this bounds the tick at 80 downloads in the worst
+ * case rather than at a folder move apiece.
+ */
+const AUTOFILE_BATCH = 8;
 
 function authorized(request: Request): boolean {
   const expected = process.env.CRON_SECRET;
@@ -116,6 +124,21 @@ export async function GET(request: Request): Promise<Response> {
    */
   const released = await sendDueMessages(new Date(), SEND_BATCH);
 
+  /**
+   * Auto-filing runs LAST of the four, and the reason is the same one that puts
+   * scheduled send third: it is the most expensive step and the least urgent.
+   * A page of attachments not filed on this tick is filed on the next one —
+   * the watermark makes that free — whereas a sync starved of its budget leaves
+   * every unread badge in the product stale.
+   *
+   * It could not have been a Sieve rule. Sieve runs inside the mail server and
+   * cannot call Yosher; the one action that could reach us (`redirect` to an
+   * inbound address) would send the message back out over SMTP, duplicate it
+   * and break SPF. So the cron is the only trigger available, and this feature
+   * inherits ADR 0005's cadence.
+   */
+  const autofiled = await runAutofileRules(AUTOFILE_BATCH);
+
   // Counts only — never an address, a subject or a tenant name (S9).
   return Response.json({
     considered: due.length,
@@ -126,5 +149,9 @@ export async function GET(request: Request): Promise<Response> {
     wakeFailed: woken.failed,
     scheduledSent: released.sent,
     scheduledFailed: released.failed,
+    autofileRules: autofiled.rules,
+    autofiled: autofiled.filed,
+    autofileSkipped: autofiled.skipped,
+    autofileFailed: autofiled.failed,
   });
 }

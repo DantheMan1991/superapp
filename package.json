@@ -23,6 +23,7 @@
     "mail:probe-search": "tsx scripts/jmap-search-probe.ts",
     "mail:probe-delegation": "tsx scripts/jmap-delegation-probe.ts",
     "mail:probe-templates": "tsx scripts/jmap-templates-probe.ts",
+    "mail:probe-autofile": "tsx scripts/jmap-autofile-probe.ts",
     "test": "vitest run",
     "test:isolation": "vitest run tests/tenant-isolation.test.ts"
   },

@@ -107,6 +107,39 @@ export async function saveRulesAction(
     }
 
     /**
+     * RULES ARE REFUSED ON A SHARED MAILBOX, and this is the one place
+     * delegation takes something away rather than adding it.
+     *
+     * A Sieve script is a SINGLETON PER ACCOUNT — `npm run mail:probe-delegation`
+     * confirmed a delegate can write the shared account's script — while
+     * `mail_rules` is per-user and a colleague cannot read anybody else's rows.
+     * So a rule saved here would be recorded privately and act publicly: it
+     * would file everyone's mail, and the only person who could see it existed
+     * is the one who wrote it. Worse, the next colleague to open this editor
+     * would see an empty list and publish over the script silently, because
+     * publishing writes the whole script from their own rows.
+     *
+     * Snooze and scheduled send also touch shared state and are ALLOWED, which
+     * looks inconsistent until you name the difference: their effects are
+     * VISIBLE to everyone sharing the box — a message in a Snoozed folder, a
+     * draft in Drafts. An invisible effect with a private record is the only
+     * combination this refuses.
+     *
+     * Fixing it properly means moving `mail_rules` from per-user to per-mailbox
+     * RLS, which is a policy change with its own isolation certification. It is
+     * a slice, not a line, and shipping the editor in the meantime would be
+     * shipping the silent overwrite.
+     */
+    if (client.data.isDelegated) {
+      return {
+        error:
+          "Rules aren't available on a shared mailbox yet. The mail server keeps " +
+          "one set of rules per mailbox, so yours would quietly apply to " +
+          "everyone using this address — and overwrite theirs.",
+      };
+    }
+
+    /**
      * THE MAIL SERVER GOES FIRST.
      *
      * If it refuses the script, nothing is written here — so the rules in the

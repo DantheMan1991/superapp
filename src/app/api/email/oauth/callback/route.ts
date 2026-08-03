@@ -4,7 +4,7 @@ import { schema, withSystem } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
 import { discoverJmapSession } from "@/lib/email/jmap/client";
-import { sessionMatchesAddress } from "@/lib/email/jmap/parse";
+import { matchSessionAccount } from "@/lib/email/jmap/parse";
 import { saveConnection } from "@/lib/email/oauth/accounts";
 import {
   MAIL_OAUTH_NOT_CONFIGURED,
@@ -132,14 +132,21 @@ export async function GET(request: Request): Promise<Response> {
   if (!mailbox) {
     return back(returnTo, { mailError: "That mailbox no longer exists." });
   }
-  if (!sessionMatchesAddress(session.data, mailbox.address)) {
+  // WHICH account inside the session is this mailbox? For a personal box that
+  // is the primary; for a SHARED one it is a second entry the mail server put
+  // there because this person has been granted access. Either way the id that
+  // matched is what gets stored — storing the primary would connect `info@` and
+  // then read the delegate's own mail through it.
+  const matched = matchSessionAccount(session.data, mailbox.address);
+  if (!matched) {
     // Names the mismatch, because the fix is "sign in as the right person" and
     // a vague failure here sends people round the loop repeatedly. Safe to say:
     // both addresses already belong to whoever is looking.
     return back(returnTo, {
       mailError:
         `You signed in as ${session.data.username || session.data.accountName || "another account"}, ` +
-        `but this is ${mailbox.address}. Connect it while signed in as that address.`,
+        `which has no access to ${mailbox.address}. Connect it while signed in as ` +
+        "that address, or ask whoever administers it to grant you access first.",
     });
   }
 
@@ -148,7 +155,7 @@ export async function GET(request: Request): Promise<Response> {
     mailboxId: pending.mailboxId,
     clerkUserId: ctx.userId,
     jmapSessionUrl: sessionUrl,
-    jmapAccountId: session.data.primaryAccountId,
+    jmapAccountId: matched.id,
     tokens: tokens.data,
   });
 
@@ -159,7 +166,14 @@ export async function GET(request: Request): Promise<Response> {
     targetType: "mail_account",
     targetId: account.id,
     // Identifiers only — no address, no token, per the module's rule.
-    meta: { mailboxId: pending.mailboxId, hasRefreshToken: Boolean(tokens.data.refreshToken) },
+    // `delegated` is worth recording: it is the difference between somebody
+    // connecting their own mailbox and somebody being granted a shared one,
+    // and "who has access to info@" is a question an audit log should answer.
+    meta: {
+      mailboxId: pending.mailboxId,
+      hasRefreshToken: Boolean(tokens.data.refreshToken),
+      delegated: !matched.isPersonal,
+    },
   });
 
   return back(returnTo, { mailConnected: "1" });

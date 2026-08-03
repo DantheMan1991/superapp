@@ -1,6 +1,7 @@
 import "server-only";
 import type { MailAccount } from "@/db/schema";
 import { authorizedClient } from "@/lib/email/oauth/accounts";
+import type { JmapClient } from "@/lib/email/jmap/client";
 import type { JmapEmail, JmapMailbox } from "@/lib/email/jmap/types";
 import { KEYWORD_FLAGGED, KEYWORD_SEEN } from "@/lib/email/jmap/types";
 import { loadConnection } from "@/lib/email/oauth/accounts";
@@ -49,11 +50,21 @@ export interface MailView {
   position: number;
   message: JmapEmail | null;
   /**
-   * The address this connection sends and receives as, from the session's
-   * `username` — RFC 8620's field for whose credentials these are. Free, and
-   * it is what stops a reply-all including the person writing it.
+   * The address this connection sends and receives as — the address of the
+   * ACCOUNT being read, which on a delegated shared mailbox is the shared
+   * address rather than the reader's own. It is what stops a reply-all
+   * including the mailbox it is being sent from.
    */
   selfAddress: string;
+  /**
+   * True when this is a mailbox somebody was granted rather than their own.
+   *
+   * Carried on the view because three settings are per-ACCOUNT on the mail
+   * server — rules, auto-reply and signature — so on a shared box they belong
+   * to everybody using it. The UI has to say so, and in the case of rules
+   * refuse outright; see `rules/actions.ts` for why that one is different.
+   */
+  isDelegated: boolean;
   /**
    * The signature from the mail server's Identity, fetched ONLY when a composer
    * is open. Signatures live on the server rather than in a table of ours, and
@@ -76,6 +87,19 @@ export interface MailView {
 export type MailViewResult =
   | MailView
   | { ok: false; message: string; needsReauth?: boolean; account: MailAccount };
+
+/**
+ * The address of the account this client acts on.
+ *
+ * Falls back to `username` when the session does not name the account, which is
+ * the pre-delegation behaviour and correct for a personal mailbox — the two are
+ * the same address there.
+ */
+function actingAddress(client: JmapClient): string {
+  const acting = client.session.accounts.find((a) => a.id === client.accountId);
+  const name = acting?.name ?? "";
+  return name.includes("@") ? name : client.session.username;
+}
 
 function toRow(email: JmapEmail): ThreadRow {
   const sender = email.from[0];
@@ -178,7 +202,13 @@ export async function loadMailView(
     total: listed.data.query.total,
     position: params.position ?? 0,
     message,
-    selfAddress: client.data.session.username,
+    // The address of the account BEING READ, not of the token holding it open.
+    // On a delegated shared mailbox those differ, and using `username` would
+    // leave `info@` in the recipients of a reply-all sent from `info@` — the
+    // mailbox mailing itself — while dropping the reader's own address, which
+    // is the one case they might genuinely want to keep.
+    selfAddress: actingAddress(client.data),
+    isDelegated: client.data.isDelegated,
     signature,
     htmlSignature,
   };

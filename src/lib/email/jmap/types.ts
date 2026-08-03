@@ -181,6 +181,31 @@ export interface JmapThread {
   emailIds: string[];
 }
 
+/**
+ * One account a session may act on.
+ *
+ * RFC 8620 §1.6.2 is explicit that an account is "not necessarily the one the
+ * credentials belong to", and that is the entire basis of delegation: a shared
+ * mailbox somebody has been granted access to arrives as a SECOND entry here,
+ * reached with their own token. `npm run mail:probe-delegation` confirmed it
+ * end to end against Stalwart 0.16.15.
+ *
+ * `name` IS the address on this server, which is what makes matching a mailbox
+ * to an account a comparison rather than a lookup. The probe checked that
+ * specifically, because the spec only promises a human-readable label — a
+ * server that put a display name here would need a different mechanism, and
+ * `parseSessionAccount` is where that would be noticed.
+ */
+export interface JmapSessionAccount {
+  id: string;
+  /** The address on this server. See above — verified, not assumed. */
+  name: string;
+  /** False for a delegated mailbox, true for the person's own. */
+  isPersonal: boolean;
+  /** A grant that allows reading but not filing, flagging or replying. */
+  isReadOnly: boolean;
+}
+
 /** The session object from the discovery endpoint. */
 export interface JmapSession {
   /**
@@ -194,9 +219,18 @@ export interface JmapSession {
   downloadUrl: string;
   uploadUrl: string;
   eventSourceUrl: string | null;
-  /** The mail account this token can act on. */
+  /** The mail account this token's OWN mailbox lives in. */
   primaryAccountId: string;
   accountName: string;
+  /**
+   * EVERY account this session may act on, the person's own included.
+   *
+   * The probe established that the server lists only what this token is
+   * entitled to and refuses (`forbidden`) any other id — so this list is an
+   * entitlement rather than a directory, which is what makes matching across
+   * it safe.
+   */
+  accounts: JmapSessionAccount[];
   /**
    * RFC 8620 §2: "the username associated with the given credentials". The
    * address the token actually belongs to, which is not necessarily the address

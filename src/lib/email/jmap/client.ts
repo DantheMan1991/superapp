@@ -379,6 +379,32 @@ export async function discoverJmapSession(
 
 export interface JmapClient {
   readonly session: JmapSession;
+  /**
+   * WHICH account every call on this client acts on.
+   *
+   * Not always `session.primaryAccountId`: a connection to a delegated mailbox
+   * acts on the granted account instead. Exposed because callers that need to
+   * know whose mailbox this is — `selfAddresses()` in sync, and anything
+   * deciding whether a setting is shared — must not re-derive it from the
+   * session and get the personal one.
+   */
+  readonly accountId: string;
+  /**
+   * True when this client acts on a mailbox somebody was GRANTED rather than
+   * their own — the mail server's own `isPersonal: false`.
+   *
+   * It is here because three features are singletons PER ACCOUNT on the mail
+   * server — the Sieve script, the vacation response and the identity's
+   * signature — so on a shared mailbox one person's change applies to
+   * everybody using it. `npm run mail:probe-delegation` confirmed a delegate
+   * can write all three. Callers that own one of those settings have to say so
+   * or refuse; see `docs/modules/email.md`.
+   *
+   * Read from the freshly discovered session rather than stored, so a grant
+   * that changed is reflected on the next call rather than at the next
+   * reconnect.
+   */
+  readonly isDelegated: boolean;
   listMailboxes(): Promise<JmapResult<JmapMailbox[]>>;
   queryEmails(opts: {
     filter?: JmapEmailFilter;
@@ -558,11 +584,19 @@ function serializeFilter(filter: JmapEmailFilter): Record<string, unknown> {
   return out;
 }
 
+/**
+ * @param accountId WHICH account in the session this client acts on. Defaults
+ *   to the primary, which is the person's own mailbox — but a connection to a
+ *   DELEGATED mailbox must pass the granted account's id instead, or every read
+ *   would return the delegate's personal mail under the shared box's name.
+ *   `authorizedClient()` passes the id stored at connect time and refuses to
+ *   build a client at all when the session no longer offers it.
+ */
 export function createJmapClient(
   session: JmapSession,
   token: string,
+  accountId: string = session.primaryAccountId,
 ): JmapClient {
-  const accountId = session.primaryAccountId;
 
   /**
    * `using` is per-call, not fixed.
@@ -643,8 +677,22 @@ export function createJmapClient(
     return { ok: true, data: { updated, failed } };
   }
 
+  // NOT `isPersonal`, deliberately. That flag is optional and this parser
+  // defaults it to false when absent, so keying off it would mark every
+  // mailbox on a server that omits it as delegated — refusing rules for
+  // everybody to guard a case that server does not even have.
+  //
+  // "The primary account" is RFC 8620's own term for the account the
+  // credentials belong to, so anything else is by definition somebody else's
+  // mailbox that this token has been granted. It needs no optional field and
+  // it cannot be absent. `isPersonal` agrees with it on this server, which the
+  // probe checked.
+  const isDelegated = accountId !== session.primaryAccountId;
+
   return {
     session,
+    accountId,
+    isDelegated,
 
     async listMailboxes() {
       const result = await call([["Mailbox/get", { accountId, ids: null }, "m"] as unknown as MethodCall]);

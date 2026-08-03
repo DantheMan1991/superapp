@@ -10,6 +10,7 @@ import {
   RichTextEditor,
   type RichTextEditorHandle,
 } from "../components/rich-text-editor";
+import { SharedMailboxNotice } from "../components/shared-mailbox-notice";
 import { saveSignatureAction } from "./actions";
 import type { LoadedSignature } from "./load";
 
@@ -35,11 +36,18 @@ export function SignatureForm({
   mailboxId,
   signature,
   closeHref,
+  sharedAddress,
 }: {
   mailboxId: string;
   /** Null when the mail server would not say what the current signature is. */
   signature: LoadedSignature | null;
   closeHref: string;
+  /**
+   * Set when this is a DELEGATED mailbox, to the address it belongs to. The
+   * signature lives on the account's Identity, of which there is one, so on a
+   * shared box it goes out under everybody's messages.
+   */
+  sharedAddress?: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -92,6 +100,9 @@ export function SignatureForm({
 
   return (
     <Shell closeHref={closeHref}>
+      {sharedAddress && (
+        <SharedMailboxNotice address={sharedAddress} what="signature" />
+      )}
       <p className="text-xs text-muted-foreground">
         Added to the bottom of messages you send from{" "}
         <span className="font-medium text-foreground">{signature.address}</span>.

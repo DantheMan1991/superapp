@@ -18,6 +18,7 @@ import { sanitizeOutboundHtml } from "../compose/html";
 import { ComposeForm, type ComposeDraft } from "./compose-form";
 import type { PickableTemplate } from "../templates/picker";
 import type { ContributedNamespace } from "../templates/placeholders";
+import type { LinkableEntity } from "@/lib/mail-extensions/types";
 
 /**
  * The composer, prefilled on the server.
@@ -55,6 +56,7 @@ export function Composer({
   senderName,
   businessName,
   namespaces,
+  threadRecords,
 }: {
   mailboxId: string;
   accountId: string;
@@ -75,6 +77,8 @@ export function Composer({
   businessName: string;
   /** Entity types contributing `{{invoice.number}}`-style placeholders. */
   namespaces: ContributedNamespace[];
+  /** What this conversation is already attached to. Empty for a new message. */
+  threadRecords: LinkableEntity[];
 }) {
   const draft = buildDraft(mode, parent, selfAddress, signature, htmlSignature);
   return (
@@ -93,6 +97,7 @@ export function Composer({
       senderEmail={selfAddress}
       businessName={businessName}
       namespaces={namespaces}
+      threadRecords={threadRecords}
     />
   );
 }

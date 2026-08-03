@@ -5,6 +5,7 @@ import {
   extractPlaceholders,
   fillPlaceholders,
   isKnownPlaceholder,
+  recordFromThread,
   requiredNamespaces,
   stripQuotedRegions,
   unfilledPlaceholders,
@@ -312,6 +313,41 @@ describe("requiredNamespaces", () => {
     expect(requiredNamespaces("<p>{{invoice.<b>number}}</b></p>", V)).toEqual([
       "invoice",
     ]);
+  });
+});
+
+/**
+ * "Which invoice?" is a question the conversation has often already answered.
+ *
+ * Chasing the same unpaid invoice four times should not mean finding it four
+ * times from a thread that is already attached to it — but a tie must never be
+ * broken silently, because the wrong invoice number in a customer's email looks
+ * exactly like the right one.
+ */
+describe("recordFromThread", () => {
+  const invoice = (id: string) => ({ entityType: "invoice", entityId: id });
+  const customer = (id: string) => ({ entityType: "customer", entityId: id });
+
+  it("uses the record when the thread names exactly one of that type", () => {
+    expect(recordFromThread("invoice", [invoice("a")])).toEqual(invoice("a"));
+  });
+
+  it("ignores links of a DIFFERENT type", () => {
+    expect(recordFromThread("invoice", [customer("c")])).toBe(null);
+    expect(recordFromThread("invoice", [customer("c"), invoice("a")])).toEqual(
+      invoice("a"),
+    );
+  });
+
+  it("ASKS when the thread names two of the same type", () => {
+    // The one that matters. Picking the newest or the first would quote a real
+    // invoice number into a real customer's email with nobody having chosen
+    // it, and the mistake would be invisible. A click is the cheap side.
+    expect(recordFromThread("invoice", [invoice("a"), invoice("b")])).toBe(null);
+  });
+
+  it("asks when the thread is attached to nothing", () => {
+    expect(recordFromThread("invoice", [])).toBe(null);
   });
 });
 

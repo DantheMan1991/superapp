@@ -2390,6 +2390,17 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
         extensionSlug: "documents",
         data: { note: `annotation of ${tag}` },
       });
+      // A canned response. The first mail table scoped to the BUSINESS rather
+      // than to one person (drizzle/0056) — so unlike everything else seeded
+      // here, the colleague is supposed to see it.
+      await tx.insert(schema.mailTemplates).values({
+        tenantId,
+        name: `Payment terms ${tag}`,
+        nameKey: `payment terms ${tag}`,
+        subject: `Our terms ${tag}`,
+        bodyHtml: `<p>Terms of ${tag}</p>`,
+        createdByClerkUserId: `user-${tag}`,
+      });
       return {
         domainId: domain.id,
         mailboxId: mailbox.id,
@@ -2453,6 +2464,7 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
           await tx.select().from(schema.mailThreadIndex),
           await tx.select().from(schema.mailLinks),
           await tx.select().from(schema.mailAnnotations),
+          await tx.select().from(schema.mailTemplates),
         ];
         for (const rows of tables) {
           expect(rows.length).toBeGreaterThan(0);
@@ -2558,6 +2570,67 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
    * would pass every other test in this file and silently make a shared mailbox
    * impossible to connect twice.
    */
+  /**
+   * TEMPLATES GO THE OTHER WAY, and that is the point of asserting it.
+   *
+   * Every other mail table is per-user, and the tests above prove a colleague
+   * sees nothing. `mail_templates` is tenant-scoped (drizzle/0056) because a
+   * canned response is the business's boilerplate rather than somebody's
+   * correspondence — so the SAME query that must return nothing for a snooze
+   * must return the row for a template. A test that only ever asserts "the
+   * colleague sees nothing" would pass just as well if the policy were broken
+   * shut, and a template nobody else can read is the feature not working.
+   */
+  it("a colleague CAN read the business's templates", async () => {
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailTemplates),
+      { userId: COLLEAGUE },
+    );
+    expect(asColleague).toHaveLength(1);
+    expect(asColleague[0].name).toBe("Payment terms a");
+    // …and it is genuinely tenant-scoped, not simply unprotected.
+    expect(asColleague.every((r) => r.tenantId === tenantA)).toBe(true);
+  });
+
+  it("templates are readable WITHOUT a user id, unlike every per-user table", async () => {
+    // The per-user tables fail closed when `{ userId }` is omitted. This one
+    // must not, because nothing about it is per-user — and a loader that
+    // silently returned an empty list would look exactly like a business with
+    // no templates yet.
+    const rows = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.mailTemplates),
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("but a template still never crosses a tenant", async () => {
+    const rows = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailTemplates),
+      { userId: "user-a" },
+    );
+    expect(rows.some((r) => r.name === "Payment terms b")).toBe(false);
+  });
+
+  it("refuses two templates with the same folded name in one tenant", async () => {
+    // The unique index is on `name_key`, so "Payment terms" and "payment  TERMS"
+    // collide — the action reports it, and this is what guarantees it when two
+    // people save at once.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.mailTemplates).values({
+          tenantId: tenantA,
+          name: "PAYMENT   terms   A",
+          nameKey: "payment terms a",
+          subject: "",
+          bodyHtml: "<p>duplicate</p>",
+          createdByClerkUserId: "user-a",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("two people can connect the SAME mailbox, each with their own row", async () => {
     const rows = await withSystem((tx) =>
       tx

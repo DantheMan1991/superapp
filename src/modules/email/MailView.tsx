@@ -23,6 +23,8 @@ import { RulesEditor, type EditorRule } from "./rules/editor";
 import { loadRules } from "./rules/load";
 import { SignatureForm } from "./signature/form";
 import { loadSignature } from "./signature/load";
+import { TemplatesEditor } from "./templates/editor";
+import { loadTemplates } from "./templates/load";
 
 /**
  * The three panes.
@@ -67,6 +69,7 @@ export async function MailView({
     away: first("away"),
     rules: first("rules"),
     signature: first("signature"),
+    templates: first("templates"),
     // The advanced search builder's fields. In the URL like everything else, so
     // a search is linkable, reloadable and saveable without a second model.
     from: first("from"),
@@ -82,6 +85,7 @@ export async function MailView({
   const showAway = params.away === "1";
   const showRules = params.rules === "1";
   const showSignature = params.signature === "1";
+  const showTemplates = params.templates === "1";
 
   const view = await loadMailView(account, {
     tenantId: ctx.tenant.id,
@@ -197,6 +201,27 @@ export async function MailView({
    */
   const signature = showSignature ? await loadSignature(account) : null;
 
+  /**
+   * Loaded when the manager is open OR a composer is — the picker needs them to
+   * offer anything, and a template inserted into a message is the point of the
+   * feature.
+   *
+   * A local SELECT, unlike the signature and the auto-reply, which are round
+   * trips to the mail server. Templates are the one mail feature stored in our
+   * own database (drizzle/0056), so this costs an indexed read on a table with
+   * a handful of rows rather than a protocol call.
+   */
+  const templates =
+    showTemplates || composeMode
+      ? await loadTemplates(ctx.tenant.id, ctx.role)
+      : [];
+  const pickableTemplates = templates.map((t) => ({
+    id: t.id,
+    name: t.name,
+    subject: t.subject,
+    bodyHtml: t.bodyHtml,
+  }));
+
   const away = await loadAutoReply(account);
   const awayState = away
     ? autoReplyState(
@@ -215,7 +240,7 @@ export async function MailView({
         <Mail className="size-5 shrink-0 text-brand" />
         <span className="truncate text-sm font-medium">Mail</span>
         <Button asChild size="sm" variant="outline" className="shrink-0">
-          <Link href={mailHref(params, { compose: "new", message: undefined })}>
+          <Link href={mailHref(params, { compose: "new", message: undefined, templates: undefined })}>
             <PenSquare className="size-4" />
             <span className="hidden sm:inline">Write</span>
           </Link>
@@ -244,14 +269,14 @@ export async function MailView({
             people from finding the form. */}
         {!view.isDelegated && (
           <Link
-            href={mailHref(params, { rules: "1", away: undefined, signature: undefined, compose: undefined, message: undefined })}
+            href={mailHref(params, { rules: "1", away: undefined, signature: undefined, templates: undefined, compose: undefined, message: undefined })}
             className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
           >
             Rules
           </Link>
         )}
         <Link
-          href={mailHref(params, { signature: "1", away: undefined, rules: undefined, compose: undefined, message: undefined })}
+          href={mailHref(params, { signature: "1", away: undefined, rules: undefined, templates: undefined, compose: undefined, message: undefined })}
           className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
         >
           Signature
@@ -319,9 +344,14 @@ export async function MailView({
         </section>
 
         <section
-          className={`min-h-0 ${view.message || composeMode || showAway || showRulesEditor || showSignature ? "block" : "hidden lg:block"}`}
+          className={`min-h-0 ${view.message || composeMode || showAway || showRulesEditor || showSignature || showTemplates ? "block" : "hidden lg:block"}`}
         >
-          {showSignature ? (
+          {showTemplates ? (
+            <TemplatesEditor
+              templates={pickableTemplates}
+              closeHref={mailHref(params, { templates: undefined })}
+            />
+          ) : showSignature ? (
             <SignatureForm
               mailboxId={account.mailboxId}
               signature={signature}
@@ -364,6 +394,7 @@ export async function MailView({
               signature={view.signature}
               htmlSignature={view.htmlSignature}
               closeHref={mailHref(params, { compose: undefined })}
+              templates={pickableTemplates}
             />
           ) : view.message ? (
             <>
@@ -383,9 +414,9 @@ export async function MailView({
                 folders={view.folders}
                 showImages={params.images === "1"}
                 showImagesHref={mailHref(params, { images: "1" })}
-                replyHref={mailHref(params, { compose: "reply" })}
-                replyAllHref={mailHref(params, { compose: "reply_all" })}
-                forwardHref={mailHref(params, { compose: "forward" })}
+                replyHref={mailHref(params, { compose: "reply", templates: undefined })}
+                replyAllHref={mailHref(params, { compose: "reply_all", templates: undefined })}
+                forwardHref={mailHref(params, { compose: "forward", templates: undefined })}
               />
             </>
           ) : (

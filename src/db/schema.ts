@@ -2977,6 +2977,89 @@ export const mailRules = pgTable(
   ],
 );
 
+/**
+ * Canned responses — and the FIRST mail table scoped to the business rather
+ * than to one person.
+ *
+ * Every mail table before this one is per-user, for reasons that do not apply
+ * here: they hold correspondence, or ids the mail server issued inside one
+ * account. A template holds neither. It is boilerplate somebody wrote in order
+ * that it be reused — "our payment terms", "thanks for the enquiry" — and the
+ * reuse is the entire point.
+ *
+ * WHY IT IS NOT ON THE MAIL SERVER, unlike rules, the auto-reply, the signature
+ * and labels. `npm run mail:probe-templates` confirmed the server CAN hold one:
+ * a `$draft` message in a mailbox of its own is exactly what Gmail's canned
+ * responses were, it round-trips its markup, and it does not pollute the Drafts
+ * folder. It was rejected anyway, because every mail-server location is scoped
+ * to ONE ACCOUNT — so sharing the company's payment-terms wording with a
+ * colleague would mean granting them the mailbox it lives in, and every message
+ * in it. **There is no way to share a template on the mail server without
+ * sharing the correspondence**, and a template that dies when its author leaves
+ * the business is not a business asset.
+ *
+ * That cost is real and accepted: a template does NOT appear on a phone or in
+ * Outlook, and it is the first mail feature since Slice 0 of which that is
+ * true. Being usable by the whole company is worth more than being usable in
+ * another client, which is the opposite of how every previous call went.
+ *
+ * `mail_account_id` is deliberately ABSENT. A template belongs to the business,
+ * not to a mailbox, so the same wording is available from a personal box and
+ * from a shared `info@` without being stored twice.
+ *
+ * Same shape as `document_templates` (0033/0034), which settled this question
+ * for the other module that has templates: tenant-scoped, `member_all`, with
+ * the author recorded rather than enforced. A colleague editing the payment
+ * terms is somebody doing their job.
+ */
+export const mailTemplates = pgTable(
+  "mail_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Case/space-folded, so "Payment terms" and "payment  terms" collide. */
+    nameKey: text("name_key").notNull(),
+    /**
+     * Filled into the composer's subject ONLY when it is empty, so applying a
+     * template to a reply cannot rewrite "Re: …". Empty means "this template
+     * has nothing to say about the subject", which is different from "".
+     */
+    subject: text("subject").notNull().default(""),
+    /**
+     * The body, already through `sanitizeOutboundHtml`.
+     *
+     * Stored sanitized as well as sanitized again at send, for the reason the
+     * signature slice recorded: this is markup that goes out under somebody's
+     * own name, many times. The send path is the guarantee; storing it clean
+     * means the editor cannot show one thing and the recipient receive another.
+     *
+     * No inline images. A `cid:` is minted per message and lives in that
+     * message's MIME, so a stored template referencing one would show a broken
+     * image on every mail it was later inserted into — the same reason the
+     * signature editor has no picture button.
+     */
+    bodyHtml: text("body_html").notNull().default(""),
+    /** Who wrote it. Recorded for the audit trail, not used to restrict edits. */
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_templates_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One name per business. Two templates called "Payment terms" is a
+    // list nobody can choose from at the moment they are trying to write.
+    uniqueIndex("mail_templates_tenant_name_idx").on(t.tenantId, t.nameKey),
+    check("mail_templates_name_not_blank", sql`length(btrim(${t.name})) > 0`),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -3458,6 +3541,7 @@ export type MailAnnotation = typeof mailAnnotations.$inferSelect;
 export type MailSavedSearch = typeof mailSavedSearches.$inferSelect;
 export type MailSnooze = typeof mailSnoozes.$inferSelect;
 export type MailRuleRow = typeof mailRules.$inferSelect;
+export type MailTemplate = typeof mailTemplates.$inferSelect;
 export type MailScheduledSend = typeof mailScheduledSends.$inferSelect;
 /** Display-only participants on an indexed thread. */
 export type MailParticipant = { name: string; email: string };

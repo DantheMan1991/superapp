@@ -16,6 +16,7 @@ import {
 } from "../compose/quote";
 import { sanitizeOutboundHtml } from "../compose/html";
 import { ComposeForm, type ComposeDraft } from "./compose-form";
+import type { PickableTemplate } from "../templates/picker";
 
 /**
  * The composer, prefilled on the server.
@@ -49,6 +50,7 @@ export function Composer({
   signature,
   htmlSignature,
   closeHref,
+  templates,
 }: {
   mailboxId: string;
   accountId: string;
@@ -61,6 +63,8 @@ export function Composer({
   /** The identity's own HTML signature, still unsanitized. */
   htmlSignature: string;
   closeHref: string;
+  /** The business's canned responses, tenant-wide. Bodies already sanitized. */
+  templates: PickableTemplate[];
 }) {
   const draft = buildDraft(mode, parent, selfAddress, signature, htmlSignature);
   return (
@@ -74,6 +78,7 @@ export function Composer({
       devNotice={devDeliveryNotice()}
       closeHref={closeHref}
       title={TITLES[mode]}
+      templates={templates}
     />
   );
 }

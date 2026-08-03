@@ -32,9 +32,14 @@ export function AutoReplyBadge({
 
   const href = mailHref(params, {
     away: "1",
-    // Clears the other pane. Without this, opening one from the other leaves
-    // ?away=1&rules=1 in the URL asking for both at once.
+    // Clears EVERY other pane. Without this, opening one from the other leaves
+    // ?away=1&rules=1 in the URL asking for both at once — and the render order
+    // in MailView silently decides which one you get, so the badge looks dead.
+    // `signature` was missing here until templates were added and made the same
+    // bug reachable from a second direction.
     rules: undefined,
+    signature: undefined,
+    templates: undefined,
     compose: undefined,
     message: undefined,
   });

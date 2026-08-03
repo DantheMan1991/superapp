@@ -17,6 +17,7 @@ import {
 import { sanitizeOutboundHtml } from "../compose/html";
 import { ComposeForm, type ComposeDraft } from "./compose-form";
 import type { PickableTemplate } from "../templates/picker";
+import type { ContributedNamespace } from "../templates/placeholders";
 
 /**
  * The composer, prefilled on the server.
@@ -53,6 +54,7 @@ export function Composer({
   templates,
   senderName,
   businessName,
+  namespaces,
 }: {
   mailboxId: string;
   accountId: string;
@@ -71,6 +73,8 @@ export function Composer({
   senderName: string;
   /** For `{{business.name}}` — the tenant's name. */
   businessName: string;
+  /** Entity types contributing `{{invoice.number}}`-style placeholders. */
+  namespaces: ContributedNamespace[];
 }) {
   const draft = buildDraft(mode, parent, selfAddress, signature, htmlSignature);
   return (
@@ -88,6 +92,7 @@ export function Composer({
       senderName={senderName}
       senderEmail={selfAddress}
       businessName={businessName}
+      namespaces={namespaces}
     />
   );
 }

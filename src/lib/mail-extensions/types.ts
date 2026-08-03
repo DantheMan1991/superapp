@@ -122,6 +122,49 @@ export interface MailEntityType {
     ctx: MailExtensionCtx,
     ids: readonly string[],
   ): Promise<LinkableEntity[]>;
+  /**
+   * Placeholder fields this type contributes to mail templates, if any.
+   *
+   * The placeholder key is `<type>.<field key>` — so an entity type named
+   * `invoice` declaring `number` gives `{{invoice.number}}`. Mail composes the
+   * vocabulary from these and never invents one, because it does not know what
+   * an invoice is.
+   *
+   * DECLARING IS SEPARATE FROM RESOLVING ON PURPOSE. The template editor has to
+   * list what somebody may type, and the save action has to refuse a typo, and
+   * both happen with no record chosen — so the vocabulary has to be knowable
+   * without reading any data. That is what keeps the enumeration CLOSED, which
+   * is the property the whole placeholder design rests on.
+   */
+  templateFields?: readonly MailTemplateField[];
+  /**
+   * The values of those fields for ONE record.
+   *
+   * Takes the CALLER'S `tx`, like `search` and `resolve` and for the same
+   * reason: what a template can reveal is exactly what the person inserting it
+   * may already read. An id they cannot see resolves to null, which is
+   * indistinguishable from "not there" — so a template cannot be used to probe
+   * for records, and the values of a colleague's hidden invoice cannot be
+   * pasted into a message by naming its id.
+   *
+   * Returns null when the record is gone or invisible. Every value is a
+   * DISPLAY STRING, already formatted by the extension: mail renders money and
+   * dates it does not understand, and a number formatted twice is a number
+   * formatted wrong.
+   */
+  templateValues?(
+    tx: Tx,
+    ctx: MailExtensionCtx,
+    entityId: string,
+  ): Promise<Record<string, string> | null>;
+}
+
+/** One fill-in-the-blank an entity type offers. */
+export interface MailTemplateField {
+  /** The part after the dot: `number` in `{{invoice.number}}`. */
+  key: string;
+  /** "Invoice number" — shown in the template editor's list. */
+  label: string;
 }
 
 /* -- Filing ------------------------------------------------------------- */

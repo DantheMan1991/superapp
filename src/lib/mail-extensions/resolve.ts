@@ -293,3 +293,35 @@ export async function resolveLinkEntities(
 export function entityKey(ref: LinkableEntityRef): string {
   return `${ref.entityType}:${ref.entityId}`;
 }
+
+/**
+ * Every entity type that contributes template placeholders.
+ *
+ * TWO CALLERS AND THEY WANT DIFFERENT ANSWERS, which is why this takes the
+ * extensions rather than reaching for the registry itself:
+ *
+ *   • the template editor and the save action pass the tenant's ENABLED
+ *     extensions, so the list offered is the list that can actually be filled;
+ *   • the send guard passes `allTemplateContributors()`, because a body
+ *     carrying `{{invoice.number}}` in a tenant that has since switched
+ *     Accounting off must still be refused rather than sent as literal braces.
+ */
+export function templateContributors(
+  extensions: readonly MailExtension[],
+): MailEntityType[] {
+  return extensions.flatMap((e) =>
+    e.entityTypes.filter((t) => (t.templateFields?.length ?? 0) > 0),
+  );
+}
+
+/**
+ * The same, over the whole static registry — every namespace that exists in
+ * this build, regardless of what any tenant has switched on.
+ *
+ * Deliberately does NOT consult the database: recognizing a placeholder is a
+ * question about the code, and making it a question about configuration is what
+ * opened the hole described above.
+ */
+export function allTemplateContributors(): MailEntityType[] {
+  return templateContributors(mailExtensions);
+}

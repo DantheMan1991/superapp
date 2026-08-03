@@ -2937,6 +2937,104 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
   });
 
   /**
+   * TEMPLATE PLACEHOLDER VALUES, reached through the newest capability.
+   *
+   * `{{invoice.number}}` pastes a business record's fields into a message
+   * somebody is about to send OUTSIDE the business, so "which records can a
+   * template read?" is the question this certifies. `templateValues` takes the
+   * CALLER'S `tx` like every other hook and applies no visibility predicate of
+   * its own — it filters on tenant and id and nothing else — so RLS reached
+   * through that transaction is the entire guard, and this asserts it rather
+   * than trusting the shape.
+   *
+   * The negative matters more than the positive: naming another tenant's
+   * invoice id must yield NULL rather than its number, and null is also what
+   * "no such invoice" gives — so a template cannot be used to discover whether
+   * a record exists.
+   */
+  it("template placeholder values cannot reach another tenant's invoice", async () => {
+    const invoiceType = accountingMailExtension.entityTypes.find(
+      (t) => t.type === "invoice",
+    )!;
+    const ids: Record<string, string> = {};
+
+    for (const [tenant, tag] of [
+      [tenantA, "a"],
+      [tenantB, "b"],
+    ] as const) {
+      ids[tag] = await withTenant(
+        tenant,
+        async (tx) => {
+          const [customer] = await tx
+            .insert(schema.customers)
+            .values({
+              tenantId: tenant,
+              name: `Placeholder Co ${tag}`,
+              email: `placeholder@${tag}.example`,
+            })
+            .returning();
+          const [invoice] = await tx
+            .insert(schema.invoices)
+            .values({
+              tenantId: tenant,
+              customerId: customer.id,
+              invoiceNumber: `PH-${tag.toUpperCase()}-1`,
+              status: "issued",
+              issueDate: "2026-08-01",
+              dueDate: "2026-08-31",
+              totalCents: 10_000,
+              createdByClerkUserId: `user-${tag}`,
+            })
+            .returning();
+          return invoice.id;
+        },
+        { role: "owner", userId: `user-${tag}` },
+      );
+    }
+
+    // Its own tenant reads it, formatted by the extension rather than by Mail.
+    const mine = await withTenant(
+      tenantA,
+      (tx) =>
+        invoiceType.templateValues!(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          ids.a,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(mine?.number).toBe("PH-A-1");
+    expect(mine?.customer_name).toBe("Placeholder Co a");
+
+    // THE ONE THAT MATTERS: tenant A naming tenant B's invoice gets nothing.
+    const theirs = await withTenant(
+      tenantA,
+      (tx) =>
+        invoiceType.templateValues!(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          ids.b,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(theirs).toBe(null);
+
+    // …and an invented id is indistinguishable from it, so the null cannot be
+    // read as "that record exists but is not yours".
+    const invented = await withTenant(
+      tenantA,
+      (tx) =>
+        invoiceType.templateValues!(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          "00000000-0000-4000-8000-000000000000",
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(invented).toBe(null);
+  });
+
+  /**
    * mail_scheduled_sends — the fifth per-user table.
    *
    * The WITH CHECK matters more here than on any table before it. A forged row

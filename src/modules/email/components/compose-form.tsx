@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Paperclip, ShieldAlert, Type, X } from "lucide-react";
 import { toast } from "sonner";
@@ -25,8 +25,13 @@ import { applyTemplateSubject } from "../templates/validate";
 import {
   composerPlaceholderValues,
   fillPlaceholders,
+  requiredNamespaces,
   unfilledPlaceholders,
+  vocabularyFromNamespaces,
+  type ContributedNamespace,
 } from "../templates/placeholders";
+import { templateEntityValuesAction } from "../templates/entity-actions";
+import type { LinkableEntity } from "@/lib/mail-extensions/types";
 import { TemplatePicker, type PickableTemplate } from "../templates/picker";
 import type { InlineImage } from "../compose/inline";
 
@@ -82,6 +87,7 @@ export function ComposeForm({
   senderName,
   senderEmail,
   businessName,
+  namespaces,
 }: {
   mailboxId: string;
   accountId: string;
@@ -96,6 +102,14 @@ export function ComposeForm({
   senderName: string;
   senderEmail: string;
   businessName: string;
+  /**
+   * Entity types contributing placeholders for THIS tenant.
+   *
+   * Per-tenant on purpose: the composer should only ever try to fill what this
+   * business can resolve. The SEND GUARD on the server uses the whole registry
+   * instead — see `compose-actions.ts` for why the two differ.
+   */
+  namespaces: ContributedNamespace[];
 }) {
   const router = useRouter();
   const [to, setTo] = useState(draft.to);
@@ -133,6 +147,10 @@ export function ComposeForm({
   const [pending, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
   const editor = useRef<RichTextEditorHandle | null>(null);
+  const vocabulary = useMemo(
+    () => vocabularyFromNamespaces(namespaces),
+    [namespaces],
+  );
 
   /**
    * Drop a canned response into what is already being written.
@@ -149,7 +167,10 @@ export function ComposeForm({
    * the text rendering goes in instead — the same `htmlToPlainText` the send
    * path derives its text alternative with, rather than a second converter.
    */
-  function insertTemplate(template: PickableTemplate) {
+  async function insertTemplate(
+    template: PickableTemplate,
+    entity: LinkableEntity | null,
+  ) {
     /**
      * PLACEHOLDERS ARE FILLED HERE, AT INSERT, NOT AT SEND.
      *
@@ -178,8 +199,26 @@ export function ComposeForm({
       today: new Date(),
     });
 
+    /**
+     * Business-object values, when a record was chosen.
+     *
+     * Fetched HERE rather than shipped with the template list, because the
+     * values belong to a record nobody had picked when the page rendered — and
+     * because sending every invoice's fields to the browser on the off-chance
+     * would be exactly the kind of over-fetch the recipient autocomplete
+     * refuses. A failure leaves the tokens visible, which the toast below then
+     * names.
+     */
+    if (entity) {
+      const resolved = await templateEntityValuesAction({
+        entityType: entity.entityType,
+        entityId: entity.entityId,
+      });
+      if ("ok" in resolved) Object.assign(values, resolved.data);
+    }
+
     const filledHtml = fillPlaceholders(template.bodyHtml, values);
-    const leftOver = unfilledPlaceholders(filledHtml);
+    const leftOver = unfilledPlaceholders(filledHtml, vocabulary);
     if (leftOver.length > 0) {
       // Said once, now, rather than discovered by the recipient. Not an error:
       // inserting a template before choosing who it is for is a normal order to
@@ -556,7 +595,22 @@ export function ComposeForm({
         <TemplatePicker
           templates={templates}
           disabled={busy}
-          onPick={insertTemplate}
+          needsRecord={(template) => {
+            // Asked of the subject as well as the body: a template whose only
+            // business-object placeholder is in its subject still needs a
+            // record, and missing that would insert an unfilled subject line.
+            const needed = requiredNamespaces(
+              `${template.subject}\n${template.bodyHtml}`,
+              vocabulary,
+            );
+            const first = needed[0];
+            if (!first) return null;
+            const ns = namespaces.find((n) => n.type === first);
+            return ns ? { type: ns.type, label: ns.label } : null;
+          }}
+          onPick={(template, entity) => {
+            void insertTemplate(template, entity);
+          }}
         />
         <Button
           variant="outline"

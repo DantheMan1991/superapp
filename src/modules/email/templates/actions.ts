@@ -8,7 +8,11 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { schema, withTenant } from "@/db";
 import { logAudit } from "@/lib/audit";
 import { MailError, friendlyMessage } from "../core/errors";
-import { PLACEHOLDERS, validateTemplateBody } from "./placeholders";
+import { buildVocabulary, validateTemplateBody } from "./placeholders";
+import {
+  enabledMailExtensions,
+  templateContributors,
+} from "@/lib/mail-extensions/resolve";
 import {
   MAX_TEMPLATE_HTML,
   MAX_TEMPLATE_NAME,
@@ -89,12 +93,20 @@ export async function saveTemplateAction(
      * Checked AFTER sanitizing, so the answer is about the markup that will
      * actually be stored rather than about whatever the editor happened to emit.
      */
-    const problem = validateTemplateBody(bodyHtml);
+    // The tenant's ENABLED extensions, so what is accepted is what this
+    // business can actually fill: a template naming `{{invoice.number}}` where
+    // Accounting is switched off would insert nothing and look broken.
+    const contributors = templateContributors(
+      await enabledMailExtensions(ctx.tenant.id),
+    );
+    const vocabulary = buildVocabulary(contributors);
+
+    const problem = validateTemplateBody(bodyHtml, vocabulary);
     if (problem?.kind === "unknown") {
       return {
         error:
           `Yosher doesn't know ${problem.keys.map((k) => `{{${k}}}`).join(", ")}. ` +
-          `You can use: ${PLACEHOLDERS.map((p) => `{{${p.key}}}`).join(", ")}.`,
+          `You can use: ${[...vocabulary].map((k) => `{{${k}}}`).join(", ")}.`,
       };
     }
     if (problem?.kind === "split") {

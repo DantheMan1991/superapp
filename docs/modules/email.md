@@ -2894,6 +2894,101 @@ to try are bolding half a token and confirming the save is refused, inserting a
 template with the To field empty, and replying to a message that quotes a
 placeholder.
 
+### 2026-08-03 (later) — Business-object placeholders, and the vocabulary Mail does not own
+
+`{{invoice.number}}`, `{{invoice.total}}`, `{{customer.name}}`. The half that
+makes templates better than Gmail's rather than equal to them, and the reason
+this module sits next to Accounting.
+
+**THE PROBLEM IS THAT MAIL DOES NOT KNOW WHAT AN INVOICE IS**, and must not
+learn. The previous slice's load-bearing decision was a CLOSED vocabulary — a
+typo has to be refusable at save time — and a closed vocabulary is exactly what
+an extension point makes hard, because the set is no longer known at compile
+time in one file.
+
+The answer is that **declaring is separated from resolving**. `MailEntityType`
+grew `templateFields` (what this type offers, as data) and `templateValues()`
+(the values for one record). The editor and the save action need the first with
+no record chosen, which is what keeps the set closed and knowable; only the
+composer needs the second. Mail composes statics + contributions and still
+refuses anything outside the union.
+
+**RECOGNIZE GLOBALLY, OFFER PER TENANT — and this asymmetry is a hole that was
+open for about an hour before the test named it.** The obvious reading is that
+the vocabulary is "whatever this tenant's enabled modules contribute", and both
+the editor and the save action do use that, correctly: offering
+`{{invoice.number}}` to a business without Accounting would produce a template
+that inserts nothing.
+
+But the SEND GUARD cannot use it. A template written while Accounting was on,
+then Accounting switched off, still contains `{{invoice.number}}` — and judged
+against the tenant's now-smaller vocabulary that stops being a known
+placeholder, so the guard waves through **exactly the message it exists to
+catch** and the customer gets literal braces. So the guard asks
+`allTemplateContributors()`, which reads the static registry and deliberately
+does not consult the database: recognizing a placeholder is a question about
+the code, and making it a question about configuration is what opened the hole.
+There is a test asserting both halves against the same body.
+
+`isKnownPlaceholder` therefore takes the vocabulary rather than defaulting to
+the statics. A default would have been wrong for both callers and invisible at
+the call site — and when the signature changed, the compiler listed every place
+that had to make the choice, which is the whole argument for not having one.
+
+**THE PICKER IS A SECOND STEP, SHOWN ONLY WHEN IT IS NEEDED.** A template that
+names no business-object placeholder still inserts in one click; one that says
+`{{invoice.number}}` asks "which invoice?" first, searching through the same
+seam the "Attach to…" picker already uses. The step REPLACES the template list
+rather than stacking on it — two popovers open at once is how somebody loses
+track of what they are answering — and cancelling **inserts unfilled** rather
+than abandoning, leaving the tokens visible with the toast naming them. That is
+the same state as inserting before typing a recipient, and better than silently
+dropping what was asked for.
+
+**Namespacing happens in Mail, not in the extension.** `templateValues` returns
+bare keys (`number`) and `entity-actions.ts` prefixes them with the entity type
+and **drops anything the type did not DECLARE**. So an extension cannot
+contribute a key outside its own namespace — `invoice` can never fill
+`{{customer.email}}` — and the list the editor showed cannot drift from the
+values that arrive.
+
+**Values are formatted by the extension**, not by Mail: `amount()` is the same
+helper the picker's sublabel uses, so a total quoted in an email and a total
+shown while choosing the invoice cannot disagree. Mail renders money and dates
+it does not understand, and a number formatted twice is a number formatted
+wrong.
+
+**THE ISOLATION TEST IS THE POINT OF THE SLICE, not a formality.** These
+placeholders paste a business record's fields into a message going OUTSIDE the
+business, so "which records can a template read?" needed certifying rather than
+asserting. `templateValues` takes the CALLER'S `tx` like every other hook and
+applies no visibility predicate of its own — it filters on tenant and id and
+nothing else — so RLS reached through that transaction is the entire guard. The
+test proves the positive, then that tenant A naming tenant B's invoice id gets
+**null**, then that an invented id gets null too: the two are indistinguishable,
+so a template cannot be used to discover whether a record exists.
+
+**Accounting implements it TWICE on purpose.** This dossier's own rule — learned
+the day three Migadu assumptions turned out to be baked into supposedly shared
+code — is that **a seam with one user is a seam that has never been tested.**
+Invoice and customer exercise the two shapes that differ: a joined record whose
+values are formatted, and a flat one whose values are not. Bill and vendor are
+deliberately left; they are the AP mirror and add no new shape.
+
+**Two things the linter and the compiler caught, both previously-learned
+lessons re-arriving.** The record search hit React 19's
+`react-hooks/set-state-in-effect` — the same rule the contact autocomplete hit —
+and the fix is the same one: store results WITH the query that produced them and
+derive the empty state at render, which also drops a stale answer without
+needing to cancel. And the isolation fixture used `status: "sent"`, which is not
+in the invoice enum; the compiler named it before the database could.
+
+Verified: 39 unit tests over the vocabulary and the required-namespace
+detection, plus 1 new isolation test — 121 passing against the dev branch. No
+migration. **Not verified in a browser** — worth trying a template mixing
+`{{recipient.first_name}}` with `{{invoice.total}}`, cancelling the record step,
+and saving a template naming an entity type whose module is switched off.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -3592,14 +3687,18 @@ code or config change.
 - **No drag-and-drop or paste of an image into the composer.** Paste is plain
   text by design, and an image on the clipboard is currently dropped silently
   rather than offered — which is the one place that rule reads as a bug.
-- **Placeholders resolve from the composer only — no business-object fields
-  yet.** `{{recipient.*}}`, `{{me.*}}`, `{{business.name}}` and `{{date.today}}`
-  are built; an invoice number or a job reference is not. Those cannot come from
-  the composer's own state ("which invoice?" needs a person), so they want an
-  entity picker in the insert flow plus a new `MailExtension` capability that
-  reads structured fields off a chosen record — `LinkableEntity` carries only
-  `label`/`sublabel` for display. That is the next slice and it is the one that
-  makes templates better than Gmail's rather than equal.
+- **A template can name only ONE business-object type.** The picker asks for the
+  first namespace it finds, so a template mixing `{{invoice.number}}` with
+  `{{customer.name}}` fills the invoice and leaves the customer tokens visible.
+  Asking twice in sequence is the obvious fix and was left out to keep the
+  insert flow one question; the send guard still catches what is unfilled.
+- **Bill and vendor contribute no placeholder fields**, only invoice and
+  customer. They are the AP mirror and add no new shape — the two implemented
+  types already prove the seam works for both a joined record and a flat one.
+- **The record step does not remember what you picked last time.** Sending five
+  chasers about the same invoice means finding it five times. A per-thread
+  memory — or defaulting to whatever the thread is already linked to via
+  `mail_links` — would remove most of that and needs no new storage.
 - **A placeholder inside a quote is ignored by the send guard.** Deliberate —
   replying to somebody who asked about `{{recipient.name}}` must not be blocked
   — but it does mean a template inserted *below* a quote in a reply would slip

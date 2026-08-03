@@ -13,7 +13,7 @@ import {
 } from "../components/rich-text-editor";
 import { deleteTemplateAction, saveTemplateAction } from "./actions";
 import { MAX_TEMPLATE_NAME, MAX_TEMPLATE_SUBJECT } from "./validate";
-import { PLACEHOLDERS } from "./placeholders";
+import { PLACEHOLDERS, type ContributedNamespace } from "./placeholders";
 
 export interface EditorTemplate {
   id: string;
@@ -41,9 +41,12 @@ export interface EditorTemplate {
  */
 export function TemplatesEditor({
   templates,
+  namespaces,
   closeHref,
 }: {
   templates: EditorTemplate[];
+  /** Entity types contributing placeholders, for this tenant. */
+  namespaces: ContributedNamespace[];
   closeHref: string;
 }) {
   const router = useRouter();
@@ -247,6 +250,32 @@ export function TemplatesEditor({
                   </li>
                 ))}
               </ul>
+
+              {/* Contributed by other modules — Mail does not know what an
+                  invoice is, so this list exists only because Accounting
+                  declared it. Grouped and labelled because using one costs an
+                  extra step: the template will ask which record it means. */}
+              {namespaces.map((ns) => (
+                <div key={ns.type} className="mt-3">
+                  <p className="text-xs font-medium">
+                    From a {ns.label.toLowerCase()}
+                    <span className="ml-1 font-normal text-muted-foreground">
+                      — you&apos;ll be asked which one when you insert the
+                      template
+                    </span>
+                  </p>
+                  <ul className="mt-1.5 space-y-1.5">
+                    {ns.fields.map((f) => (
+                      <li key={f.key} className="text-xs">
+                        <code className="rounded bg-secondary px-1 py-0.5">
+                          {`{{${ns.type}.${f.key}}}`}
+                        </code>{" "}
+                        <span className="text-muted-foreground">{f.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </details>
 
             <div className="flex items-center gap-2 pt-1">

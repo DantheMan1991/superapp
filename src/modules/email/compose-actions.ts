@@ -11,9 +11,11 @@ import { MailError, friendlyMessage } from "./core/errors";
 import { holdComposedMessage, type HeldMessage } from "./compose/send";
 import { composeBodies } from "./compose/bodies";
 import {
+  buildVocabulary,
   stripQuotedRegions,
   unfilledPlaceholders,
 } from "./templates/placeholders";
+import { allTemplateContributors } from "@/lib/mail-extensions/resolve";
 import {
   isInlineImageType,
   isValidCid,
@@ -207,6 +209,12 @@ export async function sendMessageAction(
      */
     const unfilled = unfilledPlaceholders(
       stripQuotedRegions(bodies.htmlBody ?? "", bodies.textBody ?? ""),
+      // The WHOLE registry, not this tenant's enabled extensions. A template
+      // written while Accounting was on and sent after it was switched off
+      // still carries `{{invoice.number}}`, and judging that against the
+      // tenant's own vocabulary would stop recognizing it — so the guard would
+      // wave through exactly the message it exists to catch.
+      buildVocabulary(allTemplateContributors()),
     );
     if (unfilled.length > 0) {
       return {

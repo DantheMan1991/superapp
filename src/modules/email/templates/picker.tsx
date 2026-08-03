@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { RecordStep } from "./record-step";
+import type { LinkableEntity } from "@/lib/mail-extensions/types";
 
 /** What the composer needs to insert one. The body is already sanitized. */
 export interface PickableTemplate {
@@ -24,19 +26,37 @@ export interface PickableTemplate {
 export function TemplatePicker({
   templates,
   disabled,
+  needsRecord,
   onPick,
 }: {
   templates: PickableTemplate[];
   disabled: boolean;
-  onPick: (template: PickableTemplate) => void;
+  /**
+   * Which entity type this template must be told about before it can be
+   * filled, or null. Computed by the composer, which owns the vocabulary.
+   */
+  needsRecord: (template: PickableTemplate) => { type: string; label: string } | null;
+  /**
+   * `entity` is the record chosen for a business-object template, or null when
+   * the template needed none — or when somebody chose to insert it unfilled.
+   */
+  onPick: (template: PickableTemplate, entity: LinkableEntity | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  /** The template waiting on a record, and what it is waiting for. */
+  const [pending, setPending] = useState<{
+    template: PickableTemplate;
+    type: string;
+    label: string;
+  } | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (event: MouseEvent) => {
-      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
+      if (wrap.current?.contains(event.target as Node)) return;
+      setOpen(false);
+      setPending(null);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -63,7 +83,31 @@ export function TemplatePicker({
         <span className="hidden sm:inline">Template</span>
       </Button>
 
-      {open && (
+      {/* The second step REPLACES the list rather than stacking on it: two
+          popovers open at once is how somebody loses track of what they are
+          answering. */}
+      {pending && (
+        <RecordStep
+          entityType={pending.type}
+          label={pending.label}
+          onChoose={(entity) => {
+            onPick(pending.template, entity);
+            setPending(null);
+            setOpen(false);
+          }}
+          onCancel={() => {
+            // Inserted UNFILLED rather than abandoned. The tokens stay visible
+            // in the body and the composer's toast names them — which is the
+            // same state as inserting before typing a recipient, and better
+            // than silently dropping what somebody asked for.
+            onPick(pending.template, null);
+            setPending(null);
+            setOpen(false);
+          }}
+        />
+      )}
+
+      {open && !pending && (
         <ul
           role="listbox"
           className="absolute bottom-full left-0 z-20 mb-1 max-h-64 w-72 overflow-auto rounded-md border bg-popover py-1 shadow-md"
@@ -76,7 +120,12 @@ export function TemplatePicker({
                 aria-selected={false}
                 className="block w-full px-3 py-2 text-left text-sm hover:bg-accent"
                 onClick={() => {
-                  onPick(template);
+                  const needed = needsRecord(template);
+                  if (needed) {
+                    setPending({ template, type: needed.type, label: needed.label });
+                    return;
+                  }
+                  onPick(template, null);
                   setOpen(false);
                 }}
               >

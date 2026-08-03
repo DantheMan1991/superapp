@@ -64,7 +64,112 @@ export const PLACEHOLDERS: readonly PlaceholderDef[] = [
   { key: "date.today", label: "Today's date", hint: "The date the template is inserted." },
 ] as const;
 
-const KNOWN: ReadonlySet<string> = new Set(PLACEHOLDERS.map((p) => p.key));
+/**
+ * The vocabulary a caller is judging against.
+ *
+ * Composed rather than constant, because business-object fields are
+ * CONTRIBUTED: Mail does not know what an invoice is, so `{{invoice.number}}`
+ * exists only because Accounting declared it. The statics above plus whatever
+ * the registry offers is the whole set, and it is still CLOSED — which is the
+ * property everything else rests on.
+ */
+export type Vocabulary = ReadonlySet<string>;
+
+/**
+ * An entity type's contribution, flattened for the client.
+ *
+ * A plain object rather than the `MailEntityType` itself, because that carries
+ * `search`/`resolve` functions that cannot cross into a client component — and
+ * because the browser needs only the names.
+ */
+export interface ContributedNamespace {
+  /** `invoice` — the part before the dot, and the entity type's own name. */
+  type: string;
+  /** "Invoice", singular, for the "which invoice?" prompt. */
+  label: string;
+  fields: readonly { key: string; label: string }[];
+}
+
+const STATIC_KEYS: ReadonlySet<string> = new Set(PLACEHOLDERS.map((p) => p.key));
+
+/** The statics alone. Callers that have no registry to hand. */
+export const STATIC_VOCABULARY: Vocabulary = STATIC_KEYS;
+
+/**
+ * Build a vocabulary from the statics plus a set of contributing entity types.
+ *
+ * **RECOGNIZE GLOBALLY, OFFER PER TENANT — and the asymmetry is a bug fix
+ * rather than a nicety.** The template editor should list only what this
+ * business can actually fill, so it passes the ENABLED extensions. The send
+ * guard must recognize every namespace that exists anywhere, from the static
+ * registry, and the reason is a hole the first version had: a template written
+ * while Accounting was on, then Accounting switched off, leaves
+ * `{{invoice.number}}` in a body. Judged against the tenant's own vocabulary it
+ * is no longer a known placeholder, so the guard would wave it through and it
+ * would reach a customer as literal braces — precisely the case the guard
+ * exists for.
+ */
+export function buildVocabulary(
+  contributors: readonly {
+    type: string;
+    templateFields?: readonly { key: string }[];
+  }[],
+): Vocabulary {
+  const keys = new Set(STATIC_KEYS);
+  for (const entity of contributors) {
+    for (const field of entity.templateFields ?? []) {
+      keys.add(`${entity.type}.${field.key}`);
+    }
+  }
+  return keys;
+}
+
+/** The same, from the flattened shape the browser gets. */
+export function vocabularyFromNamespaces(
+  namespaces: readonly ContributedNamespace[],
+): Vocabulary {
+  return buildVocabulary(
+    namespaces.map((n) => ({ type: n.type, templateFields: n.fields })),
+  );
+}
+
+/**
+ * The entity types an inserted template needs a record for.
+ *
+ * `{{invoice.number}}` means "ask which invoice". Returned in first-seen order
+ * so the composer asks in the order they appear in the message, which is the
+ * order somebody wrote them and therefore the order they expect.
+ */
+export function requiredNamespaces(
+  source: string,
+  vocabulary: Vocabulary,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const key of extractPlaceholders(htmlToPlainText(source))) {
+    if (!vocabulary.has(key)) continue;
+    // A static like `recipient.name` needs no record; only contributed keys do,
+    // and those are exactly the ones whose namespace is not a static's.
+    if (STATIC_KEYS.has(key)) continue;
+    const namespace = key.slice(0, key.indexOf("."));
+    if (namespace.length === 0 || seen.has(namespace)) continue;
+    seen.add(namespace);
+    out.push(namespace);
+  }
+  return out;
+}
+
+/**
+ * Deliberately takes the vocabulary rather than defaulting to the statics.
+ *
+ * A default would be the statics, which is wrong for both callers — the editor
+ * needs the tenant's contributed fields and the send guard needs every
+ * registered one — and a wrong default is worse than an extra argument,
+ * because it is invisible at the call site.
+ */
+export function isKnownPlaceholder(key: string, vocabulary: Vocabulary): boolean {
+  return vocabulary.has(key);
+}
 
 /** What a caller must supply to fill a template. Missing keys stay unfilled. */
 export type PlaceholderValues = Partial<Record<string, string>>;
@@ -91,10 +196,6 @@ export function extractPlaceholders(source: string): string[] {
   return found;
 }
 
-export function isKnownPlaceholder(key: string): boolean {
-  return KNOWN.has(key);
-}
-
 export interface TemplateBodyProblem {
   kind: "unknown" | "split";
   keys: string[];
@@ -119,13 +220,16 @@ export interface TemplateBodyProblem {
  * been broken up by tags. That reuses `htmlToPlainText` rather than parsing the
  * DOM, which this module has no business doing on the server.
  */
-export function validateTemplateBody(html: string): TemplateBodyProblem | null {
+export function validateTemplateBody(
+  html: string,
+  vocabulary: Vocabulary,
+): TemplateBodyProblem | null {
   const inHtml = extractPlaceholders(html);
   const inText = extractPlaceholders(htmlToPlainText(html));
 
   // Compared against the TEXT rendering, so a token broken by markup is judged
   // on what a person actually sees rather than on what survived the tags.
-  const unknown = inText.filter((k) => !isKnownPlaceholder(k));
+  const unknown = inText.filter((k) => !isKnownPlaceholder(k, vocabulary));
   if (unknown.length > 0) return { kind: "unknown", keys: unknown };
 
   const htmlKeys = new Set(inHtml);
@@ -177,8 +281,13 @@ function escapeHtmlText(value: string): string {
  * vocabulary count, so somebody writing to a developer about `{{mustache}}`
  * syntax is unaffected, and so is anyone who pasted JSON.
  */
-export function unfilledPlaceholders(html: string): string[] {
-  return extractPlaceholders(htmlToPlainText(html)).filter(isKnownPlaceholder);
+export function unfilledPlaceholders(
+  html: string,
+  vocabulary: Vocabulary,
+): string[] {
+  return extractPlaceholders(htmlToPlainText(html)).filter((k) =>
+    isKnownPlaceholder(k, vocabulary),
+  );
 }
 
 /**

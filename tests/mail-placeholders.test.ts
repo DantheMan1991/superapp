@@ -5,10 +5,30 @@ import {
   extractPlaceholders,
   fillPlaceholders,
   isKnownPlaceholder,
+  requiredNamespaces,
   stripQuotedRegions,
   unfilledPlaceholders,
   validateTemplateBody,
+  buildVocabulary,
+  STATIC_VOCABULARY,
 } from "@/modules/email/templates/placeholders";
+
+/**
+ * The vocabulary under test.
+ *
+ * `INVOICE` stands in for what Accounting contributes, so these tests do not
+ * depend on Accounting's own field list staying still — what is being asserted
+ * is the composition rule, not the accounting schema.
+ */
+const INVOICE = {
+  type: "invoice",
+  templateFields: [{ key: "number" }, { key: "total" }],
+};
+const V = buildVocabulary([INVOICE]);
+
+/** Shorthands, so every assertion below states which vocabulary it means. */
+const vt = (html: string) => validateTemplateBody(html, V);
+const up = (html: string) => unfilledPlaceholders(html, V);
 
 /**
  * Fill-in-the-blanks for canned responses.
@@ -31,7 +51,7 @@ describe("the vocabulary is an enumeration", () => {
     // of bug the font-stack invariant test exists for.
     for (const p of PLACEHOLDERS) {
       expect(extractPlaceholders(`{{${p.key}}}`)).toEqual([p.key]);
-      expect(isKnownPlaceholder(p.key)).toBe(true);
+      expect(isKnownPlaceholder(p.key, V)).toBe(true);
     }
   });
 
@@ -63,16 +83,16 @@ describe("extractPlaceholders", () => {
 describe("validateTemplateBody", () => {
   it("accepts a body using only known placeholders", () => {
     expect(
-      validateTemplateBody("<p>Hi {{recipient.first_name}}, — {{me.name}}</p>"),
+      vt("<p>Hi {{recipient.first_name}}, — {{me.name}}</p>"),
     ).toBe(null);
   });
 
   it("accepts a body with no placeholders at all", () => {
-    expect(validateTemplateBody("<p>Our terms are 30 days.</p>")).toBe(null);
+    expect(vt("<p>Our terms are 30 days.</p>")).toBe(null);
   });
 
   it("REFUSES a typo, and names it", () => {
-    const problem = validateTemplateBody("<p>Hi {{cusotmer}}</p>");
+    const problem = vt("<p>Hi {{cusotmer}}</p>");
     expect(problem?.kind).toBe("unknown");
     expect(problem?.keys).toEqual(["cusotmer"]);
   });
@@ -82,7 +102,7 @@ describe("validateTemplateBody", () => {
     // splitting a text node mid-word — leaves markup inside the braces. It
     // reads perfectly to a human and no regex over the HTML can match it, so
     // without this check it would survive substitution and reach a customer.
-    const problem = validateTemplateBody("<p>Hi {{recipient.<b>name}}</b></p>");
+    const problem = vt("<p>Hi {{recipient.<b>name}}</b></p>");
     expect(problem?.kind).toBe("split");
     expect(problem?.keys).toEqual(["recipient.name"]);
   });
@@ -91,12 +111,12 @@ describe("validateTemplateBody", () => {
     // Ordering matters: the split token is a valid key, so checking "unknown"
     // against the HTML would have reported a nonsense name like
     // `recipient.` — the message has to be actionable.
-    const problem = validateTemplateBody("<p>{{me.<i>name}}</i></p>");
+    const problem = vt("<p>{{me.<i>name}}</i></p>");
     expect(problem?.kind).toBe("split");
   });
 
   it("catches a typo that is ALSO split, as a typo first", () => {
-    const problem = validateTemplateBody("<p>{{cus<b>otmer}}</b></p>");
+    const problem = vt("<p>{{cus<b>otmer}}</b></p>");
     expect(problem?.kind).toBe("unknown");
   });
 });
@@ -147,7 +167,7 @@ describe("fillPlaceholders", () => {
 
 describe("unfilledPlaceholders — the send guard", () => {
   it("reports a known placeholder still in the body", () => {
-    expect(unfilledPlaceholders("<p>Hi {{recipient.name}}</p>")).toEqual([
+    expect(up("<p>Hi {{recipient.name}}</p>")).toEqual([
       "recipient.name",
     ]);
   });
@@ -156,7 +176,7 @@ describe("unfilledPlaceholders — the send guard", () => {
     // NARROW BY CONSTRUCTION. Somebody writing to a developer about mustache
     // syntax, or pasting a config file, must be able to send it. Only exact
     // members of the closed vocabulary block a send.
-    expect(unfilledPlaceholders("<p>Use {{mustache}} syntax like {{foo.bar}}</p>")).toEqual(
+    expect(up("<p>Use {{mustache}} syntax like {{foo.bar}}</p>")).toEqual(
       [],
     );
   });
@@ -164,13 +184,13 @@ describe("unfilledPlaceholders — the send guard", () => {
   it("looks at the TEXT rendering, so a split token is still caught", () => {
     // A token broken by markup cannot be filled, so it must not slip past the
     // guard just because the HTML regex misses it.
-    expect(unfilledPlaceholders("<p>Hi {{recipient.<b>name}}</b></p>")).toEqual([
+    expect(up("<p>Hi {{recipient.<b>name}}</b></p>")).toEqual([
       "recipient.name",
     ]);
   });
 
   it("passes a fully filled body", () => {
-    expect(unfilledPlaceholders("<p>Hi Aoife, from Dan</p>")).toEqual([]);
+    expect(up("<p>Hi Aoife, from Dan</p>")).toEqual([]);
   });
 });
 
@@ -184,14 +204,14 @@ describe("stripQuotedRegions", () => {
     const html =
       "<p>You type it like that, yes.</p>" +
       '<blockquote type="cite"><p>How do I use {{recipient.name}}?</p></blockquote>';
-    expect(unfilledPlaceholders(stripQuotedRegions(html, ""))).toEqual([]);
+    expect(up(stripQuotedRegions(html, ""))).toEqual([]);
   });
 
   it("still catches one the writer left ABOVE the quote", () => {
     const html =
       "<p>Hi {{recipient.first_name}},</p>" +
       '<blockquote type="cite"><p>original</p></blockquote>';
-    expect(unfilledPlaceholders(stripQuotedRegions(html, ""))).toEqual([
+    expect(up(stripQuotedRegions(html, ""))).toEqual([
       "recipient.first_name",
     ]);
   });
@@ -202,12 +222,12 @@ describe("stripQuotedRegions", () => {
     const text = ["Answered below.", "", "> How do I use {{me.name}}?", "> Thanks"].join(
       "\n",
     );
-    expect(unfilledPlaceholders(stripQuotedRegions("", text))).toEqual([]);
+    expect(up(stripQuotedRegions("", text))).toEqual([]);
   });
 
   it("catches one above the quote in plain text", () => {
     const text = ["Hi {{recipient.name}},", "", "> original"].join("\n");
-    expect(unfilledPlaceholders(stripQuotedRegions("", text))).toEqual([
+    expect(up(stripQuotedRegions("", text))).toEqual([
       "recipient.name",
     ]);
   });
@@ -219,7 +239,79 @@ describe("stripQuotedRegions", () => {
     // tail survives — over-stripping is the safe direction and under-stripping
     // here would only re-introduce a false positive, so assert what matters:
     // nothing the writer typed is missed, and the reply is not blocked.
-    expect(unfilledPlaceholders(stripQuotedRegions(html, ""))).toEqual([]);
+    expect(up(stripQuotedRegions(html, ""))).toEqual([]);
+  });
+});
+
+/**
+ * Business-object placeholders — the half Mail cannot know about on its own.
+ *
+ * `{{invoice.number}}` exists only because Accounting DECLARED it, and the
+ * vocabulary is still closed: composed from the statics plus whatever the
+ * registry contributes, and nothing else.
+ */
+describe("buildVocabulary", () => {
+  it("keeps every static and adds the contributed namespaces", () => {
+    for (const p of PLACEHOLDERS) expect(V.has(p.key)).toBe(true);
+    expect(V.has("invoice.number")).toBe(true);
+    expect(V.has("invoice.total")).toBe(true);
+  });
+
+  it("does not invent fields the contributor did not declare", () => {
+    expect(V.has("invoice.due_date")).toBe(false);
+    expect(V.has("customer.name")).toBe(false);
+  });
+
+  it("the statics alone know nothing about invoices", () => {
+    // The distinction the send guard turns on: a vocabulary built WITHOUT
+    // Accounting must not recognize its keys, which is why the guard uses the
+    // whole registry rather than the tenant's enabled modules.
+    expect(STATIC_VOCABULARY.has("invoice.number")).toBe(false);
+    expect(STATIC_VOCABULARY.has("recipient.name")).toBe(true);
+  });
+
+  it("a template written with Accounting on is STILL guarded when it is off", () => {
+    // The hole this closes: judged against a tenant vocabulary with no
+    // Accounting, `{{invoice.number}}` stops being a known placeholder and the
+    // send guard would wave through exactly the message it exists to catch.
+    const body = "<p>Invoice {{invoice.number}} is overdue.</p>";
+    expect(unfilledPlaceholders(body, STATIC_VOCABULARY)).toEqual([]);
+    expect(unfilledPlaceholders(body, V)).toEqual(["invoice.number"]);
+  });
+});
+
+describe("requiredNamespaces", () => {
+  it("names the entity type a template needs a record for", () => {
+    expect(
+      requiredNamespaces("<p>Invoice {{invoice.number}} is due.</p>", V),
+    ).toEqual(["invoice"]);
+  });
+
+  it("ignores statics, which need no record", () => {
+    expect(
+      requiredNamespaces("<p>Hi {{recipient.first_name}}, from {{me.name}}</p>", V),
+    ).toEqual([]);
+  });
+
+  it("ignores unknown tokens rather than asking for a record it cannot find", () => {
+    expect(requiredNamespaces("<p>{{widget.id}}</p>", V)).toEqual([]);
+  });
+
+  it("deduplicates and keeps first-seen order", () => {
+    expect(
+      requiredNamespaces(
+        "<p>{{invoice.total}} on {{invoice.number}} for {{recipient.name}}</p>",
+        V,
+      ),
+    ).toEqual(["invoice"]);
+  });
+
+  it("sees a token that survives only in the TEXT rendering", () => {
+    // Same reasoning as the send guard: a token broken by markup still needs a
+    // record, and missing it would insert an unfillable template silently.
+    expect(requiredNamespaces("<p>{{invoice.<b>number}}</b></p>", V)).toEqual([
+      "invoice",
+    ]);
   });
 });
 

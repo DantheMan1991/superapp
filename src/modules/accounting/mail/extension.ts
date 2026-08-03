@@ -131,6 +131,63 @@ const invoiceEntity = {
       href: `/dashboard/m/accounting/sales/invoices/${r.id}`,
     }));
   },
+
+  /**
+   * What an invoice can fill into a mail template.
+   *
+   * Chosen for what somebody actually writes in a chasing email — the number
+   * to quote, the amount, when it was due — rather than for completeness. A
+   * field nobody puts in a sentence is a longer list to read past.
+   */
+  templateFields: [
+    { key: "number", label: "Invoice number" },
+    { key: "total", label: "Invoice total" },
+    { key: "status", label: "Invoice status" },
+    { key: "due_date", label: "Invoice due date" },
+    { key: "customer_name", label: "Customer name on the invoice" },
+  ],
+
+  async templateValues(
+    tx: Tx,
+    ctx: MailExtensionCtx,
+    entityId: string,
+  ): Promise<Record<string, string> | null> {
+    const [row] = await tx
+      .select({
+        number: schema.invoices.invoiceNumber,
+        status: schema.invoices.status,
+        totalCents: schema.invoices.totalCents,
+        dueDate: schema.invoices.dueDate,
+        customerName: schema.customers.name,
+      })
+      .from(schema.invoices)
+      .innerJoin(
+        schema.customers,
+        and(
+          eq(schema.customers.tenantId, schema.invoices.tenantId),
+          eq(schema.customers.id, schema.invoices.customerId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.invoices.tenantId, ctx.tenantId),
+          eq(schema.invoices.id, entityId),
+        ),
+      );
+    // Null for "not yours" and "not there" alike — see the seam's contract.
+    if (!row) return null;
+
+    // Formatted HERE, because Mail renders money and dates it does not
+    // understand. `amount` is the same helper the picker's sublabel uses, so a
+    // total quoted in an email and a total shown in the picker cannot disagree.
+    return {
+      number: row.number,
+      total: amount(row.totalCents),
+      status: row.status,
+      due_date: row.dueDate ?? "",
+      customer_name: row.customerName,
+    };
+  },
 };
 
 const billEntity = {
@@ -297,6 +354,37 @@ const customerEntity = {
       sublabel: r.email,
       href: `/dashboard/m/accounting/sales/customers`,
     }));
+  },
+
+  /**
+   * A SECOND implementation of `templateFields`, and that is deliberate rather
+   * than incidental. This dossier's own rule — learned the day three Migadu
+   * assumptions turned out to be baked into supposedly shared code — is that
+   * **a seam with one user is a seam that has never been tested.** Invoice and
+   * customer exercise the two shapes that differ: a joined record whose values
+   * are formatted, and a flat one whose values are not.
+   */
+  templateFields: [
+    { key: "name", label: "Customer name" },
+    { key: "email", label: "Customer email" },
+  ],
+
+  async templateValues(
+    tx: Tx,
+    ctx: MailExtensionCtx,
+    entityId: string,
+  ): Promise<Record<string, string> | null> {
+    const [row] = await tx
+      .select({ name: schema.customers.name, email: schema.customers.email })
+      .from(schema.customers)
+      .where(
+        and(
+          eq(schema.customers.tenantId, ctx.tenantId),
+          eq(schema.customers.id, entityId),
+        ),
+      );
+    if (!row) return null;
+    return { name: row.name, email: row.email ?? "" };
   },
 };
 

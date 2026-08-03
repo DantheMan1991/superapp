@@ -25,6 +25,10 @@ import { SignatureForm } from "./signature/form";
 import { loadSignature } from "./signature/load";
 import { AutofileEditor, type EditorAutofileRule } from "./autofile/editor";
 import { loadAutofileRules, loadFilingDestinations } from "./autofile/load";
+import {
+  enabledMailExtensions,
+  templateContributors,
+} from "@/lib/mail-extensions/resolve";
 import { TemplatesEditor } from "./templates/editor";
 import { loadTemplates } from "./templates/load";
 
@@ -246,6 +250,27 @@ export async function MailView({
     ? await loadFilingDestinations(ctx.tenant.id, ctx.userId, "")
     : [];
 
+  /**
+   * Entity types contributing placeholders, flattened for the browser.
+   *
+   * The tenant's ENABLED extensions: the composer should only ever offer to
+   * fill what this business can resolve. Loaded whenever a composer or the
+   * template editor is open, since both list them.
+   */
+  const namespaces =
+    showTemplates || composeMode
+      ? templateContributors(await enabledMailExtensions(ctx.tenant.id)).map(
+          (t) => ({
+            type: t.type,
+            label: t.label,
+            fields: (t.templateFields ?? []).map((f) => ({
+              key: f.key,
+              label: f.label,
+            })),
+          }),
+        )
+      : [];
+
   const pickableTemplates = templates.map((t) => ({
     id: t.id,
     name: t.name,
@@ -416,6 +441,7 @@ export async function MailView({
           ) : showTemplates ? (
             <TemplatesEditor
               templates={pickableTemplates}
+              namespaces={namespaces}
               closeHref={mailHref(params, { templates: undefined })}
             />
           ) : showSignature ? (
@@ -464,6 +490,7 @@ export async function MailView({
               templates={pickableTemplates}
               senderName={view.senderName}
               businessName={ctx.tenant.name}
+              namespaces={namespaces}
             />
           ) : view.message ? (
             <>

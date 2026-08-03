@@ -2390,6 +2390,16 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
         extensionSlug: "documents",
         data: { note: `annotation of ${tag}` },
       });
+      // An auto-filing rule: per-user (drizzle/0058), so the colleague must NOT
+      // see it — the opposite of the template seeded below.
+      await tx.insert(schema.mailAutofileRules).values({
+        tenantId,
+        clerkUserId: `user-${tag}`,
+        mailAccountId: account.id,
+        name: `Supplier invoices ${tag}`,
+        matchFrom: `supplier-${tag}.example`,
+        cursor: new Date(),
+      });
       // A canned response. The first mail table scoped to the BUSINESS rather
       // than to one person (drizzle/0056) — so unlike everything else seeded
       // here, the colleague is supposed to see it.
@@ -2465,6 +2475,7 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
           await tx.select().from(schema.mailLinks),
           await tx.select().from(schema.mailAnnotations),
           await tx.select().from(schema.mailTemplates),
+          await tx.select().from(schema.mailAutofileRules),
         ];
         for (const rows of tables) {
           expect(rows.length).toBeGreaterThan(0);
@@ -2629,6 +2640,137 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+
+  /**
+   * AUTO-FILING RULES — the sixth per-user table, and the one whose WRITE side
+   * matters most.
+   *
+   * A forged row would make the sweep — which runs under `withSystem`, where
+   * RLS is not standing behind it — copy a COLLEAGUE'S mail into a shared
+   * Documents folder, on a schedule, with nobody watching. That is a disclosure
+   * rather than a data error, and the policy is the only thing preventing it.
+   */
+  it("a colleague can neither read nor forge an auto-filing rule", async () => {
+    const [mine] = await withSystem((tx) =>
+      tx
+        .insert(schema.mailAutofileRules)
+        .values({
+          tenantId: tenantA,
+          clerkUserId: "user-a",
+          mailAccountId: fx.a.accountId,
+          name: "Supplier invoices",
+          matchFrom: "supplier.example",
+          cursor: new Date(),
+        })
+        .returning(),
+    );
+
+    // Invisible to the colleague, with no predicate of the app's.
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailAutofileRules),
+      { userId: COLLEAGUE },
+    );
+    expect(asColleague).toHaveLength(0);
+
+    // Visible to its owner, so this is scoping rather than breakage.
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.mailAutofileRules),
+      { userId: "user-a" },
+    );
+    expect(asOwner.map((r) => r.id)).toContain(mine.id);
+
+    // And a caller who forgets `{ userId }` reads nothing, not everything.
+    const asNobody = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.mailAutofileRules),
+    );
+    expect(asNobody).toHaveLength(0);
+
+    // THE WRITE SIDE: a member cannot attribute a rule to a colleague, which is
+    // what would make the sweep publish that colleague's mail.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.mailAutofileRules).values({
+            tenantId: tenantA,
+            clerkUserId: "user-a",
+            mailAccountId: fx.a.accountId,
+            name: "Forged",
+            matchFrom: "anything",
+          }),
+        { userId: COLLEAGUE },
+      ),
+    ).rejects.toThrow();
+
+    await withSystem((tx) =>
+      tx.delete(schema.mailAutofileRules).where(eq(schema.mailAutofileRules.id, mine.id)),
+    );
+  });
+
+  it("deleting a Documents folder NULLS the destination instead of failing", async () => {
+    /**
+     * The composite FK from drizzle/0058, and the reason it is hand-written.
+     *
+     * A plain `ON DELETE SET NULL` on a composite key nulls EVERY column,
+     * `tenant_id` included — which is NOT NULL, so deleting a folder would fail
+     * outright for any tenant with a rule pointing at it. Tidying the cabinet
+     * would start erroring and the cause would be a mail feature nobody was
+     * thinking about. The column-list form is what makes this pass.
+     */
+    const folderId = await withSystem(async (tx) => {
+      const [folder] = await tx
+        .insert(schema.documentFolders)
+        .values({
+          tenantId: tenantA,
+          parentId: null,
+          name: `Autofile dest ${STAMP_MAIL}`,
+          nameKey: `autofile dest ${STAMP_MAIL}`,
+          // Placeholder, then rewritten below: `path` must contain the folder's
+          // OWN id (document_folders_path_format), which is not known until the
+          // insert returns. Same two-step the DMS fixture uses.
+          path: "/00000000000000000000000000000002/",
+          depth: 1,
+          createdByClerkUserId: "user-a",
+        })
+        .returning();
+      await tx
+        .update(schema.documentFolders)
+        .set({ path: `/${folder.id.replace(/-/g, "").toLowerCase()}/` })
+        .where(eq(schema.documentFolders.id, folder.id));
+      await tx.insert(schema.mailAutofileRules).values({
+        tenantId: tenantA,
+        clerkUserId: "user-a",
+        mailAccountId: fx.a.accountId,
+        name: "Files into a folder",
+        matchFrom: "supplier.example",
+        destinationFolderId: folder.id,
+      });
+      return folder.id;
+    });
+
+    // The delete must SUCCEED — that is the whole assertion.
+    await withSystem((tx) =>
+      tx.delete(schema.documentFolders).where(eq(schema.documentFolders.id, folderId)),
+    );
+
+    const after = await withSystem((tx) =>
+      tx
+        .select()
+        .from(schema.mailAutofileRules)
+        .where(eq(schema.mailAutofileRules.name, "Files into a folder")),
+    );
+    expect(after).toHaveLength(1);
+    // The rule survives and degrades to "the Documents inbox" — somebody
+    // deleted a folder, they did not ask to stop filing.
+    expect(after[0].destinationFolderId).toBe(null);
+    expect(after[0].tenantId).toBe(tenantA);
+
+    await withSystem((tx) =>
+      tx.delete(schema.mailAutofileRules).where(eq(schema.mailAutofileRules.id, after[0].id)),
+    );
   });
 
   it("two people can connect the SAME mailbox, each with their own row", async () => {

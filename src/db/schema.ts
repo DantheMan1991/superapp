@@ -3060,6 +3060,130 @@ export const mailTemplates = pgTable(
   ],
 );
 
+/**
+ * "Everything from this supplier goes in the Bills folder."
+ *
+ * The automatic half of the attachments → Documents loop. The manual half has
+ * existed since Slice 5: somebody attaches a thread to an invoice and the
+ * message plus its attachments are filed. This runs the same filing path from
+ * the cron instead of from a click.
+ *
+ * PER-USER, the sixth such table, and the reason is sharper than for the
+ * others. `mail_rules` and `mail_snoozes` are per-user because their rows are
+ * meaningless in anybody else's account. These rows would work perfectly well
+ * for a colleague — that is exactly why they must not be theirs to create.
+ * **Filing publishes one person's private correspondence to the whole
+ * business**, which is why the manual action audits inside its transaction, and
+ * an automatic version removes the human who was deciding each time. So only
+ * the person whose mailbox connection it is may set one up, and RLS is what
+ * says so rather than a predicate somebody has to remember.
+ *
+ * ALLOWED ON A DELEGATED MAILBOX, unlike Sieve rules — and by the rule the
+ * delegation slice arrived at rather than by exception. A Sieve script is
+ * refused on a shared box because its effect is invisible and its record is
+ * private. This one's effect is a document appearing in a shared folder, which
+ * everybody can see and which is audited per filing. `accounts@` filing its
+ * bills is the case the feature exists for.
+ *
+ * NOTHING HERE IS A COPY OF ANY MAIL. The row is a standing instruction: which
+ * connection to watch, what to match, where the copy goes. The copies live in
+ * Documents, and the messages stay on the mail server.
+ */
+export const mailAutofileRules = pgTable(
+  "mail_autofile_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Whose mailbox this watches. Nobody files anonymously. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    mailAccountId: uuid("mail_account_id").notNull(),
+    name: text("name").notNull(),
+    /**
+     * Restrict to one folder, as a JMAP mailbox id. Null means "anywhere the
+     * query looks", which the sweep narrows to the inbox — never Drafts or
+     * Sent, because `npm run mail:probe-autofile` confirmed the user's own
+     * drafts are visible to the same machinery and filing somebody's outgoing
+     * work back into Documents is the loop this must not have.
+     */
+    matchMailboxId: text("match_mailbox_id"),
+    /**
+     * Sender substring, case-folded, matched against the From address. Empty
+     * means "any sender" — which is only sane in combination with a folder, and
+     * the action refuses a rule that constrains neither.
+     */
+    matchFrom: text("match_from").notNull().default(""),
+    /**
+     * Where copies go, as a Documents folder id. Null means the Documents
+     * inbox, which is the same default the manual path uses.
+     *
+     * An OWNERS-ONLY folder can never be named here, and it is a property of
+     * the runtime rather than a rule anybody enforces: `requireTenant()` derives
+     * "owner" from Clerk's org role, which a cron invocation has no way to
+     * obtain, so the sweep runs as `staff` and RLS refuses the write. The action
+     * refuses it up front too, so it fails at the moment somebody chooses rather
+     * than silently every night.
+     *
+     * The composite FK is declared in SQL rather than here, the same exception
+     * `mail_links.mail_account_id` takes and for the identical reason: it needs
+     * `ON DELETE SET NULL (destination_folder_id)`, the column-list form (PG 15+)
+     * that drizzle-kit cannot emit. The plain form would try to null `tenant_id`
+     * as well — and that is NOT NULL, so **deleting a Documents folder would
+     * fail outright** for any tenant with a rule pointing at it. Nulling it
+     * instead degrades the rule to "file into the Documents inbox", which is the
+     * right answer: somebody deleted a folder, not the instruction to keep
+     * filing.
+     */
+    destinationFolderId: uuid("destination_folder_id"),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    /**
+     * The watermark: only messages received AFTER this are considered.
+     *
+     * It exists to avoid work, not to guarantee correctness — the filing target
+     * is already idempotent on the sha256 of the raw message, so a message
+     * considered twice is filed once. But that guarantee costs a full download
+     * to compute the hash, so without a watermark every sweep would re-fetch
+     * every message it had ever filed. Null means "start from now", set when the
+     * rule is created: a new rule is a statement about what arrives next, not an
+     * instruction to import the last three years.
+     */
+    cursor: timestamp("cursor", { withTimezone: true }),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    /** Surfaced in the editor, so a rule that is quietly failing is visible. */
+    lastError: text("last_error").notNull().default(""),
+    filedCount: integer("filed_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mail_autofile_rules_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("mail_autofile_rules_user_idx").on(
+      t.tenantId,
+      t.clerkUserId,
+      t.mailAccountId,
+    ),
+    // How the sweep picks its work: enabled rules, oldest run first.
+    index("mail_autofile_rules_due_idx").on(t.isEnabled, t.lastRunAt),
+    foreignKey({
+      name: "mail_autofile_rules_account_fk",
+      columns: [t.tenantId, t.mailAccountId],
+      foreignColumns: [mailAccounts.tenantId, mailAccounts.id],
+    }).onDelete("cascade"),
+    // NB: the destination_folder_id composite FK is NOT declared here — see the
+    // column's comment. It lives in drizzle/0058 because it needs the
+    // column-list form of ON DELETE SET NULL.
+    check(
+      "mail_autofile_rules_name_not_blank",
+      sql`length(btrim(${t.name})) > 0`,
+    ),
+  ],
+);
+
 export type Audit = typeof audits.$inferSelect;
 export type AuditMessage = { role: "user" | "assistant"; content: string };
 
@@ -3542,6 +3666,7 @@ export type MailSavedSearch = typeof mailSavedSearches.$inferSelect;
 export type MailSnooze = typeof mailSnoozes.$inferSelect;
 export type MailRuleRow = typeof mailRules.$inferSelect;
 export type MailTemplate = typeof mailTemplates.$inferSelect;
+export type MailAutofileRule = typeof mailAutofileRules.$inferSelect;
 export type MailScheduledSend = typeof mailScheduledSends.$inferSelect;
 /** Display-only participants on an indexed thread. */
 export type MailParticipant = { name: string; email: string };

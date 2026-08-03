@@ -23,6 +23,8 @@ import { RulesEditor, type EditorRule } from "./rules/editor";
 import { loadRules } from "./rules/load";
 import { SignatureForm } from "./signature/form";
 import { loadSignature } from "./signature/load";
+import { AutofileEditor, type EditorAutofileRule } from "./autofile/editor";
+import { loadAutofileRules, loadFilingDestinations } from "./autofile/load";
 import { TemplatesEditor } from "./templates/editor";
 import { loadTemplates } from "./templates/load";
 
@@ -70,6 +72,7 @@ export async function MailView({
     rules: first("rules"),
     signature: first("signature"),
     templates: first("templates"),
+    autofile: first("autofile"),
     // The advanced search builder's fields. In the URL like everything else, so
     // a search is linkable, reloadable and saveable without a second model.
     from: first("from"),
@@ -86,6 +89,7 @@ export async function MailView({
   const showRules = params.rules === "1";
   const showSignature = params.signature === "1";
   const showTemplates = params.templates === "1";
+  const showAutofile = params.autofile === "1";
 
   const view = await loadMailView(account, {
     tenantId: ctx.tenant.id,
@@ -215,6 +219,33 @@ export async function MailView({
     showTemplates || composeMode
       ? await loadTemplates(ctx.tenant.id, ctx.role)
       : [];
+  /**
+   * Auto-filing rules, and the folders the SWEEP could actually write into.
+   *
+   * Both only when the editor is open. The destination list is deliberately
+   * read as `staff` inside `loadFilingDestinations` even for an owner — see
+   * that file: it is the cron's own view, so what is offered here is exactly
+   * what will work at 3am.
+   */
+  const autofileRules: EditorAutofileRule[] = showAutofile
+    ? (await loadAutofileRules(ctx.tenant.id, ctx.userId, ctx.role, account.id)).map(
+        (row) => ({
+          id: row.id,
+          name: row.name,
+          matchMailboxId: row.matchMailboxId,
+          matchFrom: row.matchFrom,
+          destinationFolderId: row.destinationFolderId,
+          isEnabled: row.isEnabled,
+          lastError: row.lastError,
+          filedCount: row.filedCount,
+          lastRunAt: row.lastRunAt,
+        }),
+      )
+    : [];
+  const destinationFolders = showAutofile
+    ? await loadFilingDestinations(ctx.tenant.id, ctx.userId, "")
+    : [];
+
   const pickableTemplates = templates.map((t) => ({
     id: t.id,
     name: t.name,
@@ -240,7 +271,7 @@ export async function MailView({
         <Mail className="size-5 shrink-0 text-brand" />
         <span className="truncate text-sm font-medium">Mail</span>
         <Button asChild size="sm" variant="outline" className="shrink-0">
-          <Link href={mailHref(params, { compose: "new", message: undefined, templates: undefined })}>
+          <Link href={mailHref(params, { compose: "new", message: undefined, templates: undefined, autofile: undefined })}>
             <PenSquare className="size-4" />
             <span className="hidden sm:inline">Write</span>
           </Link>
@@ -269,17 +300,45 @@ export async function MailView({
             people from finding the form. */}
         {!view.isDelegated && (
           <Link
-            href={mailHref(params, { rules: "1", away: undefined, signature: undefined, templates: undefined, compose: undefined, message: undefined })}
+            href={mailHref(params, { rules: "1", away: undefined, signature: undefined, templates: undefined, autofile: undefined, compose: undefined, message: undefined })}
             className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
           >
             Rules
           </Link>
         )}
         <Link
-          href={mailHref(params, { signature: "1", away: undefined, rules: undefined, templates: undefined, compose: undefined, message: undefined })}
+          href={mailHref(params, { signature: "1", away: undefined, rules: undefined, templates: undefined, autofile: undefined, compose: undefined, message: undefined })}
           className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
         >
           Signature
+        </Link>
+        <Link
+          href={mailHref(params, {
+            templates: "1",
+            away: undefined,
+            rules: undefined,
+            signature: undefined,
+            autofile: undefined,
+            compose: undefined,
+            message: undefined,
+          })}
+          className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
+        >
+          Templates
+        </Link>
+        <Link
+          href={mailHref(params, {
+            autofile: "1",
+            away: undefined,
+            rules: undefined,
+            signature: undefined,
+            templates: undefined,
+            compose: undefined,
+            message: undefined,
+          })}
+          className="hidden shrink-0 text-xs text-muted-foreground hover:text-foreground sm:block"
+        >
+          Filing
         </Link>
         <MailSearch initial={params.q ?? ""} params={params} />
         <SearchBuilder query={viewQuery} params={params} folders={folders} />
@@ -344,9 +403,17 @@ export async function MailView({
         </section>
 
         <section
-          className={`min-h-0 ${view.message || composeMode || showAway || showRulesEditor || showSignature || showTemplates ? "block" : "hidden lg:block"}`}
+          className={`min-h-0 ${view.message || composeMode || showAway || showRulesEditor || showSignature || showTemplates || showAutofile ? "block" : "hidden lg:block"}`}
         >
-          {showTemplates ? (
+          {showAutofile ? (
+            <AutofileEditor
+              mailboxId={account.mailboxId}
+              rules={autofileRules}
+              folders={autofilableFolders(folders)}
+              destinationFolders={destinationFolders}
+              closeHref={mailHref(params, { autofile: undefined })}
+            />
+          ) : showTemplates ? (
             <TemplatesEditor
               templates={pickableTemplates}
               closeHref={mailHref(params, { templates: undefined })}
@@ -414,9 +481,9 @@ export async function MailView({
                 folders={view.folders}
                 showImages={params.images === "1"}
                 showImagesHref={mailHref(params, { images: "1" })}
-                replyHref={mailHref(params, { compose: "reply", templates: undefined })}
-                replyAllHref={mailHref(params, { compose: "reply_all", templates: undefined })}
-                forwardHref={mailHref(params, { compose: "forward", templates: undefined })}
+                replyHref={mailHref(params, { compose: "reply", templates: undefined, autofile: undefined })}
+                replyAllHref={mailHref(params, { compose: "reply_all", templates: undefined, autofile: undefined })}
+                forwardHref={mailHref(params, { compose: "forward", templates: undefined, autofile: undefined })}
               />
             </>
           ) : (
@@ -431,6 +498,32 @@ export async function MailView({
       </div>
     </div>
   );
+}
+
+/**
+ * Folders an auto-filing rule can sensibly watch.
+ *
+ * Drafts and Sent are excluded because the sweep's filter carries
+ * `notKeyword: "$draft"` — deliberately, since `npm run mail:probe-autofile`
+ * confirmed the user's own drafts are visible to the same machinery and filing
+ * your own outgoing work back into Documents is the loop this feature must not
+ * have. A rule pointed at Drafts would therefore match nothing, forever, and
+ * look broken rather than refused.
+ *
+ * Trash and Junk are excluded for a different reason: a message that somebody
+ * threw away or the server marked as spam is the last thing that should be
+ * copied into the shared cabinet.
+ *
+ * Archive and every user-made folder stay, along with the inbox — which is the
+ * default and therefore not listed.
+ */
+function autofilableFolders(
+  folders: { id: string; name: string; role: string | null }[],
+): { id: string; name: string }[] {
+  const excluded = new Set(["drafts", "sent", "trash", "junk", "inbox"]);
+  return folders
+    .filter((f) => !f.role || !excluded.has(f.role))
+    .map((f) => ({ id: f.id, name: f.name }));
 }
 
 /** `?compose=` → a mode, or nothing. An unknown value opens no composer. */

@@ -2661,6 +2661,146 @@ mode, and the name collision message.
 **Not applied to production**: `0055` and `0056` are on the dev branch only.
 `docs/security.md` §8 requires both.
 
+### 2026-08-03 (later) — Automatic filing, and the trigger there was only one of
+
+"Everything from this supplier goes in the Bills folder." This closes the
+`attachments → Documents` open item that has been in this dossier since the
+hosted-mailbox build.
+
+**NOTHING ABOUT FILING CHANGED — only who decides.** Slice 5 built the path: a
+message and its attachments become an `.eml`, a searchable transcript and one
+document per attachment, through `MailFilingTarget.fileMessage`. The sweep calls
+exactly that. A second implementation would have been two ways for a message to
+become a document, and they would have diverged.
+
+**THE TRIGGER COULD ONLY EVER HAVE BEEN OUR OWN CRON, and it is worth writing
+down because every other organising feature went the other way.** Rules compile
+to Sieve, snooze moves a message, a label IS a mailbox — all pushed down to the
+mail server so they work on a phone. None of that is available here: **Sieve runs
+inside the mail server and cannot call Yosher.** The one Sieve action that could
+reach us is `redirect` to an inbound address, which would send the message back
+out over SMTP, duplicate it and break SPF on the way. So this rides the mail-sync
+cron and inherits ADR 0005's cadence, which is the cost that ADR already named.
+
+**THE PROBE ANSWERED FIVE QUESTIONS. ONE MADE THE FEATURE AFFORDABLE AND ONE
+CAUGHT A BUG THAT WOULD HAVE LOST DOCUMENTS SILENTLY.**
+`npm run mail:probe-autofile` builds a real attachment, an inline-logo decoy and
+the user's own draft, then asks:
+
+| | |
+| --- | --- |
+| does `Email/changes.created` include the user's OWN drafts? | **yes** |
+| does MOVING a message re-create it? | no — `updated`, never `created` |
+| does `Email/query` honour `hasAttachment`? | yes |
+| **does an inline `cid:` logo set `hasAttachment`?** | **no** |
+| **is `after` inclusive, as RFC 8621 says?** | **NO — it is exclusive** |
+
+The first is a trap: an auto-filer keyed on `created` would file somebody's
+outgoing work back into the cabinet, forever, in a loop with itself. Hence
+`notKeyword: "$draft"` in the filter **and** a second check on the message
+metadata — the same belt-and-braces the search slice earned, because a condition
+the server accepts and silently ignores looks exactly like one that works.
+
+The fourth is the one that decides whether this feature is cheap or ruinous.
+**Every business signature is made of an inline logo.** Had `hasAttachment`
+counted them, the sweep would download the entire mailbox to discover there was
+nothing to file — not a wrong answer, a bill, per message, forever. It does not,
+so the server's own flag already means "a real file".
+
+**THE FIFTH CONTRADICTS THE RFC, AND IT WAS ASKED ONLY BECAUSE THE WATERMARK
+LOOKED TOO SIMPLE TO BE WRONG.** RFC 8621 §4.4.1 says a message matches `after`
+when its `receivedAt` "must be the same as or after this". Stalwart excludes the
+boundary. Since `receivedAt` has second granularity, **two invoices sent together
+land in the same second** — so a cursor stored at the last message would step
+over its neighbours, and those documents would never be filed, with nothing
+anywhere reporting a problem. That is the unrecoverable direction, and it is
+exactly the class of bug the search slice named: a filter that is accepted and
+behaves *almost* right.
+
+The fix is one second of overlap: the query starts at `cursor - 1s` and the
+filing target's sha256 idempotency absorbs the repeat. The probe confirmed both
+halves — that the boundary message is excluded at `cursor`, and that it returns
+at `cursor - 1s`. The compensation lives in `autofileFilter` rather than in the
+stored value, so the column still means what its name says.
+
+**`mail_autofile_rules` (`0057`/`0058`) is the SIXTH per-user table, and its
+reason is the opposite shape to the other five.** Rules, snoozes and scheduled
+sends are per-user partly because their rows are *meaningless* elsewhere — they
+name JMAP ids issued inside one account. These rows would work perfectly well for
+a colleague, and that is exactly why they must not be theirs to create. **Filing
+publishes one person's private correspondence to the whole business**, which is
+why the manual action audits inside its transaction; an automatic version removes
+the human who was deciding each time. So the right to say "everything arriving
+here goes into the shared cabinet" belongs to the person whose mailbox it is, and
+a policy says so rather than a predicate somebody has to remember.
+
+**ALLOWED ON A DELEGATED MAILBOX, unlike Sieve rules — and by the rule the
+delegation slice arrived at rather than as an exception.** A Sieve script is
+refused on a shared box because its effect is invisible and its record is
+private. This one's effect is a document appearing in a shared folder, visible to
+everyone and audited per message. `accounts@` filing its own bills is the case
+the feature exists for.
+
+**IT RUNS AS `staff`, AND THAT IS NOT A CHOICE.** `requireTenant()` derives
+"owner" from Clerk's organization role, which a cron has no session to obtain,
+and AGENTS.md forbids claiming a role that did not come from a real context. So
+the least-privileged value is the only honest one, and the consequence is real:
+**auto-filing can never reach an owners-only folder.** Rather than write a second
+rule about visibility, `loadFilingDestinations` asks the question with the
+SWEEP'S OWN credentials — it lists folders as `staff`, so RLS removes the
+owners-only ones before they arrive, and mail never has to learn what
+"owners-only" means. The action re-checks the chosen id the same way, because a
+list is a suggestion and the id that arrives is a claim.
+
+**Three refusals that are the security of the feature.**
+
+- **A rule must constrain something.** With neither a folder nor a sender it
+  matches every attachment in the mailbox — which is not a filing rule, it is
+  "publish my mailbox to my colleagues" reached by leaving two fields blank.
+- **A new rule starts its watermark at NOW.** Null would make the first sweep
+  walk the whole mailbox and publish years of attachments into a shared folder.
+  A rule is a statement about what arrives next.
+- **Deleting a rule leaves what it filed.** "Stop filing" and "destroy these
+  records" are different intentions and only one was expressed — the same call
+  unlinking makes.
+
+**The watermark is a COST control, not a correctness one**, and saying so keeps
+the next person from removing it. `fileMessage` is already idempotent on the
+sha256 of the raw message, so a message considered twice is filed once — but
+that guarantee costs a full download to compute the hash. The cursor is what
+stops every sweep re-fetching everything it has ever filed. It advances only over
+the prefix actually finished, and one message that fails stops that rule's page
+where it is: filing twice is free and skipping loses a document silently.
+
+**A second hand-written composite FK, for the same reason as the first.**
+`destination_folder_id` needs `ON DELETE SET NULL (destination_folder_id)` — the
+column-list form drizzle-kit cannot emit — because the plain form nulls every key
+column including `tenant_id`, which is NOT NULL. Without it **deleting a
+Documents folder would fail outright** for any tenant with a rule pointing at it:
+tidying the cabinet would start erroring, and the cause would be a mail feature
+nobody was thinking about. `mail_links.mail_account_id` (`0046`) was the first to
+take this exception; there is now an isolation test asserting the delete
+succeeds and the rule degrades to "the Documents inbox".
+
+**A BUG IN THE PREVIOUS SLICE, found while adding a link beside it: the Templates
+header link never existed.** It was added with a scripted string replacement that
+silently matched nothing, and the check afterwards counted occurrences of the
+word rather than reading the file — so the templates manager shipped reachable
+only by typing `?templates=1`. The composer's picker was unaffected, which is why
+nothing else caught it. Both links are in place now, and the lesson is the boring
+one: verify an edit by reading what it produced, not by counting.
+
+Verified: 5 probe confirmations against a live Stalwart 0.16.15 — one of them a
+finding that changed the code — 18 new unit tests including a golden test that
+the sweep's copy of `filableAttachments` agrees with the filing path's, and 3 new
+isolation tests, 120 passing against the dev branch. **Not verified in a browser** — the things to
+try are saving a rule with neither a sender nor a folder (it should refuse), and
+whether the destination list is empty for a tenant whose folders are all
+owners-only.
+
+**Not applied to production**: `0057` and `0058` are on the dev branch only.
+`docs/security.md` §8 requires both.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -3454,13 +3594,31 @@ code or config change.
   server-side connection that serverless cannot hold. Comparing the account's
   state string is one small request; an SSE proxy on Vercel's streaming runtime
   is a later optimization, not a prerequisite.
-- **The `attachments → Documents` join is wired, but only on demand.** Slice 5
-  files a message and its attachments into the DMS when somebody attaches the
-  thread to a record. There is still no automatic path — a hosted mailbox does
-  not file attachments the way `in.yosherapp.com` does for inbound mail, and it
-  should not: filing every attachment anybody receives would publish a mailbox
-  rather than a message. A per-folder rule ("everything from this sender") is the
-  shape that would work, and it is unbuilt.
+- ~~**The `attachments → Documents` join is wired, but only on demand.**~~
+  **CLOSED 2026-08-03.** Built as `mail_autofile_rules` (`0057`/`0058`), and in
+  the shape this item predicted: a per-sender/per-folder rule rather than
+  "file everything", because filing every attachment anybody receives would
+  publish a mailbox rather than a message. See the build log. What follows are
+  the things it leaves open.
+- **Auto-filing latency is the cron's.** A rule files on whichever tick follows
+  the message arriving, so "it appeared in Documents ten minutes later" is the
+  expected behaviour rather than a fault. It could not have been faster: Sieve
+  cannot call Yosher, which is recorded in the build log and is the same
+  constraint ADR 0005 describes from the other end.
+- **A rule matches a sender substring and nothing else.** No subject, no
+  attachment type, no "only PDFs over 100 KB". The three conditions the search
+  builder already proved against a live server (`from`, `subject`, `body`) would
+  extend it cheaply; the filter shape is deliberately one flat object so they
+  compose without an operator tree.
+- **Auto-filing cannot reach an owners-only folder**, and never will while the
+  sweep runs from a cron — it has no session, so it cannot prove ownership. The
+  destination list simply omits them. A tenant whose Documents tree is entirely
+  owners-only can configure no rules at all, which is correct but reads as an
+  empty dropdown with no explanation beyond the hint text.
+- **Nothing reports what auto-filing did, in the product.** Each filing writes a
+  `mail.message_autofiled` audit row and the rule shows a running count and its
+  last error, but there is no "here is what got filed this week" view. That is
+  the thing a client would ask for first.
 - **One hosted domain per tenant.** A client with two trading names needs two,
   and the unique index on `tenant_id` says no.
 - **Deliverability for hosted mailboxes is Migadu's**, not ours — which is the

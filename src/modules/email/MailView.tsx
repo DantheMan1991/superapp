@@ -30,6 +30,7 @@ import {
   templateContributors,
 } from "@/lib/mail-extensions/resolve";
 import { TemplatesEditor } from "./templates/editor";
+import { threadRecordsForCompose } from "./templates/thread-records";
 import { loadTemplates } from "./templates/load";
 
 /**
@@ -271,6 +272,22 @@ export async function MailView({
         )
       : [];
 
+  /**
+   * What the conversation being replied to is already attached to.
+   *
+   * Only when a composer is open, and only for a reply or forward — a new
+   * message has no thread and therefore no answer to inherit. One indexed read
+   * plus whatever the extensions need to resolve the labels, which is the same
+   * pair the reading pane already does for its "Attached to" row.
+   */
+  const threadRecords =
+    composeMode && view.message
+      ? await threadRecordsForCompose(ctx.tenant.id, ctx.userId, ctx.role, {
+          mailAccountId: account.id,
+          threadId: view.message.threadId,
+        })
+      : [];
+
   const pickableTemplates = templates.map((t) => ({
     id: t.id,
     name: t.name,
@@ -491,6 +508,7 @@ export async function MailView({
               senderName={view.senderName}
               businessName={ctx.tenant.name}
               namespaces={namespaces}
+              threadRecords={threadRecords}
             />
           ) : view.message ? (
             <>

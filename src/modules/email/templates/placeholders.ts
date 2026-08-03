@@ -240,6 +240,30 @@ export function validateTemplateBody(
 }
 
 /**
+ * Can this conversation answer "which record?" on its own?
+ *
+ * THE RULE IS "EXACTLY ONE, OR ASK." A thread already attached to invoice
+ * INV-1042 has answered the question — somebody attached it deliberately, and
+ * making them find the same invoice again to chase it a fourth time is the
+ * feature being tedious rather than careful.
+ *
+ * But **two invoices on one thread is not a tie to break silently.** Picking
+ * the newest, or the first, would quote a real invoice number into a real
+ * customer's email with nobody having chosen it, and the mistake would look
+ * exactly like a correct message. So more than one falls back to asking, which
+ * costs a click in the rare case and is never wrong.
+ *
+ * Zero is the ordinary case for a new message and also asks.
+ */
+export function recordFromThread(
+  namespace: string,
+  linked: readonly { entityType: string; entityId: string }[],
+): { entityType: string; entityId: string } | null {
+  const matches = linked.filter((l) => l.entityType === namespace);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/**
  * Substitute what we can, leave the rest.
  *
  * An unresolvable placeholder is LEFT AS ITS TOKEN rather than replaced with an

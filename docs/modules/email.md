@@ -2989,6 +2989,50 @@ migration. **Not verified in a browser** — worth trying a template mixing
 `{{recipient.first_name}}` with `{{invoice.total}}`, cancelling the record step,
 and saving a template naming an entity type whose module is switched off.
 
+### 2026-08-03 (later still) — The record step remembers, and the tie it refuses to break
+
+A template naming `{{invoice.number}}` asked which invoice every time. On a
+reply it now usually does not, because the conversation has already answered.
+
+**THE ANSWER WAS ALREADY IN THE DATABASE.** A thread attached to invoice
+INV-1042 through `mail_links` — which somebody did deliberately, and which the
+reading pane has shown in its "Attached to" row since Slice 5 — is a statement
+about which invoice this conversation is about. Making somebody find the same
+invoice again to chase it a fourth time was the feature being tedious rather
+than careful. **No new storage**, no new column, and the loader is the reading
+pane's own two-step (`listLinksForThread` then `resolveLinks`) rather than a
+second way of asking the same question.
+
+**"EXACTLY ONE, OR ASK" — and the tie is the whole decision.** A thread touching
+two invoices is not a tie to break silently. Picking the newest, or the first,
+would quote a REAL invoice number into a REAL customer's email with nobody
+having chosen it, and the result would look exactly like a correct message —
+there is no rendering of "we guessed". So more than one falls back to the
+picker, which costs a click in the rarer case and is never wrong. Zero is the
+ordinary case for a new message and asks too.
+
+**A record filled in without being chosen has to say so.** The toast names it —
+"Filled in from Invoice INV-1042" — because unlike the picker path nobody saw
+it happen, and the body is on screen to check against. That is the same call the
+composer already makes for an unfilled placeholder: say it once, now, rather
+than let the recipient discover it.
+
+**`resolveLinks` does the security work, and reusing it is why.** A link whose
+entity fails to resolve — deleted, or hidden from this caller by RLS — comes
+back with `entity: null`, and those are dropped. A record somebody cannot see
+must never become the silent default that fills an invoice number into an
+outgoing email, and "restricted" and "gone" stay indistinguishable here as
+everywhere else in this module. Writing a fresh query would have meant
+reimplementing that, and probably not noticing it was there to reimplement.
+
+Loaded only when a composer is open on an existing message: a new message has no
+thread and therefore no answer to inherit.
+
+Verified: 4 new unit tests over the exactly-one rule (43 in the file), full suite
+and lint clean. No migration. **Not verified in a browser** — the things to try
+are replying on a thread linked to one invoice (should not ask, and should say
+what it used), one linked to two (should ask), and a brand-new message.
+
 ### 2026-07-25 — Initial build: send seam + tenant sending domains (branch `claude/email-spine`)
 
 Two tables (`0030`/`0031`), a transport seam, an owner-only DNS wizard at
@@ -3695,10 +3739,12 @@ code or config change.
 - **Bill and vendor contribute no placeholder fields**, only invoice and
   customer. They are the AP mirror and add no new shape — the two implemented
   types already prove the seam works for both a joined record and a flat one.
-- **The record step does not remember what you picked last time.** Sending five
-  chasers about the same invoice means finding it five times. A per-thread
-  memory — or defaulting to whatever the thread is already linked to via
-  `mail_links` — would remove most of that and needs no new storage.
+- **A thread attached to TWO invoices still asks.** Deliberate — see the build
+  log — but it means the one case where the memory would help most (a long
+  dispute touching several invoices) is the one where it does not.
+- **The memory only works on a reply.** A new message has no thread, so a
+  template naming `{{invoice.number}}` always asks, even when it is the fourth
+  chaser you have written today.
 - **A placeholder inside a quote is ignored by the send guard.** Deliberate —
   replying to somebody who asked about `{{recipient.name}}` must not be blocked
   — but it does mean a template inserted *below* a quote in a reply would slip

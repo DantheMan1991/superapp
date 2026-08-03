@@ -25,6 +25,7 @@ import { applyTemplateSubject } from "../templates/validate";
 import {
   composerPlaceholderValues,
   fillPlaceholders,
+  recordFromThread,
   requiredNamespaces,
   unfilledPlaceholders,
   vocabularyFromNamespaces,
@@ -88,6 +89,7 @@ export function ComposeForm({
   senderEmail,
   businessName,
   namespaces,
+  threadRecords,
 }: {
   mailboxId: string;
   accountId: string;
@@ -110,6 +112,13 @@ export function ComposeForm({
    * instead — see `compose-actions.ts` for why the two differ.
    */
   namespaces: ContributedNamespace[];
+  /**
+   * Business records this conversation is already attached to.
+   *
+   * Empty for a new message. Used to answer "which invoice?" without asking
+   * when the thread names exactly one of the required type.
+   */
+  threadRecords: LinkableEntity[];
 }) {
   const router = useRouter();
   const [to, setTo] = useState(draft.to);
@@ -209,12 +218,39 @@ export function ComposeForm({
      * refuses. A failure leaves the tokens visible, which the toast below then
      * names.
      */
-    if (entity) {
+    /**
+     * The record: the one just chosen, or the one this conversation is already
+     * attached to.
+     *
+     * The picker hands null when it did not need to ask, which is both "this
+     * template names no business object" and "the thread already answered" —
+     * so the fallback is resolved here rather than in the picker, where it
+     * would have had to know about the vocabulary.
+     */
+    const needed = requiredNamespaces(
+      `${template.subject}\n${template.bodyHtml}`,
+      vocabulary,
+    );
+    const chosen =
+      entity ??
+      (needed[0] ? recordFromThread(needed[0], threadRecords) : null);
+
+    if (chosen) {
       const resolved = await templateEntityValuesAction({
-        entityType: entity.entityType,
-        entityId: entity.entityId,
+        entityType: chosen.entityType,
+        entityId: chosen.entityId,
       });
       if ("ok" in resolved) Object.assign(values, resolved.data);
+      // Named, because it was not chosen in front of them. A template that
+      // quietly pulled the wrong invoice's number into a customer email would
+      // look exactly like a correct one, so the message says which record it
+      // used and the body is on screen to check.
+      if (!entity) {
+        const label =
+          threadRecords.find((r) => r.entityId === chosen.entityId)?.label ??
+          "this conversation's record";
+        toast.message(`Filled in from ${label}.`);
+      }
     }
 
     const filledHtml = fillPlaceholders(template.bodyHtml, values);
@@ -605,6 +641,11 @@ export function ComposeForm({
             );
             const first = needed[0];
             if (!first) return null;
+            // ALREADY ANSWERED? A thread attached to exactly one invoice has
+            // said which invoice, and asking again is the feature being
+            // tedious rather than careful. Two of them still asks — see
+            // `recordFromThread`.
+            if (recordFromThread(first, threadRecords)) return null;
             const ns = namespaces.find((n) => n.type === first);
             return ns ? { type: ns.type, label: ns.label } : null;
           }}

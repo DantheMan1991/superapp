@@ -105,8 +105,15 @@ const createDealSchema = z.object({
   custom: z.record(z.string().uuid(), z.unknown()).optional(),
 });
 
+/**
+ * `z.input`, not `z.infer`. `amountField` has a `.transform()`, so `z.infer`
+ * describes what comes OUT (cents, or null) while the caller supplies what goes
+ * IN (the string somebody typed). Using the output type here would demand the
+ * form parse the money itself, which is the one thing conventions §3 says only
+ * `@/lib/money` may do.
+ */
 export async function createDealAction(
-  input: z.infer<typeof createDealSchema>,
+  input: z.input<typeof createDealSchema>,
 ): Promise<ActionResult<{ dealId: string }>> {
   try {
     const ctx = await gate();
@@ -155,7 +162,7 @@ const updateDealSchema = z.object({
 });
 
 export async function updateDealAction(
-  input: z.infer<typeof updateDealSchema>,
+  input: z.input<typeof updateDealSchema>,
 ): Promise<ActionResult> {
   try {
     const ctx = await gate();

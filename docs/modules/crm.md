@@ -14,6 +14,23 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — Slice 3: pipelines, deals, and stage history (branch `claude/crm-pipelines`)
+
+- `crm_pipelines`, `crm_pipeline_stages`, `crm_deals`, `crm_deal_stage_events`,
+  `crm_deal_parties`. Board, deal page, stage settings, and a deals panel on
+  every record.
+- **Won/lost is a property of the STAGE.** No `status` column on the deal, so
+  the two cannot desync. `closed_at` is stored because it is a fact about time;
+  `closedAtFor` stamps on first close, refuses to re-stamp a won→lost
+  correction, and clears on reopen.
+- **Stage history ships with a reader.** The deal page renders it from day one
+  rather than leaving the table an unverified promise until slice 9.
+- Deals inherit the party's visibility; stage events inherit through the deal.
+- `money.ts` moved to `src/lib/` with a re-export shim — CRM needed cents and a
+  module may not import another module.
+- Default pipeline provisioned **lazily on first board visit**, so no backfill
+  and no change to `toggleModule`.
+
 ### 2026-08-04 — Slice 2: custom fields (branch `claude/crm-custom-fields`)
 
 Per-tenant fields on every record — the feature that makes this shapeable
@@ -88,6 +105,10 @@ behaviour change.
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
 | `crm_party_details` | What CRM knows about a party — 1:1, created when CRM is first asked about the record | FORCE RLS with a **visibility term**: `visibility = 'members' OR app_current_tenant_role() = 'owner'`, in USING **and** WITH CHECK. `owner_clerk_user_id` is an attribution and grants nothing — see Decisions. `custom` jsonb is the slice 2 extension bag (P2), `lifecycle_stage`/`source` are open taxonomies (P1) with no CHECK. Composite FK to `parties`, ON DELETE CASCADE. Unique on `(tenant, party)` is what makes "the CRM record for this party" a lookup |
 | `crm_affiliations` | A person's connection to an organization, current or former | **Inherits visibility** through a positive `EXISTS` against `crm_party_details` at both ends — no second copy of the flag, so no drift. The positive spelling is load-bearing; see Decisions. Two partial uniques: one current connection per pair, one primary per person. CHECK that the two ends differ |
+| `crm_pipelines` / `crm_pipeline_stages` | The steps a deal moves through | **Configuration**: member-read + owner-write, same two-policy split as `crm_field_defs`. One default per tenant enforced by a partial unique. `outcome` (`open`/`won`/`lost`) is where terminal semantics live — there is no status column on the deal |
+| `crm_deals` | One piece of work in front of a record | **Inherits the party's visibility** through a positive `EXISTS` against `crm_party_details`. `amount_cents` is NULLABLE on purpose — "not priced yet" and "worth nothing" are different facts and a forecast must not conflate them. `closed_at` denormalized from the history; `custom` holds slice 2's `entity_type = 'deal'` fields |
+| `crm_deal_stage_events` | Append-only stage history | **Inherits through the deal** — a two-link chain. Member-writable because the same action that moves a deal records the move; nothing UPDATEs or DELETEs these rows, which is a code property in the same standing as `audit_log` being append-only by convention. No `version` column |
+| `crm_deal_parties` | Additional stakeholders beyond the primary contact | Inherits through the deal. Unique on `(tenant, deal, party)` |
 | `crm_field_defs` | Per-tenant custom field definitions | **Read/write split, not a visibility term**: a `FOR SELECT` member-read policy plus a `FOR ALL` owner-write policy. Two policies because **WITH CHECK is not consulted for DELETE** — a single `FOR ALL` with a permissive USING would let staff delete every definition in the tenant. `entity_type` is an open taxonomy (P1) so slice 3's deals need no migration. Key format enforced by CHECK; the `(tenant, entity_type, key)` unique is **partial on `archived_at is null`**, so archiving frees the name |
 
 Migrations: `0059` (tables/columns), `0060_parties_rls.sql` (custom: policies),
@@ -248,6 +269,29 @@ values as unknown and drops them from the *validated payload* — so
 it. A straight replace would silently delete a retired field's values on the
 next unrelated save, which is exactly what archiving was meant to prevent.
 
+**`moveDealStage` is the only path that may change `stage_id`**, because it is
+the only one that writes a `crm_deal_stage_events` row. A stray
+`update(crmDeals).set({ stageId })` anywhere else would move the card and lose
+the fact that it moved — and unlike almost every other bug in this module, that
+one cannot be repaired afterwards. `updateDeal` deliberately does not accept a
+stage.
+
+**A DRIZZLE MIGRATION THAT CREATES A PARENT AND CHILD TOGETHER NEEDS ITS
+STATEMENT ORDER HAND-EDITED.** drizzle-kit emits every `ADD CONSTRAINT` before
+every `CREATE INDEX`. That is fine whenever a composite FK points at a table
+from an earlier migration — every CRM migration before 0068 got away with it —
+but `crm_deal_parties` references `crm_deals (tenant_id, id)` whose backing
+unique index was still forty lines below, and Postgres refused with `42830,
+there is no unique constraint matching given keys`. 0068 hoists the three
+`(tenant_id, id)` uniques above the foreign keys. **Expect to do this again.**
+The failure is loud rather than subtle, and drizzle wraps each file in a
+transaction, so the database rolled back cleanly.
+
+**The board moves deals with a MENU, not drag and drop.** conventions §8 says a
+real share of usage is one-handed, in the field, on a phone, and dragging a card
+between columns that do not fit the screen is the one board interaction with no
+good touch story. A menu also names every destination.
+
 **A field's TYPE cannot be changed after creation.** Flipping `text` to `number`
 would leave every stored value in a shape the new type rejects, so saves would
 start failing on records nobody had touched. Archive and re-add instead: the old
@@ -309,6 +353,17 @@ values stay readable and the discontinuity is visible.
   different shape and is not modelled.
 - **No `updated_at` trigger anywhere in CRM** — the ops layer sets it. Consistent
   with the rest of the schema, and worth knowing before writing a raw UPDATE.
-- Slices 2–11 (custom fields, pipelines & deals, timeline & tasks, mail
-  extension, explicit collaborators, dedup & merge, saved views, reporting,
-  automation, AI) are planned and unbuilt.
+- **Deals have no per-deal probability override** — the weight comes from the
+  stage. A real want, but it is one more number to keep honest and slice 9 can
+  add it once a report argues for it.
+- **No currency column.** Single-currency platform; a second one is a change to
+  `@/lib/money` before it is a change here.
+- **Stage reordering has no UI.** `reorderStagesAction` exists and works;
+  nothing calls it, so new stages land at the end.
+- **A deal cannot be moved between pipelines**, and `moveDealStage` refuses it
+  explicitly rather than leaving a card on a board that does not draw its
+  column.
+- **`crm_deal_parties` has no add/remove UI** — the deal page lists
+  stakeholders, and the actions exist, but nothing creates one yet.
+- Slices 4–11 (timeline & tasks, mail extension, explicit collaborators, dedup
+  & merge, saved views, reporting, automation, AI) are planned and unbuilt.

@@ -2,7 +2,11 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Customer } from "@/db/schema";
-import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
+import {
+  createPartyForRole,
+  syncPartyName,
+  syncRoleContactPoints,
+} from "@/lib/parties/role-sync";
 import { LedgerError, type LedgerCtx } from "../core";
 
 /**
@@ -54,6 +58,13 @@ export async function createCustomer(
   // without a party is not a state this code can reach. 0061's trigger is the
   // backstop for writers that predate this line, not a substitute for it.
   const party = await createPartyForRole(tx, ctx.tenantId, input.name);
+  // Additive: the address contributes a contact point, and clearing it later
+  // never removes one. See syncRoleContactPoints.
+  await syncRoleContactPoints(tx, ctx.tenantId, party.id, {
+    email: input.email,
+    phone: input.phone,
+    label: "billing",
+  });
   const [row] = await tx
     .insert(schema.customers)
     .values({
@@ -103,6 +114,11 @@ export async function updateCustomer(
   if (args.patch.name !== undefined) {
     await syncPartyName(tx, ctx.tenantId, rows[0].partyId, args.patch.name);
   }
+  await syncRoleContactPoints(tx, ctx.tenantId, rows[0].partyId, {
+    email: args.patch.email,
+    phone: args.patch.phone,
+    label: "billing",
+  });
   return { before, after: rows[0] };
 }
 

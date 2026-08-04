@@ -14,6 +14,25 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — Contact points: slice 0's deferral comes due (branch `claude/party-contact-points`)
+
+The shared table `parties` deliberately did without. It arrives because two
+features needed it, and it unblocks both in the same slice.
+
+- `party_contact_points` — kind (`email`/`phone`/`website`), open-taxonomy
+  label, the value **as typed**, and a `normalized_value` that matching
+  compares. Multi-value, with one primary per party per kind.
+- `src/lib/parties/contact-values.ts` is pure and owns normalization — 19 unit
+  tests, no database.
+- **CRM now implements `MailContactSource`**, the hook the seam's own header
+  says it was designed for.
+- **Duplicate warning at create time**, matching on normalized values. It warns
+  and never blocks.
+- Backfilled from `customers`/`vendors`; accounting writes now contribute
+  contact points **additively** through the single door.
+- Accounting's own columns are untouched and still authoritative for AR/AP.
+  This is the expand phase, exactly as slice 0 was.
+
 ### 2026-08-04 — Slice 5: the mail extension (branch `claude/crm-mail-extension`)
 
 CRM becomes the **third** filler of the mail extension seam, after Accounting
@@ -136,6 +155,7 @@ behaviour change.
 | `parties` | The shared identity spine — one row per person or organization a tenant deals with | **Written by two modules**, so it lives at `src/lib/parties/` and not inside either. FORCE RLS, `member_all` policy scoped by `app_current_tenant()`: ordinary business data, ordinary tenant scoping. Composite unique `(tenant_id, id)` so every referencing FK can be tenant-aware. `kind` is `person` \| `organization`; `given_name`/`family_name` are NULL for organizations. `display_name` is authoritative, never derived — see Decisions |
 | `customers.party_id` | The AR role's link to its party | Nullable → backfilled → `NOT NULL`. Composite FK. `UNIQUE (tenant_id, party_id)`: a party may hold the customer role at most once |
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
+| `party_contact_points` | How to reach a party — **shared, not CRM's** | Tenant-scoped and member-writable like `parties`, NOT visibility-bearing: the same addresses are already on `customers.email` where staff read them, so hiding one copy while the other shows on the invoice screen would be two answers to one question. `normalized_value` is written only by `src/lib/parties/contacts.ts` and is what the duplicate check compares. Partial unique gives one primary per party **per kind**; `(tenant, party, kind, normalized)` unique stops the same address twice; `(tenant, kind, normalized)` indexes the duplicate lookup |
 | `crm_party_details` | What CRM knows about a party — 1:1, created when CRM is first asked about the record | FORCE RLS with a **visibility term**: `visibility = 'members' OR app_current_tenant_role() = 'owner'`, in USING **and** WITH CHECK. `owner_clerk_user_id` is an attribution and grants nothing — see Decisions. `custom` jsonb is the slice 2 extension bag (P2), `lifecycle_stage`/`source` are open taxonomies (P1) with no CHECK. Composite FK to `parties`, ON DELETE CASCADE. Unique on `(tenant, party)` is what makes "the CRM record for this party" a lookup |
 | `crm_affiliations` | A person's connection to an organization, current or former | **Inherits visibility** through a positive `EXISTS` against `crm_party_details` at both ends — no second copy of the flag, so no drift. The positive spelling is load-bearing; see Decisions. Two partial uniques: one current connection per pair, one primary per person. CHECK that the two ends differ |
 | `crm_pipelines` / `crm_pipeline_stages` | The steps a deal moves through | **Configuration**: member-read + owner-write, same two-policy split as `crm_field_defs`. One default per tenant enforced by a partial unique. `outcome` (`open`/`won`/`lost`) is where terminal semantics live — there is no status column on the deal |
@@ -193,11 +213,38 @@ already give.
 **`parties` carries NO contact information, and that absence is the design.** A
 company has several offices, billing addresses and numbers; a person has a work
 address and a personal one. A single `parties.email` would be canonical within a
-week of shipping and would then have to be unpicked from every read site. So
-this table commits to nothing: accounting keeps reading `customers.email`
-completely unchanged, and `party_contact_points` / `party_addresses` arrive as a
-later shared slice with the accounting read sites migrated as an explicit step.
-**Do not add an email column here as a convenience.**
+week of shipping and would then have to be unpicked from every read site.
+**Do not add an email column here as a convenience** — `party_contact_points`
+is the answer, and it arrived on 2026-08-04.
+
+**CONTACT VALUES ARE STORED TWICE, AS TYPED AND AS MATCHABLE.**
+`Bob@Example.COM ` and `bob@example.com` are one address; `(555) 123-4567` and
+`+1 555 123 4567` are one phone. The person sees what they typed and the machine
+compares something that can actually be compared. `normalizeContactValue` is the
+only place that computes the matchable form — normalizing at each call site
+would be the same class of mistake as formatting money in two places, and the
+symptom is not an error but the duplicate check quietly finding nothing. The
+backfill migration (0074) mirrors those rules in SQL with the correspondence
+written out line by line; **if you change one, change the other in the same
+commit.**
+
+**Accounting's contact sync is ADDITIVE, unlike the name sync.** A name is one
+fact and the role's copy is authoritative, so a rename overwrites. A way of
+reaching somebody is one of several, so an accounting edit contributes an
+address and never removes one. The concrete failure that rules out mirroring:
+somebody clears `customers.email` because the invoice should go elsewhere, and a
+mirroring sync silently deletes the mobile a colleague added in CRM last week.
+
+**The composer now offers a customer's address twice**, once from Accounting's
+column and once from the contact point backfilled from it. Both carry a sublabel
+saying where they came from. That is accepted rather than missed — the fix is the
+contract slice that retires the accounting columns, not a filter guessing which
+copy to suppress.
+
+**The duplicate check warns and never blocks.** Two people at one company
+genuinely share `info@`, and a product that refuses the second record teaches
+its users to add a full stop to get past it. Same line the merge tool and the AI
+slices sit on: the machine suggests, a person commits.
 
 **`display_name` is authoritative, not derived.** Deriving it from
 `given_name`/`family_name` means a fight the first time somebody wants
@@ -382,10 +429,17 @@ values stay readable and the discontinuity is visible.
 
 ## Open items
 
-- **Contact points and addresses are deferred, deliberately.**
-  `party_contact_points` and `party_addresses` (typed, labelled, multi-value,
-  with a primary) are the intended model. Until they land, the only contact data
-  is on the accounting role rows and CRM must not add its own.
+- **`party_addresses` is still deferred, and now deliberately rather than by
+  omission.** Contact points landed because two features needed them; nothing
+  reads a postal address that `customers.address` does not already serve, and
+  adding a table with no reader is the speculative build this codebase avoids.
+  The shape is the same as contact points when it is wanted.
+- **The accounting columns have NOT been retired.** `customers.email` /
+  `.phone` still exist, are still authoritative for AR/AP, and are still read by
+  the invoice paths and Accounting's own mail extension. This is the expand
+  phase; the contract slice retires them and is what removes the duplicate
+  suggestion in the composer. Only two files read those columns directly, so it
+  is a small change when somebody wants it.
 - **Custom fields cannot become mail placeholders without changing Mail's
   contract.** `MailEntityType.templateFields` is a static array on purpose —
   its header says the vocabulary must be knowable without reading data, which is
@@ -407,10 +461,12 @@ values stay readable and the discontinuity is visible.
   a paying client to pull it in. The founder directed this build ahead of that on
   2026-08-03. Recorded here so a future session reads it as a decision rather
   than as precedent.
-- **No dedup warning yet.** Nothing stops two records for the same company being
-  created by hand. The cheap version — warn on a matching normalized email or
-  phone at create time — needs contact points to exist first, so it lands with
-  them rather than in slice 7's full merge tool.
+- **The duplicate warning covers contact points, not names.** Two records for
+  the same company with no shared address are still invisible to it; that is
+  slice 7's merge tool, matching on stronger evidence than a string compare.
+- **The warning only fires where a contact point is entered**, which is the
+  record page. Creating a record from the "Add a record" form does not ask for
+  an address, so nothing is checked there.
 - **The records list caps at 500** with a line saying so, and there is no paging
   or cursor. Fine at current scale; slice 8's saved views is where this gets
   solved properly rather than by raising the number.

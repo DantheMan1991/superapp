@@ -2,7 +2,11 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Vendor } from "@/db/schema";
-import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
+import {
+  createPartyForRole,
+  syncPartyName,
+  syncRoleContactPoints,
+} from "@/lib/parties/role-sync";
 import { LedgerError, type LedgerCtx } from "../core";
 
 /**
@@ -80,6 +84,11 @@ export async function createVendor(
   await assertDefaultAccount(tx, ctx.tenantId, input.defaultExpenseAccountId);
   // Identity and role born in one transaction — see createCustomer.
   const party = await createPartyForRole(tx, ctx.tenantId, input.name);
+  await syncRoleContactPoints(tx, ctx.tenantId, party.id, {
+    email: input.email,
+    phone: input.phone,
+    label: "accounts",
+  });
   const [row] = await tx
     .insert(schema.vendors)
     .values({
@@ -130,6 +139,11 @@ export async function updateVendor(
   // step. `VendorInput.name` is required, so unlike the customer path there is
   // no "was it edited?" to test.
   await syncPartyName(tx, ctx.tenantId, rows[0].partyId, args.patch.name);
+  await syncRoleContactPoints(tx, ctx.tenantId, rows[0].partyId, {
+    email: args.patch.email,
+    phone: args.patch.phone,
+    label: "accounts",
+  });
   return { before, after: rows[0] };
 }
 

@@ -16,6 +16,8 @@ import {
   listTasksForParty,
   loadTimeline,
 } from "@/modules/crm/timeline-ops";
+import { listContactPoints } from "@/lib/parties/contacts";
+import { ContactPoints } from "@/modules/crm/components/contact-points";
 import { Timeline } from "@/modules/crm/components/timeline";
 import {
   AddTaskButton,
@@ -51,6 +53,7 @@ export default async function RecordPage({
     async (tx) => ({
       ...(await loadRecord(tx, ctx.tenant.id, partyId)),
       deals: await listDealsForParty(tx, ctx.tenant.id, partyId),
+      contactPoints: await listContactPoints(tx, ctx.tenant.id, partyId),
       timeline: await loadTimeline(tx, ctx.tenant.id, partyId),
       activities: await listActivitiesForParty(tx, ctx.tenant.id, partyId),
       tasks: await listTasksForParty(tx, ctx.tenant.id, partyId),
@@ -69,6 +72,7 @@ export default async function RecordPage({
     affiliations,
     fieldDefs,
     deals,
+    contactPoints,
     timeline,
     activities,
     tasks,
@@ -157,6 +161,10 @@ export default async function RecordPage({
               visibility: details.visibility,
             }}
           />
+
+          <Separator />
+
+          <ContactPoints partyId={party.id} points={contactPoints} />
 
           <Separator />
 

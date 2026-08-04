@@ -1,12 +1,15 @@
 import "server-only";
 import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
-import { schema } from "@/db";
+import { schema, type Tx } from "@/db";
 import type {
   LinkableEntity,
+  MailContactCandidate,
   MailEntityType,
   MailExtension,
+  MailExtensionCtx,
 } from "@/lib/mail-extensions/types";
 import { formatCents } from "@/lib/money";
+import { searchReachableParties } from "@/lib/parties/contacts";
 
 /**
  * What CRM contributes to Mail: the three things a conversation is usually
@@ -36,13 +39,20 @@ import { formatCents } from "@/lib/money";
  *    staff, and no predicate in this file says so — it falls out of using the
  *    caller's transaction.
  *
- * WHAT IS DELIBERATELY ABSENT: `contacts`. `MailContactSource` requires an
- * email address per suggestion, and `parties` has no email column — that was
- * slice 0's decision, and typed multi-value contact points are a later shared
- * slice. The addresses that do exist live on `customers`/`vendors`, and
- * Accounting's extension already offers them; contributing them again would put
- * the same person in the picker twice. CRM implements this hook the day parties
- * have addresses of their own, and not before.
+ * `contacts` IS NOW IMPLEMENTED, over `party_contact_points`. It could not be
+ * until those existed: `MailContactSource` requires an email per suggestion and
+ * `parties` deliberately has no email column. This is the hook slice 0's
+ * deferral was blocking, and the seam's own header names CRM as the reason it
+ * was designed — "so a future CRM contributes its people without Mail knowing
+ * it exists".
+ *
+ * NOTE THE DUPLICATE THIS CREATES, because it is real and accepted rather than
+ * missed. A customer's billing address now reaches the composer twice: once
+ * from Accounting's `customers.email`, once from the contact point backfilled
+ * from it. Both carry a `sublabel` saying where they came from, so the two rows
+ * are distinguishable rather than mysterious — and the fix is the CONTRACT
+ * slice that retires the accounting columns, not a filter here guessing which
+ * copy to suppress.
  */
 
 /** One `%term%` fragment, bound as a parameter — never interpolated. */
@@ -363,9 +373,52 @@ function dealToEntity(r: {
   };
 }
 
+/* -- People the composer can address -------------------------------------- */
+
+/**
+ * Parties with an email address, as recipient suggestions.
+ *
+ * Uses the CALLER'S transaction, so this is exactly the set of parties that
+ * person may see — nothing here filters on visibility, and nothing needs to.
+ *
+ * An empty query returns NOTHING rather than everyone: this fires while
+ * somebody types an address, and listing every party the moment a recipient
+ * field is focused would be a query per composer for suggestions nobody asked
+ * for. Same rule the accounting source follows.
+ */
+async function searchContacts(
+  tx: Tx,
+  ctx: MailExtensionCtx,
+  query: string,
+  limit: number,
+): Promise<MailContactCandidate[]> {
+  const matches = await searchReachableParties(
+    tx,
+    ctx.tenantId,
+    "email",
+    query,
+    limit,
+  );
+
+  return matches.map(({ party, contactPoint }) => ({
+    email: contactPoint.value,
+    name: party.displayName,
+    // Says WHERE this came from. Two rows reading the same name with no other
+    // difference is a choice nobody can make — and there WILL be two while the
+    // accounting columns still exist.
+    sublabel: [
+      party.kind === "person" ? "Contact" : "Company",
+      contactPoint.label || null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  }));
+}
+
 export const crmMailExtension: MailExtension = {
   slug: "crm",
   moduleSlug: "crm",
   name: "CRM",
   entityTypes: [contactEntity, companyEntity, dealEntity],
+  contacts: { search: searchContacts },
 };

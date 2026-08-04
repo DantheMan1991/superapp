@@ -587,6 +587,90 @@ export const parties = pgTable(
   ],
 );
 
+/**
+ * How to reach a party. The column `parties` deliberately does NOT have.
+ *
+ * Slice 0 refused to put an `email` on `parties` because a company has several
+ * offices and a person has a work address and a personal one, and a single
+ * column would have been canonical within a week and then needed unpicking from
+ * every read site. This is the shape that was promised instead, arriving when
+ * two features finally needed it: CRM contributing recipients to the mail
+ * composer, and warning about a duplicate at create time.
+ *
+ * `normalized_value` IS THE POINT OF THE TABLE. `Bob@Example.COM ` and
+ * `bob@example.com` are the same address and must match; `(555) 123-4567` and
+ * `+15551234567` are the same phone. Storing both the typed form and the
+ * matchable form means the person sees what they typed and the machine compares
+ * something that can actually be compared — the alternative is normalizing at
+ * every call site, which is the same class of mistake as formatting money twice.
+ */
+export const partyContactKind = pgEnum("party_contact_kind", [
+  "email",
+  "phone",
+  "website",
+]);
+
+export const partyContactPoints = pgTable(
+  "party_contact_points",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    partyId: uuid("party_id").notNull(),
+    kind: partyContactKind("kind").notNull(),
+    /**
+     * "work", "mobile", "billing". An OPEN taxonomy (P1) with no CHECK: which
+     * labels a business uses is its own business, and a profile may seed a set.
+     * Empty string rather than null so a filter never handles two spellings of
+     * "not said".
+     */
+    label: text("label").notNull().default(""),
+    /** Exactly as typed. This is what gets displayed back. */
+    value: text("value").notNull(),
+    /** Derived by `normalizeContactValue`. What matching compares. */
+    normalizedValue: text("normalized_value").notNull(),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("party_contact_points_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One primary per party PER KIND — a party has a main email and a main
+    // phone, and those are different questions.
+    uniqueIndex("party_contact_points_primary_idx")
+      .on(t.tenantId, t.partyId, t.kind)
+      .where(sql`is_primary = true`),
+    // The same address twice on one party is a duplicate, not a second way to
+    // reach them. Compared on the NORMALIZED value, so differing capitalisation
+    // does not sneak one past.
+    uniqueIndex("party_contact_points_unique_idx").on(
+      t.tenantId,
+      t.partyId,
+      t.kind,
+      t.normalizedValue,
+    ),
+    // THE DEDUP LOOKUP: "does any party already have this address?" Without
+    // this index that question is a sequential scan on every keystroke.
+    index("party_contact_points_lookup_idx").on(
+      t.tenantId,
+      t.kind,
+      t.normalizedValue,
+    ),
+    index("party_contact_points_party_idx").on(t.tenantId, t.partyId),
+    foreignKey({
+      name: "party_contact_points_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+  ],
+);
+
 /* ------------------------------------------------------------------------
  * Invoicing / AR (session 4). The tenant's OWN customers. Invoices carry an
  * explicit state machine; `partial`/`paid` are derived from payments,
@@ -3303,6 +3387,8 @@ export type AccountingSettings = typeof accountingSettings.$inferSelect;
 /** The shared identity spine. Written by Accounting and by CRM — see src/lib/parties/. */
 export type Party = typeof parties.$inferSelect;
 export type PartyKind = Party["kind"];
+export type PartyContactPoint = typeof partyContactPoints.$inferSelect;
+export type PartyContactKind = PartyContactPoint["kind"];
 export type Customer = typeof customers.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;

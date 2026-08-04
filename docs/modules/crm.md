@@ -14,6 +14,25 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — Slice 5: the mail extension (branch `claude/crm-mail-extension`)
+
+CRM becomes the **third** filler of the mail extension seam, after Accounting
+and Documents. **No migration** — this slice is code only.
+
+- `src/modules/crm/mail/extension.ts` registers `contact`, `company` and `deal`
+  as linkable entity types, with `search`, `resolve` and fixed
+  `templateFields`. A thread can now be attached to a CRM record, which files
+  the message into Documents and links it, and Mail's reverse view shows the
+  record.
+- **`contacts` is NOT implemented, and that is a consequence of slice 0.**
+  `MailContactSource` needs an email per suggestion and `parties` has no email
+  column; the addresses that exist are on `customers`/`vendors` and Accounting
+  already offers them. See Open items.
+- **Custom fields are not placeholders**, and cannot be without changing Mail's
+  contract. Fixed fields only.
+- `contact` and `company` read `parties` directly; `deal` reads `crm_deals` and
+  therefore inherits record visibility for free. Both halves are tested.
+
 ### 2026-08-04 — Slice 4: activity and follow-ups (branch `claude/crm-timeline`)
 
 - `crm_activities` (note / call / meeting, with `occurred_at` separate from
@@ -313,6 +332,16 @@ down; nothing but opening the page could have caught it. `centsToInput` and
 `EMPTY_RECORD` now live in `core/`, and the rule is in
 [conventions.md §8](../conventions.md).
 
+**THE MAIL PICKER OFFERS A RESTRICTED RECORD'S NAME BUT NOT ITS DEALS**, and
+the asymmetry is deliberate rather than an oversight — pin it before "fixing"
+either half. `contact` and `company` read `parties` directly, so a restricted
+record's name appears exactly as it does in the records list; the identity is
+shared with Accounting where the same staff member already sees it. `deal`
+reads `crm_deals`, which inherits the record's visibility, so a restricted
+account's deals are absent — and no predicate in the extension says so. It falls
+out of using the caller's transaction, which is invariant S12 working as
+designed. There is a test for both halves.
+
 **An unattached task's `IS NULL` branch is not a hole**, and a reviewer's first
 instinct is that it should be. `crm_tasks.party_id` is nullable because "ring
 the accountant back" is a real task belonging to nobody in the CRM, and a
@@ -419,10 +448,25 @@ values stay readable and the discontinuity is visible.
   column.
 - **`crm_deal_parties` has no add/remove UI** — the deal page lists
   stakeholders, and the actions exist, but nothing creates one yet.
-- **The timeline has no mail in it yet.** That is slice 5's job: CRM has to
-  register its entity types with Mail before any thread can point at a party.
-  `mergeTimeline` takes items rather than tables precisely so that lands as a
-  query and a mapping function.
+- **THE TIMELINE STILL HAS NO MAIL IN IT, and slice 5 did not fix that.**
+  Registering the entity types was the prerequisite and is done — a thread can
+  now be attached to a record — but showing those threads *on the CRM timeline*
+  needs the reverse read, and that is a design question rather than a query.
+  "Emails on this record" is two hops through `mail_links` plus resolving the
+  filed copy through the Documents extension, and all of that lives in
+  `src/modules/email/links.ts` and the registry, neither of which CRM may
+  import. Reimplementing the hops here would duplicate behaviour Mail owns,
+  including the `is not distinct from` subtlety that keeps a disconnected
+  mailbox's links alive. The real answer is either moving the reverse read into
+  a shared seam or Mail declaring a timeline-contribution extension point —
+  P5 again, pointing the other way. `mergeTimeline` takes items rather than
+  tables so that whichever wins is a mapping function here.
+- **CRM contributes no recipients to the composer.** `MailContactSource`
+  requires an email per suggestion and `parties` has none by design (slice 0).
+  Accounting already offers the addresses that exist, on `customers`/`vendors`,
+  so contributing them again would list the same person twice. CRM implements
+  the hook the day parties have contact points of their own — the same later
+  slice that unblocks dedup warnings.
 - **The Follow-ups page groups against the SERVER's today**, so a tenant far
   from UTC sees a task change group a few hours early or late. The per-row badge
   is computed in the browser and is correct. A real fix needs a tenant timezone

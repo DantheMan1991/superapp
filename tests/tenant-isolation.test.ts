@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema, type Tx } from "../src/db";
 import { recentCorrespondents } from "../src/modules/email/contacts/recent";
 import { accountingMailExtension } from "../src/modules/accounting/mail/extension";
+import { crmMailExtension } from "../src/modules/crm/mail/extension";
 import { documentsMailExtension } from "../src/modules/documents/mail/extension";
 
 /**
@@ -1275,6 +1276,148 @@ d("crm isolation (RLS + record visibility)", () => {
         { role: "owner" },
       ),
     ).rejects.toThrow();
+  });
+
+  /* -- The CRM mail extension (slice 5) ----------------------------------- */
+
+  /**
+   * CRM is the THIRD real user of the mail extension seam, after Accounting and
+   * Documents — and this dossier's own rule is that a seam with one user is a
+   * seam that has never been tested. What these certify is invariant S12 as the
+   * contract states it: `search`, `resolve` and `templateValues` take the
+   * CALLER'S transaction and apply no visibility predicate of their own, so RLS
+   * reached through that transaction is the entire guard.
+   */
+  it("the CRM extension cannot reach another tenant's records", async () => {
+    const company = crmMailExtension.entityTypes.find((t) => t.type === "company")!;
+
+    const fromA = await withTenant(
+      tenantA,
+      (tx) =>
+        company.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          "Open Co",
+          10,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(fromA.map((e) => e.label)).toContain("Open Co A");
+    expect(fromA.map((e) => e.label)).not.toContain("Open Co B");
+
+    // And naming B's id directly resolves to nothing rather than to its name.
+    const smuggled = await withTenant(
+      tenantA,
+      (tx) =>
+        company.resolve(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          [partyOf.bOpen],
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(smuggled).toHaveLength(0);
+  });
+
+  it("CRM template values return null for another tenant's record", async () => {
+    // Null is also what "no such record" gives, so a template cannot be used to
+    // discover whether one exists.
+    const company = crmMailExtension.entityTypes.find((t) => t.type === "company")!;
+    const values = await withTenant(
+      tenantA,
+      (tx) =>
+        company.templateValues!(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          partyOf.bOpen,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(values).toBeNull();
+  });
+
+  it("the contact type offers only people, the company type only organizations", async () => {
+    // The two share an implementation and differ by `kind`; a mix-up would put
+    // companies in a picker asking for a person and nothing would complain.
+    const contact = crmMailExtension.entityTypes.find((t) => t.type === "contact")!;
+    const found = await withTenant(
+      tenantA,
+      (tx) =>
+        contact.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          "Person A",
+          10,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(found.map((e) => e.label)).toEqual(["Person A"]);
+
+    const companies = await withTenant(
+      tenantA,
+      (tx) =>
+        contact.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          "Open Co",
+          10,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(companies).toHaveLength(0);
+  });
+
+  /**
+   * DEALS INHERIT, CONTACTS DO NOT, and the asymmetry is deliberate rather than
+   * an oversight — so it is worth pinning before somebody "fixes" one of them.
+   *
+   * A restricted record's NAME is visible to staff by design (the identity is
+   * shared with Accounting), so the picker offers it exactly as the records
+   * list does. Its DEALS are not, because `crm_deals` inherits the record's
+   * visibility — and no predicate in the extension says so, which is the point.
+   */
+  it("the picker offers a restricted record's name but not its deals", async () => {
+    const company = crmMailExtension.entityTypes.find((t) => t.type === "company")!;
+    const deal = crmMailExtension.entityTypes.find((t) => t.type === "deal")!;
+
+    const namesAsStaff = await withTenant(
+      tenantA,
+      (tx) =>
+        company.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "staff" },
+          "Secret Co",
+          10,
+        ),
+      { role: "staff", userId: "user-a" },
+    );
+    expect(namesAsStaff.map((e) => e.label)).toContain("Secret Co A");
+
+    const dealsAsStaff = await withTenant(
+      tenantA,
+      (tx) =>
+        deal.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "staff" },
+          "Confidential",
+          10,
+        ),
+      { role: "staff", userId: "user-a" },
+    );
+    expect(dealsAsStaff).toHaveLength(0);
+
+    const dealsAsOwner = await withTenant(
+      tenantA,
+      (tx) =>
+        deal.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          "Confidential",
+          10,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(dealsAsOwner.map((e) => e.label)).toContain("Confidential deal");
   });
 
   it("staff CAN see an affiliation between two open records", async () => {

@@ -1,5 +1,6 @@
 import "server-only";
 import { accountingMailExtension } from "@/modules/accounting/mail/extension";
+import { crmMailExtension } from "@/modules/crm/mail/extension";
 import { documentsMailExtension } from "@/modules/documents/mail/extension";
 import type { MailExtension } from "./types";
 
@@ -22,6 +23,7 @@ import type { MailExtension } from "./types";
  */
 export const mailExtensions: readonly MailExtension[] = [
   accountingMailExtension,
+  crmMailExtension,
   documentsMailExtension,
 ];
 

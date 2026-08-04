@@ -10,10 +10,11 @@ import { CrmError } from "@/modules/crm/core/errors";
 import { loadDeal } from "@/modules/crm/deal-ops";
 import { listStages } from "@/modules/crm/pipeline-ops";
 import { listFieldDefs } from "@/modules/crm/field-ops";
-import {
-  centsToInput,
-  DealForm,
-} from "@/modules/crm/components/deal-form";
+// `centsToInput` comes from `core/pipeline`, NOT from the form. Every export of
+// a `"use client"` module is a client reference, so calling one here would
+// throw at render — see that function's header.
+import { centsToInput } from "@/modules/crm/core/pipeline";
+import { DealForm } from "@/modules/crm/components/deal-form";
 import { MoveDealButton } from "@/modules/crm/components/deal-controls";
 
 export const dynamic = "force-dynamic";

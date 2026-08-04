@@ -96,6 +96,41 @@ export interface CrmRecordFilter {
   includeInactive?: boolean;
 }
 
+/** The record form's editable shape, and its blank value. */
+export interface RecordFormValues {
+  kind: PartyKind;
+  displayName: string;
+  givenName: string;
+  familyName: string;
+  legalName: string;
+  lifecycleStage: string;
+  source: string;
+  notes: string;
+  visibility: CrmRecordVisibility;
+}
+
+/**
+ * DEFINED HERE RATHER THAN IN THE FORM, and the reason is the same one
+ * `centsToInput` carries: every export of a `"use client"` module becomes a
+ * client reference when a server component imports it. Passing this one as a
+ * prop happens to survive that, which makes it the more dangerous shape of the
+ * two — it works until somebody reads a property off it on the server, and
+ * then fails at render with a message production withholds.
+ *
+ * A constant a server component touches lives in a module with no directive.
+ */
+export const EMPTY_RECORD: RecordFormValues = {
+  kind: "organization",
+  displayName: "",
+  givenName: "",
+  familyName: "",
+  legalName: "",
+  lifecycleStage: "",
+  source: "",
+  notes: "",
+  visibility: "members",
+};
+
 export const LIFECYCLE_STAGE_MAX = 60;
 export const SOURCE_MAX = 60;
 export const NOTES_MAX = 4000;

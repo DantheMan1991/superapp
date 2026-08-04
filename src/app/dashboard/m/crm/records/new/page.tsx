@@ -4,10 +4,10 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { listFieldDefs } from "@/modules/crm/field-ops";
-import {
-  EMPTY_RECORD,
-  RecordForm,
-} from "@/modules/crm/components/record-form";
+// `EMPTY_RECORD` from `core/types`, not the form — see its header. A server
+// component may import COMPONENTS from a `"use client"` module, never values.
+import { EMPTY_RECORD } from "@/modules/crm/core/types";
+import { RecordForm } from "@/modules/crm/components/record-form";
 
 export const dynamic = "force-dynamic";
 

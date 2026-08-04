@@ -287,6 +287,16 @@ there is no unique constraint matching given keys`. 0068 hoists the three
 The failure is loud rather than subtle, and drizzle wraps each file in a
 transaction, so the database rolled back cleanly.
 
+**A SERVER COMPONENT MAY IMPORT COMPONENTS FROM A `"use client"` MODULE, NEVER
+PLAIN VALUES.** `centsToInput` started in `components/deal-form.tsx` and was
+called from the deal page. Every export of a client module becomes a client
+*reference*, so the call threw at render and production withheld the message —
+while `npm run build`, `tsc` and `eslint` all stayed green, because the import
+is legal and only the call is not. It reached production and took the deal page
+down; nothing but opening the page could have caught it. `centsToInput` and
+`EMPTY_RECORD` now live in `core/`, and the rule is in
+[conventions.md §8](../conventions.md).
+
 **The board moves deals with a MENU, not drag and drop.** conventions §8 says a
 real share of usage is one-handed, in the field, on a phone, and dragging a card
 between columns that do not fit the screen is the one board interaction with no

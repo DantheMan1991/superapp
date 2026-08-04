@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
+import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { listFieldDefs } from "@/modules/crm/field-ops";
 import {
   EMPTY_RECORD,
   RecordForm,
@@ -14,6 +16,12 @@ const BASE = "/dashboard/m/crm";
 export default async function NewRecordPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "crm");
+
+  const fieldDefs = await withTenant(
+    ctx.tenant.id,
+    (tx) => listFieldDefs(tx, ctx.tenant.id, "party"),
+    { role: ctx.role },
+  );
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6">
@@ -37,6 +45,7 @@ export default async function NewRecordPage() {
         mode="create"
         initial={EMPTY_RECORD}
         isOwner={ctx.role === "owner"}
+        fieldDefs={fieldDefs}
       />
     </div>
   );

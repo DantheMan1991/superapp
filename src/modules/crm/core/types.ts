@@ -1,5 +1,6 @@
 import type {
   CrmAffiliation,
+  CrmFieldDef,
   CrmPartyDetails,
   CrmRecordVisibility,
   Party,
@@ -39,6 +40,14 @@ export interface CrmRecordRow {
 /** One record's full page: identity, CRM's knowledge, and its connections. */
 export interface CrmRecord extends CrmRecordRow {
   affiliations: CrmAffiliationRow[];
+  /**
+   * The tenant's LIVE custom field definitions, in display order.
+   *
+   * Loaded with the record rather than separately so the form renders in one
+   * pass, and deliberately excluding archived ones — a retired field stops
+   * appearing while its stored values stay in `details.custom` untouched.
+   */
+  fieldDefs: CrmFieldDef[];
 }
 
 /** An affiliation with the other end already resolved for display. */
@@ -61,6 +70,12 @@ export interface CrmRecordInput {
   notes?: string;
   ownerClerkUserId?: string | null;
   visibility?: CrmRecordVisibility;
+  /**
+   * Custom field values, keyed by field definition id. UNTRUSTED — validated
+   * against the live definitions server-side on every write, never taken as
+   * given. See core/custom-fields.ts.
+   */
+  custom?: Record<string, unknown>;
 }
 
 /**

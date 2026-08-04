@@ -822,6 +822,117 @@ d("crm isolation (RLS + record visibility)", () => {
     expect(asStaff).toHaveLength(0);
   });
 
+  /* -- Custom field definitions (slice 2) --------------------------------- */
+
+  /**
+   * `crm_field_defs` is the first table here with a READ/WRITE role split
+   * rather than a visibility term, and the case that earns its keep is DELETE:
+   * a single FOR ALL policy with a permissive USING would have let staff delete
+   * every definition in the tenant, because WITH CHECK is not consulted for
+   * DELETE. See drizzle/0067.
+   */
+  it("staff can READ field definitions", async () => {
+    // Not a formality — the record form cannot render without them, so a
+    // policy that locked staff out would break the module for most of a team.
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmFieldDefs).values({
+          tenantId: tenantA,
+          key: "warranty_expiry",
+          label: "Warranty expiry",
+          fieldType: "date",
+        }),
+      { role: "owner" },
+    );
+
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmFieldDefs),
+      { role: "staff" },
+    );
+    expect(asStaff.map((r) => r.key)).toContain("warranty_expiry");
+  });
+
+  it("staff cannot CREATE a field definition", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmFieldDefs).values({
+            tenantId: tenantA,
+            key: "smuggled",
+            label: "Smuggled",
+            fieldType: "text",
+          }),
+        { role: "staff" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("staff cannot UPDATE a field definition (0 rows affected)", async () => {
+    const updated = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.crmFieldDefs)
+          .set({ label: "defaced" })
+          .where(eq(schema.crmFieldDefs.tenantId, tenantA))
+          .returning(),
+      { role: "staff" },
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  it("STAFF CANNOT DELETE A FIELD DEFINITION — the hole a single FOR ALL policy would leave", async () => {
+    const deleted = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.crmFieldDefs)
+          .where(eq(schema.crmFieldDefs.tenantId, tenantA))
+          .returning(),
+      { role: "staff" },
+    );
+    expect(deleted).toHaveLength(0);
+
+    // And the definitions are still there, so the assertion above is about
+    // permission rather than about an empty table.
+    const remaining = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmFieldDefs),
+      { role: "owner" },
+    );
+    expect(remaining.length).toBeGreaterThan(0);
+  });
+
+  it("cannot read or write another tenant's field definitions", async () => {
+    const rows = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.crmFieldDefs)
+          .where(eq(schema.crmFieldDefs.tenantId, tenantB)),
+      { role: "owner" },
+    );
+    expect(rows).toHaveLength(0);
+
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmFieldDefs).values({
+            tenantId: tenantB,
+            key: "smuggled",
+            label: "Smuggled",
+            fieldType: "text",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
   it("staff CAN see an affiliation between two open records", async () => {
     // The other direction, so the test above is proving inheritance rather than
     // an accidental blanket denial of the whole table to staff.

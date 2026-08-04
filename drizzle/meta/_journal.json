@@ -463,6 +463,20 @@
       "when": 1785815080291,
       "tag": "0065_parties_drop_compat",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1785817059239,
+      "tag": "0066_chubby_black_cat",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1785817077653,
+      "tag": "0067_crm_field_defs_rls",
+      "breakpoints": true
     }
   ]
 }

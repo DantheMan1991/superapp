@@ -44,7 +44,7 @@ export default async function RecordPage({
     throw err;
   });
 
-  const { party, details, affiliations, isCustomer, isVendor } = record;
+  const { party, details, affiliations, fieldDefs, isCustomer, isVendor } = record;
   const isOwner = ctx.role === "owner";
   const current = affiliations.filter((a) => !a.affiliation.endedOn);
   const former = affiliations.filter((a) => a.affiliation.endedOn);
@@ -109,6 +109,12 @@ export default async function RecordPage({
             partyVersion={party.version}
             detailsVersion={details.version}
             isOwner={isOwner}
+            fieldDefs={fieldDefs}
+            // Stored values may include ids whose definition has since been
+            // archived. They are passed through untouched and simply not
+            // rendered — the write path merges rather than replaces, so an
+            // unrelated save cannot drop them.
+            initialCustom={(details.custom ?? {}) as Record<string, unknown>}
             initial={{
               kind: party.kind,
               displayName: party.displayName,

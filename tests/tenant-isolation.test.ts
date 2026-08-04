@@ -604,6 +604,248 @@ d("parties isolation (RLS + composite tenant FKs)", () => {
   });
 });
 
+/**
+ * CRM (slice 1) — tenant isolation PLUS the first record-level visibility
+ * outside Documents.
+ *
+ * The two-tenant cases are the standard certification. The ones that earn their
+ * keep are the visibility pair at the bottom: `crm_party_details` carries the
+ * flag, and `crm_affiliations` INHERITS it through a positive EXISTS rather
+ * than storing a second copy. The inherited half is the one that could silently
+ * fail open — see drizzle/0064 for why the negative spelling of that policy
+ * would show a restricted record's connections to exactly the person it was
+ * hidden from.
+ */
+const STAMP_CRM = `iso-crm-${process.pid}`;
+
+d("crm isolation (RLS + record visibility)", () => {
+  let tenantA: string;
+  let tenantB: string;
+  const partyOf: Record<string, string> = {};
+
+  /** A party with its CRM row, created as an owner so visibility can be set. */
+  async function seedCrmRecord(
+    tenantId: string,
+    displayName: string,
+    kind: "person" | "organization",
+    visibility: "members" | "restricted",
+  ): Promise<string> {
+    return withTenant(
+      tenantId,
+      async (tx) => {
+        const [party] = await tx
+          .insert(schema.parties)
+          .values({ tenantId, kind, displayName })
+          .returning();
+        await tx
+          .insert(schema.crmPartyDetails)
+          .values({ tenantId, partyId: party.id, visibility });
+        return party.id;
+      },
+      { role: "owner" },
+    );
+  }
+
+  beforeAll(async () => {
+    [tenantA, tenantB] = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP_CRM}-a`, name: "CRM Iso A", slug: `${STAMP_CRM}-a` },
+          { clerkOrgId: `${STAMP_CRM}-b`, name: "CRM Iso B", slug: `${STAMP_CRM}-b` },
+        ])
+        .returning();
+      return [rows[0].id, rows[1].id];
+    });
+
+    partyOf.aOpen = await seedCrmRecord(tenantA, "Open Co A", "organization", "members");
+    partyOf.aPerson = await seedCrmRecord(tenantA, "Person A", "person", "members");
+    partyOf.aSecret = await seedCrmRecord(
+      tenantA,
+      "Secret Co A",
+      "organization",
+      "restricted",
+    );
+    partyOf.bOpen = await seedCrmRecord(tenantB, "Open Co B", "organization", "members");
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("unscoped selects on crm tables return only the tenant's rows", async () => {
+    await withTenant(
+      tenantA,
+      async (tx) => {
+        const details = await tx.select().from(schema.crmPartyDetails);
+        expect(details.length).toBeGreaterThan(0);
+        expect(details.every((r) => r.tenantId === tenantA)).toBe(true);
+        const affiliations = await tx.select().from(schema.crmAffiliations);
+        expect(affiliations.every((r) => r.tenantId === tenantA)).toBe(true);
+      },
+      { role: "owner" },
+    );
+  });
+
+  it("cannot INSERT crm rows attributed to the other tenant", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmPartyDetails).values({
+            tenantId: tenantB,
+            partyId: partyOf.bOpen,
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot UPDATE or DELETE the other tenant's crm rows (0 rows affected)", async () => {
+    const updated = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.crmPartyDetails)
+          .set({ lifecycleStage: "defaced" })
+          .where(eq(schema.crmPartyDetails.tenantId, tenantB))
+          .returning(),
+      { role: "owner" },
+    );
+    expect(updated).toHaveLength(0);
+
+    const deleted = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.crmPartyDetails)
+          .where(eq(schema.crmPartyDetails.tenantId, tenantB))
+          .returning(),
+      { role: "owner" },
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("a crm row cannot reference another tenant's party", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmPartyDetails).values({
+            tenantId: tenantA,
+            partyId: partyOf.bOpen,
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  /* -- Record visibility -------------------------------------------------- */
+
+  it("staff cannot see a restricted record's crm row; an owner can", async () => {
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmPartyDetails),
+      { role: "staff" },
+    );
+    expect(asStaff.map((r) => r.partyId)).not.toContain(partyOf.aSecret);
+    // The open ones are unaffected — this is a visibility term, not a lockout.
+    expect(asStaff.map((r) => r.partyId)).toContain(partyOf.aOpen);
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmPartyDetails),
+      { role: "owner" },
+    );
+    expect(asOwner.map((r) => r.partyId)).toContain(partyOf.aSecret);
+  });
+
+  it("a caller who forgets { role } is denied the restricted row, never granted it", async () => {
+    // The fail-closed direction: app_current_tenant_role() defaults to 'staff'.
+    const rows = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.crmPartyDetails),
+    );
+    expect(rows.map((r) => r.partyId)).not.toContain(partyOf.aSecret);
+  });
+
+  it("staff cannot flip a restricted record back to members", async () => {
+    // The WITH CHECK half. Without it a staff member could unhide a record by
+    // writing to a row they cannot read.
+    const updated = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.crmPartyDetails)
+          .set({ visibility: "members" })
+          .where(eq(schema.crmPartyDetails.partyId, partyOf.aSecret))
+          .returning(),
+      { role: "staff" },
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  /**
+   * THE INHERITED HALF, and the reason drizzle/0064 spells its policy
+   * positively. An affiliation names two parties; if either end is restricted,
+   * the connection itself is a disclosure — "our restricted account has this
+   * person at it" — so it has to disappear for staff without storing a second
+   * copy of the flag that could drift from the first.
+   */
+  it("staff cannot see an affiliation touching a restricted record", async () => {
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmAffiliations).values({
+          tenantId: tenantA,
+          personPartyId: partyOf.aPerson,
+          organizationPartyId: partyOf.aSecret,
+          title: "Confidential",
+        }),
+      { role: "owner" },
+    );
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmAffiliations),
+      { role: "owner" },
+    );
+    expect(asOwner.length).toBeGreaterThan(0);
+
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmAffiliations),
+      { role: "staff" },
+    );
+    expect(asStaff).toHaveLength(0);
+  });
+
+  it("staff CAN see an affiliation between two open records", async () => {
+    // The other direction, so the test above is proving inheritance rather than
+    // an accidental blanket denial of the whole table to staff.
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmAffiliations).values({
+          tenantId: tenantA,
+          personPartyId: partyOf.aPerson,
+          organizationPartyId: partyOf.aOpen,
+          title: "Operations Manager",
+        }),
+      { role: "owner" },
+    );
+
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmAffiliations),
+      { role: "staff" },
+    );
+    expect(asStaff.map((r) => r.organizationPartyId)).toEqual([partyOf.aOpen]);
+  });
+});
+
 interface DocFixture {
   documentId: string;
   entryId: string;

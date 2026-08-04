@@ -54,7 +54,7 @@ import nextTs from "eslint-config-next/typescript";
  * must not depend on another module's functions, errors or behaviour. RLS, not
  * an import graph, is what decides who may read a row.
  */
-const MODULE_SLUGS = ["accounting", "documents", "email", "hello"];
+const MODULE_SLUGS = ["accounting", "crm", "documents", "email", "hello"];
 
 const CROSS_MODULE_MESSAGE =
   "Modules are sold separately and must work alone — a module may not import another module. " +

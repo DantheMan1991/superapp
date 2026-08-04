@@ -442,6 +442,27 @@
       "when": 1785812487698,
       "tag": "0062_parties_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1785815033327,
+      "tag": "0063_vengeful_loki",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1785815075399,
+      "tag": "0064_crm_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1785815080291,
+      "tag": "0065_parties_drop_compat",
+      "breakpoints": true
     }
   ]
 }

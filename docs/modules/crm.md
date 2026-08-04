@@ -14,6 +14,29 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — Slice 1: records, connections, and record visibility (branch `claude/crm-party-records`)
+
+The module becomes `available`. First surface: the records list, a record page,
+and the connections between people and companies.
+
+- `crm_party_details` — 1:1 with a party, holding what CRM knows: assigned
+  owner, lifecycle stage, source, notes, visibility, and the `custom` jsonb bag
+  slice 2 fills. A party with no row here is one Accounting created and CRM has
+  never been asked about, which is a normal state and not a gap to backfill.
+- `crm_affiliations` — a person's connection to an organization, with a title
+  and a date range. A join table rather than a column so a former employer
+  survives the person changing jobs.
+- **Record visibility, in RLS.** `members` (default) or `restricted`
+  (tenant owners only), reusing `app_current_tenant_role()` from 0024.
+  Affiliations INHERIT it rather than storing a second copy.
+- The records list is a LEFT JOIN over every party, so a tenant who has been
+  invoicing for months does not open CRM to an empty product.
+- **0061's compatibility triggers are dropped** (`0065`). Every insert site now
+  routes through `src/lib/parties/`, so the single door is true rather than
+  merely claimed.
+- `npm run db:seed -- --dev` gained a `--dev` flag mirroring `db:migrate`'s. A
+  module seeded only on production is one nobody can look at before shipping.
+
 ### 2026-08-03 — Slice 0: the party spine (branch `claude/crm-party-spine`)
 
 The identity table CRM and Accounting share, added with no CRM UI and no
@@ -41,6 +64,8 @@ behaviour change.
 | `parties` | The shared identity spine — one row per person or organization a tenant deals with | **Written by two modules**, so it lives at `src/lib/parties/` and not inside either. FORCE RLS, `member_all` policy scoped by `app_current_tenant()`: ordinary business data, ordinary tenant scoping. Composite unique `(tenant_id, id)` so every referencing FK can be tenant-aware. `kind` is `person` \| `organization`; `given_name`/`family_name` are NULL for organizations. `display_name` is authoritative, never derived — see Decisions |
 | `customers.party_id` | The AR role's link to its party | Nullable → backfilled → `NOT NULL`. Composite FK. `UNIQUE (tenant_id, party_id)`: a party may hold the customer role at most once |
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
+| `crm_party_details` | What CRM knows about a party — 1:1, created when CRM is first asked about the record | FORCE RLS with a **visibility term**: `visibility = 'members' OR app_current_tenant_role() = 'owner'`, in USING **and** WITH CHECK. `owner_clerk_user_id` is an attribution and grants nothing — see Decisions. `custom` jsonb is the slice 2 extension bag (P2), `lifecycle_stage`/`source` are open taxonomies (P1) with no CHECK. Composite FK to `parties`, ON DELETE CASCADE. Unique on `(tenant, party)` is what makes "the CRM record for this party" a lookup |
+| `crm_affiliations` | A person's connection to an organization, current or former | **Inherits visibility** through a positive `EXISTS` against `crm_party_details` at both ends — no second copy of the flag, so no drift. The positive spelling is load-bearing; see Decisions. Two partial uniques: one current connection per pair, one primary per person. CHECK that the two ends differ |
 
 Migrations: `0059` (tables/columns), `0060_parties_rls.sql` (custom: policies),
 `0061_parties_compat.sql` (custom: the compatibility triggers),
@@ -52,10 +77,23 @@ Migrations: `0059` (tables/columns), `0060_parties_rls.sql` (custom: policies),
   version enforcement, and the normalization rules. Takes the caller's `tx`;
   never opens its own scope and never `withSystem`. **Deliberately has no
   `requireModuleEnabled` call** — it serves tenants who bought Accounting and
-  not CRM.
+  not CRM. `names.ts` is pure and free of `server-only`, so the normalization
+  rules are tested without a database (`tests/parties.test.ts`).
+- `src/lib/parties/role-sync.ts` — the "both names exist" bridge while
+  `customers.name` and `parties.display_name` are both stored. Temporary by
+  design; the header says what has to move before it goes.
 - `src/modules/accounting/invoicing/customers.ts` and `payables/vendors.ts` —
   create paths route through the service so a role row and its party are born in
-  one transaction.
+  one transaction; a rename carries onto the party.
+- `src/modules/crm/party-ops.ts` — CRM's operations. Never writes `parties`
+  itself; identity goes through the shared service and CRM's own tables are
+  written here.
+- `src/modules/crm/actions.ts` — every `withTenant` passes `{ role: ctx.role }`
+  without exception, because `crm_party_details` is visibility-bearing.
+- `src/modules/crm/CrmModule.tsx` — the records list, and it IS the module home
+  rather than an overview linking to one.
+- Routes: `/dashboard/m/crm`, `/dashboard/m/crm/records/new`,
+  `/dashboard/m/crm/records/[partyId]`.
 
 ## Decisions & gotchas
 
@@ -120,6 +158,39 @@ starts slipping, the fix is a lint rule, not a comment.
 **Never call an organization an "Account."** `accounts` is the chart of
 accounts. That collision would be permanent and unfixable by rename.
 
+**"Owner" means two things, and they are kept structurally apart.**
+`crm_party_details.owner_clerk_user_id` is the person a record is ASSIGNED to —
+an attribution that grants nothing. `app.tenant_role = 'owner'` is the
+business's owner, and it is the only thing visibility consults. A rep does not
+see a restricted record because their name is on it, and a colleague does not
+lose an ordinary one because it is not. The visibility enum is spelled
+`restricted` rather than Documents' `owners` for exactly this reason: a value
+called `owners` would read as "the rep who owns it". One inconsistent word is
+cheaper than the collision.
+
+**Affiliation visibility must be inherited POSITIVELY, and the negative
+spelling fails open.** The obvious policy is "hide this row if either endpoint
+is restricted" — `NOT EXISTS (… WHERE visibility = 'restricted')`. That is
+backwards, because **RLS applies inside policy subqueries**: a staff member
+cannot see the restricted row, so the inner query finds nothing, so `NOT EXISTS`
+is true, so the connection is shown to precisely the person it was hidden from.
+Stated positively — visible only if BOTH endpoints resolve to a
+`crm_party_details` row the caller can see — the same mechanism works for us,
+and the policy never mentions `restricted` at all. Same trick
+`document_versions` uses. There is a test for both directions.
+
+**`restricted` hides what CRM knows, not that the business deals with
+somebody.** The party stays visible to staff, because the identity is shared
+with Accounting where the same person can already see it as a customer. Hiding
+it outright would mean a visibility term on `parties`, which would hide
+customers from accounting staff. The record page says this in words rather than
+leaving a blank panel.
+
+**A restricted record and a never-worked one look identical to staff**, on
+purpose — `details` is null in both cases. Distinguishing them would turn the
+list into a way to discover which records are restricted, which is the same
+probe the mail template values are designed to refuse.
+
 ## Open items
 
 - **Contact points and addresses are deferred, deliberately.**
@@ -141,6 +212,22 @@ accounts. That collision would be permanent and unfixable by rename.
   a paying client to pull it in. The founder directed this build ahead of that on
   2026-08-03. Recorded here so a future session reads it as a decision rather
   than as precedent.
-- Slices 1–11 (module + party records, custom fields, pipelines & deals,
-  timeline & tasks, mail extension, ownership & visibility, dedup & merge, views,
-  reporting, automation, AI) are planned and unbuilt.
+- **No dedup warning yet.** Nothing stops two records for the same company being
+  created by hand. The cheap version — warn on a matching normalized email or
+  phone at create time — needs contact points to exist first, so it lands with
+  them rather than in slice 7's full merge tool.
+- **The records list caps at 500** with a line saying so, and there is no paging
+  or cursor. Fine at current scale; slice 8's saved views is where this gets
+  solved properly rather than by raising the number.
+- **`crm_party_details.custom` is written by nothing.** The column and its
+  `NOT NULL DEFAULT '{}'` exist so slice 2 needs no migration.
+- **Affiliations assume person→organization.** The kinds are checked in
+  `party-ops.ts` rather than by a constraint, because the constraint would have
+  to reach into another table and because a sole trader is a real edge. A
+  company-to-company relationship (parent, subsidiary, joint venture) is a
+  different shape and is not modelled.
+- **No `updated_at` trigger anywhere in CRM** — the ops layer sets it. Consistent
+  with the rest of the schema, and worth knowing before writing a raw UPDATE.
+- Slices 2–11 (custom fields, pipelines & deals, timeline & tasks, mail
+  extension, explicit collaborators, dedup & merge, saved views, reporting,
+  automation, AI) are planned and unbuilt.

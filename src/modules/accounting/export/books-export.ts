@@ -96,6 +96,12 @@ export async function gatherBooksExport(
     customers: await tx.query.customers.findMany({
       where: eq(schema.customers.tenantId, tid),
     }),
+    // The email and phone the two role CSVs carry. Whole-tenant rather than
+    // joined per role row: a party that is both a customer and a vendor would
+    // otherwise be fetched twice, and the builder indexes by party anyway.
+    partyContactPoints: await tx.query.partyContactPoints.findMany({
+      where: eq(schema.partyContactPoints.tenantId, tid),
+    }),
     invoices: await tx.query.invoices.findMany({
       where: eq(schema.invoices.tenantId, tid),
       orderBy: asc(schema.invoices.issueDate),

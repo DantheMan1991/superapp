@@ -2,11 +2,8 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Customer } from "@/db/schema";
-import {
-  createPartyForRole,
-  syncPartyName,
-  syncRoleContactPoints,
-} from "@/lib/parties/role-sync";
+import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
+import { setPreferredContactValue } from "@/lib/parties/contacts";
 import { LedgerError, type LedgerCtx } from "../core";
 
 /**
@@ -17,6 +14,13 @@ import { LedgerError, type LedgerCtx } from "../core";
  * both a customer and a vendor is one party holding two role rows. Every write
  * here goes through `@/lib/parties`, which is the single door onto that table —
  * this module does not INSERT or UPDATE `parties` itself.
+ *
+ * `email` AND `phone` ARE NOT COLUMNS ON THIS TABLE AND HAVE NOT BEEN SINCE
+ * 0075. They are still part of `CustomerInput` because the customer form still
+ * asks for them; they now land on `party_contact_points`, where the CRM and the
+ * mail composer read the same rows. `address` and `notes` stay here — postal
+ * addresses have no shared table yet, and that is recorded as deferred rather
+ * than forgotten in docs/modules/crm.md.
  */
 
 export async function listCustomers(tx: Tx, tenantId: string): Promise<Customer[]> {
@@ -43,10 +47,33 @@ export async function loadCustomer(
 
 export interface CustomerInput {
   name: string;
+  /** Stored on the party, not here. Empty string clears; undefined leaves. */
   email?: string;
+  /** Same. */
   phone?: string;
   address?: string;
   notes?: string;
+}
+
+/**
+ * The two contact fields the customer form carries, written to the party.
+ *
+ * `billing` labels the email because that is what an AR address is; the phone
+ * is `main`, matching what the 0074 backfill wrote, so a number recorded before
+ * this slice and one recorded after are not distinguishable by label alone.
+ */
+async function writeCustomerContacts(
+  tx: Tx,
+  tenantId: string,
+  partyId: string,
+  input: Pick<CustomerInput, "email" | "phone">,
+): Promise<void> {
+  await setPreferredContactValue(tx, tenantId, partyId, "email", input.email, {
+    label: "billing",
+  });
+  await setPreferredContactValue(tx, tenantId, partyId, "phone", input.phone, {
+    label: "main",
+  });
 }
 
 export async function createCustomer(
@@ -58,21 +85,13 @@ export async function createCustomer(
   // without a party is not a state this code can reach. 0061's trigger is the
   // backstop for writers that predate this line, not a substitute for it.
   const party = await createPartyForRole(tx, ctx.tenantId, input.name);
-  // Additive: the address contributes a contact point, and clearing it later
-  // never removes one. See syncRoleContactPoints.
-  await syncRoleContactPoints(tx, ctx.tenantId, party.id, {
-    email: input.email,
-    phone: input.phone,
-    label: "billing",
-  });
+  await writeCustomerContacts(tx, ctx.tenantId, party.id, input);
   const [row] = await tx
     .insert(schema.customers)
     .values({
       tenantId: ctx.tenantId,
       partyId: party.id,
       name: input.name,
-      email: input.email ?? "",
-      phone: input.phone ?? "",
       address: input.address ?? "",
       notes: input.notes ?? "",
     })
@@ -90,8 +109,6 @@ export async function updateCustomer(
     .update(schema.customers)
     .set({
       ...(args.patch.name !== undefined ? { name: args.patch.name } : {}),
-      ...(args.patch.email !== undefined ? { email: args.patch.email } : {}),
-      ...(args.patch.phone !== undefined ? { phone: args.patch.phone } : {}),
       ...(args.patch.address !== undefined ? { address: args.patch.address } : {}),
       ...(args.patch.notes !== undefined ? { notes: args.patch.notes } : {}),
       version: args.expectedVersion + 1,
@@ -114,11 +131,7 @@ export async function updateCustomer(
   if (args.patch.name !== undefined) {
     await syncPartyName(tx, ctx.tenantId, rows[0].partyId, args.patch.name);
   }
-  await syncRoleContactPoints(tx, ctx.tenantId, rows[0].partyId, {
-    email: args.patch.email,
-    phone: args.patch.phone,
-    label: "billing",
-  });
+  await writeCustomerContacts(tx, ctx.tenantId, rows[0].partyId, args.patch);
   return { before, after: rows[0] };
 }
 

@@ -117,3 +117,16 @@ export function preferredContact<
   const ofKind = points.filter((p) => p.kind === kind);
   return ofKind.find((p) => p.isPrimary) ?? ofKind[0] ?? null;
 }
+
+/**
+ * The same answer as a string: what a form with ONE email box shows, or "".
+ *
+ * Lives here rather than beside the write path because the readers are pages
+ * and a CSV builder that must stay free of `server-only` — `export-csv.ts`
+ * calls itself the testable seam and is tested without a database.
+ */
+export function preferredContactValue<
+  T extends { kind: PartyContactKind; isPrimary: boolean; value: string },
+>(points: readonly T[], kind: PartyContactKind): string {
+  return preferredContact(points, kind)?.value ?? "";
+}

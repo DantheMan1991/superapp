@@ -2,11 +2,8 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Vendor } from "@/db/schema";
-import {
-  createPartyForRole,
-  syncPartyName,
-  syncRoleContactPoints,
-} from "@/lib/parties/role-sync";
+import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
+import { setPreferredContactValue } from "@/lib/parties/contacts";
 import { LedgerError, type LedgerCtx } from "../core";
 
 /**
@@ -19,6 +16,12 @@ import { LedgerError, type LedgerCtx } from "../core";
  * business that invoices us AND buys from us is now ONE party with a customer
  * row and a vendor row, which is the fact these two tables could never state.
  * All `parties` writes go through `@/lib/parties`, the single door.
+ *
+ * The mirror extends to contacts: `email` and `phone` left this table in 0075
+ * and live on `party_contact_points`. See `customers.ts` for the reasoning,
+ * which is the same reasoning — and note the consequence the shared spine
+ * makes true, that the one business paid AND invoiced now has ONE main email
+ * rather than two columns free to disagree.
  */
 
 export async function loadVendor(
@@ -52,11 +55,36 @@ export async function listVendors(
 
 export interface VendorInput {
   name: string;
+  /** Stored on the party, not here. Empty string clears; undefined leaves. */
   email?: string;
+  /** Same. */
   phone?: string;
   address?: string;
   notes?: string;
   defaultExpenseAccountId?: string | null;
+}
+
+/**
+ * The vendor form's two contact fields, written to the party.
+ *
+ * `accounts` labels the email — an AP address is whoever sends the invoices —
+ * and the phone is `main`, matching the 0074 backfill. Note the asymmetry with
+ * `updateVendor`'s other fields: this takes `email`/`phone` exactly as given,
+ * so `undefined` leaves the party's address alone rather than clearing it. The
+ * update path passes `?? ""` on purpose; see the call site.
+ */
+async function writeVendorContacts(
+  tx: Tx,
+  tenantId: string,
+  partyId: string,
+  input: Pick<VendorInput, "email" | "phone">,
+): Promise<void> {
+  await setPreferredContactValue(tx, tenantId, partyId, "email", input.email, {
+    label: "accounts",
+  });
+  await setPreferredContactValue(tx, tenantId, partyId, "phone", input.phone, {
+    label: "main",
+  });
 }
 
 async function assertDefaultAccount(
@@ -84,19 +112,13 @@ export async function createVendor(
   await assertDefaultAccount(tx, ctx.tenantId, input.defaultExpenseAccountId);
   // Identity and role born in one transaction — see createCustomer.
   const party = await createPartyForRole(tx, ctx.tenantId, input.name);
-  await syncRoleContactPoints(tx, ctx.tenantId, party.id, {
-    email: input.email,
-    phone: input.phone,
-    label: "accounts",
-  });
+  await writeVendorContacts(tx, ctx.tenantId, party.id, input);
   const [row] = await tx
     .insert(schema.vendors)
     .values({
       tenantId: ctx.tenantId,
       partyId: party.id,
       name: input.name,
-      email: input.email ?? "",
-      phone: input.phone ?? "",
       address: input.address ?? "",
       notes: input.notes ?? "",
       defaultExpenseAccountId: input.defaultExpenseAccountId ?? null,
@@ -116,8 +138,6 @@ export async function updateVendor(
     .update(schema.vendors)
     .set({
       name: args.patch.name,
-      email: args.patch.email ?? "",
-      phone: args.patch.phone ?? "",
       address: args.patch.address ?? "",
       notes: args.patch.notes ?? "",
       defaultExpenseAccountId: args.patch.defaultExpenseAccountId ?? null,
@@ -139,10 +159,15 @@ export async function updateVendor(
   // step. `VendorInput.name` is required, so unlike the customer path there is
   // no "was it edited?" to test.
   await syncPartyName(tx, ctx.tenantId, rows[0].partyId, args.patch.name);
-  await syncRoleContactPoints(tx, ctx.tenantId, rows[0].partyId, {
-    email: args.patch.email,
-    phone: args.patch.phone,
-    label: "accounts",
+  // `?? ""` rather than passing through, because `VendorInput` is a WHOLE
+  // record here rather than a patch — the dialog sends every field on every
+  // save, so a missing email means the box was empty and the address is meant
+  // to go. The customer path is a genuine partial and passes `undefined`
+  // through untouched, which is the same distinction spelled two ways because
+  // the two forms genuinely differ.
+  await writeVendorContacts(tx, ctx.tenantId, rows[0].partyId, {
+    email: args.patch.email ?? "",
+    phone: args.patch.phone ?? "",
   });
   return { before, after: rows[0] };
 }

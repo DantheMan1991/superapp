@@ -33,7 +33,15 @@ import {
   createRecurringInvoice,
   generateRecurringInvoices,
 } from "../src/modules/accounting/invoicing/recurring";
-import { createCustomer } from "../src/modules/accounting/invoicing/customers";
+import {
+  createCustomer,
+  updateCustomer,
+} from "../src/modules/accounting/invoicing/customers";
+import {
+  addContactPoint,
+  listContactPoints,
+} from "../src/lib/parties/contacts";
+import { preferredContactValue } from "../src/lib/parties/contact-values";
 import {
   createInvoiceDraft,
   deleteInvoiceDraft,
@@ -206,6 +214,142 @@ d("invoicing (DB)", () => {
   afterAll(async () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
+    });
+  });
+
+  /**
+   * THE CUSTOMER FORM'S EMAIL AND PHONE, after 0075 removed the columns they
+   * used to be.
+   *
+   * These four cases are the contract of `setPreferredContactValue` reached
+   * through the accounting path that actually calls it. The one that earns its
+   * keep is the last: while the columns existed the sync was ADDITIVE and
+   * clearing the box deliberately removed nothing, and the moment the box
+   * became the contact point itself that behaviour turned from a safeguard into
+   * a form that silently discards what somebody typed. If a future change makes
+   * clearing a no-op again, this is the test that fails.
+   */
+  describe("customer contact details live on the party", () => {
+    async function pointsOf(customerId: string) {
+      return withTenant(tenantId, async (tx) => {
+        const customer = await tx.query.customers.findFirst({
+          where: and(
+            eq(schema.customers.tenantId, tenantId),
+            eq(schema.customers.id, customerId),
+          ),
+        });
+        return listContactPoints(tx, tenantId, customer!.partyId);
+      });
+    }
+
+    it("a new customer's address becomes a contact point on its party", async () => {
+      const customer = await withTenant(tenantId, (tx) =>
+        createCustomer(tx, owner, {
+          name: "Contact Co",
+          email: "Billing@Contact.example",
+          phone: "(555) 010-2030",
+        }),
+      );
+
+      const points = await pointsOf(customer.id);
+      const email = points.find((p) => p.kind === "email")!;
+      expect(email.value).toBe("Billing@Contact.example");
+      // As typed for the person, matchable for the machine.
+      expect(email.normalizedValue).toBe("billing@contact.example");
+      expect(email.isPrimary).toBe(true);
+      expect(email.label).toBe("billing");
+      expect(
+        points.find((p) => p.kind === "phone")?.normalizedValue,
+      ).toBe("5550102030");
+    });
+
+    it("editing the address changes that point rather than adding a second", async () => {
+      const customer = await withTenant(tenantId, (tx) =>
+        createCustomer(tx, owner, {
+          name: "Correction Co",
+          email: "wrong@correction.example",
+        }),
+      );
+      await withTenant(tenantId, (tx) =>
+        updateCustomer(tx, owner, {
+          customerId: customer.id,
+          expectedVersion: customer.version,
+          patch: { email: "right@correction.example" },
+        }),
+      );
+
+      const emails = (await pointsOf(customer.id)).filter(
+        (p) => p.kind === "email",
+      );
+      // Correcting a typo is one address, not two. A second row here would be
+      // the additive sync coming back.
+      expect(emails).toHaveLength(1);
+      expect(emails[0].value).toBe("right@correction.example");
+      expect(emails[0].isPrimary).toBe(true);
+    });
+
+    it("an edit that does not mention the address leaves it alone", async () => {
+      const customer = await withTenant(tenantId, (tx) =>
+        createCustomer(tx, owner, {
+          name: "Rename Co",
+          email: "keep@rename.example",
+        }),
+      );
+      await withTenant(tenantId, (tx) =>
+        updateCustomer(tx, owner, {
+          customerId: customer.id,
+          expectedVersion: customer.version,
+          // `undefined` is not `""`: this is the shape a partial patch takes
+          // when only the name was edited.
+          patch: { name: "Rename Co Ltd" },
+        }),
+      );
+
+      expect(preferredContactValue(await pointsOf(customer.id), "email")).toBe(
+        "keep@rename.example",
+      );
+    });
+
+    it("clearing the box removes THAT address and no other", async () => {
+      const customer = await withTenant(tenantId, (tx) =>
+        createCustomer(tx, owner, {
+          name: "Clearing Co",
+          email: "billing@clearing.example",
+          phone: "555 111 2222",
+        }),
+      );
+      // A colleague adds a second address somewhere else — in CRM, on the same
+      // record. It is not the one the accounting form is showing.
+      await withTenant(tenantId, async (tx) => {
+        const c = await tx.query.customers.findFirst({
+          where: and(
+            eq(schema.customers.tenantId, tenantId),
+            eq(schema.customers.id, customer.id),
+          ),
+        });
+        await addContactPoint(tx, tenantId, c!.partyId, {
+          kind: "email",
+          value: "aoife@clearing.example",
+          label: "mobile",
+        });
+      });
+
+      await withTenant(tenantId, (tx) =>
+        updateCustomer(tx, owner, {
+          customerId: customer.id,
+          expectedVersion: customer.version,
+          patch: { email: "" },
+        }),
+      );
+
+      const after = await pointsOf(customer.id);
+      const emails = after.filter((p) => p.kind === "email");
+      expect(emails.map((p) => p.value)).toEqual(["aoife@clearing.example"]);
+      // The survivor inherits primary, so the record is not left with an email
+      // and no main one.
+      expect(emails[0].isPrimary).toBe(true);
+      // And the phone is a different question that nobody asked.
+      expect(preferredContactValue(after, "phone")).toBe("555 111 2222");
     });
   });
 

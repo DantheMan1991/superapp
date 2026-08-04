@@ -186,6 +186,40 @@ describe("rankContacts", () => {
     expect(ranked).toHaveLength(1);
   });
 
+  it("collapses the same address contributed by TWO record sources", () => {
+    // Accounting and CRM both read `party_contact_points` since 0075, so a
+    // customer who is also a CRM record is contributed twice with the same
+    // address and the same origin. The composer must show one row, and it must
+    // show the accounting sublabel — the registry lists that extension first,
+    // and "Customer" is the more useful of the two true answers about a
+    // business address.
+    //
+    // Worth pinning rather than assuming: the dossier previously recorded this
+    // as a visible duplicate awaiting the contract slice. It never was one.
+    // What the overlap actually decides is the SUBLABEL, and it decides it by
+    // registry order rather than by which query finished first.
+    const ranked = rankContacts(
+      [
+        suggestion({
+          email: "info@probe.example",
+          origin: "records",
+          name: "Probe Construction",
+          sublabel: "Customer",
+        }),
+        suggestion({
+          email: "info@probe.example",
+          origin: "records",
+          name: "Probe Construction",
+          sublabel: "Company · billing",
+        }),
+      ],
+      "probe",
+      10,
+    );
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0].sublabel).toBe("Customer");
+  });
+
   it("keeps the NAME from whichever source has one", () => {
     // A recent correspondent is often a bare address, while the customer record
     // for the same address carries the business's real name. Showing

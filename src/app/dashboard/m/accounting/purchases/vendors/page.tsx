@@ -11,6 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { listContactPointsFor } from "@/lib/parties/contacts";
+import { preferredContactValue } from "@/lib/parties/contact-values";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listVendors } from "@/modules/accounting/payables/vendors";
 import { PurchasesNav } from "../purchases-nav";
@@ -32,8 +34,23 @@ export default async function VendorsPage() {
       ),
       orderBy: (a, { asc }) => [asc(a.code)],
     });
-    return { vendors, accounts };
+    // The vendor's email and phone are contact points on its party since 0075
+    // — one query for the page rather than one per row.
+    const contacts = await listContactPointsFor(
+      tx,
+      tenantId,
+      vendors.map((v) => v.partyId),
+    );
+    return { vendors, accounts, contacts };
   });
+
+  const reach = (partyId: string) => {
+    const points = data.contacts.get(partyId) ?? [];
+    return {
+      email: preferredContactValue(points, "email"),
+      phone: preferredContactValue(points, "phone"),
+    };
+  };
 
   const accountName = new Map(
     data.accounts.map((a) => [a.id, `${a.code} · ${a.name}`]),
@@ -79,7 +96,9 @@ export default async function VendorsPage() {
               <TableRow key={vendor.id}>
                 <TableCell className="font-medium">{vendor.name}</TableCell>
                 <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
-                  {[vendor.email, vendor.phone].filter(Boolean).join(" · ") || "—"}
+                  {[reach(vendor.partyId).email, reach(vendor.partyId).phone]
+                    .filter(Boolean)
+                    .join(" · ") || "—"}
                 </TableCell>
                 <TableCell className="hidden text-sm md:table-cell">
                   {vendor.defaultExpenseAccountId
@@ -100,8 +119,8 @@ export default async function VendorsPage() {
                       id: vendor.id,
                       version: vendor.version,
                       name: vendor.name,
-                      email: vendor.email,
-                      phone: vendor.phone,
+                      email: reach(vendor.partyId).email,
+                      phone: reach(vendor.partyId).phone,
                       address: vendor.address,
                       notes: vendor.notes,
                       defaultExpenseAccountId: vendor.defaultExpenseAccountId,

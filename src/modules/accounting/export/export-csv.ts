@@ -20,12 +20,14 @@ import type {
   JournalEntry,
   JournalLine,
   LineDimension,
+  PartyContactPoint,
   PeriodClose,
   Reconciliation,
   ReconciliationLine,
   RecurringInvoice,
   Vendor,
 } from "@/db/schema";
+import { preferredContactValue } from "@/lib/parties/contact-values";
 
 /**
  * Full-books export: pure per-table CSV builders (the testable seam).
@@ -47,6 +49,16 @@ export interface BooksData {
   closeNotes: CloseNote[];
   auditLog: AuditEntry[];
   customers: Customer[];
+  /**
+   * Every contact point on every party this tenant's role rows point at.
+   *
+   * Here because `customers.email` / `.phone` stopped existing in 0075 and the
+   * two CSVs still carry those columns — an export is a file somebody's
+   * accountant already has a process for, and dropping a column out of one is a
+   * change to their end, not ours. The values are the party's main email and
+   * main phone, which is what the retired columns held.
+   */
+  partyContactPoints: PartyContactPoint[];
   invoices: Invoice[];
   invoiceLines: InvoiceLine[];
   invoicePayments: InvoicePayment[];
@@ -106,6 +118,20 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     id ? (accountById.get(id)?.name ?? "") : "";
   const custName = (id: string): string => customerById.get(id)?.name ?? "";
   const vendName = (id: string): string => vendorById.get(id)?.name ?? "";
+
+  const contactsByParty = new Map<string, PartyContactPoint[]>();
+  for (const point of data.partyContactPoints) {
+    const list = contactsByParty.get(point.partyId);
+    if (list) list.push(point);
+    else contactsByParty.set(point.partyId, [point]);
+  }
+  const reach = (partyId: string) => {
+    const points = contactsByParty.get(partyId) ?? [];
+    return {
+      email: preferredContactValue(points, "email"),
+      phone: preferredContactValue(points, "phone"),
+    };
+  };
 
   const files: BooksCsvFile[] = [];
 
@@ -241,7 +267,8 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
       "Customers",
       ["id", "name", "email", "phone", "address", "notes", "active"],
       data.customers.map((c) => [
-        c.id, c.name, c.email, c.phone, c.address, c.notes, String(c.isActive),
+        c.id, c.name, reach(c.partyId).email, reach(c.partyId).phone,
+        c.address, c.notes, String(c.isActive),
       ]),
     ),
   );
@@ -305,7 +332,8 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
       "Vendors",
       ["id", "name", "email", "phone", "address", "notes", "default_expense_account", "active"],
       data.vendors.map((v) => [
-        v.id, v.name, v.email, v.phone, v.address, v.notes,
+        v.id, v.name, reach(v.partyId).email, reach(v.partyId).phone,
+        v.address, v.notes,
         acctCode(v.defaultExpenseAccountId), String(v.isActive),
       ]),
     ),

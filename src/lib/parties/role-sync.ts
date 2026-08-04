@@ -3,10 +3,9 @@ import type { Tx } from "@/db";
 import type { Party } from "@/db/schema";
 import { createParty, loadParty, updateParty } from "./index";
 import { normalizeName } from "./names";
-import { addContactPoint } from "./contacts";
 
 /**
- * The bridge between a role row that carries its own name and the party that
+ * The bridge between a role row that carries its own NAME and the party that
  * now owns that identity. TEMPORARY BY DESIGN — see the last paragraph.
  *
  * `customers.name` and `vendors.name` predate `parties.display_name`, so for
@@ -15,13 +14,22 @@ import { addContactPoint } from "./contacts";
  * then show a name the invoice does not. So the role's writer calls through
  * here and the two stay in step.
  *
- * WHY THE DUPLICATION IS NOT SIMPLY REMOVED NOW. Dropping `customers.name`
+ * CONTACT DETAILS USED TO BE BRIDGED HERE TOO, AND DELIBERATELY ARE NOT ANY
+ * MORE. `syncRoleContactPoints` copied `customers.email` onto the party
+ * additively while both stores existed; the contract migration (0075) dropped
+ * those columns, so there is nothing left to bridge and a second store to
+ * disagree with. The accounting forms now edit `party_contact_points` directly
+ * through `setPreferredContactValue`. That function's header records why the
+ * additive rule went with the column it was protecting.
+ *
+ * WHY THE NAME DUPLICATION IS NOT SIMPLY REMOVED NOW. Dropping `customers.name`
  * means rewriting every read site — invoices, statements, the aging report, the
  * mail extension's search and its `{{invoice.customer_name}}` placeholder, the
  * CSV and full-books exports. That is a large change with no user-visible
  * benefit, landing in the same PR as a live migration of the AR and AP tables.
- * Expand, deploy, contract: this file is the "both exist" stage, and the
- * contract stage is a slice of its own once every reader has been moved.
+ * Expand, deploy, contract: for names this file is still the "both exist"
+ * stage, and their contract stage is a slice of its own once every reader has
+ * been moved. Contacts have now been through all three.
  */
 
 /**
@@ -77,47 +85,4 @@ export async function syncPartyName(
     expectedVersion: party.version,
     patch: { displayName: next },
   });
-}
-
-/**
- * Carry a role row's email and phone onto the party as contact points.
- *
- * ADDITIVE ONLY, and that asymmetry with `syncPartyName` is the design. A name
- * is one fact and the role's copy is authoritative, so a rename overwrites. A
- * way of reaching somebody is one of SEVERAL — the whole reason this table
- * exists — so an accounting edit contributes an address and never removes one.
- *
- * The concrete failure that rules out mirroring: somebody clears
- * `customers.email` because the invoice should go elsewhere, and a mirroring
- * sync silently deletes the mobile number a colleague added in CRM last week.
- * Deleting a contact point is a deliberate act with its own control.
- *
- * `addContactPoint` is a no-op when the value is already there and refuses an
- * unusable one, so this is safe to call on every write without testing first.
- * A blank or malformed accounting field simply contributes nothing rather than
- * failing the save it is attached to.
- */
-export async function syncRoleContactPoints(
-  tx: Tx,
-  tenantId: string,
-  partyId: string,
-  role: { email?: string | null; phone?: string | null; label: string },
-): Promise<void> {
-  for (const [kind, raw] of [
-    ["email", role.email],
-    ["phone", role.phone],
-  ] as const) {
-    if (!raw || raw.trim().length === 0) continue;
-    try {
-      await addContactPoint(tx, tenantId, partyId, {
-        kind,
-        value: raw,
-        label: role.label,
-      });
-    } catch {
-      // An unusable value is not a reason to fail the invoice-side save that
-      // triggered this. The accounting column keeps whatever was typed; the
-      // party simply gains no contact point from it.
-    }
-  }
 }

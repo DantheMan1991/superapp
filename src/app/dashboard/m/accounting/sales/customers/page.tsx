@@ -2,6 +2,8 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
+import { listContactPointsFor } from "@/lib/parties/contacts";
+import { preferredContactValue } from "@/lib/parties/contact-values";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
@@ -53,8 +55,24 @@ export default async function CustomersPage() {
         ),
       )
       .groupBy(schema.invoices.customerId);
-    return { customers, invoiced, paid };
+    // One query for every customer's addresses rather than one per row. The
+    // contact points ARE the email and phone this page shows — the columns
+    // were retired in 0075.
+    const contacts = await listContactPointsFor(
+      tx,
+      ctx.tenant.id,
+      customers.map((c) => c.partyId),
+    );
+    return { customers, invoiced, paid, contacts };
   });
+
+  const reach = (partyId: string) => {
+    const points = data.contacts.get(partyId) ?? [];
+    return {
+      email: preferredContactValue(points, "email"),
+      phone: preferredContactValue(points, "phone"),
+    };
+  };
 
   const paidOf = new Map(data.paid.map((p) => [p.customerId, toSafeCents(p.paid)]));
   const openOf = new Map(
@@ -99,7 +117,9 @@ export default async function CustomersPage() {
                       {!c.isActive && <Badge variant="outline">inactive</Badge>}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {[c.email, c.phone].filter(Boolean).join(" · ") || "—"}
+                      {[reach(c.partyId).email, reach(c.partyId).phone]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
@@ -113,8 +133,8 @@ export default async function CustomersPage() {
                         id: c.id,
                         version: c.version,
                         name: c.name,
-                        email: c.email,
-                        phone: c.phone,
+                        email: reach(c.partyId).email,
+                        phone: reach(c.partyId).phone,
                         address: c.address,
                         notes: c.notes,
                         isActive: c.isActive,

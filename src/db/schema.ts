@@ -529,10 +529,12 @@ export const dimensionMembers = pgTable(
  * A company has several offices and billing addresses; a person has a work
  * address and a personal one. A single `email` here would be canonical within a
  * week and would then have to be unpicked from every read site that had come to
- * rely on it. So this table commits to nothing: accounting keeps reading
- * `customers.email` unchanged, and typed multi-value `party_contact_points` /
- * `party_addresses` arrive as a later shared slice. Do not add one as a
- * convenience — see docs/modules/crm.md.
+ * rely on it. So this table commits to nothing: `party_contact_points` is the
+ * typed multi-value answer and is now the ONLY store for an email or a phone —
+ * `customers.email` and `vendors.email` were retired in 0075. A postal address
+ * is still `customers.address`; `party_addresses` is deferred, deliberately, and
+ * has the same shape waiting. Do not add a column here as a convenience — see
+ * docs/modules/crm.md.
  * ---------------------------------------------------------------------- */
 
 export const partyKind = pgEnum("party_kind", ["person", "organization"]);
@@ -603,6 +605,11 @@ export const parties = pgTable(
  * matchable form means the person sees what they typed and the machine compares
  * something that can actually be compared — the alternative is normalizing at
  * every call site, which is the same class of mistake as formatting money twice.
+ *
+ * SINCE 0075 THIS IS THE ONLY PLACE AN EMAIL OR PHONE IS STORED for a customer
+ * or a vendor. The columns it was backfilled from are gone, so nothing has to
+ * decide which copy is authoritative and the invoice screen and the CRM cannot
+ * show different answers.
  */
 export const partyContactKind = pgEnum("party_contact_kind", [
   "email",
@@ -706,8 +713,17 @@ export const customers = pgTable(
      */
     partyId: uuid("party_id").notNull(),
     name: text("name").notNull(),
-    email: text("email").notNull().default(""),
-    phone: text("phone").notNull().default(""),
+    /**
+     * NO `email` OR `phone`. They were dropped in 0075 — the contract half of
+     * the expand/contract that `party_contact_points` began — because a way of
+     * reaching a business is one of several and a column can hold one. The
+     * customer form still asks for them and writes them there.
+     *
+     * `address` and `notes` STAY, and the asymmetry is deliberate rather than
+     * an unfinished job: nothing yet reads a postal address that this does not
+     * serve, and `party_addresses` is recorded as deferred in
+     * docs/modules/crm.md rather than built with no reader.
+     */
     address: text("address").notNull().default(""),
     notes: text("notes").notNull().default(""),
     isActive: boolean("is_active").notNull().default(true),
@@ -3431,8 +3447,7 @@ export const vendors = pgTable(
      */
     partyId: uuid("party_id").notNull(),
     name: text("name").notNull(),
-    email: text("email").notNull().default(""),
-    phone: text("phone").notNull().default(""),
+    /** No `email` or `phone` since 0075 — see the note on `customers`. */
     address: text("address").notNull().default(""),
     notes: text("notes").notNull().default(""),
     /** AI-free prefill for this vendor's bill lines. */

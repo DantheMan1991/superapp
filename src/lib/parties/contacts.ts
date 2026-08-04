@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Party, PartyContactKind, PartyContactPoint } from "@/db/schema";
 import { PartyError } from "./errors";
-import { normalizeContactValue } from "./contact-values";
+import { normalizeContactValue, preferredContact } from "./contact-values";
 
 /**
  * Contact points — part of the party subsystem, and subject to all three of its
@@ -282,6 +282,100 @@ export async function deleteContactPoint(
         ),
       );
   }
+}
+
+/**
+ * Set the ONE address of a kind that a single-field form shows — the primary,
+ * or the only one there is.
+ *
+ * THIS IS DIRECT MANIPULATION, NOT A SYNC, and the difference is the whole
+ * reason the accounting columns could be retired. While `customers.email` and
+ * `party_contact_points` both existed, the accounting field was a MIRROR of a
+ * different store, and a mirror cannot tell "the invoice should go elsewhere"
+ * from "we no longer have this address" — so that sync was additive, and
+ * clearing the field deliberately removed nothing. The field now IS a contact
+ * point: it renders `preferredContact(points, kind)` and writes back to the
+ * same row. Every edit therefore means what it appears to mean, including the
+ * empty one. A box that silently discards what somebody typed is the bug the
+ * additive rule would now cause rather than prevent.
+ *
+ * The four cases, and why each is what it is:
+ *
+ *  - `undefined` — the caller did not mention this kind. Left alone. Not the
+ *    same as an empty string, and `updateCustomer` takes a partial patch where
+ *    exactly that distinction is how "name only" edits work.
+ *  - empty — cleared. Deletes the point the form was showing, and nothing else:
+ *    a second email a colleague added is a different row and survives, then
+ *    inherits primary through `deleteContactPoint`.
+ *  - a value that normalizes to what is already stored — the typed form is
+ *    re-recorded if it changed and skipped entirely if it did not, so an edit
+ *    that only touched the name burns no version.
+ *  - anything else — the stored point is edited IN PLACE rather than added
+ *    alongside. Correcting a typo in an address is one address, not two.
+ *
+ * AN UNUSABLE VALUE CONTRIBUTES NOTHING AND RAISES NOTHING, which is inherited
+ * from the sync this replaced: half an email address is not a reason to fail
+ * the invoice-side save it arrived with. It does not clear either — refusing to
+ * store "bob@" must not be a way to lose the address that was there.
+ */
+export async function setPreferredContactValue(
+  tx: Tx,
+  tenantId: string,
+  partyId: string,
+  kind: PartyContactKind,
+  raw: string | null | undefined,
+  opts: { label?: string } = {},
+): Promise<void> {
+  if (raw === undefined) return;
+
+  const points = await listContactPoints(tx, tenantId, partyId);
+  // The same helper the form's initial value comes from, so the row this writes
+  // is provably the row the person was looking at.
+  const current = preferredContact(points, kind);
+  const wanted = (raw ?? "").trim();
+
+  if (wanted.length === 0) {
+    if (current) await deleteContactPoint(tx, tenantId, current.id);
+    return;
+  }
+
+  const normalized = normalizeContactValue(kind, wanted);
+  if (!normalized) return;
+
+  if (!current) {
+    await addContactPoint(tx, tenantId, partyId, {
+      kind,
+      value: wanted,
+      label: opts.label,
+    });
+    return;
+  }
+
+  if (current.normalizedValue === normalized.normalizedValue) {
+    if (current.value === normalized.value) return;
+  } else {
+    // The address they typed may already be on this party as a NON-primary
+    // point — a work address being promoted to the billing one. Editing the
+    // primary to match it would trip the (tenant, party, kind, normalized)
+    // unique, and the honest outcome is not an error: the address they asked
+    // for becomes the main one, and the party keeps both.
+    const existing = points.find(
+      (p) =>
+        p.kind === kind &&
+        p.id !== current.id &&
+        p.normalizedValue === normalized.normalizedValue,
+    );
+    if (existing) {
+      await setPrimaryContactPoint(tx, tenantId, existing.id);
+      return;
+    }
+  }
+
+  await updateContactPoint(tx, tenantId, {
+    contactPointId: current.id,
+    expectedVersion: current.version,
+    patch: { value: normalized.value },
+  });
 }
 
 /* -- Matching ------------------------------------------------------------- */

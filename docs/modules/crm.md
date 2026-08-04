@@ -14,6 +14,31 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — The contract step: the accounting columns are gone (branch `claude/party-contact-points`)
+
+`customers.email`, `customers.phone` and the vendor pair were dropped (`0075`).
+`party_contact_points` is now the only place an email or a phone is stored, and
+the expand/deploy/contract sequence that began with `parties` itself is finished
+for contacts.
+
+- **The accounting forms did not lose their Email and Phone boxes.** The box
+  shows `preferredContact(points, kind)` and `setPreferredContactValue` writes
+  back to that same row — neither dialog component changed, because the pages
+  that feed them now read the party instead of the column.
+- **The additive rule went with the column it was protecting.** Clearing the box
+  now deletes that address. See Decisions — this is the reversal that the
+  contract step is *for*, not a regression against it.
+- Read sites moved: the customers page, the vendors page, the mail extension
+  (search, resolve, `{{customer.email}}`, contact source) and the two halves of
+  the books export. **Five** files, not the two the previous entry predicted.
+- **`0075` MUST BE APPLIED AFTER THE DEPLOY**, the only migration here that
+  inverts the standing order. It carries a catch-up backfill for addresses typed
+  into the old form after `0074` ran, and refuses to drop anything if a usable
+  address is not already a contact point.
+- The composer "duplicate" this slice was supposed to fix **never existed**:
+  `rankContacts` already deduped by address. What the overlap actually decided
+  was the sublabel. Corrected below, and pinned by a test.
+
 ### 2026-08-04 — Contact points: slice 0's deferral comes due (branch `claude/party-contact-points`)
 
 The shared table `parties` deliberately did without. It arrives because two
@@ -155,7 +180,7 @@ behaviour change.
 | `parties` | The shared identity spine — one row per person or organization a tenant deals with | **Written by two modules**, so it lives at `src/lib/parties/` and not inside either. FORCE RLS, `member_all` policy scoped by `app_current_tenant()`: ordinary business data, ordinary tenant scoping. Composite unique `(tenant_id, id)` so every referencing FK can be tenant-aware. `kind` is `person` \| `organization`; `given_name`/`family_name` are NULL for organizations. `display_name` is authoritative, never derived — see Decisions |
 | `customers.party_id` | The AR role's link to its party | Nullable → backfilled → `NOT NULL`. Composite FK. `UNIQUE (tenant_id, party_id)`: a party may hold the customer role at most once |
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
-| `party_contact_points` | How to reach a party — **shared, not CRM's** | Tenant-scoped and member-writable like `parties`, NOT visibility-bearing: the same addresses are already on `customers.email` where staff read them, so hiding one copy while the other shows on the invoice screen would be two answers to one question. `normalized_value` is written only by `src/lib/parties/contacts.ts` and is what the duplicate check compares. Partial unique gives one primary per party **per kind**; `(tenant, party, kind, normalized)` unique stops the same address twice; `(tenant, kind, normalized)` indexes the duplicate lookup |
+| `party_contact_points` | How to reach a party — **shared, not CRM's**, and since `0075` the ONLY store for an email or a phone | Tenant-scoped and member-writable like `parties`, NOT visibility-bearing. That was argued from "the same address is also on `customers.email`, where staff read it"; the column is gone and the argument is now stronger rather than weaker — it is one row, rendered on the CRM record page AND on the customers page, so a visibility term here would blank the address on the invoicing screen for every staff member. `normalized_value` is written only by `src/lib/parties/contacts.ts` and is what the duplicate check compares. Partial unique gives one primary per party **per kind**; `(tenant, party, kind, normalized)` unique stops the same address twice; `(tenant, kind, normalized)` indexes the duplicate lookup |
 | `crm_party_details` | What CRM knows about a party — 1:1, created when CRM is first asked about the record | FORCE RLS with a **visibility term**: `visibility = 'members' OR app_current_tenant_role() = 'owner'`, in USING **and** WITH CHECK. `owner_clerk_user_id` is an attribution and grants nothing — see Decisions. `custom` jsonb is the slice 2 extension bag (P2), `lifecycle_stage`/`source` are open taxonomies (P1) with no CHECK. Composite FK to `parties`, ON DELETE CASCADE. Unique on `(tenant, party)` is what makes "the CRM record for this party" a lookup |
 | `crm_affiliations` | A person's connection to an organization, current or former | **Inherits visibility** through a positive `EXISTS` against `crm_party_details` at both ends — no second copy of the flag, so no drift. The positive spelling is load-bearing; see Decisions. Two partial uniques: one current connection per pair, one primary per person. CHECK that the two ends differ |
 | `crm_pipelines` / `crm_pipeline_stages` | The steps a deal moves through | **Configuration**: member-read + owner-write, same two-policy split as `crm_field_defs`. One default per tenant enforced by a partial unique. `outcome` (`open`/`won`/`lost`) is where terminal semantics live — there is no status column on the deal |
@@ -169,6 +194,10 @@ behaviour change.
 Migrations: `0059` (tables/columns), `0060_parties_rls.sql` (custom: policies),
 `0061_parties_compat.sql` (custom: the compatibility triggers),
 `0062_parties_contract.sql` (custom: NOT NULL, uniques, triggers dropped).
+Contact points: `0072` (table), `0073_party_contacts_rls.sql` (policies),
+`0074_party_contacts_backfill.sql` (values copied off the accounting columns),
+`0075_accounting_contacts_contract.sql` (catch-up backfill, verification, then
+the columns dropped — **apply this one after the deploy**).
 
 ## Key files & seams
 
@@ -181,9 +210,20 @@ Migrations: `0059` (tables/columns), `0060_parties_rls.sql` (custom: policies),
 - `src/lib/parties/role-sync.ts` — the "both names exist" bridge while
   `customers.name` and `parties.display_name` are both stored. Temporary by
   design; the header says what has to move before it goes.
+- `src/lib/parties/contacts.ts` — contact points, and `normalized_value` is
+  written nowhere else. **`setPreferredContactValue` is the write path behind
+  every single-field contact box**, in Accounting today and anywhere else that
+  shows one address per kind; its header carries the four cases and the reason
+  clearing deletes. `preferredContact` / `preferredContactValue` live in the
+  pure `contact-values.ts` because a CSV builder and two pages read them and
+  must stay free of `server-only`.
 - `src/modules/accounting/invoicing/customers.ts` and `payables/vendors.ts` —
   create paths route through the service so a role row and its party are born in
-  one transaction; a rename carries onto the party.
+  one transaction; a rename carries onto the party, and the form's email and
+  phone go straight to `party_contact_points` because there is no longer a
+  column to put them in. Note the deliberate asymmetry: `updateCustomer` takes a
+  PATCH so `undefined` means "not edited", `updateVendor` takes a whole record
+  so `undefined` means "the box was empty".
 - `src/modules/crm/party-ops.ts` — CRM's operations. Never writes `parties`
   itself; identity goes through the shared service and CRM's own tables are
   written here.
@@ -215,7 +255,9 @@ company has several offices, billing addresses and numbers; a person has a work
 address and a personal one. A single `parties.email` would be canonical within a
 week of shipping and would then have to be unpicked from every read site.
 **Do not add an email column here as a convenience** — `party_contact_points`
-is the answer, and it arrived on 2026-08-04.
+is the answer, and it arrived on 2026-08-04. The unpicking that was predicted
+then happened for real one slice later, on `customers.email`, and cost five
+files: it is a description of work somebody has now done, not a hypothetical.
 
 **CONTACT VALUES ARE STORED TWICE, AS TYPED AND AS MATCHABLE.**
 `Bob@Example.COM ` and `bob@example.com` are one address; `(555) 123-4567` and
@@ -228,18 +270,39 @@ backfill migration (0074) mirrors those rules in SQL with the correspondence
 written out line by line; **if you change one, change the other in the same
 commit.**
 
-**Accounting's contact sync is ADDITIVE, unlike the name sync.** A name is one
-fact and the role's copy is authoritative, so a rename overwrites. A way of
-reaching somebody is one of several, so an accounting edit contributes an
-address and never removes one. The concrete failure that rules out mirroring:
-somebody clears `customers.email` because the invoice should go elsewhere, and a
-mirroring sync silently deletes the mobile a colleague added in CRM last week.
+**THE ACCOUNTING CONTACT SYNC WAS ADDITIVE, AND `0075` DELIBERATELY REVERSED
+THAT.** Read both halves before changing either, because each is right about its
+own world and neither generalizes.
 
-**The composer now offers a customer's address twice**, once from Accounting's
-column and once from the contact point backfilled from it. Both carry a sublabel
-saying where they came from. That is accepted rather than missed — the fix is the
-contract slice that retires the accounting columns, not a filter guessing which
-copy to suppress.
+While `customers.email` and the contact point both existed, the accounting field
+was a MIRROR of a different store. A mirror cannot tell "the invoice should go
+elsewhere" from "we no longer have this address", so clearing it removed
+nothing — otherwise an invoicing edit would silently delete the mobile a
+colleague added in CRM last week. A name behaved the opposite way in the same
+file, and correctly: a name is one fact with an authoritative copy, so a rename
+overwrites.
+
+The column is now gone, and the box IS the contact point — it renders
+`preferredContact` and writes back to that row. Direct manipulation is not
+mirroring, so every edit means what it appears to mean: a corrected address
+edits the row in place rather than adding a second, and an emptied box deletes
+the address it was showing and nothing else (a colleague's second email is a
+different row, survives, and inherits primary). Keeping the additive rule here
+would have turned a safeguard into a form that silently discards what somebody
+typed, which is a bug users report rather than one they are protected by. There
+are tests for all four cases in `tests/invoicing.test.ts`.
+
+**THE COMPOSER NEVER OFFERED THE ADDRESS TWICE, and the previous entry here was
+wrong.** Both Accounting's contact source and CRM's arrive with
+`origin: "records"`, and `rankContacts` deduplicates by lowercased address
+before anything reaches the screen — so the overlap was always one row. What it
+actually decided was the SUBLABEL, and by registry order rather than by which
+query finished first: `mailExtensions` lists accounting before crm, so a
+business address reads "Customer" rather than "Company", which is the more
+useful of the two true answers. Both sources are kept — deleting accounting's
+would leave a tenant who never bought CRM with no suggestions at all, because an
+extension whose module is off contributes nothing. Pinned in
+`tests/mail-contacts.test.ts` so the claim cannot rot again.
 
 **The duplicate check warns and never blocks.** Two people at one company
 genuinely share `info@`, and a product that refuses the second record teaches
@@ -434,12 +497,13 @@ values stay readable and the discontinuity is visible.
   reads a postal address that `customers.address` does not already serve, and
   adding a table with no reader is the speculative build this codebase avoids.
   The shape is the same as contact points when it is wanted.
-- **The accounting columns have NOT been retired.** `customers.email` /
-  `.phone` still exist, are still authoritative for AR/AP, and are still read by
-  the invoice paths and Accounting's own mail extension. This is the expand
-  phase; the contract slice retires them and is what removes the duplicate
-  suggestion in the composer. Only two files read those columns directly, so it
-  is a small change when somebody wants it.
+- **`0075` IS NOT APPLIED TO PRODUCTION YET, and applying it before the deploy
+  takes the product down.** It drops the four columns and must follow the code
+  that stopped reading them; the dev branch has it, production is deliberately
+  waiting. The migration header says this at the top and
+  [conventions.md §4](../conventions.md) now carries the general rule. Until it
+  runs, production carries four columns nothing reads — which is the harmless
+  half of the window and can sit there indefinitely.
 - **Custom fields cannot become mail placeholders without changing Mail's
   contract.** `MailEntityType.templateFields` is a static array on purpose —
   its header says the vocabulary must be knowable without reading data, which is
@@ -517,12 +581,12 @@ values stay readable and the discontinuity is visible.
   a shared seam or Mail declaring a timeline-contribution extension point —
   P5 again, pointing the other way. `mergeTimeline` takes items rather than
   tables so that whichever wins is a mapping function here.
-- **CRM contributes no recipients to the composer.** `MailContactSource`
-  requires an email per suggestion and `parties` has none by design (slice 0).
-  Accounting already offers the addresses that exist, on `customers`/`vendors`,
-  so contributing them again would list the same person twice. CRM implements
-  the hook the day parties have contact points of their own — the same later
-  slice that unblocks dedup warnings.
+- **An accounting form still edits only the MAIN address of each kind.** A party
+  with three emails shows its primary in the customer dialog and the other two
+  nowhere in Accounting; the record page in CRM is the only place to see or
+  label the full set, and a tenant without CRM cannot reach them at all. Adding
+  a proper multi-value editor to the accounting dialog would duplicate a panel
+  CRM owns, so this waits for somebody who actually has the problem.
 - **The Follow-ups page groups against the SERVER's today**, so a tenant far
   from UTC sees a task change group a few hours early or late. The per-row badge
   is computed in the browser and is correct. A real fix needs a tenant timezone

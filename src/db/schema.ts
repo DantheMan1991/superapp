@@ -4031,7 +4031,111 @@ export const crmAffiliations = pgTable(
   ],
 );
 
+/**
+ * The types a custom field can be. A CLOSED enumeration on purpose: every value
+ * here needs a parser, an input control and a display, so adding one is a code
+ * change in three places and should look like one.
+ */
+export const crmFieldType = pgEnum("crm_field_type", [
+  "text",
+  "number",
+  "date",
+  "boolean",
+  "select",
+  "multi_select",
+  "url",
+]);
+
+/**
+ * Per-tenant custom field definitions — the thing that makes this a CRM a
+ * business can shape rather than a fixed form, and the seam a Layer 2b industry
+ * profile fills with data instead of code.
+ *
+ * TWO IDENTIFIERS, AND WHICH ONE IS AUTHORITATIVE MATTERS.
+ *
+ *   `id`  — what `crm_party_details.custom` is keyed by. Stable forever.
+ *   `key` — a human- and import-facing alias. RENAMEABLE.
+ *
+ * Storing values against the id means correcting a typo in `key` rewrites one
+ * row instead of every record that ever held the field. This is deliberately
+ * the OPPOSITE choice from `document_tags`, where the slug is immutable and
+ * `documents.tags` stores slugs — and the difference is who types the string. A
+ * tag is a label somebody picks from a list; a custom field key is closer to a
+ * column name, invented once under time pressure and regretted later. The cost
+ * is that `custom` is not readable without joining to this table, which is a
+ * price worth paying for a rename that cannot lose data.
+ *
+ * `entity_type` is an OPEN taxonomy (P1) with no CHECK: 'party' today, 'deal'
+ * when slice 3 lands, and a pack's own record type after that — none of which
+ * should need a migration to core.
+ */
+export const crmFieldDefs = pgTable(
+  "crm_field_defs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    entityType: text("entity_type").notNull().default("party"),
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    fieldType: crmFieldType("field_type").notNull(),
+    /**
+     * `[{ value, label }]` for the select kinds, `[]` for everything else.
+     * NOT NULL DEFAULT so `options` is always an array to iterate, never a null
+     * to test for (conventions §4).
+     */
+    options: jsonb("options").notNull().default([]),
+    /**
+     * Required for a LIFECYCLE TRANSITION, not for every save.
+     *
+     * Required-on-create is how imports and lead capture become unusable: a
+     * half-known record is the normal state at the moment somebody first types
+     * a name, and a form that refuses it just moves the record into a
+     * spreadsheet. The check runs when the stage changes, which is the point at
+     * which the business actually asserts something.
+     */
+    isRequired: boolean("is_required").notNull().default(false),
+    helpText: text("help_text").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * ARCHIVED, NEVER DELETED. Values already stored against this id stay in
+     * `custom` and stop being rendered. Hard-deleting the definition would turn
+     * every stored value into an orphan nobody can interpret — the data would
+     * still be there and would no longer mean anything.
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_field_defs_tenant_id_id_idx").on(t.tenantId, t.id),
+    // Unique among LIVE definitions only, so archiving `warranty_expiry` frees
+    // the name for a replacement without touching the old one's stored values.
+    uniqueIndex("crm_field_defs_tenant_key_idx")
+      .on(t.tenantId, t.entityType, t.key)
+      .where(sql`archived_at is null`),
+    index("crm_field_defs_tenant_entity_idx").on(
+      t.tenantId,
+      t.entityType,
+      t.sortOrder,
+    ),
+    // Lowercase, underscore-separated. The same shape `mail_links.entity_type`
+    // uses — a format constraint, never a value whitelist.
+    check("crm_field_defs_key_format", sql`${t.key} ~ '^[a-z][a-z0-9_]{0,62}$'`),
+  ],
+);
+
 export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
 export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
+export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
+export type CrmFieldType = CrmFieldDef["fieldType"];
+/** One choice on a select or multi-select field. */
+export type CrmFieldOption = { value: string; label: string };
 /** Who may see a CRM record: every member, or the business's owners only. */
 export type CrmRecordVisibility = CrmPartyDetails["visibility"];

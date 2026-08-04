@@ -14,6 +14,28 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — Slice 2: custom fields (branch `claude/crm-custom-fields`)
+
+Per-tenant fields on every record — the feature that makes this shapeable
+rather than a fixed form, and the seam a Layer 2b profile fills with **data**
+instead of code.
+
+- `crm_field_defs` — key, label, one of seven types, options, `is_required`,
+  sort order, `archived_at`. **Read by every member, written only by owners**
+  (`0067`), because a definition is the shape of every record rather than a
+  record.
+- Values live in `crm_party_details.custom`, **keyed by definition id** rather
+  than by `key`, so renaming a field rewrites one row instead of every record
+  that ever held it.
+- `core/custom-fields.ts` is pure and carries the whole integrity of that jsonb
+  column — 27 unit tests, no database.
+- **Required means required to change stage**, not to save. Required-on-create
+  is how imports and lead capture stop being usable.
+- Archiving never deletes: the write path merges rather than replaces, so a
+  retired field's stored values survive every later save.
+- Owner-only settings page at `/dashboard/m/crm/fields`; typed controls render
+  on the record form from the definitions.
+
 ### 2026-08-04 — Slice 1: records, connections, and record visibility (branch `claude/crm-party-records`)
 
 The module becomes `available`. First surface: the records list, a record page,
@@ -66,6 +88,7 @@ behaviour change.
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
 | `crm_party_details` | What CRM knows about a party — 1:1, created when CRM is first asked about the record | FORCE RLS with a **visibility term**: `visibility = 'members' OR app_current_tenant_role() = 'owner'`, in USING **and** WITH CHECK. `owner_clerk_user_id` is an attribution and grants nothing — see Decisions. `custom` jsonb is the slice 2 extension bag (P2), `lifecycle_stage`/`source` are open taxonomies (P1) with no CHECK. Composite FK to `parties`, ON DELETE CASCADE. Unique on `(tenant, party)` is what makes "the CRM record for this party" a lookup |
 | `crm_affiliations` | A person's connection to an organization, current or former | **Inherits visibility** through a positive `EXISTS` against `crm_party_details` at both ends — no second copy of the flag, so no drift. The positive spelling is load-bearing; see Decisions. Two partial uniques: one current connection per pair, one primary per person. CHECK that the two ends differ |
+| `crm_field_defs` | Per-tenant custom field definitions | **Read/write split, not a visibility term**: a `FOR SELECT` member-read policy plus a `FOR ALL` owner-write policy. Two policies because **WITH CHECK is not consulted for DELETE** — a single `FOR ALL` with a permissive USING would let staff delete every definition in the tenant. `entity_type` is an open taxonomy (P1) so slice 3's deals need no migration. Key format enforced by CHECK; the `(tenant, entity_type, key)` unique is **partial on `archived_at is null`**, so archiving frees the name |
 
 Migrations: `0059` (tables/columns), `0060_parties_rls.sql` (custom: policies),
 `0061_parties_compat.sql` (custom: the compatibility triggers),
@@ -191,6 +214,45 @@ purpose — `details` is null in both cases. Distinguishing them would turn the
 list into a way to discover which records are restricted, which is the same
 probe the mail template values are designed to refuse.
 
+**Custom field values are keyed by definition ID, not by `key`.** This is
+deliberately the OPPOSITE choice from `document_tags`, where the slug is
+immutable and `documents.tags` stores slugs — and the difference is who types
+the string. A tag is a label somebody picks from a list; a custom field key is
+closer to a column name, invented once under time pressure and regretted later.
+Keying by id means correcting a typo rewrites one definition row instead of
+every record that ever held the field. The cost is that `custom` is unreadable
+without joining to `crm_field_defs`, which is a fair price for a rename that
+cannot lose data.
+
+**`WITH CHECK` IS NOT CONSULTED FOR `DELETE`.** The tempting shape for an
+owner-writable table is one `FOR ALL` policy with a permissive `USING` and a
+role test only in `WITH CHECK`. That leaves a silent hole: staff could delete
+every row while being unable to create one. `crm_field_defs` therefore splits
+into a `FOR SELECT` read policy and a `FOR ALL` write policy whose **USING**
+clause carries the role test. There is a test that deletes as staff and asserts
+zero rows.
+
+**Required means required to CHANGE STAGE, not to save.** A half-known record is
+the normal state the moment somebody first types a name, and a form that refuses
+it just moves the record into a spreadsheet. The check runs when
+`lifecycle_stage` actually changes — compared against the stored value, never
+asserted by the caller — which is the point at which the business commits to
+something. Imports and quick captures stay usable.
+
+**Archiving a field is not deleting it, and the write path is what makes that
+true.** Stored values are keyed by definition id, so a hard delete would turn
+every one of them into a number nobody can interpret. Archived definitions are
+excluded from `listFieldDefs`, which means `sanitizeCustomValues` treats their
+values as unknown and drops them from the *validated payload* — so
+`mergeCustomValues` folds the payload onto what is stored rather than replacing
+it. A straight replace would silently delete a retired field's values on the
+next unrelated save, which is exactly what archiving was meant to prevent.
+
+**A field's TYPE cannot be changed after creation.** Flipping `text` to `number`
+would leave every stored value in a shape the new type rejects, so saves would
+start failing on records nobody had touched. Archive and re-add instead: the old
+values stay readable and the discontinuity is visible.
+
 ## Open items
 
 - **Contact points and addresses are deferred, deliberately.**
@@ -219,8 +281,21 @@ probe the mail template values are designed to refuse.
 - **The records list caps at 500** with a line saying so, and there is no paging
   or cursor. Fine at current scale; slice 8's saved views is where this gets
   solved properly rather than by raising the number.
-- **`crm_party_details.custom` is written by nothing.** The column and its
-  `NOT NULL DEFAULT '{}'` exist so slice 2 needs no migration.
+- **Custom fields are not filterable or searchable.** Nothing indexes `custom`,
+  and the records list does not offer them as facets. Deliberate for now —
+  arbitrary jsonb filtering gets expensive fast, and the right shape is an
+  intentional expression index per field somebody actually filters on, decided
+  with slice 8's saved views rather than guessed at now.
+- **No field is classified as sensitive.** A custom field can hold anything a
+  tenant types, including C4 PII, and it inherits only the record's visibility.
+  A per-field restriction is a real gap once somebody puts a national insurance
+  number in one.
+- **Field definitions cannot be reordered from the UI.** `reorderFieldDefsAction`
+  exists and works; nothing calls it yet, so new fields land at the bottom.
+- **A profile cannot yet seed field definitions idempotently.** `key` is
+  renameable, so a Layer 2b installer upserting on it would duplicate a field a
+  tenant had renamed. That needs an ownership marker on the row, and it should
+  be designed with the first real profile rather than guessed at now.
 - **Affiliations assume person→organization.** The kinds are checked in
   `party-ops.ts` rather than by a constraint, because the constraint would have
   to reach into another table and because a sole trader is a real edge. A

@@ -23,6 +23,19 @@ import {
   setRecordActive,
   updateRecord,
 } from "./party-ops";
+import {
+  createFieldDef,
+  FIELD_KEY_MAX,
+  FIELD_LABEL_MAX,
+  HELP_TEXT_MAX,
+  MAX_OPTIONS,
+  reorderFieldDefs,
+  setFieldDefArchived,
+  updateFieldDef,
+} from "./field-ops";
+
+/** An option's `value` and `label` share a cap; neither is prose. */
+const OPTION_VALUE_MAX = 80;
 
 /**
  * Server actions for CRM. Canonical shape: gate → Zod → withTenant(core +
@@ -36,9 +49,18 @@ import {
 
 const BASE = "/dashboard/m/crm";
 
-type ActionResult<T = undefined> = { ok: true; data?: T } | { error: string };
+type ActionResult<T = undefined> =
+  | { ok: true; data?: T }
+  | {
+      error: string;
+      /**
+       * Per-field messages, so a form can put each one beside its input rather
+       * than showing one toast for six problems.
+       */
+      issues?: { fieldId: string; label: string; message: string }[];
+    };
 
-async function gate(): Promise<CrmCtx> {
+async function gate(opts?: { ownerOnly?: boolean }): Promise<CrmCtx> {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "crm");
   // Fail closed for the expert (accountant) role, as Documents does: this
@@ -46,11 +68,19 @@ async function gate(): Promise<CrmCtx> {
   if (ctx.role === "expert") {
     throw new CrmError("FORBIDDEN_EXPERT", "accountant access is read-only");
   }
+  // Checked here as well as in RLS, and the duplication is deliberate: the
+  // policy makes an unauthorized write affect zero rows, and "nothing happened"
+  // is a worse thing to tell somebody than "you need to be an owner".
+  if (opts?.ownerOnly && ctx.role !== "owner") {
+    throw new CrmError("FORBIDDEN", "owner role required");
+  }
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
 }
 
-function fail(err: unknown): { error: string } {
-  if (err instanceof CrmError) return { error: friendlyMessage(err) };
+function fail(err: unknown): { error: string; issues?: CrmError["issues"] } {
+  if (err instanceof CrmError) {
+    return { error: friendlyMessage(err), ...(err.issues ? { issues: err.issues } : {}) };
+  }
   console.error("crm action failed", err);
   return { error: friendlyMessage(err) };
 }
@@ -59,6 +89,15 @@ function revalidate(partyId?: string): void {
   revalidatePath(BASE);
   revalidatePath(`${BASE}/records`);
   if (partyId) revalidatePath(`${BASE}/records/${partyId}`);
+}
+
+/**
+ * A definition change reshapes EVERY record's form, so the whole module's
+ * cached pages go — not just the settings page that was edited.
+ */
+function revalidateFields(): void {
+  revalidatePath(`${BASE}/fields`);
+  revalidatePath(BASE, "layout");
 }
 
 /* -- Schemas -------------------------------------------------------------- */
@@ -79,6 +118,14 @@ const crmFields = {
   notes: optionalText(NOTES_MAX),
   ownerClerkUserId: z.string().max(120).nullable().optional(),
   visibility: z.enum(["members", "restricted"]).optional(),
+  /**
+   * Deliberately `z.unknown()` per value rather than a union of the storage
+   * types. Zod's job at this boundary is to prove the SHAPE is an object keyed
+   * by uuid; what each value may be depends on a field definition Zod cannot
+   * see, and `sanitizeCustomValues` decides it against the live definitions.
+   * Two validators disagreeing about the same value is worse than one.
+   */
+  custom: z.record(z.string().uuid(), z.unknown()).optional(),
 };
 
 const createSchema = z.object({ ...identitySchema, ...crmFields });
@@ -233,6 +280,182 @@ export async function setRecordActiveAction(
     );
 
     revalidate(parsed.data.partyId);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- Custom field definitions --------------------------------------------- */
+
+const optionSchema = z.object({
+  value: z.string().min(1).max(OPTION_VALUE_MAX),
+  label: z.string().max(OPTION_VALUE_MAX).optional(),
+});
+
+const fieldKey = z
+  .string()
+  .min(1)
+  .max(FIELD_KEY_MAX)
+  // Mirrors the database CHECK exactly. Both exist: the app gives a usable
+  // message, the constraint means no other writer can get it wrong.
+  .regex(/^[a-z][a-z0-9_]{0,62}$/, "Use lowercase letters, numbers and underscores");
+
+const createFieldSchema = z.object({
+  key: fieldKey,
+  label: z.string().min(1).max(FIELD_LABEL_MAX),
+  fieldType: z.enum([
+    "text",
+    "number",
+    "date",
+    "boolean",
+    "select",
+    "multi_select",
+    "url",
+  ]),
+  options: z.array(optionSchema).max(MAX_OPTIONS).optional(),
+  isRequired: z.boolean().optional(),
+  helpText: z.string().max(HELP_TEXT_MAX).optional(),
+});
+
+export async function createFieldDefAction(
+  input: z.infer<typeof createFieldSchema>,
+): Promise<ActionResult<{ fieldId: string }>> {
+  try {
+    const ctx = await gate({ ownerOnly: true });
+    const parsed = createFieldSchema.safeParse(input);
+    if (!parsed.success) {
+      return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+    }
+
+    const fieldId = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const def = await createFieldDef(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          action: "crm.field_created",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "crm_field_def",
+          targetId: def.id,
+          // The key and type are schema, not somebody's data — safe to record,
+          // and they are what makes this audit row worth having.
+          meta: { key: def.key, fieldType: def.fieldType, required: def.isRequired },
+        });
+        return def.id;
+      },
+      { role: ctx.role },
+    );
+
+    revalidateFields();
+    return { ok: true, data: { fieldId } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const updateFieldSchema = z.object({
+  fieldId: z.string().uuid(),
+  expectedVersion: z.number().int().positive(),
+  key: fieldKey.optional(),
+  label: z.string().min(1).max(FIELD_LABEL_MAX).optional(),
+  options: z.array(optionSchema).max(MAX_OPTIONS).optional(),
+  isRequired: z.boolean().optional(),
+  helpText: z.string().max(HELP_TEXT_MAX).optional(),
+});
+
+export async function updateFieldDefAction(
+  input: z.infer<typeof updateFieldSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate({ ownerOnly: true });
+    const parsed = updateFieldSchema.safeParse(input);
+    if (!parsed.success) {
+      return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+    }
+    const { fieldId, expectedVersion, ...patch } = parsed.data;
+
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await updateFieldDef(tx, ctx, { fieldId, expectedVersion, patch });
+        await logAuditInTx(tx, {
+          action: "crm.field_updated",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "crm_field_def",
+          targetId: fieldId,
+          meta: { fields: Object.keys(patch).sort() },
+        });
+      },
+      { role: ctx.role },
+    );
+
+    revalidateFields();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const archiveFieldSchema = z.object({
+  fieldId: z.string().uuid(),
+  expectedVersion: z.number().int().positive(),
+  archived: z.boolean(),
+});
+
+export async function setFieldDefArchivedAction(
+  input: z.infer<typeof archiveFieldSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate({ ownerOnly: true });
+    const parsed = archiveFieldSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await setFieldDefArchived(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          action: parsed.data.archived
+            ? "crm.field_archived"
+            : "crm.field_restored",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "crm_field_def",
+          targetId: parsed.data.fieldId,
+          meta: {},
+        });
+      },
+      { role: ctx.role },
+    );
+
+    revalidateFields();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const reorderSchema = z.object({
+  fieldIds: z.array(z.string().uuid()).max(200),
+});
+
+export async function reorderFieldDefsAction(
+  input: z.infer<typeof reorderSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate({ ownerOnly: true });
+    const parsed = reorderSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withTenant(
+      ctx.tenantId,
+      (tx) => reorderFieldDefs(tx, ctx, parsed.data.fieldIds),
+      { role: ctx.role },
+    );
+
+    revalidateFields();
     return { ok: true };
   } catch (err) {
     return fail(err);

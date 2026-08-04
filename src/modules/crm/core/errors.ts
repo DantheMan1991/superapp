@@ -14,6 +14,10 @@ export type CrmErrorCode =
   | "AFFILIATION_NOT_FOUND"
   | "AFFILIATION_INVALID"
   | "AFFILIATION_DUPLICATE"
+  | "FIELD_NOT_FOUND"
+  | "FIELD_KEY_TAKEN"
+  | "FIELD_OPTIONS_REQUIRED"
+  | "CUSTOM_VALUES_INVALID"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
 
@@ -21,6 +25,13 @@ export class CrmError extends Error {
   constructor(
     readonly code: CrmErrorCode,
     message: string,
+    /**
+     * Per-field messages for `CUSTOM_VALUES_INVALID`, so the form can put each
+     * one where it belongs instead of showing one toast for six problems.
+     * Already client-safe: a label the tenant typed and a message this module
+     * wrote, never a database detail.
+     */
+    readonly issues?: { fieldId: string; label: string; message: string }[],
   ) {
     super(message);
     this.name = "CrmError";
@@ -50,6 +61,17 @@ export function friendlyMessage(err: unknown): string {
       return "A person can only be connected to an organization.";
     case "AFFILIATION_DUPLICATE":
       return "That connection already exists.";
+    case "FIELD_NOT_FOUND":
+      return "That field could not be found.";
+    case "FIELD_KEY_TAKEN":
+      return "A field with that name already exists.";
+    case "FIELD_OPTIONS_REQUIRED":
+      return "A choice field needs at least one option.";
+    case "CUSTOM_VALUES_INVALID":
+      // The per-field messages carry the detail; this is the summary line.
+      return err.issues?.length
+        ? `${err.issues.length} field${err.issues.length === 1 ? "" : "s"} need attention.`
+        : "Some fields need attention.";
     case "FORBIDDEN":
       return "You do not have permission to do that.";
     case "FORBIDDEN_EXPERT":

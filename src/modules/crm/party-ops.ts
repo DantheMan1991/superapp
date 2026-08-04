@@ -1,7 +1,13 @@
 import "server-only";
 import { and, asc, desc, eq, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { CrmAffiliation, CrmPartyDetails, Party } from "@/db/schema";
+import type {
+  CrmAffiliation,
+  CrmFieldDef,
+  CrmPartyDetails,
+  Party,
+} from "@/db/schema";
+import type { CustomValue } from "./core/custom-fields";
 import {
   createParty,
   loadParty,
@@ -9,6 +15,12 @@ import {
   PartyError,
 } from "@/lib/parties";
 import { CrmError } from "./core/errors";
+import {
+  mergeCustomValues,
+  missingRequired,
+  sanitizeCustomValues,
+} from "./core/custom-fields";
+import { listFieldDefs } from "./field-ops";
 import type {
   CrmAffiliationRow,
   CrmCtx,
@@ -220,9 +232,10 @@ export async function loadRecord(
 ): Promise<CrmRecord> {
   const party = await loadParty(tx, tenantId, partyId).catch(asCrmError);
 
-  const [details, affiliations, customer, vendor] = await Promise.all([
+  const [details, affiliations, fieldDefs, customer, vendor] = await Promise.all([
     loadDetails(tx, tenantId, partyId),
     loadAffiliations(tx, tenantId, partyId),
+    listFieldDefs(tx, tenantId, "party"),
     tx.query.customers.findFirst({
       where: and(
         eq(schema.customers.tenantId, tenantId),
@@ -241,9 +254,33 @@ export async function loadRecord(
     party,
     details,
     affiliations,
+    fieldDefs,
     isCustomer: !!customer,
     isVendor: !!vendor,
   };
+}
+
+/**
+ * Validate an incoming custom payload against the tenant's LIVE definitions.
+ *
+ * Throws with the per-field issues attached rather than returning them, so a
+ * caller cannot accidentally write a payload it forgot to check — the failure
+ * path is the one that takes no effort.
+ */
+async function validateCustom(
+  tx: Tx,
+  tenantId: string,
+  incoming: Record<string, unknown> | undefined,
+  opts: { requireComplete: boolean },
+): Promise<{ defs: CrmFieldDef[]; values: Record<string, CustomValue> }> {
+  const defs = await listFieldDefs(tx, tenantId, "party");
+  const { values, issues } = sanitizeCustomValues(defs, incoming ?? {}, {
+    requireComplete: opts.requireComplete,
+  });
+  if (issues.length > 0) {
+    throw new CrmError("CUSTOM_VALUES_INVALID", "custom field values rejected", issues);
+  }
+  return { defs, values };
 }
 
 /* -- Writing -------------------------------------------------------------- */
@@ -283,6 +320,13 @@ export async function createRecord(
     legalName: input.legalName,
   }).catch(asCrmError);
 
+  // Not `requireComplete`: a record being created is the most half-known a
+  // record ever is, and refusing it here is how lead capture and imports stop
+  // being usable. The requirement bites when the stage moves.
+  const { values } = await validateCustom(tx, ctx.tenantId, input.custom, {
+    requireComplete: false,
+  });
+
   const [details] = await tx
     .insert(schema.crmPartyDetails)
     .values({
@@ -293,6 +337,7 @@ export async function createRecord(
       lifecycleStage: input.lifecycleStage ?? "",
       source: input.source ?? "",
       notes: input.notes ?? "",
+      custom: values,
     })
     .returning();
 
@@ -341,6 +386,39 @@ export async function updateRecord(
     }).catch(asCrmError);
   }
 
+  // THE STAGE TRANSITION IS WHAT MAKES REQUIRED FIELDS BITE. An ordinary save
+  // that leaves the stage alone never demands them; moving the record is the
+  // point at which the business actually asserts something about it, so that is
+  // where completeness is checked. Read the current row first — "the stage
+  // changed" is a comparison, not a claim the caller gets to make.
+  const existing = await loadDetails(tx, ctx.tenantId, args.partyId);
+  if (!existing) {
+    throw new CrmError("RECORD_NOT_FOUND", `crm record for ${args.partyId} missing`);
+  }
+  const movingStage =
+    patch.lifecycleStage !== undefined &&
+    patch.lifecycleStage !== existing.lifecycleStage;
+
+  let nextCustom: Record<string, CustomValue> | undefined;
+  if (patch.custom !== undefined) {
+    const { defs, values } = await validateCustom(tx, ctx.tenantId, patch.custom, {
+      requireComplete: movingStage,
+    });
+    nextCustom = mergeCustomValues(existing.custom, defs, values);
+  } else if (movingStage) {
+    // A stage move from a surface that does not render custom fields still has
+    // to satisfy the required ones — but it asks the NARROW question. Full
+    // re-validation would also re-check stored values against the current
+    // definitions, so an owner removing a select option would start blocking
+    // stage moves on every record that had picked it, with an error about a
+    // field nobody touched. Those values were valid when written.
+    const defs = await listFieldDefs(tx, ctx.tenantId, "party");
+    const issues = missingRequired(defs, existing.custom);
+    if (issues.length > 0) {
+      throw new CrmError("CUSTOM_VALUES_INVALID", "required fields unanswered", issues);
+    }
+  }
+
   const rows = await tx
     .update(schema.crmPartyDetails)
     .set({
@@ -353,6 +431,7 @@ export async function updateRecord(
         : {}),
       ...(patch.source !== undefined ? { source: patch.source } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+      ...(nextCustom !== undefined ? { custom: nextCustom } : {}),
       version: args.detailsVersion + 1,
       updatedAt: new Date(),
     })

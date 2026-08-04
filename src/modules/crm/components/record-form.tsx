@@ -17,7 +17,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { createRecordAction, updateRecordAction } from "../actions";
-import type { CrmRecordVisibility } from "@/db/schema";
+import { CustomFieldInputs } from "./custom-field-inputs";
+import type { CustomValue } from "../core/custom-fields";
+import type { CrmFieldDef, CrmRecordVisibility } from "@/db/schema";
 import type { PartyKind } from "@/db/schema";
 
 const BASE = "/dashboard/m/crm";
@@ -63,6 +65,8 @@ export function RecordForm({
   detailsVersion,
   initial,
   isOwner,
+  fieldDefs = [],
+  initialCustom = {},
 }: {
   mode: "create" | "edit";
   partyId?: string;
@@ -70,10 +74,32 @@ export function RecordForm({
   detailsVersion?: number;
   initial: RecordFormValues;
   isOwner: boolean;
+  fieldDefs?: CrmFieldDef[];
+  initialCustom?: Record<string, unknown>;
 }) {
   const router = useRouter();
   const [values, setValues] = useState<RecordFormValues>(initial);
+  const [custom, setCustom] = useState<Record<string, unknown>>(initialCustom);
+  // Per-field messages from the server, cleared as soon as somebody edits the
+  // field they belong to — a stale error beside a corrected value is worse than
+  // no error at all.
+  const [fieldIssues, setFieldIssues] = useState<Record<string, string>>({});
   const [pending, startTransition] = useTransition();
+
+  function setCustomValue(fieldId: string, value: CustomValue | undefined) {
+    setCustom((c) => {
+      const next = { ...c };
+      if (value === undefined) delete next[fieldId];
+      else next[fieldId] = value;
+      return next;
+    });
+    setFieldIssues((i) => {
+      if (!(fieldId in i)) return i;
+      const next = { ...i };
+      delete next[fieldId];
+      return next;
+    });
+  }
 
   function set<K extends keyof RecordFormValues>(
     key: K,
@@ -98,6 +124,7 @@ export function RecordForm({
     }
 
     startTransition(async () => {
+      setFieldIssues({});
       const payload = {
         kind: values.kind,
         displayName: values.displayName.trim() || undefined,
@@ -107,6 +134,7 @@ export function RecordForm({
         lifecycleStage: values.lifecycleStage.trim(),
         source: values.source.trim(),
         notes: values.notes,
+        custom,
         ...(isOwner ? { visibility: values.visibility } : {}),
       };
 
@@ -121,6 +149,11 @@ export function RecordForm({
             });
 
       if ("error" in result) {
+        if (result.issues?.length) {
+          setFieldIssues(
+            Object.fromEntries(result.issues.map((i) => [i.fieldId, i.message])),
+          );
+        }
         toast.error(result.error);
         return;
       }
@@ -230,6 +263,14 @@ export function RecordForm({
           rows={5}
         />
       </div>
+
+      <CustomFieldInputs
+        defs={fieldDefs}
+        values={custom}
+        issues={fieldIssues}
+        onChange={setCustomValue}
+        disabled={pending}
+      />
 
       {isOwner && (
         <div className="flex items-start justify-between gap-4 rounded-md border px-4 py-3">

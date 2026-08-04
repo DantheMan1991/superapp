@@ -64,9 +64,14 @@ export async function CrmModule({
             </p>
           </div>
         </div>
-        <Button asChild>
-          <Link href={`${BASE}/records/new`}>Add a record</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href={`${BASE}/fields`}>Fields</Link>
+          </Button>
+          <Button asChild>
+            <Link href={`${BASE}/records/new`}>Add a record</Link>
+          </Button>
+        </div>
       </div>
 
       <RecordSearch filter={filter} />

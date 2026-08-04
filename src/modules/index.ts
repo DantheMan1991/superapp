@@ -1,5 +1,6 @@
 import type { ModuleDefinition } from "./types";
 import { AccountingModule } from "./accounting/AccountingModule";
+import { CrmModule } from "./crm/CrmModule";
 import { DocumentsModule } from "./documents/DocumentsModule";
 import { EmailModule } from "./email/EmailModule";
 import { HelloModule } from "./hello/HelloModule";
@@ -22,6 +23,12 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     name: "Accounting",
     icon: "calculator",
     Component: AccountingModule,
+  },
+  crm: {
+    slug: "crm",
+    name: "CRM",
+    icon: "contact",
+    Component: CrmModule,
   },
   documents: {
     slug: "documents",

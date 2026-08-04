@@ -31,10 +31,19 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
   },
   {
     id: "crm",
+    // Description tracks what actually ships. Records and connections land
+    // first; custom fields, pipelines, activity and follow-ups follow.
+    //
+    // Wording passes the neutrality test in docs/extension-model.md §3: a
+    // bookkeeping firm, a dental practice and a plumbing contractor all have
+    // customers, people and companies they deal with. Note what is ABSENT —
+    // "lead" and "pipeline" are fine, but "job" is trade vocabulary a profile
+    // supplies as a label, so it cannot appear in a core module's copy.
     name: "CRM",
-    description: "Your customers and leads — pipeline, contacts, follow-ups.",
+    description:
+      "Everyone the business deals with — companies, the people inside them, and where each one stands.",
     category: "core",
-    status: "coming_soon",
+    status: "available",
     sortOrder: 20,
   },
   {
@@ -91,12 +100,47 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
   },
 ];
 
-async function main() {
+/**
+ * `npm run db:seed` seeds the app's own database.
+ * `npm run db:seed -- --dev` seeds the Neon dev branch instead.
+ *
+ * The flag mirrors scripts/migrate.ts exactly, and exists for the same reason:
+ * a new module's registry row has to reach BOTH databases, and without this the
+ * only way to target the branch is to edit .env or splice a connection string
+ * through the shell — which is how a dotenv banner once ended up inside a URL.
+ * The dev branch is also where the preview and the isolation suite run, so a
+ * module seeded only on production is one nobody can look at before shipping.
+ */
+function resolveTarget(): { url: string; label: string } | null {
+  if (process.argv.includes("--dev")) {
+    const url =
+      process.env.TEST_DATABASE_URL_OWNER || process.env.TEST_DATABASE_URL;
+    if (!url) {
+      console.error("--dev needs TEST_DATABASE_URL_OWNER (or TEST_DATABASE_URL) set.");
+      return null;
+    }
+    // The same guard migrate.ts applies: if the "test" database IS the app's
+    // database, --dev is silently seeding production while claiming otherwise.
+    if (url === process.env.DATABASE_URL || url === process.env.DATABASE_URL_OWNER) {
+      console.error(
+        "REFUSING: TEST_DATABASE_URL_OWNER points at the same database as DATABASE_URL.",
+      );
+      return null;
+    }
+    return { url, label: "dev branch" };
+  }
   const url = process.env.DATABASE_URL_OWNER || process.env.DATABASE_URL;
-  if (!url) {
+  if (!url) return null;
+  return { url, label: "app database" };
+}
+
+async function main() {
+  const target = resolveTarget();
+  if (!target) {
     console.error("DATABASE_URL is not set.");
     process.exit(1);
   }
+  const url = target.url;
   if (!globalThis.WebSocket) {
     neonConfig.webSocketConstructor = ws;
   }
@@ -123,7 +167,11 @@ async function main() {
     }
   });
 
-  console.log(`Seeded ${MODULES.length} modules.`);
+  // Host only. The connection string carries the password and must never be
+  // printed, logged, or pasted into a transcript.
+  console.log(
+    `Seeded ${MODULES.length} modules into the ${target.label} (${new URL(url).host}).`,
+  );
   await pool.end();
 }
 

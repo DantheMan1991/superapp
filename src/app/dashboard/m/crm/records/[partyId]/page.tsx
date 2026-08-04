@@ -1,0 +1,183 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { Building2, ChevronLeft, Lock, User } from "lucide-react";
+import { withTenant } from "@/db";
+import { requireTenant } from "@/lib/auth";
+import { requireModuleEnabled } from "@/lib/modules";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { CrmError } from "@/modules/crm/core/errors";
+import { loadRecord } from "@/modules/crm/party-ops";
+import { RecordForm } from "@/modules/crm/components/record-form";
+import {
+  AddAffiliationButton,
+  AdoptButton,
+  ArchiveButton,
+  EndAffiliationButton,
+} from "@/modules/crm/components/record-controls";
+
+export const dynamic = "force-dynamic";
+
+const BASE = "/dashboard/m/crm";
+
+export default async function RecordPage({
+  params,
+}: {
+  params: Promise<{ partyId: string }>;
+}) {
+  const { partyId } = await params;
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, "crm");
+
+  // `{ role: ctx.role }` is what lets RLS decide whether the CRM half of a
+  // restricted record comes back at all. A staff member gets the identity and a
+  // null `details`, which is indistinguishable from "never worked in CRM" — the
+  // same deliberate ambiguity the mail template values have.
+  const record = await withTenant(
+    ctx.tenant.id,
+    (tx) => loadRecord(tx, ctx.tenant.id, partyId),
+    { role: ctx.role },
+  ).catch((err) => {
+    // A record in another tenant and a record that does not exist are the same
+    // answer, because RLS removed it before this code ran. 404, never 403.
+    if (err instanceof CrmError && err.code === "RECORD_NOT_FOUND") notFound();
+    throw err;
+  });
+
+  const { party, details, affiliations, isCustomer, isVendor } = record;
+  const isOwner = ctx.role === "owner";
+  const current = affiliations.filter((a) => !a.affiliation.endedOn);
+  const former = affiliations.filter((a) => a.affiliation.endedOn);
+
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-6">
+      <Link
+        href={BASE}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft className="size-4" />
+        All records
+      </Link>
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-lg bg-brand/15 text-brand-foreground">
+            {party.kind === "person" ? (
+              <User className="size-5" />
+            ) : (
+              <Building2 className="size-5" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {party.displayName}
+            </h1>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {isCustomer && <Badge variant="secondary">Customer</Badge>}
+              {isVendor && <Badge variant="secondary">Vendor</Badge>}
+              {!party.isActive && <Badge variant="outline">Archived</Badge>}
+              {details?.visibility === "restricted" && (
+                <Badge variant="outline" className="gap-1">
+                  <Lock className="size-3" />
+                  Restricted
+                </Badge>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {!details && <AdoptButton partyId={party.id} />}
+          <ArchiveButton
+            partyId={party.id}
+            partyVersion={party.version}
+            isActive={party.isActive}
+          />
+        </div>
+      </div>
+
+      {!details ? (
+        <p className="rounded-md border px-4 py-8 text-center text-sm text-muted-foreground">
+          {isOwner
+            ? "This record is not in the CRM yet. Add it to track a stage, notes and connections."
+            : "You can see who this is, but not what the CRM holds on them. That is either because nobody has worked this record yet, or because it is restricted."}
+        </p>
+      ) : (
+        <>
+          <RecordForm
+            mode="edit"
+            partyId={party.id}
+            partyVersion={party.version}
+            detailsVersion={details.version}
+            isOwner={isOwner}
+            initial={{
+              kind: party.kind,
+              displayName: party.displayName,
+              givenName: party.givenName ?? "",
+              familyName: party.familyName ?? "",
+              legalName: party.legalName ?? "",
+              lifecycleStage: details.lifecycleStage,
+              source: details.source,
+              notes: details.notes,
+              visibility: details.visibility,
+            }}
+          />
+
+          <Separator />
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-medium">Connections</h2>
+                <p className="text-xs text-muted-foreground">
+                  {party.kind === "person"
+                    ? "Where this person works, and where they used to."
+                    : "Who works here, and who used to."}
+                </p>
+              </div>
+              <AddAffiliationButton partyId={party.id} partyKind={party.kind} />
+            </div>
+
+            {affiliations.length === 0 ? (
+              <p className="rounded-md border px-4 py-8 text-center text-sm text-muted-foreground">
+                No connections yet.
+              </p>
+            ) : (
+              <ul className="divide-y rounded-md border">
+                {[...current, ...former].map(({ affiliation, counterparty }) => (
+                  <li
+                    key={affiliation.id}
+                    className="flex items-center gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        href={`${BASE}/records/${counterparty.id}`}
+                        className="truncate text-sm font-medium hover:underline"
+                      >
+                        {counterparty.displayName}
+                      </Link>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {affiliation.title || "No role recorded"}
+                        {affiliation.endedOn && ` · until ${affiliation.endedOn}`}
+                      </p>
+                    </div>
+                    {affiliation.isPrimary && !affiliation.endedOn && (
+                      <Badge variant="secondary">Primary</Badge>
+                    )}
+                    {!affiliation.endedOn && (
+                      <EndAffiliationButton
+                        affiliationId={affiliation.id}
+                        expectedVersion={affiliation.version}
+                        partyId={party.id}
+                        counterpartyName={counterparty.displayName}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}

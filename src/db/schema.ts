@@ -3866,3 +3866,172 @@ export const interviewSessions = pgTable(
 );
 
 export type InterviewSession = typeof interviewSessions.$inferSelect;
+
+/* ------------------------------------------------------------------------
+ * CRM (slice 1). The module's OWN rows, on top of the shared `parties`
+ * spine — see the party-spine block above and docs/modules/crm.md.
+ *
+ * The division: `parties` says who somebody is and is readable by a tenant
+ * who never bought CRM; everything here says what CRM knows ABOUT them and
+ * disappears cleanly with the module. Nothing in accounting reads these
+ * tables, which is what lets CRM be sold separately.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Who may see a CRM record.
+ *
+ * `members` is spelled the same as `documents.effective_visibility` on
+ * purpose — it is the same concept and the same RLS mechanism
+ * (`app_current_tenant_role()`), and two vocabularies for one idea is how a
+ * codebase teaches the next reader to invent a third.
+ *
+ * `restricted` is spelled DIFFERENTLY from Documents' `owners`, and that is
+ * also deliberate. In a CRM "owner" already means the person a record is
+ * assigned to, so a visibility value called `owners` would read as "only the
+ * rep who owns it" when it actually means "only the business's owners". The
+ * collision is worth one inconsistent word to avoid.
+ *
+ * An enum rather than a boolean so a third tier costs a value and not a
+ * migration of every read site.
+ */
+export const crmVisibility = pgEnum("crm_visibility", ["members", "restricted"]);
+
+/**
+ * What CRM knows about a party: 1:1, created when CRM first touches the record.
+ *
+ * A party with no row here is one Accounting created and CRM has never been
+ * asked about — which is a normal state, not a gap to backfill.
+ */
+export const crmPartyDetails = pgTable(
+  "crm_party_details",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    partyId: uuid("party_id").notNull(),
+    /**
+     * The person this record is assigned to. AN ATTRIBUTION, NOT A PERMISSION
+     * — it answers "whose account is this?" and grants nothing. Visibility is
+     * the column below, decided by tenant role in RLS. Keeping the two apart
+     * is what stops "owner" meaning two things in one table.
+     *
+     * Nullable: unassigned is a real and common state, and a default of
+     * "whoever created it" would be a lie the pipeline reports on.
+     */
+    ownerClerkUserId: text("owner_clerk_user_id"),
+    visibility: crmVisibility("visibility").notNull().default("members"),
+    /**
+     * Open taxonomy (primitive P1) — no CHECK on the values. Core stores and
+     * filters; a Layer 2b profile supplies the vocabulary a trade actually
+     * uses. Empty string rather than null so a filter never has to handle two
+     * spellings of "not set".
+     */
+    lifecycleStage: text("lifecycle_stage").notNull().default(""),
+    /** Same shape, same reason: "referral", "website", whatever a pack names. */
+    source: text("source").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    /**
+     * Extension bag (primitive P2) for the per-tenant custom fields slice 2
+     * defines. NOT NULL DEFAULT '{}' so `custom->>'x'` is always safe, per
+     * conventions §4. Nothing writes it yet.
+     */
+    custom: jsonb("custom").notNull().default({}),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_party_details_tenant_id_id_idx").on(t.tenantId, t.id),
+    // 1:1 with the party. The unique is what makes "the CRM record for this
+    // party" a lookup rather than a query that might return two answers.
+    uniqueIndex("crm_party_details_tenant_party_idx").on(t.tenantId, t.partyId),
+    index("crm_party_details_tenant_owner_idx").on(t.tenantId, t.ownerClerkUserId),
+    foreignKey({
+      name: "crm_party_details_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * A person's connection to an organization — "Aoife is Operations Manager at
+ * Probe Construction".
+ *
+ * A JOIN TABLE RATHER THAN A COLUMN ON `parties`, because people change
+ * employers and the old connection is the thing you want when you find a
+ * three-year-old thread. A `parent_party_id` would have to be overwritten to
+ * record that, losing exactly the history a CRM exists to keep.
+ *
+ * `ended_at` is what makes it former rather than deleted.
+ */
+export const crmAffiliations = pgTable(
+  "crm_affiliations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The party with kind='person'. Not CHECKed — see the sole-trader note. */
+    personPartyId: uuid("person_party_id").notNull(),
+    organizationPartyId: uuid("organization_party_id").notNull(),
+    /** "Operations Manager". Free text: job titles are not an enumeration. */
+    title: text("title").notNull().default(""),
+    /**
+     * The one to write to at that company. Partial-unique below rather than a
+     * plain unique, so any number of non-primary affiliations may exist.
+     */
+    isPrimary: boolean("is_primary").notNull().default(false),
+    startedOn: date("started_on", { mode: "string" }),
+    endedOn: date("ended_on", { mode: "string" }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_affiliations_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("crm_affiliations_tenant_person_idx").on(t.tenantId, t.personPartyId),
+    index("crm_affiliations_tenant_org_idx").on(t.tenantId, t.organizationPartyId),
+    // The same person at the same company, twice, is a duplicate — but only
+    // while it is current. Somebody who leaves and returns years later gets a
+    // second row, which is the history this table exists to keep.
+    uniqueIndex("crm_affiliations_current_idx")
+      .on(t.tenantId, t.personPartyId, t.organizationPartyId)
+      .where(sql`ended_on is null`),
+    // At most one primary company per person, and again only among current
+    // ones. A partial unique index is the whole enforcement; no trigger.
+    uniqueIndex("crm_affiliations_primary_idx")
+      .on(t.tenantId, t.personPartyId)
+      .where(sql`is_primary = true and ended_on is null`),
+    foreignKey({
+      name: "crm_affiliations_person_fk",
+      columns: [t.tenantId, t.personPartyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "crm_affiliations_org_fk",
+      columns: [t.tenantId, t.organizationPartyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+    // A party affiliated with itself is meaningless and is the shape a bad
+    // merge produces, so the database refuses it rather than the UI hiding it.
+    check(
+      "crm_affiliations_distinct_parties",
+      sql`${t.personPartyId} <> ${t.organizationPartyId}`,
+    ),
+  ],
+);
+
+export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
+export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
+/** Who may see a CRM record: every member, or the business's owners only. */
+export type CrmRecordVisibility = CrmPartyDetails["visibility"];

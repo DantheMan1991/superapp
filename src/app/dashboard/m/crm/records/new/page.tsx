@@ -1,0 +1,43 @@
+import Link from "next/link";
+import { ChevronLeft } from "lucide-react";
+import { requireTenant } from "@/lib/auth";
+import { requireModuleEnabled } from "@/lib/modules";
+import {
+  EMPTY_RECORD,
+  RecordForm,
+} from "@/modules/crm/components/record-form";
+
+export const dynamic = "force-dynamic";
+
+const BASE = "/dashboard/m/crm";
+
+export default async function NewRecordPage() {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, "crm");
+
+  return (
+    <div className="mx-auto w-full max-w-2xl space-y-6">
+      <Link
+        href={BASE}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft className="size-4" />
+        All records
+      </Link>
+
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Add a record</h1>
+        <p className="text-sm text-muted-foreground">
+          A company or a person. Anyone already invoiced or paid through
+          Accounting is here already — search before adding.
+        </p>
+      </div>
+
+      <RecordForm
+        mode="create"
+        initial={EMPTY_RECORD}
+        isOwner={ctx.role === "owner"}
+      />
+    </div>
+  );
+}

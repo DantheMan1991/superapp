@@ -2,9 +2,18 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Customer } from "@/db/schema";
+import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
 import { LedgerError, type LedgerCtx } from "../core";
 
-/** Customers: the tenant's OWN customers. Staff may manage these (P21). */
+/**
+ * Customers: the tenant's OWN customers. Staff may manage these (P21).
+ *
+ * SINCE THE PARTY SPINE (CRM slice 0) this row is a ROLE, not an identity:
+ * "a party we invoice". `parties` says who they are, and a business that is
+ * both a customer and a vendor is one party holding two role rows. Every write
+ * here goes through `@/lib/parties`, which is the single door onto that table —
+ * this module does not INSERT or UPDATE `parties` itself.
+ */
 
 export async function listCustomers(tx: Tx, tenantId: string): Promise<Customer[]> {
   return tx.query.customers.findMany({
@@ -41,10 +50,15 @@ export async function createCustomer(
   ctx: LedgerCtx,
   input: CustomerInput,
 ): Promise<Customer> {
+  // The identity is born in the same transaction as the role, so a customer
+  // without a party is not a state this code can reach. 0061's trigger is the
+  // backstop for writers that predate this line, not a substitute for it.
+  const party = await createPartyForRole(tx, ctx.tenantId, input.name);
   const [row] = await tx
     .insert(schema.customers)
     .values({
       tenantId: ctx.tenantId,
+      partyId: party.id,
       name: input.name,
       email: input.email ?? "",
       phone: input.phone ?? "",
@@ -82,6 +96,12 @@ export async function updateCustomer(
     .returning();
   if (rows.length === 0) {
     throw new LedgerError("STALE_VERSION", "customer changed since loaded");
+  }
+  // Same transaction, so the two names cannot commit out of step. Without this
+  // the first corrected spelling makes the invoice and the CRM disagree about
+  // who the customer is.
+  if (args.patch.name !== undefined) {
+    await syncPartyName(tx, ctx.tenantId, rows[0].partyId, args.patch.name);
   }
   return { before, after: rows[0] };
 }

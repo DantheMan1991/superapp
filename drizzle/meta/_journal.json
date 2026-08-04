@@ -414,6 +414,34 @@
       "when": 1785719416015,
       "tag": "0058_mail_autofile_rules_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1785812312907,
+      "tag": "0059_graceful_invaders",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1785812368605,
+      "tag": "0060_parties_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1785812374553,
+      "tag": "0061_parties_compat",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1785812487698,
+      "tag": "0062_parties_contract",
+      "breakpoints": true
     }
   ]
 }

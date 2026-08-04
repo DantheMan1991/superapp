@@ -25,6 +25,10 @@ export type CrmErrorCode =
   | "STAGE_WRONG_PIPELINE"
   | "DEAL_NOT_FOUND"
   | "DEAL_TITLE_REQUIRED"
+  | "ACTIVITY_EMPTY"
+  | "ACTIVITY_NOT_FOUND"
+  | "TASK_NOT_FOUND"
+  | "TASK_TITLE_REQUIRED"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
 
@@ -90,6 +94,14 @@ export function friendlyMessage(err: unknown): string {
       return "That deal could not be found.";
     case "DEAL_TITLE_REQUIRED":
       return "Give the deal a name.";
+    case "ACTIVITY_EMPTY":
+      return "Write something before saving.";
+    case "ACTIVITY_NOT_FOUND":
+      return "That entry could not be found.";
+    case "TASK_NOT_FOUND":
+      return "That follow-up could not be found.";
+    case "TASK_TITLE_REQUIRED":
+      return "Give the follow-up a name.";
     case "CUSTOM_VALUES_INVALID":
       // The per-field messages carry the detail; this is the summary line.
       return err.issues?.length

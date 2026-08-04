@@ -14,6 +14,20 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — Slice 4: activity and follow-ups (branch `claude/crm-timeline`)
+
+- `crm_activities` (note / call / meeting, with `occurred_at` separate from
+  `created_at`) and `crm_tasks` (optional due date, optional record, completion
+  as a timestamp pair).
+- A timeline on every record merging both, plus a module-level **Follow-ups**
+  list grouped overdue / today / this week / later / someday.
+- `core/timeline.ts` is pure — merge, ordering, and the calendar-day urgency
+  rules — with 21 unit tests and no database.
+- **Built for sources that do not exist yet.** `mergeTimeline` takes items, not
+  tables, so slice 5's mail threads are a query and a mapping function.
+- `crm_tasks` RLS **branches**: unattached tasks are tenant-scoped, attached
+  ones inherit the record's visibility. See Decisions.
+
 ### 2026-08-04 — Slice 3: pipelines, deals, and stage history (branch `claude/crm-pipelines`)
 
 - `crm_pipelines`, `crm_pipeline_stages`, `crm_deals`, `crm_deal_stage_events`,
@@ -109,6 +123,8 @@ behaviour change.
 | `crm_deals` | One piece of work in front of a record | **Inherits the party's visibility** through a positive `EXISTS` against `crm_party_details`. `amount_cents` is NULLABLE on purpose — "not priced yet" and "worth nothing" are different facts and a forecast must not conflate them. `closed_at` denormalized from the history; `custom` holds slice 2's `entity_type = 'deal'` fields |
 | `crm_deal_stage_events` | Append-only stage history | **Inherits through the deal** — a two-link chain. Member-writable because the same action that moves a deal records the move; nothing UPDATEs or DELETEs these rows, which is a code property in the same standing as `audit_log` being append-only by convention. No `version` column |
 | `crm_deal_parties` | Additional stakeholders beyond the primary contact | Inherits through the deal. Unique on `(tenant, deal, party)` |
+| `crm_activities` | What was said — a note, a call, a meeting | Inherits the party's visibility positively, like deals. `occurred_at` is separate from `created_at` so writing up Friday's visit on Monday reads as Friday. No `email` kind: Mail already holds those and two records of one conversation disagree the moment either is edited. **Deletable**, unlike everything else here — see Decisions |
+| `crm_tasks` | A follow-up | **The policy BRANCHES**: `party_id IS NULL` is plain tenant-scoped, otherwise it inherits. Completion is a timestamp pair guarded by a CHECK — `completed_at` and `completed_by` are one fact and a row with half of it is uninterpretable. `due_on` is a DATE; follow-ups are due on a day |
 | `crm_field_defs` | Per-tenant custom field definitions | **Read/write split, not a visibility term**: a `FOR SELECT` member-read policy plus a `FOR ALL` owner-write policy. Two policies because **WITH CHECK is not consulted for DELETE** — a single `FOR ALL` with a permissive USING would let staff delete every definition in the tenant. `entity_type` is an open taxonomy (P1) so slice 3's deals need no migration. Key format enforced by CHECK; the `(tenant, entity_type, key)` unique is **partial on `archived_at is null`**, so archiving frees the name |
 
 Migrations: `0059` (tables/columns), `0060_parties_rls.sql` (custom: policies),
@@ -297,6 +313,34 @@ down; nothing but opening the page could have caught it. `centsToInput` and
 `EMPTY_RECORD` now live in `core/`, and the rule is in
 [conventions.md §8](../conventions.md).
 
+**An unattached task's `IS NULL` branch is not a hole**, and a reviewer's first
+instinct is that it should be. `crm_tasks.party_id` is nullable because "ring
+the accountant back" is a real task belonging to nobody in the CRM, and a
+product that refuses to hold it sends that task to a sticky note. An unattached
+task names no record, so there is no restricted thing to leak; its title is the
+author's own words about their own work. The moment somebody attaches it, the
+inheritance branch takes over — including on UPDATE, because WITH CHECK carries
+the same test, so staff cannot attach a task to a record they cannot see.
+
+**Tasks are deliberately NOT scoped to their assignee.** A follow-up is the
+business's work, not private correspondence, and whoever covers for somebody on
+holiday has to see what is outstanding. `app.clerk_user_id` exists and six mail
+tables use it; its absence here is a decision.
+
+**Activity is the one deletable thing in this module.** Everything else
+archives. An activity is the only table holding unstructured prose about
+another person — "rude on the phone, would not budge" is a note whose author may
+reasonably want it gone, and leaving it readable while pretending otherwise
+would be worse. Nothing references an activity, so removing one dangles nothing.
+
+**Calendar-day comparisons are done on yyyy-mm-dd STRINGS, never Dates.**
+"Is this overdue" is a question about days in the user's timezone; comparing a
+`date` column against a server `Date` is wrong by up to a day for anybody not on
+UTC, which surfaces as the product nagging about something due tomorrow. The
+per-row badge is computed in the BROWSER; the Follow-ups page groups on the
+server's today and says so — properly fixing that needs a tenant timezone in a
+shared setting, because `accounting_settings` holds one and CRM may not read it.
+
 **The board moves deals with a MENU, not drag and drop.** conventions §8 says a
 real share of usage is one-handed, in the field, on a phone, and dragging a card
 between columns that do not fit the screen is the one board interaction with no
@@ -375,5 +419,21 @@ values stay readable and the discontinuity is visible.
   column.
 - **`crm_deal_parties` has no add/remove UI** — the deal page lists
   stakeholders, and the actions exist, but nothing creates one yet.
-- Slices 4–11 (timeline & tasks, mail extension, explicit collaborators, dedup
-  & merge, saved views, reporting, automation, AI) are planned and unbuilt.
+- **The timeline has no mail in it yet.** That is slice 5's job: CRM has to
+  register its entity types with Mail before any thread can point at a party.
+  `mergeTimeline` takes items rather than tables precisely so that lands as a
+  query and a mapping function.
+- **The Follow-ups page groups against the SERVER's today**, so a tenant far
+  from UTC sees a task change group a few hours early or late. The per-row badge
+  is computed in the browser and is correct. A real fix needs a tenant timezone
+  somewhere CRM may read.
+- **An activity attaches to exactly one party**, plus optionally one deal. A
+  meeting with three people from the same company is currently three entries or
+  one filed against the company. Multi-attendee activity is a real want with no
+  UI demand yet.
+- **Tasks have no assignee picker** — the column exists and the ops honour it,
+  but nothing sets it, so everything is unassigned.
+- **No reminders or notifications.** An overdue follow-up is visible only to
+  somebody who opens the page.
+- Slices 5–11 (mail extension, explicit collaborators, dedup & merge, saved
+  views, reporting, automation, AI) are planned and unbuilt.

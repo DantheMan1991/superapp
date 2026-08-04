@@ -11,6 +11,16 @@ import { Separator } from "@/components/ui/separator";
 import { CrmError } from "@/modules/crm/core/errors";
 import { loadRecord } from "@/modules/crm/party-ops";
 import { listDealsForParty } from "@/modules/crm/deal-ops";
+import {
+  listActivitiesForParty,
+  listTasksForParty,
+  loadTimeline,
+} from "@/modules/crm/timeline-ops";
+import { Timeline } from "@/modules/crm/components/timeline";
+import {
+  AddTaskButton,
+  LogActivityButton,
+} from "@/modules/crm/components/timeline-controls";
 import { RecordForm } from "@/modules/crm/components/record-form";
 import {
   AddAffiliationButton,
@@ -41,6 +51,9 @@ export default async function RecordPage({
     async (tx) => ({
       ...(await loadRecord(tx, ctx.tenant.id, partyId)),
       deals: await listDealsForParty(tx, ctx.tenant.id, partyId),
+      timeline: await loadTimeline(tx, ctx.tenant.id, partyId),
+      activities: await listActivitiesForParty(tx, ctx.tenant.id, partyId),
+      tasks: await listTasksForParty(tx, ctx.tenant.id, partyId),
     }),
     { role: ctx.role },
   ).catch((err) => {
@@ -50,8 +63,18 @@ export default async function RecordPage({
     throw err;
   });
 
-  const { party, details, affiliations, fieldDefs, deals, isCustomer, isVendor } =
-    record;
+  const {
+    party,
+    details,
+    affiliations,
+    fieldDefs,
+    deals,
+    timeline,
+    activities,
+    tasks,
+    isCustomer,
+    isVendor,
+  } = record;
   const isOwner = ctx.role === "owner";
   const current = affiliations.filter((a) => !a.affiliation.endedOn);
   const former = affiliations.filter((a) => a.affiliation.endedOn);
@@ -134,6 +157,30 @@ export default async function RecordPage({
               visibility: details.visibility,
             }}
           />
+
+          <Separator />
+
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-medium">Timeline</h2>
+                <p className="text-xs text-muted-foreground">
+                  What was said, and what still has to happen.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <LogActivityButton partyId={party.id} />
+                <AddTaskButton partyId={party.id} />
+              </div>
+            </div>
+
+            <Timeline
+              items={timeline.items}
+              activities={activities}
+              tasks={tasks}
+              partyId={party.id}
+            />
+          </section>
 
           <Separator />
 

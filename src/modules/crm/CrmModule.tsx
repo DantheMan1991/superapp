@@ -66,6 +66,9 @@ export async function CrmModule({
         </div>
         <div className="flex items-center gap-2">
           <Button asChild variant="outline">
+            <Link href={`${BASE}/tasks`}>Follow-ups</Link>
+          </Button>
+          <Button asChild variant="outline">
             <Link href={`${BASE}/deals`}>Board</Link>
           </Button>
           <Button asChild variant="outline">

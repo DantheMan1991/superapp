@@ -60,6 +60,7 @@ function minimalBooksData(): BooksData {
     closeNotes: [],
     auditLog: [],
     customers: [],
+    partyContactPoints: [],
     invoices: [],
     invoiceLines: [],
     invoicePayments: [],

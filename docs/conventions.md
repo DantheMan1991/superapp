@@ -152,6 +152,15 @@ a feature PR; **import `@/lib/money` in new code.**
 - Migrations: `npm run db:generate` for schema, then a **second `--custom`
   migration** for RLS policies. Drizzle does not generate RLS.
 - Run every migration against **both** the dev branch and production.
+- Migrations go out **ahead of** the deploy, so every one must leave the
+  currently running code working (the 0023/0025 outage, in
+  [documents.md](modules/documents.md)). **A migration that DROPS a column is
+  the one exception and must be applied AFTER the deploy** — drizzle names every
+  column of a table in the SELECT it builds, so the old code starts answering
+  `column … does not exist` the instant the column goes. Nothing enforces the
+  order; what makes it safe is that the wrong way round is loud and the right
+  way round is harmless. Say so in the migration's header, as
+  `0075_accounting_contacts_contract.sql` does.
 - Indexes on tenant tables lead with `tenant_id`.
 - Prefer a `NOT NULL DEFAULT` over a nullable column — `metadata jsonb NOT NULL
   DEFAULT '{}'` means `metadata->>'x'` is always safe.

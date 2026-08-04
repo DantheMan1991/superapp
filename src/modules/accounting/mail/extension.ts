@@ -1,5 +1,6 @@
 import "server-only";
-import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import type { AnyColumn } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type {
   LinkableEntity,
@@ -7,6 +8,8 @@ import type {
   MailContactCandidate,
   MailExtensionCtx,
 } from "@/lib/mail-extensions/types";
+import { listContactPointsFor } from "@/lib/parties/contacts";
+import { preferredContactValue } from "@/lib/parties/contact-values";
 import { formatCents } from "../lib/money";
 
 /**
@@ -39,6 +42,53 @@ function contains(term: string): string {
 /** Money on one line, the way the rest of the module writes it. */
 function amount(cents: number): string {
   return `$${formatCents(cents)}`;
+}
+
+/**
+ * Every listed party's main email, for the sublabels below.
+ *
+ * A CUSTOMER'S ADDRESS IS NOT A COLUMN ON `customers` ANY MORE (0075), so what
+ * used to be `r.email` is now a second read against `party_contact_points` —
+ * one batched query for the whole page of results rather than one per row.
+ * Through the caller's `tx` like everything else here, so the addresses this
+ * can see are the addresses that person can see.
+ */
+async function mainEmails(
+  tx: Tx,
+  tenantId: string,
+  partyIds: readonly string[],
+): Promise<Map<string, string>> {
+  const byParty = await listContactPointsFor(tx, tenantId, partyIds);
+  const out = new Map<string, string>();
+  for (const [partyId, points] of byParty) {
+    out.set(partyId, preferredContactValue(points, "email"));
+  }
+  return out;
+}
+
+/**
+ * "This role row's party can be reached at something matching the query."
+ *
+ * Searching a role by address used to be `ilike(customers.email, …)`. The
+ * addresses moved, so the predicate follows them. RLS applies inside this
+ * subquery exactly as it does in the outer one — `party_contact_points` is
+ * tenant-scoped — and the explicit `cp.tenant_id = <role>.tenant_id` is the
+ * same belt-and-braces every other predicate in this file wears. Note this is
+ * a POSITIVE existence test, so RLS removing rows can only ever narrow what is
+ * found; the failure mode `crm_affiliations` documents (a NOT EXISTS that goes
+ * true precisely because the caller cannot see the row) does not arise.
+ */
+function reachableAt(
+  tenantIdColumn: AnyColumn,
+  partyIdColumn: AnyColumn,
+  like: string,
+) {
+  return sql`exists (
+    select 1 from party_contact_points cp
+     where cp.tenant_id = ${tenantIdColumn}
+       and cp.party_id = ${partyIdColumn}
+       and cp.value ilike ${like}
+  )`;
 }
 
 const invoiceEntity = {
@@ -299,8 +349,8 @@ const customerEntity = {
     const rows = await tx
       .select({
         id: schema.customers.id,
+        partyId: schema.customers.partyId,
         name: schema.customers.name,
-        email: schema.customers.email,
         isActive: schema.customers.isActive,
       })
       .from(schema.customers)
@@ -309,7 +359,11 @@ const customerEntity = {
           eq(schema.customers.tenantId, ctx.tenantId),
           or(
             ilike(schema.customers.name, like),
-            ilike(schema.customers.email, like),
+            reachableAt(
+              schema.customers.tenantId,
+              schema.customers.partyId,
+              like,
+            ),
           ),
         ),
       )
@@ -318,11 +372,19 @@ const customerEntity = {
       .orderBy(desc(schema.customers.isActive), sql`lower(${schema.customers.name})`)
       .limit(limit);
 
+    const email = await mainEmails(
+      tx,
+      ctx.tenantId,
+      rows.map((r) => r.partyId),
+    );
+
     return rows.map((r) => ({
       entityType: "customer",
       entityId: r.id,
       label: r.name,
-      sublabel: [r.email, r.isActive ? null : "archived"].filter(Boolean).join(" · "),
+      sublabel: [email.get(r.partyId), r.isActive ? null : "archived"]
+        .filter(Boolean)
+        .join(" · "),
       href: `/dashboard/m/accounting/sales/customers`,
     }));
   },
@@ -336,8 +398,8 @@ const customerEntity = {
     const rows = await tx
       .select({
         id: schema.customers.id,
+        partyId: schema.customers.partyId,
         name: schema.customers.name,
-        email: schema.customers.email,
       })
       .from(schema.customers)
       .where(
@@ -347,11 +409,17 @@ const customerEntity = {
         ),
       );
 
+    const email = await mainEmails(
+      tx,
+      ctx.tenantId,
+      rows.map((r) => r.partyId),
+    );
+
     return rows.map((r) => ({
       entityType: "customer",
       entityId: r.id,
       label: r.name,
-      sublabel: r.email,
+      sublabel: email.get(r.partyId) ?? "",
       href: `/dashboard/m/accounting/sales/customers`,
     }));
   },
@@ -364,6 +432,14 @@ const customerEntity = {
    * customer exercise the two shapes that differ: a joined record whose values
    * are formatted, and a flat one whose values are not.
    */
+  /**
+   * `{{customer.email}}` SURVIVED THE COLUMN IT WAS NAMED AFTER, and keeping
+   * the key was not optional. A template's placeholders are validated against
+   * this array when it is saved, so renaming a key breaks every stored template
+   * that used it — with no migration able to guess what the author meant. The
+   * key names a question ("how do we reach this customer?"), the answer moved,
+   * and only the answer moved.
+   */
   templateFields: [
     { key: "name", label: "Customer name" },
     { key: "email", label: "Customer email" },
@@ -375,7 +451,7 @@ const customerEntity = {
     entityId: string,
   ): Promise<Record<string, string> | null> {
     const [row] = await tx
-      .select({ name: schema.customers.name, email: schema.customers.email })
+      .select({ name: schema.customers.name, partyId: schema.customers.partyId })
       .from(schema.customers)
       .where(
         and(
@@ -384,7 +460,10 @@ const customerEntity = {
         ),
       );
     if (!row) return null;
-    return { name: row.name, email: row.email ?? "" };
+    const email = await mainEmails(tx, ctx.tenantId, [row.partyId]);
+    // "" for a customer with no address, exactly as the empty column gave —
+    // an unknown value pastes as nothing rather than as the word "null".
+    return { name: row.name, email: email.get(row.partyId) ?? "" };
   },
 };
 
@@ -404,25 +483,36 @@ const vendorEntity = {
     const rows = await tx
       .select({
         id: schema.vendors.id,
+        partyId: schema.vendors.partyId,
         name: schema.vendors.name,
-        email: schema.vendors.email,
         isActive: schema.vendors.isActive,
       })
       .from(schema.vendors)
       .where(
         and(
           eq(schema.vendors.tenantId, ctx.tenantId),
-          or(ilike(schema.vendors.name, like), ilike(schema.vendors.email, like)),
+          or(
+            ilike(schema.vendors.name, like),
+            reachableAt(schema.vendors.tenantId, schema.vendors.partyId, like),
+          ),
         ),
       )
       .orderBy(desc(schema.vendors.isActive), sql`lower(${schema.vendors.name})`)
       .limit(limit);
 
+    const email = await mainEmails(
+      tx,
+      ctx.tenantId,
+      rows.map((r) => r.partyId),
+    );
+
     return rows.map((r) => ({
       entityType: "vendor",
       entityId: r.id,
       label: r.name,
-      sublabel: [r.email, r.isActive ? null : "archived"].filter(Boolean).join(" · "),
+      sublabel: [email.get(r.partyId), r.isActive ? null : "archived"]
+        .filter(Boolean)
+        .join(" · "),
       href: `/dashboard/m/accounting/purchases/vendors`,
     }));
   },
@@ -436,8 +526,8 @@ const vendorEntity = {
     const rows = await tx
       .select({
         id: schema.vendors.id,
+        partyId: schema.vendors.partyId,
         name: schema.vendors.name,
-        email: schema.vendors.email,
       })
       .from(schema.vendors)
       .where(
@@ -447,11 +537,17 @@ const vendorEntity = {
         ),
       );
 
+    const email = await mainEmails(
+      tx,
+      ctx.tenantId,
+      rows.map((r) => r.partyId),
+    );
+
     return rows.map((r) => ({
       entityType: "vendor",
       entityId: r.id,
       label: r.name,
-      sublabel: r.email,
+      sublabel: email.get(r.partyId) ?? "",
       href: `/dashboard/m/accounting/purchases/vendors`,
     }));
   },
@@ -477,6 +573,19 @@ export const accountingMailExtension: MailExtension = {
  *
  * Uses the CALLER'S transaction, so this is exactly the set of customers and
  * vendors that person may see. Nothing here filters on visibility.
+ *
+ * THIS OVERLAPS CRM'S SOURCE AND IS KEPT ANYWAY. Since 0075 both read the same
+ * `party_contact_points` rows, so a customer with CRM installed is found twice
+ * — and `rankContacts` collapses the two by lowercased address before anything
+ * is shown, then keeps the sublabel of whichever source the registry lists
+ * first. That is this one, so a business address reads "Customer" rather than
+ * "Company", which is the more useful of the two true answers. Deleting this
+ * source instead would leave an accounting-only tenant with no suggestions at
+ * all, because an extension whose module is off contributes nothing.
+ *
+ * The join is to the ROLE row rather than to the party, which is what makes the
+ * distinction possible: `name` is the customer's name as invoicing knows it,
+ * and only parties the business actually invoices or pays are offered.
  */
 async function searchContacts(
   tx: Tx,
@@ -491,30 +600,56 @@ async function searchContacts(
   // Two selects rather than a UNION: drizzle's union typing across differently
   // named columns costs more than it saves for six rows, and these run
   // concurrently inside the one transaction anyway.
+  //
+  // INNER JOIN, so a role row with no address is not offered — a suggestion
+  // that does nothing when clicked is worse than absent, and that used to be
+  // the `ne(email, "")` predicate. All of a party's addresses are offered
+  // rather than only the primary, main one first, the same way CRM's source
+  // does: a picker is where somebody chooses between them.
   const [customerRows, vendorRows] = await Promise.all([
     tx
-      .select({ name: schema.customers.name, email: schema.customers.email })
+      .select({
+        name: schema.customers.name,
+        email: schema.partyContactPoints.value,
+      })
       .from(schema.customers)
+      .innerJoin(
+        schema.partyContactPoints,
+        and(
+          eq(schema.partyContactPoints.tenantId, schema.customers.tenantId),
+          eq(schema.partyContactPoints.partyId, schema.customers.partyId),
+          eq(schema.partyContactPoints.kind, "email"),
+        ),
+      )
       .where(
         and(
           eq(schema.customers.tenantId, ctx.tenantId),
-          // A row with no address cannot be picked, so it must not be offered —
-          // a suggestion that does nothing when clicked is worse than absent.
-          ne(schema.customers.email, ""),
-          sql`(${schema.customers.name} ilike ${like} or ${schema.customers.email} ilike ${like})`,
+          sql`(${schema.customers.name} ilike ${like} or ${schema.partyContactPoints.value} ilike ${like})`,
         ),
       )
+      .orderBy(desc(schema.partyContactPoints.isPrimary), asc(schema.customers.name))
       .limit(limit),
     tx
-      .select({ name: schema.vendors.name, email: schema.vendors.email })
+      .select({
+        name: schema.vendors.name,
+        email: schema.partyContactPoints.value,
+      })
       .from(schema.vendors)
+      .innerJoin(
+        schema.partyContactPoints,
+        and(
+          eq(schema.partyContactPoints.tenantId, schema.vendors.tenantId),
+          eq(schema.partyContactPoints.partyId, schema.vendors.partyId),
+          eq(schema.partyContactPoints.kind, "email"),
+        ),
+      )
       .where(
         and(
           eq(schema.vendors.tenantId, ctx.tenantId),
-          ne(schema.vendors.email, ""),
-          sql`(${schema.vendors.name} ilike ${like} or ${schema.vendors.email} ilike ${like})`,
+          sql`(${schema.vendors.name} ilike ${like} or ${schema.partyContactPoints.value} ilike ${like})`,
         ),
       )
+      .orderBy(desc(schema.partyContactPoints.isPrimary), asc(schema.vendors.name))
       .limit(limit),
   ]);
 

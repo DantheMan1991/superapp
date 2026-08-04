@@ -46,13 +46,13 @@ import { searchReachableParties } from "@/lib/parties/contacts";
  * was designed — "so a future CRM contributes its people without Mail knowing
  * it exists".
  *
- * NOTE THE DUPLICATE THIS CREATES, because it is real and accepted rather than
- * missed. A customer's billing address now reaches the composer twice: once
- * from Accounting's `customers.email`, once from the contact point backfilled
- * from it. Both carry a `sublabel` saying where they came from, so the two rows
- * are distinguishable rather than mysterious — and the fix is the CONTRACT
- * slice that retires the accounting columns, not a filter here guessing which
- * copy to suppress.
+ * THIS OVERLAPS ACCOUNTING'S SOURCE AND DOES NOT DUPLICATE ANYTHING. Since 0075
+ * both read the same `party_contact_points` rows, so a customer who is also a
+ * CRM record is contributed twice — and `rankContacts` collapses the two by
+ * lowercased address before anything is shown. What the overlap decides is the
+ * SUBLABEL: the registry lists accounting first, so a business address reads
+ * "Customer" rather than "Company". That is the better of the two true answers
+ * and is the reason neither source needs a filter guessing about the other.
  */
 
 /** One `%term%` fragment, bound as a parameter — never interpolated. */
@@ -404,8 +404,9 @@ async function searchContacts(
     email: contactPoint.value,
     name: party.displayName,
     // Says WHERE this came from. Two rows reading the same name with no other
-    // difference is a choice nobody can make — and there WILL be two while the
-    // accounting columns still exist.
+    // difference is a choice nobody can make. The label is included because a
+    // party with a billing address and a mobile offers both, and "Contact" on
+    // its own would not tell them apart.
     sublabel: [
       party.kind === "person" ? "Contact" : "Company",
       contactPoint.label || null,

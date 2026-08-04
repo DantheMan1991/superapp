@@ -4034,10 +4034,13 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
   /**
    * The contact SEAM, over Accounting's customers.
    *
-   * `extension.ts` filters on tenant and a non-empty address and nothing else,
-   * so this asserts that the CALLER'S transaction is what keeps one tenant's
-   * customers out of another's recipient field — the same property the image
-   * source is tested for, reached through the other capability.
+   * `extension.ts` joins the customer to its party's contact points and filters
+   * on tenant and nothing else, so this asserts that the CALLER'S transaction is
+   * what keeps one tenant's customers out of another's recipient field — the
+   * same property the image source is tested for, reached through the other
+   * capability. Since 0075 the address is on the PARTY, which puts a second
+   * tenant-scoped table inside the same query and makes this worth more than it
+   * was: RLS has to hold on both sides of that join.
    */
   it("the contact source cannot reach another tenant's customers", async () => {
     for (const [tenant, tag] of [
@@ -4046,13 +4049,22 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
     ] as const) {
       await withTenant(
         tenant,
-        async (tx) =>
-          tx.insert(schema.customers).values({
+        async (tx) => {
+          const partyId = await seedParty(tx, tenant, `Isolation Contact ${tag}`);
+          await tx.insert(schema.partyContactPoints).values({
             tenantId: tenant,
-            partyId: await seedParty(tx, tenant, `Isolation Contact ${tag}`),
+            partyId,
+            kind: "email",
+            value: `isolation-contact@${tag}.example`,
+            normalizedValue: `isolation-contact@${tag}.example`,
+            isPrimary: true,
+          });
+          return tx.insert(schema.customers).values({
+            tenantId: tenant,
+            partyId,
             name: `Isolation Contact ${tag}`,
-            email: `isolation-contact@${tag}.example`,
-          }),
+          });
+        },
         { role: "owner", userId: `user-${tag}` },
       );
     }
@@ -4085,6 +4097,55 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
   });
 
   /**
+   * FINDING A CUSTOMER BY ITS ADDRESS, which after 0075 is an `EXISTS` against
+   * `party_contact_points` written as raw SQL rather than an `ilike` on a
+   * column. Two things are asserted and both are worth the test:
+   *
+   *  - it works at all. Hand-written SQL that has never run is exactly what
+   *    ships broken, and no other test reaches this predicate.
+   *  - RLS holds INSIDE the subquery. A positive existence test can only ever
+   *    be narrowed by rows the caller cannot see, which is the opposite of the
+   *    `NOT EXISTS` failure `crm_affiliations` documents — but "it follows from
+   *    the shape" is how the affiliation bug would have been argued too.
+   */
+  it("a customer is findable by an address on its party, and only its own tenant's", async () => {
+    const customerType = accountingMailExtension.entityTypes.find(
+      (t) => t.type === "customer",
+    )!;
+
+    const fromA = await withTenant(
+      tenantA,
+      (tx) =>
+        customerType.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          // The address only — nothing in the NAME matches this, so a hit can
+          // only have come through the contact-point subquery.
+          "isolation-contact@a.example",
+          10,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(fromA.map((e) => e.label)).toEqual(["Isolation Contact a"]);
+    expect(fromA[0].sublabel).toBe("isolation-contact@a.example");
+
+    // Tenant B's address, asked for by tenant A. The role row is invisible and
+    // so is the contact point; neither half may answer.
+    const crossTenant = await withTenant(
+      tenantA,
+      (tx) =>
+        customerType.search(
+          tx,
+          { tenantId: tenantA, userId: "user-a", role: "owner" },
+          "isolation-contact@b.example",
+          10,
+        ),
+      { role: "owner", userId: "user-a" },
+    );
+    expect(crossTenant).toEqual([]);
+  });
+
+  /**
    * TEMPLATE PLACEHOLDER VALUES, reached through the newest capability.
    *
    * `{{invoice.number}}` pastes a business record's fields into a message
@@ -4113,13 +4174,21 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
       ids[tag] = await withTenant(
         tenant,
         async (tx) => {
+          const partyId = await seedParty(tx, tenant, `Placeholder Co ${tag}`);
+          await tx.insert(schema.partyContactPoints).values({
+            tenantId: tenant,
+            partyId,
+            kind: "email",
+            value: `placeholder@${tag}.example`,
+            normalizedValue: `placeholder@${tag}.example`,
+            isPrimary: true,
+          });
           const [customer] = await tx
             .insert(schema.customers)
             .values({
               tenantId: tenant,
-              partyId: await seedParty(tx, tenant, `Placeholder Co ${tag}`),
+              partyId,
               name: `Placeholder Co ${tag}`,
-              email: `placeholder@${tag}.example`,
             })
             .returning();
           const [invoice] = await tx

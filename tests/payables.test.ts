@@ -44,7 +44,9 @@ import {
 } from "../src/modules/accounting/payables/from-document";
 import { buildApAging } from "../src/modules/accounting/payables/aging";
 import { getApAging } from "../src/modules/accounting/payables/aging-feed";
-import { createVendor } from "../src/modules/accounting/payables/vendors";
+import { createVendor, updateVendor } from "../src/modules/accounting/payables/vendors";
+import { listContactPoints } from "../src/lib/parties/contacts";
+import { preferredContactValue } from "../src/lib/parties/contact-values";
 import {
   gatherBillCodingInputs,
   suggestBillCodingForBill,
@@ -334,6 +336,61 @@ d("payables (DB)", () => {
   afterAll(async () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
+    });
+  });
+
+  /**
+   * The vendor half of 0075. Shorter than the customer suite in
+   * invoicing.test.ts because the paths are the same code — what is asserted
+   * here is the ONE genuine difference: `updateVendor` takes a whole record
+   * rather than a patch, so a vendor dialog submitted with an empty email box
+   * sends `undefined` and must still mean "cleared". The customer path spells
+   * the same intent as `""`, and a reader who assumes both are patches would
+   * make clearing a vendor's address impossible without noticing.
+   */
+  describe("vendor contact details live on the party", () => {
+    async function pointsOf(vendorId: string) {
+      return withTenant(tenantId, async (tx) => {
+        const vendor = await tx.query.vendors.findFirst({
+          where: and(
+            eq(schema.vendors.tenantId, tenantId),
+            eq(schema.vendors.id, vendorId),
+          ),
+        });
+        return listContactPoints(tx, tenantId, vendor!.partyId);
+      });
+    }
+
+    it("a new vendor's address becomes a contact point labelled for AP", async () => {
+      const vendor = await withTenant(tenantId, (tx) =>
+        createVendor(tx, owner, {
+          name: "Contact Supplies",
+          email: "AP@Supplies.example",
+        }),
+      );
+      const email = (await pointsOf(vendor.id)).find((p) => p.kind === "email")!;
+      expect(email.value).toBe("AP@Supplies.example");
+      expect(email.normalizedValue).toBe("ap@supplies.example");
+      expect(email.label).toBe("accounts");
+    });
+
+    it("saving the dialog with an empty box clears the address", async () => {
+      const vendor = await withTenant(tenantId, (tx) =>
+        createVendor(tx, owner, {
+          name: "Clearing Supplies",
+          email: "ap@clearing-supplies.example",
+        }),
+      );
+      await withTenant(tenantId, (tx) =>
+        updateVendor(tx, owner, {
+          vendorId: vendor.id,
+          expectedVersion: vendor.version,
+          // Exactly what `vendor-dialogs.tsx` sends: every field, `undefined`
+          // where the box was empty.
+          patch: { name: "Clearing Supplies", email: undefined },
+        }),
+      );
+      expect(preferredContactValue(await pointsOf(vendor.id), "email")).toBe("");
     });
   });
 

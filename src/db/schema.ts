@@ -568,7 +568,7 @@ export const parties = pgTable(
      */
     givenName: text("given_name"),
     familyName: text("family_name"),
-    /** "Probe Construction Ltd" when the display name is "Probe". */
+    /** The registered name, when it differs from what everyone calls them. */
     legalName: text("legal_name"),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
@@ -3960,8 +3960,8 @@ export const crmPartyDetails = pgTable(
 );
 
 /**
- * A person's connection to an organization — "Aoife is Operations Manager at
- * Probe Construction".
+ * A person's connection to an organization — "this person is Operations
+ * Manager at that company".
  *
  * A JOIN TABLE RATHER THAN A COLUMN ON `parties`, because people change
  * employers and the old connection is the thing you want when you find a

@@ -270,6 +270,12 @@ values stay readable and the discontinuity is visible.
 - **Cross-linking accounting's customer list to a CRM record needs P5.**
   Accounting cannot import CRM. A record-link extension point is the sanctioned
   route; ADR 0004 already predicted nav contribution would force one.
+- **`Probe Construction` is still in two files this module did not touch** —
+  `src/lib/mail-extensions/types.ts` and `src/lib/email/jmap/types.ts`, both as
+  comment examples. Worth knowing because CRM's own placeholders picked the name
+  up from them by reading nearby code, which is the propagation mechanism
+  [extension-model.md §8](../extension-model.md) describes rather than a
+  coincidence. Rewrite them opportunistically when next in those files.
 - **A6 was overridden deliberately.** The empty-slot rule says a module waits for
   a paying client to pull it in. The founder directed this build ahead of that on
   2026-08-03. Recorded here so a future session reads it as a decision rather

@@ -18,6 +18,13 @@ export type CrmErrorCode =
   | "FIELD_KEY_TAKEN"
   | "FIELD_OPTIONS_REQUIRED"
   | "CUSTOM_VALUES_INVALID"
+  | "PIPELINE_NOT_FOUND"
+  | "PIPELINE_HAS_NO_OPEN_STAGE"
+  | "STAGE_NOT_FOUND"
+  | "STAGE_NOT_EMPTY"
+  | "STAGE_WRONG_PIPELINE"
+  | "DEAL_NOT_FOUND"
+  | "DEAL_TITLE_REQUIRED"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
 
@@ -67,6 +74,22 @@ export function friendlyMessage(err: unknown): string {
       return "A field with that name already exists.";
     case "FIELD_OPTIONS_REQUIRED":
       return "A choice field needs at least one option.";
+    case "PIPELINE_NOT_FOUND":
+      return "That pipeline could not be found.";
+    case "PIPELINE_HAS_NO_OPEN_STAGE":
+      return "This pipeline has no open stage to start a deal in. Add one first.";
+    case "STAGE_NOT_FOUND":
+      return "That stage could not be found.";
+    case "STAGE_NOT_EMPTY":
+      // Says what to do, not just what went wrong: the deals would otherwise
+      // survive in a column nothing draws.
+      return "Move the deals out of this stage before archiving it.";
+    case "STAGE_WRONG_PIPELINE":
+      return "That stage belongs to a different pipeline.";
+    case "DEAL_NOT_FOUND":
+      return "That deal could not be found.";
+    case "DEAL_TITLE_REQUIRED":
+      return "Give the deal a name.";
     case "CUSTOM_VALUES_INVALID":
       // The per-field messages carry the detail; this is the summary line.
       return err.issues?.length

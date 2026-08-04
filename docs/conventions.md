@@ -137,9 +137,13 @@ Integer cents in JS numbers. Never floats, anywhere, for any reason.
 - DB columns are `bigint`.
 - CSV amounts are built by integer construction, never `toFixed()`.
 
-[src/modules/accounting/lib/money.ts](../src/modules/accounting/lib/money.ts) is
-the only place this logic lives. If you are writing `/100` or `* 100` outside
-it, stop.
+[src/lib/money.ts](../src/lib/money.ts) is the only place this logic lives. If
+you are writing `/100` or `* 100` outside it, stop.
+
+It moved out of `src/modules/accounting/lib/` on 2026-08-04, when CRM needed it
+for deal amounts and could not import another module. `src/modules/accounting/lib/money.ts`
+is now a re-export kept so the sixty existing callers were not rewritten inside
+a feature PR; **import `@/lib/money` in new code.**
 
 ---
 

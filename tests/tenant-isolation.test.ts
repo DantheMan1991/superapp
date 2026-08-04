@@ -5,6 +5,7 @@ import { withTenant, withSystem, schema, type Tx } from "../src/db";
 import { recentCorrespondents } from "../src/modules/email/contacts/recent";
 import { accountingMailExtension } from "../src/modules/accounting/mail/extension";
 import { crmMailExtension } from "../src/modules/crm/mail/extension";
+import { findPartiesByContact } from "../src/lib/parties/contacts";
 import { documentsMailExtension } from "../src/modules/documents/mail/extension";
 
 /**
@@ -590,6 +591,117 @@ d("parties isolation (RLS + composite tenant FKs)", () => {
    * cannot hold the SAME role twice. Two AR relationships with one identity is
    * a duplicate record, not a fact about the business.
    */
+  /* -- Contact points ----------------------------------------------------- */
+
+  /**
+   * `party_contact_points` is tenant-scoped like `parties`. The case that
+   * earns its keep is the DUPLICATE LOOKUP: it searches by normalized value
+   * across the whole tenant, which is exactly the shape that leaks if it is
+   * ever run outside a scoped transaction. Typing a competitor's email and
+   * being told whether they are one of our clients is the failure to prevent.
+   */
+  it("contact points are scoped to their tenant", async () => {
+    for (const [tenant, tag] of [
+      [tenantA, "a"],
+      [tenantB, "b"],
+    ] as const) {
+      await withTenant(tenant, (tx) =>
+        tx.insert(schema.partyContactPoints).values({
+          tenantId: tenant,
+          partyId: partyOf[tag === "a" ? "A" : "B"],
+          kind: "email",
+          value: `shared@example.com`,
+          // Written literally rather than through the normalizer, so this test
+          // does not agree with a bug in the code it is certifying.
+          normalizedValue: "shared@example.com",
+          isPrimary: true,
+        }),
+      );
+    }
+
+    const rows = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.partyContactPoints),
+    );
+    expect(rows.length).toBe(1);
+    expect(rows[0].tenantId).toBe(tenantA);
+  });
+
+  it("THE DUPLICATE LOOKUP CANNOT SEE ANOTHER TENANT'S PARTY", async () => {
+    // Both tenants have `shared@example.com` from the test above. Tenant A must
+    // find its own and only its own — otherwise the warning becomes a way to
+    // discover another business's client list one address at a time.
+    const matches = await withTenant(tenantA, (tx) =>
+      findPartiesByContact(tx, tenantA, "email", "Shared@Example.COM"),
+    );
+    expect(matches).toHaveLength(1);
+    expect(matches[0].party.id).toBe(partyOf.A);
+    expect(matches[0].party.tenantId).toBe(tenantA);
+  });
+
+  it("cannot INSERT a contact point attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.partyContactPoints).values({
+          tenantId: tenantB,
+          partyId: partyOf.B,
+          kind: "email",
+          value: "smuggled@example.com",
+          normalizedValue: "smuggled@example.com",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("one party cannot hold the same address twice", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.partyContactPoints).values({
+          tenantId: tenantA,
+          partyId: partyOf.A,
+          kind: "email",
+          value: "SHARED@example.com",
+          // Same normalized value as the row inserted above — differing
+          // capitalisation must not sneak a duplicate past the unique.
+          normalizedValue: "shared@example.com",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("one party cannot have two primary addresses of the same kind", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.partyContactPoints).values({
+          tenantId: tenantA,
+          partyId: partyOf.A,
+          kind: "email",
+          value: "second@example.com",
+          normalizedValue: "second@example.com",
+          isPrimary: true,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("but CAN have a primary of each kind", async () => {
+    // The partial unique is per (party, KIND) — a main email and a main phone
+    // are different questions and both deserve an answer.
+    const row = await withTenant(tenantA, (tx) =>
+      tx
+        .insert(schema.partyContactPoints)
+        .values({
+          tenantId: tenantA,
+          partyId: partyOf.A,
+          kind: "phone",
+          value: "+1 555 123 4567",
+          normalizedValue: "+15551234567",
+          isPrimary: true,
+        })
+        .returning(),
+    );
+    expect(row).toHaveLength(1);
+  });
+
   it("a party cannot hold the same role twice", async () => {
     await expect(
       withTenant(tenantA, async (tx) => {

@@ -10,6 +10,8 @@
 export type PartyErrorCode =
   | "PARTY_NOT_FOUND"
   | "PARTY_NAME_REQUIRED"
+  | "CONTACT_POINT_NOT_FOUND"
+  | "CONTACT_VALUE_INVALID"
   | "STALE_VERSION";
 
 export class PartyError extends Error {
@@ -29,6 +31,10 @@ export function friendlyPartyMessage(err: PartyError): string {
       return "That record could not be found.";
     case "PARTY_NAME_REQUIRED":
       return "A name is required.";
+    case "CONTACT_POINT_NOT_FOUND":
+      return "That contact detail could not be found.";
+    case "CONTACT_VALUE_INVALID":
+      return "That does not look like a usable email, phone or website.";
     case "STALE_VERSION":
       return "This record changed while you were editing it. Reload and try again.";
   }

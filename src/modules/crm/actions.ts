@@ -6,6 +6,14 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
+import { CONTACT_VALUE_MAX } from "@/lib/parties/contact-values";
+import {
+  addContactPoint,
+  deleteContactPoint,
+  findPartiesByContact,
+  setPrimaryContactPoint,
+  updateContactPoint,
+} from "@/lib/parties/contacts";
 import { CrmError, friendlyMessage } from "./core/errors";
 import {
   LIFECYCLE_STAGE_MAX,
@@ -457,6 +465,183 @@ export async function reorderFieldDefsAction(
 
     revalidateFields();
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- Contact points ------------------------------------------------------- */
+
+const contactKind = z.enum(["email", "phone", "website"]);
+
+const addContactSchema = z.object({
+  partyId: z.string().uuid(),
+  kind: contactKind,
+  value: z.string().min(1).max(CONTACT_VALUE_MAX),
+  label: z.string().max(40).optional(),
+  isPrimary: z.boolean().optional(),
+});
+
+export async function addContactPointAction(
+  input: z.infer<typeof addContactSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = addContactSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+    const { partyId, ...rest } = parsed.data;
+
+    await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        await addContactPoint(tx, ctx.tenantId, partyId, rest);
+        await logAuditInTx(tx, {
+          action: "crm.contact_point_added",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "party",
+          targetId: partyId,
+          // The KIND only. An address is a client's own contact detail (C4) and
+          // does not belong in a superadmin-visible log (S9).
+          meta: { kind: rest.kind },
+        });
+      },
+      { role: ctx.role },
+    );
+
+    revalidate(partyId);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const editContactSchema = z.object({
+  contactPointId: z.string().uuid(),
+  expectedVersion: z.number().int().positive(),
+  partyId: z.string().uuid(),
+  value: z.string().min(1).max(CONTACT_VALUE_MAX).optional(),
+  label: z.string().max(40).optional(),
+});
+
+export async function updateContactPointAction(
+  input: z.infer<typeof editContactSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = editContactSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+    const { contactPointId, expectedVersion, partyId, ...patch } = parsed.data;
+
+    await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        updateContactPoint(tx, ctx.tenantId, {
+          contactPointId,
+          expectedVersion,
+          patch,
+        }),
+      { role: ctx.role },
+    );
+
+    revalidate(partyId);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const contactRefSchema = z.object({
+  contactPointId: z.string().uuid(),
+  partyId: z.string().uuid(),
+});
+
+export async function setPrimaryContactPointAction(
+  input: z.infer<typeof contactRefSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = contactRefSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withTenant(
+      ctx.tenantId,
+      (tx) => setPrimaryContactPoint(tx, ctx.tenantId, parsed.data.contactPointId),
+      { role: ctx.role },
+    );
+
+    revalidate(parsed.data.partyId);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deleteContactPointAction(
+  input: z.infer<typeof contactRefSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = contactRefSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withTenant(
+      ctx.tenantId,
+      (tx) => deleteContactPoint(tx, ctx.tenantId, parsed.data.contactPointId),
+      { role: ctx.role },
+    );
+
+    revalidate(parsed.data.partyId);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const duplicateSchema = z.object({
+  kind: contactKind,
+  value: z.string().max(CONTACT_VALUE_MAX),
+  excludePartyId: z.string().uuid().optional(),
+});
+
+/**
+ * "Somebody already has this address" — the duplicate warning.
+ *
+ * A WARNING AND NOT A BLOCK, deliberately. Two people at one company genuinely
+ * share `info@`, a family business genuinely shares a mobile, and a product
+ * that refuses the second record teaches its users to put a full stop in the
+ * address to get past it. Showing who already has it lets the person decide,
+ * which is the same "the machine suggests, a person commits" line the merge
+ * tool and the AI slices sit on.
+ *
+ * Returns names and ids only, under the caller's own `withTenant` — so this
+ * cannot become a way to discover whether an address belongs to another
+ * tenant's client by typing it.
+ */
+export async function findDuplicateContactAction(
+  input: z.infer<typeof duplicateSchema>,
+): Promise<ActionResult<{ partyId: string; displayName: string }[]>> {
+  try {
+    const ctx = await gate();
+    const parsed = duplicateSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const matches = await withTenant(
+      ctx.tenantId,
+      (tx) =>
+        findPartiesByContact(tx, ctx.tenantId, parsed.data.kind, parsed.data.value, {
+          excludePartyId: parsed.data.excludePartyId,
+        }),
+      { role: ctx.role },
+    );
+
+    return {
+      ok: true,
+      data: matches.map((m) => ({
+        partyId: m.party.id,
+        displayName: m.party.displayName,
+      })),
+    };
   } catch (err) {
     return fail(err);
   }

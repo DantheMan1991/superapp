@@ -507,8 +507,88 @@ export const dimensionMembers = pgTable(
 );
 
 /* ------------------------------------------------------------------------
- * Invoicing / AR (session 4). The tenant's OWN customers (the platform
- * `tenants` table is the founder's CRM — unrelated). Invoices carry an
+ * THE PARTY SPINE (CRM slice 0) — shared, and owned by NEITHER module.
+ *
+ * One row per person or organization a tenant deals with. `customers` and
+ * `vendors` below stop being identities and become ROLES on a party: "someone
+ * we invoice", "someone we pay". A business that is both is one party with two
+ * role rows, which is the fact neither table could previously express.
+ *
+ * WHY IT IS NOT OWNED BY CRM, which is the module it was built for. A tenant
+ * can buy Accounting without CRM, so accounting can never reference a `crm_*`
+ * table — and two customer lists is precisely the failure CRM exists to
+ * prevent. `documents` already answered this shape once (one table, two
+ * surfaces, `origin` discriminating), so the writer lives at `src/lib/parties/`
+ * rather than inside either module. eslint.config.mjs states the general rule:
+ * genuinely shared code moves to src/lib/.
+ *
+ * NOTE the platform `tenants` table is the FOUNDER'S CRM — a different thing at
+ * a different layer, and unrelated to this.
+ *
+ * THERE IS NO EMAIL, PHONE OR ADDRESS COLUMN HERE, AND THAT IS THE DESIGN.
+ * A company has several offices and billing addresses; a person has a work
+ * address and a personal one. A single `email` here would be canonical within a
+ * week and would then have to be unpicked from every read site that had come to
+ * rely on it. So this table commits to nothing: accounting keeps reading
+ * `customers.email` unchanged, and typed multi-value `party_contact_points` /
+ * `party_addresses` arrive as a later shared slice. Do not add one as a
+ * convenience — see docs/modules/crm.md.
+ * ---------------------------------------------------------------------- */
+
+export const partyKind = pgEnum("party_kind", ["person", "organization"]);
+
+export const parties = pgTable(
+  "parties",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * No database default, deliberately — the `documents.origin` pattern
+     * (conventions §4). Every insert site must state what it knows, and the
+     * compiler names any that does not.
+     */
+    kind: partyKind("kind").notNull(),
+    /**
+     * AUTHORITATIVE, never derived from the structured names. Deriving it means
+     * a fight the first time somebody wants "Bob Smith Plumbing" instead of
+     * "Robert Smith", and the derivation would have to lose.
+     */
+    displayName: text("display_name").notNull(),
+    /**
+     * Null for organizations, and null for a person nobody has split yet. They
+     * exist because "Dear Aoife" in a mail template needs a real first name —
+     * and needs one with CRM switched off, which is why they sit on the shared
+     * spine rather than in CRM's own table.
+     *
+     * No CHECK ties these to `kind`: a sole trader is genuinely a person
+     * trading under a business name, and a constraint saying otherwise becomes
+     * a migration the first time somebody models one.
+     */
+    givenName: text("given_name"),
+    familyName: text("family_name"),
+    /** "Probe Construction Ltd" when the display name is "Probe". */
+    legalName: text("legal_name"),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Every referencing FK in this schema is tenant-aware, so every referenced
+    // table needs this pair unique.
+    uniqueIndex("parties_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("parties_tenant_idx").on(t.tenantId),
+  ],
+);
+
+/* ------------------------------------------------------------------------
+ * Invoicing / AR (session 4). The tenant's OWN customers. Invoices carry an
  * explicit state machine; `partial`/`paid` are derived from payments,
  * never set directly. Issuance posts Dr AR / Cr income through the core
  * engine; payments post Dr deposit / Cr AR.
@@ -531,6 +611,16 @@ export const customers = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * The identity behind this AR relationship. This row is now a ROLE — "a
+     * party we invoice" — and `parties` is who they are.
+     *
+     * Declared NOT NULL here because that is the settled state; the column
+     * arrived nullable in 0059 and was enforced in 0062 only after the backfill
+     * (see docs/modules/crm.md). Nothing in this file can express that
+     * sequence, which is why those two migrations are hand-written.
+     */
+    partyId: uuid("party_id").notNull(),
     name: text("name").notNull(),
     email: text("email").notNull().default(""),
     phone: text("phone").notNull().default(""),
@@ -548,6 +638,14 @@ export const customers = pgTable(
   (t) => [
     uniqueIndex("customers_tenant_id_id_idx").on(t.tenantId, t.id),
     index("customers_tenant_idx").on(t.tenantId),
+    // A party holds the customer role at most once. Two AR relationships with
+    // the same identity is a duplicate, not a fact.
+    uniqueIndex("customers_tenant_party_idx").on(t.tenantId, t.partyId),
+    foreignKey({
+      name: "customers_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }),
   ],
 );
 
@@ -3202,6 +3300,9 @@ export type JournalLine = typeof journalLines.$inferSelect;
 export type DimensionMember = typeof dimensionMembers.$inferSelect;
 export type LineDimension = typeof lineDimensions.$inferSelect;
 export type AccountingSettings = typeof accountingSettings.$inferSelect;
+/** The shared identity spine. Written by Accounting and by CRM — see src/lib/parties/. */
+export type Party = typeof parties.$inferSelect;
+export type PartyKind = Party["kind"];
 export type Customer = typeof customers.$inferSelect;
 export type Invoice = typeof invoices.$inferSelect;
 export type InvoiceLine = typeof invoiceLines.$inferSelect;
@@ -3236,6 +3337,13 @@ export const vendors = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * The identity behind this AP relationship — the mirror of
+     * `customers.party_id`. A business that both invoices us and buys from us
+     * is ONE party holding two role rows, which is the fact these two tables
+     * could not previously express.
+     */
+    partyId: uuid("party_id").notNull(),
     name: text("name").notNull(),
     email: text("email").notNull().default(""),
     phone: text("phone").notNull().default(""),
@@ -3255,10 +3363,16 @@ export const vendors = pgTable(
   (t) => [
     uniqueIndex("vendors_tenant_id_id_idx").on(t.tenantId, t.id),
     index("vendors_tenant_idx").on(t.tenantId),
+    uniqueIndex("vendors_tenant_party_idx").on(t.tenantId, t.partyId),
     foreignKey({
       name: "vendors_default_account_fk",
       columns: [t.tenantId, t.defaultExpenseAccountId],
       foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    foreignKey({
+      name: "vendors_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
     }),
   ],
 );

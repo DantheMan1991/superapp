@@ -2,12 +2,19 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Vendor } from "@/db/schema";
+import { createPartyForRole, syncPartyName } from "@/lib/parties/role-sync";
 import { LedgerError, type LedgerCtx } from "../core";
 
 /**
  * Vendors mirror customers: duplicate names allowed, deactivate never
  * delete, staff-manageable. Plus a nullable default expense account —
  * AI-free prefill for this vendor's bill lines (P21).
+ *
+ * SINCE THE PARTY SPINE (CRM slice 0) this row is a ROLE — "a party we pay" —
+ * and `parties` owns the identity. The mirror runs deeper than it used to: a
+ * business that invoices us AND buys from us is now ONE party with a customer
+ * row and a vendor row, which is the fact these two tables could never state.
+ * All `parties` writes go through `@/lib/parties`, the single door.
  */
 
 export async function loadVendor(
@@ -71,10 +78,13 @@ export async function createVendor(
   input: VendorInput,
 ): Promise<Vendor> {
   await assertDefaultAccount(tx, ctx.tenantId, input.defaultExpenseAccountId);
+  // Identity and role born in one transaction — see createCustomer.
+  const party = await createPartyForRole(tx, ctx.tenantId, input.name);
   const [row] = await tx
     .insert(schema.vendors)
     .values({
       tenantId: ctx.tenantId,
+      partyId: party.id,
       name: input.name,
       email: input.email ?? "",
       phone: input.phone ?? "",
@@ -116,9 +126,19 @@ export async function updateVendor(
   if (rows.length === 0) {
     throw new LedgerError("STALE_VERSION", "vendor changed since loaded");
   }
+  // Same transaction, so the role's name and the party's cannot commit out of
+  // step. `VendorInput.name` is required, so unlike the customer path there is
+  // no "was it edited?" to test.
+  await syncPartyName(tx, ctx.tenantId, rows[0].partyId, args.patch.name);
   return { before, after: rows[0] };
 }
 
+/**
+ * Deactivating a vendor does NOT deactivate the party, and that asymmetry is
+ * deliberate: `is_active` here means "we no longer buy from them", while
+ * `parties.is_active` would mean "we no longer deal with them at all". The same
+ * business may well still be a live customer.
+ */
 export async function setVendorActive(
   tx: Tx,
   ctx: LedgerCtx,

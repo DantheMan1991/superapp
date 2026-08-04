@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { withTenant, withSystem, schema } from "../src/db";
+import { withTenant, withSystem, schema, type Tx } from "../src/db";
 import { recentCorrespondents } from "../src/modules/email/contacts/recent";
 import { accountingMailExtension } from "../src/modules/accounting/mail/extension";
 import { documentsMailExtension } from "../src/modules/documents/mail/extension";
@@ -29,6 +29,27 @@ if (!RUN) {
 const STAMP = `iso-test-${process.pid}`;
 let tenantA: string;
 let tenantB: string;
+
+/**
+ * Mint the party behind a `customers` or `vendors` fixture.
+ *
+ * Since CRM slice 0 those two tables are ROLES on a shared identity, so a
+ * fixture that wants a customer needs a party first. Deliberately a raw insert
+ * rather than a call into `src/lib/parties/`: this suite certifies what the
+ * DATABASE enforces, and routing fixtures through application code would let a
+ * bug in that code make the isolation tests agree with it.
+ */
+async function seedParty(
+  tx: Tx,
+  tenantId: string,
+  displayName: string,
+): Promise<string> {
+  const [row] = await tx
+    .insert(schema.parties)
+    .values({ tenantId, kind: "organization", displayName })
+    .returning();
+  return row.id;
+}
 
 d("tenant isolation (RLS)", () => {
   beforeAll(async () => {
@@ -426,6 +447,163 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
  */
 const STAMP_DOC = `iso-doc-${process.pid}`;
 
+/**
+ * THE PARTY SPINE (CRM slice 0).
+ *
+ * `parties` is the first table in this schema written by TWO modules —
+ * Accounting today, CRM next — which makes it worth more than the standard
+ * two-tenant pass. The specific risk a shared identity table introduces is a
+ * role row in one tenant pointing at an identity in another, so the composite
+ * FK gets its own case here rather than being assumed from the column list.
+ */
+const STAMP_PARTY = `iso-party-${process.pid}`;
+
+d("parties isolation (RLS + composite tenant FKs)", () => {
+  let tenantA: string;
+  let tenantB: string;
+  const partyOf: Record<string, string> = {};
+
+  beforeAll(async () => {
+    [tenantA, tenantB] = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values([
+          { clerkOrgId: `${STAMP_PARTY}-a`, name: "Party Iso A", slug: `${STAMP_PARTY}-a` },
+          { clerkOrgId: `${STAMP_PARTY}-b`, name: "Party Iso B", slug: `${STAMP_PARTY}-b` },
+        ])
+        .returning();
+      return [rows[0].id, rows[1].id];
+    });
+
+    for (const [tenant, tag] of [
+      [tenantA, "A"],
+      [tenantB, "B"],
+    ] as const) {
+      partyOf[tag] = await withTenant(tenant, (tx) =>
+        seedParty(tx, tenant, `Party ${tag}`),
+      );
+    }
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantA));
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantB));
+    });
+  });
+
+  it("an unscoped select on parties returns only the tenant's rows", async () => {
+    const rows = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.parties),
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.tenantId === tenantA)).toBe(true);
+  });
+
+  it("cannot INSERT a party attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.parties).values({
+          tenantId: tenantB,
+          kind: "organization",
+          displayName: "smuggled party",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot UPDATE or DELETE the other tenant's parties (0 rows affected)", async () => {
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.parties)
+        .set({ displayName: "defaced" })
+        .where(eq(schema.parties.tenantId, tenantB))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+
+    const deleted = await withTenant(tenantA, (tx) =>
+      tx
+        .delete(schema.parties)
+        .where(eq(schema.parties.tenantId, tenantB))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("no context at all → default deny (FORCE RLS catches raw access)", async () => {
+    const rows = await withSystem(async (tx) => {
+      // Reset context inside this tx to simulate a forgotten wrapper.
+      await tx.execute(sql`select set_config('app.role', '', true)`);
+      await tx.execute(sql`select set_config('app.tenant_id', '', true)`);
+      return tx.select().from(schema.parties);
+    });
+    expect(rows).toHaveLength(0);
+  });
+
+  /**
+   * THE CASE A SHARED IDENTITY TABLE ADDS, and the reason this block exists.
+   *
+   * A customer row naming another tenant's party would be a cross-tenant join
+   * that RLS alone cannot see — both rows are individually legitimate, and the
+   * reference between them is what is wrong. `customers_party_fk` is composite
+   * on (tenant_id, party_id), so the database refuses it outright rather than
+   * leaving it to a predicate somebody has to remember to write.
+   */
+  it("a role row cannot reference another tenant's party", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.customers).values({
+          tenantId: tenantA,
+          partyId: partyOf.B,
+          name: "cross-tenant identity",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  /**
+   * The positive case, and the entire point of the spine: ONE identity holding
+   * BOTH accounting roles. Before slice 0 a business that invoiced you and sold
+   * to you was two unrelated rows with no way to state they were the same
+   * company.
+   */
+  it("one party can hold both a customer and a vendor role", async () => {
+    const [customer, vendor] = await withTenant(tenantA, async (tx) => {
+      const partyId = await seedParty(tx, tenantA, "Both Roles Ltd");
+      const [c] = await tx
+        .insert(schema.customers)
+        .values({ tenantId: tenantA, partyId, name: "Both Roles Ltd" })
+        .returning();
+      const [v] = await tx
+        .insert(schema.vendors)
+        .values({ tenantId: tenantA, partyId, name: "Both Roles Ltd" })
+        .returning();
+      return [c, v];
+    });
+    expect(customer.partyId).toBe(vendor.partyId);
+  });
+
+  /**
+   * And the duplicate that unique index exists to refuse: the same party
+   * cannot hold the SAME role twice. Two AR relationships with one identity is
+   * a duplicate record, not a fact about the business.
+   */
+  it("a party cannot hold the same role twice", async () => {
+    await expect(
+      withTenant(tenantA, async (tx) => {
+        const partyId = await seedParty(tx, tenantA, "Twice Ltd");
+        await tx
+          .insert(schema.customers)
+          .values({ tenantId: tenantA, partyId, name: "Twice Ltd" });
+        await tx
+          .insert(schema.customers)
+          .values({ tenantId: tenantA, partyId, name: "Twice Ltd again" });
+      }),
+    ).rejects.toThrow();
+  });
+});
+
 interface DocFixture {
   documentId: string;
   entryId: string;
@@ -461,7 +639,11 @@ d("documents isolation (RLS + composite tenant FKs)", () => {
         .returning();
       const [customer] = await tx
         .insert(schema.customers)
-        .values({ tenantId, name: `Customer ${tag}` })
+        .values({
+          tenantId,
+          partyId: await seedParty(tx, tenantId, `Customer ${tag}`),
+          name: `Customer ${tag}`,
+        })
         .returning();
       const [invoice] = await tx
         .insert(schema.invoices)
@@ -631,6 +813,8 @@ const STAMP_PAY = `iso-pay-${process.pid}`;
 
 interface PayFixture {
   vendorId: string;
+  /** The vendor's party. Needed so the smuggling test can present a VALID FK. */
+  partyId: string;
   billId: string;
   billLineId: string;
   accountId: string;
@@ -653,9 +837,10 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.journalEntries)
         .values({ tenantId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
         .returning();
+      const partyId = await seedParty(tx, tenantId, `Vendor ${tag}`);
       const [vendor] = await tx
         .insert(schema.vendors)
-        .values({ tenantId, name: `Vendor ${tag}` })
+        .values({ tenantId, partyId, name: `Vendor ${tag}` })
         .returning();
       const [bill] = await tx
         .insert(schema.bills)
@@ -671,6 +856,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .returning();
       return {
         vendorId: vendor.id,
+        partyId,
         billId: bill.id,
         billLineId: billLine.id,
         accountId: expense.id,
@@ -719,7 +905,16 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
   it("cannot INSERT payables rows attributed to the other tenant", async () => {
     await expect(
       withTenant(tenantA, (tx) =>
-        tx.insert(schema.vendors).values({ tenantId: tenantB, name: "smuggled vendor" }),
+        // Tenant B's REAL party id, so the foreign key is satisfiable and RLS
+        // is the only thing left that can refuse this row. Passing a random
+        // uuid would still throw, but for the wrong reason — and a test that
+        // passes for the wrong reason stops certifying anything the day the
+        // policy is dropped.
+        tx.insert(schema.vendors).values({
+          tenantId: tenantB,
+          partyId: fx.b.partyId,
+          name: "smuggled vendor",
+        }),
       ),
     ).rejects.toThrow();
     await expect(
@@ -2899,9 +3094,10 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
     ] as const) {
       await withTenant(
         tenant,
-        (tx) =>
+        async (tx) =>
           tx.insert(schema.customers).values({
             tenantId: tenant,
+            partyId: await seedParty(tx, tenant, `Isolation Contact ${tag}`),
             name: `Isolation Contact ${tag}`,
             email: `isolation-contact@${tag}.example`,
           }),
@@ -2969,6 +3165,7 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
             .insert(schema.customers)
             .values({
               tenantId: tenant,
+              partyId: await seedParty(tx, tenant, `Placeholder Co ${tag}`),
               name: `Placeholder Co ${tag}`,
               email: `placeholder@${tag}.example`,
             })

@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatCents } from "@/lib/money";
 import type { CrmFieldDef } from "@/db/schema";
 import { createDealAction, updateDealAction } from "../deal-actions";
 import { CustomFieldInputs } from "./custom-field-inputs";
@@ -20,11 +19,6 @@ export interface DealFormValues {
   /** A STRING, not cents. `@/lib/money` owns the parse, server-side. */
   amount: string;
   expectedCloseOn: string;
-}
-
-/** Cents → the editable string. The inverse of what the server does on save. */
-export function centsToInput(cents: number | null): string {
-  return cents === null ? "" : formatCents(cents).replace(/,/g, "");
 }
 
 /**

@@ -219,6 +219,15 @@ npm run test:isolation   # required before deploy
 ## 8. UI
 
 - Server components by default; `"use client"` only where interaction requires.
+- **A server component may import COMPONENTS from a `"use client"` module, never
+  plain values.** Every export of a client module becomes a client *reference*
+  when a server component imports it, so calling an imported helper throws at
+  render — and the production error page withholds the message. `npm run build`,
+  `tsc` and `eslint` are all green either way, because the import is legal and
+  only the server-side call is not. Shared helpers and constants go in a module
+  with no directive at the top (`core/`, `src/lib/`). Found the expensive way on
+  2026-08-04: `centsToInput` lived in `deal-form.tsx` and took the whole CRM deal
+  page down in production.
 - shadcn/ui + Tailwind. Check `src/components/ui` before adding a dependency.
 - Modules declare layout needs via `ModuleDefinition.layout`; the shell never
   branches on a module slug.

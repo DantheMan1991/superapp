@@ -19,34 +19,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { createRecordAction, updateRecordAction } from "../actions";
 import { CustomFieldInputs } from "./custom-field-inputs";
 import type { CustomValue } from "../core/custom-fields";
-import type { CrmFieldDef, CrmRecordVisibility } from "@/db/schema";
-import type { PartyKind } from "@/db/schema";
+import type { RecordFormValues } from "../core/types";
+import type { CrmFieldDef, PartyKind } from "@/db/schema";
 
 const BASE = "/dashboard/m/crm";
-
-export interface RecordFormValues {
-  kind: PartyKind;
-  displayName: string;
-  givenName: string;
-  familyName: string;
-  legalName: string;
-  lifecycleStage: string;
-  source: string;
-  notes: string;
-  visibility: CrmRecordVisibility;
-}
-
-export const EMPTY_RECORD: RecordFormValues = {
-  kind: "organization",
-  displayName: "",
-  givenName: "",
-  familyName: "",
-  legalName: "",
-  lifecycleStage: "",
-  source: "",
-  notes: "",
-  visibility: "members",
-};
 
 /**
  * One form for both creating and editing, because the fields are identical and

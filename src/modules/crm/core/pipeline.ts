@@ -1,4 +1,5 @@
 import type { CrmDeal, CrmDealOutcome, CrmPipelineStage } from "@/db/schema";
+import { formatCents } from "@/lib/money";
 
 /**
  * Pipeline arithmetic and stage-transition rules. PURE — no database, no
@@ -44,6 +45,27 @@ export const DEFAULT_PIPELINE_NAME = "Sales";
 export const DEAL_TITLE_MAX = 200;
 export const STAGE_NAME_MAX = 60;
 export const PIPELINE_NAME_MAX = 60;
+
+/**
+ * Stored cents → the string the amount field edits. The inverse of what
+ * `parseMoneyToCents` does on save.
+ *
+ * IT LIVES HERE, IN A MODULE WITH NO `"use client"`, AND THAT IS THE WHOLE
+ * REASON THIS COMMENT EXISTS. It started in `components/deal-form.tsx`, which
+ * IS a client module — and every export of a client module becomes a client
+ * REFERENCE, not the function itself. The deal page is a server component; it
+ * imported this, called it, and blew up at render with a message production
+ * deliberately withholds.
+ *
+ * Nothing caught it: `npm run build`, `tsc` and `eslint` were all green,
+ * because the import is legal and only the server-side CALL is not. The rule
+ * that generalizes: a server component may import COMPONENTS from a client
+ * module, never plain functions. Shared helpers belong in a module with no
+ * directive at the top.
+ */
+export function centsToInput(cents: number | null): string {
+  return cents === null ? "" : formatCents(cents).replace(/,/g, "");
+}
 
 /** Is this deal still live? The single source is the stage it sits in. */
 export function isOpen(stage: Pick<CrmPipelineStage, "outcome">): boolean {

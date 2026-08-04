@@ -599,5 +599,5 @@ values stay readable and the discontinuity is visible.
   but nothing sets it, so everything is unassigned.
 - **No reminders or notifications.** An overdue follow-up is visible only to
   somebody who opens the page.
-- Slices 5–11 (mail extension, explicit collaborators, dedup & merge, saved
-  views, reporting, automation, AI) are planned and unbuilt.
+- Slices 6–11 (explicit collaborators, dedup & merge, saved views, reporting,
+  automation, AI) are planned and unbuilt. Slice 5 shipped on 2026-08-04.

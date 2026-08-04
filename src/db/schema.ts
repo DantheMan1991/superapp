@@ -568,7 +568,7 @@ export const parties = pgTable(
      */
     givenName: text("given_name"),
     familyName: text("family_name"),
-    /** "Probe Construction Ltd" when the display name is "Probe". */
+    /** The registered name, when it differs from what everyone calls them. */
     legalName: text("legal_name"),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
@@ -3960,8 +3960,8 @@ export const crmPartyDetails = pgTable(
 );
 
 /**
- * A person's connection to an organization — "Aoife is Operations Manager at
- * Probe Construction".
+ * A person's connection to an organization — "this person is Operations
+ * Manager at that company".
  *
  * A JOIN TABLE RATHER THAN A COLUMN ON `parties`, because people change
  * employers and the old connection is the thing you want when you find a
@@ -4131,9 +4131,269 @@ export const crmFieldDefs = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * CRM pipelines and deals (slice 3).
+ *
+ * The neutrality line, because this is where it is easiest to cross: core owns
+ * a pipeline with ORDERED STAGES and a deal with an amount. It does NOT own
+ * what the stages are called. "Estimate sent", "Treatment plan accepted",
+ * "Survey booked" are vocabulary a Layer 2b profile supplies as seed data —
+ * core ships one deliberately dull default set and nothing else.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * What reaching a stage MEANS. The terminal semantics live on the stage rather
+ * than as a separate column on the deal, so "is this deal won?" has exactly one
+ * answer and cannot desync — the same "derived, never stored" discipline the
+ * accounting module applies to invoice status.
+ */
+export const crmDealOutcome = pgEnum("crm_deal_outcome", ["open", "won", "lost"]);
+
+export const crmPipelines = pgTable(
+  "crm_pipelines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_pipelines_tenant_id_id_idx").on(t.tenantId, t.id),
+    // At most one default, and only among live pipelines. A partial unique is
+    // the whole enforcement — no trigger, no application invariant to remember.
+    uniqueIndex("crm_pipelines_default_idx")
+      .on(t.tenantId)
+      .where(sql`is_default = true and archived_at is null`),
+    index("crm_pipelines_tenant_sort_idx").on(t.tenantId, t.sortOrder),
+  ],
+);
+
+export const crmPipelineStages = pgTable(
+  "crm_pipeline_stages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    pipelineId: uuid("pipeline_id").notNull(),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Default likelihood, 0–100, used for a weighted forecast. On the STAGE
+     * rather than the deal: a per-deal override is a real want, but it is one
+     * more number to keep honest and slice 9 can add it once there is a report
+     * arguing for it.
+     */
+    probability: integer("probability").notNull().default(0),
+    outcome: crmDealOutcome("outcome").notNull().default("open"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_pipeline_stages_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("crm_pipeline_stages_pipeline_idx").on(
+      t.tenantId,
+      t.pipelineId,
+      t.sortOrder,
+    ),
+    foreignKey({
+      name: "crm_pipeline_stages_pipeline_fk",
+      columns: [t.tenantId, t.pipelineId],
+      foreignColumns: [crmPipelines.tenantId, crmPipelines.id],
+    }).onDelete("cascade"),
+    check(
+      "crm_pipeline_stages_probability",
+      sql`${t.probability} between 0 and 100`,
+    ),
+  ],
+);
+
+export const crmDeals = pgTable(
+  "crm_deals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * WHO THE DEAL IS WITH. Required, and a column rather than a row in
+     * `crm_deal_parties`, so the database guarantees exactly one — a deal with
+     * no party is unfilterable in every board view, and "there should be one
+     * row flagged primary" is an invariant an application has to remember.
+     */
+    partyId: uuid("party_id").notNull(),
+    /** The person to talk to. Optional: plenty of deals are with a company. */
+    primaryContactPartyId: uuid("primary_contact_party_id"),
+    pipelineId: uuid("pipeline_id").notNull(),
+    stageId: uuid("stage_id").notNull(),
+    title: text("title").notNull(),
+    /**
+     * NULLABLE, and that is the honest shape rather than an oversight. A deal
+     * whose value is not yet known is a real and common state; defaulting it to
+     * zero would make every forecast quietly understate itself, and nothing
+     * downstream could tell "worth nothing" from "not priced yet".
+     *
+     * Integer cents in a bigint, like every other amount here (conventions §3).
+     * There is no currency column — the platform is single-currency today, and
+     * a second one is a change to `@/lib/money` before it is a change here.
+     */
+    amountCents: bigint("amount_cents", { mode: "number" }),
+    expectedCloseOn: date("expected_close_on", { mode: "string" }),
+    ownerClerkUserId: text("owner_clerk_user_id"),
+    /**
+     * Denormalized from the stage history, stamped when the deal first reaches
+     * a stage whose outcome is not `open`. Derivable by walking
+     * `crm_deal_stage_events`, but "won deals this quarter" would then be a
+     * join-and-aggregate on every dashboard load — the same reasoning behind
+     * `invoices.total_cents`. Cleared if the deal reopens.
+     */
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    /** Slice 2's custom fields, for definitions with `entity_type = 'deal'`. */
+    custom: jsonb("custom").notNull().default({}),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_deals_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("crm_deals_board_idx").on(t.tenantId, t.pipelineId, t.stageId),
+    index("crm_deals_party_idx").on(t.tenantId, t.partyId),
+    index("crm_deals_owner_idx").on(t.tenantId, t.ownerClerkUserId),
+    foreignKey({
+      name: "crm_deals_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "crm_deals_contact_fk",
+      columns: [t.tenantId, t.primaryContactPartyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }),
+    foreignKey({
+      name: "crm_deals_pipeline_fk",
+      columns: [t.tenantId, t.pipelineId],
+      foreignColumns: [crmPipelines.tenantId, crmPipelines.id],
+    }),
+    foreignKey({
+      name: "crm_deals_stage_fk",
+      columns: [t.tenantId, t.stageId],
+      foreignColumns: [crmPipelineStages.tenantId, crmPipelineStages.id],
+    }),
+    check("crm_deals_amount_nonnegative", sql`${t.amountCents} >= 0`),
+  ],
+);
+
+/**
+ * Every stage change, append-only.
+ *
+ * SHIPPED NOW EVEN THOUGH NOTHING READS IT YET, and that is deliberate rather
+ * than speculative. Velocity, win rate and "how long does a deal sit in
+ * Proposal" are the reports slice 9 exists to build, and every one of them is a
+ * question about history. History is the single thing that cannot be
+ * reconstructed later — a table added in slice 9 starts empty and answers
+ * nothing until a quarter has passed. The cost of carrying it now is one insert
+ * per stage move.
+ *
+ * No `version` column: nothing updates these rows. A correction is a new event.
+ */
+export const crmDealStageEvents = pgTable(
+  "crm_deal_stage_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    dealId: uuid("deal_id").notNull(),
+    /** Null on the first event — the deal was created into its opening stage. */
+    fromStageId: uuid("from_stage_id"),
+    toStageId: uuid("to_stage_id").notNull(),
+    changedByClerkUserId: text("changed_by_clerk_user_id").notNull(),
+    changedAt: timestamp("changed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_deal_stage_events_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("crm_deal_stage_events_deal_idx").on(t.tenantId, t.dealId, t.changedAt),
+    foreignKey({
+      name: "crm_deal_stage_events_deal_fk",
+      columns: [t.tenantId, t.dealId],
+      foreignColumns: [crmDeals.tenantId, crmDeals.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * Additional people on a deal beyond the primary contact — the finance
+ * approver, the site manager, the person who actually signs.
+ *
+ * A relation table rather than more columns, because the count is genuinely
+ * unbounded and each one carries its own role.
+ */
+export const crmDealParties = pgTable(
+  "crm_deal_parties",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    dealId: uuid("deal_id").notNull(),
+    partyId: uuid("party_id").notNull(),
+    /** "Approver", "Site contact". Free text — roles are not an enumeration. */
+    role: text("role").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_deal_parties_tenant_id_id_idx").on(t.tenantId, t.id),
+    // The same person twice on one deal is a duplicate, not a second role.
+    uniqueIndex("crm_deal_parties_unique_idx").on(t.tenantId, t.dealId, t.partyId),
+    index("crm_deal_parties_party_idx").on(t.tenantId, t.partyId),
+    foreignKey({
+      name: "crm_deal_parties_deal_fk",
+      columns: [t.tenantId, t.dealId],
+      foreignColumns: [crmDeals.tenantId, crmDeals.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "crm_deal_parties_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+  ],
+);
+
 export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
 export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
+export type CrmPipeline = typeof crmPipelines.$inferSelect;
+export type CrmPipelineStage = typeof crmPipelineStages.$inferSelect;
+export type CrmDeal = typeof crmDeals.$inferSelect;
+export type CrmDealStageEvent = typeof crmDealStageEvents.$inferSelect;
+export type CrmDealParty = typeof crmDealParties.$inferSelect;
+/** What reaching a stage means for the deal sitting in it. */
+export type CrmDealOutcome = CrmPipelineStage["outcome"];
 export type CrmFieldType = CrmFieldDef["fieldType"];
 /** One choice on a select or multi-select field. */
 export type CrmFieldOption = { value: string; label: string };

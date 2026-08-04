@@ -195,7 +195,13 @@ export function RecordForm({
             id="crm-display-name"
             value={values.displayName}
             onChange={(e) => set("displayName", e.target.value)}
-            placeholder={isPerson ? "Built from the names below" : "Probe Construction"}
+            // DESCRIPTIVE, NOT AN EXAMPLE. A placeholder naming a fictional
+            // company is user-visible copy in a core module, and whichever
+            // trade the fake name belongs to is the trade this product looks
+            // like it is for — the §8 leak, in the place it does the most work.
+            placeholder={
+              isPerson ? "Built from the names below" : "Their business name"
+            }
           />
         </div>
       </div>
@@ -230,7 +236,7 @@ export function RecordForm({
             id="crm-legal-name"
             value={values.legalName}
             onChange={(e) => set("legalName", e.target.value)}
-            placeholder={isPerson ? "" : "Probe Construction Ltd"}
+            placeholder={isPerson ? "" : "Registered name, if different"}
           />
         </div>
         <div className="space-y-2">

@@ -477,6 +477,20 @@
       "when": 1785817077653,
       "tag": "0067_crm_field_defs_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1785819889915,
+      "tag": "0068_fat_butterfly",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1785819909168,
+      "tag": "0069_crm_pipelines_rls",
+      "breakpoints": true
     }
   ]
 }

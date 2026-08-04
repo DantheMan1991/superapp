@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Building2, ChevronLeft, Lock, User } from "lucide-react";
+import { Building2, ChevronLeft, Lock, Plus, User } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { formatCents } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { CrmError } from "@/modules/crm/core/errors";
 import { loadRecord } from "@/modules/crm/party-ops";
+import { listDealsForParty } from "@/modules/crm/deal-ops";
 import { RecordForm } from "@/modules/crm/components/record-form";
 import {
   AddAffiliationButton,
@@ -35,7 +38,10 @@ export default async function RecordPage({
   // same deliberate ambiguity the mail template values have.
   const record = await withTenant(
     ctx.tenant.id,
-    (tx) => loadRecord(tx, ctx.tenant.id, partyId),
+    async (tx) => ({
+      ...(await loadRecord(tx, ctx.tenant.id, partyId)),
+      deals: await listDealsForParty(tx, ctx.tenant.id, partyId),
+    }),
     { role: ctx.role },
   ).catch((err) => {
     // A record in another tenant and a record that does not exist are the same
@@ -44,7 +50,8 @@ export default async function RecordPage({
     throw err;
   });
 
-  const { party, details, affiliations, fieldDefs, isCustomer, isVendor } = record;
+  const { party, details, affiliations, fieldDefs, deals, isCustomer, isVendor } =
+    record;
   const isOwner = ctx.role === "owner";
   const current = affiliations.filter((a) => !a.affiliation.endedOn);
   const former = affiliations.filter((a) => a.affiliation.endedOn);
@@ -127,6 +134,59 @@ export default async function RecordPage({
               visibility: details.visibility,
             }}
           />
+
+          <Separator />
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-medium">Deals</h2>
+                <p className="text-xs text-muted-foreground">
+                  Work in front of this record, and what came of it.
+                </p>
+              </div>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`${BASE}/records/${party.id}/deals/new`}>
+                  <Plus className="mr-2 size-4" />
+                  Add a deal
+                </Link>
+              </Button>
+            </div>
+
+            {deals.length === 0 ? (
+              <p className="rounded-md border px-4 py-8 text-center text-sm text-muted-foreground">
+                No deals yet.
+              </p>
+            ) : (
+              <ul className="divide-y rounded-md border">
+                {deals.map(({ deal, stage }) => (
+                  <li
+                    key={deal.id}
+                    className="flex items-center gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        href={`${BASE}/deals/${deal.id}`}
+                        className="truncate text-sm font-medium hover:underline"
+                      >
+                        {deal.title}
+                      </Link>
+                      <p className="text-xs text-muted-foreground">
+                        {deal.amountCents === null
+                          ? "No amount yet"
+                          : `$${formatCents(deal.amountCents)}`}
+                      </p>
+                    </div>
+                    <Badge
+                      variant={stage.outcome === "open" ? "secondary" : "outline"}
+                    >
+                      {stage.name}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           <Separator />
 

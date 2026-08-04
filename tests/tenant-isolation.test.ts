@@ -933,6 +933,192 @@ d("crm isolation (RLS + record visibility)", () => {
     ).rejects.toThrow();
   });
 
+  /* -- Pipelines and deals (slice 3) -------------------------------------- */
+
+  /**
+   * Deals inherit the party's visibility, and stage history inherits through
+   * the deal — a two-link chain. The case that earns its keep is the second
+   * link: it is easy to get the deal policy right and leave the history table
+   * tenant-scoped only, which would let a staff member read the moves of a deal
+   * they cannot see, complete with who changed it and when.
+   */
+  it("pipelines and stages: staff read, only owners write", async () => {
+    const pipelineId = await withTenant(
+      tenantA,
+      async (tx) => {
+        const [p] = await tx
+          .insert(schema.crmPipelines)
+          .values({ tenantId: tenantA, name: "Iso pipeline", isDefault: true })
+          .returning();
+        await tx.insert(schema.crmPipelineStages).values([
+          { tenantId: tenantA, pipelineId: p.id, name: "New", sortOrder: 0, outcome: "open" },
+          { tenantId: tenantA, pipelineId: p.id, name: "Won", sortOrder: 1, outcome: "won", probability: 100 },
+        ]);
+        return p.id;
+      },
+      { role: "owner" },
+    );
+    partyOf.pipeline = pipelineId;
+
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmPipelineStages),
+      { role: "staff" },
+    );
+    expect(asStaff.length).toBe(2);
+
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmPipelines).values({
+            tenantId: tenantA,
+            name: "Smuggled",
+          }),
+        { role: "staff" },
+      ),
+    ).rejects.toThrow();
+
+    // The DELETE case again — the 0067 hole, re-checked on this table.
+    const deleted = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.crmPipelineStages)
+          .where(eq(schema.crmPipelineStages.tenantId, tenantA))
+          .returning(),
+      { role: "staff" },
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("staff cannot see a deal on a restricted record, nor its stage history", async () => {
+    const stages = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.crmPipelineStages)
+          .where(eq(schema.crmPipelineStages.pipelineId, partyOf.pipeline)),
+      { role: "owner" },
+    );
+    const openStage = stages.find((s) => s.outcome === "open")!;
+
+    const dealId = await withTenant(
+      tenantA,
+      async (tx) => {
+        const [d] = await tx
+          .insert(schema.crmDeals)
+          .values({
+            tenantId: tenantA,
+            // aSecret is `restricted` — set up at the top of this block.
+            partyId: partyOf.aSecret,
+            pipelineId: partyOf.pipeline,
+            stageId: openStage.id,
+            title: "Confidential deal",
+            amountCents: 40_000_00,
+          })
+          .returning();
+        await tx.insert(schema.crmDealStageEvents).values({
+          tenantId: tenantA,
+          dealId: d.id,
+          toStageId: openStage.id,
+          changedByClerkUserId: "user-owner",
+        });
+        return d.id;
+      },
+      { role: "owner" },
+    );
+
+    const ownerDeals = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmDeals),
+      { role: "owner" },
+    );
+    expect(ownerDeals.map((d) => d.id)).toContain(dealId);
+
+    const staffDeals = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmDeals),
+      { role: "staff" },
+    );
+    expect(staffDeals.map((d) => d.id)).not.toContain(dealId);
+
+    // THE SECOND LINK. Tenant-scoping alone would have leaked this.
+    const staffHistory = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmDealStageEvents),
+      { role: "staff" },
+    );
+    expect(staffHistory.map((e) => e.dealId)).not.toContain(dealId);
+  });
+
+  it("staff CAN see a deal on an open record", async () => {
+    // The other direction, so the test above proves inheritance rather than a
+    // blanket denial of the deals table to staff.
+    const stages = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.crmPipelineStages)
+          .where(eq(schema.crmPipelineStages.pipelineId, partyOf.pipeline)),
+      { role: "owner" },
+    );
+    const openStage = stages.find((s) => s.outcome === "open")!;
+
+    const dealId = await withTenant(
+      tenantA,
+      async (tx) => {
+        const [d] = await tx
+          .insert(schema.crmDeals)
+          .values({
+            tenantId: tenantA,
+            partyId: partyOf.aOpen,
+            pipelineId: partyOf.pipeline,
+            stageId: openStage.id,
+            title: "Ordinary deal",
+          })
+          .returning();
+        return d.id;
+      },
+      { role: "owner" },
+    );
+
+    const staffDeals = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmDeals),
+      { role: "staff" },
+    );
+    expect(staffDeals.map((d) => d.id)).toContain(dealId);
+  });
+
+  it("a deal cannot reference another tenant's party or stage", async () => {
+    const stages = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.crmPipelineStages)
+          .where(eq(schema.crmPipelineStages.pipelineId, partyOf.pipeline)),
+      { role: "owner" },
+    );
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmDeals).values({
+            tenantId: tenantA,
+            partyId: partyOf.bOpen,
+            pipelineId: partyOf.pipeline,
+            stageId: stages[0].id,
+            title: "Cross-tenant deal",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
   it("staff CAN see an affiliation between two open records", async () => {
     // The other direction, so the test above is proving inheritance rather than
     // an accidental blanket denial of the whole table to staff.

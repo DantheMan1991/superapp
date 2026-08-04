@@ -1119,6 +1119,164 @@ d("crm isolation (RLS + record visibility)", () => {
     ).rejects.toThrow();
   });
 
+  /* -- Activity and follow-ups (slice 4) ---------------------------------- */
+
+  it("staff cannot see an activity logged against a restricted record", async () => {
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmActivities).values({
+          tenantId: tenantA,
+          partyId: partyOf.aSecret,
+          kind: "note",
+          body: "They will not pay until the dispute settles.",
+          createdByClerkUserId: "user-owner",
+        }),
+      { role: "owner" },
+    );
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmActivities),
+      { role: "owner" },
+    );
+    expect(asOwner.length).toBeGreaterThan(0);
+
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmActivities),
+      { role: "staff" },
+    );
+    expect(asStaff.map((a) => a.partyId)).not.toContain(partyOf.aSecret);
+  });
+
+  it("staff CAN see an activity on an open record", async () => {
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmActivities).values({
+          tenantId: tenantA,
+          partyId: partyOf.aOpen,
+          kind: "call",
+          body: "Ordinary call.",
+          createdByClerkUserId: "user-owner",
+        }),
+      { role: "owner" },
+    );
+
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmActivities),
+      { role: "staff" },
+    );
+    expect(asStaff.map((a) => a.partyId)).toContain(partyOf.aOpen);
+  });
+
+  /**
+   * The task policy BRANCHES, which is the one genuinely new shape in slice 4:
+   * an unattached task is plain tenant-scoped, an attached one inherits. Both
+   * halves need proving, and so does the write side — a staff member must not
+   * be able to attach a task to a record they cannot see.
+   */
+  it("an unattached task is visible to every member", async () => {
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmTasks).values({
+          tenantId: tenantA,
+          title: "Ring the accountant back",
+          createdByClerkUserId: "user-owner",
+        }),
+      { role: "owner" },
+    );
+
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmTasks),
+      { role: "staff" },
+    );
+    expect(asStaff.map((t) => t.title)).toContain("Ring the accountant back");
+  });
+
+  it("a task attached to a restricted record is hidden from staff", async () => {
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmTasks).values({
+          tenantId: tenantA,
+          partyId: partyOf.aSecret,
+          title: "Chase the confidential one",
+          createdByClerkUserId: "user-owner",
+        }),
+      { role: "owner" },
+    );
+
+    const asStaff = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmTasks),
+      { role: "staff" },
+    );
+    expect(asStaff.map((t) => t.title)).not.toContain("Chase the confidential one");
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmTasks),
+      { role: "owner" },
+    );
+    expect(asOwner.map((t) => t.title)).toContain("Chase the confidential one");
+  });
+
+  it("staff cannot ATTACH a task to a restricted record", async () => {
+    // The WITH CHECK half. Without it a staff member could file work against a
+    // record they cannot open, and then not see what they had just written.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmTasks).values({
+            tenantId: tenantA,
+            partyId: partyOf.aSecret,
+            title: "Smuggled",
+            createdByClerkUserId: "user-staff",
+          }),
+        { role: "staff" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a task cannot be half-completed", async () => {
+    // The CHECK constraint: completed_at and completed_by are one fact stored
+    // in two columns, and a row carrying only half of it is uninterpretable.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmTasks).values({
+            tenantId: tenantA,
+            title: "Half done",
+            completedAt: new Date(),
+            createdByClerkUserId: "user-owner",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot write activity or tasks into the other tenant", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmTasks).values({
+            tenantId: tenantB,
+            title: "Cross-tenant task",
+            createdByClerkUserId: "attacker",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
   it("staff CAN see an affiliation between two open records", async () => {
     // The other direction, so the test above is proving inheritance rather than
     // an accidental blanket denial of the whole table to staff.

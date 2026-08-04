@@ -4384,9 +4384,154 @@ export const crmDealParties = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * CRM activity and follow-ups (slice 4).
+ *
+ * What was said, and what has to happen next. The timeline these feed is
+ * built to take more sources than these two — slice 5 adds mail threads once
+ * CRM registers its entity types with Mail, and nothing here has to change
+ * for that.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * What kind of contact this was. A CLOSED enumeration, because each value gets
+ * an icon and a verb in the UI — adding one is a code change and should look
+ * like one.
+ *
+ * Note what is absent: no `email`. A logged email would be somebody retyping
+ * what the Mail module already holds, and two records of one conversation
+ * disagree the moment either is edited. Mail contributes threads to the
+ * timeline directly in slice 5.
+ */
+export const crmActivityKind = pgEnum("crm_activity_kind", [
+  "note",
+  "call",
+  "meeting",
+]);
+
+export const crmActivities = pgTable(
+  "crm_activities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The record this is filed under. Required — an activity about nobody is
+     * not an activity, and the visibility policy resolves through it. */
+    partyId: uuid("party_id").notNull(),
+    /** Optionally also about a specific deal. */
+    dealId: uuid("deal_id"),
+    kind: crmActivityKind("kind").notNull(),
+    subject: text("subject").notNull().default(""),
+    body: text("body").notNull().default(""),
+    /**
+     * WHEN IT HAPPENED, which is not when it was typed. Somebody writing up
+     * Friday's site visit on Monday needs the timeline to read Friday, and
+     * `created_at` cannot be moved without lying about the row.
+     */
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_activities_tenant_id_id_idx").on(t.tenantId, t.id),
+    // The timeline's own query: one record, newest first.
+    index("crm_activities_party_idx").on(t.tenantId, t.partyId, t.occurredAt),
+    index("crm_activities_deal_idx").on(t.tenantId, t.dealId, t.occurredAt),
+    foreignKey({
+      name: "crm_activities_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "crm_activities_deal_fk",
+      columns: [t.tenantId, t.dealId],
+      foreignColumns: [crmDeals.tenantId, crmDeals.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * A follow-up.
+ *
+ * BOTH `party_id` AND `deal_id` ARE OPTIONAL, deliberately. "Ring the
+ * accountant back" is a real task that belongs to nobody in the CRM, and a
+ * product that refuses to hold it sends that task to a sticky note. The RLS
+ * policy therefore branches: attached tasks inherit the record's visibility,
+ * unattached ones are plain tenant-scoped.
+ */
+export const crmTasks = pgTable(
+  "crm_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    partyId: uuid("party_id"),
+    dealId: uuid("deal_id"),
+    title: text("title").notNull(),
+    notes: text("notes").notNull().default(""),
+    /** A DATE, not a timestamp. Follow-ups are due on a day, not at 14:32. */
+    dueOn: date("due_on", { mode: "string" }),
+    assigneeClerkUserId: text("assignee_clerk_user_id"),
+    /**
+     * Completion is a TIME, not a boolean, so "done" and "done last Tuesday"
+     * are the same fact rather than two columns that can disagree. Null is
+     * open; clearing it reopens.
+     */
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    completedByClerkUserId: text("completed_by_clerk_user_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_tasks_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("crm_tasks_party_idx").on(t.tenantId, t.partyId),
+    index("crm_tasks_deal_idx").on(t.tenantId, t.dealId),
+    // "What is open, soonest first" — the query the task list is made of.
+    index("crm_tasks_open_idx")
+      .on(t.tenantId, t.dueOn)
+      .where(sql`completed_at is null`),
+    index("crm_tasks_assignee_idx").on(t.tenantId, t.assigneeClerkUserId),
+    foreignKey({
+      name: "crm_tasks_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "crm_tasks_deal_fk",
+      columns: [t.tenantId, t.dealId],
+      foreignColumns: [crmDeals.tenantId, crmDeals.id],
+    }).onDelete("cascade"),
+    // Completed means both stamps, or neither. A row with one is a half-write
+    // nobody could interpret, so the database refuses it.
+    check(
+      "crm_tasks_completion_pair",
+      sql`(${t.completedAt} is null) = (${t.completedByClerkUserId} is null)`,
+    ),
+  ],
+);
+
 export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
 export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
+export type CrmActivity = typeof crmActivities.$inferSelect;
+export type CrmActivityKind = CrmActivity["kind"];
+export type CrmTask = typeof crmTasks.$inferSelect;
 export type CrmPipeline = typeof crmPipelines.$inferSelect;
 export type CrmPipelineStage = typeof crmPipelineStages.$inferSelect;
 export type CrmDeal = typeof crmDeals.$inferSelect;

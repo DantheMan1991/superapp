@@ -202,8 +202,13 @@ export interface AffiliationPlan {
    * differ — so these must go rather than fail the transaction.
    */
   dropSelf: string[];
-  /** The survivor already has this exact connection. */
+  /** The survivor already has this exact CURRENT connection. */
   dropDuplicate: string[];
+  /**
+   * Moved rows that lose `is_primary`, because the merged person already has a
+   * current primary employer and `crm_affiliations_primary_idx` allows one.
+   */
+  demote: string[];
 }
 
 export interface MergePlan {
@@ -257,6 +262,13 @@ export interface AffiliationSnapshot {
   id: string;
   personPartyId: string;
   organizationPartyId: string;
+  /**
+   * Both uniques on this table are PARTIAL on `ended_on is null`, so a former
+   * connection contends with nothing. Carrying the date is what stops the plan
+   * discarding real history as a duplicate.
+   */
+  endedOn: string | null;
+  isPrimary: boolean;
 }
 
 export interface DetailsSnapshot {
@@ -446,15 +458,45 @@ export function joinNotes(survivor: string, loser: string): string {
   return `${a}\n\n--- merged from a duplicate record ---\n\n${b}`;
 }
 
+/**
+ * Which connections survive, and in what state.
+ *
+ * BOTH LISTS MUST CONTAIN ROWS WHERE THE PARTY IS EITHER END. A person's
+ * affiliations name them as the person; a company's name it as the
+ * organization, and merging two companies re-points that end for every employee
+ * anybody recorded. Passing only one end would leave the collisions below
+ * undetected and the transaction would abort on an index instead.
+ *
+ * THE TWO UNIQUES ARE PARTIAL ON `ended_on is null`, which is what makes a
+ * former connection harmless. "They worked there, left, and came back" is two
+ * legitimate rows for one pair, and a plan that deduplicated on the pair alone
+ * would delete the history and keep only the present — losing exactly the fact
+ * the join table exists to hold.
+ */
 export function planAffiliations(
   survivorPartyId: string,
   loserPartyId: string,
   survivor: readonly AffiliationSnapshot[],
   loser: readonly AffiliationSnapshot[],
 ): AffiliationPlan {
-  const plan: AffiliationPlan = { move: [], dropSelf: [], dropDuplicate: [] };
-  const held = new Set(
-    survivor.map((a) => `${a.personPartyId}:${a.organizationPartyId}`),
+  const plan: AffiliationPlan = {
+    move: [],
+    dropSelf: [],
+    dropDuplicate: [],
+    demote: [],
+  };
+
+  const currentPairs = new Set(
+    survivor
+      .filter((a) => a.endedOn === null)
+      .map((a) => `${a.personPartyId}:${a.organizationPartyId}`),
+  );
+  // Scoped to the person, so only rows the merge re-points AS the person can
+  // contend. A row where the loser is the organization leaves its person
+  // untouched, and that person's primary already satisfies the index.
+  let personHasPrimary = survivor.some(
+    (a) =>
+      a.isPrimary && a.endedOn === null && a.personPartyId === survivorPartyId,
   );
 
   for (const affiliation of loser) {
@@ -471,12 +513,21 @@ export function planAffiliations(
       plan.dropSelf.push(affiliation.id);
       continue;
     }
-    if (held.has(`${person}:${organization}`)) {
+
+    const key = `${person}:${organization}`;
+    const isCurrent = affiliation.endedOn === null;
+    if (isCurrent && currentPairs.has(key)) {
       plan.dropDuplicate.push(affiliation.id);
       continue;
     }
-    held.add(`${person}:${organization}`);
+
     plan.move.push(affiliation.id);
+    if (isCurrent) currentPairs.add(key);
+
+    if (affiliation.isPrimary && isCurrent && person === survivorPartyId) {
+      if (personHasPrimary) plan.demote.push(affiliation.id);
+      else personHasPrimary = true;
+    }
   }
   return plan;
 }

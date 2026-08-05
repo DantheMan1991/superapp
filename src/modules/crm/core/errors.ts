@@ -29,6 +29,7 @@ export type CrmErrorCode =
   | "ACTIVITY_NOT_FOUND"
   | "TASK_NOT_FOUND"
   | "TASK_TITLE_REQUIRED"
+  | "MERGE_SAME_RECORD"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
 
@@ -102,6 +103,8 @@ export function friendlyMessage(err: unknown): string {
       return "That follow-up could not be found.";
     case "TASK_TITLE_REQUIRED":
       return "Give the follow-up a name.";
+    case "MERGE_SAME_RECORD":
+      return "Choose two different records to merge.";
     case "CUSTOM_VALUES_INVALID":
       // The per-field messages carry the detail; this is the summary line.
       return err.issues?.length

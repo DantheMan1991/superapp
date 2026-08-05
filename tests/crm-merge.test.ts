@@ -250,6 +250,8 @@ describe("affiliations", () => {
     id: "a1",
     personPartyId: A,
     organizationPartyId: B,
+    endedOn: null,
+    isPrimary: false,
     ...over,
   });
 
@@ -280,6 +282,74 @@ describe("affiliations", () => {
       [link({ id: "l1", personPartyId: A, organizationPartyId: B })],
     );
     expect(plan.dropDuplicate).toEqual(["l1"]);
+  });
+
+  it("KEEPS a former connection that duplicates a current one", () => {
+    // Both uniques are partial on `ended_on is null`, so this pair is legal —
+    // and it is real history. "They worked there, left, and came back" is two
+    // rows, and deduplicating on the pair alone would delete the past and keep
+    // only the present, losing the fact the join table exists to hold.
+    const plan = planAffiliations(
+      C,
+      B,
+      [link({ id: "s1", personPartyId: A, organizationPartyId: C })],
+      [
+        link({
+          id: "l1",
+          personPartyId: A,
+          organizationPartyId: B,
+          endedOn: "2024-03-31",
+        }),
+      ],
+    );
+    expect(plan.move).toEqual(["l1"]);
+    expect(plan.dropDuplicate).toEqual([]);
+  });
+
+  it("DEMOTES an incoming primary when the merged person already has one", () => {
+    // `crm_affiliations_primary_idx` allows one current primary per person, so
+    // moving a second would abort the whole merge on an index.
+    const plan = planAffiliations(
+      A,
+      C,
+      [link({ id: "s1", personPartyId: A, organizationPartyId: B, isPrimary: true })],
+      [link({ id: "l1", personPartyId: C, organizationPartyId: B, isPrimary: true })],
+    );
+    // Same pair once re-pointed? No — the org differs from the survivor, and
+    // the person becomes A, so this is A→B twice. The pair rule catches it
+    // first, which is the correct precedence.
+    expect(plan.dropDuplicate).toEqual(["l1"]);
+  });
+
+  it("demotes rather than drops when the primaries name different companies", () => {
+    const plan = planAffiliations(
+      A,
+      C,
+      [link({ id: "s1", personPartyId: A, organizationPartyId: B, isPrimary: true })],
+      [
+        link({
+          id: "l1",
+          personPartyId: C,
+          organizationPartyId: "org-2",
+          isPrimary: true,
+        }),
+      ],
+    );
+    expect(plan.move).toEqual(["l1"]);
+    expect(plan.demote).toEqual(["l1"]);
+  });
+
+  it("leaves a primary alone when the loser is the ORGANIZATION", () => {
+    // The person is unchanged, so their primary already satisfies the index —
+    // re-pointing the other end cannot contend with it.
+    const plan = planAffiliations(
+      C,
+      B,
+      [],
+      [link({ id: "l1", personPartyId: A, organizationPartyId: B, isPrimary: true })],
+    );
+    expect(plan.move).toEqual(["l1"]);
+    expect(plan.demote).toEqual([]);
   });
 });
 

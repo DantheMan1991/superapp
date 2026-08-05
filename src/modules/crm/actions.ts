@@ -681,15 +681,19 @@ export async function searchRecordsAction(
         listRecords(tx, ctx.tenantId, {
           query: parsed.data.query,
           kind: parsed.data.kind,
+          // A typeahead wants ten, so it asks for ten rather than taking a page
+          // and throwing most of it away.
+          pageSize: 10,
         }),
       { role: ctx.role, userId: ctx.userId },
     );
 
     return {
       ok: true,
-      data: rows
-        .slice(0, 10)
-        .map((r) => ({ id: r.party.id, displayName: r.party.displayName })),
+      data: rows.rows.map((r) => ({
+        id: r.party.id,
+        displayName: r.party.displayName,
+      })),
     };
   } catch (err) {
     return fail(err);

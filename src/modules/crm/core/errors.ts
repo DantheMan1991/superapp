@@ -32,6 +32,10 @@ export type CrmErrorCode =
   | "MERGE_SAME_RECORD"
   | "COLLABORATOR_INVALID"
   | "COLLABORATOR_NOT_FOUND"
+  | "VIEW_NAME_REQUIRED"
+  | "VIEW_NAME_TAKEN"
+  | "VIEW_NOT_YOURS"
+  | "VIEW_FILTER_INVALID"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
 
@@ -113,6 +117,18 @@ export function friendlyMessage(err: unknown): string {
       // Says what is true rather than "not found": the row is gone, which is
       // what they wanted, and the screen was simply stale.
       return "That person no longer has access to this record.";
+    case "VIEW_NAME_REQUIRED":
+      return "Give the view a name.";
+    case "VIEW_NAME_TAKEN":
+      return "You already have a view with that name.";
+    case "VIEW_NOT_YOURS":
+      // Not "not found": they are looking at it in the picker, so saying it
+      // does not exist would be the one answer they know to be false.
+      return "Only the person who made a view can change it.";
+    case "VIEW_FILTER_INVALID":
+      // Carries the registry's own reason — "Not a date", "Enter a value" —
+      // because a filter that will not save should say which part is wrong.
+      return err.message || "That filter is not valid.";
     case "CUSTOM_VALUES_INVALID":
       // The per-field messages carry the detail; this is the summary line.
       return err.issues?.length

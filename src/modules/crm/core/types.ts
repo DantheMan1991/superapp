@@ -6,6 +6,7 @@ import type {
   Party,
   PartyKind,
 } from "@/db/schema";
+import type { FilterCondition, ViewSort } from "./views";
 
 /**
  * The shapes the CRM module passes around. No database, no React — importable
@@ -94,6 +95,34 @@ export interface CrmRecordFilter {
   /** Only records CRM has actually been asked about. */
   workedOnly?: boolean;
   includeInactive?: boolean;
+  /**
+   * A saved view's conditions, already validated by `core/views.ts`.
+   *
+   * SEPARATE FROM `query` ON PURPOSE, and the two answer different questions:
+   * the view is what somebody saved, the query is what they are typing right
+   * now. Folding the search box into the view's conditions would mean every
+   * keystroke edited the view.
+   */
+  conditions?: readonly FilterCondition[];
+  sort?: ViewSort;
+  page?: number;
+  pageSize?: number;
+}
+
+/** One page of records, and how many there are in total. */
+export interface CrmRecordPage {
+  rows: CrmRecordRow[];
+  /**
+   * Matching records across every page.
+   *
+   * A COUNT RATHER THAN A "there may be more" HEDGE. The list used to stop at
+   * 500 with a line saying so, which is the shape of truncation that makes
+   * somebody wonder whether the record they cannot find is missing or merely
+   * beyond the cap.
+   */
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 /** The record form's editable shape, and its blank value. */

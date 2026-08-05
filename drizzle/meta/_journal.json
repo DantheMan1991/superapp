@@ -533,6 +533,20 @@
       "when": 1785881388699,
       "tag": "0075_accounting_contacts_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1785892597390,
+      "tag": "0076_crm_collaborators",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1785892598390,
+      "tag": "0077_crm_collaborators_rls",
+      "breakpoints": true
     }
   ]
 }

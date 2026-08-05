@@ -74,7 +74,7 @@ export default async function DuplicatesPage() {
         ),
       };
     },
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   );
 
   return (

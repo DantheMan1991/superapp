@@ -58,7 +58,7 @@ export default async function RecordPage({
       activities: await listActivitiesForParty(tx, ctx.tenant.id, partyId),
       tasks: await listTasksForParty(tx, ctx.tenant.id, partyId),
     }),
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   ).catch((err) => {
     // A record in another tenant and a record that does not exist are the same
     // answer, because RLS removed it before this code ran. 404, never 403.

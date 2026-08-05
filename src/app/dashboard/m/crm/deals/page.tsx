@@ -69,7 +69,7 @@ export default async function DealsBoardPage({
         pipelines: await listPipelines(tx, ctx.tenant.id),
       };
     },
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   );
 
   if (!board) {

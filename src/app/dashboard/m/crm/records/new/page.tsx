@@ -20,7 +20,7 @@ export default async function NewRecordPage() {
   const fieldDefs = await withTenant(
     ctx.tenant.id,
     (tx) => listFieldDefs(tx, ctx.tenant.id, "party"),
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   );
 
   return (

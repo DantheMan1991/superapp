@@ -100,7 +100,7 @@ export async function logActivityAction(
           meta: { kind: row.kind },
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFor(parsed.data.partyId, parsed.data.dealId);
@@ -139,7 +139,7 @@ export async function updateActivityAction(
             ...(occurredOn ? { occurredAt: new Date(`${occurredOn}T12:00:00Z`) } : {}),
           },
         }),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFor(partyId);
@@ -175,7 +175,7 @@ export async function deleteActivityAction(
           meta: {},
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFor(parsed.data.partyId);
@@ -217,7 +217,7 @@ export async function createTaskAction(
           meta: { attached: row.partyId !== null, dated: row.dueOn !== null },
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFor(parsed.data.partyId, parsed.data.dealId);
@@ -249,7 +249,7 @@ export async function updateTaskAction(
     await withTenant(
       ctx.tenantId,
       (tx) => updateTask(tx, ctx, { taskId, expectedVersion, patch }),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFor(partyId);
@@ -278,7 +278,7 @@ export async function setTaskCompleteAction(
     await withTenant(
       ctx.tenantId,
       (tx) => setTaskComplete(tx, ctx, parsed.data),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFor(parsed.data.partyId, parsed.data.dealId);

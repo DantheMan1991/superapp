@@ -26,7 +26,7 @@ export default async function FieldsPage() {
   const defs = await withTenant(
     ctx.tenant.id,
     (tx) => listFieldDefs(tx, ctx.tenant.id, "party", { includeArchived: true }),
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   );
 
   const isOwner = ctx.role === "owner";

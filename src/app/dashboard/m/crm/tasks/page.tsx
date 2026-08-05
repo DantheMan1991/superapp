@@ -54,7 +54,7 @@ export default async function TasksPage() {
         partyNames: await resolveTaskParties(tx, ctx.tenant.id, [...open, ...done]),
       };
     },
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   );
 
   const today = new Date().toISOString().slice(0, 10);

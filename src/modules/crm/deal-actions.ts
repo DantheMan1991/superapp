@@ -139,7 +139,7 @@ export async function createDealAction(
         });
         return deal.id;
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateBoard(dealId, parsed.data.partyId);
@@ -189,7 +189,7 @@ export async function updateDealAction(
           meta: { fields: Object.keys(patch).sort() },
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateBoard(dealId, partyId);
@@ -228,7 +228,7 @@ export async function moveDealStageAction(
           meta: { toStageId: parsed.data.toStageId, closed: deal.closedAt !== null },
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateBoard(parsed.data.dealId, parsed.data.partyId);
@@ -254,6 +254,7 @@ export async function addDealStakeholderAction(
 
     await withTenant(ctx.tenantId, (tx) => addDealStakeholder(tx, ctx, parsed.data), {
       role: ctx.role,
+      userId: ctx.userId,
     });
 
     revalidateBoard(parsed.data.dealId);
@@ -279,7 +280,7 @@ export async function removeDealStakeholderAction(
     await withTenant(
       ctx.tenantId,
       (tx) => removeDealStakeholder(tx, ctx, parsed.data),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateBoard(parsed.data.dealId);
@@ -317,7 +318,7 @@ export async function createPipelineAction(
         });
         return pipeline.id;
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidatePath(`${BASE}/pipelines`);
@@ -345,6 +346,7 @@ export async function createStageAction(
 
     await withTenant(ctx.tenantId, (tx) => createStage(tx, ctx, parsed.data), {
       role: ctx.role,
+      userId: ctx.userId,
     });
 
     revalidatePath(`${BASE}/pipelines`);
@@ -375,7 +377,7 @@ export async function updateStageAction(
     await withTenant(
       ctx.tenantId,
       (tx) => updateStage(tx, ctx, { stageId, expectedVersion, patch }),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidatePath(`${BASE}/pipelines`);
@@ -402,6 +404,7 @@ export async function setStageArchivedAction(
 
     await withTenant(ctx.tenantId, (tx) => setStageArchived(tx, ctx, parsed.data), {
       role: ctx.role,
+      userId: ctx.userId,
     });
 
     revalidatePath(`${BASE}/pipelines`);
@@ -426,6 +429,7 @@ export async function reorderStagesAction(
 
     await withTenant(ctx.tenantId, (tx) => reorderStages(tx, ctx, parsed.data.stageIds), {
       role: ctx.role,
+      userId: ctx.userId,
     });
 
     revalidatePath(`${BASE}/pipelines`);

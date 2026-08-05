@@ -4193,6 +4193,103 @@ export const crmRecordCollaborators = pgTable(
 );
 
 /**
+ * A saved list view: which records, in what order.
+ *
+ * THE FILTER IS jsonb AND `src/modules/crm/core/views.ts` IS ITS WHOLE
+ * INTEGRITY, exactly as `crm_party_details.custom` depends on
+ * `core/custom-fields.ts`. A stored filter names a FIELD KEY from a registry in
+ * that file — never a column name — so nothing a browser sent can reach a WHERE
+ * clause as an identifier. Read `parseFilter` before changing this column's
+ * shape.
+ *
+ * NOT VISIBILITY-BEARING, and it does not need to be. A view is a saved
+ * QUESTION, and the answer is computed inside the caller's transaction where
+ * RLS has already removed what they may not see — so two people running one
+ * shared view legitimately get different rows, and a view can be shared without
+ * anybody auditing what it might expose. That is the property that makes
+ * `is_shared` a boolean rather than an access list.
+ *
+ * NO `version` COLUMN. Every other editable row here has one, and the absence
+ * is deliberate: a view is edited by the one person who made it, so the
+ * concurrent-edit problem optimistic locking solves does not arise.
+ */
+export const crmSavedViews = pgTable(
+  "crm_saved_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Open taxonomy (P1) so deals and follow-ups need no migration. */
+    entityType: text("entity_type").notNull().default("party"),
+    name: text("name").notNull(),
+    /** Who made it, and therefore who may edit it. */
+    ownerClerkUserId: text("owner_clerk_user_id").notNull(),
+    /** Private, or visible to the whole tenant. Not an access list — see above. */
+    isShared: boolean("is_shared").notNull().default(false),
+    /** `FilterCondition[]`, validated by `parseFilter` on every read. */
+    filter: jsonb("filter").notNull().default([]),
+    /** `{ field, direction }`, validated by `parseSort`. */
+    sort: jsonb("sort").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_saved_views_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("crm_saved_views_tenant_entity_idx").on(t.tenantId, t.entityType),
+    // One person cannot have two views of the same name for the same thing.
+    // Scoped to the OWNER rather than the tenant, because two people naming
+    // their own private view "Mine" have not collided.
+    uniqueIndex("crm_saved_views_name_idx").on(
+      t.tenantId,
+      t.entityType,
+      t.ownerClerkUserId,
+      t.name,
+    ),
+  ],
+);
+
+/**
+ * Which view a person lands on.
+ *
+ * PER USER, NOT PER TENANT. A pin is a preference about how somebody works, and
+ * one person pinning "Assigned to me" must not change what anybody else opens.
+ *
+ * `view_id` IS TEXT AND HAS NO FOREIGN KEY, deliberately: it holds either a
+ * `crm_saved_views.id` or a built-in id like `builtin:mine`, which is code
+ * rather than a row. Resolution falls back to the default when the id names
+ * nothing the caller can see — which covers a deleted view, a shared view that
+ * was made private, and a built-in that a later release retires, without any of
+ * the three needing a cleanup job.
+ */
+export const crmViewPins = pgTable(
+  "crm_view_pins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clerkUserId: text("clerk_user_id").notNull(),
+    entityType: text("entity_type").notNull().default("party"),
+    viewId: text("view_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_view_pins_unique_idx").on(
+      t.tenantId,
+      t.clerkUserId,
+      t.entityType,
+    ),
+  ],
+);
+
+/**
  * The types a custom field can be. A CLOSED enumeration on purpose: every value
  * here needs a parser, an input control and a display, so adding one is a code
  * change in three places and should look like one.
@@ -4690,6 +4787,8 @@ export const crmTasks = pgTable(
 export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
 export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
 export type CrmRecordCollaborator = typeof crmRecordCollaborators.$inferSelect;
+export type CrmSavedView = typeof crmSavedViews.$inferSelect;
+export type CrmViewPin = typeof crmViewPins.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 export type CrmActivityKind = CrmActivity["kind"];

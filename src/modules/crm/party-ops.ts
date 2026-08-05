@@ -21,14 +21,16 @@ import {
   sanitizeCustomValues,
 } from "./core/custom-fields";
 import { listFieldDefs } from "./field-ops";
+import { compileConditions, compileSort } from "./view-ops";
+import { DEFAULT_SORT } from "./core/views";
 import type {
   CrmAffiliationRow,
   CrmCtx,
   CrmRecord,
   CrmRecordFilter,
+  CrmRecordPage,
   CrmRecordInput,
   CrmRecordPatch,
-  CrmRecordRow,
 } from "./core/types";
 
 /**
@@ -88,11 +90,13 @@ function asCrmError(err: unknown): never {
  * `restricted` hides what CRM KNOWS — stage, owner, notes, connections — not
  * the fact that the business deals with somebody.
  */
+export const PAGE_SIZE = 50;
+
 export async function listRecords(
   tx: Tx,
   tenantId: string,
   filter: CrmRecordFilter = {},
-): Promise<CrmRecordRow[]> {
+): Promise<CrmRecordPage> {
   const conditions = [eq(schema.parties.tenantId, tenantId)];
 
   const term = filter.query?.trim();
@@ -113,6 +117,33 @@ export async function listRecords(
     conditions.push(isNotNull(schema.crmPartyDetails.id));
   }
 
+  // A SAVED VIEW'S CONDITIONS, COMPILED. They arrive already validated against
+  // the field registry, and every value below is bound as a parameter — see the
+  // header of `view-ops.ts` for why those two properties are the whole of the
+  // safety argument.
+  //
+  // A DETAILS-COLUMN FILTER EXCLUDES UNWORKED RECORDS, and that is inherent
+  // rather than a bug to fix: this is a LEFT JOIN, so a party CRM has never
+  // been asked about has no `lifecycle_stage` to compare, and neither does a
+  // restricted record RLS removed for this caller. "Stage is lead" therefore
+  // means "records CRM knows about, whose stage is lead". `not_equals` and
+  // `not_contains` deliberately keep the nulls; see `compileConditions`.
+  conditions.push(...compileConditions(filter.conditions ?? [], new Date()));
+
+  const sort = filter.sort ?? DEFAULT_SORT;
+  const pageSize = Math.min(Math.max(filter.pageSize ?? PAGE_SIZE, 1), 200);
+  const page = Math.max(filter.page ?? 1, 1);
+
+  const where = and(...conditions);
+
+  // The details join is spelled out in both queries below rather than factored
+  // into a helper: drizzle's join types change the builder's type parameter, so
+  // a generic wrapper only typechecks behind a cast that is not sound.
+  const detailsJoin = and(
+    eq(schema.crmPartyDetails.tenantId, schema.parties.tenantId),
+    eq(schema.crmPartyDetails.partyId, schema.parties.id),
+  );
+
   const rows = await tx
     .select({
       party: schema.parties,
@@ -121,13 +152,7 @@ export async function listRecords(
       vendorId: schema.vendors.id,
     })
     .from(schema.parties)
-    .leftJoin(
-      schema.crmPartyDetails,
-      and(
-        eq(schema.crmPartyDetails.tenantId, schema.parties.tenantId),
-        eq(schema.crmPartyDetails.partyId, schema.parties.id),
-      ),
-    )
+    .leftJoin(schema.crmPartyDetails, detailsJoin)
     .leftJoin(
       schema.customers,
       and(
@@ -142,16 +167,35 @@ export async function listRecords(
         eq(schema.vendors.partyId, schema.parties.id),
       ),
     )
-    .where(and(...conditions))
-    .orderBy(sql`lower(${schema.parties.displayName})`)
-    .limit(500);
+    .where(where)
+    .orderBy(...compileSort(sort))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
 
-  return rows.map((r) => ({
-    party: r.party,
-    details: r.details,
-    isCustomer: r.customerId !== null,
-    isVendor: r.vendorId !== null,
-  }));
+  // THE COUNT MUST MATCH THE LIST, so it carries the same predicate and the
+  // same details join — a filter on `lifecycle_stage` changes what matches, and
+  // a count taken without that join would label the page with a number the page
+  // contradicts. The customers/vendors joins are omitted because they only
+  // supply display flags and, being unique per party, cannot change the row
+  // count. **If a filter field is ever added over those tables, this query
+  // needs their joins too.**
+  const counted = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.parties)
+    .leftJoin(schema.crmPartyDetails, detailsJoin)
+    .where(where);
+
+  return {
+    rows: rows.map((r) => ({
+      party: r.party,
+      details: r.details,
+      isCustomer: r.customerId !== null,
+      isVendor: r.vendorId !== null,
+    })),
+    total: counted[0]?.n ?? 0,
+    page,
+    pageSize,
+  };
 }
 
 async function loadDetails(

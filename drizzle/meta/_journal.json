@@ -547,6 +547,20 @@
       "when": 1785892598390,
       "tag": "0077_crm_collaborators_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1785896444782,
+      "tag": "0078_crm_saved_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1785896445782,
+      "tag": "0079_crm_saved_views_rls",
+      "breakpoints": true
     }
   ]
 }

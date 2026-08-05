@@ -11,6 +11,29 @@ import type { CrmRecordFilter } from "./core/types";
 const BASE = "/dashboard/m/crm";
 
 /**
+ * The current URL with a different page number.
+ *
+ * Built from the params that arrived rather than from a remembered filter, so
+ * paging carries the search, the kind and the view along with it. A "next"
+ * link that dropped the filter would take somebody to page 2 of a different
+ * list.
+ */
+function pageHref(
+  searchParams: Record<string, string | string[] | undefined>,
+  page: number,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (key === "page") continue;
+    const single = Array.isArray(value) ? value[0] : value;
+    if (single) params.set(key, single);
+  }
+  if (page > 1) params.set("page", String(page));
+  const query = params.toString();
+  return query ? `${BASE}?${query}` : BASE;
+}
+
+/**
  * The records list, and it IS the module's home page rather than an overview
  * that links to one. A CRM whose front door reports counts is a dead end; the
  * thing somebody opens this for is the list of who they deal with.
@@ -39,13 +62,16 @@ export async function CrmModule({
         : undefined,
     workedOnly: first(searchParams.worked) === "1",
     includeInactive: first(searchParams.archived) === "1",
+    page: Number.parseInt(first(searchParams.page) ?? "1", 10) || 1,
   };
 
-  const records = await withTenant(
+  const page = await withTenant(
     ctx.tenant.id,
     (tx) => listRecords(tx, ctx.tenant.id, filter),
     { role: ctx.role, userId: ctx.userId },
   );
+  const records = page.rows;
+  const pageCount = Math.max(Math.ceil(page.total / page.pageSize), 1);
 
   const isFiltered =
     !!filter.query || !!filter.kind || !!filter.workedOnly || !!filter.includeInactive;
@@ -135,12 +161,39 @@ export async function CrmModule({
         </ul>
       )}
 
-      {records.length >= 500 && (
-        // The cap is stated rather than silently applied — a list that stops at
-        // 500 without saying so reads as "that is everyone".
-        <p className="text-xs text-muted-foreground">
-          Showing the first 500. Narrow the search to see more.
-        </p>
+      {/*
+        THE 500-ROW CAP IS GONE. It used to stop the list and say so, which is
+        the shape of truncation that leaves somebody wondering whether the
+        record they cannot find is missing or merely past the edge. There is a
+        real count and real pages now, so the answer is always reachable.
+      */}
+      {page.total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {page.total === 1 ? "1 record" : `${page.total} records`}
+            {pageCount > 1 && ` · page ${page.page} of ${pageCount}`}
+          </span>
+          {pageCount > 1 && (
+            <span className="flex items-center gap-2">
+              {page.page > 1 && (
+                <Link
+                  href={pageHref(searchParams, page.page - 1)}
+                  className="underline hover:text-foreground"
+                >
+                  Previous
+                </Link>
+              )}
+              {page.page < pageCount && (
+                <Link
+                  href={pageHref(searchParams, page.page + 1)}
+                  className="underline hover:text-foreground"
+                >
+                  Next
+                </Link>
+              )}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );

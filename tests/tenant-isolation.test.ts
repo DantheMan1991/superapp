@@ -6,6 +6,7 @@ import { recentCorrespondents } from "../src/modules/email/contacts/recent";
 import { accountingMailExtension } from "../src/modules/accounting/mail/extension";
 import { crmMailExtension } from "../src/modules/crm/mail/extension";
 import { findPartiesByContact } from "../src/lib/parties/contacts";
+import { previewMerge } from "../src/modules/crm/merge-ops";
 import { documentsMailExtension } from "../src/modules/documents/mail/extension";
 
 /**
@@ -636,6 +637,37 @@ d("parties isolation (RLS + composite tenant FKs)", () => {
     expect(matches).toHaveLength(1);
     expect(matches[0].party.id).toBe(partyOf.A);
     expect(matches[0].party.tenantId).toBe(tenantA);
+  });
+
+  /**
+   * MERGING CANNOT REACH ACROSS TENANTS, and this is the highest-consequence
+   * version of that question in the codebase. A merge deletes an identity and
+   * re-points posted invoices; one that accepted another tenant's party id
+   * would destroy a different business's records from inside this one.
+   *
+   * Nothing in `merge-ops.ts` filters on tenancy beyond the explicit
+   * `tenant_id` predicates — the guard is `loadParty` running inside the
+   * caller's transaction, where RLS has already removed the other tenant's row,
+   * so the id resolves to nothing and the merge refuses before it writes.
+   */
+  it("A MERGE CANNOT NAME ANOTHER TENANT'S RECORD", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) => previewMerge(tx, tenantA, partyOf.A, partyOf.B),
+        { role: "owner", userId: "user-a" },
+      ),
+    ).rejects.toThrow();
+
+    // And the same in the direction that would matter most: the other tenant's
+    // record as the SURVIVOR, which would move our rows onto theirs.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) => previewMerge(tx, tenantA, partyOf.B, partyOf.A),
+        { role: "owner", userId: "user-a" },
+      ),
+    ).rejects.toThrow();
   });
 
   it("cannot INSERT a contact point attributed to the other tenant", async () => {

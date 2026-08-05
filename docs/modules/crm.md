@@ -14,6 +14,26 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — Slice 7: dedup & merge (branch `claude/crm-merge`)
+
+The tool three earlier slices deferred to. **No migration** — merging is code
+over the tables that already exist, and adding a `crm_party_merges` table would
+be a second store for what `audit_log` already holds.
+
+- `core/merge.ts` is pure and decides everything: candidates, contested fields,
+  and the four unique indexes a merge has to step around. 33 unit tests.
+- **The plan is the product.** `buildMergePlan` returns a complete description;
+  the preview RENDERS it and `applyMerge` re-derives and APPLIES the same one.
+  No second code path computes "what would happen".
+- **The absorb re-points posted invoices** onto the surviving customer row when
+  both records hold the role — authorised by the founder on 2026-08-04. See
+  Decisions for why the ledger is untouched by it.
+- Owner-only in full, including the listing. Every merge writes an audit row
+  carrying both names and the counts, because nothing else survives it.
+- `/dashboard/m/crm/duplicates`, linked from the module home.
+- 8 database tests on the executor, plus a cross-tenant refusal in the
+  isolation suite.
+
 ### 2026-08-04 — The contract step: the accounting columns are gone (branch `claude/party-contact-points`)
 
 `customers.email`, `customers.phone` and the vendor pair were dropped (`0075`).
@@ -198,6 +218,10 @@ Contact points: `0072` (table), `0073_party_contacts_rls.sql` (policies),
 `0074_party_contacts_backfill.sql` (values copied off the accounting columns),
 `0075_accounting_contacts_contract.sql` (catch-up backfill, verification, then
 the columns dropped — **apply this one after the deploy**).
+Slice 7 added **no migration**: merging is code over the tables that already
+exist. A `crm_party_merges` table was considered and refused — `audit_log`
+already records the event, and a second store for the same fact is the drift
+this dossier keeps warning about.
 
 ## Key files & seams
 
@@ -210,6 +234,15 @@ the columns dropped — **apply this one after the deploy**).
 - `src/lib/parties/role-sync.ts` — the "both names exist" bridge while
   `customers.name` and `parties.display_name` are both stored. Temporary by
   design; the header says what has to move before it goes.
+- `src/modules/crm/core/merge.ts` — pure, and the whole integrity of a merge.
+  `buildMergePlan` is the single description both the preview and the executor
+  use. Read its header before changing any rule in it; every one of them is a
+  judgement about data nobody can get back.
+- `src/modules/crm/merge-ops.ts` — the candidates query and `applyMerge`. **Step
+  order is load-bearing** and the header says which constraint each step is
+  avoiding. The only place in CRM that writes accounting's tables.
+- `src/modules/crm/merge-actions.ts` — owner-only, all three actions including
+  the listing.
 - `src/lib/parties/contacts.ts` — contact points, and `normalized_value` is
   written nowhere else. **`setPreferredContactValue` is the write path behind
   every single-field contact box**, in Accounting today and anywhere else that
@@ -303,6 +336,79 @@ useful of the two true answers. Both sources are kept — deleting accounting's
 would leave a tenant who never bought CRM with no suggestions at all, because an
 extension whose module is off contributes nothing. Pinned in
 `tests/mail-contacts.test.ts` so the claim cannot rot again.
+
+**A MERGE RE-POINTS POSTED INVOICES, AND THE LEDGER IS UNTOUCHED BY IT.** When
+both records hold the same role, `invoices.customer_id`,
+`recurring_invoices.customer_id` and `bills.vendor_id` move onto the surviving
+role row and the emptied one is deleted. That is CRM writing accounting's
+tables, decided by the founder on 2026-08-04 over the alternative of a merge
+tool that cannot fix the commonest duplicate there is — the one 0062's backfill
+guaranteed exists in every tenant. Two facts make it defensible and both are
+worth checking before anybody widens it: `journal_entries` carries **no**
+customer or vendor reference, so double-entry balances and every posted total
+are untouched and only the AR/AP sub-ledger's attribution consolidates onto the
+same business; and `document_links` reaches documents through `invoice_id` /
+`bill_id`, whose rows survive with their ids intact, so nothing filed comes
+loose. The preview counts invoices **only when the role is genuinely absorbed** —
+a role only the loser holds is re-pointed whole and moves no posted record, and
+saying "42 invoices will move" about an operation that moves none is how a
+confirmation screen stops meaning anything.
+
+**THE PLAN IS THE PRODUCT.** `buildMergePlan` returns a complete description of
+the merge; the preview renders that plan and the executor re-derives and applies
+the same one. There is deliberately no second code path computing "what would
+happen", because the screen asking somebody to commit an irreversible operation
+must not be able to describe a different operation from the one that runs. The
+executor recomputes rather than accepting the plan from the caller — a record
+edited between reading and confirming merges as it IS, and a plan cannot arrive
+from a browser naming two records nobody chose.
+
+**The survivor wins every contested field, with two exceptions that are the
+interesting part.** Somebody chose which record survives while looking at both,
+so silently preferring the other one's lifecycle stage would make that choice
+mean less than it appears to. But **notes are appended, never contested** — two
+people's prose about the same business are both true, and discarding one is the
+most irreversible thing a merge could do — and **the more restrictive visibility
+wins**, because merging must never become a way to widen who can see a record.
+
+**`mergeCustomBags` is deliberately not `mergeCustomValues`.** The latter is the
+FORM-SAVE path: it walks the live definitions and deletes any key the payload
+omitted, which is exactly how archiving a field keeps its stored values. Fed two
+records it would delete every field the loser answered and the survivor did not.
+The merge helper consults no definitions at all, so an archived field's values
+survive a merge as well; `false` and `0` are answers rather than blanks.
+
+**Step order in `applyMerge` is load-bearing.** Contact points are
+de-duplicated and demoted while they still belong to the loser, so the
+one-primary-per-kind partial unique never sees two. Affiliations lose their
+self-references BEFORE the ends are re-pointed, or the ends-differ CHECK fires
+on a row that was about to be deleted. Both affiliation uniques are **partial on
+`ended_on is null`**, so a former connection contends with nothing — "they
+worked there, left, and came back" stays two rows rather than being discarded as
+a duplicate. The details row goes last of the CRM tables because its unique on
+(tenant, party) is the one a half-finished merge would trip.
+
+**The losing party is HARD deleted, last, and that is a safety property.**
+Everything referencing it has been re-pointed by then, so if `merge-ops.ts` ever
+misses a table the DELETE fails on a foreign key and the whole transaction rolls
+back — loudly, with nothing lost. A soft delete would leave a ghost in the
+records list and quietly hide the missed reference. This is the one place CRM
+deletes rather than archives apart from activities, and the reason is the same:
+a merged-away duplicate that stayed visible would defeat the merge.
+
+**Merging is owner-only INCLUDING the listing**, which is stricter than the
+fields page next door. Fields are readable by everyone because knowing what a
+field means helps a staff member fill a record in. The duplicates page is a list
+of one job, and that job deletes an identity and moves posted invoices — showing
+it to somebody who cannot finish it would be a page of buttons that refuse.
+
+**Name matching folds case and whitespace and NOTHING else.** No stripping of
+"Ltd", "Inc" or "LLC": those are different legal entities, and a matcher that
+fused them would propose merging two real companies' books. A miss costs a
+search; a false pair costs a business its records. The SQL fold in
+`findMergeCandidates` and `matchableName` in TypeScript must agree, the same
+arrangement `contact-values.ts` has with the 0074 backfill — there is a test
+pinning them together.
 
 **The duplicate check warns and never blocks.** Two people at one company
 genuinely share `info@`, and a product that refuses the second record teaches
@@ -525,9 +631,29 @@ values stay readable and the discontinuity is visible.
   a paying client to pull it in. The founder directed this build ahead of that on
   2026-08-03. Recorded here so a future session reads it as a decision rather
   than as precedent.
-- **The duplicate warning covers contact points, not names.** Two records for
-  the same company with no shared address are still invisible to it; that is
-  slice 7's merge tool, matching on stronger evidence than a string compare.
+- **The duplicate warning at create time still covers contact points only.**
+  Slice 7's duplicates page catches identical names as well, but the warning
+  shown while somebody is typing a new record does not — they are two different
+  surfaces and only the page was extended.
+- **A MERGE CANNOT BE UNDONE, and the audit row is all that survives it.** It
+  carries both ids, both names as they read at the time, and the counts of what
+  moved, which is what somebody asking "where did that customer go?" has to work
+  with. An actual reversal would need the pre-merge state stored somewhere,
+  which is a real feature and not a small one.
+- **`mail_links` is re-pointed by CRM, writing a table `src/modules/email` owns.**
+  Leaving them would silently detach correspondence from the record it was filed
+  against, which is worse; but the sanctioned answer is an "entity merged" hook
+  on the extension seam — P5, the same pointer the timeline gap needs, aimed the
+  same way. Documents' own links ride on `invoice_id`/`bill_id` and need nothing.
+- **Nothing merges parties across the person/organization divide sensibly.** The
+  planner allows it and the executor will do it, because a sole trader recorded
+  once as a person and once as a company is a real duplicate — but the surviving
+  `kind` is simply the survivor's, and no affiliation is rebuilt around the
+  change beyond dropping self-references.
+- **The candidates query scans, and is capped at 500 pairs per signal.** No
+  expression index on the folded name, deliberately: at the scale the records
+  list already caps itself at, a sequential scan is cheaper than an index nobody
+  has asked for. Both are the same "solve it properly in slice 8" bet.
 - **The warning only fires where a contact point is entered**, which is the
   record page. Creating a record from the "Add a record" form does not ask for
   an address, so nothing is checked there.
@@ -599,5 +725,5 @@ values stay readable and the discontinuity is visible.
   but nothing sets it, so everything is unassigned.
 - **No reminders or notifications.** An overdue follow-up is visible only to
   somebody who opens the page.
-- Slices 6–11 (explicit collaborators, dedup & merge, saved views, reporting,
-  automation, AI) are planned and unbuilt. Slice 5 shipped on 2026-08-04.
+- Slices 6 and 8–11 (explicit collaborators, saved views, reporting, automation,
+  AI) are planned and unbuilt. Slices 5 and 7 shipped on 2026-08-04.

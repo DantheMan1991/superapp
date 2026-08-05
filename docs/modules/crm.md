@@ -14,6 +14,27 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-05 — Slice 8: saved views, and the end of the 500 cap (branch `claude/crm-saved-views`)
+
+The list stops being one fixed question. `crm_saved_views` + `crm_view_pins`
+(`0078`/`0079`), a pure rules module, a filter compiler, and real pagination.
+
+- **`core/views.ts` is a whitelist first and a rules module second.** A stored
+  condition names a field KEY; the registry maps it to a column, so a column
+  name cannot arrive from outside the codebase. Values are always bound — there
+  is a test filtering on a literal `%` that asserts it matches nothing.
+- **A dropped condition widens, never narrows**, which is safe only because RLS
+  decides what the caller may see. A filter is a convenience over rows already
+  permitted, and that is what makes a shared view shareable unaudited.
+- **Built-in views are code, not seeded rows** — four of them, the same for
+  every tenant.
+- **Explore first, name it later.** Filters live in the URL and apply
+  immediately; "Save as view" appears only once the list differs from the view
+  it came from.
+- **The 500-row cap is gone**, replaced by pages and a real count.
+- Shaped after an afternoon in a Salesforce org (2026-08-05). What was worth
+  taking and what was not is in Decisions.
+
 ### 2026-08-04 — Slice 6: explicit collaborators (branch `claude/crm-collaborators`)
 
 `restricted` meant "tenant owners only" and nothing in between. The commonest
@@ -221,6 +242,8 @@ behaviour change.
 | `customers.party_id` | The AR role's link to its party | Nullable → backfilled → `NOT NULL`. Composite FK. `UNIQUE (tenant_id, party_id)`: a party may hold the customer role at most once |
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
 | `party_contact_points` | How to reach a party — **shared, not CRM's**, and since `0075` the ONLY store for an email or a phone | Tenant-scoped and member-writable like `parties`, NOT visibility-bearing. That was argued from "the same address is also on `customers.email`, where staff read it"; the column is gone and the argument is now stronger rather than weaker — it is one row, rendered on the CRM record page AND on the customers page, so a visibility term here would blank the address on the invoicing screen for every staff member. `normalized_value` is written only by `src/lib/parties/contacts.ts` and is what the duplicate check compares. Partial unique gives one primary per party **per kind**; `(tenant, party, kind, normalized)` unique stops the same address twice; `(tenant, kind, normalized)` indexes the duplicate lookup |
+| `crm_saved_views` | A saved list question: filter, sort, and who else can use it | **Not visibility-bearing, and does not need to be** — a view is the QUESTION and the answer is computed in the reader's own transaction, so two people running one shared view correctly get different rows. That is why `is_shared` is a boolean rather than an access list. Read policy is `is_shared OR owner = app_current_user()`; write is the owner alone, with WITH CHECK carrying the same test so a view cannot be created in somebody else's name or reassigned by updating the owner column. A separate `FOR DELETE … USING` lets a tenant owner remove any view, so a leaver's shared views are not permanent. `filter` jsonb is validated by `parseFilter` on **every read**. No `version` column: one editor, so there is no concurrent-edit problem to solve |
+| `crm_view_pins` | Which view a person lands on | Per user in both directions — nobody reads or writes anybody else's. `view_id` is TEXT with **no foreign key** on purpose: it holds either a saved view's uuid or a built-in id like `builtin:mine`, and `resolveView` falls back to the default when it names nothing. That covers a deleted view, a shared view made private, and a built-in a later release retires, with no cleanup job for any of them |
 | `crm_record_collaborators` | Named people who may see a `restricted` record | The one table `crm_party_details`' policy reads, which is why **its own policy must never read `crm_party_details`** — see Decisions. Owners see every grant, everybody else only their own, so the table cannot be used to enumerate which records are confidential. Writes are owner-only with the role test in **USING** as well as WITH CHECK (0067's DELETE trap, where it would mean silent revocation). `ON DELETE CASCADE` on the party, which is why the merge tool has to move grants explicitly rather than leave them |
 | `crm_party_details` | What CRM knows about a party — 1:1, created when CRM is first asked about the record | FORCE RLS with a **visibility term**: `visibility = 'members' OR app_current_tenant_role() = 'owner' OR a collaborator grant to `app_current_user()`, in USING **and** WITH CHECK. `owner_clerk_user_id` is an attribution and grants nothing — see Decisions. `custom` jsonb is the slice 2 extension bag (P2), `lifecycle_stage`/`source` are open taxonomies (P1) with no CHECK. Composite FK to `parties`, ON DELETE CASCADE. Unique on `(tenant, party)` is what makes "the CRM record for this party" a lookup |
 | `crm_affiliations` | A person's connection to an organization, current or former | **Inherits visibility** through a positive `EXISTS` against `crm_party_details` at both ends — no second copy of the flag, so no drift. The positive spelling is load-bearing; see Decisions. Two partial uniques: one current connection per pair, one primary per person. CHECK that the two ends differ |
@@ -239,6 +262,7 @@ Contact points: `0072` (table), `0073_party_contacts_rls.sql` (policies),
 `0074_party_contacts_backfill.sql` (values copied off the accounting columns),
 `0075_accounting_contacts_contract.sql` (catch-up backfill, verification, then
 the columns dropped — **apply this one after the deploy**).
+Slice 8: `0078` (saved views and pins) and `0079_crm_saved_views_rls.sql` (their policies) — both ordinary additive migrations that go ahead of the deploy.
 Slice 6: `0076` (the collaborators table) and `0077_crm_collaborators_rls.sql` (its policies, plus the one change to the details policy that makes a grant mean anything). Slice 7 added **no migration**: merging is code over the tables that already
 exist. A `crm_party_merges` table was considered and refused — `audit_log`
 already records the event, and a second store for the same fact is the drift
@@ -255,6 +279,14 @@ this dossier keeps warning about.
 - `src/lib/parties/role-sync.ts` — the "both names exist" bridge while
   `customers.name` and `parties.display_name` are both stored. Temporary by
   design; the header says what has to move before it goes.
+- `src/modules/crm/core/views.ts` — pure. The field registry IS the whitelist
+  that keeps a column name out of user input, plus the operator vocabulary, the
+  relative-date rules, the URL codec and the built-in views. Read it before
+  touching `crm_saved_views.filter`.
+- `src/modules/crm/view-ops.ts` — the compiler, the view store and the pins.
+  Every value it puts in a predicate is bound; nothing here builds SQL text.
+- `src/modules/crm/components/view-controls.tsx` — the picker and filter panel.
+  Filters go into the URL, so a filtered list is a link.
 - `src/modules/crm/core/merge.ts` — pure, and the whole integrity of a merge.
   `buildMergePlan` is the single description both the preview and the executor
   use. Read its header before changing any rule in it; every one of them is a
@@ -357,6 +389,62 @@ useful of the two true answers. Both sources are kept — deleting accounting's
 would leave a tenant who never bought CRM with no suggestions at all, because an
 extension whose module is off contributes nothing. Pinned in
 `tests/mail-contacts.test.ts` so the claim cannot rot again.
+
+**THE FILTER COMPILER'S SAFETY IS TWO PROPERTIES, AND NEITHER IS OPTIONAL.** A
+filter is jsonb a browser once sent that ends up in a WHERE clause. First, **the
+column comes from the registry in `core/views.ts`, never from the input** — a
+condition names a field key, an unknown key has no column, and the condition is
+dropped, so a column name cannot arrive from outside the codebase. Second,
+**every value is bound as a parameter**; the one place that builds a LIKE
+pattern escapes the wildcards first, and there is a test filtering on a literal
+`%` that asserts it matches nothing rather than everything. If either property
+is ever weakened, the whitelist stops being a whitelist.
+
+**A DROPPED CONDITION WIDENS, NEVER NARROWS — and that is only safe because the
+filter is not the security boundary.** `parseFilter` and `decodeConditions` both
+discard anything they cannot validate, so a view saved when a field existed
+still loads once the field is gone. For a *visibility* rule the safe direction
+would be the opposite, and the reason it is safe here is one sentence: RLS has
+already removed the rows the caller may not see before any filter applies. A
+filter is a convenience over rows already permitted. **If a condition is ever
+made to narrow the permitted set rather than the displayed set, this rule has to
+be revisited first.**
+
+**Negative operators keep the unknowns.** `<>` is NULL for a NULL column, so a
+plain `ne` would drop every record CRM has never been asked about from "stage is
+not lead" — silently, and it reads as data loss rather than as a filter. Spelled
+`ne(...) OR IS NULL`, with a test. The mirror of this is inherent and stays:
+filtering on a details column *positively* excludes unworked records, because a
+LEFT JOIN gives them no value to compare.
+
+**Relative dates are INSTANTS, not calendar days**, which departs from the
+follow-ups page deliberately. `crm_tasks.due_on` is a DATE and "is this overdue"
+is a question about the user's timezone, which is why that page compares
+yyyy-mm-dd strings. `created_at` is a timestamptz, and "added in the last 7
+days" is 7×24 hours with no timezone in it, so none is invented. A view whose
+dates froze at save time would make every built-in stale the day after it
+shipped.
+
+**Built-in views are code, not seeded rows.** Seeding means a migration every
+time a default is added or its wording improved, a backfill for tenants that
+already exist, and an awkward question the first time somebody edits one. As
+code they are identical for everybody and improve for everybody at once. The
+cost is that a tenant cannot delete one, which is fair for four views that are
+each one obvious question — and a saved view can be pinned over the top.
+
+**WHAT THE SALESFORCE AFTERNOON WAS ACTUALLY WORTH.** The mechanics taken:
+explore-then-name (filters apply immediately, saving is a later decision), a
+pre-seeded set so the feature is not an empty box, a per-user pin, a plain
+sentence stating the list's own state, a closed nine-operator vocabulary, and
+AND-by-default. The mechanics deliberately declined: filtering across related
+objects, which implies a join planner; inline table editing, against
+visibility-bearing fields; a console tab strip, against
+[conventions §8](../conventions.md)'s one-handed-in-the-field rule; and charts
+on a list, which is slice 9. **The one idea worth more than the rest is that a
+view and its RENDERING are orthogonal** — Salesforce draws one saved view as a
+table, a kanban or a split view. Our board and our records list are still
+separate pages, and unifying them is the shape slice 9 should consider rather
+than a thing slice 8 half-did.
 
 **SLICE 6 SPENT 0064'S PROMISE THAT `crm_party_details`' POLICY READS NO OTHER
 TABLE, AND IT CANNOT BE SPENT TWICE.** The details policy now reads
@@ -713,9 +801,27 @@ values stay readable and the discontinuity is visible.
 - **The warning only fires where a contact point is entered**, which is the
   record page. Creating a record from the "Add a record" form does not ask for
   an address, so nothing is checked there.
-- **The records list caps at 500** with a line saying so, and there is no paging
-  or cursor. Fine at current scale; slice 8's saved views is where this gets
-  solved properly rather than by raising the number.
+- **Paging is OFFSET-based**, which is right at this scale and will not stay
+  right forever: a row inserted while somebody reads page 3 shifts the boundary,
+  so a record can be seen twice or skipped. Keyset paging is the upgrade and it
+  needs one cursor shape per sort field, which is why it was not built for a
+  list that currently holds hundreds.
+- **Filters are ANDed, with no OR.** The panel says so in words rather than
+  leaving it to be discovered. An expression escape hatch — "1 AND (2 OR 3)" —
+  is a real want and a real parser, and half-building it would have meant a
+  stored `logic` string nothing honoured.
+- **Custom fields are still not filterable**, for the reason recorded below:
+  arbitrary jsonb filtering is expensive and the right shape is an intentional
+  expression index per field somebody actually filters on. Saved views make that
+  cheaper to decide now — the first tenant to ask will name the field.
+- **A view does not choose its columns.** The list renders a fixed row, so
+  `crm_saved_views` has no `columns` jsonb; adding one before anything reads it
+  would be the speculative build this codebase avoids.
+- **The board is not a view.** A saved view renders as one list and nothing else,
+  while Salesforce draws the same view as a table, a kanban or a split view. Ours
+  stays two pages with two queries. See Decisions — this is the idea most worth
+  taking next, and it belongs to a slice that can move the board rather than to
+  one bolting a second renderer onto the list.
 - **Custom fields are not filterable or searchable.** Nothing indexes `custom`,
   and the records list does not offer them as facets. Deliberate for now —
   arbitrary jsonb filtering gets expensive fast, and the right shape is an
@@ -791,5 +897,5 @@ values stay readable and the discontinuity is visible.
   and is not modelled.
 - **Nothing tells a collaborator they have been granted access**, or removed.
   There are no notifications anywhere in CRM yet, and this inherits that gap.
-- Slices 8–11 (saved views, reporting, automation, AI) are planned and unbuilt.
-  Slices 5, 6 and 7 shipped on 2026-08-04.
+- Slices 9–11 (reporting, automation, AI) are planned and unbuilt. Slices 5, 6
+  and 7 shipped on 2026-08-04; slice 8 on 2026-08-05.

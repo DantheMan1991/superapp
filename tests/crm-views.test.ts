@@ -7,13 +7,16 @@ import {
   VALUE_MAX,
   builtInView,
   conditionProblem,
+  decodeConditions,
   describeFilter,
+  encodeCondition,
   filterField,
   operatorsFor,
   parseFilter,
   parseSort,
   resolveBuiltIn,
   resolveDateValue,
+  sameConditions,
   type FilterCondition,
 } from "../src/modules/crm/core/views";
 
@@ -200,6 +203,58 @@ describe("describeFilter", () => {
         { field: "name", operator: "starts_with", value: "A" },
       ]),
     ).toBe("Type is Person · Name starts with A");
+  });
+});
+
+describe("the URL codec", () => {
+  it("round-trips a condition", () => {
+    const original: FilterCondition = {
+      field: "name",
+      operator: "contains",
+      value: "Probe Construction",
+    };
+    expect(decodeConditions([encodeCondition(original)])).toEqual([original]);
+  });
+
+  it("SURVIVES A COLON IN THE VALUE", () => {
+    // The field and operator come from closed sets that cannot contain one, so
+    // splitting on the first two colons is unambiguous however odd the value.
+    const original: FilterCondition = {
+      field: "name",
+      operator: "contains",
+      value: "10:30 meeting",
+    };
+    expect(decodeConditions([encodeCondition(original)])).toEqual([original]);
+  });
+
+  it("drops a hand-edited entry rather than failing the page", () => {
+    expect(decodeConditions(["nonsense"])).toEqual([]);
+    expect(decodeConditions(["name:contains:%E0%A4%A"])).toEqual([]);
+    expect(decodeConditions(["password:equals:x"])).toEqual([]);
+  });
+
+  it("validates through the same gate as stored filters", () => {
+    // An operator that does not apply to the field is refused here too, so a
+    // URL cannot express a filter a saved view could not.
+    expect(decodeConditions(["created:starts_with:2026"])).toEqual([]);
+  });
+
+  it("caps the number of conditions a URL may carry", () => {
+    const many = Array.from({ length: MAX_CONDITIONS + 3 }, () =>
+      encodeCondition({ field: "name", operator: "contains", value: "x" }),
+    );
+    expect(decodeConditions(many)).toHaveLength(MAX_CONDITIONS);
+  });
+
+  it("compares what is on screen against the view it came from", () => {
+    const a: FilterCondition[] = [
+      { field: "kind", operator: "equals", value: "person" },
+    ];
+    expect(sameConditions(a, [...a])).toBe(true);
+    expect(sameConditions(a, [])).toBe(false);
+    expect(
+      sameConditions(a, [{ field: "kind", operator: "equals", value: "organization" }]),
+    ).toBe(false);
   });
 });
 

@@ -5,7 +5,10 @@ import type { TenantContext } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { listRecords } from "./party-ops";
+import { listViews, pinnedViewId, resolveView } from "./view-ops";
+import { decodeConditions, describeFilter } from "./core/views";
 import { RecordSearch } from "./components/record-search";
+import { ViewControls } from "./components/view-controls";
 import type { CrmRecordFilter } from "./core/types";
 
 const BASE = "/dashboard/m/crm";
@@ -65,11 +68,44 @@ export async function CrmModule({
     page: Number.parseInt(first(searchParams.page) ?? "1", 10) || 1,
   };
 
-  const page = await withTenant(
+  // The URL is the source of truth for what the list is showing, so a filtered
+  // list is a link somebody can send. `view` names where the filter CAME from;
+  // the `f` params are what is on screen, which may differ once somebody edits.
+  const rawConditions = searchParams.f;
+  const urlConditions = decodeConditions(
+    Array.isArray(rawConditions) ? rawConditions : rawConditions ? [rawConditions] : [],
+  );
+
+  const { records: page, views, current, pinned } = await withTenant(
     ctx.tenant.id,
-    (tx) => listRecords(tx, ctx.tenant.id, filter),
+    async (tx) => {
+      const all = await listViews(tx, ctx.tenant.id, ctx.userId);
+      const pinnedId = await pinnedViewId(tx, ctx.tenant.id, ctx.userId);
+      // No `view` in the URL means "open where I left off", which is the pin —
+      // and `resolveView` falls back if the pin names something that no longer
+      // resolves, so a deleted view cannot produce a broken page.
+      const selected = await resolveView(
+        tx,
+        ctx.tenant.id,
+        ctx.userId,
+        first(searchParams.view) ?? pinnedId,
+      );
+      const conditions = searchParams.f ? urlConditions : selected.conditions;
+      return {
+        records: await listRecords(tx, ctx.tenant.id, {
+          ...filter,
+          conditions,
+          sort: selected.sort,
+        }),
+        views: all,
+        current: selected,
+        pinned: pinnedId,
+      };
+    },
     { role: ctx.role, userId: ctx.userId },
   );
+
+  const activeConditions = searchParams.f ? urlConditions : current.conditions;
   const records = page.rows;
   const pageCount = Math.max(Math.ceil(page.total / page.pageSize), 1);
 
@@ -109,7 +145,24 @@ export async function CrmModule({
         </div>
       </div>
 
+      <ViewControls
+        views={views}
+        current={current}
+        conditions={activeConditions}
+        sort={current.sort}
+        pinnedViewId={pinned}
+        total={page.total}
+      />
+
       <RecordSearch filter={filter} />
+
+      {/*
+        The list states its own state in one plain line. Somebody who can read
+        why they are seeing these rows does not have to open the filter panel to
+        find out — and "why is this record missing?" is the question a filtered
+        list generates most.
+      */}
+      <p className="text-xs text-muted-foreground">{describeFilter(activeConditions)}</p>
 
       {records.length === 0 ? (
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">

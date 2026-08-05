@@ -333,6 +333,65 @@ function describeCondition(condition: FilterCondition): string {
   return `${field.label} ${operatorLabel(condition.operator)} ${value}`;
 }
 
+/* -- The URL -------------------------------------------------------------- */
+
+/**
+ * Conditions as query-string values, and back.
+ *
+ * THE FILTER LIVES IN THE URL BECAUSE THE LIST IS SERVER-RENDERED, and that
+ * turns out to be the better answer anyway: a filtered list is a link somebody
+ * can send a colleague, reload, or bookmark. Client-only filter state would
+ * lose all three and would still need a round trip for the rows.
+ *
+ * `field:operator:value` with the VALUE encoded and the other two not, because
+ * both come from closed sets that cannot contain a colon. Splitting on the
+ * first two colons is therefore unambiguous no matter what somebody typed in
+ * the value — including a colon.
+ */
+export function encodeCondition(condition: FilterCondition): string {
+  return `${condition.field}:${condition.operator}:${encodeURIComponent(condition.value)}`;
+}
+
+export function decodeConditions(raw: readonly string[]): FilterCondition[] {
+  const out: FilterCondition[] = [];
+  for (const entry of raw) {
+    const first = entry.indexOf(":");
+    const second = entry.indexOf(":", first + 1);
+    if (first < 1 || second < 0) continue;
+    let value: string;
+    try {
+      value = decodeURIComponent(entry.slice(second + 1));
+    } catch {
+      // A malformed escape is somebody's hand-edited URL, not an error worth
+      // showing. The condition is dropped, which widens — the same rule
+      // `parseFilter` follows and safe for the same reason.
+      continue;
+    }
+    const condition: FilterCondition = {
+      field: entry.slice(0, first),
+      operator: entry.slice(first + 1, second) as FilterOperator,
+      value,
+    };
+    if (conditionProblem(condition) === null) out.push(condition);
+    if (out.length >= MAX_CONDITIONS) break;
+  }
+  return out;
+}
+
+/** Whether what is on screen still matches the view it came from. */
+export function sameConditions(
+  a: readonly FilterCondition[],
+  b: readonly FilterCondition[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every(
+    (condition, i) =>
+      condition.field === b[i].field &&
+      condition.operator === b[i].operator &&
+      condition.value === b[i].value,
+  );
+}
+
 /* -- Sorting -------------------------------------------------------------- */
 
 export const SORT_FIELDS = ["name", "created", "stage"] as const;

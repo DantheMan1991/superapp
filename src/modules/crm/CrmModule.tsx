@@ -74,6 +74,9 @@ export async function CrmModule({
           <Button asChild variant="outline">
             <Link href={`${BASE}/fields`}>Fields</Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link href={`${BASE}/duplicates`}>Duplicates</Link>
+          </Button>
           <Button asChild>
             <Link href={`${BASE}/records/new`}>Add a record</Link>
           </Button>

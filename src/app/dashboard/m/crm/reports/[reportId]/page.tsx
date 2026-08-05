@@ -8,10 +8,11 @@ import { formatCents } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import {
   DETAIL_LIMIT,
+  resolveReport,
   runReport,
 } from "@/modules/crm/report-ops";
+import { SaveReport } from "@/modules/crm/components/save-report";
 import {
-  builtInReport,
   describeReport,
   measureFor,
   parseDefinition,
@@ -55,20 +56,33 @@ export default async function ReportPage({
   const first = (v: string | string[] | undefined) =>
     Array.isArray(v) ? v[0] : v;
 
-  const built = builtInReport(decodeURIComponent(reportId));
-  if (!built && reportId !== "new") notFound();
+  const id = decodeURIComponent(reportId);
+
+  // A built-in or a saved one, resolved the same way. `resolveReport` returns
+  // null rather than falling back, unlike a view pin: a report id in a URL is a
+  // specific thing somebody asked for, and quietly showing them a different
+  // question would be worse than a 404.
+  const saved =
+    id === "new"
+      ? null
+      : await withTenant(
+          ctx.tenant.id,
+          (tx) => resolveReport(tx, ctx.tenant.id, ctx.userId, id),
+          { role: ctx.role, userId: ctx.userId },
+        );
+  if (id !== "new" && !saved) notFound();
 
   // The stored definition, then the URL's overrides, then the parser — so an
   // impossible combination from a hand-edited link falls back rather than
   // reaching the query builder.
   const definition: ReportDefinition = parseDefinition({
-    ...(built?.definition ?? { type: first(query.type) ?? "records" }),
+    ...(saved?.definition ?? { type: first(query.type) ?? "records" }),
     ...(query.group !== undefined
       ? { groupBy: first(query.group) === "" ? null : first(query.group) }
       : {}),
     ...(query.measure ? { measure: first(query.measure) } : {}),
     ...(query.detail ? { showDetail: first(query.detail) === "1" } : {}),
-    ...(built ? { filter: built.definition.filter } : {}),
+    ...(saved ? { filter: saved.definition.filter } : {}),
   });
 
   const type = reportType(definition.type)!;
@@ -79,14 +93,14 @@ export default async function ReportPage({
     { role: ctx.role, userId: ctx.userId },
   );
 
-  const title = built?.name ?? type.question;
+  const title = saved?.name ?? type.question;
   const format = (value: number) =>
     measure.format === "money" ? `$${formatCents(value)}` : String(value);
 
   /** This page with one thing changed. Controls are links, not state. */
   const href = (patch: Record<string, string>) => {
     const params = new URLSearchParams();
-    if (!built) params.set("type", definition.type);
+    if (!saved) params.set("type", definition.type);
     if (definition.groupBy) params.set("group", definition.groupBy);
     if (definition.measure !== type.measures[0].key) {
       params.set("measure", definition.measure);
@@ -156,6 +170,17 @@ export default async function ReportPage({
         >
           {definition.showDetail ? "Hide the rows" : "Show the rows"}
         </ControlLink>
+
+        {/*
+          The one client component on the page, and it earns its place: naming
+          a thing needs a text box. Everything else stayed a link.
+        */}
+        <SaveReport
+          definition={definition}
+          savedReportId={saved && !saved.isBuiltIn ? saved.id : null}
+          canDelete={!!saved && !saved.isBuiltIn && saved.isMine}
+          total={result.summary.total}
+        />
       </div>
 
       <div className="rounded-md border">

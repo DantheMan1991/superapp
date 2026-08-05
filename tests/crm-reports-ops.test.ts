@@ -3,7 +3,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import { createParty } from "../src/lib/parties";
-import { runReport } from "../src/modules/crm/report-ops";
+import {
+  createReport,
+  deleteReport,
+  listReports,
+  resolveReport,
+  runReport,
+  updateReport,
+} from "../src/modules/crm/report-ops";
 import {
   BUILT_IN_REPORTS,
   DEFAULT_DEFINITION,
@@ -248,6 +255,132 @@ d("crm reports (database)", () => {
     });
     expect(withDetail.detail.length).toBe(3);
     expect(withDetail.detail.map((r) => r.title)).toContain("Acme Holdings");
+  });
+
+  describe("saved reports", () => {
+    it("lists the built-ins with nothing saved, and refuses an unknown id", async () => {
+      const listed = await withTenant(
+        tenantId,
+        (tx) => listReports(tx, tenantId, owner.userId),
+        owner,
+      );
+      expect(listed.filter((r) => r.isBuiltIn).length).toBe(
+        BUILT_IN_REPORTS.length,
+      );
+
+      // NULL rather than a fallback, unlike a view pin: a report id in a URL is
+      // a specific thing somebody asked for, and quietly answering a different
+      // question would be worse than a 404.
+      const missing = await withTenant(
+        tenantId,
+        (tx) => resolveReport(tx, tenantId, owner.userId, "builtin:nope"),
+        owner,
+      );
+      expect(missing).toBeNull();
+    });
+
+    it("A PRIVATE REPORT IS INVISIBLE TO A COLLEAGUE; a shared one is not", async () => {
+      await withTenant(
+        tenantId,
+        async (tx) => {
+          await createReport(tx, tenantId, owner.userId, {
+            name: "My private question?",
+            definition: { ...DEFAULT_DEFINITION, groupBy: "stage" },
+            isShared: false,
+          });
+          await createReport(tx, tenantId, owner.userId, {
+            name: "A team question?",
+            definition: { ...DEFAULT_DEFINITION, groupBy: "kind" },
+            isShared: true,
+          });
+        },
+        owner,
+      );
+
+      const theirs = await withTenant(
+        tenantId,
+        (tx) => listReports(tx, tenantId, staff.userId),
+        staff,
+      );
+      expect(theirs.filter((r) => !r.isBuiltIn).map((r) => r.name)).toEqual([
+        "A team question?",
+      ]);
+    });
+
+    it("a colleague cannot edit a shared report they can see", async () => {
+      const theirs = await withTenant(
+        tenantId,
+        (tx) => listReports(tx, tenantId, staff.userId),
+        staff,
+      );
+      const shared = theirs.find((r) => r.name === "A team question?")!;
+      await expect(
+        withTenant(
+          tenantId,
+          (tx) => updateReport(tx, tenantId, shared.id, { name: "Hijacked?" }),
+          staff,
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("BUT A TENANT OWNER MAY DELETE ONE, so a leaver's reports are not permanent", async () => {
+      const listed = await withTenant(
+        tenantId,
+        (tx) => listReports(tx, tenantId, owner.userId),
+        owner,
+      );
+      const shared = listed.find((r) => r.name === "A team question?")!;
+      await withTenant(
+        tenantId,
+        (tx) => deleteReport(tx, tenantId, shared.id),
+        { role: "owner", userId: "a-different-owner" },
+      );
+      const after = await withTenant(
+        tenantId,
+        (tx) => listReports(tx, tenantId, owner.userId),
+        owner,
+      );
+      expect(after.map((r) => r.name)).not.toContain("A team question?");
+    });
+
+    it("a saved report still runs, and re-validates on the way out", async () => {
+      const saved = await withTenant(
+        tenantId,
+        (tx) =>
+          createReport(tx, tenantId, owner.userId, {
+            name: "Runs from storage?",
+            definition: { ...DEFAULT_DEFINITION, groupBy: "kind" },
+            isShared: false,
+          }),
+        owner,
+      );
+      const resolved = await withTenant(
+        tenantId,
+        (tx) => resolveReport(tx, tenantId, owner.userId, saved.id),
+        owner,
+      );
+      const result = await withTenant(
+        tenantId,
+        (tx) => runReport(tx, tenantId, resolved!.definition),
+        owner,
+      );
+      expect(result.summary.total).toBe(3);
+    });
+
+    it("refuses a second report with the same name for one person", async () => {
+      await expect(
+        withTenant(
+          tenantId,
+          (tx) =>
+            createReport(tx, tenantId, owner.userId, {
+              name: "Runs from storage?",
+              definition: DEFAULT_DEFINITION,
+              isShared: false,
+            }),
+          owner,
+        ),
+      ).rejects.toThrow();
+    });
   });
 
   it("A STAFF MEMBER'S REPORT OMITS A RESTRICTED RECORD'S DEALS", async () => {

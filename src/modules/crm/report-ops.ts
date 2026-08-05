@@ -1,7 +1,9 @@
 import "server-only";
-import { and, eq, gt, gte, ilike, lt, lte, ne, not, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, ilike, lt, lte, ne, not, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { type Tx } from "@/db";
+import { schema, type Tx } from "@/db";
+import type { CrmReport } from "@/db/schema";
+import { CrmError } from "./core/errors";
 import {
   conditionProblem,
   filterField,
@@ -9,7 +11,10 @@ import {
   type FilterCondition,
 } from "./core/views";
 import {
+  BUILT_IN_REPORTS,
+  builtInReport,
   measureFor,
+  parseDefinition,
   reportType,
   summarise,
   type ReportDefinition,
@@ -331,6 +336,178 @@ export function compileReportConditions(
   }
 
   return out;
+}
+
+/* -- Stored reports ------------------------------------------------------- */
+
+export interface ResolvedReport {
+  id: string;
+  name: string;
+  isBuiltIn: boolean;
+  isShared: boolean;
+  isMine: boolean;
+  definition: ReportDefinition;
+}
+
+export const REPORT_NAME_MAX = 80;
+
+/**
+ * Every report the caller can open: the built-ins, then their own and anything
+ * shared.
+ *
+ * Built-ins first and always present — they are code rather than rows, so a
+ * tenant cannot delete one and a new default arrives for everybody at once.
+ * Exactly the arrangement `listViews` has, and the two should keep matching.
+ */
+export async function listReports(
+  tx: Tx,
+  tenantId: string,
+  clerkUserId: string,
+): Promise<ResolvedReport[]> {
+  const saved = await tx
+    .select()
+    .from(schema.crmReports)
+    .where(eq(schema.crmReports.tenantId, tenantId))
+    .orderBy(asc(schema.crmReports.name));
+
+  return [
+    ...BUILT_IN_REPORTS.map((report) => ({
+      id: report.id,
+      name: report.name,
+      isBuiltIn: true,
+      isShared: true,
+      isMine: false,
+      definition: report.definition,
+    })),
+    ...saved.map((row) => toResolvedReport(row, clerkUserId)),
+  ];
+}
+
+function toResolvedReport(
+  row: CrmReport,
+  clerkUserId: string,
+): ResolvedReport {
+  return {
+    id: row.id,
+    name: row.name,
+    isBuiltIn: false,
+    isShared: row.isShared,
+    isMine: row.ownerClerkUserId === clerkUserId,
+    // Re-validated on every read, never trusted from storage: a report saved
+    // when a field existed must still open once the field is gone.
+    definition: parseDefinition(row.definition),
+  };
+}
+
+/**
+ * One report by id, or null.
+ *
+ * NULL RATHER THAN A FALLBACK, unlike `resolveView`. A pin is a preference and
+ * silently opening a different list is kinder than an error; a report id in a
+ * URL is a specific thing somebody asked for, and quietly showing them a
+ * different question would be worse than a 404.
+ */
+export async function resolveReport(
+  tx: Tx,
+  tenantId: string,
+  clerkUserId: string,
+  reportId: string,
+): Promise<ResolvedReport | null> {
+  const built = builtInReport(reportId);
+  if (built) {
+    return {
+      id: built.id,
+      name: built.name,
+      isBuiltIn: true,
+      isShared: true,
+      isMine: false,
+      definition: built.definition,
+    };
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(reportId)) return null;
+
+  const row = await tx.query.crmReports.findFirst({
+    where: and(
+      eq(schema.crmReports.tenantId, tenantId),
+      eq(schema.crmReports.id, reportId),
+    ),
+  });
+  return row ? toResolvedReport(row, clerkUserId) : null;
+}
+
+export async function createReport(
+  tx: Tx,
+  tenantId: string,
+  clerkUserId: string,
+  input: { name: string; definition: ReportDefinition; isShared: boolean },
+): Promise<CrmReport> {
+  const name = input.name.trim();
+  if (name.length === 0 || name.length > REPORT_NAME_MAX) {
+    throw new CrmError("REPORT_NAME_REQUIRED", "name required");
+  }
+  const rows = await tx
+    .insert(schema.crmReports)
+    .values({
+      tenantId,
+      name,
+      // Parsed on the way IN as well as on the way out, so a definition that
+      // was already impossible never reaches storage.
+      definition: parseDefinition(input.definition),
+      ownerClerkUserId: clerkUserId,
+      isShared: input.isShared,
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  const row = rows[0];
+  if (!row) {
+    throw new CrmError("REPORT_NAME_TAKEN", "you already have a report with that name");
+  }
+  return row;
+}
+
+export async function updateReport(
+  tx: Tx,
+  tenantId: string,
+  reportId: string,
+  patch: { name?: string; definition?: ReportDefinition; isShared?: boolean },
+): Promise<void> {
+  const rows = await tx
+    .update(schema.crmReports)
+    .set({
+      ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+      ...(patch.definition !== undefined
+        ? { definition: parseDefinition(patch.definition) }
+        : {}),
+      ...(patch.isShared !== undefined ? { isShared: patch.isShared } : {}),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(schema.crmReports.tenantId, tenantId), eq(schema.crmReports.id, reportId)),
+    )
+    .returning({ id: schema.crmReports.id });
+  if (rows.length === 0) {
+    throw new CrmError("REPORT_NOT_YOURS", "only the person who made a report can change it");
+  }
+}
+
+export async function deleteReport(
+  tx: Tx,
+  tenantId: string,
+  reportId: string,
+): Promise<void> {
+  const rows = await tx
+    .delete(schema.crmReports)
+    .where(
+      and(eq(schema.crmReports.tenantId, tenantId), eq(schema.crmReports.id, reportId)),
+    )
+    .returning({ id: schema.crmReports.id });
+  if (rows.length === 0) {
+    throw new CrmError(
+      "REPORT_NOT_YOURS",
+      "only the person who made a report, or an owner, can delete it",
+    );
+  }
 }
 
 /* -- Running -------------------------------------------------------------- */

@@ -36,6 +36,9 @@ export type CrmErrorCode =
   | "VIEW_NAME_TAKEN"
   | "VIEW_NOT_YOURS"
   | "VIEW_FILTER_INVALID"
+  | "REPORT_NAME_REQUIRED"
+  | "REPORT_NAME_TAKEN"
+  | "REPORT_NOT_YOURS"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
 
@@ -125,6 +128,12 @@ export function friendlyMessage(err: unknown): string {
       // Not "not found": they are looking at it in the picker, so saying it
       // does not exist would be the one answer they know to be false.
       return "Only the person who made a view can change it.";
+    case "REPORT_NAME_REQUIRED":
+      return "Give the report a name.";
+    case "REPORT_NAME_TAKEN":
+      return "You already have a report with that name.";
+    case "REPORT_NOT_YOURS":
+      return "Only the person who made a report can change it.";
     case "VIEW_FILTER_INVALID":
       // Carries the registry's own reason — "Not a date", "Enter a value" —
       // because a filter that will not save should say which part is wrong.

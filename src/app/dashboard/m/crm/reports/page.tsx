@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { Badge } from "@/components/ui/badge";
+import { listReports } from "@/modules/crm/report-ops";
 import {
   BUILT_IN_REPORTS,
   REPORT_TYPES,
@@ -28,6 +31,15 @@ const BASE = "/dashboard/m/crm";
 export default async function ReportsPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "crm");
+
+  // Built-ins and saved ones in one call. RLS decides which saved reports
+  // appear — your own, plus anything shared with the tenant.
+  const reports = await withTenant(
+    ctx.tenant.id,
+    (tx) => listReports(tx, ctx.tenant.id, ctx.userId),
+    { role: ctx.role, userId: ctx.userId },
+  );
+  const saved = reports.filter((r) => !r.isBuiltIn);
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
@@ -65,6 +77,41 @@ export default async function ReportsPage() {
           </li>
         ))}
       </ul>
+
+      {saved.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-medium">Saved</h2>
+          <ul className="divide-y rounded-md border">
+            {saved.map((report) => (
+              <li key={report.id}>
+                <Link
+                  href={`${BASE}/reports/${report.id}`}
+                  className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-accent/40"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">
+                      {report.name}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {describeReport(report.definition)}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {/*
+                      Says whose it is, because a shared list needs to explain
+                      why somebody else's question is in it.
+                    */}
+                    {report.isShared && !report.isMine && (
+                      <Badge variant="outline">shared</Badge>
+                    )}
+                    <ChevronRight className="size-4 text-muted-foreground" />
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="space-y-2">
         <h2 className="text-sm font-medium">Start from scratch</h2>

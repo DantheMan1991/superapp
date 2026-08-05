@@ -14,11 +14,33 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-05 — Saved reports (branch `claude/crm-saved-reports`)
+
+Slice 9's one named gap, closed. `crm_reports` (`0080`/`0081`) — a report can be
+kept by name and shared with the team.
+
+- **Deliberately the same four policies as `crm_saved_views`**, because a report
+  and a view are the same kind of thing: a saved question whose answer is
+  computed in the reader's own transaction. If one table's policies change,
+  change the other or write down why they diverged.
+- **`definition` is ONE jsonb column, not four.** `parseDefinition` already
+  validates the whole shape on every read; splitting it would mean four things
+  to validate separately and a fifth state where they disagree.
+- **The name is the question, by convention rather than by CHECK.** Every
+  built-in ends in a question mark and a test enforces that for them, but
+  refusing to save "Q3 pipeline" for want of punctuation would be a product
+  telling its user how to write.
+- `resolveReport` returns **null rather than falling back**, unlike a view pin —
+  a report id in a URL is a specific thing somebody asked for, and quietly
+  answering a different question would be worse than a 404.
+- 6 more database tests: private stays private, a colleague cannot edit a shared
+  one, a tenant owner can delete it, and a stored definition still runs.
+
 ### 2026-08-05 — Slice 9: reporting (branch `claude/crm-reporting`)
 
 Five declared report types, four built-in reports, and a report page whose every
-control is a link. **No migration** — reports are code and URLs, not rows. See
-Open items for why there is no `crm_reports` table yet.
+control is a link. **No migration in this slice** — the engine is code and URLs.
+Saved reports followed immediately after; see the entry above.
 
 - **The report TYPE is the design.** A report picks one of five declared join
   shapes, each a hand-written base query. That is the join-level version of the
@@ -263,6 +285,7 @@ behaviour change.
 | `customers.party_id` | The AR role's link to its party | Nullable → backfilled → `NOT NULL`. Composite FK. `UNIQUE (tenant_id, party_id)`: a party may hold the customer role at most once |
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
 | `party_contact_points` | How to reach a party — **shared, not CRM's**, and since `0075` the ONLY store for an email or a phone | Tenant-scoped and member-writable like `parties`, NOT visibility-bearing. That was argued from "the same address is also on `customers.email`, where staff read it"; the column is gone and the argument is now stronger rather than weaker — it is one row, rendered on the CRM record page AND on the customers page, so a visibility term here would blank the address on the invoicing screen for every staff member. `normalized_value` is written only by `src/lib/parties/contacts.ts` and is what the duplicate check compares. Partial unique gives one primary per party **per kind**; `(tenant, party, kind, normalized)` unique stops the same address twice; `(tenant, kind, normalized)` indexes the duplicate lookup |
+| `crm_reports` | A saved report: a question somebody wanted to keep asking | **Deliberately the same four policies as `crm_saved_views`** — read that row first, and if you change one table change the other or say why. `definition` is one jsonb column validated by `parseDefinition` on every read, rather than four columns with a fifth state where they disagree. Unique on `(tenant, owner, name)`, so two people may each keep their own "My pipeline" |
 | `crm_saved_views` | A saved list question: filter, sort, and who else can use it | **Not visibility-bearing, and does not need to be** — a view is the QUESTION and the answer is computed in the reader's own transaction, so two people running one shared view correctly get different rows. That is why `is_shared` is a boolean rather than an access list. Read policy is `is_shared OR owner = app_current_user()`; write is the owner alone, with WITH CHECK carrying the same test so a view cannot be created in somebody else's name or reassigned by updating the owner column. A separate `FOR DELETE … USING` lets a tenant owner remove any view, so a leaver's shared views are not permanent. `filter` jsonb is validated by `parseFilter` on **every read**. No `version` column: one editor, so there is no concurrent-edit problem to solve |
 | `crm_view_pins` | Which view a person lands on | Per user in both directions — nobody reads or writes anybody else's. `view_id` is TEXT with **no foreign key** on purpose: it holds either a saved view's uuid or a built-in id like `builtin:mine`, and `resolveView` falls back to the default when it names nothing. That covers a deleted view, a shared view made private, and a built-in a later release retires, with no cleanup job for any of them |
 | `crm_record_collaborators` | Named people who may see a `restricted` record | The one table `crm_party_details`' policy reads, which is why **its own policy must never read `crm_party_details`** — see Decisions. Owners see every grant, everybody else only their own, so the table cannot be used to enumerate which records are confidential. Writes are owner-only with the role test in **USING** as well as WITH CHECK (0067's DELETE trap, where it would mean silent revocation). `ON DELETE CASCADE` on the party, which is why the merge tool has to move grants explicitly rather than leave them |
@@ -283,6 +306,7 @@ Contact points: `0072` (table), `0073_party_contacts_rls.sql` (policies),
 `0074_party_contacts_backfill.sql` (values copied off the accounting columns),
 `0075_accounting_contacts_contract.sql` (catch-up backfill, verification, then
 the columns dropped — **apply this one after the deploy**).
+Saved reports: `0080` (the table) and `0081_crm_reports_rls.sql` (policies), additive.
 Slice 8: `0078` (saved views and pins) and `0079_crm_saved_views_rls.sql` (their policies) — both ordinary additive migrations that go ahead of the deploy.
 Slice 6: `0076` (the collaborators table) and `0077_crm_collaborators_rls.sql` (its policies, plus the one change to the details policy that makes a grant mean anything). Slice 7 added **no migration**: merging is code over the tables that already
 exist. A `crm_party_merges` table was considered and refused — `audit_log`
@@ -869,14 +893,11 @@ values stay readable and the discontinuity is visible.
 - **The warning only fires where a contact point is entered**, which is the
   record page. Creating a record from the "Add a record" form does not ask for
   an address, so nothing is checked there.
-- **THERE IS NO `crm_reports` TABLE, so a custom report cannot be saved by
-  name.** A report is a built-in id plus a query string, which means it can be
-  bookmarked and sent to a colleague but not listed for the team. Saving one is
-  the same shape of work `crm_saved_views` already is — table, two policies,
-  four actions — and it was left out rather than rushed at the end of the slice
-  that built the engine. The first person who asks will also tell us whether
-  reports want folders, which is the one place Salesforce's model differs
-  sharply from ours.
+- **Reports have no folders.** `crm_reports` shares the flat, per-report
+  `is_shared` boolean that `crm_saved_views` uses, where Salesforce makes the
+  FOLDER the sharing unit and files every report into one. Flat is right while a
+  tenant has five reports and will stop being right at fifty; the shape to copy
+  when it does is theirs, not a per-report ACL.
 - **Reports have no schedule and no delivery.** Salesforce subscribes you to a
   report and emails it; ours is a page you open. That is the same
   no-notifications gap the whole module has, and reporting is where somebody

@@ -4254,6 +4254,60 @@ export const crmSavedViews = pgTable(
 );
 
 /**
+ * A saved report: a question somebody wanted to keep asking.
+ *
+ * THE SAME SHAPE AS `crm_saved_views` AND FOR THE SAME REASONS — read the note
+ * there before changing either. A report is a QUESTION, and the answer is
+ * computed in the reader's own transaction where RLS has already removed what
+ * they may not see, so `is_shared` is a boolean rather than an access list and
+ * two people opening one shared report correctly get different totals.
+ *
+ * `definition` IS ONE jsonb COLUMN RATHER THAN FOUR, and that is deliberate:
+ * `parseDefinition` in `core/reports.ts` already validates the whole shape on
+ * every read — type, filter, grouping, measure — and splitting it into columns
+ * would mean four things to validate separately and a fifth state where they
+ * disagree. The column is opaque to SQL, which is fine because nothing queries
+ * into it; a report is looked up by id and then run.
+ *
+ * `name` IS THE QUESTION IT ANSWERS, by convention rather than by CHECK. Every
+ * built-in ends in a question mark and there is a test enforcing that for them,
+ * but refusing to save "Q3 pipeline" because somebody left the punctuation off
+ * would be a product telling its user how to write. The placeholder asks; the
+ * database does not insist.
+ */
+export const crmReports = pgTable(
+  "crm_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** A `ReportDefinition`, validated by `parseDefinition` on every read. */
+    definition: jsonb("definition").notNull().default({}),
+    ownerClerkUserId: text("owner_clerk_user_id").notNull(),
+    isShared: boolean("is_shared").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_reports_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("crm_reports_tenant_idx").on(t.tenantId),
+    // One person cannot have two reports of the same name. Scoped to the owner,
+    // because two people each keeping their own "My pipeline" have not collided.
+    uniqueIndex("crm_reports_name_idx").on(
+      t.tenantId,
+      t.ownerClerkUserId,
+      t.name,
+    ),
+  ],
+);
+
+/**
  * Which view a person lands on.
  *
  * PER USER, NOT PER TENANT. A pin is a preference about how somebody works, and
@@ -4788,6 +4842,7 @@ export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
 export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
 export type CrmRecordCollaborator = typeof crmRecordCollaborators.$inferSelect;
 export type CrmSavedView = typeof crmSavedViews.$inferSelect;
+export type CrmReport = typeof crmReports.$inferSelect;
 export type CrmViewPin = typeof crmViewPins.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;

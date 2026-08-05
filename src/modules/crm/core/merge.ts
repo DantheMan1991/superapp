@@ -211,6 +211,13 @@ export interface AffiliationPlan {
   demote: string[];
 }
 
+export interface CollaboratorPlan {
+  /** Grants that follow the record to the survivor. */
+  move: string[];
+  /** People who already have a grant on the survivor. */
+  dropDuplicate: string[];
+}
+
 export interface MergePlan {
   survivorPartyId: string;
   loserPartyId: string;
@@ -219,6 +226,7 @@ export interface MergePlan {
   contactPoints: ContactPointPlan;
   details: DetailsPlan;
   affiliations: AffiliationPlan;
+  collaborators: CollaboratorPlan;
   /** Counts for the preview: what simply follows the party with no decisions. */
   moves: {
     deals: number;
@@ -240,6 +248,7 @@ export interface MergeInputs {
     details: DetailsSnapshot | null;
     contactPoints: readonly ContactSnapshot[];
     affiliations: readonly AffiliationSnapshot[];
+    collaborators: readonly CollaboratorSnapshot[];
   };
   loser: {
     customerId: string | null;
@@ -247,8 +256,14 @@ export interface MergeInputs {
     details: DetailsSnapshot | null;
     contactPoints: readonly ContactSnapshot[];
     affiliations: readonly AffiliationSnapshot[];
+    collaborators: readonly CollaboratorSnapshot[];
     counts: MergePlan["moves"];
   };
+}
+
+export interface CollaboratorSnapshot {
+  id: string;
+  clerkUserId: string;
 }
 
 export interface ContactSnapshot {
@@ -307,8 +322,42 @@ export function buildMergePlan(inputs: MergeInputs): MergePlan {
       survivor.affiliations,
       loser.affiliations,
     ),
+    collaborators: planCollaborators(
+      survivor.collaborators,
+      loser.collaborators,
+    ),
     moves: loser.counts,
   };
+}
+
+/**
+ * Who keeps access to the merged record.
+ *
+ * GRANTS MOVE RATHER THAN LAPSING, and the alternative is what made this a bug
+ * worth fixing before the feature shipped: `crm_record_collaborators` has
+ * `ON DELETE CASCADE` on the party, so a merge that ignored the table would not
+ * fail — it would silently revoke access for everyone named on the losing
+ * record, at the moment the two records became one. Silent revocation of a
+ * confidential record is the worst shape a bug in this module could take.
+ *
+ * A person already holding a grant on the survivor keeps the one they have;
+ * the duplicate would trip the (tenant, party, clerk_user_id) unique, and one
+ * grant per person per record is the correct outcome rather than an error.
+ */
+export function planCollaborators(
+  survivor: readonly CollaboratorSnapshot[],
+  loser: readonly CollaboratorSnapshot[],
+): CollaboratorPlan {
+  const held = new Set(survivor.map((c) => c.clerkUserId));
+  const plan: CollaboratorPlan = { move: [], dropDuplicate: [] };
+  for (const grant of loser) {
+    if (held.has(grant.clerkUserId)) plan.dropDuplicate.push(grant.id);
+    else {
+      held.add(grant.clerkUserId);
+      plan.move.push(grant.id);
+    }
+  }
+  return plan;
 }
 
 function roleDisposition(

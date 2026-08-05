@@ -173,7 +173,7 @@ export async function createRecordAction(
         });
         return party.id;
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(partyId);
@@ -211,7 +211,7 @@ export async function updateRecordAction(
           meta: { fields: Object.keys(patch).sort() },
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(partyId);
@@ -245,7 +245,7 @@ export async function adoptRecordAction(
           meta: {},
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(parsed.data.partyId);
@@ -284,7 +284,7 @@ export async function setRecordActiveAction(
           meta: {},
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(parsed.data.partyId);
@@ -352,7 +352,7 @@ export async function createFieldDefAction(
         });
         return def.id;
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFields();
@@ -396,7 +396,7 @@ export async function updateFieldDefAction(
           meta: { fields: Object.keys(patch).sort() },
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFields();
@@ -435,7 +435,7 @@ export async function setFieldDefArchivedAction(
           meta: {},
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFields();
@@ -460,7 +460,7 @@ export async function reorderFieldDefsAction(
     await withTenant(
       ctx.tenantId,
       (tx) => reorderFieldDefs(tx, ctx, parsed.data.fieldIds),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidateFields();
@@ -506,7 +506,7 @@ export async function addContactPointAction(
           meta: { kind: rest.kind },
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(partyId);
@@ -541,7 +541,7 @@ export async function updateContactPointAction(
           expectedVersion,
           patch,
         }),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(partyId);
@@ -567,7 +567,7 @@ export async function setPrimaryContactPointAction(
     await withTenant(
       ctx.tenantId,
       (tx) => setPrimaryContactPoint(tx, ctx.tenantId, parsed.data.contactPointId),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(parsed.data.partyId);
@@ -588,7 +588,7 @@ export async function deleteContactPointAction(
     await withTenant(
       ctx.tenantId,
       (tx) => deleteContactPoint(tx, ctx.tenantId, parsed.data.contactPointId),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(parsed.data.partyId);
@@ -632,7 +632,7 @@ export async function findDuplicateContactAction(
         findPartiesByContact(tx, ctx.tenantId, parsed.data.kind, parsed.data.value, {
           excludePartyId: parsed.data.excludePartyId,
         }),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     return {
@@ -682,7 +682,7 @@ export async function searchRecordsAction(
           query: parsed.data.query,
           kind: parsed.data.kind,
         }),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     return {
@@ -727,7 +727,7 @@ export async function addAffiliationAction(
           meta: {},
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(parsed.data.personPartyId);
@@ -767,7 +767,7 @@ export async function endAffiliationAction(
           meta: {},
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     revalidate(parsed.data.partyId);

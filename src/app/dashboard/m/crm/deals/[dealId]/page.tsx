@@ -40,7 +40,7 @@ export default async function DealPage({
         fieldDefs: await listFieldDefs(tx, ctx.tenant.id, "deal"),
       };
     },
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   ).catch((err) => {
     // A deal on a restricted record is absent for staff, and absent is also
     // what "no such deal" looks like. 404 either way, never 403.

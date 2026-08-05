@@ -44,7 +44,7 @@ export async function CrmModule({
   const records = await withTenant(
     ctx.tenant.id,
     (tx) => listRecords(tx, ctx.tenant.id, filter),
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   );
 
   const isFiltered =

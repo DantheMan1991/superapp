@@ -334,6 +334,45 @@ d("crm merge executor (database)", () => {
     expect(leftovers).toHaveLength(0);
   });
 
+  it("CARRIES ACCESS GRANTS ACROSS instead of letting the cascade eat them", async () => {
+    // `crm_record_collaborators` has ON DELETE CASCADE on the party, so a merge
+    // that did not handle the table would not fail — it would silently revoke
+    // access for everyone named on the losing record. This is the assertion
+    // that the grant is still there afterwards, and the one that would have
+    // caught the bug.
+    const { a, b } = await twoRecords("grants");
+    await withTenant(
+      tenantId,
+      async (tx) => {
+        await tx.insert(schema.crmPartyDetails).values([
+          { tenantId, partyId: a, visibility: "restricted" },
+          { tenantId, partyId: b, visibility: "restricted" },
+        ]);
+        await tx.insert(schema.crmRecordCollaborators).values([
+          // On the survivor and the loser alike — the shared one must not be
+          // duplicated on the way across.
+          { tenantId, partyId: a, clerkUserId: "shared", grantedByClerkUserId: "owner" },
+          { tenantId, partyId: b, clerkUserId: "shared", grantedByClerkUserId: "owner" },
+          { tenantId, partyId: b, clerkUserId: "aoife", grantedByClerkUserId: "owner" },
+        ]);
+      },
+      ctx,
+    );
+
+    await withTenant(tenantId, (tx) => applyMerge(tx, tenantId, a, b), ctx);
+
+    const grants = await withTenant(
+      tenantId,
+      (tx) =>
+        tx
+          .select()
+          .from(schema.crmRecordCollaborators)
+          .where(eq(schema.crmRecordCollaborators.partyId, a)),
+      ctx,
+    );
+    expect(grants.map((g) => g.clerkUserId).sort()).toEqual(["aoife", "shared"]);
+  });
+
   it("removes the losing identity, so the duplicate leaves the records list", async () => {
     const { a, b } = await twoRecords("identity");
     await withTenant(tenantId, (tx) => applyMerge(tx, tenantId, a, b), ctx);

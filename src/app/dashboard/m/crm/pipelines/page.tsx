@@ -47,7 +47,7 @@ export default async function PipelinesPage({
         }),
       };
     },
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   );
 
   const isOwner = ctx.role === "owner";

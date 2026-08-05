@@ -254,6 +254,17 @@ function PlanSummary({
   if (plan.affiliations.move.length) {
     moving.push(count(plan.affiliations.move.length, "connection"));
   }
+  if (plan.collaborators.move.length) {
+    // Named rather than folded into "details": who can see a confidential
+    // record is the thing somebody would most want to be told is changing.
+    moving.push(
+      count(
+        plan.collaborators.move.length,
+        "person with access",
+        "people with access",
+      ),
+    );
+  }
 
   const dropped =
     plan.contactPoints.dropDuplicate.length +
@@ -316,6 +327,13 @@ function PlanSummary({
   );
 }
 
-function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+/**
+ * `2 deals`, `1 invoice`, `2 people with access`.
+ *
+ * The explicit plural exists because appending "s" is wrong the moment a noun
+ * is a phrase — "2 person with accesss" — and every count on this screen is
+ * read by somebody deciding whether to commit something irreversible.
+ */
+function count(n: number, noun: string, plural?: string): string {
+  return `${n} ${n === 1 ? noun : (plural ?? `${noun}s`)}`;
 }

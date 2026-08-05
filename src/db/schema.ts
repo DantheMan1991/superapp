@@ -4133,6 +4133,66 @@ export const crmAffiliations = pgTable(
 );
 
 /**
+ * Named people who may see a RESTRICTED record.
+ *
+ * Slice 1 gave visibility two values and nothing in between: `members` means
+ * everybody, `restricted` means tenant owners. That is a real cliff — the
+ * commonest thing a business wants is "this acquisition is confidential, but
+ * the two people working it need it", and the only way to say that was to make
+ * the whole record visible to everybody.
+ *
+ * A GRANT IS NOT AN ASSIGNMENT, and the two stay structurally apart exactly as
+ * 0064 insisted. `crm_party_details.owner_clerk_user_id` records who a record
+ * is assigned to and grants nothing; a row HERE grants access and says nothing
+ * about who is doing the work. Making assignment imply access would have been
+ * the cheaper feature and it is the wrong one: a rep's name lands on records
+ * for a dozen reasons, and none of them is a decision about confidentiality.
+ *
+ * READ THE POLICY NOTE IN THE MIGRATION BEFORE CHANGING EITHER TABLE'S RLS.
+ * `crm_party_details` now reads this table, so this table's own policy must
+ * NOT read `crm_party_details` — Postgres would recurse. 0064's promise that
+ * "crm_party_details' own policy reads no other table" is what slice 6 spends,
+ * and it can only be spent once.
+ */
+export const crmRecordCollaborators = pgTable(
+  "crm_record_collaborators",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    partyId: uuid("party_id").notNull(),
+    /** Who may see it. Clerk's id, like every other actor column here. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /**
+     * Who granted it. An audit trail on the row itself as well as in
+     * `audit_log`, because "who let them in" is the first question asked about
+     * a confidential record and the row is where somebody will look.
+     */
+    grantedByClerkUserId: text("granted_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_record_collaborators_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One grant per person per record. Granting twice is not two facts.
+    uniqueIndex("crm_record_collaborators_unique_idx").on(
+      t.tenantId,
+      t.partyId,
+      t.clerkUserId,
+    ),
+    // The lookup the details policy runs on every read of a restricted record.
+    index("crm_record_collaborators_party_idx").on(t.tenantId, t.partyId),
+    foreignKey({
+      name: "crm_record_collaborators_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
  * The types a custom field can be. A CLOSED enumeration on purpose: every value
  * here needs a parser, an input control and a display, so adding one is a code
  * change in three places and should look like one.
@@ -4629,6 +4689,7 @@ export const crmTasks = pgTable(
 
 export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
 export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
+export type CrmRecordCollaborator = typeof crmRecordCollaborators.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 export type CrmActivityKind = CrmActivity["kind"];

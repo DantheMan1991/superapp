@@ -30,6 +30,8 @@ export type CrmErrorCode =
   | "TASK_NOT_FOUND"
   | "TASK_TITLE_REQUIRED"
   | "MERGE_SAME_RECORD"
+  | "COLLABORATOR_INVALID"
+  | "COLLABORATOR_NOT_FOUND"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
 
@@ -105,6 +107,12 @@ export function friendlyMessage(err: unknown): string {
       return "Give the follow-up a name.";
     case "MERGE_SAME_RECORD":
       return "Choose two different records to merge.";
+    case "COLLABORATOR_INVALID":
+      return "Choose somebody to give access to.";
+    case "COLLABORATOR_NOT_FOUND":
+      // Says what is true rather than "not found": the row is gone, which is
+      // what they wanted, and the screen was simply stale.
+      return "That person no longer has access to this record.";
     case "CUSTOM_VALUES_INVALID":
       // The per-field messages carry the detail; this is the summary line.
       return err.issues?.length

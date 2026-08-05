@@ -37,7 +37,7 @@ export default async function NewDealPage({
       record: await loadRecord(tx, ctx.tenant.id, partyId),
       fieldDefs: await listFieldDefs(tx, ctx.tenant.id, "deal"),
     }),
-    { role: ctx.role },
+    { role: ctx.role, userId: ctx.userId },
   ).catch((err) => {
     if (err instanceof CrmError && err.code === "RECORD_NOT_FOUND") notFound();
     throw err;

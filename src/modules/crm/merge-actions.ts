@@ -65,7 +65,7 @@ export async function findMergeCandidatesAction(): Promise<
     const candidates = await withTenant(
       ctx.tenantId,
       (tx) => findMergeCandidates(tx, ctx.tenantId),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
     return { ok: true, data: { candidates } };
   } catch (err) {
@@ -99,7 +99,7 @@ export async function previewMergeAction(
           parsed.data.survivorPartyId,
           parsed.data.loserPartyId,
         ),
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     return {
@@ -172,7 +172,7 @@ export async function mergeRecordsAction(
           },
         });
       },
-      { role: ctx.role },
+      { role: ctx.role, userId: ctx.userId },
     );
 
     // The whole module: a merge changes the records list, the record page that

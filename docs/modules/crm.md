@@ -14,6 +14,26 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-04 — Slice 6: explicit collaborators (branch `claude/crm-collaborators`)
+
+`restricted` meant "tenant owners only" and nothing in between. The commonest
+real want — "this is confidential, but the two people working it need it" —
+could only be said by making the record visible to everybody.
+
+- `crm_record_collaborators` (`0076`) + policies and the details-policy change
+  (`0077`). A grant names a person and records who granted it.
+- **This spends 0064's promise that the details policy reads no other table**,
+  and it can only be spent once. See Decisions — the collaborators policy must
+  never read `crm_party_details` back.
+- **Deals, activities, tasks and affiliations inherit the grant for free**, and
+  none of those four policies changed.
+- **Every CRM transaction now passes `userId`**, because the policy consults
+  `app_current_user()` and a missing one silently denies a collaborator.
+- Owner-only to grant or revoke, both audited. Five RLS tests certify it,
+  including that staff can neither self-grant nor DELETE a grant.
+- The merge tool was taught about the new table in the same branch — without
+  it, merging would have silently revoked everyone's access.
+
 ### 2026-08-04 — Slice 7: dedup & merge (branch `claude/crm-merge`)
 
 The tool three earlier slices deferred to. **No migration** — merging is code
@@ -201,7 +221,8 @@ behaviour change.
 | `customers.party_id` | The AR role's link to its party | Nullable → backfilled → `NOT NULL`. Composite FK. `UNIQUE (tenant_id, party_id)`: a party may hold the customer role at most once |
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
 | `party_contact_points` | How to reach a party — **shared, not CRM's**, and since `0075` the ONLY store for an email or a phone | Tenant-scoped and member-writable like `parties`, NOT visibility-bearing. That was argued from "the same address is also on `customers.email`, where staff read it"; the column is gone and the argument is now stronger rather than weaker — it is one row, rendered on the CRM record page AND on the customers page, so a visibility term here would blank the address on the invoicing screen for every staff member. `normalized_value` is written only by `src/lib/parties/contacts.ts` and is what the duplicate check compares. Partial unique gives one primary per party **per kind**; `(tenant, party, kind, normalized)` unique stops the same address twice; `(tenant, kind, normalized)` indexes the duplicate lookup |
-| `crm_party_details` | What CRM knows about a party — 1:1, created when CRM is first asked about the record | FORCE RLS with a **visibility term**: `visibility = 'members' OR app_current_tenant_role() = 'owner'`, in USING **and** WITH CHECK. `owner_clerk_user_id` is an attribution and grants nothing — see Decisions. `custom` jsonb is the slice 2 extension bag (P2), `lifecycle_stage`/`source` are open taxonomies (P1) with no CHECK. Composite FK to `parties`, ON DELETE CASCADE. Unique on `(tenant, party)` is what makes "the CRM record for this party" a lookup |
+| `crm_record_collaborators` | Named people who may see a `restricted` record | The one table `crm_party_details`' policy reads, which is why **its own policy must never read `crm_party_details`** — see Decisions. Owners see every grant, everybody else only their own, so the table cannot be used to enumerate which records are confidential. Writes are owner-only with the role test in **USING** as well as WITH CHECK (0067's DELETE trap, where it would mean silent revocation). `ON DELETE CASCADE` on the party, which is why the merge tool has to move grants explicitly rather than leave them |
+| `crm_party_details` | What CRM knows about a party — 1:1, created when CRM is first asked about the record | FORCE RLS with a **visibility term**: `visibility = 'members' OR app_current_tenant_role() = 'owner' OR a collaborator grant to `app_current_user()`, in USING **and** WITH CHECK. `owner_clerk_user_id` is an attribution and grants nothing — see Decisions. `custom` jsonb is the slice 2 extension bag (P2), `lifecycle_stage`/`source` are open taxonomies (P1) with no CHECK. Composite FK to `parties`, ON DELETE CASCADE. Unique on `(tenant, party)` is what makes "the CRM record for this party" a lookup |
 | `crm_affiliations` | A person's connection to an organization, current or former | **Inherits visibility** through a positive `EXISTS` against `crm_party_details` at both ends — no second copy of the flag, so no drift. The positive spelling is load-bearing; see Decisions. Two partial uniques: one current connection per pair, one primary per person. CHECK that the two ends differ |
 | `crm_pipelines` / `crm_pipeline_stages` | The steps a deal moves through | **Configuration**: member-read + owner-write, same two-policy split as `crm_field_defs`. One default per tenant enforced by a partial unique. `outcome` (`open`/`won`/`lost`) is where terminal semantics live — there is no status column on the deal |
 | `crm_deals` | One piece of work in front of a record | **Inherits the party's visibility** through a positive `EXISTS` against `crm_party_details`. `amount_cents` is NULLABLE on purpose — "not priced yet" and "worth nothing" are different facts and a forecast must not conflate them. `closed_at` denormalized from the history; `custom` holds slice 2's `entity_type = 'deal'` fields |
@@ -218,7 +239,7 @@ Contact points: `0072` (table), `0073_party_contacts_rls.sql` (policies),
 `0074_party_contacts_backfill.sql` (values copied off the accounting columns),
 `0075_accounting_contacts_contract.sql` (catch-up backfill, verification, then
 the columns dropped — **apply this one after the deploy**).
-Slice 7 added **no migration**: merging is code over the tables that already
+Slice 6: `0076` (the collaborators table) and `0077_crm_collaborators_rls.sql` (its policies, plus the one change to the details policy that makes a grant mean anything). Slice 7 added **no migration**: merging is code over the tables that already
 exist. A `crm_party_merges` table was considered and refused — `audit_log`
 already records the event, and a second store for the same fact is the drift
 this dossier keeps warning about.
@@ -336,6 +357,41 @@ useful of the two true answers. Both sources are kept — deleting accounting's
 would leave a tenant who never bought CRM with no suggestions at all, because an
 extension whose module is off contributes nothing. Pinned in
 `tests/mail-contacts.test.ts` so the claim cannot rot again.
+
+**SLICE 6 SPENT 0064'S PROMISE THAT `crm_party_details`' POLICY READS NO OTHER
+TABLE, AND IT CANNOT BE SPENT TWICE.** The details policy now reads
+`crm_record_collaborators`, which is safe in exactly one direction: **the
+collaborators policy must never read `crm_party_details`**. Postgres evaluates
+policies inside policy subqueries, so two tables naming each other recurse —
+`infinite recursion detected in policy for relation`, on the first SELECT, taking
+the whole module down. Loud, but total. The collaborators policy is therefore
+self-contained: `app_current_tenant()`, `app_current_tenant_role()`,
+`app_current_user()`, nothing else. If a later slice wants grant rows to inherit
+record visibility properly, the answer is a SECURITY DEFINER helper, not an
+EXISTS. Verified against the dev branch as `app_user`: all six CRM tables query
+cleanly.
+
+**A GRANT IS NOT AN ASSIGNMENT, still.** `owner_clerk_user_id` plays no part in
+visibility, exactly as 0064 insisted — slice 6 added the middle ground without
+touching that separation. Making assignment imply access would have been the
+cheaper feature and it is the wrong one: a rep's name lands on a record for a
+dozen reasons and none of them is a decision about confidentiality.
+
+**EVERY CRM TRANSACTION NOW PASSES `userId` AS WELL AS `role`.** The details
+policy consults `app_current_user()`, which returns NULL when unset — so
+`clerk_user_id = NULL` is NULL and a forgetful call site does not leak a
+confidential record, it silently denies a collaborator the record they were
+granted. Fail-closed, and invisible to anybody debugging "why can't Aoife see
+this?". Fourteen files were changed to add it; a scripted rewrite mangled four
+of them first, and the failed attempt is what surfaced two call sites the file
+list had missed. **Read the diff, never the match count.**
+
+**Grant reads are narrow, and that is an anti-probe property rather than
+politeness.** Owners see every grant; everybody else sees only their own. A staff
+member who could list grants could ask "which records have collaborators?" and
+get back precisely the set of confidential records — the question `restricted`
+exists to refuse, and the same probe the mail template values are designed
+against.
 
 **A MERGE RE-POINTS POSTED INVOICES, AND THE LEDGER IS UNTOUCHED BY IT.** When
 both records hold the same role, `invoices.customer_id`,
@@ -725,5 +781,15 @@ values stay readable and the discontinuity is visible.
   but nothing sets it, so everything is unassigned.
 - **No reminders or notifications.** An overdue follow-up is visible only to
   somebody who opens the page.
-- Slices 6 and 8–11 (explicit collaborators, saved views, reporting, automation,
-  AI) are planned and unbuilt. Slices 5 and 7 shipped on 2026-08-04.
+- **Adding a collaborator means typing a Clerk user id.** CRM has no roster of
+  the tenant's members to pick from — Clerk holds it and nothing in this module
+  reads it — so the panel takes an id and shows ids. A picker is the obvious
+  next move and needs a members list the module can read; it is the one part of
+  slice 6 that is visibly unfinished rather than deliberately absent.
+- **A grant is all-or-nothing.** A collaborator gets the whole record: notes,
+  deals, timeline, follow-ups. Field-level restriction is a different feature
+  and is not modelled.
+- **Nothing tells a collaborator they have been granted access**, or removed.
+  There are no notifications anywhere in CRM yet, and this inherits that gap.
+- Slices 8–11 (saved views, reporting, automation, AI) are planned and unbuilt.
+  Slices 5, 6 and 7 shipped on 2026-08-04.

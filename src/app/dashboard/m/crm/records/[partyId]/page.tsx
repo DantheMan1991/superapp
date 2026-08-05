@@ -18,6 +18,8 @@ import {
 } from "@/modules/crm/timeline-ops";
 import { listContactPoints } from "@/lib/parties/contacts";
 import { ContactPoints } from "@/modules/crm/components/contact-points";
+import { RecordAccess } from "@/modules/crm/components/record-access";
+import { listCollaborators } from "@/modules/crm/collaborator-ops";
 import { Timeline } from "@/modules/crm/components/timeline";
 import {
   AddTaskButton,
@@ -54,6 +56,10 @@ export default async function RecordPage({
       ...(await loadRecord(tx, ctx.tenant.id, partyId)),
       deals: await listDealsForParty(tx, ctx.tenant.id, partyId),
       contactPoints: await listContactPoints(tx, ctx.tenant.id, partyId),
+      // Narrow by policy: an owner gets every grant, anybody else gets only
+      // their own — so this is safe to load unconditionally and the panel
+      // below decides whether it is worth showing.
+      collaborators: await listCollaborators(tx, ctx.tenant.id, partyId),
       timeline: await loadTimeline(tx, ctx.tenant.id, partyId),
       activities: await listActivitiesForParty(tx, ctx.tenant.id, partyId),
       tasks: await listTasksForParty(tx, ctx.tenant.id, partyId),
@@ -73,6 +79,7 @@ export default async function RecordPage({
     fieldDefs,
     deals,
     contactPoints,
+    collaborators,
     timeline,
     activities,
     tasks,
@@ -165,6 +172,18 @@ export default async function RecordPage({
           <Separator />
 
           <ContactPoints partyId={party.id} points={contactPoints} />
+
+          {/*
+            Only where it means something: a restricted record, seen by an
+            owner. On a `members` record everybody can already see everything,
+            so the panel would be a control that does nothing.
+          */}
+          {isOwner && details.visibility === "restricted" && (
+            <>
+              <Separator />
+              <RecordAccess partyId={party.id} collaborators={collaborators} />
+            </>
+          )}
 
           <Separator />
 

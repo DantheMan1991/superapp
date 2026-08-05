@@ -4689,6 +4689,7 @@ export const crmTasks = pgTable(
 
 export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
 export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
+export type CrmRecordCollaborator = typeof crmRecordCollaborators.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 export type CrmActivityKind = CrmActivity["kind"];

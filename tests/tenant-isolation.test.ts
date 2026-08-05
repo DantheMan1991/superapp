@@ -916,6 +916,173 @@ d("crm isolation (RLS + record visibility)", () => {
     expect(rows.map((r) => r.partyId)).not.toContain(partyOf.aSecret);
   });
 
+  /* -- Explicit collaborators (slice 6) ------------------------------------ */
+
+  /**
+   * THE MIDDLE GROUND, certified. `restricted` used to mean "tenant owners
+   * only"; a grant names one person and lets them in without widening the
+   * record to everybody.
+   *
+   * The four tests below are the whole feature: it works, it is narrow, it
+   * cannot be self-issued, and it cannot be quietly removed. The third and
+   * fourth matter most — a visibility grant that a staff member could write for
+   * themselves is not a permission system, and one they could DELETE is a way
+   * to lock an owner out of their own confidential record.
+   */
+  it("A COLLABORATOR SEES A RESTRICTED RECORD; a colleague still does not", async () => {
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmRecordCollaborators).values({
+          tenantId: tenantA,
+          partyId: partyOf.aSecret,
+          clerkUserId: "collab-user",
+          grantedByClerkUserId: "owner-user",
+        }),
+      { role: "owner", userId: "owner-user" },
+    );
+
+    const asCollaborator = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmPartyDetails),
+      { role: "staff", userId: "collab-user" },
+    );
+    expect(asCollaborator.map((r) => r.partyId)).toContain(partyOf.aSecret);
+
+    // The same role, a different person: nothing changed for them.
+    const asColleague = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmPartyDetails),
+      { role: "staff", userId: "other-user" },
+    );
+    expect(asColleague.map((r) => r.partyId)).not.toContain(partyOf.aSecret);
+
+    // And the fail-closed direction, which is the one that would go unnoticed:
+    // a transaction that forgot the user id sees no grants and falls back to
+    // owner-only, rather than treating "no user" as "any user".
+    const anonymous = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmPartyDetails),
+      { role: "staff" },
+    );
+    expect(anonymous.map((r) => r.partyId)).not.toContain(partyOf.aSecret);
+  });
+
+  it("the grant carries through to the record's timeline and follow-ups", async () => {
+    // The reason the term lives on `crm_party_details` rather than being
+    // repeated: the inheriting policies resolve visibility through a positive
+    // EXISTS against that row, and not one of them mentions collaborators.
+    //
+    // Fixtures are created HERE rather than borrowed from the blocks below —
+    // those run later in the file, and a test that depends on the order of its
+    // neighbours is one that passes for the wrong reason.
+    await withTenant(
+      tenantA,
+      async (tx) => {
+        await tx.insert(schema.crmActivities).values({
+          tenantId: tenantA,
+          partyId: partyOf.aSecret,
+          kind: "note",
+          body: "Confidential note",
+          occurredAt: new Date(),
+          createdByClerkUserId: "owner-user",
+        });
+        await tx.insert(schema.crmTasks).values({
+          tenantId: tenantA,
+          partyId: partyOf.aSecret,
+          title: "Confidential follow-up",
+          createdByClerkUserId: "owner-user",
+        });
+      },
+      { role: "owner", userId: "owner-user" },
+    );
+
+    const [activities, tasks] = await withTenant(
+      tenantA,
+      async (tx) => [
+        await tx.select().from(schema.crmActivities),
+        await tx.select().from(schema.crmTasks),
+      ],
+      { role: "staff", userId: "collab-user" },
+    );
+    expect(activities.map((a) => a.partyId)).toContain(partyOf.aSecret);
+    expect(tasks.map((t) => t.partyId)).toContain(partyOf.aSecret);
+
+    // And a colleague without the grant still sees neither.
+    const [theirActivities, theirTasks] = await withTenant(
+      tenantA,
+      async (tx) => [
+        await tx.select().from(schema.crmActivities),
+        await tx.select().from(schema.crmTasks),
+      ],
+      { role: "staff", userId: "other-user" },
+    );
+    expect(theirActivities.map((a) => a.partyId)).not.toContain(partyOf.aSecret);
+    expect(theirTasks.map((t) => t.partyId)).not.toContain(partyOf.aSecret);
+  });
+
+  it("STAFF CANNOT GRANT THEMSELVES ACCESS", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.crmRecordCollaborators).values({
+            tenantId: tenantA,
+            partyId: partyOf.aSecret,
+            clerkUserId: "sneaky-user",
+            grantedByClerkUserId: "sneaky-user",
+          }),
+        { role: "staff", userId: "sneaky-user" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("STAFF CANNOT DELETE A GRANT — the WITH-CHECK-is-not-consulted-for-DELETE trap", async () => {
+    // 0067's lesson, in the place where it would hurt most: a permissive USING
+    // with the role test only in WITH CHECK would let staff revoke access to
+    // every confidential record in the tenant.
+    const deleted = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.crmRecordCollaborators)
+          .where(eq(schema.crmRecordCollaborators.tenantId, tenantA))
+          .returning(),
+      { role: "staff", userId: "collab-user" },
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("a collaborator sees their OWN grant and nobody else's", async () => {
+    // Narrow on purpose: somebody who could list grants could ask "which
+    // records have collaborators?" and get back the set of confidential ones.
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.crmRecordCollaborators).values({
+          tenantId: tenantA,
+          partyId: partyOf.aOpen,
+          clerkUserId: "someone-else",
+          grantedByClerkUserId: "owner-user",
+        }),
+      { role: "owner", userId: "owner-user" },
+    );
+
+    const mine = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmRecordCollaborators),
+      { role: "staff", userId: "collab-user" },
+    );
+    expect(mine.map((r) => r.clerkUserId)).toEqual(["collab-user"]);
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.crmRecordCollaborators),
+      { role: "owner", userId: "owner-user" },
+    );
+    expect(asOwner.length).toBeGreaterThan(1);
+  });
+
   it("staff cannot flip a restricted record back to members", async () => {
     // The WITH CHECK half. Without it a staff member could unhide a record by
     // writing to a row they cannot read.

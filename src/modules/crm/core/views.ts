@@ -82,8 +82,24 @@ export const FILTER_FIELDS: readonly FilterField[] = [
   },
 ] as const;
 
-export function filterField(key: string): FilterField | null {
-  return FILTER_FIELDS.find((f) => f.key === key) ?? null;
+/**
+ * A field by key, within a registry.
+ *
+ * THE SECOND ARGUMENT IS WHAT LETS REPORTS REUSE ALL OF THIS. The records list
+ * has one registry — the default — while each report type declares its own,
+ * because "deal stage" is a sensible thing to filter a pipeline report on and a
+ * meaningless thing to filter the records list on. Every existing caller passes
+ * one argument and keeps the behaviour it had.
+ *
+ * The whitelist property is unchanged and is the reason the parameter is a
+ * FIELD SET rather than a flag: a caller can only widen the vocabulary to
+ * another list this codebase wrote, never to an arbitrary column name.
+ */
+export function filterField(
+  key: string,
+  fields: readonly FilterField[] = FILTER_FIELDS,
+): FilterField | null {
+  return fields.find((f) => f.key === key) ?? null;
 }
 
 /* -- Operators ------------------------------------------------------------ */
@@ -229,8 +245,11 @@ export const VALUE_MAX = 200;
  * conditions from a STORED view and the caller decides whether a bad one from a
  * FORM is worth an error message.
  */
-export function conditionProblem(condition: FilterCondition): string | null {
-  const field = filterField(condition.field);
+export function conditionProblem(
+  condition: FilterCondition,
+  fields: readonly FilterField[] = FILTER_FIELDS,
+): string | null {
+  const field = filterField(condition.field, fields);
   if (!field) return "Unknown field";
   if (!operatorsFor(field.type).includes(condition.operator)) {
     return `${operatorLabel(condition.operator)} does not apply to ${field.label}`;
@@ -300,13 +319,19 @@ export function parseFilter(stored: unknown): FilterCondition[] {
  * in words. A person who can read why they are seeing these rows does not have
  * to open the filter panel to find out.
  */
-export function describeFilter(conditions: readonly FilterCondition[]): string {
+export function describeFilter(
+  conditions: readonly FilterCondition[],
+  fields: readonly FilterField[] = FILTER_FIELDS,
+): string {
   if (conditions.length === 0) return "All records";
-  return conditions.map(describeCondition).join(" · ");
+  return conditions.map((c) => describeCondition(c, fields)).join(" · ");
 }
 
-function describeCondition(condition: FilterCondition): string {
-  const field = filterField(condition.field);
+function describeCondition(
+  condition: FilterCondition,
+  fields: readonly FilterField[],
+): string {
+  const field = filterField(condition.field, fields);
   if (!field) return "";
 
   if (field.type === "date") {

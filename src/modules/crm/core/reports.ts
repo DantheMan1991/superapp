@@ -218,7 +218,17 @@ export function reportType(id: string): ReportType | null {
 
 /* -- A report definition -------------------------------------------------- */
 
-export type ReportChart = "none" | "bar" | "donut";
+/**
+ * ONE CHART TYPE, AND THAT IS THE WHOLE ENUMERATION.
+ *
+ * A donut was in the first draft of this file and came out again: it had no
+ * renderer, and an enum value nothing can draw is a definition somebody saves
+ * and then finds broken. Horizontal bars are also the honest default for this
+ * data — they carry any number of groups, they stay readable when a label runs
+ * long, and they do not imply the parts make a meaningful whole, which a
+ * pipeline grouped by stage does not.
+ */
+export type ReportChart = "none" | "bar";
 
 export interface ReportDefinition {
   type: ReportTypeId;
@@ -289,10 +299,7 @@ export function parseDefinition(stored: unknown): ReportDefinition {
     ? (candidate.measure as string)
     : type.measures[0].key;
 
-  const chart: ReportChart =
-    candidate.chart === "donut" || candidate.chart === "none"
-      ? candidate.chart
-      : "bar";
+  const chart: ReportChart = candidate.chart === "none" ? "none" : "bar";
 
   return {
     type: type.id,
@@ -443,7 +450,7 @@ export const BUILT_IN_REPORTS: readonly BuiltInReport[] = [
       type: "followups",
       groupBy: "task_assignee",
       filter: [{ field: "task_done", operator: "equals", value: "false" }],
-      chart: "donut",
+      chart: "bar",
     },
   },
 ];

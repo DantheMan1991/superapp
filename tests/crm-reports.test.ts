@@ -117,7 +117,7 @@ describe("parseDefinition", () => {
       groupBy: "deal_stage",
       measure: "deal_amount_sum",
       showDetail: true,
-      chart: "donut",
+      chart: "bar",
       filter: [{ field: "deal_open", operator: "equals", value: "true" }],
     });
     expect(parsed).toEqual({
@@ -125,7 +125,7 @@ describe("parseDefinition", () => {
       groupBy: "deal_stage",
       measure: "deal_amount_sum",
       showDetail: true,
-      chart: "donut",
+      chart: "bar",
       filter: [{ field: "deal_open", operator: "equals", value: "true" }],
     });
   });

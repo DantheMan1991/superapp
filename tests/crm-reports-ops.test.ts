@@ -88,21 +88,21 @@ d("crm reports (database)", () => {
           .values([
             {
               tenantId, partyId: acme.id, pipelineId: pipeline.id, stageId: open.id,
-              title: "Acme roof", amountCents: 500_000, createdByClerkUserId: "owner-user",
+              title: "Acme roof", amountCents: 500_000, ownerClerkUserId: "rep-a",
             },
             {
               tenantId, partyId: bob.id, pipelineId: pipeline.id, stageId: open.id,
-              title: "Bob extension", amountCents: 250_000, createdByClerkUserId: "owner-user",
+              title: "Bob extension", amountCents: 250_000, ownerClerkUserId: "rep-b",
             },
             {
               tenantId, partyId: acme.id, pipelineId: pipeline.id, stageId: won.id,
-              title: "Acme fit-out", amountCents: 1_000_000, createdByClerkUserId: "owner-user",
+              title: "Acme fit-out", amountCents: 1_000_000, ownerClerkUserId: "rep-a",
             },
             // On the RESTRICTED record — invisible to staff, and the reason the
             // last test in this file exists.
             {
               tenantId, partyId: secret.id, pipelineId: pipeline.id, stageId: open.id,
-              title: "Secret job", amountCents: 9_000_000, createdByClerkUserId: "owner-user",
+              title: "Secret job", amountCents: 9_000_000, ownerClerkUserId: "rep-a",
             },
           ])
           .returning();

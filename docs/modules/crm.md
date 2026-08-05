@@ -14,6 +14,27 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-05 — Slice 9: reporting (branch `claude/crm-reporting`)
+
+Five declared report types, four built-in reports, and a report page whose every
+control is a link. **No migration** — reports are code and URLs, not rows. See
+Open items for why there is no `crm_reports` table yet.
+
+- **The report TYPE is the design.** A report picks one of five declared join
+  shapes, each a hand-written base query. That is the join-level version of the
+  column whitelist slice 8 built: `views.ts` decides which columns a filter may
+  name, `reports.ts` decides which joins a report may reach across.
+- **Aggregation happens in Postgres.** The pure module sums nothing.
+- **RLS does the access control**, and there is a test: over one definition an
+  owner totals 10,750,000 and staff 1,750,000, because the restricted record's
+  deal is not theirs to count.
+- **Nulls are kept and labelled** — "not set" is usually the actionable line,
+  and dropping it would make the groups fail to add up to the total above them.
+- Every built-in is **named as a question**, taken from the Salesforce org where
+  all fifty-nine are.
+- `FILTER_FIELDS` became a default rather than the only registry, so slice 8's
+  compiler serves both. Its 32 tests passed untouched.
+
 ### 2026-08-05 — Slice 8: saved views, and the end of the 500 cap (branch `claude/crm-saved-views`)
 
 The list stops being one fixed question. `crm_saved_views` + `crm_view_pins`
@@ -279,6 +300,12 @@ this dossier keeps warning about.
 - `src/lib/parties/role-sync.ts` — the "both names exist" bridge while
   `customers.name` and `parties.display_name` are both stored. Temporary by
   design; the header says what has to move before it goes.
+- `src/modules/crm/core/reports.ts` — pure. The five report types, each a
+  declared join shape, plus the summariser and the built-in reports. Read it
+  before adding a sixth type: the other half is `report-ops.ts`.
+- `src/modules/crm/report-ops.ts` — one hand-written base query per type. Every
+  identifier in its SQL is a literal in that file; keys are looked up in
+  whitelists and values are bound.
 - `src/modules/crm/core/views.ts` — pure. The field registry IS the whitelist
   that keeps a column name out of user input, plus the operator vocabulary, the
   relative-date rules, the URL codec and the built-in views. Read it before
@@ -389,6 +416,47 @@ useful of the two true answers. Both sources are kept — deleting accounting's
 would leave a tenant who never bought CRM with no suggestions at all, because an
 extension whose module is off contributes nothing. Pinned in
 `tests/mail-contacts.test.ts` so the claim cannot rot again.
+
+**A REPORT TYPE IS A JOIN WHITELIST, AND THAT IS THE WHOLE OF SLICE 9'S
+DESIGN.** A report does not choose a table and join outward; it chooses one of
+five declared shapes, each of which is a hand-written base query in
+`report-ops.ts`. The two whitelists now stack:
+
+    core/views.ts    decides which COLUMNS a filter may name.
+    core/reports.ts  decides which JOINS a report may reach across.
+
+Neither lets an identifier arrive from outside the codebase — a type a browser
+sent but `REPORT_TYPES` does not declare has no base query, so it cannot run at
+all. **Adding a sixth type is a code change in two places**, and a test fails if
+only one of them happens. The alternative was a generic join planner over this
+schema, which is a database console with a nicer skin: it would hand every
+tenant the ability to write a query nobody can index for, and it would make RLS
+the only thing standing between a curious user and a cartesian product.
+
+**AGGREGATION HAPPENS IN POSTGRES, NEVER IN TYPESCRIPT.** `core/reports.ts`
+orders and totals what the database already grouped; it never sums rows.
+Summing in the application means fetching every row to count it, which is the
+mistake that makes a reporting feature collapse on the first tenant with real
+data — and it would do so silently, because it works perfectly on the tenant a
+developer tests with.
+
+**A REPORT IS A QUESTION ABOUT THE ROWS YOU MAY SEE, and the totals differ per
+reader on purpose.** Reports run in the caller's transaction, so a staff
+member's pipeline report omits deals on restricted records. There is a test
+asserting exactly that over one definition. This is the same property that makes
+a shared saved view safe, and it is why neither feature needed an access model
+of its own.
+
+**Nulls are kept and labelled "Not set".** "12 records with no stage" is usually
+the most actionable line in a report, and dropping it would make the groups
+silently fail to add up to the total printed above them. A summary that does not
+add up is worse than no summary, because it gets believed.
+
+**One grouping level, and one chart type.** Salesforce allows three groupings;
+almost every question a small business asks needs one, and each extra level
+multiplies the rendering, the chart's meaning and the empty-group cases. A donut
+chart was drafted and removed: it had no renderer, and an enum value nothing can
+draw is a definition somebody saves and then finds broken.
 
 **THE FILTER COMPILER'S SAFETY IS TWO PROPERTIES, AND NEITHER IS OPTIONAL.** A
 filter is jsonb a browser once sent that ends up in a WHERE clause. First, **the
@@ -801,6 +869,24 @@ values stay readable and the discontinuity is visible.
 - **The warning only fires where a contact point is entered**, which is the
   record page. Creating a record from the "Add a record" form does not ask for
   an address, so nothing is checked there.
+- **THERE IS NO `crm_reports` TABLE, so a custom report cannot be saved by
+  name.** A report is a built-in id plus a query string, which means it can be
+  bookmarked and sent to a colleague but not listed for the team. Saving one is
+  the same shape of work `crm_saved_views` already is — table, two policies,
+  four actions — and it was left out rather than rushed at the end of the slice
+  that built the engine. The first person who asks will also tell us whether
+  reports want folders, which is the one place Salesforce's model differs
+  sharply from ours.
+- **Reports have no schedule and no delivery.** Salesforce subscribes you to a
+  report and emails it; ours is a page you open. That is the same
+  no-notifications gap the whole module has, and reporting is where somebody
+  will feel it first.
+- **The detail list caps at 200 rows** and says so. A report is a summary and
+  the detail exists to answer "which ones?" about one group, not to be a second
+  records list.
+- **No cross-type reporting.** "Deals with their activities" is a sixth type,
+  not a join somebody can assemble, and it stays that way until a real question
+  needs it.
 - **Paging is OFFSET-based**, which is right at this scale and will not stay
   right forever: a row inserted while somebody reads page 3 shifts the boundary,
   so a record can be seen twice or skipped. Keyset paging is the upgrade and it
@@ -897,5 +983,5 @@ values stay readable and the discontinuity is visible.
   and is not modelled.
 - **Nothing tells a collaborator they have been granted access**, or removed.
   There are no notifications anywhere in CRM yet, and this inherits that gap.
-- Slices 9–11 (reporting, automation, AI) are planned and unbuilt. Slices 5, 6
-  and 7 shipped on 2026-08-04; slice 8 on 2026-08-05.
+- Slices 10 and 11 (automation, AI) are planned and unbuilt. Slices 5, 6 and 7
+  shipped on 2026-08-04; slices 8 and 9 on 2026-08-05.

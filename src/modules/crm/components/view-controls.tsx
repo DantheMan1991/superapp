@@ -282,7 +282,10 @@ function FilterPanel({
     setDraft(next);
   }
 
-  const problems = draft.map(conditionProblem);
+  // NOT `draft.map(conditionProblem)`: the callback receives the index as its
+  // second argument, which is now the field-set parameter. The compiler caught
+  // it, and the arrow keeps it caught.
+  const problems = draft.map((condition) => conditionProblem(condition));
   const ready = problems.every((p) => p === null);
 
   return (

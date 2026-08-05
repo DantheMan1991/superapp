@@ -10,6 +10,7 @@ import {
   matchableName,
   rankCandidates,
   type AffiliationSnapshot,
+  type CollaboratorSnapshot,
   type ContactSnapshot,
   type DetailsSnapshot,
   type EvidenceRow,
@@ -209,10 +210,24 @@ interface Side {
   details: DetailsSnapshot | null;
   contactPoints: ContactSnapshot[];
   affiliations: AffiliationSnapshot[];
+  collaborators: CollaboratorSnapshot[];
 }
 
+/**
+ * One record's side of the merge.
+ *
+ * THE COLLABORATOR READ DEPENDS ON THE CALLER BEING AN OWNER, and that is a
+ * real coupling rather than an incidental one. `crm_record_collaborators` shows
+ * non-owners only their OWN grant, so a merge run by anybody else would build a
+ * plan that could not see the other grants — and because the party FK cascades,
+ * the ones it could not see would be deleted rather than moved. Silent
+ * revocation of access to a confidential record. `merge-actions.ts` gates all
+ * three actions on `owner`, which is what makes this safe; if that gate is ever
+ * loosened, this function has to stop trusting the caller's transaction for
+ * this one read.
+ */
 async function loadSide(tx: Tx, tenantId: string, partyId: string): Promise<Side> {
-  const [customer, vendor, details, contactPoints, affiliations] =
+  const [customer, vendor, details, contactPoints, affiliations, collaborators] =
     await Promise.all([
       tx.query.customers.findFirst({
         where: and(
@@ -270,6 +285,18 @@ async function loadSide(tx: Tx, tenantId: string, partyId: string): Promise<Side
             ),
           ),
         ),
+      tx
+        .select({
+          id: schema.crmRecordCollaborators.id,
+          clerkUserId: schema.crmRecordCollaborators.clerkUserId,
+        })
+        .from(schema.crmRecordCollaborators)
+        .where(
+          and(
+            eq(schema.crmRecordCollaborators.tenantId, tenantId),
+            eq(schema.crmRecordCollaborators.partyId, partyId),
+          ),
+        ),
     ]);
 
   return {
@@ -287,6 +314,7 @@ async function loadSide(tx: Tx, tenantId: string, partyId: string): Promise<Side
       : null,
     contactPoints,
     affiliations,
+    collaborators,
   };
 }
 
@@ -515,10 +543,38 @@ export async function applyMerge(
   await applyRole(tx, tenantId, "customer", plan, survivorPartyId);
   await applyRole(tx, tenantId, "vendor", plan, survivorPartyId);
 
-  /* 5. Mail links */
+  /* 5. Access grants. BEFORE the party delete, because the FK cascades — a
+     merge that skipped this would silently revoke everyone's access to a
+     confidential record at the moment the two became one. */
+  if (plan.collaborators.dropDuplicate.length > 0) {
+    await tx
+      .delete(schema.crmRecordCollaborators)
+      .where(
+        and(
+          eq(schema.crmRecordCollaborators.tenantId, tenantId),
+          inArray(
+            schema.crmRecordCollaborators.id,
+            plan.collaborators.dropDuplicate,
+          ),
+        ),
+      );
+  }
+  if (plan.collaborators.move.length > 0) {
+    await tx
+      .update(schema.crmRecordCollaborators)
+      .set({ partyId: survivorPartyId })
+      .where(
+        and(
+          eq(schema.crmRecordCollaborators.tenantId, tenantId),
+          inArray(schema.crmRecordCollaborators.id, plan.collaborators.move),
+        ),
+      );
+  }
+
+  /* 6. Mail links */
   await repointMailLinks(tx, tenantId, plan, survivorPartyId, loserPartyId);
 
-  /* 6. CRM's own knowledge */
+  /* 7. CRM's own knowledge */
   if (plan.details.repointLoserDetails) {
     await tx
       .update(schema.crmPartyDetails)
@@ -546,7 +602,7 @@ export async function applyMerge(
     await tx.delete(schema.crmPartyDetails).where(scoped(schema.crmPartyDetails));
   }
 
-  /* 7. The loser identity, last. A missed reference fails HERE, on a foreign
+  /* 8. The loser identity, last. A missed reference fails HERE, on a foreign
      key, and rolls the whole thing back rather than orphaning a row. */
   const removed = await tx
     .delete(schema.parties)

@@ -5,6 +5,7 @@ import {
   matchableName,
   mergeCustomBags,
   planAffiliations,
+  planCollaborators,
   planContactPoints,
   planDetails,
   rankCandidates,
@@ -353,6 +354,41 @@ describe("affiliations", () => {
   });
 });
 
+describe("collaborators", () => {
+  it("MOVES grants rather than letting them lapse", () => {
+    // The bug this exists to prevent: `crm_record_collaborators` cascades on
+    // the party, so a merge that ignored the table would not fail — it would
+    // silently revoke access for everyone named on the losing record, at the
+    // moment the two records became one.
+    const plan = planCollaborators([], [{ id: "g1", clerkUserId: "aoife" }]);
+    expect(plan.move).toEqual(["g1"]);
+    expect(plan.dropDuplicate).toEqual([]);
+  });
+
+  it("keeps the grant somebody already has on the survivor", () => {
+    const plan = planCollaborators(
+      [{ id: "s1", clerkUserId: "aoife" }],
+      [{ id: "l1", clerkUserId: "aoife" }],
+    );
+    expect(plan.dropDuplicate).toEqual(["l1"]);
+    expect(plan.move).toEqual([]);
+  });
+
+  it("does not move the same person twice", () => {
+    // Two grants for one person cannot exist on one record, but they can exist
+    // one apiece — and after the merge that is one record.
+    const plan = planCollaborators(
+      [],
+      [
+        { id: "l1", clerkUserId: "aoife" },
+        { id: "l2", clerkUserId: "aoife" },
+      ],
+    );
+    expect(plan.move).toEqual(["l1"]);
+    expect(plan.dropDuplicate).toEqual(["l2"]);
+  });
+});
+
 describe("the whole plan", () => {
   const counts = {
     deals: 0,
@@ -373,6 +409,7 @@ describe("the whole plan", () => {
       details: null,
       contactPoints: [],
       affiliations: [],
+      collaborators: [],
     },
     loser: {
       customerId: null,
@@ -380,6 +417,7 @@ describe("the whole plan", () => {
       details: null,
       contactPoints: [],
       affiliations: [],
+      collaborators: [],
       counts,
     },
   };

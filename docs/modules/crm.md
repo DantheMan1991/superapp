@@ -14,6 +14,27 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-05 — Slice 10: automation (branch `claude/crm-automation`)
+
+"When this happens, do that." `crm_automation_rules` (`0082`/`0083`), five
+triggers, three actions, and an engine that runs inside the transaction that
+fired it.
+
+- **A rule runs as the person who triggered it**, synchronously, with their
+  role. So it can never do something they could not — and automation needed no
+  permission model at all. Tested: staff triggering a rule against a restricted
+  record applies nothing.
+- **A savepoint per rule.** A broken rule must not roll back somebody's own
+  work, and catching the exception in TypeScript is not enough because Postgres
+  aborts the whole transaction. Tested by breaking a rule on purpose and then
+  writing in the same transaction.
+- **One hop, never a cascade.** Actions write tables directly and never call
+  back into a triggering path, so a loop is unrepresentable rather than merely
+  unlikely.
+- **`parseRule` returns null rather than a degraded rule** — the opposite of
+  `parseFilter`, and the reason is in Decisions.
+- Readable by every member, writable by owners. Nothing sends anything.
+
 ### 2026-08-05 — Saved reports (branch `claude/crm-saved-reports`)
 
 Slice 9's one named gap, closed. `crm_reports` (`0080`/`0081`) — a report can be
@@ -285,6 +306,7 @@ behaviour change.
 | `customers.party_id` | The AR role's link to its party | Nullable → backfilled → `NOT NULL`. Composite FK. `UNIQUE (tenant_id, party_id)`: a party may hold the customer role at most once |
 | `vendors.party_id` | The AP role's link to its party | Same shape. A party that is both customer and vendor holds two role rows, which is correct and is not a duplicate |
 | `party_contact_points` | How to reach a party — **shared, not CRM's**, and since `0075` the ONLY store for an email or a phone | Tenant-scoped and member-writable like `parties`, NOT visibility-bearing. That was argued from "the same address is also on `customers.email`, where staff read it"; the column is gone and the argument is now stronger rather than weaker — it is one row, rendered on the CRM record page AND on the customers page, so a visibility term here would blank the address on the invoicing screen for every staff member. `normalized_value` is written only by `src/lib/parties/contacts.ts` and is what the duplicate check compares. Partial unique gives one primary per party **per kind**; `(tenant, party, kind, normalized)` unique stops the same address twice; `(tenant, kind, normalized)` indexes the duplicate lookup |
+| `crm_automation_rules` | "When this happens, do that" | `trigger` is a COLUMN because the engine's only query is "which rules watch this?"; conditions and the action are jsonb, read once the row is in hand and never queried into. Partial index on `(tenant, trigger) WHERE is_active` — the lookup that runs on every write that could fire one. **Readable by every member, writable by owners**, with the role test in USING as well as WITH CHECK (0067: staff could otherwise DELETE every automation and the business would quietly stop having the ones it thought it had). No `last_run_at`/`run_count`: both would make a busy rule a serialization point, and `audit_log` answers "is it working?" better |
 | `crm_reports` | A saved report: a question somebody wanted to keep asking | **Deliberately the same four policies as `crm_saved_views`** — read that row first, and if you change one table change the other or say why. `definition` is one jsonb column validated by `parseDefinition` on every read, rather than four columns with a fifth state where they disagree. Unique on `(tenant, owner, name)`, so two people may each keep their own "My pipeline" |
 | `crm_saved_views` | A saved list question: filter, sort, and who else can use it | **Not visibility-bearing, and does not need to be** — a view is the QUESTION and the answer is computed in the reader's own transaction, so two people running one shared view correctly get different rows. That is why `is_shared` is a boolean rather than an access list. Read policy is `is_shared OR owner = app_current_user()`; write is the owner alone, with WITH CHECK carrying the same test so a view cannot be created in somebody else's name or reassigned by updating the owner column. A separate `FOR DELETE … USING` lets a tenant owner remove any view, so a leaver's shared views are not permanent. `filter` jsonb is validated by `parseFilter` on **every read**. No `version` column: one editor, so there is no concurrent-edit problem to solve |
 | `crm_view_pins` | Which view a person lands on | Per user in both directions — nobody reads or writes anybody else's. `view_id` is TEXT with **no foreign key** on purpose: it holds either a saved view's uuid or a built-in id like `builtin:mine`, and `resolveView` falls back to the default when it names nothing. That covers a deleted view, a shared view made private, and a built-in a later release retires, with no cleanup job for any of them |
@@ -306,6 +328,7 @@ Contact points: `0072` (table), `0073_party_contacts_rls.sql` (policies),
 `0074_party_contacts_backfill.sql` (values copied off the accounting columns),
 `0075_accounting_contacts_contract.sql` (catch-up backfill, verification, then
 the columns dropped — **apply this one after the deploy**).
+Slice 10: `0082` (the rules table) and `0083_crm_automation_rls.sql` (policies), additive.
 Saved reports: `0080` (the table) and `0081_crm_reports_rls.sql` (policies), additive.
 Slice 8: `0078` (saved views and pins) and `0079_crm_saved_views_rls.sql` (their policies) — both ordinary additive migrations that go ahead of the deploy.
 Slice 6: `0076` (the collaborators table) and `0077_crm_collaborators_rls.sql` (its policies, plus the one change to the details policy that makes a grant mean anything). Slice 7 added **no migration**: merging is code over the tables that already
@@ -324,6 +347,10 @@ this dossier keeps warning about.
 - `src/lib/parties/role-sync.ts` — the "both names exist" bridge while
   `customers.name` and `parties.display_name` are both stored. Temporary by
   design; the header says what has to move before it goes.
+- `src/modules/crm/core/automation.ts` — pure. Triggers, actions and the
+  validator. Its header carries the "runs as the triggering person" argument.
+- `src/modules/crm/automation-ops.ts` — the engine. **Read the savepoint note
+  before touching it**: it executes inside somebody else's transaction.
 - `src/modules/crm/core/reports.ts` — pure. The five report types, each a
   declared join shape, plus the summariser and the built-in reports. Read it
   before adding a sixth type: the other half is `report-ops.ts`.
@@ -440,6 +467,58 @@ useful of the two true answers. Both sources are kept — deleting accounting's
 would leave a tenant who never bought CRM with no suggestions at all, because an
 extension whose module is off contributes nothing. Pinned in
 `tests/mail-contacts.test.ts` so the claim cannot rot again.
+
+**AN AUTOMATION RUNS AS THE PERSON WHO TRIGGERED IT, AND THAT IS WHY IT HAS NO
+PERMISSION MODEL.** Mail's auto-filing is the other shape and the comparison is
+what settled this one: that rides a cron, because the thing it reacts to happens
+in somebody else's system, and a cron has no Clerk session — so it runs as
+`staff` and can never reach an owners-only folder. CRM's triggers are our own
+writes, with a real person, a real role and an open transaction at the moment
+each fires, so the rule simply borrows them. **A staff member's edit cannot
+cause a rule to touch a restricted record**, because the transaction is theirs
+and RLS removed the row before the engine saw it. There is a test asserting
+exactly that. Nothing in `automation-ops.ts` re-implements a permission check,
+because there is nothing left to check.
+
+**A SAVEPOINT PER RULE, AND IT IS NOT OPTIONAL.** The engine runs inside the
+transaction that triggered it, so a failing action would take the person's own
+work with it — and **catching the exception in TypeScript is not enough**, because
+Postgres aborts the whole transaction on any error and the caller's commit then
+fails with "current transaction is aborted". `SAVEPOINT` / `ROLLBACK TO
+SAVEPOINT` is the only construct that lets one statement fail without poisoning
+the rest. Tested by breaking a rule on purpose and then writing in the same
+transaction.
+
+**ONE HOP, NEVER A CASCADE.** An action does not re-trigger rules, so a rule
+that creates a follow-up cannot wake a rule that watches follow-ups. That is
+enforced by where the calls are — the actions write tables directly rather than
+through `createTask` — and not by a depth counter. Two reasons for writing the
+tables directly, and the second would bite immediately: the ops functions
+contain the trigger calls, and routing through them would also make
+`automation-ops` import `timeline-ops` import `party-ops` import
+`automation-ops`. If a future action ever must go through a triggering path, a
+depth counter is the thing to add first. Cascades are what make an automation
+engine fun to demonstrate and impossible to debug.
+
+**`parseRule` RETURNS NULL RATHER THAN A DEGRADED RULE**, which is deliberately
+the opposite of `parseFilter` and `parseDefinition`. A dropped filter condition
+widens a LIST, and somebody sees it. A dropped condition on a RULE widens what
+it does to their data, silently and every time it fires. So a rule that no
+longer entirely makes sense stops running and is shown as needing attention,
+rather than running on a subset of its own instructions.
+
+**NOTHING SENDS ANYTHING.** No email, no notification, no webhook — not an
+oversight but the only defensible position while the module has no notification
+machinery at all. An automation that quietly emailed a customer is the most
+damaging thing a half-built rules engine could do. When notifications exist,
+"notify somebody" becomes a fourth action and this paragraph comes out.
+
+**Rules are readable by every member and writable only by owners**, which is
+wider on the read side than the merge tool or the collaborator grants. A rule
+changes other people's data, so somebody who finds a follow-up they did not
+create is owed the ability to discover which rule made it — a rules engine
+nobody can inspect is indistinguishable from a haunted database. The rows carry
+no data about anybody; a rule is an instruction, not a record.
 
 **A REPORT TYPE IS A JOIN WHITELIST, AND THAT IS THE WHOLE OF SLICE 9'S
 DESIGN.** A report does not choose a table and join outward; it chooses one of
@@ -893,6 +972,24 @@ values stay readable and the discontinuity is visible.
 - **The warning only fires where a contact point is entered**, which is the
   record page. Creating a record from the "Add a record" form does not ask for
   an address, so nothing is checked there.
+- **A rule cannot be edited, only paused or deleted and rebuilt.** Editing means
+  a version question — does a change apply to what already fired? — and pausing
+  covers the urgent case ("make it stop") without answering it.
+- **The rule builder has no condition editor yet.** A rule with no conditions is
+  the one most people want, and the engine, the storage and the validator all
+  support conditions already — only the form does not. The filter UI on the
+  records list is the thing to reuse when somebody asks.
+- **A rule fires per event, and there is no bulk apply.** Adding "when a record
+  is created, add a follow-up" does nothing to the records that already exist.
+  That is the honest default, but the first person to write a rule will expect
+  otherwise, and a "run this over existing records" button is a real want.
+- **`assignee` is a Clerk user id typed into a box**, the same gap the
+  collaborator panel has and for the same reason: no module-readable member
+  roster.
+- **No per-rule failure surface.** A rule that throws is logged to the server
+  console and counted, and the person sees nothing. `audit_log` records the
+  firings that SUCCEED, so a rule that has quietly failed every time looks the
+  same as one that never matched.
 - **Reports have no folders.** `crm_reports` shares the flat, per-report
   `is_shared` boolean that `crm_saved_views` uses, where Salesforce makes the
   FOLDER the sharing unit and files every report into one. Flat is right while a
@@ -1004,5 +1101,5 @@ values stay readable and the discontinuity is visible.
   and is not modelled.
 - **Nothing tells a collaborator they have been granted access**, or removed.
   There are no notifications anywhere in CRM yet, and this inherits that gap.
-- Slices 10 and 11 (automation, AI) are planned and unbuilt. Slices 5, 6 and 7
-  shipped on 2026-08-04; slices 8 and 9 on 2026-08-05.
+- Slice 11 (AI) is planned and unbuilt. Slices 5, 6 and 7 shipped on
+  2026-08-04; slices 8, 9 and 10 on 2026-08-05.

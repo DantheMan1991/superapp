@@ -15,6 +15,7 @@ import {
   PartyError,
 } from "@/lib/parties";
 import { CrmError } from "./core/errors";
+import { runTrigger } from "./automation-ops";
 import {
   mergeCustomValues,
   missingRequired,
@@ -384,6 +385,15 @@ export async function createRecord(
       custom: values,
     })
     .returning();
+
+  // TRIGGER. Runs in this transaction with this caller's role, so a rule can
+  // only touch what they could — see `automation-ops.ts`. It never throws: a
+  // broken rule must not stop somebody adding a record.
+  await runTrigger(
+    tx,
+    { tenantId: ctx.tenantId, userId: ctx.userId, partyId: party.id },
+    "record_created",
+  );
 
   return { party, details };
 }

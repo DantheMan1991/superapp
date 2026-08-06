@@ -120,12 +120,16 @@ export type ActionKind = (typeof ACTION_KINDS)[number];
 /**
  * What a rule does.
  *
- * THREE ACTIONS, ALL OF THEM WRITES THIS MODULE ALREADY MAKES. Every one goes
- * through the same ops function a person's click goes through, so an automated
- * change is indistinguishable from a manual one — same validation, same audit,
- * same RLS. An action that reached around those would be a second write path,
- * and two write paths onto one table is how this codebase's own conventions say
- * last-write-wins bugs get in.
+ * THREE ACTIONS, ALL OF THEM WRITES THIS MODULE ALREADY MAKES — but the engine
+ * writes the TABLES rather than calling the ops functions, and that is worth
+ * being precise about because the obvious reading is the wrong one.
+ *
+ * Going through `createTask` would be tidier in one sense and wrong in two.
+ * Those functions contain the trigger calls, so routing an action through one
+ * would reintroduce exactly the cascade this design forbids — and it would make
+ * `automation-ops` import `timeline-ops`, which imports `party-ops`, which
+ * imports `automation-ops`. The validation those functions apply is applied
+ * here instead, by `actionProblem` before the rule is ever stored.
  *
  * NOTHING HERE SENDS ANYTHING. No email, no notification, no webhook. That is
  * not an oversight: the module has no notification machinery at all, and an

@@ -8,6 +8,7 @@ import type {
   Party,
 } from "@/db/schema";
 import { CrmError } from "./core/errors";
+import { runTrigger } from "./automation-ops";
 import { closedAtFor, openingStage } from "./core/pipeline";
 import {
   mergeCustomValues,
@@ -399,6 +400,21 @@ export async function moveDealStage(
     toStageId: toStage.id,
     changedByClerkUserId: ctx.userId,
   });
+
+  // TRIGGERS, after the history row, so a rule can never fire for a move that
+  // lost a version race. `deal_won` and `deal_lost` are separate triggers as
+  // well as being stage changes, because "when a deal is won" is the rule
+  // somebody actually wants to write and making them filter for it would mean
+  // knowing which stage names count — which is a per-tenant fact the rule
+  // should not have to hard-code.
+  const triggerCtx = {
+    tenantId: ctx.tenantId,
+    userId: ctx.userId,
+    partyId: deal.partyId,
+  };
+  await runTrigger(tx, triggerCtx, "deal_stage_changed");
+  if (toStage.outcome === "won") await runTrigger(tx, triggerCtx, "deal_won");
+  if (toStage.outcome === "lost") await runTrigger(tx, triggerCtx, "deal_lost");
 
   return rows[0];
 }

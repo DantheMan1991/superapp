@@ -4254,6 +4254,67 @@ export const crmSavedViews = pgTable(
 );
 
 /**
+ * "When this happens, do that."
+ *
+ * `trigger` IS A COLUMN AND THE REST IS jsonb, which is the one place this
+ * table's shape differs from `crm_reports` and `crm_saved_views`. The engine's
+ * only query is "which rules watch this trigger?", so that field has to be
+ * indexable; conditions and the action are read once the row is already in
+ * hand and never queried into. The trigger is NOT also stored inside the
+ * jsonb — one fact, one place.
+ *
+ * NO `last_run_at` OR `run_count`, deliberately. Both were drafted and both
+ * would mean every triggered transaction writing to the rule row, which turns a
+ * busy rule into a serialization point for unrelated work. "Is this rule
+ * actually doing anything?" is better answered by `audit_log`, which already
+ * gets a row per firing with the record it touched — strictly more useful than
+ * a counter, and it contends with nothing.
+ *
+ * READABLE BY EVERY MEMBER, WRITABLE BY OWNERS. The write half matches the
+ * merge tool and the collaborator grants: a rule changes everybody's data, so
+ * it is the business's decision. The read half is deliberately wider than those
+ * two, because somebody who finds a follow-up they did not create is owed the
+ * ability to discover which rule made it — a rules engine nobody can inspect is
+ * indistinguishable from a haunted database.
+ */
+export const crmAutomationRules = pgTable(
+  "crm_automation_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** One of `TRIGGERS` in `core/automation.ts`. Indexed; the engine's lookup. */
+    trigger: text("trigger").notNull(),
+    /** `{ conditions, action }`, validated by `parseRule` on every read. */
+    definition: jsonb("definition").notNull().default({}),
+    /**
+     * Off is a first-class state. Somebody debugging "why did this record
+     * change?" needs to be able to stop a rule without deleting it and losing
+     * what it said.
+     */
+    isActive: boolean("is_active").notNull().default(true),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("crm_automation_rules_tenant_id_id_idx").on(t.tenantId, t.id),
+    // The engine's query, and the reason `trigger` is a column: only the ACTIVE
+    // rules for one trigger, on every write that could fire one.
+    index("crm_automation_rules_trigger_idx")
+      .on(t.tenantId, t.trigger)
+      .where(sql`is_active = true`),
+    uniqueIndex("crm_automation_rules_name_idx").on(t.tenantId, t.name),
+  ],
+);
+
+/**
  * A saved report: a question somebody wanted to keep asking.
  *
  * THE SAME SHAPE AS `crm_saved_views` AND FOR THE SAME REASONS — read the note
@@ -4843,6 +4904,7 @@ export type CrmAffiliation = typeof crmAffiliations.$inferSelect;
 export type CrmRecordCollaborator = typeof crmRecordCollaborators.$inferSelect;
 export type CrmSavedView = typeof crmSavedViews.$inferSelect;
 export type CrmReport = typeof crmReports.$inferSelect;
+export type CrmAutomationRule = typeof crmAutomationRules.$inferSelect;
 export type CrmViewPin = typeof crmViewPins.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;

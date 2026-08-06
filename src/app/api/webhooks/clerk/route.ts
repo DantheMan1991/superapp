@@ -90,11 +90,34 @@ export async function POST(req: NextRequest) {
     }
     case "organizationMembership.created":
     case "organizationMembership.updated": {
-      await upsertMembership({
+      const result = await upsertMembership({
         clerkOrgId: data.organization?.id,
         clerkUserId: data.public_user_data?.user_id,
         clerkRole: data.role,
       });
+      /**
+       * Clerk does not guarantee delivery order, so this event can arrive
+       * before the user.created or organization.created that it depends on.
+       * Answering 503 makes svix retry with backoff, by which time the
+       * prerequisite has landed.
+       *
+       * The alternative — 200 and move on — is what this route did before, and
+       * it lost the membership permanently and silently. That is invisible
+       * today (requireTenant reads owner-ness from Clerk, not from this table)
+       * and becomes a person no background job ever acts for the moment
+       * anything reads it. Fail loud where the failure is still recoverable.
+       */
+      if (result.status === "deferred") {
+        await logAudit({
+          action: "membership.sync_deferred",
+          actorLabel: "clerk-webhook",
+          meta: { clerkOrgId: data.organization?.id, missing: result.missing },
+        });
+        return NextResponse.json(
+          { error: "dependency not yet synced", retry: true },
+          { status: 503 },
+        );
+      }
       break;
     }
     case "organizationMembership.deleted": {

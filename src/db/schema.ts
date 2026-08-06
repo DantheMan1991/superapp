@@ -37,6 +37,12 @@ export const tenantStatus = pgEnum("tenant_status", [
  * is a LOCAL overlay set by the tenant owner on the Team page — any writer
  * of memberships.role must preserve an existing "expert" value (see
  * upsertMembership in tenant-sync.ts).
+ *
+ * "owner" is a PRIVILEGED value: background jobs read it to decide whose
+ * behalf they may act on, so tenant context may never write it. RLS enforces
+ * that (drizzle/0085) — a withTenant transaction can only move a row between
+ * staff and expert, and cannot touch an owner row at all. Only withSystem
+ * (the Clerk webhook and membership-sync's reconcile) mints or clears one.
  */
 export const membershipRole = pgEnum("membership_role", [
   "owner",
@@ -111,6 +117,23 @@ export const memberships = pgTable(
       .notNull()
       .references(() => profiles.id, { onDelete: "cascade" }),
     role: membershipRole("role").notNull().default("staff"),
+    /**
+     * When this row's Clerk-derived role was last confirmed against Clerk —
+     * by the membership webhook or by reconcileTenantMemberships().
+     *
+     * Exists because a background job cannot ask Clerk who it is acting as.
+     * Storing the role is not enough: a dropped demotion webhook leaves a row
+     * that says "owner" forever, and a job that trusted it would read
+     * owners-only data on behalf of somebody who no longer has it. This lets a
+     * job require recency and degrade to staff when the row is stale, which
+     * keeps the S6 direction (down, never up).
+     *
+     * Nullable: rows written before this column existed have never been
+     * confirmed, and NULL says exactly that rather than implying a sync.
+     */
+    clerkRoleSyncedAt: timestamp("clerk_role_synced_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

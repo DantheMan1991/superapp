@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { CreateOrganization } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
+import { reconcileTenantMemberships } from "@/lib/membership-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,20 @@ export default async function OnboardingPage() {
     const org = await client.organizations.getOrganization({
       organizationId: orgId,
     });
-    await upsertTenantFromOrg({ id: org.id, name: org.name, slug: org.slug });
+    const tenant = await upsertTenantFromOrg({
+      id: org.id,
+      name: org.name,
+      slug: org.slug,
+    });
+    /**
+     * The roster too, not just the tenant. This page is the documented
+     * idempotent fallback for webhook lag, but it only ever covered the
+     * tenants row — so the founder who just created the org had no membership
+     * of it until a webhook landed or somebody opened the Team page. Nothing
+     * surfaced that, because requireTenant reads their owner-ness from Clerk.
+     * A background job reading this table would simply not have found them.
+     */
+    await reconcileTenantMemberships(tenant);
     redirect("/dashboard");
   }
 

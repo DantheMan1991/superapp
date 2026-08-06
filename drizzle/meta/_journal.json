@@ -589,6 +589,20 @@
       "when": 1785975283874,
       "tag": "0083_crm_automation_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1785980723691,
+      "tag": "0084_blue_inhumans",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1785980751229,
+      "tag": "0085_memberships_owner_role_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -39,6 +39,8 @@ export type CrmErrorCode =
   | "REPORT_NAME_REQUIRED"
   | "REPORT_NAME_TAKEN"
   | "REPORT_NOT_YOURS"
+  | "RULE_NAME_REQUIRED"
+  | "RULE_NAME_TAKEN"
   | "FORBIDDEN"
   | "FORBIDDEN_EXPERT";
 
@@ -128,6 +130,10 @@ export function friendlyMessage(err: unknown): string {
       // Not "not found": they are looking at it in the picker, so saying it
       // does not exist would be the one answer they know to be false.
       return "Only the person who made a view can change it.";
+    case "RULE_NAME_REQUIRED":
+      return "Give the rule a name.";
+    case "RULE_NAME_TAKEN":
+      return "A rule with that name already exists.";
     case "REPORT_NAME_REQUIRED":
       return "Give the report a name.";
     case "REPORT_NAME_TAKEN":

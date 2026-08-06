@@ -575,6 +575,20 @@
       "when": 1785945909007,
       "tag": "0081_crm_reports_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1785975282874,
+      "tag": "0082_crm_automation",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1785975283874,
+      "tag": "0083_crm_automation_rls",
+      "breakpoints": true
     }
   ]
 }

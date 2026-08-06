@@ -3,6 +3,7 @@ import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { CrmActivity, CrmActivityKind, CrmTask } from "@/db/schema";
 import { CrmError } from "./core/errors";
+import { runTrigger } from "./automation-ops";
 import {
   activityToTimeline,
   mergeTimeline,
@@ -342,6 +343,18 @@ export async function setTaskComplete(
   if (rows.length === 0) {
     throw new CrmError("STALE_VERSION", "task changed since loaded");
   }
+
+  // TRIGGER, on completion only — reopening a follow-up is a correction, and
+  // firing rules on it would punish somebody for fixing a mistake. An
+  // unattached task has no record for a rule to act on, so it fires nothing.
+  if (args.complete && rows[0].partyId) {
+    await runTrigger(
+      tx,
+      { tenantId: ctx.tenantId, userId: ctx.userId, partyId: rows[0].partyId },
+      "task_completed",
+    );
+  }
+
   return rows[0];
 }
 

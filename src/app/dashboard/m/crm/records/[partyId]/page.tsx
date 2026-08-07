@@ -5,6 +5,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { formatCents } from "@/lib/money";
+import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -63,6 +64,9 @@ export default async function RecordPage({
       timeline: await loadTimeline(tx, ctx.tenant.id, partyId),
       activities: await listActivitiesForParty(tx, ctx.tenant.id, partyId),
       tasks: await listTasksForParty(tx, ctx.tenant.id, partyId),
+      // In the caller's own transaction, so the picker can only ever offer
+      // people this person could already find.
+      members: await listAssignableMembers(tx, ctx.tenant.id),
     }),
     { role: ctx.role, userId: ctx.userId },
   ).catch((err) => {
@@ -197,7 +201,14 @@ export default async function RecordPage({
               </div>
               <div className="flex items-center gap-2">
                 <LogActivityButton partyId={party.id} />
-                <AddTaskButton partyId={party.id} />
+                <AddTaskButton
+                  partyId={party.id}
+                  members={record.members.map((m) => ({
+                    clerkUserId: m.clerkUserId,
+                    label: memberLabel(m),
+                  }))}
+                  currentUserId={ctx.userId}
+                />
               </div>
             </div>
 

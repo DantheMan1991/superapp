@@ -4,6 +4,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone } from "@/lib/timezone";
+import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { groupTasks, type DueBucket } from "@/modules/crm/core/timeline";
@@ -55,6 +56,9 @@ export default async function TasksPage() {
         open,
         done,
         partyNames: await resolveTaskParties(tx, ctx.tenant.id, [...open, ...done]),
+        // In the caller's own transaction, so the picker can only ever offer
+        // people this person could already find.
+        members: await listAssignableMembers(tx, ctx.tenant.id),
       };
     },
     { role: ctx.role, userId: ctx.userId },
@@ -83,7 +87,14 @@ export default async function TasksPage() {
           </p>
         </div>
         {/* No party: a standalone follow-up is a first-class thing here. */}
-        <AddTaskButton label="Add a follow-up" />
+        <AddTaskButton
+          label="Add a follow-up"
+          members={data.members.map((m) => ({
+            clerkUserId: m.clerkUserId,
+            label: memberLabel(m),
+          }))}
+          currentUserId={ctx.userId}
+        />
       </div>
 
       {data.open.length === 0 ? (

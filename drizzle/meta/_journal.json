@@ -617,6 +617,13 @@
       "when": 1786059121025,
       "tag": "0087_backfill_tenant_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1786068062659,
+      "tag": "0088_naive_wallop",
+      "breakpoints": true
     }
   ]
 }

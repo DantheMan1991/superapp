@@ -11,6 +11,23 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-06 — Drop the deprecated accounting column (`claude/drop-bookkeeping-timezone`)
+
+The contract half of the change below. `accounting_settings.bookkeeping_timezone`
+is gone (`0088`); `tenants.timezone` is the only clock in the system.
+
+- **`0088` must be applied AFTER the deploy** — the second migration in the
+  repo to invert the standing order, after `0075`. Nothing read the column's
+  *value* any more, but Drizzle expands `tx.query.accountingSettings
+  .findFirst()` into an explicit column list built from `schema.ts`, so any
+  deployment whose schema still declares it SELECTs it. Dropping while that
+  build serves 500s `getSettings` and every accounting page with it.
+- It carries the value up one last time before dropping, but **narrowly**: only
+  where the tenant is still on the untouched default. An unconditional re-run
+  of `0087`'s backfill would overwrite a timezone an owner had since chosen at
+  `/dashboard/settings` with one from a column that was never editable.
+- Matches zero rows on the database it was written against, by construction.
+
 ### 2026-08-05 — Promote the timezone to a platform setting (`claude/tenant-timezone`)
 
 Prerequisite 2 of notifications: a digest sent "daily at 7am" needs to know
@@ -51,7 +68,7 @@ carried a comment saying exactly that while it waited for a shared setting.
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `tenants.timezone` | The business's clock. IANA zone name | NOT NULL, default `America/New_York`. **SELECT-only for tenant context** — `tenants` has no member UPDATE policy and must not gain one (see Decisions). Written by `setTenantTimezoneAction` under `withSystem` after `requireTenantOwner` |
-| `accounting_settings.bookkeeping_timezone` | **DEPRECATED** — superseded above | Unread as of this release. Kept one release so the previous deployment's accounting pages, which SELECT it, keep working. A follow-up migration drops it. Do not add readers |
+| ~~`accounting_settings.bookkeeping_timezone`~~ | **DROPPED** (`0088`) | Existed `0007`–`0088`. Superseded by `tenants.timezone`. There is now exactly one clock in the system |
 
 ## Key files & seams
 
@@ -117,8 +134,6 @@ against a live deployment.
 
 ## Open items
 
-- **Drop `accounting_settings.bookkeeping_timezone`.** The contract half of this
-  change. Safe once this release is live and confirmed.
 - **The CRM per-row due badge is still computed in the browser**, so it uses the
   viewer's clock while the grouping uses the business's. Someone working away
   from the business's timezone can see a row badged differently from the group

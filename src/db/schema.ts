@@ -1079,15 +1079,8 @@ export const accountingSettings = pgTable(
     entryEditPolicy: entryEditPolicy("entry_edit_policy")
       .notNull()
       .default("standard"),
-    /**
-     * DEPRECATED — superseded by `tenants.timezone`. No longer read anywhere;
-     * kept for one release because dropping it while the previous deployment
-     * is still serving would break every accounting page that selects it.
-     * The follow-up migration drops it. Do not add readers.
-     */
-    bookkeepingTimezone: text("bookkeeping_timezone")
-      .notNull()
-      .default("America/New_York"),
+    // `bookkeeping_timezone` lived here from 0007 until 0088. The business
+    // day is `tenants.timezone` now — one clock, readable by every module.
     /** AI-suggestion cooldown marker (30s between batches per tenant). */
     aiLastSuggestedAt: timestamp("ai_last_suggested_at", { withTimezone: true }),
     /**

@@ -400,9 +400,17 @@ Eight migrations, two of which rewrite RLS policies (`0043`, `0048`). They are
 applied to the dev branch and the isolation suite passes against it;
 `docs/security.md` §8 requires both.
 
-**`vercel.json` asks for `*/10 * * * *`. Vercel's Hobby plan runs cron once per
-day.** On Hobby the job silently will not run at the stated frequency. Confirm
-the tier or widen the schedule — the tab poller still keeps an open mail tab
+**`vercel.json` asks for `*/10 * * * *`, and the plan now allows it.** This
+used to read "confirm the tier": Hobby runs cron once per day, so the job
+silently did not run at the stated frequency. The founder confirmed on
+2026-08-06 that the account is off Hobby, so the configured schedule is the
+real one.
+
+**Worth verifying once against actual invocation logs rather than assuming.**
+If the job really was running daily before, then mail sync, snooze wakes,
+scheduled sends and auto-filing were all landing up to 24 hours late and are
+now ~144× more frequent — a real change in load on Stalwart and on the
+database, arriving without any deploy. The tab poller keeps an open mail tab
 fresh either way, so the cron is what serves everyone *else*.
 
 ---

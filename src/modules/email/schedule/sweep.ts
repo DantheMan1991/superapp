@@ -9,9 +9,10 @@ import { releaseHeldMessage } from "../compose/send";
  * Send the messages whose time has come.
  *
  * Rides the existing mail-sync cron rather than getting one of its own, the same
- * arrangement `wakeDueSnoozes` has and for the same reason: Vercel's Hobby plan
- * runs each cron ONCE A DAY, so a second job would not make anything more
- * punctual — it would only add another thing that runs at an unknown hour.
+ * arrangement `wakeDueSnoozes` has. The reason has expired: Hobby ran each cron
+ * ONCE A DAY, so a second job could not have made anything more punctual. Off
+ * Hobby (confirmed 2026-08-06) it could — see the note in the cron route for
+ * why the split waits for the digest rather than happening piecemeal.
  *
  * **THE ORDERING IS THE OPPOSITE OF THE SNOOZE SWEEP'S, and deliberately so.**
  * Snooze deletes its row only after the move is confirmed, because waking twice

@@ -12,6 +12,45 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-07 — First live run: the machinery worked, the provider refused
+
+The digest cron fired for the first time at **07:00 America/New_York** (11:00
+UTC), hours after slice 2 deployed. Recording it because the outcome splits
+cleanly in two, and only one half is a problem.
+
+**What worked, on the first attempt, unprompted.** The cron authorized against
+`CRON_SECRET`, enumerated tenants, matched `localHourInTimezone` to the send
+hour, reconciled both rosters against Clerk, built two digests, and claimed both
+rows in `notification_digest_log`. Every piece of this session's work ran in
+production without a nudge.
+
+**What failed: the send, at the provider.**
+
+```
+The mail.yosherapp.com domain is not verified.
+Please, add and verify your domain on https://resend.com/domains
+```
+
+**This is a known, deliberate gap, not a defect** — `email.md` §Sending has
+recorded since 2026-07-25 that nothing sends yet because Resend's free tier
+allows one domain and it is spent on `in.yosherapp.com` for inbound.
+`EMAIL_FROM_DOMAIN` is already set correctly, `mail.yosherapp.com` is reserved
+for exactly this in the mail-server runbook, and **verifying the domain is the
+only step — no code or config change.**
+
+`outbound_emails` contained exactly two rows at that point, both these digests:
+the digest is simply the first feature in the product to attempt an outbound
+send, so it is the first to meet a wall that was always there.
+
+Two observations worth keeping:
+
+- **Both digests were empty** (0 items), so nothing of substance was lost — they
+  would have been the "nothing needs you today" all-clear.
+- **A 7am failure costs the whole day**, and that is inherent to a once-daily
+  send rather than to claiming the log row first. The cron only sends when the
+  local hour matches, so there is no second attempt before tomorrow. Claim-then-
+  send loses nothing here; see the note below.
+
 ### 2026-08-07 — Slice 2: the morning email (branch `claude/digest-email`)
 
 The digest itself. One cron for every timezone, an email that leads with what
@@ -169,14 +208,25 @@ failure prerequisite 1 exists to prevent, and the safe direction is silence.
 
 ## Open items
 
-- **NOBODY HAS RECEIVED ONE YET.** The whole path is tested but no real digest
-  has been sent to a real person, and `EMAIL_DEV_REDIRECT` means nothing leaves
-  outside production regardless. The first live 7am is the actual test: whether
-  the items read as *yours*, whether the delta sentence is true, whether the
-  subject survives a lock screen.
-- **`CRON_SECRET` must be set** or the route fails closed and returns 404 —
-  deliberately, but it means a missing secret looks exactly like a missing
-  route. Check it before concluding the cron is broken.
+- **BLOCKED ON ONE THING: `mail.yosherapp.com` is not verified in Resend.**
+  Every digest will fail at the provider until it is, and it needs a paid plan
+  because the free tier's single domain is spent on inbound. **This is a
+  billing decision, not an engineering task** — the day the domain is verified,
+  digests start arriving with no code or config change. Do not debug this as if
+  it were broken; see the 2026-08-07 build-log entry.
+- **NOBODY HAS RECEIVED ONE YET**, and will not until the above is resolved. So
+  the questions that actually matter are still unanswered: do the items read as
+  *yours*, is the delta sentence true, does the subject survive a lock screen?
+  Everything below the send is proven; nothing above it is.
+- **No retry within the day.** A send that fails at 7am is not reattempted until
+  7am tomorrow, because the cron only acts when the local hour matches. Widening
+  that to a window ("7–9, if not yet logged") is the obvious fix and has not
+  been done — it trades a missed day for the risk of sending at an odd hour.
+- `CRON_SECRET` **is** set in Vercel and the route authorizes. Noted because it
+  was wrongly assumed missing: the route returns 404 when the secret is absent,
+  which is indistinguishable from the route not existing, so the absence of
+  evidence looked like evidence. Check `outbound_emails` and
+  `notification_digest_log` for proof of a run before concluding anything.
 - **The cron-vs-queue question is deferred, not answered.** A dedicated cron is
   right for the digest. It stops being enough when the agent runs land —
   minutes long, resumable — and that is the moment to build a queue, with two

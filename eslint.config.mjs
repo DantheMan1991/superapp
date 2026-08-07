@@ -93,6 +93,22 @@ function pathsToModule(slug) {
 /** The module that DECLARES the mail extension point, and therefore runs it. */
 const EXTENSION_HOST = "email";
 
+/**
+ * The attention-source contract gets the same treatment, with one asymmetry
+ * worth naming: it has NO module exemption.
+ *
+ * Mail's host is a module (`src/modules/email/`), so that one directory has to
+ * be allowed to reach the registry it runs. Attention sources are run by the
+ * notifications digest, which is platform-level code in `src/lib/` and
+ * `src/app/` — no module declares this slot, so no module needs to import the
+ * wiring. Every module here is a filler, and a filler that knew about the other
+ * fillers would not be one.
+ */
+const ATTENTION_REGISTRY_MESSAGE =
+  "A module may import only src/lib/attention-sources/types. The registry and resolver are " +
+  "platform wiring — importing either pulls in every other module's source and defeats the " +
+  "isolation rule by one level of indirection.";
+
 const moduleIsolation = MODULE_SLUGS.map((slug) => ({
   files: [`src/modules/${slug}/**/*.{ts,tsx}`],
   rules: {
@@ -115,6 +131,14 @@ const moduleIsolation = MODULE_SLUGS.map((slug) => ({
                   message: REGISTRY_MESSAGE,
                 },
               ]),
+          // No host exemption — see ATTENTION_REGISTRY_MESSAGE above.
+          {
+            group: [
+              "@/lib/attention-sources/registry",
+              "@/lib/attention-sources/resolve",
+            ],
+            message: ATTENTION_REGISTRY_MESSAGE,
+          },
         ],
       },
     ],
@@ -131,6 +155,8 @@ const eslintConfig = defineConfig([
     files: [
       "src/lib/mail-extensions/types.ts",
       "src/lib/mail-extensions/resolve.ts",
+      "src/lib/attention-sources/types.ts",
+      "src/lib/attention-sources/resolve.ts",
     ],
     rules: {
       "no-restricted-imports": [
@@ -140,7 +166,7 @@ const eslintConfig = defineConfig([
             {
               group: ["@/modules/*", "@/modules/**"],
               message:
-                "Only src/lib/mail-extensions/registry.ts may import modules. The contract must not " +
+                "Only the registry.ts beside this file may import modules. The contract must not " +
                 "depend on an implementation of itself.",
             },
           ],

@@ -24,6 +24,10 @@ export default async function DashboardLayout({
 
   const navItems: NavItem[] = [
     { href: "/dashboard", label: "Overview", icon: "dashboard", exact: true },
+    // Everyone, not owners only: the whole premise is that each person sees
+    // their own work. It sits directly under Overview because it is the page
+    // the morning email links to.
+    { href: "/dashboard/today", label: "What needs you", icon: "checks" },
     // Only modules that are both switched on AND implemented appear in nav.
     ...active
       .filter(({ module }) => moduleRegistry[module.id])

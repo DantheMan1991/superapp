@@ -12,6 +12,7 @@ import {
   CreditCard,
   FolderOpen,
   LayoutDashboard,
+  ListChecks,
   Mail,
   Menu,
   ScrollText,
@@ -39,6 +40,7 @@ const ICONS: Record<string, LucideIcon> = {
   clock: Clock,
   folder: FolderOpen,
   mail: Mail,
+  checks: ListChecks,
 };
 
 export interface NavItem {

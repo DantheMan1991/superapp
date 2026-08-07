@@ -37,7 +37,7 @@ export default async function BankingPage() {
       orderBy: (b, { asc }) => [asc(b.createdAt)],
     });
     const settings = await getSettings(tx, tenantId);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(ctx.tenant.timezone);
     const balances =
       bankAccounts.length > 0
         ? await getBalances(tx, tenantId, {

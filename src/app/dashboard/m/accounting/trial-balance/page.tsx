@@ -36,7 +36,7 @@ export default async function TrialBalancePage({
 
   const { tb, asOf, settings } = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
     const tb = await getTrialBalance(tx, ctx.tenant.id, asOf);
     return { tb, asOf, settings };

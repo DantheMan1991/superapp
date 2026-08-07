@@ -34,7 +34,7 @@ export default async function CashActivityPage({
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(ctx.tenant.timezone);
     const fallback = presetRange("this-month", today, settings.fiscalYearStartMonth);
     const from = sp.from && isValidIsoDate(sp.from) ? sp.from : fallback.from;
     const to = sp.to && isValidIsoDate(sp.to) ? sp.to : fallback.to;

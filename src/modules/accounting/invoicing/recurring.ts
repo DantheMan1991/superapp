@@ -3,9 +3,10 @@ import { and, asc, eq, inArray, lte } from "drizzle-orm";
 import { z } from "zod";
 import { schema, withTenant, type Tx } from "@/db";
 import type { RecurringInvoice } from "@/db/schema";
-import { LedgerError, getSettings, requireOwnerRole, type LedgerCtx } from "../core";
+import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { addDaysIso } from "../lib/dates";
 import { todayInTimezone } from "../lib/money";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { invoiceLineSchema, type InvoiceLineInput } from "./lines";
 import { createInvoiceDraft } from "./invoices";
 
@@ -205,8 +206,7 @@ export async function generateRecurringInvoices(
 ): Promise<GenerationResult> {
   requireOwnerRole(ctx);
   const { due, today } = await withTenant(ctx.tenantId, async (tx) => {
-    const settings = await getSettings(tx, ctx.tenantId);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(await getTenantTimezone(tx, ctx.tenantId));
     const due = await tx.query.recurringInvoices.findMany({
       where: and(
         eq(schema.recurringInvoices.tenantId, ctx.tenantId),

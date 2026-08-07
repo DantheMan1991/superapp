@@ -47,7 +47,7 @@ export default async function BankRegisterPage({
     });
     if (!bankAccount) return null;
     const settings = await getSettings(tx, tenantId);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(ctx.tenant.timezone);
     const [balance] = await getBalances(tx, tenantId, {
       asOf: today,
       accountIds: [bankAccount.accountId],

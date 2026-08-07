@@ -116,6 +116,57 @@ d("tenant isolation (RLS)", () => {
     expect(rows.map((r) => r.id)).toEqual([tenantA]);
   });
 
+  it("tenant context can READ its own timezone", async () => {
+    // Every page reads ctx.tenant.timezone to answer "what day is it", so a
+    // policy that hid it would break the whole product.
+    const rows = await withTenant(tenantA, (tx) =>
+      tx
+        .select({ timezone: schema.tenants.timezone })
+        .from(schema.tenants)
+        .where(eq(schema.tenants.id, tenantA)),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].timezone).toBeTruthy();
+  });
+
+  it("tenant context cannot WRITE the tenants table, timezone included", async () => {
+    /**
+     * `tenants` is SELECT-only for members (0001) and must stay that way: RLS
+     * is row-level, not column-level, so any member UPDATE policy permissive
+     * enough to allow a timezone change would also expose `status` — letting a
+     * tenant flip itself to `active` and skip billing — and `clerk_org_id`.
+     *
+     * This is why setTenantTimezoneAction goes through withSystem after
+     * requireTenantOwner rather than through withTenant. If someone ever adds
+     * a member UPDATE policy here, this test is what should stop them.
+     */
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.tenants)
+        .set({ timezone: "Pacific/Honolulu" })
+        .where(eq(schema.tenants.id, tenantA))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+
+    const statusAttempt = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.tenants)
+        .set({ status: "active" })
+        .where(eq(schema.tenants.id, tenantA))
+        .returning(),
+    );
+    expect(statusAttempt).toHaveLength(0);
+
+    const after = await withSystem((tx) =>
+      tx
+        .select({ timezone: schema.tenants.timezone })
+        .from(schema.tenants)
+        .where(eq(schema.tenants.id, tenantA)),
+    );
+    expect(after[0].timezone).not.toBe("Pacific/Honolulu");
+  });
+
   it("tenant A cannot INSERT rows attributed to tenant B", async () => {
     await expect(
       withTenant(tenantA, (tx) =>

@@ -2,6 +2,7 @@ import "server-only";
 import { asc, eq, isNotNull, and } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { logAuditInTx } from "@/lib/audit";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError, type LedgerCtx } from "../core";
 import { getSettings } from "../core/guards";
 import { getTrialBalance } from "../core/balances";
@@ -80,6 +81,7 @@ export async function gatherBooksExport(
       where: eq(schema.lineDimensions.tenantId, tid),
     }),
     settings,
+    timezone: await getTenantTimezone(tx, tid),
     periodCloses: await tx.query.periodCloses.findMany({
       where: eq(schema.periodCloses.tenantId, tid),
       orderBy: asc(schema.periodCloses.periodEnd),

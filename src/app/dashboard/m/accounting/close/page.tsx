@@ -65,7 +65,7 @@ export default async function ClosePage({
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(ctx.tenant.timezone);
     const options = periodOptions(settings.closedThrough, today);
     const defaultEnd =
       options.find((o) => o >= lastCompleteMonthEndIso(today)) ??

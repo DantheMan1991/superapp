@@ -26,7 +26,7 @@ export default async function ApAgingPage({
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
     const report = await getApAging(tx, ctx.tenant.id, asOf);
     return { settings, today, asOf, report };

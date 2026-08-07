@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { DimensionMember, JournalEntry, JournalLine } from "@/db/schema";
 import { MAX_AMOUNT_CENTS, isValidIsoDate, todayInTimezone } from "../lib/money";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError } from "./errors";
 import { assertPeriodOpen, getSettings, requireOwnerRole } from "./guards";
 import type { EntryLineInput, LedgerCtx, NewEntryInput, PostResult } from "./types";
@@ -520,7 +521,8 @@ export async function reverseEntry(
   }
   const settings = await getSettings(tx, ctx.tenantId);
   const reversalDate =
-    args.entryDate ?? todayInTimezone(settings.bookkeepingTimezone);
+    args.entryDate ??
+    todayInTimezone(await getTenantTimezone(tx, ctx.tenantId));
 
   const lines = await tx
     .select()

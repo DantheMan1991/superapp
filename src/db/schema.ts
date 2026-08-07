@@ -73,6 +73,21 @@ export const tenants = pgTable(
     status: tenantStatus("status").notNull().default("onboarding"),
     contactName: text("contact_name"),
     contactEmail: text("contact_email"),
+    /**
+     * The business's clock. IANA zone name — the single answer to "what day is
+     * it here", for every module and for code running with no request behind it.
+     *
+     * Platform-level rather than per-module because "is this overdue" is one
+     * question with one answer: an invoice due today and a task due today must
+     * agree, and a digest that says 4 things are due cannot disagree with the
+     * page that says 3. Accounting held the only timezone in the system
+     * (`accounting_settings.bookkeeping_timezone`) and CRM could not read it
+     * without importing another module's table — see docs/modules/timezone.md.
+     *
+     * Per-USER timezones are deliberately not a thing. A person's preferred
+     * send time is separable from what day the business is having.
+     */
+    timezone: text("timezone").notNull().default("America/New_York"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1064,7 +1079,12 @@ export const accountingSettings = pgTable(
     entryEditPolicy: entryEditPolicy("entry_edit_policy")
       .notNull()
       .default("standard"),
-    /** Defines "today" and period cutoffs — the server TZ never decides. */
+    /**
+     * DEPRECATED — superseded by `tenants.timezone`. No longer read anywhere;
+     * kept for one release because dropping it while the previous deployment
+     * is still serving would break every accounting page that selects it.
+     * The follow-up migration drops it. Do not add readers.
+     */
     bookkeepingTimezone: text("bookkeeping_timezone")
       .notNull()
       .default("America/New_York"),

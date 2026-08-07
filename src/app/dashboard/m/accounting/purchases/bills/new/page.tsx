@@ -34,7 +34,7 @@ export default async function NewBillPage() {
     const registerIds = new Set(registers.map((r) => r.accountId));
     return {
       vendors,
-      today: todayInTimezone(settings.bookkeepingTimezone),
+      today: todayInTimezone(ctx.tenant.timezone),
       accounts: accounts.filter(
         (a) =>
           !registerIds.has(a.id) &&

@@ -117,7 +117,7 @@ export default async function BillDetailPage({
       registers,
       vendors,
       duplicates,
-      today: todayInTimezone(settings.bookkeepingTimezone),
+      today: todayInTimezone(ctx.tenant.timezone),
     };
   });
   if (!data) notFound();

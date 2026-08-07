@@ -54,7 +54,7 @@ export default async function InvoicesPage({
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(ctx.tenant.timezone);
     const invoices = await tx
       .select({
         id: schema.invoices.id,

@@ -30,7 +30,7 @@ export default async function NewEntryPage() {
       )
       .orderBy(asc(schema.accounts.code));
     const settings = await getSettings(tx, ctx.tenant.id);
-    return { accounts, today: todayInTimezone(settings.bookkeepingTimezone) };
+    return { accounts, today: todayInTimezone(ctx.tenant.timezone) };
   });
 
   return (

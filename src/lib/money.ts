@@ -68,15 +68,13 @@ export function centsToCsvAmount(cents: number): string {
   return `${sign}${whole}.${frac}`;
 }
 
-/** Today's ISO date (yyyy-mm-dd) in the tenant's bookkeeping timezone. */
-export function todayInTimezone(timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
+/**
+ * Re-exported from lib/timezone, which is now the single home for "what day
+ * is it" across the platform. Kept here because ~20 accounting call sites
+ * import it from the money module, and a date helper living in `money` was
+ * always an accident of where it was first needed.
+ */
+export { todayInTimezone } from "./timezone";
 
 /** True if s is a real calendar date in yyyy-mm-dd form (rejects 2026-02-31). */
 export function isValidIsoDate(s: string): boolean {

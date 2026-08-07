@@ -14,6 +14,12 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-07 — Follow-ups get an assignee (branch `claude/crm-task-assignee`)
+- The dialog now asks **who is doing it**, defaulting to the person adding it, with "Nobody yet" available for work that genuinely has no owner
+- **Backend needed no changes at all** — `assignee_clerk_user_id`, `createTask`, the Zod schema and the digest's per-person scoping all already handled it. The only missing piece was a UI that set the value, which is exactly the kind of gap a dossier open-item hides in plain sight
+- Found by taking the app for a spin rather than by reading code: a follow-up added through the dialog landed in the digest's "not assigned to anyone" section, because every follow-up did. See the open item this closes
+- `listAssignableMembers` (`src/lib/team.ts`) takes the caller's `tx`, so the picker can only offer people the caller could already see. **Experts are excluded** — the outside accountant is refused by every CRM action, so assigning them work would create an obligation they are barred from discharging
+
 ### 2026-08-05 — Follow-ups group against the business's today (branch `claude/tenant-timezone`)
 - The Follow-ups page and CRM automation both stop using the server's clock. `tenants.timezone` (`0086`) is the platform-level setting the old comment in `tasks/page.tsx` said it was waiting for — see [timezone.md](timezone.md)
 - Automation's "due in N days" now counts from the tenant's today. A rule firing at 9pm in Denver used to date its follow-up from tomorrow's UTC date and land a day early
@@ -1094,10 +1100,14 @@ values stay readable and the discontinuity is visible.
   meeting with three people from the same company is currently three entries or
   one filed against the company. Multi-attendee activity is a real want with no
   UI demand yet.
-- **Tasks have no assignee picker** — the column exists and the ops honour it,
-  but nothing sets it, so everything is unassigned.
-- **No reminders or notifications.** An overdue follow-up is visible only to
-  somebody who opens the page.
+- ~~**Tasks have no assignee picker**~~ — **fixed 2026-08-07.** This one turned
+  out to be load-bearing: with nothing setting an assignee, every follow-up was
+  unassigned, so the notifications digest — built on "each person sees their own
+  work" — could only ever reach owners, via its unassigned roll-up. A staff
+  member's digest was empty by construction. See [notifications.md](notifications.md).
+- ~~**No reminders or notifications.**~~ — **fixed 2026-08-06.** Follow-ups due
+  or overdue now reach their assignee in the daily digest, and appear on
+  `/dashboard/today`. See [notifications.md](notifications.md).
 - **Adding a collaborator means typing a Clerk user id.** CRM has no roster of
   the tenant's members to pick from — Clerk holds it and nothing in this module
   reads it — so the panel takes an id and shows ids. A picker is the obvious

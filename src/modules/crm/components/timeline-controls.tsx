@@ -181,21 +181,44 @@ export function LogActivityButton({
   );
 }
 
-/** Add a follow-up. `partyId` null is a standalone task — see the RLS note. */
+/** The picker's value for "nobody yet" — empty string, since Select needs one. */
+const UNASSIGNED = "__unassigned__";
+
+/**
+ * Add a follow-up. `partyId` null is a standalone task — see the RLS note.
+ *
+ * `members` and `currentUserId` came from the server so the picker cannot
+ * reveal anybody the caller could not already see: the query behind them runs
+ * in the caller's own tenant transaction.
+ *
+ * THE DEFAULT IS YOU, and that is the fix rather than an incidental choice.
+ * The column, the ops and the digest's per-person scoping all existed already
+ * — what did not exist was any UI that set an assignee, so every follow-up in
+ * the product was unassigned, and a digest built on "each person sees their own
+ * work" had nothing to give anybody but the owner. Defaulting to the person
+ * adding it makes the common case correct without a decision; "Nobody yet"
+ * stays available for work that genuinely has no owner, which is what the
+ * digest's unassigned roll-up is for.
+ */
 export function AddTaskButton({
   partyId,
   dealId,
   label,
+  members = [],
+  currentUserId,
 }: {
   partyId?: string | null;
   dealId?: string | null;
   label?: string;
+  members?: Array<{ clerkUserId: string; label: string }>;
+  currentUserId?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [dueOn, setDueOn] = useState("");
+  const [assignee, setAssignee] = useState<string>(currentUserId ?? UNASSIGNED);
   const [pending, startTransition] = useTransition();
 
   function submit() {
@@ -210,6 +233,7 @@ export function AddTaskButton({
         title: title.trim(),
         notes,
         dueOn: dueOn || null,
+        assigneeClerkUserId: assignee === UNASSIGNED ? null : assignee,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -220,6 +244,7 @@ export function AddTaskButton({
       setTitle("");
       setNotes("");
       setDueOn("");
+      setAssignee(currentUserId ?? UNASSIGNED);
       router.refresh();
     });
   }
@@ -251,6 +276,27 @@ export function AddTaskButton({
                 placeholder="Send the revised figures"
               />
             </div>
+            {members.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="crm-task-assignee">Who is doing it</Label>
+                <Select value={assignee} onValueChange={setAssignee}>
+                  <SelectTrigger id="crm-task-assignee" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {members.map((m) => (
+                      <SelectItem key={m.clerkUserId} value={m.clerkUserId}>
+                        {m.clerkUserId === currentUserId ? `${m.label} (you)` : m.label}
+                      </SelectItem>
+                    ))}
+                    {/* Last, not first: an owner is the exception, not the
+                        default. Work with nobody's name on it is what the
+                        digest rolls up to the owner separately. */}
+                    <SelectItem value={UNASSIGNED}>Nobody yet</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="crm-task-due">By when (optional)</Label>
               <Input

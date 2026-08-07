@@ -121,6 +121,17 @@ Owners get it, in a separate section, because "you owe this" and "nobody owes
 this yet" are different asks. Staff do not (an instruction nobody gave them);
 experts do not (the accountant role can never write).
 
+**A digest is only as good as the assignment data underneath it, and there
+wasn't any.** Slices 1 and 2 shipped a per-person digest into a product where
+nothing set a task's assignee — the CRM dialog had no picker, so every
+follow-up was unassigned and reached owners through the unassigned roll-up
+alone. **A staff member's digest was empty by construction**, and no test could
+have caught it: every layer was correct, the data simply never exercised the
+path. It surfaced the first time somebody added a follow-up in the real app and
+watched where it landed. Fixed 2026-08-07 (see [crm.md](crm.md)); the lesson is
+that "each person sees their own work" is a claim about the DATA, and worth
+checking against real records before building the delivery mechanism on top.
+
 **Accounting reaches owners only, and that is a real limitation.** Invoices and
 bills have no assignee column, so there is no per-record answer to "whose job is
 this". Role is the only honest scope available. The consequence is that a staff

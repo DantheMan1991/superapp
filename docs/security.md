@@ -64,7 +64,7 @@ Four transaction-local settings, read by every policy
 | --- | --- | --- |
 | `app.role` | `superadmin` \| `member` | God view, or scoped to one tenant |
 | `app.tenant_id` | uuid | Which tenant, when `member` |
-| `app.tenant_role` | `owner` \| `staff` \| `expert` | Lets a policy separate owners from staff |
+| `app.tenant_role` | `owner` \| `staff` \| `expert` | Lets a policy separate owners from staff. For a request this comes from Clerk; for a background job it comes from `memberships.role`, which is why that column is `withSystem`-write-only (S6) |
 | `app.clerk_user_id` | Clerk user id | Lets a policy scope rows to **one person** inside a tenant |
 
 Set only by `withTenant()` / `withSystem()` in [src/db/index.ts](../src/db/index.ts),
@@ -135,6 +135,25 @@ into a typed shape; never index into unvalidated input.
 **S6 — Role degrades downward, never upward.**
 Clerk `org:admin` is always `owner`. A missing membership row resolves to
 `staff`, never `expert`. Any new role resolution keeps this property.
+
+For anything with a session, **Clerk is the authority** — `requireTenant()`
+reads `orgRole`, and `memberships` decides only expert-vs-staff. Code running
+without one (crons, sweeps) has no such authority to consult, so it reads
+`memberships.role`, and two things make that safe:
+
+- `role = 'owner'` is writable **only under `withSystem()`** — the member
+  UPDATE policy is narrowed to non-owner rows and staff/expert values
+  (`drizzle/0085`). A tenant transaction cannot mint an owner.
+- `clerk_role_synced_at` records when Clerk last confirmed the row. A job that
+  intends to act as somebody **reconciles first**
+  (`reconcileTenantMemberships()`) and treats a stale row as `staff`.
+
+The failure that motivates both: a dropped demotion webhook leaves a row saying
+`owner` for someone Clerk now calls a member. A job trusting it reads
+owners-only data on their behalf — and if it emails, the disclosure cannot be
+withdrawn. Never widen this to "the DB says owner, so they are one" for a live
+request; that is an upward grant from cached data. See
+[modules/identity-and-roles.md](modules/identity-and-roles.md).
 
 **S7 — Billing state is written only from trusted Stripe data.**
 The signature-verified webhook, or a server→Stripe reconcile
@@ -265,7 +284,7 @@ Every path into the system, and what makes it trustworthy.
 | Dashboard pages | Clerk session → `requireTenant()` | Middleware only checks signed-in |
 | Server actions | Clerk session → `require*()` | Re-checked per action (S4) |
 | `src/app/api/**` | `resolveTenantContext()` | JSON 401/404, no redirects |
-| Clerk webhook | Svix signature | Trusted sync → `withSystem()` legal |
+| Clerk webhook | Svix signature | Trusted sync → `withSystem()` legal. Deliveries are **not ordered**: when an event's prerequisite hasn't arrived, answer 5xx so svix retries. A 200 that wrote nothing loses the row for good |
 | Stripe webhook | Stripe signature | Only trusted source of billing state (S7) |
 | Resend inbound mail | Signature + address token | Token is the tenant claim; validate before use |
 | `/s/[token]` share links | Unguessable token + expiry + limits | **Unauthenticated by design.** Scope tightly, log access |
@@ -319,12 +338,27 @@ Also required:
 npm run build
 ```
 
+After migrating, prove the database actually has what the migration claimed —
+against **both** databases, `--dev` and without:
+
+```bash
+npx tsx scripts/verify-rls.ts --dev
+```
+
+Every table must report ENABLED, FORCED and at least one policy; the script
+exits non-zero if any does not. "Migrations complete" is not evidence. A
+partial migration once left a table on production with RLS switched off, and
+nothing surfaced it, because RLS failing open is indistinguishable from RLS
+working right up until two tenants share a query. Pass a table name
+(`… verify-rls.ts memberships`) to dump its policies and read them back.
+
 Then confirm by hand for any PR touching data access:
 
 1. Every new table appears in `tests/tenant-isolation.test.ts`.
 2. Every new `withSystem()` call has a justification comment.
 3. Every new server action starts with a `require*()` call.
-4. The migration has been run against **both** databases (dev branch + prod).
+4. The migration has been run against **both** databases (dev branch + prod),
+   and `verify-rls.ts` was run against both afterwards.
 
 ---
 
@@ -342,6 +376,11 @@ Honesty here is what keeps the rest of the document credible.
 - **No automated dependency scanning** in CI yet.
 - **Blob storage authorization is app-enforced**, not storage-enforced. Vercel
   Blob URLs are unguessable but not tenant-scoped at the storage layer.
+- **Role drift is detected only when something reconciles.** A missed Clerk
+  membership webhook leaves `memberships.role` wrong until `/onboarding`, the
+  Team page, or a job runs `reconcileTenantMemberships()`. Nothing alerts on it.
+  Harmless for live requests (Clerk is the authority) — the exposure is limited
+  to background code, which is required to reconcile before acting (S6).
 
 Add to this list rather than quietly carrying an undocumented risk. An item
 here is a decision; an item missing from here is an accident.

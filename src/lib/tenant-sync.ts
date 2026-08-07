@@ -2,7 +2,7 @@ import "server-only";
 import { eq, and } from "drizzle-orm";
 import { withSystem, schema } from "@/db";
 import { slugify } from "@/lib/slug";
-import type { Tenant } from "@/db/schema";
+import type { Membership, Tenant } from "@/db/schema";
 
 /**
  * Idempotent sync of Clerk objects → local rows. Called from the Clerk
@@ -83,19 +83,38 @@ export async function upsertProfileFromUser(user: {
   });
 }
 
+/**
+ * Outcome of a membership sync. `deferred` means the row could not be written
+ * yet because something it references has not arrived — NOT that there was
+ * nothing to do. Callers must react to it: the Clerk webhook answers 5xx so
+ * svix retries, because a membership silently missing is a person a background
+ * job will never act for.
+ */
+export type MembershipSyncResult =
+  | {
+      status: "synced";
+      membership: Membership;
+      previousRole: Membership["role"] | null;
+    }
+  | { status: "deferred"; missing: "tenant" | "profile" };
+
 export async function upsertMembership(params: {
   clerkOrgId: string;
   clerkUserId: string;
   clerkRole: string; // "org:admin" | "org:member"
-}) {
+}): Promise<MembershipSyncResult> {
   return withSystem(async (tx) => {
     const tenant = await tx.query.tenants.findFirst({
       where: eq(schema.tenants.clerkOrgId, params.clerkOrgId),
     });
+    if (!tenant) return { status: "deferred", missing: "tenant" } as const;
     const profile = await tx.query.profiles.findFirst({
       where: eq(schema.profiles.clerkUserId, params.clerkUserId),
     });
-    if (!tenant || !profile) return null;
+    // Clerk does not order webhook deliveries, so organizationMembership.created
+    // can land before user.created. Deferring (and retrying) is the whole point:
+    // returning "nothing happened" here used to drop the membership for good.
+    if (!profile) return { status: "deferred", missing: "profile" } as const;
 
     const clerkDerived = params.clerkRole === "org:admin" ? "owner" : "staff";
     const existing = await tx.query.memberships.findFirst({
@@ -116,16 +135,25 @@ export async function upsertMembership(params: {
             : "staff";
       const [updated] = await tx
         .update(schema.memberships)
-        .set({ role })
+        .set({ role, clerkRoleSyncedAt: new Date() })
         .where(eq(schema.memberships.id, existing.id))
         .returning();
-      return updated;
+      return {
+        status: "synced",
+        membership: updated,
+        previousRole: existing.role,
+      } as const;
     }
     const [created] = await tx
       .insert(schema.memberships)
-      .values({ tenantId: tenant.id, profileId: profile.id, role: clerkDerived })
+      .values({
+        tenantId: tenant.id,
+        profileId: profile.id,
+        role: clerkDerived,
+        clerkRoleSyncedAt: new Date(),
+      })
       .returning();
-    return created;
+    return { status: "synced", membership: created, previousRole: null } as const;
   });
 }
 

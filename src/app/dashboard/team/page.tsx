@@ -1,8 +1,7 @@
 import { OrganizationProfile } from "@clerk/nextjs";
-import { clerkClient } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
-import { upsertMembership } from "@/lib/tenant-sync";
+import { reconcileTenantMemberships } from "@/lib/membership-sync";
 import { schema, withTenant } from "@/db";
 import {
   Card,
@@ -37,26 +36,13 @@ export default async function TeamPage() {
   }> = [];
 
   if (ctx.role === "owner" && ctx.tenant.clerkOrgId) {
-    // Idempotent sync so the panel works even before the webhook is
-    // configured (local dev) — upsertMembership preserves the expert flag.
-    try {
-      const client = await clerkClient();
-      const list = await client.organizations.getOrganizationMembershipList({
-        organizationId: ctx.tenant.clerkOrgId,
-        limit: 100,
-      });
-      for (const m of list.data) {
-        const userId = m.publicUserData?.userId;
-        if (!userId) continue;
-        await upsertMembership({
-          clerkOrgId: ctx.tenant.clerkOrgId,
-          clerkUserId: userId,
-          clerkRole: m.role,
-        });
-      }
-    } catch (err) {
-      console.error("team membership sync failed", err);
-    }
+    // Idempotent sync so the panel works even before the webhook is configured
+    // (local dev). This used to be a hand-rolled loop here; it is now the
+    // shared reconcile, which additionally backfills missing profiles, drops
+    // people who have left the org, and records any role it had to correct.
+    // Best-effort by contract — a Clerk outage leaves the roster below stale
+    // rather than blanking the page.
+    await reconcileTenantMemberships(ctx.tenant);
 
     members = await withTenant(ctx.tenant.id, (tx) =>
       tx

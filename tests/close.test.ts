@@ -17,7 +17,10 @@ import {
   type LedgerCtx,
 } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
-import { upsertMembership } from "../src/lib/tenant-sync";
+import {
+  upsertMembership,
+  type MembershipSyncResult,
+} from "../src/lib/tenant-sync";
 import {
   lastCompleteMonthEndIso,
   monthEndIso,
@@ -28,6 +31,20 @@ import {
  * plumbing. Pure date helpers always run; everything else needs
  * DATABASE_URL (dev/staging DB, never prod).
  */
+
+/**
+ * Narrow a sync result to the success case, failing loudly (with the reason)
+ * if it deferred. Keeps the assertions below about ROLES rather than about
+ * unwrapping a union.
+ */
+function synced(
+  result: MembershipSyncResult,
+): Extract<MembershipSyncResult, { status: "synced" }> {
+  if (result.status !== "synced") {
+    throw new Error(`expected a synced membership, got deferred: ${result.missing}`);
+  }
+  return result;
+}
 
 // ------------------------------------------------------------------ pure
 
@@ -352,44 +369,82 @@ d("month-end close subsystem", () => {
         email: `${STAMP}-sync@x.test`,
       }),
     );
-    const created = await upsertMembership({
-      clerkOrgId: STAMP,
-      clerkUserId,
-      clerkRole: "org:member",
-    });
-    expect(created?.role).toBe("staff");
+    const created = synced(
+      await upsertMembership({
+        clerkOrgId: STAMP,
+        clerkUserId,
+        clerkRole: "org:member",
+      }),
+    );
+    expect(created.membership.role).toBe("staff");
+    expect(created.previousRole).toBeNull();
+    // Every sync records when Clerk last confirmed this row. A background job
+    // reads that stamp to decide whether the role is fresh enough to act on.
+    expect(created.membership.clerkRoleSyncedAt).toBeInstanceOf(Date);
 
     // Owner flags them expert (direct update — the action path is UI-tested).
     await withSystem((tx) =>
       tx
         .update(schema.memberships)
         .set({ role: "expert" })
-        .where(eq(schema.memberships.id, created!.id)),
+        .where(eq(schema.memberships.id, created.membership.id)),
     );
 
     // A membership.updated webhook re-sync must NOT clobber the flag…
-    const resynced = await upsertMembership({
-      clerkOrgId: STAMP,
-      clerkUserId,
-      clerkRole: "org:member",
-    });
-    expect(resynced?.role).toBe("expert");
+    const resynced = synced(
+      await upsertMembership({
+        clerkOrgId: STAMP,
+        clerkUserId,
+        clerkRole: "org:member",
+      }),
+    );
+    expect(resynced.membership.role).toBe("expert");
 
     // …but promotion to org:admin wins (owner can never be expert).
-    const promoted = await upsertMembership({
-      clerkOrgId: STAMP,
-      clerkUserId,
-      clerkRole: "org:admin",
-    });
-    expect(promoted?.role).toBe("owner");
+    const promoted = synced(
+      await upsertMembership({
+        clerkOrgId: STAMP,
+        clerkUserId,
+        clerkRole: "org:admin",
+      }),
+    );
+    expect(promoted.membership.role).toBe("owner");
+    // The role that changed is reported back, so the reconcile can audit drift.
+    expect(promoted.previousRole).toBe("expert");
 
     // And demotion back to member lands on staff (expert flag was consumed).
-    const demoted = await upsertMembership({
+    const demoted = synced(
+      await upsertMembership({
+        clerkOrgId: STAMP,
+        clerkUserId,
+        clerkRole: "org:member",
+      }),
+    );
+    expect(demoted.membership.role).toBe("staff");
+    expect(demoted.previousRole).toBe("owner");
+  });
+
+  it("tenant-sync DEFERS rather than dropping when the profile is missing", async () => {
+    // Clerk does not order webhook deliveries, so organizationMembership.created
+    // can arrive before the user.created it depends on. This used to return
+    // null and the webhook answered 200, losing the membership permanently.
+    const result = await upsertMembership({
       clerkOrgId: STAMP,
-      clerkUserId,
+      clerkUserId: `${STAMP}-never-signed-up`,
       clerkRole: "org:member",
     });
-    expect(demoted?.role).toBe("staff");
+    expect(result.status).toBe("deferred");
+    if (result.status === "deferred") expect(result.missing).toBe("profile");
+  });
+
+  it("tenant-sync defers on an unknown org", async () => {
+    const result = await upsertMembership({
+      clerkOrgId: `${STAMP}-no-such-org`,
+      clerkUserId: `${STAMP}-sync-user`,
+      clerkRole: "org:member",
+    });
+    expect(result.status).toBe("deferred");
+    if (result.status === "deferred") expect(result.missing).toBe("tenant");
   });
 
   // Nested so it runs before this suite's afterAll drops the fixture tenant.

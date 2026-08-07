@@ -185,3 +185,70 @@ describe("describeRule", () => {
     ).toContain("due today");
   });
 });
+
+describe("describeAction with a name resolver", () => {
+  /**
+   * The rule sentence used to render a raw Clerk user id — "assign the record
+   * to user_2abc…". The picker that sets the value landed 2026-08-07, and a
+   * sentence that reads back an id when you chose a name is half a fix.
+   *
+   * `resolve` is threaded INTO the renderer rather than applied to its output,
+   * so the live preview in the builder and the list afterwards cannot drift.
+   * These tests pin the fallback behaviour, which is the part that matters when
+   * somebody leaves.
+   */
+  const resolve = (id: string) =>
+    id === "user_sam" ? "Sam Rivera" : undefined;
+
+  it("uses the resolved name for an assigned follow-up", () => {
+    expect(
+      describeAction(
+        { kind: "create_task", title: "Call back", dueInDays: 1, assignee: "user_sam" },
+        resolve,
+      ),
+    ).toContain("for Sam Rivera");
+  });
+
+  it("uses the resolved name when assigning a record", () => {
+    expect(
+      describeAction({ kind: "assign_record", assignee: "user_sam" }, resolve),
+    ).toBe("assign the record to Sam Rivera");
+  });
+
+  it("FALLS BACK TO THE ID for somebody who has left", () => {
+    // Not to an empty string. "assign the record to " would hide that the rule
+    // now points at nobody, which is worse than an ugly id.
+    expect(
+      describeAction({ kind: "assign_record", assignee: "user_gone" }, resolve),
+    ).toBe("assign the record to user_gone");
+  });
+
+  it("still reads correctly with no resolver at all", () => {
+    // The parameter is optional, and every existing caller passed none.
+    expect(describeAction({ kind: "assign_record", assignee: "user_sam" })).toBe(
+      "assign the record to user_sam",
+    );
+  });
+
+  it("an unassigned follow-up still says whose it is, without a resolver", () => {
+    // Empty assignee is meaningful here and must not become "for undefined".
+    const described = describeAction(
+      { kind: "create_task", title: "t", dueInDays: 0, assignee: "" },
+      resolve,
+    );
+    expect(described).toContain("for whoever the record is assigned to");
+  });
+
+  it("describeRule threads the resolver through to the action", () => {
+    const sentence = describeRule(
+      {
+        trigger: "record_created",
+        conditions: [],
+        action: { kind: "assign_record", assignee: "user_sam" },
+      },
+      resolve,
+    );
+    expect(sentence).toContain("Sam Rivera");
+    expect(sentence).not.toContain("user_sam");
+  });
+});

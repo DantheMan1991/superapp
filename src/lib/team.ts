@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, ne, and } from "drizzle-orm";
+import { eq, ne, and, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 
 /**
@@ -21,6 +21,13 @@ export interface AssignableMember {
   clerkUserId: string;
   name: string | null;
   email: string;
+  /**
+   * Carried so callers can narrow further without a second query. The
+   * follow-up picker wants everybody here; the record-access picker drops
+   * owners, who can already see every restricted record and for whom a grant
+   * would be a control that does nothing.
+   */
+  role: "owner" | "staff";
 }
 
 export async function listAssignableMembers(
@@ -32,6 +39,9 @@ export async function listAssignableMembers(
       clerkUserId: schema.profiles.clerkUserId,
       name: schema.profiles.name,
       email: schema.profiles.email,
+      // Experts are excluded by the where clause, so what survives is exactly
+      // this union — narrowed here rather than cast at each call site.
+      role: sql<"owner" | "staff">`${schema.memberships.role}`,
     })
     .from(schema.memberships)
     .innerJoin(

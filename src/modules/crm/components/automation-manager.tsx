@@ -15,6 +15,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import type { CrmAutomationRule } from "@/db/schema";
@@ -53,14 +60,38 @@ import {
  * off can be read, understood and switched back on; a deleted one is a mystery
  * with no evidence.
  */
+/** Empty assignee = "whoever owns the record", which Select needs a value for. */
+const RECORD_OWNER = "__record_owner__";
+
+export interface RuleMember {
+  clerkUserId: string;
+  label: string;
+}
+
 export function AutomationManager({
   rules,
   isOwner,
+  members = [],
 }: {
   rules: CrmAutomationRule[];
   isOwner: boolean;
+  /**
+   * The tenant's assignable roster, from the caller's own transaction.
+   *
+   * These rules create follow-ups, and follow-ups now route to a person's
+   * daily digest — so an assignee typed by hand is not a cosmetic wart. A
+   * mistyped Clerk id produces a task assigned to nobody real: invisible to
+   * every digest, and indistinguishable from work nobody has picked up.
+   */
+  members?: RuleMember[];
 }) {
   const [open, setOpen] = useState(false);
+
+  // Shared by the list and the live preview, so a rule reads the same way in
+  // both. Falls through to the raw id for somebody who has since left — see
+  // NameResolver.
+  const byId = new Map(members.map((m) => [m.clerkUserId, m.label]));
+  const resolveName = (id: string) => byId.get(id);
 
   return (
     <div className="space-y-4">
@@ -80,12 +111,17 @@ export function AutomationManager({
       ) : (
         <ul className="divide-y rounded-md border">
           {rules.map((row) => (
-            <RuleRow key={row.id} row={row} isOwner={isOwner} />
+            <RuleRow
+              key={row.id}
+              row={row}
+              isOwner={isOwner}
+              resolveName={resolveName}
+            />
           ))}
         </ul>
       )}
 
-      <RuleDialog open={open} onOpenChange={setOpen} />
+      <RuleDialog open={open} onOpenChange={setOpen} members={members} />
     </div>
   );
 }
@@ -93,9 +129,11 @@ export function AutomationManager({
 function RuleRow({
   row,
   isOwner,
+  resolveName,
 }: {
   row: CrmAutomationRule;
   isOwner: boolean;
+  resolveName: (clerkUserId: string) => string | undefined;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -149,7 +187,7 @@ function RuleRow({
         <p className="text-xs text-muted-foreground">
           {broken
             ? "This rule refers to something that no longer exists, so it is being skipped."
-            : describeRule(rule!)}
+            : describeRule(rule!, resolveName)}
         </p>
       </div>
       {isOwner && (
@@ -185,13 +223,18 @@ const ACTION_LABELS: Record<ActionKind, string> = {
 function RuleDialog({
   open,
   onOpenChange,
+  members,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  members: RuleMember[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
+  // Same lookup the list uses, so the live preview and the saved rule read
+  // identically — the property the comment on the preview claims.
+  const byId = new Map(members.map((m) => [m.clerkUserId, m.label]));
   const [trigger, setTrigger] = useState<Trigger>("record_created");
   const [action, setAction] = useState<RuleAction>({
     kind: "create_task",
@@ -315,12 +358,37 @@ function RuleDialog({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="rule-assignee">For</Label>
-                <Input
-                  id="rule-assignee"
-                  value={action.assignee ?? ""}
-                  placeholder="Whoever owns the record"
-                  onChange={(e) => setAction({ ...action, assignee: e.target.value })}
-                />
+                {members.length > 0 ? (
+                  <Select
+                    value={action.assignee || RECORD_OWNER}
+                    onValueChange={(v) =>
+                      setAction({
+                        ...action,
+                        assignee: v === RECORD_OWNER ? "" : v,
+                      })
+                    }
+                  >
+                    <SelectTrigger id="rule-assignee" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* First, because it is the sensible default and the one
+                          that keeps working when people join or leave. */}
+                      <SelectItem value={RECORD_OWNER}>
+                        Whoever owns the record
+                      </SelectItem>
+                      {members.map((m) => (
+                        <SelectItem key={m.clerkUserId} value={m.clerkUserId}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Whoever owns the record.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -340,12 +408,23 @@ function RuleDialog({
           {action.kind === "assign_record" && (
             <div className="space-y-1.5">
               <Label htmlFor="rule-owner">Assign to</Label>
-              <Input
-                id="rule-owner"
+              {/* No "whoever owns the record" here — that IS the thing being
+                  set, so the empty case would be a rule that does nothing. */}
+              <Select
                 value={action.assignee ?? ""}
-                placeholder="Clerk user id"
-                onChange={(e) => setAction({ ...action, assignee: e.target.value })}
-              />
+                onValueChange={(v) => setAction({ ...action, assignee: v })}
+              >
+                <SelectTrigger id="rule-owner" className="w-full">
+                  <SelectValue placeholder="Choose a colleague" />
+                </SelectTrigger>
+                <SelectContent>
+                  {members.map((m) => (
+                    <SelectItem key={m.clerkUserId} value={m.clerkUserId}>
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           )}
 
@@ -357,7 +436,7 @@ function RuleDialog({
           <div className="rounded-md border bg-muted/40 p-3">
             <p className="text-sm">
               {problems.length === 0
-                ? describeRule(rule)
+                ? describeRule(rule, (id) => byId.get(id))
                 : problems[0]}
             </p>
           </div>

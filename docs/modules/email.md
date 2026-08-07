@@ -3586,6 +3586,15 @@ breaks unprompted.
 the domain is eventually verified in Resend, sending starts working with no
 code or config change.
 
+*[2026-08-07: **something now sends automatically, so this is no longer only a
+share-link inconvenience.** The notifications digest runs daily at 7am local per
+tenant and attempts a send per person; the first live run failed for both
+recipients with "The mail.yosherapp.com domain is not verified", and
+`outbound_emails` gained its first two rows ever. Nothing is broken and no code
+is waiting — but "nothing breaks unprompted" above has stopped being true, and
+every morning now produces failed rows until the domain is verified. See
+[notifications.md](notifications.md).]*
+
 ## Open items
 
 - **One transport only.** The seam exists but there is a single implementation

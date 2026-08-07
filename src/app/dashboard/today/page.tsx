@@ -10,6 +10,7 @@ import {
 import type { AttentionItem } from "@/lib/attention-sources/types";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { DigestToggle } from "./digest-toggle";
 
 export const dynamic = "force-dynamic";
 
@@ -31,18 +32,25 @@ export default async function TodayPage() {
   const ctx = await requireTenant();
   const today = todayInTimezone(ctx.tenant.timezone);
 
-  const result = await withTenant(
+  const { result, wantsDaily } = await withTenant(
     ctx.tenant.id,
-    (tx) =>
-      collectAttention(tx, {
-        tenantId: ctx.tenant.id,
-        userId: ctx.userId,
-        role: ctx.role,
-        today,
-      }),
-    // Both options matter here. `role` decides owners-only visibility, and
-    // `userId` scopes anything per-person — a source is handed this tx and
-    // cannot widen it.
+    async (tx) => {
+      const [collected, pref] = await Promise.all([
+        collectAttention(tx, {
+          tenantId: ctx.tenant.id,
+          userId: ctx.userId,
+          role: ctx.role,
+          today,
+        }),
+        // The policy scopes this to the caller's own row, so no `where` on
+        // profile is needed — and adding one would imply the filter is what
+        // protects it. A missing row means daily.
+        tx.query.notificationPreferences.findFirst(),
+      ]);
+      return { result: collected, wantsDaily: (pref?.digest ?? "daily") === "daily" };
+    },
+    // Every option matters here. `role` decides owners-only visibility,
+    // `userId` scopes anything per-person — including the preference row above.
     { role: ctx.role, userId: ctx.userId },
   );
 
@@ -52,11 +60,17 @@ export default async function TodayPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">What needs you</h1>
-        <p className="text-sm text-muted-foreground">
-          Outstanding work as of {today}, in {ctx.tenant.timezone.replace("_", " ")}.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            What needs you
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Outstanding work as of {today}, in{" "}
+            {ctx.tenant.timezone.replace("_", " ")}.
+          </p>
+        </div>
+        <DigestToggle daily={wantsDaily} />
       </div>
 
       {/* A source that could not be asked is stated, never swallowed. An

@@ -50,6 +50,17 @@ export const membershipRole = pgEnum("membership_role", [
   "expert",
 ]);
 
+/**
+ * Whether this person wants the daily digest.
+ *
+ * `off` must exist and must be honoured. A digest that cannot be turned off
+ * gets filtered instead, which is strictly worse: the person stops reading it
+ * AND we stop knowing they stopped. Two values on purpose — a frequency picker
+ * invites "weekly", and a weekly list of things that were urgent on Tuesday is
+ * not a digest, it is a backlog.
+ */
+export const digestPreference = pgEnum("digest_preference", ["daily", "off"]);
+
 export const moduleStatus = pgEnum("module_status", [
   "available",
   "coming_soon",
@@ -156,6 +167,105 @@ export const memberships = pgTable(
   (t) => [
     uniqueIndex("memberships_tenant_profile_idx").on(t.tenantId, t.profileId),
     index("memberships_tenant_idx").on(t.tenantId),
+  ],
+);
+
+/**
+ * What one person wants to be told, in one workspace.
+ *
+ * A TABLE RATHER THAN A COLUMN ON `memberships`, for a reason that is entirely
+ * about RLS. `drizzle/0085` deliberately made owner rows unwritable from tenant
+ * context so a background job could trust `memberships.role`; a preference
+ * living there would inherit that and owners could never turn their own digest
+ * off, forcing a `withSystem` write into a user-facing action just to change a
+ * boolean about email.
+ *
+ * Here the rule the product actually wants — "you may set YOUR OWN preference
+ * and nobody else's" — is expressible as a policy (`drizzle/0090`, the shape
+ * `mail_accounts` uses), so it is enforced by Postgres instead of by whichever
+ * server action remembers to check. That is the trade the security doc asks
+ * for: structurally hard rather than merely unlikely.
+ *
+ * A missing row means `daily`. The default lives in the read, not in a
+ * backfill, so nobody has to be inserted before they can be mailed.
+ */
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    digest: digestPreference("digest").notNull().default("daily"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("notification_preferences_person_idx").on(
+      t.tenantId,
+      t.profileId,
+    ),
+  ],
+);
+
+/**
+ * One row per person per day the digest was sent for.
+ *
+ * TWO JOBS, and the second is why this is a table rather than a timestamp:
+ *
+ *  1. **Idempotency.** The cron runs hourly and asks each tenant whether it is
+ *     7am there. Overlapping invocations, a redeploy mid-run, or a retry must
+ *     not mail somebody twice — the unique index below is what makes the second
+ *     attempt a no-op. (`outbound_emails.idempotency_key` is a second net under
+ *     this one; this table is what lets the cron skip the WORK, not just the
+ *     send.)
+ *
+ *  2. **The delta.** The design's rule for surviving to day 30 is to lead with
+ *     what CHANGED — "2 new since yesterday, 3 still waiting" — rather than
+ *     re-listing an identical set every morning until it becomes wallpaper.
+ *     That needs yesterday's item keys to compare against, which is the one
+ *     thing a bare "last sent at" column cannot provide.
+ *
+ * `item_keys` holds identifiers only (`crm_task:<uuid>`, `invoice:<uuid>`) —
+ * never a title, which would carry a customer's name into a platform table
+ * (S9). The count is stored alongside rather than derived so a future change to
+ * what gets logged cannot silently rewrite history.
+ */
+export const notificationDigestLog = pgTable(
+  "notification_digest_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    /**
+     * The date IN THE TENANT'S TIMEZONE that this digest was for — not the UTC
+     * date it happened to be sent on. Those differ for most of the world at
+     * 7am, and keying on the wrong one would let somebody be mailed twice
+     * across a midnight boundary.
+     */
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+    itemCount: integer("item_count").notNull().default(0),
+    /** Identifiers only — see the table comment. */
+    itemKeys: jsonb("item_keys").notNull().default([]),
+  },
+  (t) => [
+    // THE idempotency guarantee. Two concurrent cron invocations serialize
+    // here rather than both sending.
+    uniqueIndex("notification_digest_log_person_day_idx").on(
+      t.tenantId,
+      t.profileId,
+      t.localDate,
+    ),
+    index("notification_digest_log_tenant_idx").on(t.tenantId, t.localDate),
   ],
 );
 
@@ -3424,6 +3534,9 @@ export type AuditMessage = { role: "user" | "assistant"; content: string };
 export type Tenant = typeof tenants.$inferSelect;
 export type Profile = typeof profiles.$inferSelect;
 export type Membership = typeof memberships.$inferSelect;
+export type NotificationDigestLog = typeof notificationDigestLog.$inferSelect;
+export type NotificationPreference =
+  typeof notificationPreferences.$inferSelect;
 export type Module = typeof modules.$inferSelect;
 export type TenantModule = typeof tenantModules.$inferSelect;
 export type Subscription = typeof subscriptions.$inferSelect;

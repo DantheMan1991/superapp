@@ -22,7 +22,18 @@ import {
  * without touching a single caller.
  */
 
-export type EmailKind = "share_link" | "invoice" | "esign" | "test";
+export type EmailKind =
+  | "share_link"
+  | "invoice"
+  | "esign"
+  | "test"
+  /**
+   * The daily digest. The only kind sent to OUR OWN users rather than to a
+   * tenant's customers — which is why it goes from the platform domain and not
+   * from the tenant's, and why its recipient always came from `profiles`
+   * rather than from anything typed into a form.
+   */
+  | "digest";
 
 /** Per tenant, per hour. A valve, not accounting. */
 export const TENANT_HOURLY_CAP = 100;

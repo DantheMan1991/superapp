@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -126,10 +126,10 @@ export function InvoiceBuilder({
     (p) => p.row.description.trim() !== "" || p.row.unitPrice.trim() !== "",
   );
   const allValid = filled.length > 0 && filled.every((p) => p.valid);
-  const totalCents = useMemo(
-    () => filled.reduce((s, p) => s + p.amountCents, 0),
-    [filled],
-  );
+  // Not memoised: `filled` is rebuilt on every render just above, so a
+  // useMemo keyed on it never hit — it only cost React Compiler the chance to
+  // optimise this component at all, which it was skipping outright.
+  const totalCents = filled.reduce((s, p) => s + p.amountCents, 0);
 
   function setRow(key: string, patch: Partial<LineRow>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));

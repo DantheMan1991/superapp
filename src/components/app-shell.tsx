@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   BookOpen,
   Boxes,
@@ -157,7 +157,21 @@ export function AppShell({
   children,
 }: AppShellProps) {
   const pathname = usePathname();
-  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  /**
+   * The drawer's state is the path it was opened on, not a boolean — which
+   * makes "close on navigation" a derivation rather than an effect.
+   *
+   * It has to close on ANY navigation, not just a tap on one of its own nav
+   * links: the footer rides inside the drawer on mobile, and switching org from
+   * there routes to /dashboard without going near `onNavigate`. Clearing the
+   * stored path — rather than leaving it to be compared against forever — is
+   * what stops the drawer springing back open when the user navigates back to
+   * the page they opened it on.
+   */
+  const [openedOnPath, setOpenedOnPath] = useState<string | null>(null);
+  if (openedOnPath !== null && openedOnPath !== pathname) setOpenedOnPath(null);
+  const drawerOpen = openedOnPath !== null;
 
   // Same prefix test the nav uses for its active state, so "full width" covers
   // a module's sub-routes without each one having to opt in again.
@@ -165,16 +179,14 @@ export function AppShell({
     (prefix) => pathname === prefix || pathname.startsWith(prefix + "/"),
   );
 
-  // Close the drawer whenever navigation completes.
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
-
   return (
     <div className="flex min-h-screen w-full flex-col lg:flex-row">
       {/* Mobile top bar */}
       <header className="sticky top-0 z-30 flex h-14 items-center gap-2 bg-sidebar px-3 text-sidebar-foreground lg:hidden print:hidden">
-        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <Sheet
+          open={drawerOpen}
+          onOpenChange={(open) => setOpenedOnPath(open ? pathname : null)}
+        >
           <SheetTrigger asChild>
             <Button
               variant="ghost"
@@ -196,7 +208,10 @@ export function AppShell({
             <SidebarNav
               navItems={navItems}
               pathname={pathname}
-              onNavigate={() => setDrawerOpen(false)}
+              // Kept even though navigating clears the state on its own: this
+              // closes the drawer on tap, rather than when the next page has
+              // finished streaming in.
+              onNavigate={() => setOpenedOnPath(null)}
             />
             {footer && (
               <div className="border-t border-sidebar-border p-4">{footer}</div>

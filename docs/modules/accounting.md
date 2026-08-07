@@ -13,6 +13,11 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-07 — Two lint errors cleared out of the module (branch `claude/priceless-khayyam-b284fb`)
+- `invoice-builder.tsx` lost a `useMemo` around `totalCents`. Its dependency `filled` is rebuilt by a `.map().filter()` immediately above it, so the memo **never hit** — all it did was make React Compiler skip optimising the whole component, which is what `react-hooks/preserve-manual-memoization` was reporting. Behaviour-identical; the reduce now runs inline
+- An apostrophe escaped in the vendors empty-state copy (`react/no-unescaped-entities`). Copy unchanged
+- Both were error-level, so they were part of what kept `npx eslint` red repo-wide. No accounting behaviour changed by either
+
 ### 2026-08-06 — `bookkeeping_timezone` dropped (branch `claude/drop-bookkeeping-timezone`)
 - `0088` removes the column deprecated in the entry below. `tenants.timezone` is the only clock; `accounting_settings` no longer carries one
 - **Applied AFTER the deploy**, like `0075` and for the same reason: nothing read the value, but Drizzle builds its SELECT column list from `schema.ts`, so a deployment still declaring the column selects it. Dropping under a live old build 500s `getSettings` and every accounting page

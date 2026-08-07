@@ -8,6 +8,12 @@
 
 ## Build log
 
+### 2026-08-07 — The running-timer readout actually runs (branch `claude/priceless-khayyam-b284fb`)
+- `TimerControls` computed its elapsed minutes with `Date.now()` in the render body. `react-hooks/purity` flags that at **error** level, and the rule was right about the symptom: the "Running for ~2h" line froze at whatever the first paint computed, and the number the server rendered was never the number the browser would have
+- The clock is now read through `useSyncExternalStore`, which is what an external mutable source is for. The snapshot is **the minute, not the millisecond** — React compares snapshots by identity, so a raw `Date.now()` would look like a new value on every check and spin. A `~2h` readout has no use for finer resolution; polling every 20s just means the display turns over promptly when the minute does
+- The server snapshot is `null`, so nothing reads a clock during SSR and there is nothing for hydration to disagree with. That one paint says "Timer running" rather than a wrong duration
+- Split into its own `ElapsedReadout` component so **the subscription lives where the readout does**. `/admin/retainers` renders a `TimerControls` per tenant and all but the running one pass `timerStartedAt={null}`; subscribing in the parent would have given every idle row an interval with nothing to display
+
 ### 2026-07-24 — Initial build (`c98388f`, PR #5)
 - Four tables (migrations 0019/0020, superadmin_all + member_read RLS): `retainers` (config + live timer state), `retainer_allotments` (month-keyed history so past months' overage never rewrites when the allotment changes), `retainer_time_entries`, `retainer_purchases` (`stripe_session_id` UNIQUE is the webhook idempotency arbiter)
 - Balances derived, never stored (`src/lib/retainer-core.ts`, pure math, America/New_York calendar months): no rollover of included hours; purchased blocks carry forward until consumed by overage; soft overage only (no hard cutoff)

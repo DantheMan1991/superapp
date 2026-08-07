@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,6 +55,49 @@ export function AllotmentForm({
   );
 }
 
+/**
+ * The wall clock, as an external store — which is what it is. Reading
+ * `Date.now()` in a render body is impure, and it showed: the running-timer
+ * readout froze at whatever the first paint computed, and the number the server
+ * rendered was never the number the browser would have.
+ *
+ * The snapshot is the minute, not the millisecond, for two reasons. React
+ * compares snapshots by identity to decide whether to re-render, so a raw
+ * `Date.now()` would look like a new value every single check and spin. And a
+ * readout that says "~2h" has no use for finer resolution anyway. Polling
+ * faster than the snapshot changes just means the display turns over promptly
+ * when the minute does.
+ */
+const CLOCK_POLL_MS = 20_000;
+const subscribeToClock = (onChange: () => void) => {
+  const id = setInterval(onChange, CLOCK_POLL_MS);
+  return () => clearInterval(id);
+};
+const currentMinute = () => Math.floor(Date.now() / 60_000);
+/** No clock on the server, so there is nothing for hydration to disagree with. */
+const noClock = () => null;
+
+/**
+ * Its own component so the clock subscription lives exactly where the readout
+ * does. The retainers page renders a TimerControls per tenant and all but the
+ * running one pass `timerStartedAt={null}` — subscribing up there would give
+ * every idle row an interval with nothing to display.
+ */
+function ElapsedReadout({ startedAt }: { startedAt: string }) {
+  const nowMinute = useSyncExternalStore(
+    subscribeToClock,
+    currentMinute,
+    noClock,
+  );
+  // One paint before the client has a clock, so say the true thing meanwhile.
+  if (nowMinute === null) return <>Timer running</>;
+  const elapsedMin = Math.max(
+    1,
+    Math.ceil((nowMinute * 60_000 - new Date(startedAt).getTime()) / 60_000),
+  );
+  return <>Running for ~{formatMinutesAsHours(elapsedMin)}</>;
+}
+
 export function TimerControls({
   tenantId,
   timerStartedAt,
@@ -100,10 +143,6 @@ export function TimerControls({
     );
   }
 
-  const elapsedMin = Math.max(
-    1,
-    Math.ceil((Date.now() - new Date(timerStartedAt).getTime()) / 60_000),
-  );
 
   return (
     <form
@@ -118,7 +157,7 @@ export function TimerControls({
     >
       <input type="hidden" name="tenantId" value={tenantId} />
       <p className="text-xs text-muted-foreground">
-        Running for ~{formatMinutesAsHours(elapsedMin)}
+        <ElapsedReadout startedAt={timerStartedAt} />
       </p>
       <Textarea
         name="note"

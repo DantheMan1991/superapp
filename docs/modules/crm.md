@@ -14,6 +14,13 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-07 — The two remaining "type a Clerk user id" boxes become pickers (branch `claude/crm-member-pickers`)
+- **Collaborator panel**: a picker over non-owner members who do not already have a grant, and the existing list shows names rather than ids. Owners are absent on purpose — they can already see every restricted record, so a grant to one is a control that does nothing
+- **Automation rule builder**: both assignees are pickers. `create_task` keeps "Whoever owns the record" first (an empty assignee is meaningful there); `assign_record` has no such option, because that is the thing being set and empty would be a rule that does nothing
+- **The rule SENTENCE resolves names too.** `describeRule`/`describeAction` take an optional `NameResolver`, threaded into the renderer rather than substituted into its output — applying it afterwards would be a second renderer, and the preview and the list would eventually disagree. Falls back to the raw id for somebody who has left, because "assign the record to " hides that the rule points at nobody
+- Both were blocked on the same thing — "no module-readable member roster" — which stopped being true when `listAssignableMembers` landed a few hours earlier. Neither needed new data
+- Six tests on the resolver, all on the fallback behaviour
+
 ### 2026-08-07 — Follow-ups get an assignee (branch `claude/crm-task-assignee`)
 - The dialog now asks **who is doing it**, defaulting to the person adding it, with "Nobody yet" available for work that genuinely has no owner
 - **Backend needed no changes at all** — `assignee_clerk_user_id`, `createTask`, the Zod schema and the digest's per-person scoping all already handled it. The only missing piece was a UI that set the value, which is exactly the kind of gap a dossier open-item hides in plain sight
@@ -929,13 +936,11 @@ values stay readable and the discontinuity is visible.
   reads a postal address that `customers.address` does not already serve, and
   adding a table with no reader is the speculative build this codebase avoids.
   The shape is the same as contact points when it is wanted.
-- **`0075` IS NOT APPLIED TO PRODUCTION YET, and applying it before the deploy
-  takes the product down.** It drops the four columns and must follow the code
-  that stopped reading them; the dev branch has it, production is deliberately
-  waiting. The migration header says this at the top and
-  [conventions.md §4](../conventions.md) now carries the general rule. Until it
-  runs, production carries four columns nothing reads — which is the harmless
-  half of the window and can sit there indefinitely.
+- ~~**`0075` IS NOT APPLIED TO PRODUCTION YET**~~ — **stale; it is applied.**
+  Verified 2026-08-07 against production: zero `email`/`phone` columns remain on
+  `customers` or `vendors`. The deploy-then-migrate ordering it warned about was
+  followed. The general rule it pointed at survives in
+  [conventions.md §4](../conventions.md) and was used again for `0088`.
 - **Custom fields cannot become mail placeholders without changing Mail's
   contract.** `MailEntityType.templateFields` is a static array on purpose —
   its header says the vocabulary must be knowable without reading data, which is
@@ -994,9 +999,13 @@ values stay readable and the discontinuity is visible.
   is created, add a follow-up" does nothing to the records that already exist.
   That is the honest default, but the first person to write a rule will expect
   otherwise, and a "run this over existing records" button is a real want.
-- **`assignee` is a Clerk user id typed into a box**, the same gap the
-  collaborator panel has and for the same reason: no module-readable member
-  roster.
+- ~~**`assignee` is a Clerk user id typed into a box**~~ — **fixed 2026-08-07.**
+  Both automation assignees are pickers now, and the rule SENTENCE resolves
+  names too (`describeRule` takes an optional `NameResolver`, threaded rather
+  than applied to the finished string, so the live preview and the list cannot
+  drift). This mattered more than the collaborator one: a mistyped id produced a
+  follow-up assigned to nobody real, invisible to every digest and
+  indistinguishable from work nobody had picked up.
 - **No per-rule failure surface.** A rule that throws is logged to the server
   console and counted, and the person sees nothing. `audit_log` records the
   firings that SUCCEED, so a rule that has quietly failed every time looks the
@@ -1108,11 +1117,13 @@ values stay readable and the discontinuity is visible.
 - ~~**No reminders or notifications.**~~ — **fixed 2026-08-06.** Follow-ups due
   or overdue now reach their assignee in the daily digest, and appear on
   `/dashboard/today`. See [notifications.md](notifications.md).
-- **Adding a collaborator means typing a Clerk user id.** CRM has no roster of
-  the tenant's members to pick from — Clerk holds it and nothing in this module
-  reads it — so the panel takes an id and shows ids. A picker is the obvious
-  next move and needs a members list the module can read; it is the one part of
-  slice 6 that is visibly unfinished rather than deliberately absent.
+- ~~**Adding a collaborator means typing a Clerk user id.**~~ — **fixed
+  2026-08-07.** The blocker it named ("needs a members list the module can
+  read") stopped existing when `listAssignableMembers` landed for the follow-up
+  picker. The panel now offers non-owner members who do not already have a
+  grant, and names the ones who do. Owners are absent deliberately: they can
+  already see every restricted record, so granting one access is a control that
+  does nothing.
 - **A grant is all-or-nothing.** A collaborator gets the whole record: notes,
   deals, timeline, follow-ups. Field-level restriction is a different feature
   and is not modelled.

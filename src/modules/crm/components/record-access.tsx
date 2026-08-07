@@ -5,8 +5,14 @@ import { useState, useTransition } from "react";
 import { Lock, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { CrmRecordCollaborator } from "@/db/schema";
 import {
   grantRecordAccessAction,
@@ -29,13 +35,39 @@ import {
 export function RecordAccess({
   partyId,
   collaborators,
+  members = [],
 }: {
   partyId: string;
   collaborators: CrmRecordCollaborator[];
+  /**
+   * The tenant's whole assignable roster, resolved on the server from the
+   * caller's own transaction — so this cannot name somebody the viewer could
+   * not already find.
+   *
+   * The WHOLE roster, not a pre-filtered candidate list, because it does two
+   * jobs: naming the people already listed, and offering the ones who could be
+   * added. Filtering before it arrives would leave existing collaborators
+   * unnamed, which is the version of this I wrote first.
+   */
+  members?: Array<{
+    clerkUserId: string;
+    label: string;
+    role: "owner" | "staff";
+  }>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [clerkUserId, setClerkUserId] = useState("");
+
+  /** clerkUserId → the name to show. Falls back to the id, see below. */
+  const nameOf = new Map(members.map((m) => [m.clerkUserId, m.label]));
+
+  const granted = new Set(collaborators.map((c) => c.clerkUserId));
+  const candidates = members.filter(
+    // Owners can already see every restricted record, so a grant to one is a
+    // control that does nothing. Anybody already granted is not a candidate.
+    (m) => m.role !== "owner" && !granted.has(m.clerkUserId),
+  );
 
   function grant() {
     const trimmed = clerkUserId.trim();
@@ -86,8 +118,21 @@ export function RecordAccess({
               key={collaborator.id}
               className="flex items-center justify-between gap-3 px-3 py-2"
             >
-              <span className="truncate font-mono text-xs">
-                {collaborator.clerkUserId}
+              {/*
+                A name when we have one, the raw id when we do not — which
+                happens for somebody who has since left the organization. Their
+                grant is still real and still needs removing, so the row must
+                render rather than disappear because the roster no longer
+                mentions them.
+              */}
+              <span
+                className={
+                  nameOf.has(collaborator.clerkUserId)
+                    ? "truncate text-sm"
+                    : "truncate font-mono text-xs text-muted-foreground"
+                }
+              >
+                {nameOf.get(collaborator.clerkUserId) ?? collaborator.clerkUserId}
               </span>
               <Button
                 variant="ghost"
@@ -106,30 +151,47 @@ export function RecordAccess({
         </ul>
       )}
 
-      <div className="flex items-end gap-2">
-        <div className="flex-1 space-y-1.5">
-          <Label htmlFor="collab-user" className="text-xs">
-            Add someone
-          </Label>
-          {/*
-            A USER ID RATHER THAN A PICKER, and this is the honest limitation.
-            CRM has no roster of the tenant's members to choose from — Clerk
-            holds it and nothing in this module reads it — so until slice 6's
-            follow-up wires that in, the id is typed. A picker is the obvious
-            next move and it is recorded as an open item rather than pretended
-            away.
-          */}
-          <Input
-            id="collab-user"
-            value={clerkUserId}
-            placeholder="Clerk user id"
-            onChange={(e) => setClerkUserId(e.target.value)}
-          />
+      {/*
+        A PICKER AT LAST. This was a typed Clerk user id for one stated reason —
+        "CRM has no roster of the tenant's members to choose from" — and that
+        stopped being true when `listAssignableMembers` landed for the follow-up
+        assignee. Owners are absent from `candidates` deliberately: they can
+        already see every restricted record, so granting one access is a control
+        that does nothing.
+      */}
+      {candidates.length > 0 ? (
+        <div className="flex items-end gap-2">
+          <div className="flex-1 space-y-1.5">
+            <Label htmlFor="collab-user" className="text-xs">
+              Add someone
+            </Label>
+            <Select value={clerkUserId} onValueChange={setClerkUserId}>
+              <SelectTrigger id="collab-user" className="w-full">
+                <SelectValue placeholder="Choose a colleague" />
+              </SelectTrigger>
+              <SelectContent>
+                {candidates.map((c) => (
+                  <SelectItem key={c.clerkUserId} value={c.clerkUserId}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={grant} disabled={pending || !clerkUserId.trim()}>
+            <Plus className="mr-1.5 size-4" /> Add
+          </Button>
         </div>
-        <Button onClick={grant} disabled={pending || !clerkUserId.trim()}>
-          <Plus className="mr-1.5 size-4" /> Add
-        </Button>
-      </div>
+      ) : (
+        // Everybody who could be added already has been, or the only other
+        // members are owners who never needed a grant. Saying so beats an
+        // empty dropdown that looks broken.
+        <p className="text-xs text-muted-foreground">
+          {collaborators.length > 0
+            ? "Everyone who can be added already has access."
+            : "Nobody else to add — owners can already see this record."}
+        </p>
+      )}
     </section>
   );
 }

@@ -3,6 +3,7 @@ import { ChevronLeft } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { listRules } from "@/modules/crm/automation-ops";
 import { AutomationManager } from "@/modules/crm/components/automation-manager";
 
@@ -27,9 +28,14 @@ export default async function AutomationsPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "crm");
 
-  const rules = await withTenant(
+  const { rules, members } = await withTenant(
     ctx.tenant.id,
-    (tx) => listRules(tx, ctx.tenant.id),
+    async (tx) => ({
+      rules: await listRules(tx, ctx.tenant.id),
+      // In the caller's own transaction, so the picker can only offer people
+      // this person could already find.
+      members: await listAssignableMembers(tx, ctx.tenant.id),
+    }),
     { role: ctx.role, userId: ctx.userId },
   );
 
@@ -60,7 +66,14 @@ export default async function AutomationsPage() {
         </p>
       )}
 
-      <AutomationManager rules={rules} isOwner={isOwner} />
+      <AutomationManager
+        rules={rules}
+        isOwner={isOwner}
+        members={members.map((m) => ({
+          clerkUserId: m.clerkUserId,
+          label: memberLabel(m),
+        }))}
+      />
     </div>
   );
 }

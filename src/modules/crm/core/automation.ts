@@ -185,21 +185,39 @@ export function actionProblem(action: RuleAction): string | null {
   }
 }
 
-export function describeAction(action: RuleAction): string {
+/**
+ * Turn a Clerk user id into something a person recognises.
+ *
+ * OPTIONAL, and the fallback is the id itself. A rule can name somebody who has
+ * since left the organization, and a sentence that silently dropped them would
+ * read as "assign the record to " — worse than an ugly id, because it hides
+ * that the rule is now pointing at nobody.
+ */
+export type NameResolver = (clerkUserId: string) => string | undefined;
+
+function who(id: string, resolve?: NameResolver): string {
+  return resolve?.(id) ?? id;
+}
+
+export function describeAction(
+  action: RuleAction,
+  resolve?: NameResolver,
+): string {
   switch (action.kind) {
     case "create_task": {
       const due = action.dueInDays ?? 0;
       const when =
         due === 0 ? "today" : due === 1 ? "tomorrow" : `in ${due} days`;
-      const who = action.assignee?.trim()
-        ? ` for ${action.assignee.trim()}`
+      const assignee = action.assignee?.trim();
+      const forWhom = assignee
+        ? ` for ${who(assignee, resolve)}`
         : " for whoever the record is assigned to";
-      return `add a follow-up “${action.title ?? ""}” due ${when}${who}`;
+      return `add a follow-up “${action.title ?? ""}” due ${when}${forWhom}`;
     }
     case "set_lifecycle_stage":
       return `set the stage to ${action.stage ?? ""}`;
     case "assign_record":
-      return `assign the record to ${action.assignee ?? ""}`;
+      return `assign the record to ${who(action.assignee ?? "", resolve)}`;
   }
 }
 
@@ -272,13 +290,23 @@ export function parseRule(stored: unknown): AutomationRule | null {
   return ruleProblems(rule).length === 0 ? rule : null;
 }
 
-/** The rule as a sentence, for the list and the confirmation. */
-export function describeRule(rule: AutomationRule): string {
+/**
+ * The rule as a sentence, for the list and the confirmation.
+ *
+ * ONE FUNCTION for both, so what somebody agrees to and what they later read
+ * cannot drift apart. `resolve` is threaded rather than applied afterwards for
+ * the same reason: a caller substituting names into the finished string would
+ * be a second renderer, and the two would eventually disagree.
+ */
+export function describeRule(
+  rule: AutomationRule,
+  resolve?: NameResolver,
+): string {
   const trigger = triggerDefinition(rule.trigger);
   if (!trigger) return "";
   const where =
     rule.conditions.length > 0
       ? ` where ${describeFilter(rule.conditions, FILTER_FIELDS).toLowerCase()}`
       : "";
-  return `When ${trigger.when}${where}, ${describeAction(rule.action)}.`;
+  return `When ${trigger.when}${where}, ${describeAction(rule.action, resolve)}.`;
 }

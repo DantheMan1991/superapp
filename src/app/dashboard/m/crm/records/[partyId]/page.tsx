@@ -185,7 +185,15 @@ export default async function RecordPage({
           {isOwner && details.visibility === "restricted" && (
             <>
               <Separator />
-              <RecordAccess partyId={party.id} collaborators={collaborators} />
+              <RecordAccess
+                partyId={party.id}
+                collaborators={collaborators}
+                members={record.members.map((m) => ({
+                  clerkUserId: m.clerkUserId,
+                  label: memberLabel(m),
+                  role: m.role,
+                }))}
+              />
             </>
           )}
 

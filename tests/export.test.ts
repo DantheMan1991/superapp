@@ -32,6 +32,9 @@ function minimalBooksData(): BooksData {
     coaTemplate: "general",
     fiscalYearStartMonth: 1,
     entryEditPolicy: "standard",
+    // Deliberately DIFFERENT from the tenant timezone below, so the assertion
+    // that the CSV carries the tenant's zone cannot pass by coincidence. This
+    // deprecated column is no longer read by anything.
     bookkeepingTimezone: "America/New_York",
     aiLastSuggestedAt: null,
     inboundEmailToken: "SECRET-TOKEN-MUST-NOT-LEAK",
@@ -56,6 +59,7 @@ function minimalBooksData(): BooksData {
     dimensionMembers: [],
     lineDimensions: [],
     settings,
+    timezone: "America/Denver",
     periodCloses: [],
     closeNotes: [],
     auditLog: [],
@@ -102,6 +106,17 @@ describe("books export CSV builders (pure)", () => {
     expect(settingsFile.content).not.toContain("token");
     expect(settingsFile.content).not.toContain("ai_last");
     expect(settingsFile.content).not.toContain("export_last");
+  });
+
+  it("settings.csv reports the TENANT's timezone, not the deprecated accounting column", () => {
+    // 0086 moved the business day up to `tenants`. The CSV header keeps its
+    // name (an export is a file somebody's accountant already parses), but the
+    // value must follow the tenant or the books say one day and the app says
+    // another. The fixture sets the two to different zones on purpose.
+    const files = buildBooksCsvFiles(minimalBooksData());
+    const settingsFile = files.find((f) => f.zipPath === "ledger/settings.csv")!;
+    expect(settingsFile.content).toContain("America/Denver");
+    expect(settingsFile.content).not.toContain("America/New_York");
   });
 
   it("no plaid file exists and no file mentions plaid columns", () => {

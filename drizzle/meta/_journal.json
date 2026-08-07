@@ -603,6 +603,20 @@
       "when": 1785980751229,
       "tag": "0085_memberships_owner_role_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1786059108021,
+      "tag": "0086_useful_human_torch",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1786059121025,
+      "tag": "0087_backfill_tenant_timezone",
+      "breakpoints": true
     }
   ]
 }

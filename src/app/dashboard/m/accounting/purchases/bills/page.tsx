@@ -90,7 +90,7 @@ export default async function BillsPage({
       .orderBy(desc(schema.bills.billDate), desc(schema.bills.createdAt))
       .limit(200);
     const settings = await getSettings(tx, tenantId);
-    const today = todayInTimezone(settings.bookkeepingTimezone);
+    const today = todayInTimezone(ctx.tenant.timezone);
     const aging = await getApAging(tx, tenantId, today);
     return { bills, aging };
   });

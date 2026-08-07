@@ -46,7 +46,7 @@ export async function GET(req: NextRequest): Promise<NextResponse | Response> {
   try {
     gathered = await withTenant(ctx.tenant.id, async (tx) => {
       const settings = await getSettings(tx, ctx.tenant.id);
-      todayIso = todayInTimezone(settings.bookkeepingTimezone);
+      todayIso = todayInTimezone(ctx.tenant.timezone);
       return gatherBooksExport(tx, ledgerCtx, {
         includeFiles,
         todayIso,

@@ -105,7 +105,7 @@ export default async function InvoiceDetailPage({
       bankAccounts,
       undeposited,
       customersActive,
-      today: todayInTimezone(settings.bookkeepingTimezone),
+      today: todayInTimezone(ctx.tenant.timezone),
     };
   });
   if (!data) notFound();

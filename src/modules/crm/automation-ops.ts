@@ -3,6 +3,9 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { CrmAutomationRule } from "@/db/schema";
 import { logAuditInTx } from "@/lib/audit";
+import { getTenantTimezone } from "@/lib/tenant-timezone";
+import { todayInTimezone } from "@/lib/timezone";
+import { addDays } from "./core/timeline";
 import { CrmError } from "./core/errors";
 import {
   describeRule,
@@ -248,12 +251,14 @@ async function performAction(
 
   switch (action.kind) {
     case "create_task": {
-      const dueOn = new Date();
-      dueOn.setUTCDate(dueOn.getUTCDate() + (action.dueInDays ?? 0));
       // A DATE column, and follow-ups are due on a DAY — the same rule the
-      // timeline slice set down. `toISOString().slice(0, 10)` is the yyyy-mm-dd
-      // that column wants.
-      const due = dueOn.toISOString().slice(0, 10);
+      // timeline slice set down. "Due in 3 days" counts from the BUSINESS's
+      // today, not the server's: a rule firing at 9pm in Denver used to date
+      // its follow-up from tomorrow's UTC date and land a day early.
+      const due = addDays(
+        todayInTimezone(await getTenantTimezone(tx, ctx.tenantId)),
+        action.dueInDays ?? 0,
+      );
 
       const assignee = action.assignee?.trim()
         ? action.assignee.trim()

@@ -14,6 +14,11 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-05 — Follow-ups group against the business's today (branch `claude/tenant-timezone`)
+- The Follow-ups page and CRM automation both stop using the server's clock. `tenants.timezone` (`0086`) is the platform-level setting the old comment in `tasks/page.tsx` said it was waiting for — see [timezone.md](timezone.md)
+- Automation's "due in N days" now counts from the tenant's today. A rule firing at 9pm in Denver used to date its follow-up from tomorrow's UTC date and land a day early
+- `dueBucket()` needed no change: it always took `today` as a `yyyy-mm-dd` string, which was the point of that design
+
 ### 2026-08-05 — Slice 10: automation (branch `claude/crm-automation`)
 
 "When this happens, do that." `crm_automation_rules` (`0082`/`0083`), five
@@ -1079,10 +1084,12 @@ values stay readable and the discontinuity is visible.
   label the full set, and a tenant without CRM cannot reach them at all. Adding
   a proper multi-value editor to the accounting dialog would duplicate a panel
   CRM owns, so this waits for somebody who actually has the problem.
-- **The Follow-ups page groups against the SERVER's today**, so a tenant far
-  from UTC sees a task change group a few hours early or late. The per-row badge
-  is computed in the browser and is correct. A real fix needs a tenant timezone
-  somewhere CRM may read.
+- ~~**The Follow-ups page groups against the SERVER's today**~~ — **fixed
+  2026-08-05.** `tenants.timezone` (`0086`) is the shared setting this was
+  waiting for, and the page now groups against the business's today. See
+  [timezone.md](timezone.md). What remains: the per-row badge is still computed
+  in the BROWSER, so somebody working away from the business's timezone can see
+  a row badged differently from the group it sits in.
 - **An activity attaches to exactly one party**, plus optionally one deal. A
   meeting with three people from the same company is currently three entries or
   one filed against the company. Multi-attendee activity is a real want with no

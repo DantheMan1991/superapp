@@ -45,6 +45,14 @@ export interface BooksData {
   dimensionMembers: DimensionMember[];
   lineDimensions: LineDimension[];
   settings: AccountingSettings;
+  /**
+   * The tenant's timezone (0086). Separate from `settings` because the books'
+   * day boundary moved up to `tenants` — the accounting column it used to come
+   * from is deprecated and about to be dropped. The CSV header stays
+   * `bookkeeping_timezone`: it still describes what the value is, and an export
+   * is a file somebody's accountant already has a process for.
+   */
+  timezone: string;
   periodCloses: PeriodClose[];
   closeNotes: CloseNote[];
   auditLog: AuditEntry[];
@@ -210,7 +218,7 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
         data.settings.coaTemplate,
         String(data.settings.fiscalYearStartMonth),
         data.settings.entryEditPolicy,
-        data.settings.bookkeepingTimezone,
+        data.timezone,
       ]],
     ),
   );

@@ -202,7 +202,7 @@ export default async function EntryPage({
           <EntryEditor
             accounts={accounts}
             canPost={isOwner}
-            today={todayInTimezone(settings.bookkeepingTimezone)}
+            today={todayInTimezone(ctx.tenant.timezone)}
             entry={{
               id: entry.id,
               version: entry.version,

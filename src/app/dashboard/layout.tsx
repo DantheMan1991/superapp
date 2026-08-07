@@ -51,6 +51,11 @@ export default async function DashboardLayout({
       label: "Billing",
       icon: "billing",
     });
+    navItems.push({
+      href: "/dashboard/settings",
+      label: "Business settings",
+      icon: "wrench",
+    });
   }
 
   const mailNav = navItems.find((item) => item.href === "/dashboard/m/email");

@@ -3,6 +3,7 @@ import { ChevronLeft } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { todayInTimezone } from "@/lib/timezone";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { groupTasks, type DueBucket } from "@/modules/crm/core/timeline";
@@ -31,13 +32,15 @@ const GROUP_LABELS: Record<DueBucket, string> = {
 /**
  * Everything outstanding, across every record.
  *
- * GROUPED ON THE SERVER USING THE SERVER'S TODAY, which is a known and stated
- * limitation rather than an oversight: a tenant in a timezone far from UTC will
- * see a task flip to "Overdue" a few hours early or late. Fixing it properly
- * means storing the tenant's bookkeeping timezone and grouping against that —
- * `accounting_settings` already holds one, but reading another module's table
- * from here is exactly what the isolation rule forbids, so it waits for a
- * shared setting. The per-row badge is computed in the BROWSER and is correct.
+ * Grouped against the TENANT's today (`tenants.timezone`, 0086), so "Overdue"
+ * flips when the business's day does. This used to group against the server's
+ * today and said so: the only timezone in the platform lived in
+ * `accounting_settings`, and reading another module's table from here is what
+ * the isolation rule forbids. The shared setting it was waiting for now exists.
+ *
+ * The per-row badge is still computed in the BROWSER, which is a second clock
+ * and therefore a second answer for anyone working away from the business's
+ * timezone. Deliberate for now — see docs/modules/timezone.md.
  */
 export default async function TasksPage() {
   const ctx = await requireTenant();
@@ -57,7 +60,7 @@ export default async function TasksPage() {
     { role: ctx.role, userId: ctx.userId },
   );
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInTimezone(ctx.tenant.timezone);
   const groups = groupTasks(data.open, today);
   const order: DueBucket[] = ["overdue", "today", "soon", "later", "someday"];
 

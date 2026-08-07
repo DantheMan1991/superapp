@@ -37,7 +37,7 @@ export default async function NewInvoicePage() {
       customers,
       incomeAccounts,
       suggestedNumber,
-      today: todayInTimezone(settings.bookkeepingTimezone),
+      today: todayInTimezone(ctx.tenant.timezone),
     };
   });
 

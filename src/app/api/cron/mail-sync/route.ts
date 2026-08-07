@@ -10,7 +10,14 @@ import { runAutofileRules } from "@/modules/email/autofile/sweep";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-/** Vercel caps a Hobby cron at 60s; stay inside it and let the next tick continue. */
+/**
+ * 60s is now OUR choice, not the platform's. It was Hobby's hard cap when this
+ * was written; the plan changed (confirmed 2026-08-06) and the ceiling is
+ * higher, but every batch size below was picked to fit inside a minute and
+ * raising the limit without re-deriving them buys nothing. Raise both together,
+ * deliberately — most likely alongside the digest, when the shape of this job
+ * is being decided anyway.
+ */
 export const maxDuration = 60;
 
 /**
@@ -101,10 +108,15 @@ export async function GET(request: Request): Promise<Response> {
 
   /**
    * Snoozed mail rides along on this schedule rather than getting a cron of
-   * its own, for a boring reason with a real consequence: Vercel's Hobby plan
-   * runs each cron ONCE A DAY. A second job would mean "later today" arriving
-   * tomorrow, which is not the feature. Here it wakes at whatever cadence this
-   * route actually gets, and needs no new configuration to deploy.
+   * its own. The original reason has EXPIRED: Hobby ran each cron once a day,
+   * so a second job would have meant "later today" arriving tomorrow. Off
+   * Hobby (confirmed 2026-08-06) a second cron is allowed, and this is now a
+   * ride-along by inertia rather than by necessity.
+   *
+   * Left as-is deliberately rather than split on discovery: it works, and the
+   * one-cron-many-passengers shape is exactly what the digest forces a decision
+   * about. Split it there, once, with the queue question answered — not here as
+   * a drive-by.
    *
    * Its own cap, and last, so a large batch of due messages cannot eat the
    * sync's 60 seconds. Anything left over is picked up on the next tick —
@@ -113,8 +125,9 @@ export async function GET(request: Request): Promise<Response> {
   const woken = await wakeDueSnoozes(new Date(), WAKE_BATCH);
 
   /**
-   * Scheduled messages ride the same schedule, for the same Hobby-plan reason,
-   * and run LAST — after the sync and after the snooze sweep.
+   * Scheduled messages ride the same schedule, for the same (now expired)
+   * reason as the snooze sweep above, and run LAST — after the sync and after
+   * the snooze sweep.
    *
    * Order matters here in a way it does not for the other two. This is the only
    * step that performs an irreversible act on somebody's behalf, so it runs when

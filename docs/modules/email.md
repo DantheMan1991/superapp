@@ -13,6 +13,13 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-06 — Off Vercel Hobby: a constraint several designs here were built on is gone (branch `claude/vercel-plan-doc-cleanup`)
+- The founder confirmed the account is **no longer on Hobby**. Older entries below justify design choices with "Hobby runs each cron ONCE A DAY" and "Hobby caps a cron at 60s". Those entries are left as written — they record what was true — but are annotated inline where the *reason* no longer holds
+- **`vercel.json`'s `*/10 * * * *` is now the real schedule.** If Hobby was previously coercing it to daily, then mail sync, snooze wakes, scheduled sends and auto-filing were landing up to 24h late and are now ~144× more frequent. That is a load change on Stalwart and the database that arrived with no deploy — **verify against real invocation logs before trusting it**
+- **Nothing was re-architected in this PR.** The snooze sweep, scheduled send and auto-filing still ride the mail-sync cron. That is now inertia rather than necessity, and splitting them is exactly the decision the notifications digest forces — see `docs/modules/timezone.md` and the cron note in `src/app/api/cron/mail-sync/route.ts`. Doing it here as a drive-by would settle a queue-vs-cron question that deserves its own session
+- `maxDuration = 60` unchanged and now documented as **our** choice: every batch cap below it was sized to fit a minute, so raising the ceiling without re-deriving them buys nothing
+- ADR 0005 needed no change — it already recorded the move to Pro (2026-08-02) and its decision (polling over push) is unaffected
+
 ### 2026-07-26 — Hosted mailboxes: provisioning + MX cutover (branch `claude/email-mailboxes`)
 
 Real mailboxes on the client's own domain, hosted by us rather than connected
@@ -806,6 +813,8 @@ set in Vercel, and **`vercel.json` schedules every 10 minutes, which Vercel's
 Hobby plan does not allow** — Hobby cron runs once per day. Confirm the plan or
 widen the schedule, or the job silently will not run at the stated frequency.
 The per-tenant daily byte cap from Slice 3 is still deferred.
+*[2026-08-06: the plan question is settled — the account is off Hobby, so the
+10-minute schedule is real. See the entry at the top of this log.]*
 
 ### 2026-07-28 (later still) — Slice 5: the extension registry, and linking that means something
 
@@ -1358,6 +1367,8 @@ than as a bug worth reporting.
 own. Vercel's Hobby plan runs each cron ONCE A DAY, so a second job would mean
 "later today" arriving tomorrow. Bounded separately and run last so a large
 batch cannot eat the sync's 60 seconds.
+*[2026-08-06: that reason has expired — off Hobby, a second cron is allowed.
+The ride-along stays for now; splitting it belongs with the digest decision.]*
 
 **Idempotent by construction, in the one direction that matters.** The row is
 deleted only after the mail server confirms the move. A run that dies halfway
@@ -2219,7 +2230,8 @@ the irreversible act rather than after it — the same reasoning the outbound
 spine's idempotency key encodes, applied where no natural key exists.
 
 It rides the mail-sync cron rather than getting its own, like snooze and for the
-same Hobby-plan reason, and runs LAST of the three steps: it is the only one that
+same Hobby-plan reason *[2026-08-06: expired — see the top entry]*, and runs
+LAST of the three steps: it is the only one that
 does something irreversible on somebody's behalf, so it takes what budget is left
 rather than risking starving the sync. Its batch is smaller than the snooze cap
 (50 against 200) because releasing a message is a full submission with an SMTP
@@ -3776,10 +3788,11 @@ code or config change.
   With paste-as-text and a fixed toolbar the divergence should be nil, but if it
   ever is not, the message simply arrives as less than it looked like.
 - **A scheduled send is only as punctual as the cron.** The sweep rides the
-  mail-sync schedule. `vercel.json` asks for every 10 minutes; Vercel's Hobby
-  plan runs cron once a day. **The founder moved to Pro on 2026-08-02**, which
-  restores minute-level cron — verify the first scheduled send actually goes out
-  on time before relying on it.
+  mail-sync schedule, which `vercel.json` sets to every 10 minutes. The account
+  is **confirmed off Hobby as of 2026-08-06**, so that schedule is the real one
+  rather than the once-a-day Hobby coerced it to. Still unverified against
+  actual invocation logs — check that a scheduled send goes out on time before
+  relying on it, because this is the failure a client would notice first.
 - **Search is not instant after filing.** The server's full-text index is
   asynchronous (found by `mail:probe-search`), so a message just moved or filed
   can be missing from results for a moment. Nothing in the UI says so, and the

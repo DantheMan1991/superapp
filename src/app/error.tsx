@@ -25,8 +25,8 @@ export default function ErrorPage({
           Something went wrong
         </h1>
         <p className="text-sm text-muted-foreground">
-          The error has been logged. Try again — if it keeps happening, we're
-          probably already on it.
+          The error has been logged. Try again — if it keeps happening,
+          we&apos;re probably already on it.
         </p>
         {error.digest && (
           <p className="text-xs text-muted-foreground">

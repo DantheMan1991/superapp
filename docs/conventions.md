@@ -237,6 +237,22 @@ npm run test:isolation   # required before deploy
   with no directive at the top (`core/`, `src/lib/`). Found the expensive way on
   2026-08-04: `centsToInput` lived in `deal-form.tsx` and took the whole CRM deal
   page down in production.
+- **The React Compiler rules are errors here, and each one has caught a real
+  bug** (2026-08-08, `claude/lint-clean`) — treat a hit as a defect, not a lint
+  nag:
+  - `react-hooks/purity` — no reading the clock, randomness or any mutable
+    global while rendering. `Date.now()` in a render body means the server
+    renders one value and hydration another, and the figure then sits frozen
+    until something unrelated re-renders. Put it in state on an interval.
+  - `react-hooks/set-state-in-effect` — a `setState` called *synchronously*
+    inside an effect cascades an extra render before paint. Schedule it
+    (`setTimeout(fn, 0)`, an interval, an event) or adjust state during render
+    by comparing against the previous value, which is React's documented way to
+    react to a changed prop.
+  - `react-hooks/preserve-manual-memoization` — usually means the `useMemo` was
+    already useless: a dependency rebuilt every render (an inline array or
+    object) can never hit the cache, and only blocks the compiler from
+    memoizing properly. Delete it and let the compiler do it.
 - shadcn/ui + Tailwind. Check `src/components/ui` before adding a dependency.
 - Modules declare layout needs via `ModuleDefinition.layout`; the shell never
   branches on a module slug.

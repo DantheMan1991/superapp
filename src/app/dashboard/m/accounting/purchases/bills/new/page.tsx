@@ -3,7 +3,6 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getSettings } from "@/modules/accounting/core";
 import { listVendors } from "@/modules/accounting/payables/vendors";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { PurchasesNav } from "../../purchases-nav";
@@ -18,7 +17,6 @@ export default async function NewBillPage() {
 
   const data = await withTenant(tenantId, async (tx) => {
     const vendors = await listVendors(tx, tenantId);
-    const settings = await getSettings(tx, tenantId);
     // Codable accounts: everything active except bank registers and the
     // AR/AP system accounts (mirrors the AI coding eligibility).
     const accounts = await tx.query.accounts.findMany({

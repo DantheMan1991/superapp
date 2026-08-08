@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, like, sql } from "drizzle-orm";
 import { withSystem, schema } from "../src/db";
 import {
-  hashInterviewIp,
   promoteSession,
   runInterviewTurn,
   startInterviewSession,

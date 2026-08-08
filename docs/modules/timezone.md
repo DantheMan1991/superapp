@@ -104,7 +104,7 @@ policy that would permit a timezone change would also expose `status` — lettin
 a tenant flip itself to `active` and skip billing — and `clerk_org_id`. So
 `setTenantTimezoneAction` authorizes with `requireTenantOwner()` and then writes
 under `withSystem` with a tenant id that came from the session, never from the
-request. `tests/tenant-isolation.test.ts` asserts both the read and the denied
+request. `tests/isolation/` asserts both the read and the denied
 write, so anyone adding that policy later trips a test.
 
 **Validate against the runtime, not a regex.** `isValidTimeZone` constructs an

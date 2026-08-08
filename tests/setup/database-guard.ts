@@ -1,10 +1,10 @@
 /**
  * Keeps the test suite away from the production database.
  *
- * Sixteen test files create tenants, write rows and delete them again, and
+ * Many test files create tenants, write rows and delete them again, and
  * several of them do it under `withSystem` — the god view, where RLS is not
  * watching. That is correct for a certification suite and catastrophic against
- * live data, which is why `tenant-isolation.test.ts` has always carried the
+ * live data, which is why the isolation suite has always carried the
  * warning "dev/staging DB, never prod".
  *
  * A warning in a comment is not a control. This is:

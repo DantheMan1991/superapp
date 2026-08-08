@@ -26,7 +26,7 @@
     "mail:probe-autofile": "tsx scripts/jmap-autofile-probe.ts",
     "docs:extract-text": "tsx --conditions react-server scripts/extract-document-text.ts",
     "test": "vitest run",
-    "test:isolation": "vitest run tests/tenant-isolation.test.ts"
+    "test:isolation": "vitest run tests/isolation"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",

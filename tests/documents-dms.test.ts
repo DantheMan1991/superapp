@@ -144,7 +144,7 @@ import { friendlyMessage, DocsError } from "@/modules/documents/core/errors";
  * Pure tests for the Documents module — no database, so these run everywhere.
  * The visibility cases below are the highest-stakes logic in the module: they
  * decide who can read a file. The DB-backed proof lives in
- * tests/tenant-isolation.test.ts.
+ * tests/isolation/documents-dms.test.ts.
  */
 
 const uuid = (n: number) =>

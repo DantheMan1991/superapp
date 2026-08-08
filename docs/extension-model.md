@@ -135,7 +135,7 @@ Three already exist in the schema; use them rather than inventing a fourth.
 **P1 — Open taxonomy columns.** A free-text classifier on a core row, with no
 check constraint on its values. Core stores and filters; packs define meaning.
 Already in use: `documents.doc_kind` — *"Open taxonomy for industry packs
-('drawing', 'permit', 'submittal')"* ([schema.ts:1215](../src/db/schema.ts:1215)).
+('drawing', 'permit', 'submittal')"* ([documents.ts:101](../src/db/schema/documents.ts:101)).
 
 **P2 — Extension metadata bags.** A `NOT NULL DEFAULT '{}'` jsonb column so
 `metadata->>'x'` is always safe. Already in use: `documents.metadata`, and
@@ -273,7 +273,7 @@ rather than rediscovered. Nothing here is a security issue.
 | --- | --- | --- |
 | [templates/defaults.ts](../src/modules/documents/templates/defaults.ts) | `DEFAULT_FOLDERS` = Jobs · Insurance & Bonds · Licenses & Permits · Safety · Equipment · Suppliers | Move to a `trades` profile. Core ships a minimal neutral set. |
 | [templates/general.ts:61](../src/modules/accounting/templates/general.ts:61) | `"5100" Subcontractor Expense` in the *general* chart of accounts | Move to trades profile seed. The file's own comment already says packs ship their own. |
-| [templates/page.tsx:17](../src/app/dashboard/m/documents/templates/page.tsx:17) · [schema.ts:1605](../src/db/schema.ts:1605) | Document templates described as "lien waiver, change order, subcontract" | Core describes the mechanism; the pack ships those templates. |
+| [templates/page.tsx:17](../src/app/dashboard/m/documents/templates/page.tsx:17) · [documents.ts:538](../src/db/schema/documents.ts:538) | Document templates described as "lien waiver, change order, subcontract" | Core describes the mechanism; the pack ships those templates. |
 | [ai/bill-prompt.ts:33](../src/modules/accounting/ai/bill-prompt.ts:33) | Coding prompt infers "from the vendor's **trade**", examples are lumber yards | Prompt vocabulary should come from profile config. |
 | [new-client-form.tsx:28](../src/app/admin/clients/new/new-client-form.tsx:28) | Industry selector **defaults** to `"construction"` | Default to `general`. A defaulted industry is an assumption. |
 
@@ -301,6 +301,6 @@ generic.** The live copy is now "customer, invoice or record".
 
 **Counter-example — core doing it right:** `mail_links.entity_type` carries no
 value constraint, with the reasoning written into the schema
-([schema.ts:2557](../src/db/schema.ts:2557)); `documents.doc_kind` is an explicitly
+([mail.ts:531](../src/db/schema/mail.ts:531)); `documents.doc_kind` is an explicitly
 open taxonomy; `documents.metadata` is a pack extension bag. The newest code
 already reaches for the right primitive — this model names what it was doing.

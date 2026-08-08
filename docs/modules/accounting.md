@@ -112,7 +112,7 @@ export for the accountant.
 | `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
 | `period_closes`, `close_notes` | S7 | Month-end close |
 
-All tables: `tenant_id`, FORCE RLS, covered by `tests/tenant-isolation.test.ts`.
+All tables: `tenant_id`, FORCE RLS, covered by `tests/isolation/accounting.test.ts`.
 
 ## Key files & seams
 

@@ -47,10 +47,13 @@ that matter for code:
 
 1. Row in `scripts/seed.ts` (status `available`) + re-seed.
 2. Renderer in `src/modules/<slug>/` + entry in `src/modules/index.ts`.
-3. Tables: include `tenant_id`, add RLS policies in a new migration
+3. Tables: declare them in the right `src/db/schema/<domain>.ts` (the barrel
+   `index.ts` re-exports every domain, so `@/db/schema` is unchanged). Include
+   `tenant_id`, add RLS policies in a new migration
    (`npm run db:generate`, then a `--custom` one for policies).
 4. Server actions: `requireTenant()` + `requireModuleEnabled()` + `withTenant()`.
-5. Extend `tests/tenant-isolation.test.ts` to cover the new tables.
+5. Extend the certification suite — `tests/isolation/<area>.test.ts`, one file
+   per area — to cover the new tables.
 6. Dossier: create `docs/modules/<slug>.md` from `_TEMPLATE.md`.
 
 Modules stay "coming_soon" empty slots until a paying client pulls them in —
@@ -78,6 +81,12 @@ tree — a new file appears on the page with no code change):
   uncommitted for a week while the module dossiers stayed current — a doc
   that is not committed does not exist, and one the page cannot read may as
   well not be.
+- **Keep a dossier readable.** It is read at the START of every session that
+  touches the area, so its length is a tax on every future change to it. When a
+  build log outgrows a few screens, sweep the older entries into
+  `docs/modules/<slug>-build-log.md` — build-docs walks the whole tree, so the
+  archive renders with no code change. `email.md` reached 3,894 lines, 78% of it
+  build log, before this rule was written down.
 - **At the start of a session that modifies an area, read its dossier
   first** — it's cheaper and more reliable than re-deriving state from git
   history.

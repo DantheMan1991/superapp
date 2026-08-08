@@ -25,6 +25,14 @@ on the founder's machine, and blocked whoever started it.
   to Neon. Parallelising the 46 pure files removes their serial time and no more
 - **The real win is CI, not the 17%.** 20 minutes off the critical path beats 4
   minutes off the clock
+- **The first CI run failed on `npm ci`, and it was right to.** Node 22's npm
+  refused the lockfile — *"Missing: esbuild@0.28.2 from lock file"* — while the
+  same `npm ci` had passed locally every time. The lock is NOT stale: running
+  `npm install` locally leaves it byte-identical. The two npm versions simply
+  resolve it differently (`tsx` wants `esbuild ~0.28.0`, vitest's `vite` wants
+  `^0.27.0 || ^0.28.0`, and the lock pins 0.28.1). Fixed by pinning CI to Node
+  24, the version the lockfile was authored with. Worth knowing that "works
+  locally" and "works on a clean install" were never the same claim here
 
 ## Data model
 
@@ -93,5 +101,7 @@ None. No tables, no migrations.
 - The parallel win may be **smaller on a GitHub runner** (2–4 cores) than on the
   founder's machine. Worth re-measuring from a real CI run before quoting 17%
   anywhere that matters.
-- Node is pinned to 22 in the workflow while local development is on 24, and
-  `package.json` declares no `engines`. Worth aligning.
+- **`package.json` declares no `engines`**, so nothing enforces the Node version
+  the lockfile was authored with — CI pins 24 to match development, but that is
+  a convention held in one YAML file. Adding `engines` would make it explicit;
+  check what Vercel builds with before doing so.

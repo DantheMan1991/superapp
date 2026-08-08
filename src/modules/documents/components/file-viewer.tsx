@@ -21,6 +21,11 @@ import {
 } from "@/components/ui/dialog";
 import { formatBytes } from "../lib/format";
 import { fileKindLabel } from "../lib/view-mode";
+import {
+  describeTextExtraction,
+  isContentSearchable,
+  type TextExtractionState,
+} from "../text/state";
 import { PdfCanvas } from "./pdf-canvas";
 import { previewSpreadsheetAction } from "../document-actions";
 // From ./preview/types, never ./preview/spreadsheet — that module is
@@ -33,6 +38,14 @@ export interface ViewableFile {
   fileName: string;
   mimeType: string;
   sizeBytes: number;
+  /**
+   * Why this file's contents are, or are not, in the search index.
+   *
+   * Imported from `../text/state`, which carries no `server-only` marker for
+   * exactly this reason — `../text/extract` owns pdfjs and exceljs, and a type
+   * import from THERE would drag both parsers into the browser bundle.
+   */
+  textExtraction: TextExtractionState;
 }
 
 /** Canvas width for the viewer. Drawn at devicePixelRatio on top of this. */
@@ -241,6 +254,27 @@ export function FileViewer({
             {pdf && pageCount > 0 && ` · ${pageCount} page${pageCount === 1 ? "" : "s"}`}
           </DialogDescription>
         </DialogHeader>
+
+        {/*
+          Shown ONLY when the contents are not searchable. Confirming that a
+          file IS searchable on every other file would be a line nobody reads,
+          which is how the one file where it matters stops being noticed.
+
+          `role="note"` rather than `alert`: this explains a limitation the
+          person may not have hit yet. An alert interrupts, and nothing here is
+          urgent or wrong.
+        */}
+        {!isContentSearchable(file.textExtraction) && (
+          <p
+            role="note"
+            className="rounded-md bg-secondary/50 px-3 py-2 text-xs text-muted-foreground"
+          >
+            <span className="font-medium text-foreground">
+              Not searchable by content.
+            </span>{" "}
+            {describeTextExtraction(file.textExtraction)}
+          </p>
+        )}
 
         <div className="flex max-h-[64vh] items-center justify-center overflow-auto rounded-md border bg-secondary/30 p-3">
           {pdf ? (

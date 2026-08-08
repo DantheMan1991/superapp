@@ -13,6 +13,56 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-08 — Saying why a file is not searchable (branch `claude/documents-why-not-searchable`)
+
+The producer shipped with a six-state column and nothing rendering it. This is
+the half that talks to a person.
+
+**The insight that placed it: the confusing file is the one that is ABSENT from
+the results.** "I searched for a phrase I can plainly see in that permit and got
+nothing" is a question about a row that is not on screen, so a per-result badge
+answers the wrong question — it annotates the files that DID match. Two
+placements actually address it:
+
+- **The viewer**, for the per-file answer. Open the scanned permit and it says
+  so, above the preview.
+- **The search page**, for the aggregate: *"4 files are not searchable by
+  content — 1 file not read yet, 3 scans with no text layer. Those still match
+  on their name, title, description and tags."* Shown most prominently on the
+  zero-results state, which is the sharpest moment, and quietly under a result
+  list, because results that look complete are exactly when somebody stops
+  wondering what is missing.
+
+**Both are silent when there is nothing to say**, and that is the load-bearing
+decision rather than a detail. `summarizeUnsearchable` returns `null` for a
+clean cabinet and the viewer note renders only when the state is not `done`.
+Confirming "contents are searchable" on every file, or carrying a permanent
+banner about a problem the tenant does not have, is how a warning becomes
+furniture people stop seeing — at which point the one file where it matters goes
+unnoticed. There is a test whose whole job is that a clean cabinet shows
+nothing.
+
+**Ordered by what somebody can DO, not by count.** `pending` leads even when it
+is the rarest, because it is fixed today by running the backfill, while `empty`
+needs OCR that does not exist yet. A reader should meet the fixable thing first.
+
+**The search page's own description was stale and is corrected** — it still
+promised "names, titles, descriptions and what we read from emailed documents",
+written before anything read inside a file. A feature that changes what a page
+does has to change what the page SAYS it does, in the same PR.
+
+`tallyTextExtraction` counts under the caller's RLS context and matches search's
+own predicate (`status <> 'trashed'`, both origins). Two consequences, both
+deliberate: a staff member's count describes the cabinet they can see rather
+than the whole one, so two people can correctly see different totals; and the
+note counts exactly the rows the search considered, or it would explain a
+different question than the one asked. It returns counts only — a tally cannot
+leak a filename.
+
+`isContentSearchable(state)` exists rather than `state !== "done"` written out
+at each call site, so a seventh state added later defaults to "say something"
+instead of silently joining the searchable pile.
+
 ### 2026-08-07 — Search reaches inside files (branch `claude/documents-extract-text`)
 
 `extracted_text` has been read by `search_tsv` at weight D since `0026` and
@@ -583,9 +633,12 @@ Decisions).
   and the history panel, mounted only while open so browsing a folder makes no
   version queries.
 - `src/modules/documents/text/` — the `extracted_text` producer. `state.ts` is
-  the pure vocabulary (the six states, the bounds, `isTextExtractable`) and
-  carries NO `server-only` marker, so a client component can say why a file is
-  not searchable; `extract.ts` is `server-only` and owns pdfjs and exceljs.
+  the pure vocabulary (the six states, the bounds, `isTextExtractable`,
+  `isContentSearchable`, `describeTextExtraction`, `summarizeUnsearchable`) and
+  carries NO `server-only` marker — the file viewer is a client component and
+  imports from it, which is the whole reason it is separate; `summary.ts` is
+  `server-only` and holds `tallyTextExtraction` (counts for the search-page
+  note); `extract.ts` is `server-only` and owns pdfjs and exceljs.
   Importing even a type from `extract.ts` into client code drags those parsers
   toward the browser bundle — the `doc-templates/fields.ts` lesson, again.
 - `scripts/extract-document-text.ts` (`npm run docs:extract-text`) — the
@@ -1111,11 +1164,12 @@ to sort defeats the point of giving out the address.
   B — but their full text arrives late and only on demand. Wiring it in is
   small; deciding whether accounting should depend on `documents/text/` is the
   actual question.
-- **Nothing in the UI says why a file's contents are not searchable.**
-  `describeTextExtraction` exists and returns a sentence for all six states, and
-  nothing renders it. Somebody searching for text they can plainly see in a
-  scanned permit currently concludes search is broken. Cheap to add to the row
-  menu or the viewer; this PR stopped at the producer.
+- **The note is absent from Browse, Inbox and Trash rows.** The viewer says why
+  a file is not searchable and the search page says how many are not, but a
+  folder listing shows nothing — so a folder of fifty scans looks no different
+  from a folder of fifty readable drawings until you open one. Deliberate for
+  now (a per-row badge on every file is the noise the viewer placement avoids),
+  but a folder-level count would carry its weight.
 - **Only the CURRENT version's text is indexed.** Search finds the document, not
   the revision that said it, so a phrase deleted in v3 is unfindable even though
   v1 is still downloadable. The version rows hold the text to make that possible

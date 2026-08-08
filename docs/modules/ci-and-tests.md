@@ -80,6 +80,16 @@ None. No tables, no migrations.
   suite skips and the job goes green over zero coverage — including the
   isolation certification. The workflow fails on absent secrets before running
   anything.
+- **The suite needs three non-database values, and they are NOT repo secrets:**
+  `APP_ENCRYPTION_KEY` (32 bytes of base64), `SHARE_SECRET` (32+ chars) and
+  `INTERVIEW_IP_SALT` (any non-empty string). Every suite using them creates a
+  value and verifies it within the same run, so any input of the right shape
+  works. They are written into the workflow as fixed test values — putting the
+  production keys in CI would add risk and something to rotate, for nothing.
+  Found the honest way: the second CI run failed on `SHARE_SECRET`, and rather
+  than guess at the next one, the whole suite was re-run locally with `.env`
+  moved aside and only a CI-shaped environment. Those three were the complete
+  set.
 - **The suite is not re-run to prove isolation ran.** With the secret present the
   guard points `DATABASE_URL` at it, so the DB suites cannot skip; a second
   `test:isolation` pass would just repeat five minutes of work.

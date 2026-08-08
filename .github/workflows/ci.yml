@@ -120,4 +120,17 @@ jobs:
         env:
           TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
           TEST_DATABASE_URL_OWNER: ${{ secrets.TEST_DATABASE_URL_OWNER }}
+          # NOT SECRETS, and deliberately not repo secrets.
+          #
+          # These three are a key, a key and a salt. The suites that use them
+          # create a value and verify it inside the same run, so any input of
+          # the right SHAPE satisfies them — 32 bytes of base64, 32+ characters,
+          # and any non-empty string. Making them repo secrets would mean the
+          # production keys sitting in CI for no benefit, and one more thing to
+          # rotate. Writing them here is the safer choice, not the lazy one.
+          #
+          # The values are fixed rather than random so a failure reproduces.
+          APP_ENCRYPTION_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+          SHARE_SECRET: ci-test-share-secret-deterministic-not-real-000
+          INTERVIEW_IP_SALT: ci-test-interview-salt
         run: npm test

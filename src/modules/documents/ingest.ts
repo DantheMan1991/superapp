@@ -12,6 +12,7 @@ import {
 } from "@/lib/blob";
 import { DocsError } from "./core/errors";
 import { isAllowedUpload } from "./allowlist";
+import type { TextExtractionState } from "./text/state";
 import type { DocsCtx } from "./folder-ops";
 
 /**
@@ -70,17 +71,35 @@ export interface InspectedUpload {
 }
 
 /**
+ * The inspection plus the bytes it already had in hand.
+ *
+ * Separate from `InspectedUpload` so the bytes travel only where they are
+ * wanted: `AddVersionInput` extends the smaller shape and is stored in a row,
+ * and a megabyte of file riding along in a struct nobody reads is the kind of
+ * thing that quietly ends up logged.
+ */
+export interface InspectedUploadWithBytes extends InspectedUpload {
+  bytes: Uint8Array;
+}
+
+/**
  * Upload part 2 (part 1 is the client-direct blob upload): prove the blob is
  * really in this tenant's namespace, re-apply the allowlist to the blob's REAL
  * metadata rather than whatever the client claimed, and hash the actual bytes.
  *
  * The client-side check before upload is a courtesy that saves a round trip.
  * This is the check that counts.
+ *
+ * RETURNS THE BYTES it downloaded to hash, which it used to discard. Text
+ * extraction needs exactly those bytes, so handing them back is what makes
+ * indexing a file's contents cost a parse rather than a second download of
+ * something up to 100MB. Callers that only want the metadata destructure past
+ * them; nothing persists this field.
  */
 export async function inspectUploadedBlob(
   tenantId: string,
   pathname: string,
-): Promise<InspectedUpload> {
+): Promise<InspectedUploadWithBytes> {
   assertBlobConfigured();
   // Re-checked here as well as at token issuance: registration is a separate
   // request and must not trust that the earlier gate ran.
@@ -112,6 +131,7 @@ export async function inspectUploadedBlob(
     mimeType: meta.contentType ?? "",
     sizeBytes: meta.size,
     sha256: sha256Hex(bytes),
+    bytes,
   };
 }
 
@@ -121,6 +141,9 @@ export interface RegisterInput extends InspectedUpload {
   folderId: string | null;
   title: string;
   description: string;
+  /** Already read from the bytes by the caller — see `text/extract.ts`. */
+  extractedText: string;
+  textExtraction: TextExtractionState;
 }
 
 export interface RegisterResult {
@@ -181,9 +204,14 @@ export async function createDmsDocument(
       title: input.title,
       description: input.description,
       uploadedByClerkUserId: ctx.userId,
-      // Nothing reads DMS files yet; extraction is an accounting concern and a
-      // later OCR pass will claim this column for the search index.
+      // The ACCOUNTING AI status, which stays 'skipped' — a filing-cabinet
+      // upload is not a receipt and no model looks at it. Not to be confused
+      // with `textExtraction` below, which is the search-index one; they are
+      // different questions about the same file and were conflated in review
+      // once already.
       extractionStatus: "skipped",
+      extractedText: input.extractedText,
+      textExtraction: input.textExtraction,
     })
     .onConflictDoNothing()
     .returning();

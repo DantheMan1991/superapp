@@ -13,6 +13,108 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-07 — Search reaches inside files (branch `claude/documents-extract-text`)
+
+`extracted_text` has been read by `search_tsv` at weight D since `0026` and
+written by nothing but the mail seam. Search matched a document's METADATA and
+never its contents — which for a DMS is the difference between a filing cabinet
+and a searchable one. There is now a producer.
+
+**No model, and that is the finding rather than a compromise.** A PDF carrying
+a text layer needs a parser, not vision, and `pdfjs-dist` was already a
+dependency — it draws the previews. Probing it under plain Node settled the
+whole design in ten minutes: `legacy/build/pdf.mjs` extracts a text layer with
+no DOM, no worker and no new package. So the house AI pattern
+(`accounting/ai/extract.ts`) is deliberately NOT copied here. There is no
+per-document bill, so no cooldown to claim; no network hop, so nothing to
+inject and nothing to keep out of a transaction; and the output is a string, so
+no shape to validate. **Cargo-culting that machinery would have added a
+transaction, a settings column and an injectable seam to a function that parses
+bytes.**
+
+Four strategies behind one dispatcher: PDF text layer, plain text/CSV/Markdown,
+and xlsx through the exceljs the preview already owns. Zero new dependencies.
+
+**`empty` is the point of the state column.** Six states rather than a boolean,
+because "I searched for a phrase I can see in this file and got nothing" has six
+different answers and only one is a bug. `empty` means a supported type that
+genuinely carries no text layer — a scan, a photographed permit — and it is
+therefore the exact population OCR would help. **The vision question is now
+measurable instead of estimable**: the backfill prints that count, and the
+number is what should decide whether anyone pays for a model. Guessing at it
+first was the expensive version of this session.
+
+**It runs inline at upload, which sidesteps the cron question entirely.**
+`inspectUploadedBlob` already downloaded the whole blob to hash it and threw the
+bytes away; handing them back makes extraction cost a parse rather than a second
+download of up to 100MB. So no cron, no queue, and no fifth passenger on a
+decision `notifications.md` has deliberately deferred until the agent runs give
+it two real consumers. The backlog is drained by `npm run docs:extract-text`,
+which is a script because a backlog is finite — a cron would be a permanent job
+solving a problem that stops existing after its first successful run.
+
+**Text lives on the version row, and that made re-extraction fall out for
+free.** `document_versions` already stores every other descriptor of a set of
+bytes (file_name, mime_type, size, sha256); text is one more, so it follows the
+same rule and `promoteVersion` denormalizes it onto the document exactly as it
+already does the other five. Restoring v1 therefore restores v1's text with no
+blob read and no re-parse, and "the index describes the CURRENT bytes" is one
+assignment in one function rather than an invariant two call sites must
+remember. The alternative — re-downloading and re-parsing on restore — is more
+code, more failure modes, and a window where the index is confidently wrong.
+
+Four things the tests found, all invisible to the compiler:
+
+- **pdfjs returns positioned FRAGMENTS, not lines.** Concatenated, "…order
+  0042" followed by "Kitchen elevation" becomes the lexeme `0042Kitchen`, which
+  matches neither word anyone would type — and the index looks fine, because
+  every other word in the document still matches. Joined with a space, with a
+  test that asserts the fused form never appears.
+- **A NUL byte would have failed the upload, not the indexing.** Postgres `text`
+  cannot hold U+0000, so one mislabeled binary uploaded as `text/plain` takes
+  the whole INSERT down with `unsupported Unicode escape sequence`. Everything
+  is scrubbed before it is stored.
+- **A whitespace-boundary cut using a FRACTION of the budget is nonsense.** At
+  200,000 characters the last space is always within a few characters of the
+  end, so a `> max * 0.9` threshold either never fires or always fires depending
+  on a number nobody can reason about — and at small budgets it silently cut
+  mid-word anyway. An absolute 100-character lookback is a question with an
+  obvious answer either way.
+- **A sheet with no cells must contribute nothing, not even its name.** Indexing
+  "Sheet1" makes every untouched workbook match a search for it, and means
+  `empty` could never be reported for a spreadsheet at all — costing the state
+  its meaning to gain a lexeme nobody wants.
+
+**Run against the dev branch's REAL files, which is the only evidence that
+counts here.** A Fulton Lumber invoice PDF yielded 932 characters and the
+QuickBooks customer export from the sheet-reading session yielded 34,754 — both
+confirmed matched by `search_tsv @@ websearch_to_tsquery`, not merely stored.
+That run also produced the one quality defect worth knowing about (`INV OICE`,
+see Open items) and a script bug no fixture would have shown: **a document whose
+blob has gone missing is recorded `failed`, `failed` is in the queue, so the
+backfill re-served the same four rows 732 times.** The queue now excludes what
+the current run has already attempted, which keeps the behaviour that was
+actually wanted — a transient failure is retried on the NEXT run, not
+immediately and forever.
+
+**The dossier was slightly wrong and is corrected above.** "Nothing populates
+it" was true of the upload path only: `mail/extension.ts` has written a message
+transcript into `extracted_text` since filing shipped. Those rows are marked
+`done` so the backfill leaves them alone — a transcript is a better answer than
+any parser could give for an `.eml`, whose raw bytes are headers and base64.
+
+`0095` is expand-only (three `ADD COLUMN`s with defaults, one partial index, two
+CHECKs) and adds no table, so there is deliberately no `--custom` RLS migration
+beside it: a new COLUMN on a table that already has FORCE'd policies is covered
+the moment it exists, and adding a policy would be a second place for the
+visibility rule to be wrong. Verified with `verify-rls.ts` and by reading
+`information_schema` back, because "migrations complete" is not evidence.
+
+The isolation suite gained the assertion that now matters more than it did:
+what is protected is no longer a filename but **the wording of an owners-only
+document**, across tenants and across roles, on both tables and through the
+`search_tsv` query shape search actually uses.
+
 ### 2026-07-26 — Sheet-reading fix, remembered layout (branch `claude/documents-sheet-fix`)
 
 **The founder sent the actual file, which settled it in one probe.** A
@@ -446,9 +548,9 @@ Decisions.
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `documents` (shared) | The generic file record, now carrying DMS columns | `origin` discriminates `accounting`/`dms`; required in `$inferInsert` via `schema.ts`, and DB-defaulted to `'accounting'` so pre-Documents writers keep working (see Decisions). `member_all` policy compares `effective_visibility` against `app_current_tenant_role()`. **No new UNIQUE index may be added** — see Decisions |
+| `documents` (shared) | The generic file record, now carrying DMS columns | `origin` discriminates `accounting`/`dms`; required in `$inferInsert` via `schema.ts`, and DB-defaulted to `'accounting'` so pre-Documents writers keep working (see Decisions). `member_all` policy compares `effective_visibility` against `app_current_tenant_role()`. **No new UNIQUE index may be added** — see Decisions. `extracted_text` (indexed by `search_tsv` at weight D) describes the CURRENT bytes and is denormalized from the current version row; `text_extraction` (`0095`, text + CHECK over six states) says why it is or is not there. Do NOT confuse `text_extraction` with `extraction_status` — the latter is the accounting AI's, and a DMS upload is `skipped` there and meaningful here |
 | `document_folders` | The tree | Adjacency list (`parent_id`, source of truth) **+** materialized `path`. Self composite FK, NO ACTION. Two partial name uniques (root and non-root). `text_pattern_ops` prefix index, hand-written in 0024. Same visibility policy as `documents` |
-| `document_versions` | File revision history | Written by `versions.ts` since 2026-07-25. Partial unique on `is_current` makes "exactly one current" a DB invariant, and it is NOT deferrable, so the swap must clear the old flag before inserting. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag. A document with no history has ZERO rows here, not one — see Decisions |
+| `document_versions` | File revision history | Written by `versions.ts` since 2026-07-25. Partial unique on `is_current` makes "exactly one current" a DB invariant, and it is NOT deferrable, so the swap must clear the old flag before inserting. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag. A document with no history has ZERO rows here, not one — see Decisions. Since `0095` it also carries `extracted_text`/`text_extraction`, and this is the AUTHORITATIVE copy: text describes BYTES, and every other descriptor of the bytes (file_name, mime_type, size, sha256) was already here. `promoteVersion` denormalizes both onto the document |
 | `document_tags` | Tenant tag registry | Written by `tag-ops.ts` since 2026-07-25. `documents.tags text[]` stores slugs from here, so a rename never rewrites documents — and the SLUG IS IMMUTABLE, see Decisions. Slug format enforced by CHECK; `(tenant, slug)` unique is what makes "As Built" and "as-built" the same tag. No FK is possible from an array element, so `setDocumentTags` is the only door |
 | `document_saved_views` | Saved filters | `query` jsonb is stored USER INPUT — re-parsed with Zod on EVERY read by `parseSavedViewQuery`. Since 2026-07-25 it resolves to search-page parameters rather than to a WHERE clause of its own; unknown keys are stripped, invalid fields degrade to absent. Unique is `(tenant, creator, name_key)`, so two people may use the same view name |
 | `document_templates` | Document template identity | `0033`/`0035`. `(tenant, name_key)` unique — restored by `0035` after a hand edit to `0033` dropped it, see Build log. Archived, never deleted, so a generated document naming it cannot dangle |
@@ -462,6 +564,9 @@ Decisions.
 Migrations: `drizzle/0023_documents_dms.sql` (+ two hand edits, see Decisions)
 and `drizzle/0024_documents_dms_rls.sql` (custom: the role function, the
 replaced `documents` policy, policies for the five new tables).
+`drizzle/0095_documents_extracted_text.sql` adds the text columns — expand-only,
+no new table, and therefore deliberately **no `--custom` RLS migration** (see
+Decisions).
 
 ## Key files & seams
 
@@ -477,6 +582,15 @@ replaced `documents` policy, policies for the five new tables).
 - `src/modules/documents/components/version-controls.tsx` — the replace dialog
   and the history panel, mounted only while open so browsing a folder makes no
   version queries.
+- `src/modules/documents/text/` — the `extracted_text` producer. `state.ts` is
+  the pure vocabulary (the six states, the bounds, `isTextExtractable`) and
+  carries NO `server-only` marker, so a client component can say why a file is
+  not searchable; `extract.ts` is `server-only` and owns pdfjs and exceljs.
+  Importing even a type from `extract.ts` into client code drags those parsers
+  toward the browser bundle — the `doc-templates/fields.ts` lesson, again.
+- `scripts/extract-document-text.ts` (`npm run docs:extract-text`) — the
+  backfill for documents that predate the producer, and the retry for `failed`.
+  Prints the per-state tally, which is the measurement the OCR decision needs.
 - `src/modules/documents/search.ts` — raw-SQL query behind BOTH search and
   every saved view: optional text term, tag/origin facets, folder scope.
   `search_tsv` is deliberately absent from `schema.ts`, so this is the only
@@ -598,6 +712,102 @@ is header injection) and emitted with an RFC 5987 `filename*`.
 **Two upload routes, not one parameterized route.** One route answering to two
 module gates has cross-module privilege escalation as its failure mode; forty
 duplicated lines are cheaper.
+
+**Text extraction has no model in it, and that was a decision rather than a
+shortcut.** The house AI pattern — gather-and-gate in one tenant transaction, a
+per-tenant cooldown claimed as it is checked, exactly one injectable network
+function, Zod at the boundary — exists to make a metered, slow, untrusted remote
+call safe. A library call is none of those things: no bill, so no cooldown; no
+network, so nothing to inject and nothing that must stay out of a transaction;
+a string, so nothing to validate. **Copying the shape anyway is how a parser
+ends up with a settings column.** If a vision pass is ever added it should
+follow `accounting/ai/extract.ts` properly, as a SEPARATE producer consuming the
+`empty` queue — not by growing this file a network branch.
+
+**`empty` is a measurement, not a failure.** It means a supported type that
+genuinely carries no text layer, which is precisely the population OCR would
+help and nothing else would. Counting it is how the vision question gets decided
+with evidence; `npm run docs:extract-text` prints the number. Anything that
+makes `empty` unreachable — say, indexing a blank sheet's name so a workbook is
+never textless — quietly destroys that measurement, which is why an empty sheet
+contributes nothing at all.
+
+**`text_extraction` and `extraction_status` are different questions about the
+same file.** The latter is the accounting AI's status for the `extraction` jsonb;
+a DMS upload is `skipped` there forever. The former is whether search can reach
+inside the file. They were conflated once in review and the shared table makes
+that easy to do again — the insert site carries a comment saying so.
+
+**200,000 characters is the INDEX's number, not a taste.** `search_tsv` reads
+`left(extracted_text, 200000)` because a tsvector has a hard 1MB limit and an
+unbounded dump would make INSERTs start failing later, in production, on a table
+that was fine yesterday. The producer honours the consumer's bound rather than
+letting the index truncate silently — storing more is bytes nobody can ever
+find. **Change `text/state.ts` and `drizzle/0026`'s `left(...)` together** or
+the two disagree.
+
+**A NUL byte is an upload failure, not an indexing failure.** Postgres `text`
+cannot hold U+0000, so one mislabeled binary uploaded as `text/plain` would take
+the whole INSERT down with `unsupported Unicode escape sequence` — a rejected
+file, caused by a column we only added to help find it. `sanitizeExtractedText`
+scrubs control characters and lone surrogates before anything is stored, and it
+is written with Unicode property escapes rather than code-point ranges so the
+source file contains no control characters of its own to be mangled by an editor
+or a patch.
+
+**pdfjs, in Node, from `legacy/build/`.** The default `build/pdf.mjs` the browser
+preview uses assumes a window. No worker is configured on purpose — pdfjs then
+runs on the calling thread, which is what a serverless function with no second
+thread wants. `verbosity: 0` because otherwise every document without embedded
+standard fonts logs a `standardFontDataUrl` warning irrelevant to text. There is
+deliberately no `isEvalSupported: false`: pdfjs 6 **removed the option along
+with the eval path it guarded**, so adding it back would not fail the build, it
+would be silently ignored — which reads like a protection that is not there.
+
+**pdfjs returns positioned FRAGMENTS, not lines.** Join them with a space or
+"…order 0042" and "Kitchen elevation" fuse into the lexeme `0042Kitchen`,
+matching neither word anybody would type. The failure is nasty because the index
+looks healthy: every other word in the document still matches. There is a test
+asserting the fused form never appears.
+
+**The extracted text follows the current bytes, exactly as `file_name` does,
+and `promoteVersion` is the only place that has to know.** Both the append path
+and the restore path end there, so the invariant is one assignment rather than a
+rule two call sites must remember. Storing text on the version row is what makes
+that free: restoring v1 recovers v1's text with no blob read and no re-parse, and
+a document uploaded before the producer existed materializes its v1 as `pending`
+rather than borrowing v2's text — which would leave the index confidently wrong,
+the worst of the available failures.
+
+**The backfill runs under `withSystem`, and `withTenant` would be the unsafe
+choice.** `withTenant` defaults `app.tenant_role` to `'staff'`, so a
+tenant-context backfill would silently skip exactly the owners-only documents —
+leaving a corpus searchable for everyone except the people who filed the
+sensitive things. Same trap as an owner-only tag delete sweeping rows RLS hid
+from it. Every query in the script still names `tenant_id`, and nothing crosses a
+tenant boundary within one document.
+
+**The backfill never blanks text it did not produce, and never touches
+`updated_at`.** A row can already hold a mail transcript; if a strategy has
+nothing better to offer, the existing text stays. And reading a file is not a
+change to it — moving the timestamp would push every document in the business to
+the top of "recently modified" on the day the script runs.
+
+**Settled answers are not retried.** The queue is `pending` and `failed` only.
+`empty`, `unsupported` and `too_large` are facts about the file rather than
+transient errors, and re-downloading the corpus every run to re-learn them would
+be the expensive way to change nothing. **When the strategies grow — an OCR pass
+claiming `empty`, a zip reader claiming Word — the re-queue is a deliberate
+UPDATE**, not something the script does on its own.
+
+**A new COLUMN needs no RLS migration; a new TABLE does.** `0095` adds no table,
+and RLS is row-level: `documents` and `document_versions` already carry FORCE'd
+policies that cover a column the moment it exists. Adding a policy here would be
+a second place for the visibility rule to be wrong. The general rule in
+AGENTS.md is about tables, and it is worth reading it that way rather than
+reflexively writing a `--custom` file. Verified either way — `verify-rls.ts`
+plus an `information_schema` read-back, because "migrations complete" is not
+evidence.
 
 **A tag's slug is immutable, and that is the whole design.** `documents.tags`
 stores slugs, so renaming a tag is a one-row update on the registry and not a
@@ -864,9 +1074,59 @@ to sort defeats the point of giving out the address.
 - **A version cannot be deleted individually**, so a file uploaded to the wrong
   document is fixed by uploading the right one over it, leaving the mistake in
   the history. Trashing the whole document is the only eraser.
-- **`extracted_text` is still empty** — the search index reads it at weight D,
-  but nothing populates it. OCR / PDF text extraction is the follow-up that
-  makes search reach inside documents rather than across their metadata.
+- **Letter-spaced headings come out split, and it is the space join's fault.**
+  Running the backfill over the dev branch's real files extracted a Fulton
+  Lumber invoice as `INV OICE Fulton Lumber & Supply, LLC …` — the generator
+  emitted the heading as two positioned fragments, and joining fragments with a
+  space is what stops `0042Kitchen` (see Decisions). So a designed heading may
+  not match a search for the word it plainly shows. The impact is small in
+  practice — `file_name` and `title` are weight A, the body text is fine, and
+  the body is the part you cannot get any other way — but the fix is known: join
+  on GEOMETRY instead, using each item's `transform` and `width` to suppress the
+  space only when fragments literally abut on the same line. Deliberately not
+  guessed at here, because tuning a gap threshold against a PDF written
+  specifically to exhibit the problem is the fixture trap this module already
+  learned once. It wants a handful of real files to tune against.
+- **Scans and images are not read at all — and the size of that gap is now a
+  number.** `text_extraction = 'empty'` is a supported type carrying no text
+  layer, which is exactly the OCR population; `npm run docs:extract-text` prints
+  the count. **Look at that number before paying for a model.** When it is worth
+  doing, build it as a separate producer following
+  `accounting/ai/extract.ts` properly (cooldown, one injectable network
+  function, a per-tenant budget) consuming the `empty` queue — do NOT grow
+  `text/extract.ts` a network branch. The cost bounds it will need and this pass
+  does not: a page cap per document and a per-tenant spend ceiling, because a
+  300-page scan and a 40MB photo are very different bills.
+- **Word, PowerPoint and legacy `.doc`/`.xls` contents are not indexed.** OOXML
+  is a zip and no zip reader is a declared dependency here; the legacy binary
+  formats have no library worth the risk (the same argument that refuses
+  SheetJS for previews). Recorded as `unsupported`, so it is countable rather
+  than silent. A contract filed as `.docx` is findable by its name and not by
+  its terms, which is the most likely first complaint.
+- **A receipt uploaded through the Accounting capture path stays `pending`
+  until someone runs the backfill.** Extraction is wired into the DMS upload and
+  version actions only; accounting has its own `createDocumentRecord` and this
+  PR deliberately did not reach across the module boundary. Receipts are not
+  unsearchable meanwhile — the AI extraction's `vendorName` is indexed at weight
+  B — but their full text arrives late and only on demand. Wiring it in is
+  small; deciding whether accounting should depend on `documents/text/` is the
+  actual question.
+- **Nothing in the UI says why a file's contents are not searchable.**
+  `describeTextExtraction` exists and returns a sentence for all six states, and
+  nothing renders it. Somebody searching for text they can plainly see in a
+  scanned permit currently concludes search is broken. Cheap to add to the row
+  menu or the viewer; this PR stopped at the producer.
+- **Only the CURRENT version's text is indexed.** Search finds the document, not
+  the revision that said it, so a phrase deleted in v3 is unfindable even though
+  v1 is still downloadable. The version rows hold the text to make that possible
+  later; nothing queries them.
+- **The backfill only fixes the CURRENT version row**, not historical ones — an
+  older revision's text can only come from re-reading a blob the script does not
+  walk. Those stay `pending` forever, harmlessly, until something wants them.
+- **Extraction is inline, so a pathological file is a slow upload.** Bounded at
+  20 seconds, 100 PDF pages and 25MB, and a failure never blocks the upload —
+  but the person waiting pays the parse. A 100MB drawing set is refused outright
+  as `too_large` even though the upload allowlist accepted it.
 - **Previews download the whole file.** A PDF thumbnail parses the entire
   document to draw page 1, and an image tile is the ORIGINAL scaled by the
   browser — so a folder of 12-megapixel site photos downloads 12-megapixel site

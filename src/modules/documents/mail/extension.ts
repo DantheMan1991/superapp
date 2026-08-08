@@ -398,6 +398,11 @@ async function fileMessage(
           // message makes it findable from the Documents search box by what it
           // SAYS — which is most of why a copy is worth having.
           extractedText: input.transcript,
+          // 'done', so the text backfill leaves this row alone. The transcript
+          // is a BETTER answer than any parser could give — nothing extractable
+          // lives in an .eml's raw bytes but headers and base64 — and a rescan
+          // would mark it 'unsupported' and be tempted to blank it.
+          textExtraction: "done",
           extractionStatus: "done",
           metadata: mailMetadata(input, { kind: "message" }),
         })

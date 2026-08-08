@@ -27,6 +27,7 @@ import {
   restoreDocumentVersion,
   type VersionEntry,
 } from "./versions";
+import { extractDocumentText } from "./text/extract";
 import type { DocsCtx } from "./folder-ops";
 
 /**
@@ -93,6 +94,12 @@ export async function registerDocumentUploadAction(
     // Blob inspection (head + full read to hash) happens BEFORE the
     // transaction — network work must never hold one open.
     const inspected = await inspectUploadedBlob(ctx.tenantId, parsed.data.pathname);
+    // And so does reading the text, for the same reason plus a second one:
+    // parsing a hundred-page PDF takes seconds. It reuses the bytes the hash
+    // was computed from, so this costs a parse and not a second download, and
+    // it never throws — a file we cannot read still gets filed, carrying the
+    // reason it is not searchable.
+    const extracted = await extractDocumentText(inspected.bytes, inspected.mimeType);
 
     const result = await withTenant(
       ctx.tenantId,
@@ -103,6 +110,8 @@ export async function registerDocumentUploadAction(
           folderId: parsed.data.folderId,
           title: parsed.data.title,
           description: parsed.data.description,
+          extractedText: extracted.text,
+          textExtraction: extracted.state,
         });
         await logAuditInTx(tx, {
           action: "documents.uploaded",
@@ -117,6 +126,10 @@ export async function registerDocumentUploadAction(
             mimeType: inspected.mimeType,
             folderId: parsed.data.folderId,
             duplicateOfId: created.duplicateOfId,
+            // The STATE, never the text. Whether a file's contents could be
+            // read is an identifier-shaped fact; the contents themselves are
+            // exactly what an audit log must not hold.
+            textExtraction: extracted.state,
           },
         });
         return created;
@@ -160,6 +173,10 @@ export async function addDocumentVersionAction(
     if (!parsed.success) return { error: "Invalid input" };
 
     const inspected = await inspectUploadedBlob(ctx.tenantId, parsed.data.pathname);
+    // Re-read on every revision, because v1's text is wrong for v3. The state
+    // travels with the version row, so a later restore of v1 gets v1's text
+    // back without touching the blob store — see promoteVersion.
+    const extracted = await extractDocumentText(inspected.bytes, inspected.mimeType);
 
     const result = await withTenant(
       ctx.tenantId,
@@ -168,6 +185,8 @@ export async function addDocumentVersionAction(
           ...inspected,
           blobPathname: parsed.data.pathname,
           note: parsed.data.note,
+          extractedText: extracted.text,
+          textExtraction: extracted.state,
         });
         await logAuditInTx(tx, {
           action: "documents.version_added",
@@ -182,6 +201,7 @@ export async function addDocumentVersionAction(
             sizeBytes: inspected.sizeBytes,
             mimeType: inspected.mimeType,
             sameAsCurrent: added.sameAsCurrent,
+            textExtraction: extracted.state,
           },
         });
         return added;

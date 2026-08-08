@@ -1574,8 +1574,26 @@ export const documents = pgTable(
     /** Current file revision. See document_versions for the history. */
     fileVersionNo: integer("file_version_no").notNull().default(1),
     fileVersionCount: integer("file_version_count").notNull().default(1),
-    /** OCR / PDF text seam — indexed by search_tsv, populated later. */
+    /**
+     * The document's readable contents, indexed by `search_tsv` at weight D.
+     *
+     * Describes the CURRENT bytes, exactly like `file_name` and `sha256` do —
+     * `document_versions` holds the authoritative copy per revision and
+     * `promoteVersion` denormalizes it here. Written by
+     * `documents/text/extract.ts` for the DMS and by the mail seam for a filed
+     * message (whose transcript is a better answer than any parser).
+     *
+     * Bounded to 200,000 characters by the producer because that is what
+     * drizzle/0026's `left(extracted_text, 200000)` indexes — see
+     * `text/state.ts`.
+     */
     extractedText: text("extracted_text").notNull().default(""),
+    /**
+     * Why those contents are, or are not, in the index — see
+     * `documents/text/state.ts` for the vocabulary. Defaults to 'pending', so
+     * every row that predates the producer is the backfill's queue.
+     */
+    textExtraction: text("text_extraction").notNull().default("pending"),
     /** When it left the Inbox. */
     filedAt: timestamp("filed_at", { withTimezone: true }),
 
@@ -1617,6 +1635,12 @@ export const documents = pgTable(
       t.createdAt.desc(),
     ),
     index("documents_tags_gin_idx").using("gin", t.tags),
+    // The backfill's queue, and nothing else. PARTIAL on purpose: a plain btree
+    // over six states would be useless, whereas this one shrinks to almost
+    // nothing once every document has been read — which is the steady state.
+    index("documents_text_extraction_pending_idx")
+      .on(t.tenantId, t.createdAt)
+      .where(sql`${t.textExtraction} in ('pending', 'failed')`),
     foreignKey({
       name: "documents_folder_fk",
       columns: [t.tenantId, t.folderId],
@@ -1639,6 +1663,14 @@ export const documents = pgTable(
     check(
       "documents_filed_at_requires_folder",
       sql`${t.folderId} is not null or ${t.filedAt} is null`,
+    ),
+    // text + CHECK, not a pgEnum: ALTER TYPE ... ADD VALUE cannot be used in
+    // the transaction that adds it and Drizzle wraps each migration in one, so
+    // a seventh state would need a migration file of its own containing a
+    // single statement. Same reasoning as every other discriminator here.
+    check(
+      "documents_text_extraction_check",
+      sql`${t.textExtraction} in ('pending', 'done', 'empty', 'unsupported', 'too_large', 'failed')`,
     ),
   ],
 );
@@ -1867,6 +1899,17 @@ export const documentVersions = pgTable(
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
     sha256: text("sha256").notNull().default(""),
     isCurrent: boolean("is_current").notNull().default(true),
+    /**
+     * This revision's readable contents, and the reason they live here rather
+     * than only on the document: text describes BYTES, and every other
+     * descriptor of the bytes (file_name, mime_type, size, sha256) is already
+     * authoritative on the version row and denormalized onto the document.
+     * Text is one more descriptor, so it follows the same rule — which makes
+     * restore free, because restoring v1 restores v1's text with no download
+     * and no re-parse.
+     */
+    extractedText: text("extracted_text").notNull().default(""),
+    textExtraction: text("text_extraction").notNull().default("pending"),
     note: text("note").notNull().default(""),
     /** Set when this row was produced by restoring an earlier version. */
     restoredFromVersionId: uuid("restored_from_version_id"),
@@ -1901,6 +1944,10 @@ export const documentVersions = pgTable(
     }).onDelete("cascade"),
     check("document_versions_size_nonnegative", sql`${t.sizeBytes} >= 0`),
     check("document_versions_no_positive", sql`${t.versionNo} >= 1`),
+    check(
+      "document_versions_text_extraction_check",
+      sql`${t.textExtraction} in ('pending', 'done', 'empty', 'unsupported', 'too_large', 'failed')`,
+    ),
   ],
 );
 

@@ -2821,6 +2821,12 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
             sizeBytes: 10,
             sha256: `dms-locked-${tag}`,
             effectiveVisibility: "owners",
+            // The CONTENTS of an owners-only file, not just its name. Since the
+            // text producer shipped, `search_tsv` indexes this at weight D —
+            // which raised the stakes of a leak from "a filename" to "the
+            // wording of the document". The tests below read it back.
+            extractedText: `severance terms for locked-${tag} zephyrqx`,
+            textExtraction: "done",
           })
           .returning();
 
@@ -2835,6 +2841,8 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
             mimeType: "application/pdf",
             sizeBytes: 10,
             sha256: `dms-locked-${tag}`,
+            extractedText: `severance terms for locked-${tag} zephyrqx`,
+            textExtraction: "done",
             isCurrent: true,
           })
           .returning();
@@ -3268,6 +3276,104 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
       { role: "owner" },
     );
     expect(asOwner.map((v) => v.id)).toContain(fx.a.versionId);
+  });
+
+  /**
+   * Search reaches inside files now, so the thing being protected is no longer
+   * a filename — it is the WORDING of an owners-only document. Nothing about
+   * the policy changed to make that true (extracted_text is a column on a row
+   * RLS already governs), and that is exactly why it is worth asserting: the
+   * protection is inherited rather than added, so nobody re-derived it.
+   *
+   * Both the tenant boundary and the role boundary, and both tables, because
+   * the text is stored twice by design — authoritative on the version,
+   * denormalized onto the document.
+   */
+  it("never leaks an owners-only document's TEXT, across tenants or roles", async () => {
+    const secret = "zephyrqx";
+
+    // The other tenant, at the highest role it has.
+    const acrossTenants = await withTenant(
+      tenantB,
+      async (tx) => ({
+        docs: await tx
+          .select({ text: schema.documents.extractedText })
+          .from(schema.documents)
+          .where(eq(schema.documents.id, fx.a.lockedDocId)),
+        versions: await tx
+          .select({ text: schema.documentVersions.extractedText })
+          .from(schema.documentVersions)
+          .where(eq(schema.documentVersions.id, fx.a.versionId)),
+      }),
+      { role: "owner" },
+    );
+    expect(acrossTenants.docs).toHaveLength(0);
+    expect(acrossTenants.versions).toHaveLength(0);
+
+    // The right tenant, at the wrong role. Staff cannot see the row at all, so
+    // there is no text to read — the point being that the text needs no
+    // predicate of its own to be protected.
+    const asStaff = await withTenant(tenantA, async (tx) => ({
+      docs: await tx
+        .select({ text: schema.documents.extractedText })
+        .from(schema.documents)
+        .where(eq(schema.documents.id, fx.a.lockedDocId)),
+      versions: await tx
+        .select({ text: schema.documentVersions.extractedText })
+        .from(schema.documentVersions)
+        .where(eq(schema.documentVersions.id, fx.a.versionId)),
+    }));
+    expect(asStaff.docs).toHaveLength(0);
+    expect(asStaff.versions).toHaveLength(0);
+
+    // And it really is there for the owner, so the assertions above are about
+    // RLS rather than about an empty fixture.
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .select({ text: schema.documents.extractedText })
+          .from(schema.documents)
+          .where(eq(schema.documents.id, fx.a.lockedDocId)),
+      { role: "owner" },
+    );
+    expect(asOwner[0]?.text).toContain(secret);
+  });
+
+  /**
+   * The generated `search_tsv` column is what the search page actually queries,
+   * and it is derived from `extracted_text` — so it is a second surface the
+   * same words reach. RLS covers it for the same reason (it is a column on the
+   * row), but a full-text hit is the path a real leak would take, so it is
+   * asserted through the query shape search.ts really uses.
+   */
+  it("full-text search cannot match another tenant's document contents", async () => {
+    // Both tenants have a locked fixture carrying the same distinctive word, so
+    // "no rows" would be the wrong assertion — each tenant SHOULD find its own.
+    // The claim is about whose document comes back, which is why this asserts
+    // on ids rather than on a count.
+    const search = (tenantId: string) =>
+      withTenant(
+        tenantId,
+        async (tx) => {
+          const res = await tx.execute(
+            sql`select d.id from documents d, websearch_to_tsquery('english', 'zephyrqx') tsq
+                 where d.search_tsv @@ tsq`,
+          );
+          return (res.rows ?? []).map((r) => String((r as { id: unknown }).id));
+        },
+        { role: "owner" },
+      );
+
+    const fromB = await search(tenantB);
+    expect(fromB).not.toContain(fx.a.lockedDocId);
+    // Its own, which is what makes the line above evidence rather than an
+    // empty result set agreeing with an empty expectation.
+    expect(fromB).toContain(fx.b.lockedDocId);
+
+    const fromA = await search(tenantA);
+    expect(fromA).toContain(fx.a.lockedDocId);
+    expect(fromA).not.toContain(fx.b.lockedDocId);
   });
 
   it("staff cannot CREATE a restricted document (WITH CHECK)", async () => {

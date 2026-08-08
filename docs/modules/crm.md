@@ -14,6 +14,23 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-08 — Slice 11: a note becomes activities and follow-ups (branch `claude/crm-note-extract`)
+- **Paste a note on a record, review what was found, then save.** `NoteExtractor` on the record page; the extractor is `src/modules/crm/ai/extract-note.ts`, following accounting's house pattern (gather+gate in one tx → one injectable network call → Zod at the boundary)
+- **THE MODEL NEVER WRITES.** `extractNoteAction` returns a proposal and writes nothing; `saveReviewedNoteAction` takes the reviewed list and re-validates it on its own terms, with no idea which parts came from the model. So a hallucinated follow-up cannot reach the database by any path that skips a human reading it — which matters more since #81, because a task created here routes into its assignee's morning digest
+- **Dates come back as a day OFFSET, never a date string.** The model does not know what day it is for this business; the offset resolves against `tenants.timezone` (`0086`) so "by Friday" means the business's Friday. See [timezone.md](timezone.md)
+- **An ambiguous assignee stays unassigned and says so.** A first-name hint matches only when exactly one person matches — two Daves means we do not know which, and guessing would put the work on the wrong person's digest while looking authoritative. The unmatched hint is shown to the reviewer rather than swallowed
+- **`crm_settings`** (`0093`/`0094`) holds the cooldown, claimed inside the same transaction that checks it so two people pasting at once serialize instead of both spending a call. Member-all RLS, mirroring `accounting_settings`, because the claim has to happen in the caller's own transaction — reasoning in the migration
+- **`email` is not an activity kind.** `crm_activity_kind` is note/call/meeting; correspondence lives in Mail and attaches via `mail_links`. The first draft of the tool schema invented a fourth kind and the compiler caught it
+- **The extractor is TWO files, and the split is load-bearing.** `ai/note-shape.ts` is pure — schemas, `validateExtraction`, `resolveProposal`, `NOTE_MAX_CHARS` — and `ai/extract-note.ts` is the `server-only` half that gates and calls the model. They started as one file, and the dialog importing `NOTE_MAX_CHARS` from it dragged `server-only` (and the Anthropic SDK) toward the browser bundle: **four Turbopack errors that `tsc` and all 260 tests passed straight through**, because a client/server boundary violation is invisible to both. `npm run build` is the only check that sees it. Anything a client component needs from an AI module goes in the pure half
+- 18 pure tests on validation and resolution, 4 isolation tests on `crm_settings`
+
+### 2026-08-08 — Claude Opus 5, with existing behaviour pinned (branch `claude/crm-note-extract`)
+- `CLAUDE_MODEL` is now `claude-opus-5`
+- **The bump is behaviour-neutral for the five shipped AI features.** On Opus 5 an omitted `thinking` runs ADAPTIVE (on 4.8 it meant none), and `max_tokens` caps thinking plus response together — the interview turn's budget is 1024, so an inherited default could have truncated a forced tool call and taken the public health-check funnel down. Every pre-existing call site now pins `thinking: CLAUDE_THINKING_OFF` explicitly. Three call sites already set adaptive and were left alone
+- **Turning adaptive thinking ON for the reasoning-heavy features** (Discovery copilot, close narrative) is a real improvement and deliberately NOT bundled here — it changes output on shipped features and deserves its own evaluation
+- **Corrected a stale claim in five files**: "no extended thinking (incompatible with forced tools)". Verified against the live API on Opus 5 — forced `tool_choice` returns a `tool_use` block with thinking both on and off. It was a budget decision, not a compatibility one
+
+
 ### 2026-08-07 — A failing rule says so (branch `claude/crm-rule-health`)
 - `crm_automation_rule_health` (`0091`/`0092`): the latest error, a consecutive-failure count, and when. The rules page shows a **failing** badge with the message — distinct from *needs attention*, which means the rule no longer PARSES and is being skipped. This one parses fine; the running is what keeps going wrong
 - **A SEPARATE TABLE BECAUSE HEALTH IS AN OBSERVATION, NOT PART OF THE RULE.** `0083` made rule writes owner-only, and the engine runs in the transaction of whoever triggered it — usually staff. Columns on the rules table would have been unwritable exactly when a rule was failing for a staff member, which is the case this exists to catch
@@ -1140,5 +1157,27 @@ values stay readable and the discontinuity is visible.
   and is not modelled.
 - **Nothing tells a collaborator they have been granted access**, or removed.
   There are no notifications anywhere in CRM yet, and this inherits that gap.
-- Slice 11 (AI) is planned and unbuilt. Slices 5, 6 and 7 shipped on
-  2026-08-04; slices 8, 9 and 10 on 2026-08-05.
+- ~~Slice 11 (AI) is planned and unbuilt.~~ — **built 2026-08-08** as note
+  extraction. Slices 5, 6 and 7 shipped on 2026-08-04; slices 8, 9 and 10 on
+  2026-08-05.
+- **Nobody has run the extractor on a real note.** Every layer is tested with an
+  injected model, and the one live call made during the build was a two-line
+  compatibility probe. Whether it splits interactions sensibly, and whether it
+  resists inventing follow-ups from notes that merely discuss options, is
+  unanswered until somebody pastes a real note.
+- **The extractor reads the note and nothing else.** No record name, no history,
+  no contact points — deliberate data minimisation (S9), and also a ceiling: it
+  cannot notice that a note contradicts what the record already says.
+- **One cooldown for the whole tenant.** 15 seconds, per tenant, not per person
+  — so two people working different records at the same moment can block each
+  other. Fine at current scale, wrong later; per-person is the shape.
+- **`assigneeClerkUserId` is never checked against the roster on write.** Noted
+  while building the save action, which validates it exactly as
+  `timeline-actions.ts` already did — `z.string().max(120)`, no membership
+  lookup — so this is pre-existing and not something slice 11 introduced. The
+  extractor's own path cannot reach it (the model returns a name hint, and
+  `resolveProposal` only ever resolves to a member), but a crafted request can
+  assign a task to any string. Not a leak: such a task appears in nobody's
+  digest, since the digest iterates memberships. It is a data-quality hole that
+  got more expensive when assignment started driving the digest, and the fix
+  belongs in `createTask`, where both paths would inherit it.

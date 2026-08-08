@@ -4464,6 +4464,40 @@ export const crmAutomationRules = pgTable(
 );
 
 /**
+ * CRM's per-tenant settings row. Today it holds exactly one thing: the AI
+ * cooldown marker.
+ *
+ * Mirrors `accounting_settings`, which has carried four `ai_last_*` markers
+ * since the accounting AI shipped. The pattern matters more than the column:
+ * the extractor CLAIMS this timestamp inside the same transaction that checks
+ * it, so two people pasting notes at once serialize on the write instead of
+ * both calling the model.
+ *
+ * A table for one column is worth it only because it has a reader from day one
+ * — the gate below. It is not a home for settings nobody has asked for yet.
+ */
+export const crmSettings = pgTable(
+  "crm_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Cooldown marker for note extraction. Null = never run. */
+    aiLastExtractedAt: timestamp("ai_last_extracted_at", {
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("crm_settings_tenant_idx").on(t.tenantId)],
+);
+
+/**
  * Whether a rule is actually working.
  *
  * A SEPARATE TABLE BECAUSE HEALTH IS AN OBSERVATION, NOT PART OF THE RULE.
@@ -5102,6 +5136,7 @@ export type CrmReport = typeof crmReports.$inferSelect;
 export type CrmAutomationRule = typeof crmAutomationRules.$inferSelect;
 export type CrmAutomationRuleHealth =
   typeof crmAutomationRuleHealth.$inferSelect;
+export type CrmSettings = typeof crmSettings.$inferSelect;
 export type CrmViewPin = typeof crmViewPins.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;

@@ -208,9 +208,10 @@ reads to infer intent. The existing standard, which is worth keeping:
 ## 7. Tests
 
 - Vitest. `tests/<area>.test.ts`.
-- **`tests/tenant-isolation.test.ts` is the certification suite** and must cover
-  every tenant table: a second tenant attempting both read and write, both
-  denied. Extend it in the same PR that adds the table.
+- **`tests/isolation/` is the certification suite** — one file per area over a
+  shared `_shared.ts` — and must cover every tenant table: a second tenant
+  attempting both read and write, both denied. Add or extend the area's file in
+  the same PR that adds the table.
 - DB-backed suites require `TEST_DATABASE_URL`;
   `tests/setup/database-guard.ts` replaces `DATABASE_URL` for the run so tests
   physically cannot reach production. Without it suites **skip** — a skipped

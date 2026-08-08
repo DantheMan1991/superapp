@@ -31,7 +31,7 @@ import {
  * The one thing NOT tested here is the property that matters most — that an
  * extension cannot see rows RLS hid from the caller. It is not testable with
  * fakes because it is not enforced in TypeScript; it is enforced by the hooks
- * taking the caller's `tx` and by Postgres. `tests/tenant-isolation.test.ts`
+ * taking the caller's `tx` and by Postgres. `tests/isolation/mail.test.ts`
  * certifies it against a real database.
  */
 

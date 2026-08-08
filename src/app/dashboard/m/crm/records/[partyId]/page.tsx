@@ -20,6 +20,7 @@ import {
 import { listContactPoints } from "@/lib/parties/contacts";
 import { ContactPoints } from "@/modules/crm/components/contact-points";
 import { RecordAccess } from "@/modules/crm/components/record-access";
+import { NoteExtractor } from "@/modules/crm/components/note-extractor";
 import { listCollaborators } from "@/modules/crm/collaborator-ops";
 import { Timeline } from "@/modules/crm/components/timeline";
 import {
@@ -208,6 +209,13 @@ export default async function RecordPage({
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <NoteExtractor
+                  partyId={party.id}
+                  members={record.members.map((m) => ({
+                    clerkUserId: m.clerkUserId,
+                    label: memberLabel(m),
+                  }))}
+                />
                 <LogActivityButton partyId={party.id} />
                 <AddTaskButton
                   partyId={party.id}

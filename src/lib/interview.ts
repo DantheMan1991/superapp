@@ -4,7 +4,7 @@ import { and, eq, gte, sql } from "drizzle-orm";
 import { withSystem, schema } from "@/db";
 import type { AuditMessage, InterviewSession } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { getClaude, CLAUDE_MODEL } from "@/lib/claude";
+import { getClaude, CLAUDE_MODEL, CLAUDE_THINKING_OFF } from "@/lib/claude";
 import { uniqueTenantSlug } from "@/lib/slug";
 import {
   ASSESSMENT_INSTRUCTION,
@@ -153,12 +153,20 @@ async function gatherTurnInput(
 
 /**
  * The only network function for turns — injectable in tests. Forced tool
- * choice; no extended thinking (incompatible with forced tools).
+ * choice, with thinking pinned OFF for the token budget rather than for
+ * compatibility — forced tools work with thinking on (verified against the
+ * live API on claude-opus-5); the old claim here was stale.
  */
 export async function callInterviewModel(g: TurnGathered): Promise<unknown> {
   const stream = getClaude().messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: INTERVIEW_TURN_MAX_TOKENS,
+    // Pinned, not inherited. On claude-opus-5 an omitted `thinking` runs
+    // ADAPTIVE, and this budget is 1024 tokens covering thinking AND the
+    // response — the tightest in the codebase. A turn that thought its way
+    // through the budget would truncate the forced tool call and take the
+    // public health-check funnel down. See lib/claude.ts.
+    thinking: CLAUDE_THINKING_OFF,
     system: [
       {
         type: "text",

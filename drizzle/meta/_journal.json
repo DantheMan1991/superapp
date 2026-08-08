@@ -652,6 +652,20 @@
       "when": 1786146632707,
       "tag": "0092_crm_rule_health_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1786153717376,
+      "tag": "0093_past_jackal",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1786153743093,
+      "tag": "0094_crm_settings_rls",
+      "breakpoints": true
     }
   ]
 }

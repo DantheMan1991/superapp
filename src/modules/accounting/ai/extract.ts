@@ -1,7 +1,7 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { schema, withTenant, type Tx } from "@/db";
-import { CLAUDE_MODEL, getClaude } from "@/lib/claude";
+import { CLAUDE_MODEL, CLAUDE_THINKING_OFF, getClaude } from "@/lib/claude";
 import { logAuditInTx } from "@/lib/audit";
 import { LedgerError, type LedgerCtx } from "../core";
 import { isExtractableMime } from "../documents/allowlist";
@@ -70,7 +70,9 @@ export async function gatherExtractInput(
 
 /**
  * The only network-touching function — injectable in tests. Forced tool
- * choice; no extended thinking (incompatible with forced tools). Data
+ * choice, with thinking pinned OFF for the token budget rather than for
+ * compatibility — forced tools work with thinking on (verified against the
+ * live API on claude-opus-5); the old claim here was stale. Data
  * minimization: the document bytes are the ENTIRE tenant payload.
  */
 export async function callExtractModel(
@@ -79,6 +81,10 @@ export async function callExtractModel(
   const stream = getClaude().messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: MAX_TOKENS,
+    // Pinned, not inherited: an omitted `thinking` runs ADAPTIVE on
+    // claude-opus-5, and max_tokens caps thinking AND response together.
+    // Disabled preserves this call's 4.8 behaviour exactly. See lib/claude.ts.
+    thinking: CLAUDE_THINKING_OFF,
     system: [
       {
         type: "text",

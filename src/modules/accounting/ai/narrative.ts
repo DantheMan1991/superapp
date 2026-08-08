@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { schema, withTenant, type Tx } from "@/db";
-import { CLAUDE_MODEL, getClaude } from "@/lib/claude";
+import { CLAUDE_MODEL, CLAUDE_THINKING_OFF, getClaude } from "@/lib/claude";
 import { logAuditInTx } from "@/lib/audit";
 import { LedgerError, type LedgerCtx } from "../core";
 import { closePeriodStart, getCloseChecklist, loadClose } from "../core/close";
@@ -175,7 +175,9 @@ export async function gatherCloseNarrativeInputs(
 
 /**
  * The only network-touching function — injectable in tests. Forced tool
- * choice; no extended thinking (incompatible with forced tools).
+ * choice, with thinking pinned OFF for the token budget rather than for
+ * compatibility — forced tools work with thinking on (verified against the
+ * live API on claude-opus-5); the old claim here was stale.
  */
 export async function callCloseNarrativeModel(
   gathered: CloseNarrativeGathered,
@@ -183,6 +185,10 @@ export async function callCloseNarrativeModel(
   const stream = getClaude().messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: MAX_TOKENS,
+    // Pinned, not inherited: an omitted `thinking` runs ADAPTIVE on
+    // claude-opus-5, and max_tokens caps thinking AND response together.
+    // Disabled preserves this call's 4.8 behaviour exactly. See lib/claude.ts.
+    thinking: CLAUDE_THINKING_OFF,
     system: [
       {
         type: "text",

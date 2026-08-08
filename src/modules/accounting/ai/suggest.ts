@@ -1,7 +1,7 @@
 import "server-only";
 import { and, desc, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { schema, withTenant, type Tx } from "@/db";
-import { CLAUDE_MODEL, getClaude } from "@/lib/claude";
+import { CLAUDE_MODEL, CLAUDE_THINKING_OFF, getClaude } from "@/lib/claude";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { loadBankAccount } from "../banking/accounts";
 import {
@@ -141,7 +141,9 @@ export async function gatherSuggestInputs(
 
 /**
  * The only network-touching function — injectable in tests. Forced tool
- * choice; no extended thinking (incompatible with forced tools).
+ * choice, with thinking pinned OFF for the token budget rather than for
+ * compatibility — forced tools work with thinking on (verified against the
+ * live API on claude-opus-5); the old claim here was stale.
  */
 export async function callSuggestModel(
   gathered: SuggestGathered,
@@ -149,6 +151,10 @@ export async function callSuggestModel(
   const stream = getClaude().messages.stream({
     model: CLAUDE_MODEL,
     max_tokens: 8000,
+    // Pinned, not inherited: an omitted `thinking` runs ADAPTIVE on
+    // claude-opus-5, and max_tokens caps thinking AND response together.
+    // Disabled preserves this call's 4.8 behaviour exactly. See lib/claude.ts.
+    thinking: CLAUDE_THINKING_OFF,
     system: [
       {
         type: "text",

@@ -42,7 +42,11 @@ export type CrmErrorCode =
   | "RULE_NAME_REQUIRED"
   | "RULE_NAME_TAKEN"
   | "FORBIDDEN"
-  | "FORBIDDEN_EXPERT";
+  | "FORBIDDEN_EXPERT"
+  | "NOTE_EMPTY"
+  | "NOTE_TOO_LONG"
+  | "AI_COOLDOWN"
+  | "AI_NO_RESULT";
 
 export class CrmError extends Error {
   constructor(
@@ -130,6 +134,16 @@ export function friendlyMessage(err: unknown): string {
       // Not "not found": they are looking at it in the picker, so saying it
       // does not exist would be the one answer they know to be false.
       return "Only the person who made a view can change it.";
+    case "NOTE_EMPTY":
+      return "Paste a note first.";
+    case "NOTE_TOO_LONG":
+      // A number, because "too long" without one leaves them trimming blind.
+      return "That note is too long — keep it under 8,000 characters.";
+    case "AI_COOLDOWN":
+      // Not an error they caused: usually a double-click. Say what to do.
+      return "Just a moment — try that again in a few seconds.";
+    case "AI_NO_RESULT":
+      return "Couldn't read that note. Try rewording it, or add the details yourself.";
     case "RULE_NAME_REQUIRED":
       return "Give the rule a name.";
     case "RULE_NAME_TAKEN":

@@ -9,6 +9,7 @@ import {
   actionProblem,
   describeAction,
   describeRule,
+  errorSummary,
   parseRule,
   ruleProblems,
   triggerDefinition,
@@ -250,5 +251,43 @@ describe("describeAction with a name resolver", () => {
     );
     expect(sentence).toContain("Sam Rivera");
     expect(sentence).not.toContain("user_sam");
+  });
+});
+
+describe("errorSummary", () => {
+  /**
+   * The message that reaches a member's screen. Every case here is a way a
+   * stack trace or a raw driver error could carry row values into a table the
+   * whole tenant can read (S9).
+   */
+  it("takes the message, never the stack", () => {
+    const err = new Error("relation \"crm_tasks\" does not exist");
+    expect(errorSummary(err)).toBe('relation "crm_tasks" does not exist');
+    expect(errorSummary(err)).not.toContain("at ");
+  });
+
+  it("collapses whitespace so a multi-line driver error stays one line", () => {
+    expect(errorSummary(new Error("line one\n  line two\t\tline three"))).toBe(
+      "line one line two line three",
+    );
+  });
+
+  it("truncates rather than storing somebody's essay", () => {
+    const summary = errorSummary(new Error("x".repeat(2000)));
+    expect(summary.length).toBeLessThanOrEqual(500);
+    expect(summary.endsWith("…")).toBe(true);
+  });
+
+  it("says something rather than nothing when the error is empty", () => {
+    // A blank cell under a "failing" badge reads as a rendering bug.
+    expect(errorSummary(new Error(""))).toBe("The rule failed without saying why.");
+    expect(errorSummary(undefined)).toBe("The rule failed without saying why.");
+    expect(errorSummary({ weird: true })).toBe(
+      "The rule failed without saying why.",
+    );
+  });
+
+  it("accepts a thrown string", () => {
+    expect(errorSummary("just a string")).toBe("just a string");
   });
 });

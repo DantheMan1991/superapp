@@ -4,6 +4,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
+import { healthForRules } from "@/modules/crm/automation-health";
 import { listRules } from "@/modules/crm/automation-ops";
 import { AutomationManager } from "@/modules/crm/components/automation-manager";
 
@@ -28,14 +29,23 @@ export default async function AutomationsPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "crm");
 
-  const { rules, members } = await withTenant(
+  const { rules, members, health } = await withTenant(
     ctx.tenant.id,
-    async (tx) => ({
-      rules: await listRules(tx, ctx.tenant.id),
-      // In the caller's own transaction, so the picker can only offer people
-      // this person could already find.
-      members: await listAssignableMembers(tx, ctx.tenant.id),
-    }),
+    async (tx) => {
+      const rules = await listRules(tx, ctx.tenant.id);
+      return {
+        rules,
+        // In the caller's own transaction, so the picker can only offer people
+        // this person could already find.
+        members: await listAssignableMembers(tx, ctx.tenant.id),
+        // Usually empty — a row exists only while a rule is failing.
+        health: await healthForRules(
+          tx,
+          ctx.tenant.id,
+          rules.map((r) => r.id),
+        ),
+      };
+    },
     { role: ctx.role, userId: ctx.userId },
   );
 
@@ -73,6 +83,16 @@ export default async function AutomationsPage() {
           clerkUserId: m.clerkUserId,
           label: memberLabel(m),
         }))}
+        health={Object.fromEntries(
+          [...health].map(([ruleId, h]) => [
+            ruleId,
+            {
+              consecutiveFailures: h.consecutiveFailures,
+              lastError: h.lastError,
+              lastErrorAt: h.lastErrorAt.toISOString(),
+            },
+          ]),
+        )}
       />
     </div>
   );

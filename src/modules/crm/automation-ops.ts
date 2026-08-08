@@ -3,12 +3,18 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { CrmAutomationRule } from "@/db/schema";
 import { logAuditInTx } from "@/lib/audit";
+import {
+  healthForRules,
+  recordRuleOutcomes,
+  type RuleOutcomes,
+} from "./automation-health";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { todayInTimezone } from "@/lib/timezone";
 import { addDays } from "./core/timeline";
 import { CrmError } from "./core/errors";
 import {
   describeRule,
+  errorSummary,
   parseRule,
   type AutomationRule,
   type Trigger,
@@ -126,6 +132,31 @@ export async function runTrigger(
     return outcome;
   }
 
+  /**
+   * Which of these rules were ALREADY known to be failing.
+   *
+   * Read here, in the transaction that is already open, so that
+   * `recordRuleOutcomes` can tell "nothing changed" from "something changed"
+   * without a read of its own — which is what lets a healthy tenant pay nothing
+   * for this feature.
+   */
+  let previouslyFailing: ReadonlySet<string> = new Set();
+  try {
+    const health = await healthForRules(
+      tx,
+      ctx.tenantId,
+      rows.map((r) => r.id),
+    );
+    previouslyFailing = new Set(health.keys());
+  } catch (err) {
+    // Same posture as the rules read above: diagnostics must never cost the
+    // person their work. An empty set just means a recovery goes unrecorded
+    // until the next run.
+    console.error("crm automation: could not read rule health", err);
+  }
+
+  const outcomes: RuleOutcomes = { failed: [], succeeded: [] };
+
   for (const row of rows) {
     outcome.considered += 1;
     const rule = ruleFrom(row);
@@ -136,11 +167,14 @@ export async function runTrigger(
       continue;
     }
 
-    const applied = await applyRule(tx, ctx, row, rule);
+    const applied = await applyRule(tx, ctx, row, rule, outcomes);
     if (applied === "applied") outcome.applied += 1;
     else if (applied === "skipped") outcome.skipped += 1;
     else outcome.failed += 1;
   }
+
+  // Outside the loop and outside this transaction — see recordRuleOutcomes.
+  await recordRuleOutcomes(ctx.tenantId, outcomes, previouslyFailing);
 
   return outcome;
 }
@@ -150,6 +184,7 @@ async function applyRule(
   ctx: TriggerContext,
   row: CrmAutomationRule,
   rule: AutomationRule,
+  outcomes: RuleOutcomes,
 ): Promise<"applied" | "skipped" | "failed"> {
   // A SAVEPOINT PER RULE. Without it a single failing action would abort the
   // caller's whole transaction — the rename, the stage move, the thing the
@@ -176,12 +211,17 @@ async function applyRule(
       meta: { rule: row.name, ruleId: row.id, did: describeRule(rule) },
     });
     await tx.execute(sql.raw(`RELEASE SAVEPOINT ${savepoint}`));
+    outcomes.succeeded.push(row.id);
     return "applied";
   } catch (err) {
     await tx.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${savepoint}`));
     // Logged rather than raised: somebody renaming a customer should not be
     // told their rename failed because an automation is broken.
     console.error(`crm automation: rule ${row.id} failed`, err);
+    // AND recorded, which is the half that was missing. The console is where
+    // this went to die — nobody using the product can read it, so a rule that
+    // failed every time looked exactly like one that never matched.
+    outcomes.failed.push({ ruleId: row.id, error: errorSummary(err) });
     return "failed";
   }
 }

@@ -14,6 +14,14 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-07 — A failing rule says so (branch `claude/crm-rule-health`)
+- `crm_automation_rule_health` (`0091`/`0092`): the latest error, a consecutive-failure count, and when. The rules page shows a **failing** badge with the message — distinct from *needs attention*, which means the rule no longer PARSES and is being skipped. This one parses fine; the running is what keeps going wrong
+- **A SEPARATE TABLE BECAUSE HEALTH IS AN OBSERVATION, NOT PART OF THE RULE.** `0083` made rule writes owner-only, and the engine runs in the transaction of whoever triggered it — usually staff. Columns on the rules table would have been unwritable exactly when a rule was failing for a staff member, which is the case this exists to catch
+- **Members READ it, nobody writes it from tenant context.** Reads follow `0083`'s transparency argument — "that rule has been failing since Tuesday" is part of the answer to *what changed my record?* Writes go through `withSystem` from the engine, so a member cannot forge a failure against a rule they dislike, or clear one that embarrasses them
+- **Written only on STATE CHANGE** (healthy→failing, failing→recovered). Rules fire on every record create and update, so a per-run write would put an extra transaction on the hot path of ordinary work forever, to record something only interesting when bad. A working tenant carries no rows and pays nothing
+- The stored message is the error's `message`, collapsed and truncated — **never a stack**, which can carry row values through interpolated SQL into a table every member reads (S9)
+- Why now: this was cosmetic while rules only nudged records around. Rules create follow-ups, follow-ups route to a daily digest, so a silently broken rule became silently missing obligations
+
 ### 2026-08-07 — The two remaining "type a Clerk user id" boxes become pickers (branch `claude/crm-member-pickers`)
 - **Collaborator panel**: a picker over non-owner members who do not already have a grant, and the existing list shows names rather than ids. Owners are absent on purpose — they can already see every restricted record, so a grant to one is a control that does nothing
 - **Automation rule builder**: both assignees are pickers. `create_task` keeps "Whoever owns the record" first (an empty assignee is meaningful there); `assign_record` has no such option, because that is the thing being set and empty would be a rule that does nothing
@@ -1006,10 +1014,13 @@ values stay readable and the discontinuity is visible.
   drift). This mattered more than the collaborator one: a mistyped id produced a
   follow-up assigned to nobody real, invisible to every digest and
   indistinguishable from work nobody had picked up.
-- **No per-rule failure surface.** A rule that throws is logged to the server
-  console and counted, and the person sees nothing. `audit_log` records the
-  firings that SUCCEED, so a rule that has quietly failed every time looks the
-  same as one that never matched.
+- ~~**No per-rule failure surface.**~~ — **fixed 2026-08-07.**
+  `crm_automation_rule_health` (`0091`) records the failure and the rules page
+  shows a **failing** badge with the message and a count, distinct from the
+  existing *needs attention* (which means the rule no longer parses). What
+  remains: there is still **no history** — the row holds the latest error and a
+  consecutive count, not a run log, so "it broke on Tuesday and again today"
+  is not answerable. A run table is the shape if somebody needs it.
 - **Reports have no folders.** `crm_reports` shares the flat, per-report
   `is_shared` boolean that `crm_saved_views` uses, where Salesforce makes the
   FOLDER the sharing unit and files every report into one. Flat is right while a

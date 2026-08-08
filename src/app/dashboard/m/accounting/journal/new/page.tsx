@@ -3,7 +3,6 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getSettings } from "@/modules/accounting/core";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { EntryEditor } from "../entry-editor";
 
@@ -29,7 +28,6 @@ export default async function NewEntryPage() {
         ),
       )
       .orderBy(asc(schema.accounts.code));
-    const settings = await getSettings(tx, ctx.tenant.id);
     return { accounts, today: todayInTimezone(ctx.tenant.timezone) };
   });
 

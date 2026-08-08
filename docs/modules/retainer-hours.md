@@ -8,6 +8,12 @@
 
 ## Build log
 
+### 2026-08-08 — The running timer actually ticks (branch `claude/lint-clean`)
+- `TimerControls` read `Date.now()` **during render**. Two bugs in one: the server rendered ITS clock and the client hydrated with a different one, and after that the "Running for ~Xh" figure sat frozen until some unrelated state change happened to re-render the component. It is now state on a 30s interval, so a running timer advances on its own
+- The first reading is scheduled with a zero-delay timer rather than taken inline in the effect. Setting state synchronously inside an effect cascades an extra render before paint — see [conventions.md](../conventions.md) §8
+- The value is **tagged with the `timerStartedAt` it was measured against**, so a stopped-then-restarted timer cannot show the previous run's figure for a frame, and the effect needs no reset branch
+- **Not verified in a browser** — `/admin/retainers` is behind superadmin auth. `npm run build`, `tsc`, eslint and the full suite are green; the thing to try by hand is starting a timer and watching the figure advance without touching anything
+
 ### 2026-07-24 — Initial build (`c98388f`, PR #5)
 - Four tables (migrations 0019/0020, superadmin_all + member_read RLS): `retainers` (config + live timer state), `retainer_allotments` (month-keyed history so past months' overage never rewrites when the allotment changes), `retainer_time_entries`, `retainer_purchases` (`stripe_session_id` UNIQUE is the webhook idempotency arbiter)
 - Balances derived, never stored (`src/lib/retainer-core.ts`, pure math, America/New_York calendar months): no rollover of included hours; purchased blocks carry forward until consumed by overage; soft overage only (no hard cutoff)

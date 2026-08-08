@@ -17,7 +17,6 @@ import {
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
-import { getSettings } from "@/modules/accounting/core";
 import { loadInvoiceLines } from "@/modules/accounting/invoicing/invoices";
 import { paidCentsFor } from "@/modules/accounting/invoicing/payments";
 import {
@@ -94,7 +93,6 @@ export default async function InvoiceDetailPage({
       ),
       orderBy: asc(schema.customers.name),
     });
-    const settings = await getSettings(tx, ctx.tenant.id);
     return {
       invoice,
       customer,

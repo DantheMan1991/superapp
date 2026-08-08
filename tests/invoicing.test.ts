@@ -395,7 +395,7 @@ d("invoicing (DB)", () => {
     );
     acct.__bankLedger = bank.ledgerAccount.id;
     acct.__bankAccountId = bank.bankAccount.id;
-    let invoice = await withTenant(tenantId, (tx) =>
+    const invoice = await withTenant(tenantId, (tx) =>
       tx.query.invoices.findFirst({ where: eq(schema.invoices.id, invoiceId) }),
     );
     const p1 = await withTenant(tenantId, (tx) =>

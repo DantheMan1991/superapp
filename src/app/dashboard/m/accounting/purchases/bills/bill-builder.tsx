@@ -107,7 +107,9 @@ export function BillBuilder({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [vendorList, setVendorList] = useState(vendors);
+  // Snapshotted at mount and never set — kept as state rather than reading the
+  // prop directly so the dropdown does not reorder under the user mid-edit.
+  const [vendorList] = useState(vendors);
   const [vendorId, setVendorId] = useState(bill?.vendorId ?? "");
   const [newVendorName, setNewVendorName] = useState("");
   const [number, setNumber] = useState(bill?.billNumber ?? "");

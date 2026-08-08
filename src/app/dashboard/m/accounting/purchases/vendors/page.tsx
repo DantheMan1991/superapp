@@ -77,8 +77,8 @@ export default async function VendorsPage() {
 
       {data.vendors.length === 0 ? (
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          No vendors yet — they're created automatically when you make a bill
-          from an emailed document, or add one here.
+          No vendors yet — they&apos;re created automatically when you make a
+          bill from an emailed document, or add one here.
         </p>
       ) : (
         <Table>

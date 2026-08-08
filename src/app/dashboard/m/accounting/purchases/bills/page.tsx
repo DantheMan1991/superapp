@@ -15,7 +15,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getSettings } from "@/modules/accounting/core";
 import { getApAging } from "@/modules/accounting/payables/aging-feed";
 import { toSafeCents } from "@/modules/accounting/lib/money";
 import {
@@ -89,7 +88,6 @@ export default async function BillsPage({
       )
       .orderBy(desc(schema.bills.billDate), desc(schema.bills.createdAt))
       .limit(200);
-    const settings = await getSettings(tx, tenantId);
     const today = todayInTimezone(ctx.tenant.timezone);
     const aging = await getApAging(tx, tenantId, today);
     return { bills, aging };

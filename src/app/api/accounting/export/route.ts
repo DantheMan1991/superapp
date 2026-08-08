@@ -4,7 +4,7 @@ import { withTenant } from "@/db";
 import { resolveTenantContext } from "@/lib/auth";
 import { isModuleEnabled } from "@/lib/modules";
 import { blobToken } from "@/lib/blob";
-import { LedgerError, getSettings, type LedgerCtx } from "@/modules/accounting/core";
+import { LedgerError, type LedgerCtx } from "@/modules/accounting/core";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import {
   gatherBooksExport,
@@ -45,7 +45,6 @@ export async function GET(req: NextRequest): Promise<NextResponse | Response> {
   let todayIso = "";
   try {
     gathered = await withTenant(ctx.tenant.id, async (tx) => {
-      const settings = await getSettings(tx, ctx.tenant.id);
       todayIso = todayInTimezone(ctx.tenant.timezone);
       return gatherBooksExport(tx, ledgerCtx, {
         includeFiles,

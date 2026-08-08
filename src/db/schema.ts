@@ -4464,6 +4464,52 @@ export const crmAutomationRules = pgTable(
 );
 
 /**
+ * Whether a rule is actually working.
+ *
+ * A SEPARATE TABLE BECAUSE HEALTH IS AN OBSERVATION, NOT PART OF THE RULE.
+ * The definition is the business's decision and is owner-write-only
+ * (`drizzle/0083`). Health is written by the ENGINE, which runs inside the
+ * transaction of whoever happened to trigger it — usually staff. Columns on the
+ * rules table would therefore be unwritable exactly when a rule was failing for
+ * a staff member, which is the case this exists to catch.
+ *
+ * Members may READ it, on the same reasoning `0083` gives for letting them read
+ * rules: somebody who finds a follow-up they did not create is owed the ability
+ * to find out which rule did it — and "that rule has been failing since
+ * Tuesday" is part of that answer. Nobody but the engine may write it, so a
+ * member cannot forge a failure against a rule they dislike.
+ *
+ * A ROW EXISTS ONLY WHILE SOMETHING IS WRONG. The engine writes on STATE
+ * CHANGE — healthy→failing inserts, failing→recovered deletes — so a working
+ * tenant carries no rows here and pays nothing for the feature. Absence means
+ * healthy, which is also the honest reading for a rule that has never run.
+ */
+export const crmAutomationRuleHealth = pgTable(
+  "crm_automation_rule_health",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => crmAutomationRules.id, { onDelete: "cascade" }),
+    /** Since the last success. Resets by the row being deleted. */
+    consecutiveFailures: integer("consecutive_failures").notNull().default(1),
+    /**
+     * The error, truncated by the writer. A message, never a stack — a stack
+     * can carry row values through interpolated SQL, and this table is readable
+     * by every member (S9).
+     */
+    lastError: text("last_error").notNull().default(""),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("crm_automation_rule_health_rule_idx").on(t.ruleId)],
+);
+
+/**
  * A saved report: a question somebody wanted to keep asking.
  *
  * THE SAME SHAPE AS `crm_saved_views` AND FOR THE SAME REASONS — read the note
@@ -5054,6 +5100,8 @@ export type CrmRecordCollaborator = typeof crmRecordCollaborators.$inferSelect;
 export type CrmSavedView = typeof crmSavedViews.$inferSelect;
 export type CrmReport = typeof crmReports.$inferSelect;
 export type CrmAutomationRule = typeof crmAutomationRules.$inferSelect;
+export type CrmAutomationRuleHealth =
+  typeof crmAutomationRuleHealth.$inferSelect;
 export type CrmViewPin = typeof crmViewPins.$inferSelect;
 export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;

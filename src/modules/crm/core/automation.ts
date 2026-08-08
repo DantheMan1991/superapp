@@ -195,6 +195,32 @@ export function actionProblem(action: RuleAction): string | null {
  */
 export type NameResolver = (clerkUserId: string) => string | undefined;
 
+/** Long enough to diagnose, short enough not to store somebody's essay. */
+const MAX_ERROR = 500;
+
+/**
+ * What a failing rule tells the people who can see it: the message, never the
+ * stack.
+ *
+ * Lives here with the other pure helpers rather than beside the writer, because
+ * it is string handling with no server dependency — and because what reaches a
+ * member's screen deserves the same test coverage the sentences get.
+ *
+ * A stack can carry row values through interpolated SQL, and `crm_automation_
+ * rule_health` is readable by every member of the tenant (S9). A message is
+ * what somebody needs in order to act; a stack is for the server console, which
+ * already has it.
+ */
+export function errorSummary(err: unknown): string {
+  const raw =
+    err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  const cleaned = raw.replace(/\s+/g, " ").trim();
+  if (cleaned.length === 0) return "The rule failed without saying why.";
+  return cleaned.length > MAX_ERROR
+    ? `${cleaned.slice(0, MAX_ERROR - 1)}…`
+    : cleaned;
+}
+
 function who(id: string, resolve?: NameResolver): string {
   return resolve?.(id) ?? id;
 }

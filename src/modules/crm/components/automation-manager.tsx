@@ -68,10 +68,18 @@ export interface RuleMember {
   label: string;
 }
 
+/** Present only while a rule is failing — absence means healthy. */
+export interface RuleHealth {
+  consecutiveFailures: number;
+  lastError: string;
+  lastErrorAt: string;
+}
+
 export function AutomationManager({
   rules,
   isOwner,
   members = [],
+  health = {},
 }: {
   rules: CrmAutomationRule[];
   isOwner: boolean;
@@ -84,6 +92,11 @@ export function AutomationManager({
    * every digest, and indistinguishable from work nobody has picked up.
    */
   members?: RuleMember[];
+  /**
+   * Rule id → why it is failing. Keyed rather than a list because most rules
+   * are absent from it: a row exists only while something is wrong.
+   */
+  health?: Record<string, RuleHealth>;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -116,6 +129,7 @@ export function AutomationManager({
               row={row}
               isOwner={isOwner}
               resolveName={resolveName}
+              health={health[row.id]}
             />
           ))}
         </ul>
@@ -130,10 +144,12 @@ function RuleRow({
   row,
   isOwner,
   resolveName,
+  health,
 }: {
   row: CrmAutomationRule;
   isOwner: boolean;
   resolveName: (clerkUserId: string) => string | undefined;
+  health?: RuleHealth;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -183,12 +199,33 @@ function RuleRow({
           {row.name}
           {!row.isActive && <Badge variant="outline">paused</Badge>}
           {broken && <Badge variant="outline">needs attention</Badge>}
+          {/*
+            DISTINCT FROM "needs attention", which means the rule no longer
+            PARSES and is being skipped. This one parses fine and is being run —
+            it is the running that keeps going wrong, which is a different
+            problem with a different fix.
+          */}
+          {health && <Badge variant="destructive">failing</Badge>}
         </p>
         <p className="text-xs text-muted-foreground">
           {broken
             ? "This rule refers to something that no longer exists, so it is being skipped."
             : describeRule(rule!, resolveName)}
         </p>
+        {health && (
+          // The error verbatim rather than a friendly paraphrase: whoever can
+          // fix this needs the actual message, and inventing a kinder one would
+          // mean guessing at a cause we do not know.
+          <p className="text-xs text-destructive">
+            {health.consecutiveFailures === 1
+              ? "Failed once — "
+              : `Failed ${health.consecutiveFailures} times in a row — `}
+            {health.lastError}{" "}
+            <span className="text-muted-foreground">
+              (last {new Date(health.lastErrorAt).toLocaleString()})
+            </span>
+          </p>
+        )}
       </div>
       {isOwner && (
         <div className="flex shrink-0 items-center gap-2">

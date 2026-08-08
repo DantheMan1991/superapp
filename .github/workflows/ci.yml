@@ -8,10 +8,50 @@ name: CI
 #   tests   — the vitest suite. Shares ONE Neon branch with every other run, so
 #             it is serialised repo-wide and must never be cancelled midway.
 
+# DOCUMENTATION-ONLY CHANGES SKIP THE WHOLE WORKFLOW.
+#
+# The dossiers are updated by nearly every PR (AGENTS.md requires it), and #78
+# — two markdown files — spent twenty minutes running the database suite while
+# holding the repo-wide `db-tests` slot, so the next real push queued behind a
+# docs edit. Nothing under docs/ can change behaviour: no test reads that tree
+# (checked — the one suite that walks the filesystem inspects .ts/.tsx only),
+# and build-docs.ts reads it at request time, not at build or test time.
+#
+# `paths-ignore` skips a run only when EVERY changed file matches, so a PR that
+# touches code and its dossier still runs in full. That is the common case and
+# it is unaffected.
+#
+# Deliberately NOT ignored: `.github/workflows/**`. A change to CI must run CI.
+# Also not ignored: any .md outside this list — `public/marketing/README.md` and
+# the font NOTICE under src/ still trigger a run. Erring toward running is the
+# right bias for a filter whose failure mode is "tests you needed did not run".
+#
+# ⚠ IF BRANCH PROTECTION IS EVER ADDED, READ THIS FIRST. A run skipped by
+# `paths-ignore` never reports a status at all, so a REQUIRED check stays
+# permanently "expected" and a docs-only PR can never be merged. There is no
+# branch protection on this repo today, which is why this is safe now. If you
+# add required checks, replace this with a filter job that computes the changed
+# paths and gates the expensive job with `if:`, so a status is always reported.
+# The two lists below are duplicated on purpose. A YAML anchor would express it
+# once, but GitHub's workflow parser has never reliably supported anchors, and
+# the failure mode is CI silently not running. Five repeated lines is cheaper
+# than that risk. Keep them in sync.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "README.md"
+      - "SETUP.md"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "README.md"
+      - "SETUP.md"
 
 permissions:
   contents: read

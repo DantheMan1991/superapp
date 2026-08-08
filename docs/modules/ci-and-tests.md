@@ -7,6 +7,31 @@
 
 ## Build log
 
+### 2026-08-08 — Documentation-only changes skip CI (branch `claude/ci-skip-docs`)
+
+PR #78 was two markdown files, and it spent twenty minutes running the database
+suite while holding the repo-wide `db-tests` slot — so the next real push would
+have queued behind a docs edit. Since AGENTS.md requires a dossier update on
+nearly every PR, that was about to become the normal case rather than a one-off.
+
+- `paths-ignore` on both triggers, covering `docs/**` and the four top-level
+  docs (`AGENTS.md`, `CLAUDE.md`, `README.md`, `SETUP.md`)
+- **Checked before trusting it: no test reads the docs tree.** The one suite
+  that walks the filesystem — `documents-dms/upload.test.ts`, hunting for a
+  forbidden `@vercel/blob/client` import — inspects `.ts`/`.tsx` only, and
+  `build-docs.ts` reads `docs/` at request time, not at build or test time
+- **`.github/workflows/**` is deliberately NOT ignored.** A change to CI must
+  run CI
+- **A blanket `**.md` was deliberately not used.** `public/marketing/README.md`
+  and a font `NOTICE.md` under `src/` still trigger a run. For a filter whose
+  failure mode is "the tests you needed did not run", erring toward running is
+  the right bias
+- `paths-ignore` skips only when EVERY changed file matches, so the common case
+  — code plus its dossier — is unaffected
+- The two lists are duplicated rather than shared via a YAML anchor: GitHub's
+  workflow parser has never reliably supported anchors, and the failure mode is
+  CI silently not running
+
 ### 2026-08-08 — CI exists, and the suite stops queueing behind itself (branch `claude/test-speed`)
 
 Two changes, from one observation: the full suite took **24 minutes**, ran only
@@ -111,6 +136,13 @@ None. No tables, no migrations.
 - The parallel win may be **smaller on a GitHub runner** (2–4 cores) than on the
   founder's machine. Worth re-measuring from a real CI run before quoting 17%
   anywhere that matters.
+- **`paths-ignore` and branch protection do not mix.** A run skipped by
+  `paths-ignore` reports no status at all, so a REQUIRED check stays permanently
+  "expected" and a docs-only PR could never merge. There is no branch protection
+  on this repo today, which is the only reason the current filter is safe. If
+  required checks are ever added, replace it with a filter job that computes the
+  changed paths and gates the expensive job with `if:`, so a status is always
+  reported. The warning is repeated at the top of the workflow.
 - **`package.json` declares no `engines`**, so nothing enforces the Node version
   the lockfile was authored with — CI pins 24 to match development, but that is
   a convention held in one YAML file. Adding `engines` would make it explicit;

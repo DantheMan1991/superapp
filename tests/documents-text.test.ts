@@ -19,7 +19,9 @@ import {
 import {
   EXTRACT_MAX_CHARS,
   describeTextExtraction,
+  isContentSearchable,
   isTextExtractable,
+  summarizeUnsearchable,
 } from "@/modules/documents/text/state";
 
 /**
@@ -356,5 +358,90 @@ describe("bounds", () => {
     // A deadline already spent: every in-loop check fires immediately.
     const result = await extractDocumentText(bytes, PDF, { timeoutMs: 0 });
     expect(["empty", "failed"]).toContain(result.state);
+  });
+});
+
+/**
+ * The UI's half: saying WHY a file is not searchable.
+ *
+ * Pure, because the whole point of keeping this in `text/state.ts` rather than
+ * in a component is that the wording and the thresholds are testable without
+ * rendering anything — and that the viewer, the search page and the backfill
+ * script all say the same thing about the same state.
+ */
+describe("explaining an absence", () => {
+  it("treats only `done` as searchable", () => {
+    expect(isContentSearchable("done")).toBe(true);
+    for (const state of [
+      "pending",
+      "empty",
+      "unsupported",
+      "too_large",
+      "failed",
+    ] as const) {
+      expect(isContentSearchable(state)).toBe(false);
+    }
+  });
+
+  /**
+   * The load-bearing case. A cabinet that reads cleanly must show NOTHING —
+   * a permanent banner announcing the absence of a problem is how a useful
+   * warning turns into furniture people stop seeing.
+   */
+  it("says nothing when everything is searchable", () => {
+    expect(summarizeUnsearchable({ done: 42 })).toBeNull();
+    expect(summarizeUnsearchable({})).toBeNull();
+    expect(summarizeUnsearchable({ done: 3, empty: 0, failed: 0 })).toBeNull();
+  });
+
+  it("counts every unsearchable state and excludes done", () => {
+    const summary = summarizeUnsearchable({
+      done: 100,
+      empty: 3,
+      unsupported: 2,
+      failed: 1,
+    });
+    expect(summary).not.toBeNull();
+    expect(summary!.total).toBe(6);
+    expect(summary!.parts.join(" ")).not.toContain("100");
+  });
+
+  /**
+   * Ordered by what somebody can DO about it, not by count: `pending` is fixed
+   * today by running the backfill, while `empty` needs OCR that does not exist.
+   * A reader should meet the fixable thing first even when it is the rarest.
+   */
+  it("leads with the actionable state, not the biggest number", () => {
+    const summary = summarizeUnsearchable({ empty: 90, pending: 1 });
+    expect(summary!.parts[0]).toContain("not read yet");
+    expect(summary!.parts[1]).toContain("scan");
+  });
+
+  it("gets singular and plural right", () => {
+    expect(summarizeUnsearchable({ empty: 1 })!.parts[0]).toBe(
+      "1 scan with no text layer",
+    );
+    expect(summarizeUnsearchable({ empty: 2 })!.parts[0]).toBe(
+      "2 scans with no text layer",
+    );
+    expect(summarizeUnsearchable({ failed: 1 })!.parts[0]).toBe(
+      "1 file we could not read",
+    );
+  });
+
+  /** Every state a document can be in must produce a phrase, not `undefined`. */
+  it("has a phrase for every unsearchable state", () => {
+    for (const state of [
+      "pending",
+      "empty",
+      "unsupported",
+      "too_large",
+      "failed",
+    ] as const) {
+      const summary = summarizeUnsearchable({ [state]: 1 });
+      expect(summary).not.toBeNull();
+      expect(summary!.parts[0]).toMatch(/^1 \w/);
+      expect(summary!.parts[0]).not.toContain("undefined");
+    }
   });
 });

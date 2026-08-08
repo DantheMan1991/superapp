@@ -19,6 +19,8 @@ import {
   type SavedViewQuery,
 } from "@/modules/documents/saved-views";
 import { normalizeTags } from "@/modules/documents/core/tags";
+import { tallyTextExtraction } from "@/modules/documents/text/summary";
+import { summarizeUnsearchable } from "@/modules/documents/text/state";
 import { buildFolderLabels } from "@/modules/documents/lib/folder-labels";
 import { formatBytes } from "@/modules/documents/lib/format";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
@@ -89,12 +91,15 @@ export default async function DocumentsSearchPage({
   const data = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [folders, allTags, views] = await Promise.all([
+      const [folders, allTags, views, tally] = await Promise.all([
         listFolders(tx, ctx.tenant.id),
         listTags(tx, ctx.tenant.id),
         listSavedViews(tx, ctx.tenant.id, ctx.userId),
+        // Counted under the SAME RLS context as the search itself, so the note
+        // describes the cabinet this person can see rather than the whole one.
+        tallyTextExtraction(tx, ctx.tenant.id),
       ]);
-      if (!hasFilters) return { folders, allTags, views, result: null };
+      if (!hasFilters) return { folders, allTags, views, tally, result: null };
 
       // An unknown or hidden folder id yields no path, which the query treats
       // as "no folder restriction" — so a stale saved view degrades to a wider
@@ -111,7 +116,7 @@ export default async function DocumentsSearchPage({
         origin,
         page: requestedPage,
       });
-      return { folders, allTags, views, result };
+      return { folders, allTags, views, tally, result };
     },
     { role: ctx.role },
   );
@@ -153,14 +158,43 @@ export default async function DocumentsSearchPage({
     [q, ...tags.map((t) => tagNames[t] ?? t)].filter(Boolean).join(" · ") ||
     "Saved view";
 
+  /**
+   * The note that explains an ABSENCE.
+   *
+   * "I searched for a phrase I can plainly see in that permit and got nothing"
+   * is a question about a file that is NOT in the results, so no per-result
+   * badge can answer it — only a statement about the cabinet as a whole can.
+   *
+   * Shown only when there is a TEXT query: filtering by tag alone never depends
+   * on what we could read out of a file, so the note would be noise there. And
+   * only when something is actually unsearchable — `summarizeUnsearchable`
+   * returns null otherwise, because a permanent banner announcing the absence
+   * of a problem is how a useful warning turns into furniture.
+   */
+  const unsearchable = q ? summarizeUnsearchable(data.tally) : null;
+  const unsearchableNote = unsearchable && (
+    <p
+      role="note"
+      className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
+    >
+      <span className="font-medium text-foreground">
+        {unsearchable.total}{" "}
+        {unsearchable.total === 1 ? "file is" : "files are"} not searchable by
+        content
+      </span>{" "}
+      — {unsearchable.parts.join(", ")}. Those still match on their name, title,
+      description and tags.
+    </p>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Search</h1>
           <p className="text-sm text-muted-foreground">
-            Looks at names, titles, descriptions and what we read from emailed
-            documents. Filter by tag with no search text at all.
+            Looks inside files as well as at their names, titles, descriptions
+            and tags. Filter by tag with no search text at all.
           </p>
         </div>
         {hasFilters && (
@@ -242,11 +276,16 @@ export default async function DocumentsSearchPage({
           )}
         </div>
       ) : hitCount === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-md border px-4 py-12 text-center">
-          <Search className="size-6 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            Nothing matches those filters.
-          </p>
+        // The sharpest moment for this note: nothing came back, and the reason
+        // may be that the file somebody is picturing has no readable text.
+        <div className="space-y-3">
+          <div className="flex flex-col items-center gap-2 rounded-md border px-4 py-12 text-center">
+            <Search className="size-6 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              Nothing matches those filters.
+            </p>
+          </div>
+          {unsearchableNote}
         </div>
       ) : (
         <>
@@ -254,6 +293,11 @@ export default async function DocumentsSearchPage({
             {hitCount} {hitCount === 1 ? "result" : "results"}
             {data.result?.page ? ` · page ${data.result.page + 1}` : ""}
           </p>
+
+          {/* Quieter here than on the empty state, but still present: results
+              that look complete are exactly when somebody stops wondering
+              whether something is missing. */}
+          {unsearchableNote}
 
           <div className="divide-y rounded-md border">
             {data.result?.hits.map((hit) => (

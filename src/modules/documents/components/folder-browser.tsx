@@ -231,6 +231,7 @@ export async function FolderBrowser({
                   fileName: doc.fileName,
                   mimeType: doc.mimeType,
                   sizeBytes: doc.sizeBytes,
+                  textExtraction: doc.textExtraction,
                 }}
                 className="h-full"
               >
@@ -341,6 +342,7 @@ export async function FolderBrowser({
                     fileName: doc.fileName,
                     mimeType: doc.mimeType,
                     sizeBytes: doc.sizeBytes,
+                    textExtraction: doc.textExtraction,
                   }}
                 >
                   <a

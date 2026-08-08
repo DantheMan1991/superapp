@@ -3,6 +3,7 @@ import { and, asc, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { DocumentFolder } from "@/db/schema";
 import { clampPageSize, parseCursor, takePage } from "./core/paging";
+import type { TextExtractionState } from "./text/state";
 
 /**
  * The browse read model: what one folder contains.
@@ -25,6 +26,8 @@ export interface BrowseDocument {
   fileVersionCount: number;
   /** Optimistic-concurrency counter, for the edit dialogs. */
   version: number;
+  /** Why the file's contents are or are not in the search index. */
+  textExtraction: TextExtractionState;
   createdAt: Date;
 }
 
@@ -73,6 +76,11 @@ export async function listFolderContents(
       fileVersionNo: schema.documents.fileVersionNo,
       fileVersionCount: schema.documents.fileVersionCount,
       version: schema.documents.version,
+      // The column is `text`, so Drizzle types it `string`. The narrowing is
+      // safe because the CHECK constraint in 0095 is what makes it true at
+      // runtime — the database cannot hold a seventh value. (`.$type<>()` is a
+      // schema-BUILDER method and does not exist on a column reference here.)
+      textExtraction: sql<TextExtractionState>`${schema.documents.textExtraction}`,
       createdAt: schema.documents.createdAt,
     })
     .from(schema.documents)

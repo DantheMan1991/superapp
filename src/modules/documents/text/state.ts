@@ -126,3 +126,87 @@ export function describeTextExtraction(state: TextExtractionState): string {
       return "Not read yet.";
   }
 }
+
+/**
+ * True when a file's CONTENTS are in the search index.
+ *
+ * The negative is what the UI acts on, and it is deliberately not
+ * `state !== "done"` written out at each call site: `done` is the only state
+ * that means "searchable", and a seventh state added later must default to
+ * "say something" rather than silently join the searchable pile.
+ */
+export function isContentSearchable(state: TextExtractionState): boolean {
+  return state === "done";
+}
+
+/** How many documents sit in each state. Counts only — never a document id. */
+export type TextExtractionTally = Partial<Record<TextExtractionState, number>>;
+
+/**
+ * A short phrase per state, for the aggregate note on the search page.
+ *
+ * Separate from `describeTextExtraction` because the grammar is different: that
+ * one is a sentence about ONE file you are looking at, this one is a fragment
+ * counting many ("3 scans with no text layer"). Sharing one string would make
+ * both read badly.
+ */
+function countPhrase(state: TextExtractionState, n: number): string {
+  const plural = n === 1 ? "" : "s";
+  switch (state) {
+    case "empty":
+      return `${n} scan${plural} with no text layer`;
+    case "unsupported":
+      return `${n} file${plural} of a type we cannot read yet`;
+    case "too_large":
+      return `${n} file${plural} too large to read`;
+    case "failed":
+      return `${n} file${plural} we could not read`;
+    case "pending":
+      return `${n} file${plural} not read yet`;
+    case "done":
+      return `${n} file${plural}`;
+  }
+}
+
+export interface UnsearchableSummary {
+  /** Documents whose CONTENTS are not in the index. Never zero — null instead. */
+  total: number;
+  /** "3 scans with no text layer", "1 file we could not read" — worst first. */
+  parts: string[];
+}
+
+/**
+ * Turn a tally into the note shown under a search.
+ *
+ * Returns **null when there is nothing to say**, which is the whole point: a
+ * cabinet whose files all read cleanly must not carry a permanent banner about
+ * a problem it does not have. Announcing the absence of a problem is how a
+ * useful warning becomes furniture people stop seeing.
+ *
+ * `done` is excluded rather than reported as good news, for the same reason.
+ *
+ * Ordered by how actionable the state is, not by count: `pending` leads because
+ * somebody can fix it today by running the backfill, whereas `empty` needs OCR
+ * that does not exist yet. A user reading this should meet the fixable thing
+ * first.
+ */
+export function summarizeUnsearchable(
+  tally: TextExtractionTally,
+): UnsearchableSummary | null {
+  const order: TextExtractionState[] = [
+    "pending",
+    "failed",
+    "too_large",
+    "unsupported",
+    "empty",
+  ];
+  const parts: string[] = [];
+  let total = 0;
+  for (const state of order) {
+    const n = tally[state] ?? 0;
+    if (n <= 0) continue;
+    total += n;
+    parts.push(countPhrase(state, n));
+  }
+  return total === 0 ? null : { total, parts };
+}

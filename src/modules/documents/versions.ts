@@ -5,6 +5,7 @@ import type { Document, DocumentVersion } from "@/db/schema";
 import { DocsError } from "./core/errors";
 import type { DocsCtx } from "./folder-ops";
 import type { InspectedUpload } from "./ingest";
+import type { TextExtractionState } from "./text/state";
 
 /**
  * File revision history.
@@ -25,6 +26,12 @@ import type { InspectedUpload } from "./ingest";
 export interface AddVersionInput extends InspectedUpload {
   blobPathname: string;
   note: string;
+  /**
+   * Read from the new bytes by the caller, OUTSIDE this transaction — parsing a
+   * PDF takes seconds and a transaction must never be held open across it.
+   */
+  extractedText: string;
+  textExtraction: TextExtractionState;
 }
 
 export interface AddVersionResult {
@@ -127,6 +134,12 @@ async function materializeCurrentVersion(
     mimeType: doc.mimeType,
     sizeBytes: doc.sizeBytes,
     sha256: doc.sha256,
+    // Carried over with everything else that describes these bytes, so
+    // restoring v1 later gets v1's text back rather than an empty column. For
+    // a document uploaded before the producer existed that text is "" and the
+    // state is 'pending' — which is correct, and is what the backfill looks for.
+    extractedText: doc.extractedText,
+    textExtraction: doc.textExtraction,
     isCurrent: true,
     note: "",
     // The original uploader, not whoever happens to be adding v2.
@@ -196,6 +209,8 @@ export async function addDocumentVersion(
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
       sha256: input.sha256,
+      extractedText: input.extractedText,
+      textExtraction: input.textExtraction,
       isCurrent: true,
       note: input.note,
       uploadedByClerkUserId: ctx.userId,
@@ -261,6 +276,11 @@ export async function restoreDocumentVersion(
       mimeType: source.mimeType,
       sizeBytes: source.sizeBytes,
       sha256: source.sha256,
+      // Same bytes, so the same text — copied from the row rather than
+      // re-derived. This is the whole payoff of keeping text on the version:
+      // restore does no blob read and no parse, and cannot half-fail.
+      extractedText: source.extractedText,
+      textExtraction: source.textExtraction,
       isCurrent: true,
       note: "",
       restoredFromVersionId: source.id,
@@ -279,6 +299,13 @@ export async function restoreDocumentVersion(
  * for the file, so "Kitchen elevation" survives a revision that arrives named
  * `scan_0042.pdf`. `file_name` DOES follow the current version, so downloads
  * and the search index describe the bytes actually being served.
+ *
+ * `extracted_text` follows the same rule as `file_name`, and this function is
+ * the ONLY place it needs to: both the append path and the restore path end
+ * here, so "the index describes the current bytes" is one assignment rather
+ * than a rule two call sites have to remember. Without it, searching would find
+ * a document by the contents of a revision it no longer serves — v1's text
+ * answering for v3's file.
  */
 async function promoteVersion(
   tx: Tx,
@@ -294,6 +321,8 @@ async function promoteVersion(
       mimeType: version.mimeType,
       sizeBytes: version.sizeBytes,
       sha256: version.sha256,
+      extractedText: version.extractedText,
+      textExtraction: version.textExtraction,
       fileVersionNo: version.versionNo,
       fileVersionCount: version.versionNo,
       // The optimistic-concurrency counter, which is NOT the revision number —

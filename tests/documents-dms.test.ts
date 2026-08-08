@@ -1163,6 +1163,12 @@ d("document versions", () => {
       sizeBytes: 100 * no,
       sha256: `sha-${tag}-v${no}`,
       note: "",
+      // The action reads these off the real bytes before opening the
+      // transaction; these tests hand `addDocumentVersion` a row directly, so
+      // they stand in for that. Distinct per revision, which is what lets the
+      // promote/restore tests below assert the index follows the bytes.
+      extractedText: `contents of ${tag} v${no}`,
+      textExtraction: "done" as const,
     };
   }
 
@@ -1309,6 +1315,66 @@ d("document versions", () => {
     // Resolved to a number so the panel can say "restored from v1".
     expect(after[0].restoredFromVersionNo).toBe(1);
     expect(after.filter((v) => v.isCurrent)).toHaveLength(1);
+  });
+
+  /**
+   * The search index must describe the bytes actually being served, exactly as
+   * `file_name` does. Without this, searching finds a document by the contents
+   * of a revision it no longer serves — v1's text answering for v3's file —
+   * which is worse than not finding it, because the hit looks right.
+   *
+   * Both directions are asserted here because both paths end in promoteVersion,
+   * and that being the single choke point is the entire design.
+   */
+  it("moves extracted text with the current bytes, in both directions", async () => {
+    const doc = await mkDoc("index", {
+      extractedText: "original scope of work",
+      textExtraction: "done",
+    });
+
+    await asOwner((tx) => addDocumentVersion(tx, ctx, doc.id, bytes("index", 2)));
+    const afterV2 = await asOwner((tx) =>
+      tx.query.documents.findFirst({ where: eq(schema.documents.id, doc.id) }),
+    );
+    expect(afterV2!.extractedText).toBe("contents of index v2");
+    expect(afterV2!.textExtraction).toBe("done");
+
+    // v1's text was carried onto the materialized v1 row rather than lost, so
+    // restoring it needs no blob read and no re-parse.
+    const history = await asOwner((tx) =>
+      listDocumentVersions(tx, tenantId, doc.id),
+    );
+    const v1 = history.find((v) => v.versionNo === 1)!;
+    await asOwner((tx) => restoreDocumentVersion(tx, ctx, doc.id, v1.id!));
+
+    const afterRestore = await asOwner((tx) =>
+      tx.query.documents.findFirst({ where: eq(schema.documents.id, doc.id) }),
+    );
+    expect(afterRestore!.extractedText).toBe("original scope of work");
+    expect(afterRestore!.textExtraction).toBe("done");
+  });
+
+  /**
+   * A document uploaded before the producer existed has no text and gets none
+   * invented for it: v1 materializes as 'pending', which is precisely what the
+   * backfill looks for. The failure this prevents is quieter — carrying v2's
+   * text onto a restored v1 would leave the index confidently wrong.
+   */
+  it("materializes an un-read v1 as pending rather than borrowing v2's text", async () => {
+    const doc = await mkDoc("legacy");
+    await asOwner((tx) => addDocumentVersion(tx, ctx, doc.id, bytes("legacy", 2)));
+
+    const history = await asOwner((tx) =>
+      listDocumentVersions(tx, tenantId, doc.id),
+    );
+    const v1 = history.find((v) => v.versionNo === 1)!;
+    await asOwner((tx) => restoreDocumentVersion(tx, ctx, doc.id, v1.id!));
+
+    const after = await asOwner((tx) =>
+      tx.query.documents.findFirst({ where: eq(schema.documents.id, doc.id) }),
+    );
+    expect(after!.extractedText).toBe("");
+    expect(after!.textExtraction).toBe("pending");
   });
 
   it("refuses to restore the version that is already current", async () => {

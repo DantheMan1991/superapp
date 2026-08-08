@@ -666,6 +666,13 @@
       "when": 1786153743093,
       "tag": "0094_crm_settings_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1786159331059,
+      "tag": "0095_documents_extracted_text",
+      "breakpoints": true
     }
   ]
 }

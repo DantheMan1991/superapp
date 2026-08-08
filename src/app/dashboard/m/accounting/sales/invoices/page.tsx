@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getSettings } from "@/modules/accounting/core";
 import { getArAging } from "@/modules/accounting/invoicing/aging-feed";
 import {
   formatCentsSigned,
@@ -53,7 +52,6 @@ export default async function InvoicesPage({
   const filter = FILTERS.find((f) => f.key === sp.f) ?? FILTERS[0];
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
-    const settings = await getSettings(tx, ctx.tenant.id);
     const today = todayInTimezone(ctx.tenant.timezone);
     const invoices = await tx
       .select({

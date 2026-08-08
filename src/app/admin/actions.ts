@@ -7,7 +7,7 @@ import { z } from "zod";
 import { withSystem, withTenant, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logAudit } from "@/lib/audit";
-import { slugify, uniqueTenantSlug } from "@/lib/slug";
+import { uniqueTenantSlug } from "@/lib/slug";
 import { upsertTenantFromOrg } from "@/lib/tenant-sync";
 import { provisionAccounting } from "@/modules/accounting/templates/apply";
 import { provisionDocuments } from "@/modules/documents/templates/apply";

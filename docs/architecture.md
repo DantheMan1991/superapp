@@ -219,7 +219,7 @@ src/
   components/          shared UI + app shell
   db/
     index.ts           withTenant / withSystem — the data access seam
-    schema.ts          all tables
+    schema/            all tables, one file per domain; index.ts is the barrel
   lib/                 platform machinery: auth, audit, crypto, billing,
                        claude, email, blob, modules, tenant-sync
   modules/             Layer 1 — core tools
@@ -231,7 +231,7 @@ docs/
   decisions/           ADRs — why, dated
   modules/<slug>.md    per-module dossiers (source of truth)
 drizzle/               migrations, including hand-written RLS policies
-tests/                 vitest; tenant-isolation.test.ts is the certification
+tests/                 vitest; tests/isolation/ is the certification suite
 scripts/               migrate, seed, create-app-role, probes
 ```
 

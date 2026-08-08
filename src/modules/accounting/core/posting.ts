@@ -519,7 +519,6 @@ export async function reverseEntry(
   if (entry.status !== "posted") {
     throw new LedgerError("ENTRY_NOT_POSTED", "only posted entries can be reversed");
   }
-  const settings = await getSettings(tx, ctx.tenantId);
   const reversalDate =
     args.entryDate ??
     todayInTimezone(await getTenantTimezone(tx, ctx.tenantId));

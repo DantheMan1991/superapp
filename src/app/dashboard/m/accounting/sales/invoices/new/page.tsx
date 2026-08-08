@@ -3,7 +3,6 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getSettings } from "@/modules/accounting/core";
 import { suggestInvoiceNumber } from "@/modules/accounting/invoicing/numbering";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../../sales-nav";
@@ -32,7 +31,6 @@ export default async function NewInvoicePage() {
       orderBy: asc(schema.accounts.code),
     });
     const suggestedNumber = await suggestInvoiceNumber(tx, ctx.tenant.id);
-    const settings = await getSettings(tx, ctx.tenant.id);
     return {
       customers,
       incomeAccounts,

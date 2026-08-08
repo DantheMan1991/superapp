@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getBalances, getSettings } from "@/modules/accounting/core";
+import { getBalances } from "@/modules/accounting/core";
 import {
   formatCentsSigned,
   todayInTimezone,
@@ -46,7 +46,6 @@ export default async function BankRegisterPage({
       ),
     });
     if (!bankAccount) return null;
-    const settings = await getSettings(tx, tenantId);
     const today = todayInTimezone(ctx.tenant.timezone);
     const [balance] = await getBalances(tx, tenantId, {
       asOf: today,

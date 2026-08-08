@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import {
-  LedgerError,
   addCloseNote,
   closePeriodStart,
   completeClose,

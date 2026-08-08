@@ -18,7 +18,6 @@ import {
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
-import { getSettings } from "@/modules/accounting/core";
 import { loadBillLines, findPossibleDuplicates } from "@/modules/accounting/payables/bills";
 import { paidCentsFor } from "@/modules/accounting/payables/payments";
 import { readBillCoding } from "@/modules/accounting/ai/bill-validate";
@@ -95,7 +94,6 @@ export default async function BillDetailPage({
       ),
       orderBy: (v, { asc }) => [asc(v.name)],
     });
-    const settings = await getSettings(tx, tenantId);
     const duplicates =
       bill.status === "void"
         ? []

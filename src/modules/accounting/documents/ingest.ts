@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { get, head, put } from "@vercel/blob";
 import { schema, type Tx } from "@/db";
 import { assertBlobConfigured, blobToken, receiptPathPrefix } from "@/lib/blob";

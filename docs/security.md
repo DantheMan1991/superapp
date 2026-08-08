@@ -201,7 +201,7 @@ Paste these into the PR. They are the actual gate.
 - [ ] Decide writability deliberately: read-only to members? owner-only? If the
       row is visibility-bearing, the policy reads `app.tenant_role`
 - [ ] Unique/lookup indexes lead with `tenant_id`
-- [ ] Added to `tests/tenant-isolation.test.ts` — a two-tenant read AND write
+- [ ] Added to `tests/isolation/<area>.test.ts` — a two-tenant read AND write
       attempt, both denied
 - [ ] Migration run against **both** the dev branch and production
 - [ ] Row added to the module dossier's Data model table
@@ -354,7 +354,7 @@ working right up until two tenants share a query. Pass a table name
 
 Then confirm by hand for any PR touching data access:
 
-1. Every new table appears in `tests/tenant-isolation.test.ts`.
+1. Every new table appears in `tests/isolation/`.
 2. Every new `withSystem()` call has a justification comment.
 3. Every new server action starts with a `require*()` call.
 4. The migration has been run against **both** databases (dev branch + prod),

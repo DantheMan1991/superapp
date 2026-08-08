@@ -39,7 +39,6 @@ import {
   setTransactionExcluded,
 } from "../src/modules/accounting/banking/review";
 import {
-  persistSuggestions,
   suggestCategoriesForBankAccount,
 } from "../src/modules/accounting/ai/suggest";
 import { validateSuggestions } from "../src/modules/accounting/ai/validate";
@@ -573,7 +572,6 @@ d("banking (DB)", () => {
 
   it("reconciliation: full cycle, server-verified balance, immutability, reopen", async () => {
     const bankAccountId = acct["__bankAccount"];
-    const bankLedger = acct["__bank"];
     // Categorize the remaining unreviewed txns so ledger activity exists.
     const unreviewed = await withTenant(tenantId, (tx) =>
       tx.query.bankTransactions.findMany({

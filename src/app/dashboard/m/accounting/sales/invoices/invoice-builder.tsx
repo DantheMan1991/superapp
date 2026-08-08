@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -126,10 +126,10 @@ export function InvoiceBuilder({
     (p) => p.row.description.trim() !== "" || p.row.unitPrice.trim() !== "",
   );
   const allValid = filled.length > 0 && filled.every((p) => p.valid);
-  const totalCents = useMemo(
-    () => filled.reduce((s, p) => s + p.amountCents, 0),
-    [filled],
-  );
+  // Not memoized: `filled` is rebuilt from `rows` on every render, so its
+  // identity always changes and a useMemo keyed on it never once hit its cache
+  // — it only stopped the compiler from memoizing this properly.
+  const totalCents = filled.reduce((s, p) => s + p.amountCents, 0);
 
   function setRow(key: string, patch: Partial<LineRow>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +67,39 @@ export function TimerControls({
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState("");
 
+  // The clock is impure and must not be read while rendering. Doing so was
+  // wrong twice over: the server rendered ITS current time and the client then
+  // hydrated with a different one, and after that the figure sat frozen until
+  // some unrelated state change happened to re-render the component. Holding it
+  // in state on an interval fixes both, and makes a running timer actually tick.
+  // Tagged with the timer it was measured against, so a stopped-then-restarted
+  // timer can never show the previous run's figure for a frame. That also means
+  // the effect never has to reset anything, and so never calls setState
+  // synchronously — which would cascade an extra render before paint.
+  const [elapsed, setElapsed] = useState<{
+    startedAt: string;
+    min: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!timerStartedAt) return;
+    const startedAt = new Date(timerStartedAt).getTime();
+    const tick = () =>
+      setElapsed({
+        startedAt: timerStartedAt,
+        min: Math.max(1, Math.ceil((Date.now() - startedAt) / 60_000)),
+      });
+    // Scheduled rather than taken inline, for the reason above; a zero-delay
+    // timer lands in the next macrotask, so the figure is there immediately.
+    const first = setTimeout(tick, 0);
+    // The display is in minutes; half a minute keeps it honest without churn.
+    const id = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, [timerStartedAt]);
+
   if (!timerStartedAt) {
     return (
       <div className="flex items-center gap-2">
@@ -100,11 +133,6 @@ export function TimerControls({
     );
   }
 
-  const elapsedMin = Math.max(
-    1,
-    Math.ceil((Date.now() - new Date(timerStartedAt).getTime()) / 60_000),
-  );
-
   return (
     <form
       action={(formData) =>
@@ -118,7 +146,9 @@ export function TimerControls({
     >
       <input type="hidden" name="tenantId" value={tenantId} />
       <p className="text-xs text-muted-foreground">
-        Running for ~{formatMinutesAsHours(elapsedMin)}
+        {elapsed?.startedAt === timerStartedAt
+          ? `Running for ~${formatMinutesAsHours(elapsed.min)}`
+          : "Running…"}
       </p>
       <Textarea
         name="note"

@@ -14,7 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getBalances, getSettings } from "@/modules/accounting/core";
+import { getBalances } from "@/modules/accounting/core";
 import {
   formatCentsSigned,
   todayInTimezone,
@@ -36,7 +36,6 @@ export default async function BankingPage() {
       where: eq(schema.bankAccounts.tenantId, tenantId),
       orderBy: (b, { asc }) => [asc(b.createdAt)],
     });
-    const settings = await getSettings(tx, tenantId);
     const today = todayInTimezone(ctx.tenant.timezone);
     const balances =
       bankAccounts.length > 0

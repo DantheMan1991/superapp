@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   BookOpen,
   Boxes,
@@ -168,9 +168,19 @@ export function AppShell({
   );
 
   // Close the drawer whenever navigation completes.
-  useEffect(() => {
+  //
+  // Adjusted during render rather than in an effect. As an effect this set state
+  // synchronously after the new route had already committed, costing a second
+  // render pass just to close the drawer — what `react-hooks/set-state-in-effect`
+  // flags. Comparing against the previous value during render is React's
+  // documented way to react to a changed prop, and it resolves in the same pass.
+  // Whether the old form was perceptible on a real phone was never measured; the
+  // reason to change it is the extra pass, not an observed glitch.
+  const [drawerPath, setDrawerPath] = useState(pathname);
+  if (drawerPath !== pathname) {
+    setDrawerPath(pathname);
     setDrawerOpen(false);
-  }, [pathname]);
+  }
 
   return (
     <div className="flex min-h-screen w-full flex-col lg:flex-row">

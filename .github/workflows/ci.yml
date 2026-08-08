@@ -1,0 +1,136 @@
+name: CI
+
+# Until this existed, every check ran on somebody's laptop and blocked them for
+# twenty minutes. Two jobs, deliberately separate:
+#
+#   checks  — lint, types, build. No database, so it is safe to run many at once
+#             and safe to cancel when a newer push supersedes it.
+#   tests   — the vitest suite. Shares ONE Neon branch with every other run, so
+#             it is serialised repo-wide and must never be cancelled midway.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, types, build
+    runs-on: ubuntu-latest
+    # A superseded push has nothing worth waiting for.
+    concurrency:
+      group: checks-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npx tsc --noEmit
+
+      # Keys are deliberately absent: every provider client is lazy, so the
+      # build must stay green without them (AGENTS.md). If this step ever starts
+      # needing a secret, something now runs at module scope that should not.
+      #
+      # This is also the ONLY check that catches a client component importing a
+      # `server-only` module — tsc and vitest both pass straight through it.
+      - run: npm run build
+
+  tests:
+    name: Test suite
+    runs-on: ubuntu-latest
+    # ONE at a time across the whole repo. Every run shares the same Neon
+    # branch, and the suites stamp their tenants with `process.pid` — two
+    # runners can land on the same pid and collide on a tenant slug.
+    #
+    # cancel-in-progress is FALSE on purpose. These tests create tenants and
+    # delete them in afterAll; killing a run midway leaves the rows behind.
+    concurrency:
+      group: db-tests
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # THE IMPORTANT STEP.
+      #
+      # tests/setup/database-guard.ts does not fail when TEST_DATABASE_URL is
+      # missing — it DELETES DATABASE_URL so the database suites skip, and
+      # writes a warning to stderr. That is right locally (a contributor without
+      # a test database still gets the pure tests) and wrong here: a missing or
+      # misnamed secret would produce a green tick over zero coverage.
+      #
+      # The guard's other protection cannot help either. It refuses when
+      # TEST_DATABASE_URL equals DATABASE_URL, but DATABASE_URL is never set in
+      # CI, so a production connection string pasted into the secret would be
+      # accepted and the suite would create and delete tenants in production.
+      # The separate Neon `ci` branch is what actually prevents that.
+      - name: Require the test database secrets
+        env:
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          TEST_DATABASE_URL_OWNER: ${{ secrets.TEST_DATABASE_URL_OWNER }}
+        run: |
+          missing=""
+          [ -z "$TEST_DATABASE_URL" ] && missing="$missing TEST_DATABASE_URL"
+          [ -z "$TEST_DATABASE_URL_OWNER" ] && missing="$missing TEST_DATABASE_URL_OWNER"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            echo "Without them the database suites SKIP and this job would pass"
+            echo "while certifying nothing. Add them at Settings -> Secrets and"
+            echo "variables -> Actions, pointing at the Neon 'ci' branch."
+            exit 1
+          fi
+
+      # Applies any new migration to the CI branch before the suite runs, so it
+      # cannot drift behind main. `--dev` targets TEST_DATABASE_URL_OWNER, which
+      # here is the ci branch rather than the local dev one.
+      - name: Migrate the CI database
+        env:
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          TEST_DATABASE_URL_OWNER: ${{ secrets.TEST_DATABASE_URL_OWNER }}
+        run: npm run db:migrate -- --dev
+
+      # The whole suite, including tests/isolation — the tenant-isolation
+      # certification that AGENTS.md requires before a deploy. It is NOT run
+      # again as a separate step: with TEST_DATABASE_URL present the guard
+      # points DATABASE_URL at it, so the database suites cannot skip, and the
+      # step above already fails when the secret is absent. Re-running the
+      # isolation files here would just repeat five minutes of work.
+      #
+      # (The guard's own "DATABASE TESTS SKIPPED" warning is not a usable
+      # signal here — it is only written when DATABASE_URL was already set,
+      # which never happens in CI.)
+      - name: Run the suite
+        env:
+          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          TEST_DATABASE_URL_OWNER: ${{ secrets.TEST_DATABASE_URL_OWNER }}
+          # NOT SECRETS, and deliberately not repo secrets.
+          #
+          # These three are a key, a key and a salt. The suites that use them
+          # create a value and verify it inside the same run, so any input of
+          # the right SHAPE satisfies them — 32 bytes of base64, 32+ characters,
+          # and any non-empty string. Making them repo secrets would mean the
+          # production keys sitting in CI for no benefit, and one more thing to
+          # rotate. Writing them here is the safer choice, not the lazy one.
+          #
+          # The values are fixed rather than random so a failure reproduces.
+          APP_ENCRYPTION_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+          SHARE_SECRET: ci-test-share-secret-deterministic-not-real-000
+          INTERVIEW_IP_SALT: ci-test-interview-salt
+        run: npm test

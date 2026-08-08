@@ -109,3 +109,12 @@ tree — a new file appears on the page with no code change):
   is not watching. A skipped isolation run is not a passing one.
 - `npm run build` — must stay green; keys are not required for the build
   (all provider clients are lazy).
+- **CI runs lint, `tsc`, the build and the whole suite on every push and PR**
+  (`.github/workflows/ci.yml`), against a dedicated Neon `ci` branch. You do not
+  need a full local run to open a PR — push and let it report. Run
+  `test:isolation` locally when you have touched RLS or a tenant table, because
+  waiting on CI to learn that is the slow way round.
+- `npm test` runs two projects: `pure` in parallel, `db` sequentially. If
+  `tests/db-backed-files.test.ts` fails, a suite changed which side it belongs
+  on — update the list in `tests/db-backed-files.ts`. See
+  [docs/modules/ci-and-tests.md](docs/modules/ci-and-tests.md).

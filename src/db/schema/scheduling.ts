@@ -309,6 +309,18 @@ export const scheduleItems = pgTable(
      */
     kind: text("kind").notNull().default(""),
     /**
+     * An RFC 5545 RRULE value, without the `RRULE:` prefix. Empty means this
+     * happens once.
+     *
+     * THE SERIES IS THE ROW. Occurrences are expanded on READ, never
+     * materialised — a year of a daily standup is one row here and 365 in a
+     * table that would have to be regenerated every time somebody edited the
+     * rule. `src/modules/scheduling/core/recurrence.ts` is the only thing that
+     * parses it, and it REFUSES rules it does not implement rather than
+     * silently dropping a clause.
+     */
+    recurrenceRule: text("recurrence_rule").notNull().default(""),
+    /**
      * Extension bag (primitive P2). NOT NULL DEFAULT '{}' so `metadata->>'x'` is
      * always safe. Where a pack keeps progress, float, baselines — the fields a
      * chart needs and a calendar does not.
@@ -535,5 +547,63 @@ export const scheduleFeedTokens = pgTable(
   (t) => [
     uniqueIndex("schedule_feed_tokens_hash_idx").on(t.tokenHash),
     index("schedule_feed_tokens_owner_idx").on(t.tenantId, t.clerkUserId),
+  ],
+);
+
+/**
+ * One occurrence of a repeating event, changed or called off.
+ *
+ * The exception table that makes expand-on-read workable: the series stays a
+ * single row, and the handful of occurrences somebody moved or cancelled live
+ * here, keyed by the LOCAL DATE the occurrence falls on.
+ *
+ * WHY THE KEY IS A DATE AND NOT AN INSTANT. The occurrence somebody edited is
+ * "the one on the 12th", and it stays that occurrence even if the series' time
+ * is later changed from 9am to 10am. Keying on the instant would orphan every
+ * override the first time the rule was edited.
+ */
+export const scheduleItemOverrides = pgTable(
+  "schedule_item_overrides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull(),
+    /** `yyyy-mm-dd`, the local date of the occurrence this replaces. */
+    occurrenceDate: text("occurrence_date").notNull(),
+    /** True means this one does not happen. The rest of the row is then moot. */
+    cancelled: boolean("cancelled").notNull().default(false),
+    /** Null means "unchanged" — a cancellation carries no times at all. */
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // One override per occurrence. Editing the same occurrence twice is an
+    // update, not a second row that would have to be reconciled.
+    uniqueIndex("schedule_item_overrides_unique_idx").on(
+      t.tenantId,
+      t.itemId,
+      t.occurrenceDate,
+    ),
+    foreignKey({
+      name: "schedule_item_overrides_item_fk",
+      columns: [t.tenantId, t.itemId],
+      foreignColumns: [scheduleItems.tenantId, scheduleItems.id],
+    }).onDelete("cascade"),
+    check(
+      "schedule_item_overrides_date_format",
+      // `[0-9]` rather than `\d`: this is a TS TEMPLATE LITERAL, where `\d` is
+      // an invalid escape that silently becomes a bare `d` — the generated
+      // migration read `~ '^d{4}-d{2}-d{2}$'`, which matches the literal letter
+      // d and nothing else. Caught by reading the generated SQL.
+      sql`${t.occurrenceDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`,
+    ),
   ],
 );

@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { ScheduleShowAs } from "@/lib/schedule/access";
+import { parseRule } from "@/lib/schedule/recurrence";
 import { SchedulingError, type SchedulingCtx } from "./calendar-ops";
 
 /**
@@ -39,6 +40,12 @@ export interface ItemInput {
   showAs?: ScheduleShowAs;
   sensitivity?: "normal" | "private";
   kind?: string;
+  /**
+   * An RRULE value, or "" for a one-off. VALIDATED, not trusted: `parseRule`
+   * refuses what it does not implement, and storing a rule the expander will
+   * later refuse would show one event where somebody asked for a series.
+   */
+  recurrenceRule?: string;
   attendees?: AttendeeInput[];
 }
 
@@ -55,6 +62,7 @@ export interface ItemDetail {
   showAs: ScheduleShowAs;
   sensitivity: "normal" | "private";
   kind: string;
+  recurrenceRule: string;
   cancelledAt: Date | null;
   attendees: Array<{
     id: string;
@@ -94,6 +102,17 @@ async function requireWritableCalendar(
   }
 }
 
+/** Refuse a rule the expander cannot honour, at the boundary rather than later. */
+function assertRule(rule: string | undefined): void {
+  if (!rule) return;
+  if (!parseRule(rule)) {
+    throw new SchedulingError(
+      "INVALID",
+      "that repeat pattern is not supported yet",
+    );
+  }
+}
+
 function assertOrdered(startsAt: Date, endsAt: Date): void {
   // The database has this as a CHECK too. Here it can say which way round.
   if (endsAt.getTime() < startsAt.getTime()) {
@@ -108,6 +127,7 @@ export async function createItem(
 ): Promise<string> {
   await requireWritableCalendar(tx, input.calendarId);
   assertOrdered(input.startsAt, input.endsAt);
+  assertRule(input.recurrenceRule);
 
   const [row] = await tx
     .insert(schema.scheduleItems)
@@ -124,6 +144,7 @@ export async function createItem(
       showAs: input.showAs ?? "busy",
       sensitivity: input.sensitivity ?? "normal",
       kind: input.kind ?? "",
+      recurrenceRule: input.recurrenceRule ?? "",
       createdByClerkUserId: ctx.userId,
     })
     .returning({ id: schema.scheduleItems.id });
@@ -152,6 +173,7 @@ export async function updateItem(
   const startsAt = input.startsAt ?? existing.startsAt;
   const endsAt = input.endsAt ?? existing.endsAt;
   assertOrdered(startsAt, endsAt);
+  assertRule(input.recurrenceRule);
 
   await tx
     .update(schema.scheduleItems)
@@ -166,6 +188,9 @@ export async function updateItem(
       ...(input.timeZone === undefined ? {} : { timeZone: input.timeZone }),
       ...(input.showAs === undefined ? {} : { showAs: input.showAs }),
       ...(input.sensitivity === undefined ? {} : { sensitivity: input.sensitivity }),
+      ...(input.recurrenceRule === undefined
+        ? {}
+        : { recurrenceRule: input.recurrenceRule }),
       updatedAt: new Date(),
     })
     .where(eq(schema.scheduleItems.id, itemId));
@@ -305,6 +330,7 @@ export async function getItemDetail(
     showAs: row.showAs,
     sensitivity: row.sensitivity,
     kind: row.kind,
+    recurrenceRule: row.recurrenceRule,
     cancelledAt: row.cancelledAt,
     attendees: attendees.map((a) => ({
       id: a.id,
@@ -315,4 +341,65 @@ export async function getItemDetail(
       response: a.response,
     })),
   };
+}
+
+/* -- One occurrence of a series -------------------------------------------- */
+
+/**
+ * Change or call off a single occurrence.
+ *
+ * KEYED ON THE LOCAL DATE, not on an instant — the occurrence somebody edited
+ * is "the one on the 12th", and it stays that occurrence even if the series is
+ * later moved from 9am to 10am. Keying on the instant would orphan every
+ * override the first time the rule changed.
+ *
+ * An upsert, so editing the same occurrence twice replaces rather than
+ * accumulates.
+ */
+export async function overrideOccurrence(
+  tx: Tx,
+  ctx: SchedulingCtx,
+  input: {
+    itemId: string;
+    occurrenceDate: string;
+    cancelled: boolean;
+    startsAt?: Date;
+    endsAt?: Date;
+  },
+): Promise<void> {
+  const existing = await loadItem(tx, input.itemId);
+  await requireWritableCalendar(tx, existing.calendarId);
+  if (existing.recurrenceRule === "") {
+    throw new SchedulingError(
+      "INVALID",
+      "this event does not repeat, so there is no single occurrence to change",
+    );
+  }
+  if (input.startsAt && input.endsAt) {
+    assertOrdered(input.startsAt, input.endsAt);
+  }
+
+  await tx
+    .insert(schema.scheduleItemOverrides)
+    .values({
+      tenantId: ctx.tenantId,
+      itemId: input.itemId,
+      occurrenceDate: input.occurrenceDate,
+      cancelled: input.cancelled,
+      startsAt: input.startsAt ?? null,
+      endsAt: input.endsAt ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [
+        schema.scheduleItemOverrides.tenantId,
+        schema.scheduleItemOverrides.itemId,
+        schema.scheduleItemOverrides.occurrenceDate,
+      ],
+      set: {
+        cancelled: input.cancelled,
+        startsAt: input.startsAt ?? null,
+        endsAt: input.endsAt ?? null,
+        updatedAt: new Date(),
+      },
+    });
 }

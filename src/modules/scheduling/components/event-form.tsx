@@ -24,10 +24,12 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { describeRule, parseRule } from "@/lib/schedule/recurrence";
 import type { CalendarSummary } from "../calendar-ops";
 import {
   attachLinkAction,
   cancelEventAction,
+  cancelOccurrenceAction,
   createEventAction,
   detachLinkAction,
   getEventAction,
@@ -57,6 +59,21 @@ type LinkGroup = {
   results: Array<{ entityId: string; label: string; sublabel?: string }>;
 };
 
+/**
+ * The repeat patterns offered. A deliberately short list of what people
+ * actually pick — anything more expressive belongs behind a "custom" editor
+ * that nobody has asked for yet.
+ */
+const REPEAT_OPTIONS = [
+  { value: "", label: "Does not repeat" },
+  { value: "FREQ=DAILY", label: "Every day" },
+  { value: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", label: "Every weekday" },
+  { value: "FREQ=WEEKLY", label: "Every week" },
+  { value: "FREQ=WEEKLY;INTERVAL=2", label: "Every 2 weeks" },
+  { value: "FREQ=MONTHLY", label: "Every month" },
+  { value: "FREQ=YEARLY", label: "Every year" },
+] as const;
+
 const SHOW_AS = [
   { value: "busy", label: "Busy" },
   { value: "free", label: "Free" },
@@ -74,6 +91,7 @@ const SHOW_AS = [
  */
 export function EventForm({
   itemId,
+  occurrenceDate,
   defaultDate,
   timeZone,
   calendars,
@@ -81,6 +99,8 @@ export function EventForm({
   onClose,
 }: {
   itemId?: string;
+  /** Which occurrence was clicked, for a repeating event. Null otherwise. */
+  occurrenceDate?: string | null;
   defaultDate: string;
   timeZone: string;
   calendars: CalendarSummary[];
@@ -106,6 +126,7 @@ export function EventForm({
   const [isPrivate, setIsPrivate] = useState(false);
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [guestEmail, setGuestEmail] = useState("");
+  const [repeat, setRepeat] = useState("");
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [linkQuery, setLinkQuery] = useState("");
   const [linkGroups, setLinkGroups] = useState<LinkGroup[]>([]);
@@ -198,6 +219,7 @@ export function EventForm({
       setEndTime(d.endTime);
       setShowAs(d.showAs);
       setIsPrivate(d.sensitivity === "private");
+      setRepeat(d.recurrenceRule);
       setCanEdit(d.canEdit);
       setMyResponse(d.myResponse);
       setAttendees(
@@ -232,6 +254,7 @@ export function EventForm({
       allDay,
       showAs: showAs as "free" | "busy" | "tentative" | "away",
       sensitivity: (isPrivate ? "private" : "normal") as "private" | "normal",
+      recurrenceRule: repeat,
       attendees,
     };
     startTransition(async () => {
@@ -254,6 +277,19 @@ export function EventForm({
       if ("error" in result) toast.error(result.error);
       else {
         toast.success("Event cancelled");
+        router.refresh();
+        onClose();
+      }
+    });
+  }
+
+  function cancelThisOne() {
+    if (!itemId || !occurrenceDate) return;
+    startTransition(async () => {
+      const result = await cancelOccurrenceAction({ itemId, occurrenceDate });
+      if ("error" in result) toast.error(result.error);
+      else {
+        toast.success("That one is off");
         router.refresh();
         onClose();
       }
@@ -356,6 +392,35 @@ export function EventForm({
               <Label htmlFor="all-day" className="text-sm">
                 All day
               </Label>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="repeat">Repeats</Label>
+              {/* Radix Select cannot hold an empty string, so "none" is the
+                  sentinel for "does not repeat" and is mapped back to "" at
+                  this boundary rather than leaking into the stored rule. */}
+              <Select
+                value={repeat || "none"}
+                disabled={!canEdit}
+                onValueChange={(v) => setRepeat(v === "none" ? "" : v)}
+              >
+                <SelectTrigger id="repeat" className="w-full">
+                  <SelectValue placeholder="Does not repeat" />
+                </SelectTrigger>
+                <SelectContent>
+                  {REPEAT_OPTIONS.map((o) => (
+                    <SelectItem key={o.value || "none"} value={o.value || "none"}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {repeat && (
+                <p className="text-xs text-muted-foreground">
+                  {describeRule(parseRule(repeat) ?? { freq: "DAILY", interval: 1, byDay: [] })}
+                  . Changing the times here moves every occurrence.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -655,9 +720,20 @@ export function EventForm({
         {canEdit && !loading && (
           <DialogFooter className="gap-2 sm:justify-between">
             {itemId ? (
-              <Button variant="ghost" disabled={pending} onClick={remove}>
-                <Trash2 className="mr-1.5 size-4" /> Cancel event
-              </Button>
+              <div className="flex gap-1">
+                {/* On a repeating event the destructive default must be the
+                    NARROW one. "Cancel event" on a standup would call off every
+                    future occurrence, and somebody clicking it means Friday. */}
+                {occurrenceDate && (
+                  <Button variant="ghost" disabled={pending} onClick={cancelThisOne}>
+                    <Trash2 className="mr-1.5 size-4" /> Cancel just this one
+                  </Button>
+                )}
+                <Button variant="ghost" disabled={pending} onClick={remove}>
+                  <Trash2 className="mr-1.5 size-4" />
+                  {occurrenceDate ? "Cancel the series" : "Cancel event"}
+                </Button>
+              </div>
             ) : (
               <span />
             )}

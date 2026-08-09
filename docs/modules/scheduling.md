@@ -17,6 +17,57 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Recurrence (branch `claude/scheduling-recurrence`)
+
+Repeating events, expanded on read. Slice 6 (the pack seam) is **deferred** by
+the founder — it would have shipped three primitives with zero implementors, and
+this repo's own rule is that a seam with one user has never been tested. Packs
+get built with their first real consumer in hand.
+
+- **THE SERIES IS ONE ROW.** A year of a daily standup is one row and 365
+  renders, not 365 rows that would need regenerating every time somebody edited
+  the rule. `schedule_item_overrides` holds only the handful of occurrences
+  somebody moved or cancelled.
+- **EXPANSION WALKS LOCAL DATES, NOT MILLISECONDS**, which is the whole
+  correctness story. "Every Tuesday at 8am" means 8am on the wall clock, and
+  adding 7 × 86,400,000ms to an instant lands at 7am the week the clocks change.
+  Tests assert a weekly 8am series moves from `13:00Z` to `12:00Z` across
+  2026-03-08 while staying 8am local, and that the one occurrence a year landing
+  inside the spring-forward gap falls FORWARD to 03:30 rather than vanishing.
+- **A monthly series measures from the SERIES START, never from the previous
+  occurrence.** Starting on the 31st, February clamps to the 28th — and stepping
+  from *that* keeps it on the 28th for the rest of the year. Found by a test
+  that failed on the first run; the drift is the classic monthly-recurrence bug
+  and it was written in straight.
+- **The parser REFUSES what it does not implement** — `BYSETPOS`, ordinal
+  `BYDAY` ("the third Tuesday"), `BYMONTHDAY` lists — rather than dropping the
+  clause. A rule that quietly ignored "third Tuesday" would generate a series on
+  the wrong days, which is worse than not offering it. `item-ops` refuses it at
+  the write boundary too, so an unsupported rule never reaches storage.
+- **`app_schedule_range` CANNOT EXPAND, AND MUST NOT TRY.** Expansion needs the
+  zone's offset at each instant; reimplementing that in SQL would be a second
+  copy of the hardest logic in the module. The function now returns the series
+  row with its rule and zone attached, and `range.ts` expands BOTH sources with
+  one expander. **There is a test that a `titles`-level colleague sees all four
+  occurrences of a weekly meeting** — without it, the redacted path would show a
+  recurring event once and never again.
+- **The override key is a LOCAL DATE, not an instant.** The occurrence somebody
+  edited is "the one on the 12th", and it stays that occurrence when the series
+  moves from 9am to 10am. Keying on the instant would orphan every override the
+  first time the rule changed.
+- **The destructive default on a repeating event is the NARROW one.** "Cancel
+  just this one" sits before "Cancel the series", because somebody cancelling a
+  standup means Friday.
+- **The feed emits OCCURRENCES, not `RRULE`+`EXDATE`.** Bigger — up to 395
+  VEVENTs for a daily series — but it means the expansion `range.ts` already got
+  right is the one the phone displays, rather than the client re-expanding with
+  its own idea of the timezone. Correctness over bytes; a shorter window is the
+  fix if size ever matters.
+- **A DOM key must carry the occurrence date.** Every occurrence shares the
+  item's id, so keying a row on `id` alone collapses a whole series into one and
+  React reuses the wrong node when the week changes.
+- 17 unit tests over the expander, 7 through the read path with real RLS.
+
 ### 2026-08-09 — Slice 5: the subscribe feed (branch `claude/scheduling-slice-5`)
 
 A per-person iCalendar URL, for the phone that will never open Yosher.
@@ -376,6 +427,14 @@ Proposed layout. The three-file dependency graph is copied from
 `src/lib/mail-extensions/`, because that shape is already enforced by eslint and
 already proven by three implementors.
 
+Built for recurrence:
+
+- `src/lib/schedule/recurrence.ts` — parse, format, describe, expand. **Pure.**
+  Read its header before touching anything about dates.
+- `src/lib/schedule/range.ts` — expands BOTH sources. One expander.
+- `drizzle/0102_…sql` + `drizzle/0103_schedule_recurrence_rls.sql` (which also
+  replaces `app_schedule_range`).
+
 Built in slice 5:
 
 - `src/modules/scheduling/core/ics.ts` — RFC 5545 serialisation. **Pure.** Read
@@ -722,9 +781,9 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 | 3 | ✅ **Shipped.** Links + the shared entity-link contract extracted out of Mail. Nine entity types, no new implementations | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
 | 4 | ✅ **Shipped.** Attention source leading the digest. Seed row flips to `available` | The digest gets its strongest source; the module goes live |
 | 5 | ✅ **Shipped.** Per-person subscribe feed: hashed revocable token, ICS, revoke button | Same query as 4, no session. Reaches the person who will never open the app |
-| 6 | Extension seam: item kinds, item fields, managed calendars | First three pack primitives, all with existing precedent |
+| 6 | ⏸ **Deferred** (2026-08-09). Extension seam: item kinds, item fields, managed calendars | Would ship three primitives with zero implementors. Build it with the first real pack in hand |
 | 7 | The view seam, with a core view moved onto it | The new primitive, shipped with two users |
-| 8 | Recurrence: RRULE + overrides, expanded on read | Hardest slice; deliberately after the seam is stable. The feed emits the RRULE and the phone expands it |
+| 8 | ✅ **Shipped.** Recurrence: RRULE + overrides, expanded on read | Hardest slice. The feed emits OCCURRENCES rather than the rule — see the build log |
 | 9 | Free/busy + availability, reading `show_as` | Settled scope: no booking page, but a booking pack can call this. Mostly assembled from slice 0's projection rather than built fresh |
 
 A trade pack (`jobs`, then whatever the profile lists) is Layer 2a and starts

@@ -1,16 +1,12 @@
 import "server-only";
-import { and, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { dateInTimezone, timeOfDayInTimezone } from "@/lib/timezone";
 import type { ScheduleAccessLevel, ScheduleShowAs } from "./access";
+import { expandOccurrences, parseRule } from "./recurrence";
 
 /**
  * THE read path. Every surface goes through `listRange`.
- *
- * It looks like ceremony while it is two queries against four tables. It stops
- * looking like ceremony at slice 8, when a recurring item has to be expanded
- * across the requested window on the way out — expand-on-read cannot be
- * retrofitted across a dozen call sites that each grew their own query, and
- * this is the file where it will happen exactly once.
  *
  * ── WHY TWO QUERIES ─────────────────────────────────────────────────────────
  *
@@ -21,17 +17,36 @@ import type { ScheduleAccessLevel, ScheduleShowAs } from "./access";
  *   busy, titles    →  app_schedule_range(), which returns a PROJECTION with
  *                      the columns that level does not carry already NULL.
  *
- * So neither query redacts anything and no application code does either. The
- * merge below concatenates two disjoint sets — the SQL function stops at
- * `access < 'details'` precisely so nothing appears in both.
+ * Neither query redacts anything and no application code does either. The SQL
+ * function stops at `access < 'details'` so nothing appears in both.
  *
  * Items somebody sees by being an ATTENDEE come back on the first query, from
- * the policy's attendee term, even when the calendar itself is invisible to
- * them. Those rows have a null `access`, which is not a gap — see the field.
+ * the policy's attendee term, even when the calendar itself is invisible. Those
+ * rows have a null `access` — not a gap, see the field.
+ *
+ * ── AND WHY EXPANSION HAPPENS HERE, IN TYPESCRIPT ───────────────────────────
+ *
+ * A repeating event is ONE ROW. Expanding it means walking local dates and
+ * converting each with the zone's offset at that instant — the reason
+ * `zonedTimeToInstant` exists, and the reason a weekly 8am meeting stays 8am
+ * across a DST change. Reimplementing that in SQL would be a second copy of the
+ * hardest logic in the module, so `app_schedule_range` returns the series row
+ * with its rule attached and BOTH sources are expanded by the same code below.
+ * One expander, two sources.
  */
 
 export interface ScheduleRangeItem {
+  /** The ITEM's id. Every occurrence of a series shares it. */
   id: string;
+  /**
+   * The local date of this occurrence, for a repeating event; null for a
+   * one-off.
+   *
+   * Together with `id` it is the occurrence's identity — what an override is
+   * keyed on, and what an "edit just this one" has to name. A renderer keying
+   * a list on `id` alone will collapse a whole series into one row.
+   */
+  occurrenceDate: string | null;
   calendarId: string;
   startsAt: Date;
   endsAt: Date;
@@ -42,8 +57,7 @@ export interface ScheduleRangeItem {
    *
    * NULL means "you can see this because you are ON it, not because the
    * calendar is shared with you" — an invitation to a meeting on somebody's
-   * private calendar. Renderers should treat it as read-only and must not
-   * offer to open the surrounding calendar, because there isn't one to open.
+   * private calendar. Renderers should treat it as read-only.
    */
   access: ScheduleAccessLevel | null;
   /** NULL below `titles`. The null IS the answer: show "Busy". */
@@ -52,6 +66,24 @@ export interface ScheduleRangeItem {
   /** NULL below `details`. */
   description: string | null;
   kind: string | null;
+  /** True when this event repeats. Renderers show a marker. */
+  repeats: boolean;
+}
+
+interface SourceRow {
+  id: string;
+  calendarId: string;
+  startsAt: Date;
+  endsAt: Date;
+  allDay: boolean;
+  showAs: ScheduleShowAs;
+  access: ScheduleAccessLevel | null;
+  title: string | null;
+  location: string | null;
+  description: string | null;
+  kind: string | null;
+  timeZone: string;
+  recurrenceRule: string;
 }
 
 interface OverlayRow {
@@ -64,6 +96,8 @@ interface OverlayRow {
   access: ScheduleAccessLevel;
   title: string | null;
   location: string | null;
+  time_zone: string;
+  recurrence_rule: string;
 }
 
 /**
@@ -74,18 +108,23 @@ interface OverlayRow {
  * though it neither starts nor ends there.
  *
  * Takes the CALLER'S `tx` rather than opening its own, so what it can find is
- * exactly what the person asking may see — invariant S12 as a signature. Get the
- * tx from `withSchedule`, which is what sets the identity every policy reads.
+ * exactly what the person asking may see — invariant S12 as a signature.
  */
 export async function listRange(
   tx: Tx,
   from: Date,
   to: Date,
 ): Promise<ScheduleRangeItem[]> {
-  const overlaps = and(
+  const inWindow = and(
     isNull(schema.scheduleItems.cancelledAt),
     lt(schema.scheduleItems.startsAt, to),
-    gt(schema.scheduleItems.endsAt, from),
+    // A REPEATING series whose first occurrence is long before the window must
+    // still be selected, or the expander never sees it. The precise filtering
+    // is done per-occurrence below.
+    or(
+      ne(schema.scheduleItems.recurrenceRule, ""),
+      gt(schema.scheduleItems.endsAt, from),
+    ),
   );
 
   const full = await tx
@@ -100,6 +139,8 @@ export async function listRange(
       location: schema.scheduleItems.location,
       description: schema.scheduleItems.description,
       kind: schema.scheduleItems.kind,
+      timeZone: schema.scheduleItems.timeZone,
+      recurrenceRule: schema.scheduleItems.recurrenceRule,
       // Computed rather than stored: the level is a fact about the reader, not
       // about the row, and caching it on the row is how the two drift.
       access: sql<
@@ -107,41 +148,143 @@ export async function listRange(
       >`app_calendar_access(${schema.scheduleItems.calendarId})`,
     })
     .from(schema.scheduleItems)
-    .where(overlaps);
+    .where(inWindow);
 
   const overlay = (await tx.execute(
     sql`select * from app_schedule_range(${from}, ${to})`,
   )) as unknown as { rows: OverlayRow[] };
 
-  const projected: ScheduleRangeItem[] = overlay.rows.map((r) => ({
-    id: r.id,
-    calendarId: r.calendar_id,
-    startsAt: new Date(r.starts_at),
-    endsAt: new Date(r.ends_at),
-    allDay: r.all_day,
-    showAs: r.show_as,
-    access: r.access,
-    title: r.title,
-    location: r.location,
-    // Below `details` by construction — the function does not select them.
-    description: null,
-    kind: null,
-  }));
+  const sources: SourceRow[] = [
+    ...full,
+    ...overlay.rows.map((r) => ({
+      id: r.id,
+      calendarId: r.calendar_id,
+      startsAt: new Date(r.starts_at),
+      endsAt: new Date(r.ends_at),
+      allDay: r.all_day,
+      showAs: r.show_as,
+      access: r.access,
+      title: r.title,
+      location: r.location,
+      // Below `details` by construction — the function does not select them.
+      description: null,
+      kind: null,
+      timeZone: r.time_zone,
+      recurrenceRule: r.recurrence_rule,
+    })),
+  ];
 
-  return [...full, ...projected].sort(compareForDisplay);
+  const overrides = await loadOverrides(
+    tx,
+    sources.filter((s) => s.recurrenceRule !== "").map((s) => s.id),
+  );
+
+  const out: ScheduleRangeItem[] = [];
+  for (const source of sources) {
+    const rule = source.recurrenceRule ? parseRule(source.recurrenceRule) : null;
+
+    // A rule the parser REFUSES is treated as a one-off rather than guessed at.
+    // Refusing loudly is recurrence.ts's contract; honouring that here means an
+    // unsupported rule shows one event on the right day instead of a series on
+    // the wrong ones.
+    if (!rule) {
+      if (source.endsAt > from && source.startsAt < to) {
+        out.push(toItem(source, null, source.startsAt, source.endsAt));
+      }
+      continue;
+    }
+
+    const occurrences = expandOccurrences({
+      rule,
+      startDate: dateInTimezone(source.startsAt, source.timeZone),
+      timeOfDay: timeOfDayInTimezone(source.startsAt, source.timeZone),
+      durationMs: source.endsAt.getTime() - source.startsAt.getTime(),
+      timeZone: source.timeZone,
+      from,
+      to,
+    });
+
+    const forItem = overrides.get(source.id);
+    for (const occurrence of occurrences) {
+      const override = forItem?.get(occurrence.date);
+      if (override?.cancelled) continue;
+      const startsAt = override?.startsAt ?? occurrence.startsAt;
+      const endsAt = override?.endsAt ?? occurrence.endsAt;
+      // A MOVED occurrence can land outside the window it was generated for,
+      // so the overlap test is re-applied after the override.
+      if (endsAt <= from || startsAt >= to) continue;
+      out.push(toItem(source, occurrence.date, startsAt, endsAt));
+    }
+  }
+
+  return out.sort(compareForDisplay);
+}
+
+function toItem(
+  source: SourceRow,
+  occurrenceDate: string | null,
+  startsAt: Date,
+  endsAt: Date,
+): ScheduleRangeItem {
+  return {
+    id: source.id,
+    occurrenceDate,
+    calendarId: source.calendarId,
+    startsAt,
+    endsAt,
+    allDay: source.allDay,
+    showAs: source.showAs,
+    access: source.access,
+    title: source.title,
+    location: source.location,
+    description: source.description,
+    kind: source.kind,
+    repeats: source.recurrenceRule !== "",
+  };
+}
+
+interface OverrideRow {
+  cancelled: boolean;
+  startsAt: Date | null;
+  endsAt: Date | null;
+}
+
+/** itemId → occurrenceDate → override. One query for the whole page. */
+async function loadOverrides(
+  tx: Tx,
+  itemIds: string[],
+): Promise<Map<string, Map<string, OverrideRow>>> {
+  const map = new Map<string, Map<string, OverrideRow>>();
+  if (itemIds.length === 0) return map;
+
+  const rows = await tx
+    .select()
+    .from(schema.scheduleItemOverrides)
+    .where(inArray(schema.scheduleItemOverrides.itemId, itemIds));
+
+  for (const row of rows) {
+    const forItem = map.get(row.itemId) ?? new Map<string, OverrideRow>();
+    forItem.set(row.occurrenceDate, {
+      cancelled: row.cancelled,
+      startsAt: row.startsAt,
+      endsAt: row.endsAt,
+    });
+    map.set(row.itemId, forItem);
+  }
+  return map;
 }
 
 /**
- * Start, then id.
+ * Start, then id, then occurrence date.
  *
- * The id tiebreak is not decoration: two runs over unchanged data must produce
- * a byte-identical list, for the same reason the digest's ordering is fixed —
- * an order that changes for reasons the reader cannot predict destroys the
- * trust the surface runs on. Two items starting at the same instant is the
- * common case, not the edge case, at 9am on a Monday.
+ * The tiebreaks are not decoration: two runs over unchanged data must produce a
+ * byte-identical list, for the same reason the digest's ordering is fixed. Two
+ * events starting at the same instant is the common case at 9am on a Monday,
+ * and two occurrences of one series never share a start but may share an id.
  */
 function compareForDisplay(a: ScheduleRangeItem, b: ScheduleRangeItem): number {
   const byStart = a.startsAt.getTime() - b.startsAt.getTime();
   if (byStart !== 0) return byStart;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  if (a.id !== b.id) return a.id < b.id ? -1 : 1;
+  return (a.occurrenceDate ?? "") < (b.occurrenceDate ?? "") ? -1 : 1;
 }

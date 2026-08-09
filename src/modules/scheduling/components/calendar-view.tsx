@@ -65,7 +65,10 @@ export function CalendarView({
   members: Array<{ clerkUserId: string; label: string }>;
 }) {
   const [composing, setComposing] = useState<{ date: string } | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{
+    itemId: string;
+    occurrenceDate: string | null;
+  } | null>(null);
 
   const colorOf = new Map(calendars.map((c) => [c.id, c.color || "slate"]));
   const writable = calendars.filter((c) => c.access === "write");
@@ -161,8 +164,13 @@ export function CalendarView({
 
       {(composing || editing) && (
         <EventForm
-          key={editing ?? composing?.date}
-          itemId={editing ?? undefined}
+          key={
+            editing
+              ? `${editing.itemId}:${editing.occurrenceDate ?? ""}`
+              : composing?.date
+          }
+          itemId={editing?.itemId}
+          occurrenceDate={editing?.occurrenceDate ?? null}
           defaultDate={composing?.date ?? anchor}
           timeZone={timeZone}
           calendars={writable}
@@ -201,6 +209,17 @@ function rangeTitle(mode: ScheduleViewMode, range: ViewRange): string {
   return `${long(range.from)} – ${long(range.to)}`;
 }
 
+/**
+ * A row's identity in the DOM.
+ *
+ * MUST include the occurrence date. Every occurrence of a repeating series
+ * shares the item's id, so keying on `id` alone collapses a whole standup into
+ * one rendered row and React reuses the wrong node when the week changes.
+ */
+function keyOf(item: ScheduleRangeItem): string {
+  return `${item.id}:${item.occurrenceDate ?? ""}`;
+}
+
 /** What an item is called to THIS reader. Null title is not a bug. */
 function labelOf(item: ScheduleRangeItem): string {
   // `busy` access carries no title by construction — the projection nulled it.
@@ -223,7 +242,7 @@ function TimeGrid({
   items: ScheduleRangeItem[];
   timeZone: string;
   colorOf: Map<string, string>;
-  onOpen: (id: string) => void;
+  onOpen: (item: { itemId: string; occurrenceDate: string | null }) => void;
 }) {
   const { allDay, timed } = partitionAllDay(items);
 
@@ -270,8 +289,10 @@ function TimeGrid({
               <div key={date} className="min-h-[26px] space-y-0.5 border-l p-0.5">
                 {here.map((item) => (
                   <button
-                    key={item.id}
-                    onClick={() => onOpen(item.id)}
+                    key={keyOf(item)}
+                    onClick={() =>
+                      onOpen({ itemId: item.id, occurrenceDate: item.occurrenceDate })
+                    }
                     className={`block w-full truncate rounded border px-1 text-left text-[11px] ${
                       CHIP[colorOf.get(item.calendarId) ?? "slate"]
                     }`}
@@ -338,8 +359,10 @@ function TimeGrid({
                   );
                   return (
                     <button
-                      key={item.id}
-                      onClick={() => onOpen(item.id)}
+                      key={keyOf(item)}
+                      onClick={() =>
+                      onOpen({ itemId: item.id, occurrenceDate: item.occurrenceDate })
+                    }
                       title={labelOf(item)}
                       className={`absolute overflow-hidden rounded border px-1 text-left text-[11px] leading-tight ${
                         CHIP[colorOf.get(item.calendarId) ?? "slate"]
@@ -385,7 +408,7 @@ function MonthGrid({
   items: ScheduleRangeItem[];
   timeZone: string;
   colorOf: Map<string, string>;
-  onOpen: (id: string) => void;
+  onOpen: (item: { itemId: string; occurrenceDate: string | null }) => void;
   onAdd: (date: string) => void;
 }) {
   return (
@@ -421,8 +444,10 @@ function MonthGrid({
                 </button>
                 {shown.map((item) => (
                   <button
-                    key={item.id}
-                    onClick={() => onOpen(item.id)}
+                    key={keyOf(item)}
+                    onClick={() =>
+                      onOpen({ itemId: item.id, occurrenceDate: item.occurrenceDate })
+                    }
                     className={`block w-full truncate rounded border px-1 text-left text-[11px] ${
                       CHIP[colorOf.get(item.calendarId) ?? "slate"]
                     }`}

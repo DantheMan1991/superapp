@@ -111,10 +111,29 @@ export async function serveFeed(token: string): Promise<FeedResult | null> {
     { role: resolved.role, userId: resolved.clerkUserId },
   );
 
+  /*
+   * A REPEATING SERIES IS EMITTED AS ITS OCCURRENCES, not as one VEVENT with an
+   * RRULE, and that is a deliberate trade.
+   *
+   * RRULE would be smaller — one VEVENT instead of up to 395 for a daily
+   * standup. But it would also need EXDATE for every cancelled occurrence and a
+   * RECURRENCE-ID override VEVENT for every moved one, and the client would then
+   * expand the rule with ITS OWN understanding of the timezone. Sending the
+   * occurrences means the expansion that `range.ts` already got right — wall
+   * clock preserved across DST, gap occurrences falling forward — is the one
+   * the phone displays, and a cancelled occurrence is handled by simply not
+   * being there.
+   *
+   * Correctness over bytes. If the size ever matters, the fix is a shorter
+   * window rather than pushing expansion into the client.
+   */
   const icsEvents: IcsEvent[] = events.items.map((item) => ({
-    // The item's own id, so a client never sees an event change identity and
-    // delete-then-re-add it on every refresh.
-    uid: `${item.id}@yosherapp.com`,
+    // Stable across regenerations, and unique PER OCCURRENCE — a client treats
+    // a changed uid as a different event, so a series whose occurrences shared
+    // one uid would collapse into a single entry.
+    uid: item.occurrenceDate
+      ? `${item.id}:${item.occurrenceDate}@yosherapp.com`
+      : `${item.id}@yosherapp.com`,
     startsAt: item.startsAt,
     endsAt: item.endsAt,
     allDay: item.allDay,

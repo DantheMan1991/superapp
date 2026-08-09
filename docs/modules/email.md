@@ -18,6 +18,34 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 > it grows past a few screens, sweep the oldest into the archive. The dossier is
 > read at the start of every mail session, so its length is a real cost.
 
+### 2026-08-08 — A probe for granting access to a shared mailbox (branch `claude/mail-grant-probe`)
+
+`npm run mail:probe-grant` (`scripts/jmap-grant-probe.ts`), following the house
+pattern: ask the live server before writing any UI.
+
+**It has not been run yet, so this entry records the questions, not answers.**
+Whoever runs it should add the findings here — that is how every other probe in
+[email-build-log.md](./email-build-log) is documented, and a probe whose results
+live only in a terminal scrollback may as well not have been written.
+
+The premise, which is what makes it worth running: the delegation slice proved a
+Group principal with members produces a second account in the member's session,
+but it created both principals itself. Granting access to an EXISTING mailbox is
+harder, because `stalwart.ts` provisions every mailbox as
+`accountType: "individual"` — so `info@` on a real server is a User, not a
+Group. Five questions:
+
+1. Can a principal be found by ADDRESS? Yosher stores addresses and has no
+   column holding a Stalwart id
+2. Can a User principal hold members — is any existing mailbox shareable at all?
+3. Can a User be converted to a Group in place, keeping its address and mail?
+4. Does adding a member take effect immediately in that member's session?
+5. **The negative: does REMOVING the membership actually revoke it?** A grant
+   that cannot be taken away is not a grant
+
+It writes, so it is loopback-only and destroys everything it made on every exit
+path, including a sweep of anything an earlier run left behind.
+
 ### 2026-08-08 — The dossier got too big to read (branch `claude/split-oversized-files`)
 
 Nothing about the module changed. This records why the file you are reading is

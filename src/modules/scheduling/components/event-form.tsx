@@ -30,6 +30,7 @@ import {
   attachLinkAction,
   cancelEventAction,
   cancelOccurrenceAction,
+  checkAvailabilityAction,
   createEventAction,
   detachLinkAction,
   getEventAction,
@@ -127,6 +128,10 @@ export function EventForm({
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [guestEmail, setGuestEmail] = useState("");
   const [repeat, setRepeat] = useState("");
+  const [clash, setClash] = useState<{ busy: string[]; unknown: string[] }>({
+    busy: [],
+    unknown: [],
+  });
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [linkQuery, setLinkQuery] = useState("");
   const [linkGroups, setLinkGroups] = useState<LinkGroup[]>([]);
@@ -159,6 +164,44 @@ export function EventForm({
       clearTimeout(timer);
     };
   }, [linkQuery]);
+
+  /**
+   * Conflict check, debounced, whenever the time or the guest list moves.
+   *
+   * Runs BEFORE saving so a clash is visible while somebody is still choosing,
+   * rather than discovered by whoever turns up to an empty room.
+   */
+  const internalGuests = attendees
+    .map((a) => a.clerkUserId)
+    .filter((id): id is string => !!id);
+  const guestKey = internalGuests.join(",");
+
+  useEffect(() => {
+    let stale = false;
+    const timer = setTimeout(() => {
+      if (internalGuests.length === 0) {
+        setClash({ busy: [], unknown: [] });
+        return;
+      }
+      checkAvailabilityAction({
+        clerkUserIds: internalGuests,
+        startDate,
+        startTime,
+        endDate,
+        endTime,
+        allDay,
+      }).then((result) => {
+        if (stale || "error" in result) return;
+        setClash(result.data!);
+      });
+    }, 300);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+    // `guestKey` rather than the array, which is a new reference every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guestKey, startDate, startTime, endDate, endTime, allDay]);
 
   async function refreshLinks() {
     if (!itemId) return;
@@ -549,6 +592,26 @@ export function EventForm({
                   ))}
                 </ul>
               )}
+              {(clash.busy.length > 0 || clash.unknown.length > 0) && (
+                <div className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+                  {clash.busy.length > 0 && (
+                    <p>
+                      <span className="font-medium">Already busy:</span>{" "}
+                      {clash.busy.map((id) => nameOf.get(id) ?? id).join(", ")}
+                    </p>
+                  )}
+                  {/* Said separately from "busy" on purpose. An empty diary we
+                      cannot see is not an empty diary. */}
+                  {clash.unknown.length > 0 && (
+                    <p className="text-muted-foreground">
+                      Cannot see the calendar for{" "}
+                      {clash.unknown.map((id) => nameOf.get(id) ?? id).join(", ")} —
+                      they may or may not be free.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {canEdit && (
                 <div className="space-y-2">
                   {candidates.length > 0 && (

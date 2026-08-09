@@ -17,6 +17,46 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Free/busy and availability (branch `claude/scheduling-availability`)
+
+The last slice of the roadmap. **No migration** — it is pure interval maths over
+the read path that already exists, which is what the four access levels were
+built for.
+
+- **THE NAMED SEAM the design promised.** `src/lib/schedule/availability.ts`
+  splits into three pieces on purpose — `mergeIntervals`, `invertIntervals`,
+  `findFreeSlots` — because a booking pack needs "given these people, this
+  window and this duration, what is open?" and that has to be reachable without
+  a rewrite. Nothing customer-facing ships; the shape does.
+- **BUSY MEANS `show_as`, NEVER MERE EXISTENCE.** An all-day note, a blocked-out
+  reminder, a deadline pinned to a Tuesday — all events, none of them meaning
+  the person is unavailable. This is the payoff for putting `show_as` on the
+  item back in slice 0, and there is a test that a `free` item does not make
+  somebody busy.
+- **A `busy`-level share is ENOUGH, and reveals nothing.** Availability reads
+  through `listRange`, so it inherits the levels exactly: a colleague sharing at
+  the lowest level contributes their times and no titles, because the projection
+  already nulled them. There is a test asserting the returned objects have only
+  `startsAt` and `endsAt` — there is nowhere for a title to leak.
+- **AN UNSHARED CALENDAR IS `unknown`, NOT FREE**, and that distinction is the
+  most important thing in the file. `BusyForPerson.visible` is separate from an
+  empty `busy` array so every caller has to decide what to say. Telling somebody
+  a slot is open when the truth is "we cannot see" would be the worst lie this
+  feature could tell, and there is a test where the invisible person genuinely
+  has a meeting at that exact time.
+- **Adjacent blocks MERGE.** 9–10 and 10–11 back to back is one busy block from
+  9 to 11; leaving them separate lets a slot finder offer the instant at 10:00.
+- **Working hours apply PER LOCAL DAY**, not as one UTC band, so "9 to 5" stays
+  9 to 5 across a DST change — the same rule recurrence follows, with a test
+  spanning 2026-11-01.
+- **Slots align to the half hour**, not to the end of the previous meeting. An
+  opening at 10:47 is technically true and nobody books it.
+- **The event form warns before saving.** Conflicts and unknowns are shown
+  separately as the times and guest list change, so a clash is visible while
+  somebody is still choosing rather than discovered by whoever turns up to an
+  empty room.
+- 21 unit tests over the maths, 6 through real RLS.
+
 ### 2026-08-09 — Recurrence (branch `claude/scheduling-recurrence`)
 
 Repeating events, expanded on read. Slice 6 (the pack seam) is **deferred** by
@@ -427,6 +467,11 @@ Proposed layout. The three-file dependency graph is copied from
 `src/lib/mail-extensions/`, because that shape is already enforced by eslint and
 already proven by three implementors.
 
+Built for availability:
+
+- `src/lib/schedule/availability.ts` — **the booking seam.** Merge, invert, find
+  slots, and `busyForPeople`. Read its header before assuming what "busy" means.
+
 Built for recurrence:
 
 - `src/lib/schedule/recurrence.ts` — parse, format, describe, expand. **Pure.**
@@ -784,7 +829,7 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 | 6 | ⏸ **Deferred** (2026-08-09). Extension seam: item kinds, item fields, managed calendars | Would ship three primitives with zero implementors. Build it with the first real pack in hand |
 | 7 | The view seam, with a core view moved onto it | The new primitive, shipped with two users |
 | 8 | ✅ **Shipped.** Recurrence: RRULE + overrides, expanded on read | Hardest slice. The feed emits OCCURRENCES rather than the rule — see the build log |
-| 9 | Free/busy + availability, reading `show_as` | Settled scope: no booking page, but a booking pack can call this. Mostly assembled from slice 0's projection rather than built fresh |
+| 9 | ✅ **Shipped.** Free/busy + availability, reading `show_as` | Settled scope: no booking page, but a booking pack can call this. No migration — assembled from slice 0's projection, as designed |
 
 A trade pack (`jobs`, then whatever the profile lists) is Layer 2a and starts
 after 7. Its Gantt-style view, dependency edges and progress fields all land in
@@ -815,6 +860,12 @@ them. If something does, the boundary was drawn wrong.
   "every event on this invoice" and no reader for it: the accounting invoice
   page does not yet show its events. That is the reverse view, and it needs P5
   nav contribution to be done properly.
+- **Working hours are a constant, not a setting.** `DEFAULT_WORKING_HOURS` is
+  9–5 Monday to Friday for everybody. A tenant setting is the obvious fix and
+  needs the same settings surface the week-start question is waiting on.
+- **Nothing renders a "find a time" grid.** The seam computes slots and only the
+  event form consumes it, as a conflict warning. A booking pack, or an
+  internal scheduling assistant, is what would use `findFreeSlots` properly.
 - **THE WEEK STARTS ON SUNDAY, HARDCODED.** A tenant setting is the obvious fix
   and there is no settings surface for this module to hang it on yet. Confirmed
   as acceptable for now rather than assumed.

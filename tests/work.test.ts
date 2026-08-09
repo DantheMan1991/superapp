@@ -329,6 +329,39 @@ d("work: invariants, provisioning and the read path", () => {
       expect(nobodys.map((r) => r.id)).not.toContain(dueSoon);
     });
 
+    it("filters by state, which is what the board's columns are", async () => {
+      const done = await asOwner((tx) =>
+        listWorkItems(tx, tenantId, { listId, states: ["done"] }),
+      );
+      expect(done.map((r) => r.id)).toEqual([closed]);
+
+      const open = await asOwner((tx) =>
+        listWorkItems(tx, tenantId, { listId, states: ["todo"] }),
+      );
+      expect(open.map((r) => r.id)).toContain(dueSoon);
+      expect(open.map((r) => r.id)).not.toContain(closed);
+
+      // Two states at once — one query, not two.
+      const both = await asOwner((tx) =>
+        listWorkItems(tx, tenantId, { listId, states: ["todo", "done"] }),
+      );
+      expect(both.length).toBeGreaterThan(open.length);
+    });
+
+    it("searches title and description, and treats % as a character", async () => {
+      const byTitle = await asOwner((tx) =>
+        listWorkItems(tx, tenantId, { listId, q: "Due so" }),
+      );
+      expect(byTitle.map((r) => r.id)).toEqual([dueSoon]);
+
+      // A wildcard typed by a person is a wildcard they meant literally; an
+      // unescaped one silently matches everything.
+      const wildcard = await asOwner((tx) =>
+        listWorkItems(tx, tenantId, { listId, q: "%" }),
+      );
+      expect(wildcard).toHaveLength(0);
+    });
+
     it("filters on a due date as a STRING, not a Date", async () => {
       const rows = await asOwner((tx) =>
         listWorkItems(tx, tenantId, { listId, dueOnOrBefore: "2026-09-01" }),

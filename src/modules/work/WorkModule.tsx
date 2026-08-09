@@ -5,20 +5,24 @@ import { withWork } from "@/lib/work/with-work";
 import type { WorkState } from "@/lib/work/vocabulary";
 import { listWorkItems, listWorkLists } from "./read";
 import { groupByUrgency, isDeferred } from "./core/grouping";
-import { MyWork, type WorkRowView, type WorkViewMode } from "./components/my-work";
+import type { WorkRowView } from "./core/row";
+import { parseWorkView, resolveAssignee } from "./core/view-params";
+import { AddWork } from "./components/add-work";
+import { FilterBar } from "./components/filter-bar";
+import { WorkBoard } from "./components/work-board";
+import { WorkList } from "./components/work-list";
 
 /**
- * The module's home: what is on YOU.
+ * The module's home: one query, drawn two ways.
  *
- * The per-person surface leads rather than a board, because it is the one that
- * gets opened daily and the one that proves the shape. Google Tasks' single
- * good idea, with the thing that makes it useless to a business fixed: the rows
- * are the workspace's work, assigned to a person, not a private per-account
- * list.
+ * THE VIEW IS THE URL. `parseWorkView` turns the query string into a filter set
+ * and a choice of drawing; `listWorkItems` answers it; the list and the board
+ * render the same rows. There is deliberately no second query builder and no
+ * per-view fetch — if a future view needs one, `core/view-params.ts` was the
+ * wrong shape and that is the thing to fix.
  *
- * URL-DRIVEN, the house pattern — `?view=mine|unassigned|list&list=<id>`. A
- * particular view is linkable, survives a refresh, and the server fetches
- * exactly what is being looked at.
+ * With no parameters at all this is "what is on me, still open, as a list",
+ * because the most common view should not need a query string to reach.
  *
  * ANCHORED ON THE TENANT'S TODAY, never the server's and never the browser's,
  * so two people in one workspace agree about what is overdue.
@@ -36,54 +40,31 @@ export async function WorkModule({
     role: ctx.role,
   };
   const today = todayInTimezone(ctx.tenant.timezone);
+  const view = parseWorkView(searchParams);
 
-  const single = (key: string): string | undefined => {
-    const value = searchParams[key];
-    return Array.isArray(value) ? value[0] : value;
-  };
+  const { lists, items, members } = await withWork(workCtx, async (tx) => ({
+    lists: await listWorkLists(tx, ctx.tenant.id),
+    items: await listWorkItems(tx, ctx.tenant.id, {
+      listId: view.listId ?? undefined,
+      assignee: resolveAssignee(view.assignee, ctx.userId),
+      openOnly: view.openOnly,
+      states: view.states,
+      q: view.q || undefined,
+    }),
+    members: await listAssignableMembers(tx, ctx.tenant.id),
+  }));
 
-  const requested = single("view");
-  // `unassigned` is an OWNER's question. Offering it to staff would show them a
-  // pile they were never asked to pick up, which is the digest's reasoning
-  // applied to a page.
-  const mode: WorkViewMode =
-    requested === "list"
-      ? "list"
-      : requested === "unassigned" && ctx.role === "owner"
-        ? "unassigned"
-        : "mine";
-  const listId = single("list");
-  const showDone = single("done") === "1";
-
-  const { lists, items, members } = await withWork(workCtx, async (tx) => {
-    const lists = await listWorkLists(tx, ctx.tenant.id);
-    const filter =
-      mode === "mine"
-        ? { assignee: ctx.userId }
-        : mode === "unassigned"
-          ? { assignee: null }
-          : { listId: listId && listId.length > 0 ? listId : undefined };
-    return {
-      lists,
-      items: await listWorkItems(tx, ctx.tenant.id, {
-        ...filter,
-        openOnly: !showDone,
-      }),
-      members: await listAssignableMembers(tx, ctx.tenant.id),
-    };
-  });
-
-  const listById = new Map(lists.map((l) => [l.id, l]));
+  const listById = new Map(lists.map((list) => [list.id, list]));
   const labelByUser = new Map(
-    members.map((m) => [m.clerkUserId, memberLabel(m)]),
+    members.map((member) => [member.clerkUserId, memberLabel(member)]),
   );
 
   const rows: WorkRowView[] = items
-    // Deferred work is held back on the two per-person views only. A list is a
-    // place you go to look at everything on it, so hiding rows there would be
-    // the page disagreeing with its own heading.
+    // Deferred work is held back only on a per-person view. A list or a board
+    // is a place you go to see everything, so hiding rows there would be the
+    // page disagreeing with its own heading.
     .filter((item) =>
-      mode === "list" ? true : !isDeferred(item.startsOn, today),
+      view.assignee === "me" ? !isDeferred(item.startsOn, today) : true,
     )
     .map((item) => ({
       id: item.id,
@@ -97,30 +78,64 @@ export async function WorkModule({
       listColor: listById.get(item.listId)?.color ?? "",
       assignee: item.assigneeClerkUserId,
       assigneeLabel: item.assigneeClerkUserId
-        ? (labelByUser.get(item.assigneeClerkUserId) ?? "Someone who has left")
+        ? (labelByUser.get(item.assigneeClerkUserId) ??
+          "Someone who has left")
         : null,
       hasParent: item.parentId !== null,
     }));
 
-  const groups = groupByUrgency(rows, today);
-  const defaultListId =
-    lists.find((l) => l.isDefault)?.id ?? lists[0]?.id ?? null;
+  const listOptions = lists.map((list) => ({
+    id: list.id,
+    name: list.name,
+    color: list.color,
+  }));
+  const memberOptions = members.map((member) => ({
+    clerkUserId: member.clerkUserId,
+    label: memberLabel(member),
+  }));
+  const showListName = view.listId === null;
 
   return (
-    <MyWork
-      mode={mode}
-      today={today}
-      groups={groups}
-      lists={lists.map((l) => ({ id: l.id, name: l.name, color: l.color }))}
-      members={members.map((m) => ({
-        clerkUserId: m.clerkUserId,
-        label: memberLabel(m),
-      }))}
-      selectedListId={listId ?? null}
-      defaultListId={defaultListId}
-      showDone={showDone}
-      isOwner={ctx.role === "owner"}
-      currentUserId={ctx.userId}
-    />
+    <div className="space-y-4">
+      <FilterBar
+        view={view}
+        lists={listOptions}
+        members={memberOptions}
+        currentUserId={ctx.userId}
+      />
+      <AddWork
+        lists={listOptions}
+        defaultListId={
+          view.listId ??
+          lists.find((list) => list.isDefault)?.id ??
+          lists[0]?.id ??
+          null
+        }
+        assignToSelf={view.assignee === "me"}
+        currentUserId={ctx.userId}
+      />
+      {view.display === "board" ? (
+        <WorkBoard
+          rows={rows}
+          today={today}
+          members={memberOptions}
+          showListName={showListName}
+        />
+      ) : (
+        <WorkList
+          groups={groupByUrgency(rows, today)}
+          today={today}
+          members={memberOptions}
+          showListName={showListName}
+          emptyMessage={
+            view.assignee === "me"
+              ? "Nothing is on you right now."
+              : view.assignee === "nobody"
+                ? "Everything has somebody on it."
+                : "No work matches this view."
+          }
+        />
+      )}
+    </div>
   );
 }

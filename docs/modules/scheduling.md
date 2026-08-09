@@ -4,9 +4,10 @@
 > on Outlook and Google rather than on a work-order queue — a **calendar** is the
 > unit of sharing, private by default, grantable to named people or to the whole
 > business. Core owns time, sharing and attendance; capability packs own
-> everything a particular trade calls that work. Slice 0 is in — schema, RLS and
-> the read path — but there is no UI and no registry entry, so the module is
-> still an empty slot to a tenant until slice 4 turns it on.
+> everything a particular trade calls that work. Slices 0–2 are in: schema, RLS,
+> calendars and sharing, and a working week/day/month calendar with events and
+> attendees. The seed row stays `coming_soon` until slice 4, so a superadmin can
+> switch it on for one tenant and nobody is sold it yet.
 > Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
@@ -14,6 +15,55 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-08-09 — Slice 2: events, attendees, and the calendar itself (branch `claude/scheduling-slice-2`)
+
+Week, day and month over `listRange`. Create an event, put people on it, accept
+or decline. **The module home is now the calendar**; managing calendars moved to
+`/dashboard/m/scheduling/calendars`.
+
+- **The shared calendar arithmetic finally landed in `src/lib/timezone.ts`**,
+  where that file's own note said it belonged "the moment a second module wants
+  the same one". `zonedTimeToInstant`, `startOfDayInTimezone`, `addDays`,
+  `startOfWeek`, `minutesIntoDay`. No date library, and this is not the place to
+  add one — a dependency that owns the meaning of "midnight" is one you cannot
+  reason about at 2am on the second Sunday in March.
+- **THE DST GAP MOVED EVENTS BACKWARDS, and it took a check to notice.** The
+  standard two-pass wall-clock→instant conversion, asked for 02:30 on the
+  spring-forward morning, returns an instant that renders as **01:30** — earlier
+  than requested, silently. Verified rather than reasoned about: two passes give
+  06:30Z and 06:30Z is 01:30 EST. There is now a third step that renders the
+  result back, and falls FORWARD to 03:30 when the requested time does not
+  exist, like Google and Outlook. The autumn ambiguity needs no special case;
+  the passes settle on the first occurrence.
+- **A cluster's width is maximum CONCURRENCY, not how many events are in it.**
+  A 9–10, B 9:30–10:30, C 10–11 is three chained events but two columns, because
+  C reuses A's. The first version of the layout TEST asserted three and the code
+  was right — worth recording that the mistake was in the expectation, since the
+  same wrong mental model is what produces cascading-column calendars.
+- **A month grid is 4, 5 or 6 rows and never assumed to be 5.** It shows whole
+  weeks, so February starting on a Sunday needs four and a 31-day month starting
+  on a Saturday needs six. `shiftAnchor` steps months by name rather than by 30
+  days, or stepping from the 31st skips one.
+- **Attendees are DIFFED, not deleted and reinserted.** Reinserting resets
+  `response`, so saving an unrelated title change would quietly un-accept
+  everybody who had already replied. There is a test that accepts, edits, and
+  asserts the acceptance survived.
+- **All-day events are stored end-EXCLUSIVE** — local midnight to local midnight
+  — so a one-day event occupies exactly one column and a three-day event three.
+  Storing 23:59 leaves a one-minute hole every overlap query would have to know
+  about. The form shows the day before as the last day, or a one-day event reads
+  as two.
+- **A redacted item renders as "Busy", not as a placeholder.** At `busy` access
+  the title is NULL by construction, and inventing "(private)" would claim the
+  event is marked private when it is simply not shared at that level.
+- **An item somebody sees only by being an attendee comes back with
+  `access: null`**, which is how the renderer knows it is an invitation rather
+  than something on a calendar they can open.
+- **Nothing is emailed.** The form says so, because "add a colleague" reads as
+  "send an invitation" and it does not — it puts the event on their Yosher
+  calendar and nothing else.
+- 37 pure tests (timezone, layout, ranges) and 10 ops tests through real RLS.
 
 ### 2026-08-09 — Slice 1 broke the superadmin tenant page in production
 
@@ -194,6 +244,20 @@ should carry these invariants as comments, in the style of `0077`.
 Proposed layout. The three-file dependency graph is copied from
 `src/lib/mail-extensions/`, because that shape is already enforced by eslint and
 already proven by three implementors.
+
+Built in slice 2:
+
+- `src/lib/timezone.ts` — the shared calendar arithmetic. **Read its DST notes
+  before touching anything that turns a wall clock into an instant.**
+- `src/modules/scheduling/item-ops.ts` — events and attendees.
+- `src/modules/scheduling/core/layout.ts` — overlap column packing. Pure.
+- `src/modules/scheduling/core/range.ts` — which days each view covers. Pure.
+- `src/modules/scheduling/components/calendar-view.tsx` — the grid. Navigation
+  is `<Link>`s, so a week is linkable and refresh-proof.
+- `src/modules/scheduling/components/event-form.tsx` — create/edit/RSVP.
+- `src/app/dashboard/m/scheduling/calendars/page.tsx` — slice 1's list, moved.
+- `tests/timezone-calendar.test.ts`, `tests/scheduling-layout.test.ts`,
+  `tests/scheduling-view-range.test.ts`, `tests/scheduling-item-ops.test.ts`.
 
 Built in slice 1:
 
@@ -496,7 +560,7 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 | --- | --- | --- |
 | 0 | ✅ **Shipped.** Schema + RLS + 13 isolation tests. `withSchedule()`. Access-level projection in the read path. Primary calendar auto-provisioned on membership | The visibility rules are the expensive part; prove them against two tenants before any UI exists. The projection lands here because widening a boolean later means rewriting every caller |
 | 1 | ✅ **Shipped.** Calendars: create, rename, colour, archive. Share with a person or the whole workspace, at any level. Module registered (seed row still `coming_soon`) | Sharing is the module's defining behaviour and everything else assumes it works |
-| 2 | Items + attendees. Month/week/day. `listRange` | Attendees are NOT deferred — see Decisions |
+| 2 | ✅ **Shipped.** Events + attendees + RSVP. Week/day/month over `listRange`. Calendar becomes the module home | Attendees are NOT deferred — see Decisions |
 | 3 | Links, and entity types from Accounting, CRM, Documents and Mail | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
 | 4 | Attention source + "my day". Registry entry, seed row flips to `available` | The digest gets its strongest source; the module goes live |
 | 5 | Per-person subscribe feed: hashed revocable token, ICS, revoke button | Same query as 4, no session. Reaches the person who will never open the app |
@@ -512,7 +576,18 @@ them. If something does, the boundary was drawn wrong.
 
 ## Open items
 
-- **NOBODY HAS CLICKED THE SLICE 1 UI.** It compiles, its actions are covered by
+- **THE WEEK STARTS ON SUNDAY, HARDCODED.** A tenant setting is the obvious fix
+  and there is no settings surface for this module to hang it on yet. Confirmed
+  as acceptable for now rather than assumed.
+- **A multi-day TIMED event is drawn on each day it touches**, clamped to that
+  column. It is not drawn as one continuous bar across the header the way an
+  all-day event is, which is what Google does for a two-day 4pm–11am booking.
+  Nothing depends on it; it will look wrong the first time somebody logs an
+  overnight job.
+- **The month cell caps at three events and then says "+N more"**, and the
+  "more" is not clickable. Clicking the day number opens a new event rather than
+  expanding the day, which is the wrong instinct once a day is busy.
+- **NOBODY HAS CLICKED THE SLICE 1 OR SLICE 2 UI.** It compiles, its actions are covered by
   9 tests through real RLS, and the RLS itself is covered by 14 more — but the
   dashboard is behind Clerk auth, so no agent can reach it and none of this
   says the sharing dialog reads correctly to a human. The questions still open:

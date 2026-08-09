@@ -35,8 +35,8 @@ import {
 } from "@/components/ui/select";
 import { SCHEDULE_ACCESS_LEVELS, type ScheduleAccessLevel } from "@/lib/schedule/access";
 import type { CalendarSummary, ShareRow } from "../calendar-ops";
+import { CALENDAR_COLORS } from "../core/colors";
 import {
-  CALENDAR_COLORS,
   createCalendarAction,
   grantShareAction,
   revokeShareAction,

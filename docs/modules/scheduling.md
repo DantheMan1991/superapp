@@ -15,6 +15,35 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Slice 1 broke the superadmin tenant page in production
+
+Enabling **any** module 500'd. `src/modules/scheduling/actions.ts` carries
+`"use server"` and exported `CALENDAR_COLORS`, a const array. A `"use server"`
+file may export only async functions; anything else throws *"A 'use server' file
+can only export async functions, found object"* when the module graph is
+evaluated. The admin tenant page reaches that file through `moduleRegistry` →
+`SchedulingModule` → `calendar-manager` → `actions`, so the whole page's server
+actions died — nothing to do with scheduling being enabled.
+
+Moved to `src/modules/scheduling/core/colors.ts`, which carries the reasoning.
+
+**THE PART WORTH REMEMBERING: nothing in the pipeline caught it.** `tsc`,
+eslint, the full suite and **`npm run build` all passed.** AGENTS.md says the
+build is what catches server-boundary violations — that is true of `server-only`
+imports and false of this. The error surfaces only when a REQUEST evaluates the
+server-action graph, which no CI step does.
+
+`tests/use-server-exports.test.ts` now scans every `"use server"` file for
+runtime value exports. It was confirmed to FAIL on the original bug before being
+kept — a checker never seen to fail is not a checker. Exported `type` and
+`interface` are still allowed and several action files rely on that; they are
+erased before runtime, so Next never sees them.
+
+Found by the founder clicking the toggle on the live site, minutes after #99
+made it clickable. Diagnosed from `vercel logs`, not from the browser: the
+console showed only a digest and "an error occurred in the Server Components
+render", which names nothing.
+
 ### 2026-08-08 — Slice 1: calendars and sharing (branch `claude/scheduling-slice-1`)
 
 The four access levels stop being a schema decision and become something a

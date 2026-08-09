@@ -482,3 +482,58 @@ export const scheduleItemLinks = pgTable(
     ),
   ],
 );
+
+/**
+ * A per-person subscribe URL for an external calendar app.
+ *
+ * ============================================================================
+ * THE URL *IS* THE CREDENTIAL. There is no session behind this.
+ * ============================================================================
+ *
+ * A phone's calendar cannot log in, so the token in the path is the only thing
+ * standing between a stranger and somebody's schedule — and it will end up in a
+ * clipboard, a screenshot and an IT ticket. Three consequences, all of them
+ * load-bearing:
+ *
+ *  1. **Only the HASH is stored.** `token_hash` is SHA-256 of the token and the
+ *     lookup is by hash, so a dump of this table does not hand anybody a
+ *     working feed. The token itself is shown ONCE, at mint, and never again.
+ *  2. **Revocation is a row, not a rotation.** `revoked_at` set means the feed
+ *     404s from the next fetch. Nothing is ever reused.
+ *  3. **`last_used_at`** is what makes "is anything still subscribed to this?"
+ *     answerable before somebody revokes it.
+ *
+ * A REVOKED TOKEN KEEPS WORKING FOR AS LONG AS THE PHONE HAS IT CACHED, and
+ * nothing on this side changes that. The revoke UI has to say so rather than
+ * implying the link died the instant it was pressed.
+ */
+export const scheduleFeedTokens = pgTable(
+  "schedule_feed_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Whose calendar this feed shows. Clerk's id, as everywhere else here. */
+    clerkUserId: text("clerk_user_id").notNull(),
+    /**
+     * SHA-256 of the token, hex. UNIQUE GLOBALLY rather than per tenant: the
+     * route has no tenant context until this row resolves, so the hash is the
+     * entire lookup key and a collision across tenants would be a cross-tenant
+     * read. 32 random bytes makes that impossible in practice; the unique index
+     * makes it impossible in fact.
+     */
+    tokenHash: text("token_hash").notNull(),
+    /** "iPhone", "Work laptop" — so somebody can tell which one to revoke. */
+    label: text("label").notNull().default(""),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("schedule_feed_tokens_hash_idx").on(t.tokenHash),
+    index("schedule_feed_tokens_owner_idx").on(t.tenantId, t.clerkUserId),
+  ],
+);

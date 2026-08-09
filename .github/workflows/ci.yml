@@ -3,10 +3,44 @@ name: CI
 # Until this existed, every check ran on somebody's laptop and blocked them for
 # twenty minutes. Two jobs, deliberately separate:
 #
-#   checks  — lint, types, build. No database, so it is safe to run many at once
-#             and safe to cancel when a newer push supersedes it.
-#   tests   — the vitest suite. Shares ONE Neon branch with every other run, so
+#   checks  — lint, types, build, and the PURE tests. No database, so it is safe
+#             to run many at once and safe to cancel when a newer push
+#             supersedes it. ~3 minutes. THIS is what gates a merge.
+#   tests   — the database suite. Shares ONE Neon branch with every other run, so
 #             it is serialised repo-wide and must never be cancelled midway.
+#             ~12 minutes, and it now runs AFTER a merge rather than before.
+#
+# WHY THE DATABASE SUITE NO LONGER BLOCKS A PULL REQUEST (2026-08-09).
+#
+# It was costing about fifteen minutes of waiting per merge, and the founder was
+# paying that on every slice of a ten-slice module. Three things made it the
+# wrong trade:
+#
+#   1. It is almost entirely the `db` vitest project, which is deliberately
+#      sequential (one Neon branch, and several files assert what is NOT visible
+#      across a tenant boundary). The 46 pure files finish in seconds.
+#   2. It DUPLICATES the local gate. AGENTS.md already requires
+#      `npm run test:isolation` locally whenever RLS or a tenant table is
+#      touched — six and a half minutes — and CI then re-ran the same files.
+#   3. Blocking bought less than it looked. Every failure that actually reached
+#      production did so through a fully green pipeline: the `use server` export
+#      that broke module toggling passed lint, tsc, the whole suite AND the
+#      build, because it only fails when a request evaluates the action graph.
+#
+# So the fast gate blocks the merge and the database suite runs on the push to
+# `main` afterwards. A failure is found within ~12 minutes of merging rather than
+# before it, which is a real reduction in safety and is the accepted trade:
+# `main` auto-deploys, so a bad merge is live for that window. Revert-and-fix,
+# not catch-before-merge.
+#
+# THE ESCAPE HATCH: label a pull request `full-tests` and the database suite runs
+# on it, blocking as it used to. Use it for anything touching RLS, a migration,
+# or a tenant table — the cases where finding out after the deploy is worst.
+#
+# `if:` rather than a second `paths-ignore`, deliberately. A job skipped by `if:`
+# still REPORTS a status, so this stays compatible with branch protection; a
+# trigger-level filter reports nothing at all and would wedge a required check
+# forever. That is the fix the note below already prescribes.
 
 # DOCUMENTATION-ONLY CHANGES SKIP THE WHOLE WORKFLOW.
 #
@@ -84,11 +118,36 @@ jobs:
       #
       # This is also the ONLY check that catches a client component importing a
       # `server-only` module — tsc and vitest both pass straight through it.
+      #
+      # It is NOT a complete server-boundary check, and that was learned the
+      # hard way: a `"use server"` file exporting a const throws only when a
+      # request evaluates the action graph, so this step passes it. The pure
+      # tests below carry `use-server-exports.test.ts`, which is what catches
+      # that one.
       - run: npm run build
+
+      # THE PURE PROJECT ONLY — no database, no secrets, a few seconds.
+      #
+      # Named explicitly rather than relying on the guard to skip the DB files.
+      # `database-guard.ts` would delete DATABASE_URL and let them skip quietly,
+      # and a suite that skips reports zero failures, which is the shape of a
+      # green tick over no coverage. `--project pure` cannot do that: the db
+      # files are not selected at all.
+      #
+      # This includes the two checkers that guard the split itself —
+      # db-backed-files.test.ts (recomputes which files touch the database) and
+      # use-server-exports.test.ts — so both still run on every pull request.
+      - run: npx vitest run --project pure
 
   tests:
     name: Test suite
     runs-on: ubuntu-latest
+    # AFTER a merge, not before. See the header for why, and for the cost.
+    # `full-tests` on a pull request opts back into blocking — use it for RLS,
+    # migrations, and anything touching a tenant table.
+    if: >-
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'full-tests')
     # ONE at a time across the whole repo. Every run shares the same Neon
     # branch, and the suites stamp their tenants with `process.pid` — two
     # runners can land on the same pid and collide on a tenant slug.

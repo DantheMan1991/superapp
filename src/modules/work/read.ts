@@ -1,5 +1,16 @@
 import "server-only";
-import { and, asc, eq, isNull, lte, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { WorkState, WorkVisibility } from "@/lib/work/vocabulary";
 
@@ -91,6 +102,17 @@ export interface WorkItemFilter {
   openOnly?: boolean;
   /** `yyyy-mm-dd`. Due on or before this day. Compare STRINGS, never Dates. */
   dueOnOrBefore?: string;
+  /** Exactly these states. Empty or absent means no state filter. */
+  states?: readonly WorkState[];
+  /**
+   * Free text over title and description.
+   *
+   * `ilike` over two columns, with no index behind it. That is honest at this
+   * size and will not stay honest — Documents needed a generated tsvector for
+   * the same question. The dossier records it; do not reach for a second query
+   * builder when it bites, extend this one.
+   */
+  q?: string;
 }
 
 /**
@@ -119,6 +141,21 @@ export async function listWorkItems(
   }
   if (filter.dueOnOrBefore) {
     where.push(lte(schema.workItems.dueOn, filter.dueOnOrBefore));
+  }
+  if (filter.states && filter.states.length > 0) {
+    where.push(inArray(schema.workItems.state, [...filter.states]));
+  }
+  if (filter.q) {
+    // Interpolating a JS array into a `sql` template flattens it into one param
+    // per element and Postgres rejects it (documents.md). `ilike` takes a bound
+    // parameter, so the pattern is built here and bound, never concatenated.
+    const pattern = `%${filter.q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    where.push(
+      or(
+        ilike(schema.workItems.title, pattern),
+        ilike(schema.workItems.description, pattern),
+      ) as SQL,
+    );
   }
   const rows = await tx
     .select({

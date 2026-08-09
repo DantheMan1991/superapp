@@ -13,6 +13,49 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Slice 2: the list and the board, over one query (branch `claude/work-slice-2`)
+
+Two drawings, one dataset. **No migration.** 12 view-param tests and two new
+read-path tests.
+
+- **The roadmap's acceptance test was "if this needs a second query builder,
+  slice 1 built the wrong read path". It did not.** `listWorkItems` grew two
+  filters (`states`, `q`) and both views call it unchanged otherwise. There is
+  no per-view fetch and no board-specific query.
+- **A view IS a parameter set** (`core/view-params.ts`): `display` decides how
+  rows are drawn, every other field decides which rows there are. Documents
+  settled the storage half of this already — a saved view is the same parameter
+  set replayed as a URL, never a second query builder reading jsonb — so slice
+  3 can save these with no change to the shape.
+- **A board column is `state`, which is a column on the row, not a container.**
+  Trello's board is its data model, so a card is *in* the Doing list and
+  "everything assigned to me" is unaskable there. Here the two views are one
+  query and a row is in both at once.
+- **Work moves between columns by MENU.** conventions §8 and CRM's deal board
+  both got there first: a real share of usage is one-handed on a phone, and
+  dragging between columns that do not fit the screen is the one board
+  interaction with no good touch story. A menu also names every destination.
+- **The board overrides `openOnly` rather than obeying it**, because a Done
+  column that is always empty is worse than no Done column. The cost is that
+  the two closed columns are unbounded — recorded below as the second caller
+  wanting the pagination that slice 0 already flagged.
+- **`?view=mine|unassigned|list` from slice 1 is gone**, replaced by
+  `display/who/list/state/open/q`. Slice 1's params were a mode; these are a
+  filter set, and keeping both would have meant two ways to say one thing.
+  Nothing had been clicked and the module is not sellable, so this cost
+  nothing — and `/dashboard/m/work` with no parameters still means "my work".
+- **"Unassigned" is now offered to everybody, reversing slice 1's owner-only
+  rule.** The reasoning changed with the direction: the digest PUSHES
+  unassigned work to owners because nobody asked for it, while a filter PULLS
+  and a staff member choosing "Nobody" is asking what is going spare.
+- **One row DTO and one set of row controls**, in `core/row.ts` and
+  `components/item-controls.tsx`. Two DTOs over one query is how two views
+  start disagreeing about what a row is, and duplicated controls are how one of
+  them silently stops knowing about a new state.
+- **A `%` typed into the search box is a literal `%`.** `ilike` patterns escape
+  `%` and `_` before binding; an unescaped wildcard silently matches everything,
+  which reads as "search is broken" rather than as a wildcard.
+
 ### 2026-08-09 — Slice 1: lists, items, and "my work" (branch `claude/work-slice-1`)
 
 The module renders. Eight server actions, two client surfaces, 13 op tests and
@@ -265,6 +308,18 @@ Built in slice 1:
 - `src/app/dashboard/m/work/lists/page.tsx`.
 - `tests/work-ops.test.ts` · `tests/work-grouping.test.ts`.
 
+Built in slice 2:
+
+- `src/modules/work/core/view-params.ts` — a view as a parameter set. The file
+  slice 3's saved views will read; if a later view needs its own query builder,
+  this was the wrong shape.
+- `src/modules/work/core/row.ts` — the one row DTO both drawings render.
+- `src/modules/work/components/item-controls.tsx` — the row controls, written
+  once so the list and the board cannot drift.
+- `components/work-list.tsx` · `components/work-board.tsx` ·
+  `components/filter-bar.tsx` · `components/add-work.tsx`.
+- `tests/work-view-params.test.ts`.
+
 Still to come, and where it goes:
 
 - `src/modules/work/link-ops.ts` — the "attach to…" surface (slice 3)
@@ -405,7 +460,7 @@ Migrations start at **0104**.
 | --- | --- | --- |
 | 0 | ✅ **Shipped.** Schema + RLS + 12 isolation tests + the read path. Default list auto-provisioned. `withWork()` | The visibility rules are the expensive part; certify them against two tenants before any UI exists |
 | 1 | ✅ **Shipped.** Lists and items: create, edit, assign, close, nest. **"My work"**. Module registered, seed row `coming_soon` | The per-person surface first, because it is the one that gets opened daily and the one that proves the shape |
-| 2 | The list view with filters, and the board grouped by `state`, moved by menu | Two views over one dataset — the Notion lesson made concrete. If this needs a second query builder, slice 1 built the wrong read path |
+| 2 | ✅ **Shipped.** The list view with filters, and the board grouped by `state`, moved by menu | Two views over one dataset — the Notion lesson made concrete. It did not need a second query builder; `listWorkItems` grew two filters |
 | 3 | Saved views as URL parameter sets. Links: Work as host **and** as contributor | The seam work. Documents' saved-view decision is reused, not re-derived |
 | 4 | Attention source, second in the digest. Seed row flips to `available` | The module goes live once the obligation it creates can reach a person |
 | 5 | CRM follow-ups migrate onto work items; `crm_tasks` is deleted | Its own slice, after the core is proven. Read the trap above before starting |
@@ -421,11 +476,16 @@ something does, the boundary was drawn wrong.
 
 ## Open items
 
-- **`listWorkItems` has no pagination.** It returns every item matching the
-  filter, which is fine for the tenants that exist and is not fine for a list
-  with five thousand items on it. Slice 1's UI is what will meet this first, and
-  the fix is a limit plus a cursor on `(due_on, created_at)` — the index is
-  already in that order.
+- **`listWorkItems` has no pagination, and slice 2 gave it a second caller that
+  needs one.** The board reads without the open-only filter so its Done and
+  Cancelled columns are not permanently empty, which means those two columns
+  grow without bound. The fix is a limit plus a cursor on `(due_on, created_at)`
+  — the index is already in that order — and the board additionally wants a
+  per-column cap with a "+N more".
+- **Search is `ilike` over two columns with no index behind it.** Honest at this
+  size, and it will not stay honest; Documents needed a generated tsvector for
+  the same question. When it bites, extend `listWorkItems` rather than adding a
+  second query builder — that is the property slice 2 exists to preserve.
 - ~~**Nothing keeps `updated_at` current.**~~ — **fixed in slice 1.** Every op
   sets it. There is still no trigger, so a future op that forgets will not fail
   any test; the guard is that all of them go through `list-ops`/`item-ops`.

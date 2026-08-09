@@ -80,6 +80,13 @@ on:
       - "README.md"
       - "SETUP.md"
   pull_request:
+    # `labeled` is here so the `full-tests` escape hatch works on a PR that is
+    # ALREADY OPEN. GitHub evaluates a job's `if:` when the run starts, and the
+    # default trigger list — opened, synchronize, reopened — means adding the
+    # label to an open PR re-runs nothing and the suite silently stays skipped.
+    # Found by labelling PR #101 and watching it report "skipping" anyway.
+    # Listing types overrides the defaults, so all four are named.
+    types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - "docs/**"
       - "AGENTS.md"

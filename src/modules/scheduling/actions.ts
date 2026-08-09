@@ -7,6 +7,11 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { withSchedule } from "@/lib/schedule/with-schedule";
 import { SCHEDULE_ACCESS_LEVELS } from "@/lib/schedule/access";
+// A colour is one of a fixed set, validated server-side: free-form would let a
+// caller put anything into a string the UI drops into a style attribute. The
+// COLUMN stays open text so a palette can change without a migration; the enum
+// is the boundary check. It cannot be declared in this file — see colors.ts.
+import { CALENDAR_COLORS } from "./core/colors";
 import {
   SchedulingError,
   createCalendar,
@@ -52,23 +57,6 @@ function fail(err: unknown): { error: string } {
   console.error("scheduling action failed", err);
   return { error: "Something went wrong." };
 }
-
-/**
- * A colour is one of a fixed set, validated server-side.
- *
- * Free-form would let a caller put anything in a string the UI drops into a
- * style attribute. The column is deliberately open text so a palette can change
- * without a migration; the ENUM lives here, at the boundary, which is where
- * "what may be written" belongs.
- */
-export const CALENDAR_COLORS = [
-  "slate",
-  "blue",
-  "green",
-  "amber",
-  "rose",
-  "violet",
-] as const;
 
 const nameSchema = z.string().trim().min(1).max(80);
 const colorSchema = z.enum(CALENDAR_COLORS);

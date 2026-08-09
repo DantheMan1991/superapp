@@ -24,3 +24,4 @@ export * from "./retainer";
 export * from "./interview";
 export * from "./crm";
 export * from "./scheduling";
+export * from "./work";

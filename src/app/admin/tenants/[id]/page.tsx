@@ -198,13 +198,35 @@ export default async function TenantDetailPage({
               <CardDescription>
                 Switch capabilities on and off for this client. &ldquo;Coming
                 soon&rdquo; modules are named, empty slots — sellable, not yet
-                built.
+                built. &ldquo;In build&rdquo; ones have a renderer but are not in
+                the catalog yet: switchable here so a slice can be tried on a
+                real tenant before anybody is sold it.
               </CardDescription>
             </CardHeader>
             <CardContent className="divide-y">
               {allModules.map((mod) => {
+                /*
+                 * TWO DIFFERENT QUESTIONS, and conflating them is what made a
+                 * half-finished module untestable on the only tenant allowed to
+                 * see it.
+                 *
+                 * `implemented` — is there a renderer? That is what decides
+                 * whether switching it on can possibly work, so it is what gates
+                 * the toggle.
+                 *
+                 * `sellable` — is it in the catalog? That is a commercial state,
+                 * and it drives the BADGE and nothing else.
+                 *
+                 * They were one flag until 2026-08-09. A module built slice by
+                 * slice is implemented long before it is sellable — scheduling
+                 * sat in exactly that gap, with a working calendar UI nobody
+                 * could reach, because `coming_soon` disabled the switch. The
+                 * empty-slot discipline is about what CLIENTS are offered
+                 * (docs/architecture.md), and this page is the superadmin
+                 * console; it was never the thing that rule protected.
+                 */
                 const implemented = !!moduleRegistry[mod.id];
-                const available = mod.status === "available" && implemented;
+                const sellable = mod.status === "available";
                 return (
                   <div
                     key={mod.id}
@@ -213,9 +235,9 @@ export default async function TenantDetailPage({
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium">{mod.name}</span>
-                        {!available && (
+                        {!sellable && (
                           <Badge variant="outline" className="text-xs">
-                            coming soon
+                            {implemented ? "in build" : "coming soon"}
                           </Badge>
                         )}
                       </div>
@@ -227,7 +249,7 @@ export default async function TenantDetailPage({
                       tenantId={tenant.id}
                       moduleId={mod.id}
                       enabled={enabledBySlug.get(mod.id) ?? false}
-                      available={available}
+                      canToggle={implemented}
                     />
                   </div>
                 );

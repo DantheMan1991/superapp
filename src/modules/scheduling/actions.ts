@@ -9,6 +9,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { appUrl } from "@/lib/stripe-customer";
 import { withSchedule } from "@/lib/schedule/with-schedule";
+import { busyForPeople, conflictsWith } from "@/lib/schedule/availability";
 import { SCHEDULE_ACCESS_LEVELS } from "@/lib/schedule/access";
 import {
   addDays,
@@ -327,7 +328,19 @@ type EventFields = z.infer<typeof eventFieldsSchema>;
  * column and a three-day event exactly three. Storing 23:59 instead would leave
  * a one-minute hole that every overlap query would have to know about.
  */
-function resolveSpan(fields: EventFields, timeZone: string) {
+function resolveSpan(
+  // Structural, not `EventFields`: availability checking needs the same
+  // conversion and has no calendar or title to offer. Narrowing the parameter
+  // is what keeps that call honest instead of casting a half-built object.
+  fields: {
+    startDate: string;
+    startTime: string;
+    endDate: string;
+    endTime: string;
+    allDay?: boolean;
+  },
+  timeZone: string,
+) {
   if (fields.allDay) {
     return {
       startsAt: startOfDayInTimezone(fields.startDate, timeZone),
@@ -801,6 +814,58 @@ export async function cancelOccurrenceAction(
 
     revalidatePath(BASE);
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- Availability ---------------------------------------------------------- */
+
+const availabilitySchema = z.object({
+  clerkUserIds: z.array(z.string().max(255)).max(50),
+  startDate: dateSchema,
+  startTime: timeSchema,
+  endDate: dateSchema,
+  endTime: timeSchema,
+  allDay: z.boolean().optional(),
+});
+
+/**
+ * Who among these people is already busy at the proposed time.
+ *
+ * Called from the event form as the times and the guest list change, so the
+ * clash is visible BEFORE the event is saved rather than discovered by whoever
+ * turns up to an empty room.
+ *
+ * `unknown` is reported separately from `busy` and that separation is the whole
+ * point: somebody who has shared nothing contributes an empty busy list, and
+ * rendering that as "free" would be the worst lie this feature could tell.
+ */
+export async function checkAvailabilityAction(
+  input: z.infer<typeof availabilitySchema>,
+): Promise<ActionResult<{ busy: string[]; unknown: string[] }>> {
+  try {
+    const ctx = await gate();
+    const parsed = availabilitySchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+    if (parsed.data.clerkUserIds.length === 0) {
+      return { ok: true, data: { busy: [], unknown: [] } };
+    }
+    const span = resolveSpan(parsed.data, ctx.timeZone);
+
+    const result = await withSchedule(ctx, async (tx) => {
+      const people = await busyForPeople(tx, {
+        clerkUserIds: parsed.data.clerkUserIds,
+        from: span.startsAt,
+        to: span.endsAt,
+      });
+      return {
+        busy: conflictsWith(people, span),
+        unknown: people.filter((p) => !p.visible).map((p) => p.clerkUserId),
+      };
+    });
+
+    return { ok: true, data: result };
   } catch (err) {
     return fail(err);
   }

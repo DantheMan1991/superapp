@@ -1,6 +1,7 @@
 import "server-only";
 import { accountingAttentionSource } from "@/modules/accounting/attention/source";
 import { crmAttentionSource } from "@/modules/crm/attention/source";
+import { schedulingAttentionSource } from "@/modules/scheduling/attention/source";
 import type { AttentionSource } from "./types";
 
 /**
@@ -18,11 +19,17 @@ import type { AttentionSource } from "./types";
  * to add a module import somewhere else to avoid a plumbing chore, that is the
  * rule doing its job — add the hook to `types.ts` instead.
  *
- * Registration order is section order in the digest and on the page. Follow-ups
- * lead because they are the items with a real assignee, and therefore the ones
- * most certainly the reader's own.
+ * Registration order is section order in the digest and on the page.
+ *
+ * SCHEDULING LEADS from 2026-08-09. What is on today is the thing somebody
+ * checks a morning email to find out, and it is the only section with a time
+ * attached — a 7am digest that opens with an overdue invoice buries the 8am
+ * site visit under it. Follow-ups keep second place for the reason they used to
+ * hold first: they are the items with a real assignee. Accounting is last
+ * because it reaches owners only and has no per-record assignee at all.
  */
 export const attentionSources: readonly AttentionSource[] = [
+  schedulingAttentionSource,
   crmAttentionSource,
   accountingAttentionSource,
 ];

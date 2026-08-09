@@ -4,18 +4,57 @@
 > on Outlook and Google rather than on a work-order queue — a **calendar** is the
 > unit of sharing, private by default, grantable to named people or to the whole
 > business. Core owns time, sharing and attendance; capability packs own
-> everything a particular trade calls that work. Slices 0–3 are in: schema, RLS,
-> calendars and sharing, a working week/day/month calendar with events and
-> attendees, and links to the records an event is about. The seed row stays
-> `coming_soon` until slice 4, so a superadmin can switch it on for one tenant
-> and nobody is sold it yet.
-> Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> everything a particular trade calls that work. **Live from slice 4**: schema
+> and RLS, calendars and sharing, a week/day/month calendar with events and
+> attendees, links to the records an event is about, and the morning digest's
+> leading section. Recurrence, availability and the subscribe feed are the
+> remaining slices.
+> Status: `available` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-08-09 — Slice 4: the module goes live (branch `claude/scheduling-slice-4`)
+
+The digest gets its strongest source, and the seed row flips to `available`.
+
+- **`schedulingAttentionSource` LEADS the registry**, ahead of CRM follow-ups
+  and accounting. What is on today is the thing somebody opens a morning email
+  to find out, and it is the only section with a time attached — a 7am digest
+  that opens with an overdue invoice buries the 8am site visit under it.
+- **Two populations, and only one of them is an obligation.**
+  `notifications.md` is strict that an item must SELF-CLEAR. An **unanswered
+  invitation** is a true obligation — you owe a reply and answering makes it
+  vanish, with a test that accepts and asserts it disappeared. **Today's
+  schedule** is not something you owe; it clears because tomorrow arrives.
+  Included anyway because it is the reason the channel is worth opening.
+- **WHOSE DAY, EXACTLY: an attendee, or a calendar you OWN.** Deliberately not
+  "any calendar you can see" — a workspace calendar shared with everybody would
+  otherwise put the entire company's week into every person's morning email,
+  which is precisely the untrustworthy noise the derived-obligation design
+  exists to avoid. There is a test where a colleague can READ the Team calendar
+  at `details` and it is still not in their digest.
+- **A consequence worth noticing: nothing here is ever redacted.** Everything
+  returned is the reader's own calendar or their own invitation, so the four
+  access levels never come into it. A `busy`-level glimpse of somebody else's
+  afternoon is not an obligation.
+- **An unanswered invitation for TODAY is reported once, as the invitation** —
+  the more actionable of the two framings. Reporting it twice would make the
+  count wrong, and "one number everywhere" is what the feature trades on.
+- **The seed description said "Jobs, appointments, calendar." and had to be
+  rewritten.** `extension-model.md` §8 names "job" as its worked example of a
+  word that sounds generic and is not: it is what electrical calls its work
+  while plumbing says Service Call and a GC says Project. A profile supplies
+  that label; a core module's catalog copy must not. It now reads *"The
+  business's calendar — what is happening, when, and who is on it. Private until
+  you share it."*
+- **`status` is `available`**, so the module is sellable and appears in the
+  catalog as a real thing rather than an empty slot. `npm run db:seed` is what
+  applies that to a database; the code change alone does nothing.
+- 8 attention tests through real RLS.
 
 ### 2026-08-09 — Slice 3: links, and a contract that stopped belonging to Mail (branch `claude/scheduling-slice-3`)
 
@@ -294,6 +333,13 @@ should carry these invariants as comments, in the style of `0077`.
 Proposed layout. The three-file dependency graph is copied from
 `src/lib/mail-extensions/`, because that shape is already enforced by eslint and
 already proven by three implementors.
+
+Built in slice 4:
+
+- `src/modules/scheduling/attention/source.ts` — what scheduling says needs you.
+  Imports `@/lib/attention-sources/types` and nothing else from a module.
+- `src/lib/attention-sources/registry.ts` — scheduling registered FIRST.
+- `scripts/seed.ts` — `status: "available"`, and a description that passes §3.
 
 Built in slice 3:
 
@@ -622,7 +668,7 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 | 1 | ✅ **Shipped.** Calendars: create, rename, colour, archive. Share with a person or the whole workspace, at any level. Module registered (seed row still `coming_soon`) | Sharing is the module's defining behaviour and everything else assumes it works |
 | 2 | ✅ **Shipped.** Events + attendees + RSVP. Week/day/month over `listRange`. Calendar becomes the module home | Attendees are NOT deferred — see Decisions |
 | 3 | ✅ **Shipped.** Links + the shared entity-link contract extracted out of Mail. Nine entity types, no new implementations | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
-| 4 | Attention source + "my day". Registry entry, seed row flips to `available` | The digest gets its strongest source; the module goes live |
+| 4 | ✅ **Shipped.** Attention source leading the digest. Seed row flips to `available` | The digest gets its strongest source; the module goes live |
 | 5 | Per-person subscribe feed: hashed revocable token, ICS, revoke button | Same query as 4, no session. Reaches the person who will never open the app |
 | 6 | Extension seam: item kinds, item fields, managed calendars | First three pack primitives, all with existing precedent |
 | 7 | The view seam, with a core view moved onto it | The new primitive, shipped with two users |

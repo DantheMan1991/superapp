@@ -93,9 +93,24 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
   {
     id: "scheduling",
     name: "Scheduling",
-    description: "Jobs, appointments, calendar.",
+    // Description tracks what actually ships. Calendars, sharing, events,
+    // attendees and links are in; recurrence, availability and the subscribe
+    // feed follow, and get added here as they do.
+    //
+    // THE PLACEHOLDER THIS REPLACES READ "Jobs, appointments, calendar." and
+    // FAILED the neutrality test in docs/extension-model.md §3 — §8 names "job"
+    // as the worked example of a word that sounds generic and is not: it is
+    // what electrical calls its work while plumbing says Service Call and a GC
+    // says Project. A profile supplies that label; a core module's catalog copy
+    // must not.
+    //
+    // What is here instead passes: a bookkeeping firm, a dental practice and a
+    // plumbing contractor all recognise appointments, who is on them, and a
+    // calendar that is private until shared.
+    description:
+      "The business's calendar — what is happening, when, and who is on it. Private until you share it.",
     category: "core",
-    status: "coming_soon",
+    status: "available",
     sortOrder: 60,
   },
 ];

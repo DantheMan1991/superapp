@@ -376,6 +376,150 @@ d("scheduling tables (RLS)", () => {
     expect(rows).toHaveLength(0);
   });
 
+  /* -- Links (0098/0099) --------------------------------------------------- */
+
+  /** Attach a record to an item as OWNER, returning the link id. */
+  async function attachAs(itemId: string, entityId: string) {
+    const [row] = await withSystem((tx) =>
+      tx
+        .insert(schema.scheduleItemLinks)
+        .values({
+          tenantId: tenantA,
+          itemId,
+          extensionSlug: "accounting",
+          entityType: "invoice",
+          entityId,
+        })
+        .returning(),
+    );
+    return row.id;
+  }
+
+  it("a link INHERITS the item's visibility and never restates it", async () => {
+    await shareProjectsAt(null);
+    const linkId = await attachAs(
+      sharedItem,
+      "11111111-1111-4111-8111-111111111111",
+    );
+
+    // Not shared: the item is invisible, so its links are too.
+    let seen = await asMate((tx) => tx.select().from(schema.scheduleItemLinks));
+    expect(seen.map((r) => r.id)).not.toContain(linkId);
+
+    // Shared at details: the item appears, and the link with it.
+    await shareProjectsAt("details");
+    seen = await asMate((tx) => tx.select().from(schema.scheduleItemLinks));
+    expect(seen.map((r) => r.id)).toContain(linkId);
+
+    // Shared at titles: the item ROW is invisible, so the link is too — the
+    // four-level model applies to links for free.
+    await shareProjectsAt("titles");
+    seen = await asMate((tx) => tx.select().from(schema.scheduleItemLinks));
+    expect(seen.map((r) => r.id)).not.toContain(linkId);
+  });
+
+  it("another tenant sees no links at all", async () => {
+    await attachAs(sharedItem, "22222222-2222-4222-8222-222222222222");
+    const rows = await withTenant(
+      tenantB,
+      (tx) => tx.select().from(schema.scheduleItemLinks),
+      { role: "owner", userId: OTHER },
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("`details` may READ a link and may not DETACH it", async () => {
+    await shareProjectsAt("details");
+    const linkId = await attachAs(
+      sharedItem,
+      "33333333-3333-4333-8333-333333333333",
+    );
+
+    // WITH CHECK is not consulted for DELETE, so this is the assertion that
+    // keeps the USING clause on schedule_item_links_write honest.
+    const deleted = await asMate((tx) =>
+      tx
+        .delete(schema.scheduleItemLinks)
+        .where(eq(schema.scheduleItemLinks.id, linkId))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+
+    await expect(
+      asMate((tx) =>
+        tx
+          .insert(schema.scheduleItemLinks)
+          .values({
+            tenantId: tenantA,
+            itemId: sharedItem,
+            extensionSlug: "accounting",
+            entityType: "invoice",
+            entityId: "44444444-4444-4444-8444-444444444444",
+          })
+          .returning(),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("`write` may attach and detach", async () => {
+    await shareProjectsAt("write");
+    const attached = await asMate((tx) =>
+      tx
+        .insert(schema.scheduleItemLinks)
+        .values({
+          tenantId: tenantA,
+          itemId: sharedItem,
+          extensionSlug: "accounting",
+          entityType: "invoice",
+          entityId: "55555555-5555-4555-8555-555555555555",
+        })
+        .returning(),
+    );
+    expect(attached).toHaveLength(1);
+
+    const removed = await asMate((tx) =>
+      tx
+        .delete(schema.scheduleItemLinks)
+        .where(eq(schema.scheduleItemLinks.id, attached[0].id))
+        .returning(),
+    );
+    expect(removed).toHaveLength(1);
+  });
+
+  it("entity_type is an OPEN taxonomy, but must look like one", async () => {
+    // A pack registers `rfi` by writing the string — no migration, no core file
+    // naming it. That is primitive P3 and this is what proves it.
+    const ok = await withSystem((tx) =>
+      tx
+        .insert(schema.scheduleItemLinks)
+        .values({
+          tenantId: tenantA,
+          itemId: sharedItem,
+          extensionSlug: "trades-pack",
+          entityType: "rfi",
+          entityId: "66666666-6666-4666-8666-666666666666",
+        })
+        .returning(),
+    );
+    expect(ok).toHaveLength(1);
+
+    // The format check is the only constraint, and it still applies.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.scheduleItemLinks)
+          .values({
+            tenantId: tenantA,
+            itemId: sharedItem,
+            extensionSlug: "accounting",
+            entityType: "Not A Valid Type",
+            entityId: "77777777-7777-4777-8777-777777777777",
+          })
+          .returning(),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("one primary calendar per person, enforced by the index", async () => {
     await expect(
       withSystem((tx) =>

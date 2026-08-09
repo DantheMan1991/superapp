@@ -4,10 +4,11 @@
 > on Outlook and Google rather than on a work-order queue — a **calendar** is the
 > unit of sharing, private by default, grantable to named people or to the whole
 > business. Core owns time, sharing and attendance; capability packs own
-> everything a particular trade calls that work. Slices 0–2 are in: schema, RLS,
-> calendars and sharing, and a working week/day/month calendar with events and
-> attendees. The seed row stays `coming_soon` until slice 4, so a superadmin can
-> switch it on for one tenant and nobody is sold it yet.
+> everything a particular trade calls that work. Slices 0–3 are in: schema, RLS,
+> calendars and sharing, a working week/day/month calendar with events and
+> attendees, and links to the records an event is about. The seed row stays
+> `coming_soon` until slice 4, so a superadmin can switch it on for one tenant
+> and nobody is sold it yet.
 > Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
@@ -15,6 +16,55 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-08-09 — Slice 3: links, and a contract that stopped belonging to Mail (branch `claude/scheduling-slice-3`)
+
+An event can now be attached to a customer, an invoice, a file — nine entity
+types across Accounting, CRM and Documents, none of which scheduling knows
+anything about.
+
+- **THE LINKABLE-RECORD CONTRACT MOVED OUT OF MAIL.** Nine implementations
+  already existed, written against `MailEntityType`, and their `search`/`resolve`
+  were entirely generic — only `templateFields`/`templateValues` are really
+  mail's. Scheduling wanted the same nine, because an event is attached to an
+  invoice for the same reason a thread is. The generic half is now
+  `src/lib/entity-links/types.ts`; `MailEntityType extends LinkableEntityType`
+  and re-exports the shared names, so **not one implementation or importer
+  changed** — only the type they satisfy. The alternative was nine second
+  implementations to keep in sync, which is what ADR 0004 exists to prevent.
+- **TWO HOSTS NOW, AND THE DISTINCTION IS ENFORCED.** A host DECLARES an
+  "attach to…" surface and therefore runs the wiring: mail and scheduling. A
+  contributor that imported `entity-links/registry` would pull in every other
+  module through it — rule 1 defeated by one indirection. eslint carries the
+  split, and it was **verified by planting a violation in Accounting and
+  watching it fail**, not by assuming; `ENTITY_LINK_HOSTS` is the list, and
+  adding to it means that module now renders a picker over everybody else's
+  records.
+- **`scheduling` was missing from `MODULE_SLUGS` entirely**, so it had no
+  isolation rules at all — it could have imported another module and nothing
+  would have said so. Added.
+- **`schedule_item_links` is `mail_links` copied down to the format checks.**
+  `entity_type` carries NO value whitelist, only a format CHECK: that is
+  primitive P3, and a pack registers `rfi` by writing the string with no
+  migration to core. There is a test that writes `rfi` and one that refuses
+  `"Not A Valid Type"`.
+- **The policy graph gains one edge and stays acyclic.** links → items →
+  calendars → shares → (definer). `schedule_items` does not read links, so
+  there is no cycle to cut and no new `SECURITY DEFINER` helper. Visibility
+  INHERITS through one EXISTS, which means the four-level model applies to
+  links for free — somebody at `titles` cannot see the item row, so they see
+  none of its links either, and there is a test that walks all three levels.
+- **A LINK DOES NOT CHECK WHETHER YOU MAY SEE THE OTHER END, deliberately.**
+  `entity_id` is an opaque uuid and core has no idea what an invoice is. The
+  protection is on the read path: `resolve` runs inside the caller's own
+  transaction, so a record they may not see simply does not come back and
+  renders as *"no longer available"*. S12 doing the work — and the reason
+  resolution must never be moved to `withSystem` for convenience.
+- **A dangling link is SHOWN, not hidden.** A link that silently disappears
+  looks like it was never made.
+- **Attaching is only offered on a saved event.** A link needs an item id to
+  point at, and queueing them client-side until the first save would mean two
+  code paths for one feature.
 
 ### 2026-08-09 — Slice 2: events, attendees, and the calendar itself (branch `claude/scheduling-slice-2`)
 
@@ -244,6 +294,16 @@ should carry these invariants as comments, in the style of `0077`.
 Proposed layout. The three-file dependency graph is copied from
 `src/lib/mail-extensions/`, because that shape is already enforced by eslint and
 already proven by three implementors.
+
+Built in slice 3:
+
+- `src/lib/entity-links/types.ts` — **the shared contract.** Imports nothing
+  from `src/modules/**`. `MailEntityType` extends it.
+- `src/lib/entity-links/registry.ts` — composition root. **Hosts only** —
+  `ENTITY_LINK_HOSTS` in eslint.config.mjs is the list.
+- `drizzle/0098_…sql` (table) and `drizzle/0099_schedule_links_rls.sql`
+  (policies). 0099's header carries the updated policy graph.
+- `src/modules/scheduling/link-ops.ts` — search, resolve, attach, detach.
 
 Built in slice 2:
 
@@ -561,7 +621,7 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 | 0 | ✅ **Shipped.** Schema + RLS + 13 isolation tests. `withSchedule()`. Access-level projection in the read path. Primary calendar auto-provisioned on membership | The visibility rules are the expensive part; prove them against two tenants before any UI exists. The projection lands here because widening a boolean later means rewriting every caller |
 | 1 | ✅ **Shipped.** Calendars: create, rename, colour, archive. Share with a person or the whole workspace, at any level. Module registered (seed row still `coming_soon`) | Sharing is the module's defining behaviour and everything else assumes it works |
 | 2 | ✅ **Shipped.** Events + attendees + RSVP. Week/day/month over `listRange`. Calendar becomes the module home | Attendees are NOT deferred — see Decisions |
-| 3 | Links, and entity types from Accounting, CRM, Documents and Mail | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
+| 3 | ✅ **Shipped.** Links + the shared entity-link contract extracted out of Mail. Nine entity types, no new implementations | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
 | 4 | Attention source + "my day". Registry entry, seed row flips to `available` | The digest gets its strongest source; the module goes live |
 | 5 | Per-person subscribe feed: hashed revocable token, ICS, revoke button | Same query as 4, no session. Reaches the person who will never open the app |
 | 6 | Extension seam: item kinds, item fields, managed calendars | First three pack primitives, all with existing precedent |
@@ -576,6 +636,20 @@ them. If something does, the boundary was drawn wrong.
 
 ## Open items
 
+- **The entity types still live at `src/modules/<slug>/mail/extension.ts`**,
+  because that is where they were written when mail was the only consumer. The
+  directory name now lies slightly. Moving them to `<slug>/links.ts` is a
+  mechanical rename of three files, deliberately not done in the same change as
+  extracting the contract — one is a type-level change that cannot alter
+  behaviour and the other is a file move across a live module.
+- **A mail THREAD is not linkable to an event.** Mail contributes no entity type
+  of its own — it is a host, not a contributor — so you can attach an invoice
+  to an event but not a conversation. The roadmap line said "and Mail"; that
+  needs a `MailEntityType` for threads, which is a Mail change and was not made.
+- **Nothing shows the links in the other direction.** There is an index for
+  "every event on this invoice" and no reader for it: the accounting invoice
+  page does not yet show its events. That is the reverse view, and it needs P5
+  nav contribution to be done properly.
 - **THE WEEK STARTS ON SUNDAY, HARDCODED.** A tenant setting is the obvious fix
   and there is no settings surface for this module to hang it on yet. Confirmed
   as acceptable for now rather than assumed.

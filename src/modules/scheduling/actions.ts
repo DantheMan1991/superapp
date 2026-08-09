@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { schema, type Tx } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
@@ -36,6 +37,13 @@ import {
   respondToItem,
   updateItem,
 } from "./item-ops";
+import {
+  attachLink,
+  detachLink,
+  resolveLinks,
+  searchLinkTargets,
+  type LinkTargetGroup,
+} from "./link-ops";
 
 /**
  * Server actions for scheduling. Canonical shape, the same one CRM uses:
@@ -496,6 +504,14 @@ export async function getEventAction(
       externalName: string;
       response: "needs_action" | "accepted" | "declined" | "tentative";
     }>;
+    links: Array<{
+      linkId: string;
+      entityType: string;
+      /** Null when the record is gone or hidden from this reader. */
+      label: string | null;
+      sublabel?: string;
+      href?: string;
+    }>;
   }>
 > {
   try {
@@ -539,10 +555,134 @@ export async function getEventAction(
           externalName: a.externalName,
           response: a.response,
         })),
+        // Resolved inside the CALLER'S transaction, so a record they may not
+        // see comes back null and renders as a dangling link rather than
+        // leaking its name. S12 doing the work — see 0099's header.
+        links: (await resolveLinks(tx, ctx, [item.id])).map((l) => ({
+          linkId: l.linkId,
+          entityType: l.entityType,
+          label: l.entity?.label ?? null,
+          sublabel: l.entity?.sublabel,
+          href: l.entity?.href,
+        })),
       };
     });
 
     return { ok: true, data };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- Links ----------------------------------------------------------------- */
+
+/**
+ * Which modules this tenant has switched on.
+ *
+ * Read inside the caller's transaction rather than through
+ * `getActiveModules`, which opens its own — one round trip instead of two, and
+ * it keeps the entitlement filter in the same snapshot as the search it gates.
+ */
+async function enabledModuleSlugs(tx: Tx, tenantId: string) {
+  const rows = await tx
+    .select({ moduleId: schema.tenantModules.moduleId })
+    .from(schema.tenantModules)
+    .where(
+      and(
+        eq(schema.tenantModules.tenantId, tenantId),
+        eq(schema.tenantModules.enabled, true),
+      ),
+    );
+  return new Set(rows.map((r) => r.moduleId));
+}
+
+const searchSchema = z.object({ query: z.string().max(200) });
+
+export async function searchLinkTargetsAction(
+  input: z.infer<typeof searchSchema>,
+): Promise<ActionResult<{ groups: LinkTargetGroup[] }>> {
+  try {
+    const ctx = await gate();
+    const parsed = searchSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const groups = await withSchedule(ctx, async (tx) => {
+      const enabled = await enabledModuleSlugs(tx, ctx.tenantId);
+      return searchLinkTargets(tx, ctx, parsed.data.query, enabled);
+    });
+
+    return { ok: true, data: { groups } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const attachSchema = z.object({
+  itemId: z.string().uuid(),
+  extensionSlug: z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/),
+  entityType: z.string().regex(/^[a-z][a-z0-9_]{0,62}$/),
+  entityId: z.string().uuid(),
+});
+
+export async function attachLinkAction(
+  input: z.infer<typeof attachSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = attachSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withSchedule(ctx, async (tx) => {
+      await attachLink(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "scheduling.link_attached",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "schedule_item",
+        targetId: parsed.data.itemId,
+        // The KIND and the id, never the label — the label is the customer's
+        // name, and an audit row is readable by people the record may not be.
+        meta: {
+          entityType: parsed.data.entityType,
+          entityId: parsed.data.entityId,
+        },
+      });
+    });
+
+    revalidatePath(BASE);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const detachSchema = z.object({
+  itemId: z.string().uuid(),
+  linkId: z.string().uuid(),
+});
+
+export async function detachLinkAction(
+  input: z.infer<typeof detachSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = detachSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withSchedule(ctx, async (tx) => {
+      await detachLink(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "scheduling.link_detached",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "schedule_item",
+        targetId: parsed.data.itemId,
+        meta: { linkId: parsed.data.linkId },
+      });
+    });
+
+    revalidatePath(BASE);
+    return { ok: true };
   } catch (err) {
     return fail(err);
   }

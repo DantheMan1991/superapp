@@ -26,10 +26,13 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { CalendarSummary } from "../calendar-ops";
 import {
+  attachLinkAction,
   cancelEventAction,
   createEventAction,
+  detachLinkAction,
   getEventAction,
   respondToEventAction,
+  searchLinkTargetsAction,
   updateEventAction,
 } from "../actions";
 
@@ -37,6 +40,21 @@ type Attendee = {
   clerkUserId?: string;
   externalEmail?: string;
   externalName?: string;
+};
+
+type LinkRow = {
+  linkId: string;
+  entityType: string;
+  label: string | null;
+  sublabel?: string;
+  href?: string;
+};
+
+type LinkGroup = {
+  extensionSlug: string;
+  entityType: string;
+  pluralLabel: string;
+  results: Array<{ entityId: string; label: string; sublabel?: string }>;
 };
 
 const SHOW_AS = [
@@ -88,6 +106,75 @@ export function EventForm({
   const [isPrivate, setIsPrivate] = useState(false);
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [guestEmail, setGuestEmail] = useState("");
+  const [links, setLinks] = useState<LinkRow[]>([]);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkGroups, setLinkGroups] = useState<LinkGroup[]>([]);
+
+  /**
+   * DEBOUNCED, because this fires while somebody types and each keystroke is a
+   * fan-out across every module's search. 250ms is long enough to skip the
+   * middle of a word and short enough not to feel laggy.
+   */
+  useEffect(() => {
+    const q = linkQuery.trim();
+    let stale = false;
+    // Every path goes through the timer, including the empty one. Clearing
+    // synchronously here would be a setState directly inside an effect, which
+    // cascades an extra render before paint — see conventions.md §8.
+    const timer = setTimeout(() => {
+      if (q.length === 0) {
+        setLinkGroups([]);
+        return;
+      }
+      searchLinkTargetsAction({ query: q }).then((result) => {
+        // A response that arrives after a newer keystroke is discarded, or a
+        // slow query for "ac" overwrites the results for "acme".
+        if (stale || "error" in result) return;
+        setLinkGroups(result.data!.groups);
+      });
+    }, 250);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [linkQuery]);
+
+  async function refreshLinks() {
+    if (!itemId) return;
+    const result = await getEventAction({ itemId });
+    if (!("error" in result)) setLinks(result.data!.links);
+  }
+
+  function attach(extensionSlug: string, entityType: string, entityId: string) {
+    if (!itemId) return;
+    startTransition(async () => {
+      const result = await attachLinkAction({
+        itemId,
+        extensionSlug,
+        entityType,
+        entityId,
+      });
+      if ("error" in result) toast.error(result.error);
+      else {
+        setLinkQuery("");
+        setLinkGroups([]);
+        await refreshLinks();
+        router.refresh();
+      }
+    });
+  }
+
+  function detach(linkId: string) {
+    if (!itemId) return;
+    startTransition(async () => {
+      const result = await detachLinkAction({ itemId, linkId });
+      if ("error" in result) toast.error(result.error);
+      else {
+        await refreshLinks();
+        router.refresh();
+      }
+    });
+  }
 
   useEffect(() => {
     if (!itemId) return;
@@ -120,6 +207,7 @@ export function EventForm({
           externalName: a.externalName,
         })),
       );
+      setLinks(d.links);
       setLoading(false);
     });
     return () => {
@@ -446,6 +534,109 @@ export function EventForm({
                 </div>
               )}
             </div>
+
+            {/* WHAT THIS EVENT IS ABOUT.
+                Only on a saved event: a link needs an item id to point at, and
+                queueing them client-side until the first save would mean two
+                code paths for one feature. */}
+            {itemId && (
+              <div className="space-y-1.5">
+                <Label>Related to</Label>
+                {links.length > 0 && (
+                  <ul className="divide-y rounded-md border">
+                    {links.map((l) => (
+                      <li
+                        key={l.linkId}
+                        className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm"
+                      >
+                        {l.label === null ? (
+                          /* The record is gone, or this reader may not see it.
+                             Shown rather than hidden: a link that silently
+                             disappears looks like it was never made. */
+                          <span className="truncate text-muted-foreground italic">
+                            {l.entityType} (no longer available)
+                          </span>
+                        ) : (
+                          <span className="min-w-0 flex-1 truncate">
+                            {l.href ? (
+                              <a
+                                href={l.href}
+                                className="underline underline-offset-2"
+                              >
+                                {l.label}
+                              </a>
+                            ) : (
+                              l.label
+                            )}
+                            {l.sublabel && (
+                              <span className="ml-1.5 text-xs text-muted-foreground">
+                                {l.sublabel}
+                              </span>
+                            )}
+                          </span>
+                        )}
+                        {canEdit && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-6 shrink-0"
+                            disabled={pending}
+                            onClick={() => detach(l.linkId)}
+                          >
+                            <X className="size-3.5" />
+                            <span className="sr-only">Remove link</span>
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {canEdit && (
+                  <div className="space-y-1.5">
+                    <Input
+                      value={linkQuery}
+                      onChange={(e) => setLinkQuery(e.target.value)}
+                      placeholder="Search a customer, invoice, file…"
+                    />
+                    {/* Derived from the query rather than trusted from state,
+                        so an emptied box hides results immediately instead of
+                        waiting out the debounce. */}
+                    {linkQuery.trim().length > 0 && linkGroups.length > 0 && (
+                      <div className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-2">
+                        {linkGroups.map((group) => (
+                          <div key={`${group.extensionSlug}:${group.entityType}`}>
+                            <p className="px-1 text-[11px] font-medium text-muted-foreground">
+                              {group.pluralLabel}
+                            </p>
+                            {group.results.map((r) => (
+                              <button
+                                key={r.entityId}
+                                className="block w-full truncate rounded px-1 py-1 text-left text-sm hover:bg-muted"
+                                disabled={pending}
+                                onClick={() =>
+                                  attach(
+                                    group.extensionSlug,
+                                    group.entityType,
+                                    r.entityId,
+                                  )
+                                }
+                              >
+                                {r.label}
+                                {r.sublabel && (
+                                  <span className="ml-1.5 text-xs text-muted-foreground">
+                                    {r.sublabel}
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="event-notes">Notes</Label>

@@ -54,7 +54,14 @@ import nextTs from "eslint-config-next/typescript";
  * must not depend on another module's functions, errors or behaviour. RLS, not
  * an import graph, is what decides who may read a row.
  */
-const MODULE_SLUGS = ["accounting", "crm", "documents", "email", "hello"];
+const MODULE_SLUGS = [
+  "accounting",
+  "crm",
+  "documents",
+  "email",
+  "hello",
+  "scheduling",
+];
 
 const CROSS_MODULE_MESSAGE =
   "Modules are sold separately and must work alone — a module may not import another module. " +
@@ -92,6 +99,29 @@ function pathsToModule(slug) {
 
 /** The module that DECLARES the mail extension point, and therefore runs it. */
 const EXTENSION_HOST = "email";
+
+/**
+ * Modules that declare an "attach this to a record" surface, and therefore have
+ * to run the wiring that composes every contributor's linkable types.
+ *
+ * TWO HOSTS RATHER THAN ONE, which is the difference from `EXTENSION_HOST`
+ * above. Mail declared the idea first; scheduling wants the same nine entity
+ * types, because an event is attached to an invoice for the same reason a
+ * thread is. The contract lives in `src/lib/entity-links/` and both import its
+ * registry.
+ *
+ * A CONTRIBUTOR IS STILL FORBIDDEN. Accounting importing this registry would
+ * pull in CRM and Documents through it — rule 1 defeated by one indirection,
+ * exactly as with mail's. Adding a host here is a deliberate act: it means that
+ * module now renders a picker over everybody else's records.
+ */
+const ENTITY_LINK_HOSTS = ["email", "scheduling"];
+
+const ENTITY_LINKS_MESSAGE =
+  "A module may import only src/lib/entity-links/types. The registry composes every " +
+  "module's linkable types, so importing it from a contributor pulls in every other " +
+  "module and defeats the isolation rule by one level of indirection. Only a module " +
+  "that DECLARES an attach-to surface (mail, scheduling) is a host.";
 
 /**
  * The attention-source contract gets the same treatment, with one asymmetry
@@ -139,6 +169,14 @@ const moduleIsolation = MODULE_SLUGS.map((slug) => ({
             ],
             message: ATTENTION_REGISTRY_MESSAGE,
           },
+          ...(ENTITY_LINK_HOSTS.includes(slug)
+            ? []
+            : [
+                {
+                  group: ["@/lib/entity-links/registry"],
+                  message: ENTITY_LINKS_MESSAGE,
+                },
+              ]),
         ],
       },
     ],
@@ -157,6 +195,9 @@ const eslintConfig = defineConfig([
       "src/lib/mail-extensions/resolve.ts",
       "src/lib/attention-sources/types.ts",
       "src/lib/attention-sources/resolve.ts",
+      // The shared linkable-record contract. Same rule, same reason: a contract
+      // that imported an implementation of itself would invert the graph.
+      "src/lib/entity-links/types.ts",
     ],
     rules: {
       "no-restricted-imports": [

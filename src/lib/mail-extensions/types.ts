@@ -1,4 +1,9 @@
 import type { Tx } from "@/db";
+import type {
+  EntityLinkCtx,
+  LinkableEntityRef,
+  LinkableEntityType,
+} from "@/lib/entity-links/types";
 
 /**
  * The mail extension contract — primitive P5, "declared extension points".
@@ -42,86 +47,47 @@ import type { Tx } from "@/db";
  */
 
 /**
- * What an extension is told about the caller.
+ * ── WHAT MOVED, AND WHY (2026-08-09) ─────────────────────────────────────────
  *
- * Deliberately small: the ids and the role, all of which came from
- * `requireTenant()`. Notably absent is anything an extension could use to
- * broaden a query — no database handle, no session, no token. It gets the same
- * `tx` the caller is already inside, and that tx is already scoped.
- */
-export interface MailExtensionCtx {
-  tenantId: string;
-  userId: string;
-  role: "owner" | "staff" | "expert";
-}
-
-/** Enough to write a `mail_links` row. */
-export interface LinkableEntityRef {
-  /** Matches `mail_links.entity_type`: ^[a-z][a-z0-9_]{0,62}$ */
-  entityType: string;
-  entityId: string;
-}
-
-/**
- * One thing a thread can be attached to, as the UI needs to show it.
+ * `MailExtensionCtx`, `LinkableEntityRef`, `LinkableEntity` and the generic half
+ * of `MailEntityType` now live in `src/lib/entity-links/types.ts`.
  *
- * Presentation strings come from the extension because only the extension knows
- * what an invoice is called. Mail renders them and never parses them.
+ * Mail declared the idea of a linkable business record first, so it owned the
+ * contract — and then Scheduling wanted exactly the same nine implementations,
+ * because an event is attached to an invoice for the same reason a thread is.
+ * The alternative was a parallel contract and nine second implementations to
+ * keep in sync, which is what ADR 0004 exists to prevent.
+ *
+ * NOTHING ABOUT THE IMPLEMENTATIONS CHANGED — only the type they satisfy.
+ * `MailEntityType` keeps the parts that really are mail's (template
+ * placeholders) and inherits the rest. The names below are re-exported so every
+ * existing `import { LinkableEntity } from "@/lib/mail-extensions/types"` keeps
+ * resolving; new code should prefer the entity-links path.
  */
-export interface LinkableEntity extends LinkableEntityRef {
-  /** "Invoice INV-1042" — the primary line, already formatted. */
-  label: string;
-  /** "Acme Builders · due 2026-08-01". Optional second line. */
-  sublabel?: string;
-  /** Where clicking it goes. Omitted when the entity has no page of its own. */
-  href?: string;
-}
+export type {
+  EntityLinkCtx,
+  LinkableEntity,
+  LinkableEntityRef,
+  LinkableEntityType,
+} from "@/lib/entity-links/types";
+
+/** Mail's name for the caller context. An alias, not a second shape. */
+export type MailExtensionCtx = EntityLinkCtx;
 
 /**
  * A kind of thing threads can be attached to. One per entity type, not one per
  * module — Accounting contributes four.
+ *
+ * `type`, `label`, `pluralLabel`, `icon`, `search` and `resolve` come from
+ * `LinkableEntityType`; read its header for the S12 rule about `tx`. What is
+ * added here is the template vocabulary, which is mail's alone: nothing else in
+ * the product fills in `{{invoice.number}}`.
+ *
+ * (`resolve` is BATCHED there for a reason worth restating on this side: the
+ * alternative is N+1 queries behind a reading pane, the exact failure
+ * `mail_thread_index` exists to prevent on the other side of this join.)
  */
-export interface MailEntityType {
-  /**
-   * Written verbatim into `mail_links.entity_type`, which carries no whitelist
-   * on purpose: registering a new type needs no migration to core. The format
-   * CHECK is the only constraint, so keep it lowercase and underscore-separated.
-   */
-  type: string;
-  /** Singular, for the picker: "Invoice". */
-  label: string;
-  /** Plural, for headings: "Invoices". */
-  pluralLabel: string;
-  /** lucide icon name. A string, so it stays serializable across the boundary. */
-  icon: string;
-  /**
-   * Find candidates for the "Attach to…" picker.
-   *
-   * `query` is raw user input and must be treated as such — bind it, never
-   * interpolate it. Returning fewer than `limit` is fine; returning more is
-   * truncated by the caller.
-   */
-  search(
-    tx: Tx,
-    ctx: MailExtensionCtx,
-    query: string,
-    limit: number,
-  ): Promise<LinkableEntity[]>;
-  /**
-   * Turn stored ids back into displayable entities — BATCHED, one call for
-   * every id of this type on the page.
-   *
-   * Batched because the alternative is N+1 queries behind a reading pane, which
-   * is the exact failure `mail_thread_index` exists to prevent on the other
-   * side of this join. Ids that no longer resolve (deleted, or hidden by RLS)
-   * are simply absent from the result; the caller renders those as a dangling
-   * link rather than treating it as an error.
-   */
-  resolve(
-    tx: Tx,
-    ctx: MailExtensionCtx,
-    ids: readonly string[],
-  ): Promise<LinkableEntity[]>;
+export interface MailEntityType extends LinkableEntityType {
   /**
    * Placeholder fields this type contributes to mail templates, if any.
    *

@@ -418,3 +418,67 @@ export const scheduleItemAttendees = pgTable(
     ),
   ],
 );
+
+/**
+ * What an event is ABOUT — the customer, the invoice, the drawing set.
+ *
+ * MODELLED ON `mail_links` DELIBERATELY, down to the format checks: a thread is
+ * attached to an invoice for the same reason an event is, so the second one to
+ * need it copies the shape rather than inventing a second one.
+ *
+ * `entity_type` CARRIES NO WHITELIST, only a format CHECK. That is primitive P3
+ * and it is the whole point: a capability pack registers `rfi` or `permit` by
+ * writing the string, with no migration to core and no core file naming it.
+ * `extension_slug` records who owns the type, so an UNINSTALLED pack's links are
+ * ignored rather than repaired — the same rule mail's links follow.
+ */
+export const scheduleItemLinks = pgTable(
+  "schedule_item_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull(),
+    /** Which layer owns this link type, so an uninstalled one can be skipped. */
+    extensionSlug: text("extension_slug").notNull(),
+    /** "invoice" | "customer" | "document" | later "job", "rfi", … */
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("schedule_item_links_tenant_id_id_idx").on(t.tenantId, t.id),
+    // Attaching the same record twice is a no-op, not a second row.
+    uniqueIndex("schedule_item_links_unique_idx").on(
+      t.tenantId,
+      t.itemId,
+      t.entityType,
+      t.entityId,
+    ),
+    // The join a module runs in the other direction: "every event on this
+    // invoice". Nothing reads it yet — the reverse view is a later slice — but
+    // the index costs nothing now and a migration later.
+    index("schedule_item_links_entity_idx").on(
+      t.tenantId,
+      t.entityType,
+      t.entityId,
+    ),
+    foreignKey({
+      name: "schedule_item_links_item_fk",
+      columns: [t.tenantId, t.itemId],
+      foreignColumns: [scheduleItems.tenantId, scheduleItems.id],
+    }).onDelete("cascade"),
+    check(
+      "schedule_item_links_entity_type_format",
+      sql`${t.entityType} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "schedule_item_links_extension_slug_format",
+      sql`${t.extensionSlug} ~ '^[a-z][a-z0-9_-]{0,62}$'`,
+    ),
+  ],
+);

@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { schema, type Tx } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
@@ -17,6 +19,13 @@ import {
   setParent,
   updateItem,
 } from "./item-ops";
+import {
+  attachLink,
+  detachLink,
+  searchLinkTargets,
+  type LinkTargetGroup,
+} from "./link-ops";
+import { createSavedView, deleteSavedView } from "./saved-view-ops";
 
 /**
  * Server actions for Work. Canonical shape (conventions §1):
@@ -277,6 +286,135 @@ export async function setParentAction(input: unknown): Promise<ActionResult> {
     await withWork(ctx, (tx) =>
       setParent(tx, ctx, parsed.data.itemId, parsed.data.parentId),
     );
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+/**
+ * Which modules this tenant has switched on.
+ *
+ * Read inside the caller's transaction rather than through `getActiveModules`,
+ * which opens its own — one round trip instead of two, and it keeps the
+ * entitlement filter in the same snapshot as the search it gates.
+ */
+async function enabledModuleSlugs(
+  tx: Tx,
+  tenantId: string,
+): Promise<Set<string>> {
+  const rows = await tx
+    .select({ moduleId: schema.tenantModules.moduleId })
+    .from(schema.tenantModules)
+    .where(
+      and(
+        eq(schema.tenantModules.tenantId, tenantId),
+        eq(schema.tenantModules.enabled, true),
+      ),
+    );
+  return new Set(rows.map((row) => row.moduleId));
+}
+
+const searchSchema = z.object({ query: z.string().max(200) });
+
+export async function searchLinkTargetsAction(
+  input: unknown,
+): Promise<ActionResult<{ groups: LinkTargetGroup[] }>> {
+  try {
+    const ctx = await gate();
+    const parsed = searchSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const groups = await withWork(ctx, async (tx) => {
+      const enabled = await enabledModuleSlugs(tx, ctx.tenantId);
+      return searchLinkTargets(tx, ctx, parsed.data.query, enabled);
+    });
+    // No revalidate: a search changes nothing.
+    return { ok: true, data: { groups } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const attachSchema = z.object({
+  itemId: z.string().uuid(),
+  extensionSlug: z.string().regex(/^[a-z][a-z0-9_-]{0,62}$/),
+  entityType: z.string().regex(/^[a-z][a-z0-9_]{0,62}$/),
+  entityId: z.string().uuid(),
+});
+
+export async function attachLinkAction(input: unknown): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    // The two format regexes mirror the CHECKs in drizzle/0106 exactly. Both
+    // exist: the database is the guarantee, and this is what turns a violation
+    // into "Invalid input" rather than a 500 carrying a constraint name.
+    const parsed = attachSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withWork(ctx, (tx) => attachLink(tx, ctx, parsed.data));
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const detachSchema = z.object({ linkId: z.string().uuid() });
+
+export async function detachLinkAction(input: unknown): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = detachSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withWork(ctx, (tx) => detachLink(tx, ctx, parsed.data.linkId));
+    revalidate();
+    return { ok: true };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const saveViewSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  // The query string, stored and replayed verbatim. Bounded because it reaches
+  // a text column and a URL; not otherwise validated, because `parseWorkView`
+  // is total and turns anything it does not recognise into the default view.
+  params: z.string().max(500),
+  scope: z.enum(["tenant", "private"]),
+});
+
+export async function saveViewAction(
+  input: unknown,
+): Promise<ActionResult<{ viewId: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = saveViewSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const viewId = await withWork(ctx, (tx) =>
+      createSavedView(tx, ctx, parsed.data),
+    );
+    revalidate();
+    return { ok: true, data: { viewId } };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+const deleteViewSchema = z.object({ viewId: z.string().uuid() });
+
+export async function deleteViewAction(
+  input: unknown,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = deleteViewSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withWork(ctx, (tx) => deleteSavedView(tx, ctx, parsed.data.viewId));
     revalidate();
     return { ok: true };
   } catch (error) {

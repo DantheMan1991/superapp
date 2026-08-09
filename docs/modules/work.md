@@ -13,6 +13,58 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Slice 3: links both ways, and saved views (branch `claude/work-slice-3`)
+
+The seam slice. Two tables (`0106`), six policies (`0107`), an item sheet, and
+the isolation suite up to 18. **Work is now the first module that is both a HOST
+and a CONTRIBUTOR of `entity-links`.**
+
+- **The host/contributor combination has an edge eslint could not see, and it
+  is now pinned.** The registry imports `work/links.ts`; the host half
+  (`link-ops.ts`) imports the registry. The module-isolation rule is generated
+  per MODULE, so making `work` a host exempted the whole directory — including
+  the contributor file, which would then have closed the graph into
+  `registry -> links -> registry`. JavaScript resolves a cycle by handing one
+  side a half-built module, which surfaces as `undefined is not a function` at
+  request time on one route. `contributorFileInHost` in eslint.config.mjs puts
+  the non-host rules back for that one file, and the guard was **verified by
+  adding the import and watching it fail**, not by assuming.
+- **`work` was missing from `MODULE_SLUGS` entirely.** Three slices shipped with
+  no isolation rule on `src/modules/work/` in either direction — it could have
+  imported another module, and another module could have imported it. Fixed
+  here. A new module belongs in that array in the slice that creates its
+  directory.
+- **A saved view is a stored query string, replayed.** `params` is text, not
+  jsonb, which differs from `document_saved_views` without disagreeing with it:
+  the shared decision is that a saved view replays the ONE query builder rather
+  than being a second one reading a filter tree. Work's views already serialise
+  to a query string, so storing exactly what the URL held keeps "a view is a
+  parameter set" literally true. Safe only because `parseWorkView` is TOTAL —
+  if that parse ever gains a throw, this column becomes a crash vector and the
+  two must be reconsidered together.
+- **Saved views are the first table here where read and write scopes differ**,
+  and the first policy in the module to read `app_current_user()` — the user id
+  `withWork` has carried since slice 0 for nothing. Four command-specific
+  policies rather than one `FOR ALL`, because DELETE consults USING and never
+  WITH CHECK (drizzle/0077's trap): a USING wide enough to read a colleague's
+  shared view would be wide enough to delete it.
+- **Authorship cannot be forged.** The INSERT policy pins
+  `created_by_clerk_user_id` to `app_current_user()` rather than trusting the
+  row, so a staff member cannot write a view that claims to be the owner's.
+  There is a test.
+- **`?item=` is not part of the view.** It says which sheet is open, which is
+  not a filter — a saved view called "Overdue on site" that also reopened one
+  particular item every time would be carrying somebody's accident forever.
+- **The sheet is URL-driven, and that is what makes Work linkable at all.** A
+  sheet opened by component state would have no href for another module's chip
+  to point at, so `work_item` could not have been contributed.
+- **The link policy does not check the linked record**, and cannot: the entity
+  lives in another module's table under an open taxonomy with no whitelist, so
+  there is nothing to join to. The check happens where it can — the
+  contributor's `resolve()` runs in the caller's transaction, so a record RLS
+  refuses simply does not come back and the chip renders as dangling. The link
+  row is not the secret; the record is, and the record defends itself.
+
 ### 2026-08-09 — Slice 2: the list and the board, over one query (branch `claude/work-slice-2`)
 
 Two drawings, one dataset. **No migration.** 12 view-param tests and two new
@@ -247,7 +299,7 @@ throughout, per conventions §4 and every module since accounting.
 | --- | --- | --- |
 | `work_lists` | The container, and the unit of sharing | **BUILT (0104/0105).** `visibility` is `members` \| `owners`, text + CHECK, default `members`. Policy is `document_folders`' shape exactly: `tenant_id = app_current_tenant() AND (visibility = 'members' OR app_current_tenant_role() = 'owner')`. **No `effective_visibility` column** — lists do not nest, so there is no ancestor chain to roll down. One list per tenant is auto-provisioned (`Work`), the way scheduling provisions a primary calendar. `archived_at`, never deleted |
 | `work_items` | The unit of work | **BUILT (0104/0105).** Inherits its list's visibility through an `EXISTS` against `work_lists` — RLS applies inside policy subqueries, so the visibility term is written once and cannot drift (the trick 0024 documents for `document_versions`). Columns below |
-| `work_item_links` | What a work item is about | *Not built.* Slice 3. Modelled on `schedule_item_links`/`mail_links` **exactly**: `entity_type` carries a FORMAT check (`^[a-z][a-z0-9_]{0,62}$`) and **no value whitelist**, plus `extension_slug`. Inherits from the item. Registering a new linkable type needs no migration to core |
+| `work_item_links` | What a work item is about | **BUILT (0106/0107).** Modelled on `schedule_item_links`/`mail_links` **exactly**: `entity_type` carries a FORMAT check (`^[a-z][a-z0-9_]{0,62}$`) and **no value whitelist**, plus `extension_slug`. Inherits from the item. Registering a new linkable type needs no migration to core |
 
 `work_items` columns that carry a decision:
 
@@ -320,11 +372,22 @@ Built in slice 2:
   `components/filter-bar.tsx` · `components/add-work.tsx`.
 - `tests/work-view-params.test.ts`.
 
+Built in slice 3:
+
+- `src/modules/work/links.ts` — the CONTRIBUTOR. **Must never import
+  `entity-links/registry`**; eslint pins that per file.
+- `src/modules/work/link-ops.ts` — the HOST. This is the half that imports the
+  registry, and why `work` is in `ENTITY_LINK_HOSTS`.
+- `src/modules/work/saved-view-ops.ts` — named parameter sets. Nothing here
+  parses `params`.
+- `src/modules/work/components/item-sheet.tsx` — the surface links live on,
+  opened by `?item=`.
+- `src/modules/work/components/saved-views.tsx`.
+- `drizzle/0106` (tables) · `drizzle/0107` (six policies).
+
 Still to come, and where it goes:
 
-- `src/modules/work/link-ops.ts` — the "attach to…" surface (slice 3)
 - `src/modules/work/attention/source.ts` — the digest contribution (slice 4)
-- `src/modules/work/links.ts` — Work's own contribution to `entity-links` (see below)
 - `src/app/dashboard/m/work/` — the routes
 - `src/db/schema/work.ts`, re-exported by the barrel
 
@@ -461,7 +524,7 @@ Migrations start at **0104**.
 | 0 | ✅ **Shipped.** Schema + RLS + 12 isolation tests + the read path. Default list auto-provisioned. `withWork()` | The visibility rules are the expensive part; certify them against two tenants before any UI exists |
 | 1 | ✅ **Shipped.** Lists and items: create, edit, assign, close, nest. **"My work"**. Module registered, seed row `coming_soon` | The per-person surface first, because it is the one that gets opened daily and the one that proves the shape |
 | 2 | ✅ **Shipped.** The list view with filters, and the board grouped by `state`, moved by menu | Two views over one dataset — the Notion lesson made concrete. It did not need a second query builder; `listWorkItems` grew two filters |
-| 3 | Saved views as URL parameter sets. Links: Work as host **and** as contributor | The seam work. Documents' saved-view decision is reused, not re-derived |
+| 3 | ✅ **Shipped.** Saved views as URL parameter sets. Links: Work as host **and** as contributor | The seam work. Documents' saved-view decision is reused, not re-derived |
 | 4 | Attention source, second in the digest. Seed row flips to `available` | The module goes live once the obligation it creates can reach a person |
 | 5 | CRM follow-ups migrate onto work items; `crm_tasks` is deleted | Its own slice, after the core is proven. Read the trap above before starting |
 | 6 | Recurring work (RRULE moved to `src/lib/` first, in its own PR) | Needs a real consumer; a maintenance schedule is the obvious one |

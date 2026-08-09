@@ -31,6 +31,7 @@ import {
   date,
   foreignKey,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -269,6 +270,128 @@ export const workItems = pgTable(
     check(
       "work_items_no_self_parent",
       sql`${t.parentId} is distinct from ${t.id}`,
+    ),
+  ],
+);
+
+/**
+ * What a work item is about.
+ *
+ * MODELLED ON `schedule_item_links` EXACTLY, which was modelled on `mail_links`
+ * — down to the two format CHECKs and the absence of any value whitelist on
+ * `entity_type`. That absence is the feature: a pack registers a new linkable
+ * kind with no migration to core (primitive P3). Three tables with one shape is
+ * not duplication to be factored away; it is the same contract implemented
+ * where each host's rows live, and ADR 0004's rule applies to the CODE that
+ * resolves them, which is shared in `src/lib/entity-links/`.
+ *
+ * Its policy inherits from `work_items`, which inherits from `work_lists`, so
+ * the chain is three deep and still acyclic: links -> items -> lists -> nothing.
+ */
+export const workItemLinks = pgTable(
+  "work_item_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull(),
+    /** Which layer owns this link type, so an uninstalled one can be skipped. */
+    extensionSlug: text("extension_slug").notNull(),
+    /** "invoice" | "customer" | "document" | later "job", "rfi", … */
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("work_item_links_tenant_id_id_idx").on(t.tenantId, t.id),
+    // Attaching the same record twice is a no-op, not a second row.
+    uniqueIndex("work_item_links_unique_idx").on(
+      t.tenantId,
+      t.itemId,
+      t.entityType,
+      t.entityId,
+    ),
+    // The join in the other direction: "every job on this invoice". Nothing
+    // reads it yet — the reverse view is a later slice — but the index costs
+    // nothing now and a migration later.
+    index("work_item_links_entity_idx").on(t.tenantId, t.entityType, t.entityId),
+    foreignKey({
+      name: "work_item_links_item_fk",
+      columns: [t.tenantId, t.itemId],
+      foreignColumns: [workItems.tenantId, workItems.id],
+    }).onDelete("cascade"),
+    check(
+      "work_item_links_entity_type_format",
+      sql`${t.entityType} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "work_item_links_extension_slug_format",
+      sql`${t.extensionSlug} ~ '^[a-z][a-z0-9_-]{0,62}$'`,
+    ),
+  ],
+);
+
+/**
+ * A named view — which is to say, a named set of URL parameters.
+ *
+ * `params` IS THE QUERY STRING, stored as text. `document_saved_views` keeps
+ * jsonb and this keeps a string, and the difference is not a disagreement: the
+ * decision both share is that a saved view REPLAYS THE ONE QUERY BUILDER rather
+ * than being a second one reading a stored filter tree. Work's views already
+ * serialise to a query string (`core/view-params.ts`), so storing exactly what
+ * the URL held keeps "a view is a parameter set" literally true instead of
+ * approximately.
+ *
+ * Storing an unvalidated string is safe here for one specific reason:
+ * `parseWorkView` is TOTAL. Every field falls back to its default and unknown
+ * states are dropped individually, so the worst a corrupted row can do is open
+ * the default view. If that parse ever gains a throw, this column becomes a
+ * crash vector and the two have to be reconsidered together.
+ *
+ * THE FIRST POLICY IN THIS MODULE THAT READS `app_current_user()`. A private
+ * view belongs to one person, so `withWork` carrying a user id — which slice 0
+ * shipped before anything needed it — finally does something.
+ */
+export const workSavedViews = pgTable(
+  "work_saved_views",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Lowercased name, so "Overdue" and "overdue" collide for one owner. */
+    nameKey: text("name_key").notNull(),
+    /** `tenant` = everyone in the workspace; `private` = only its author. */
+    scope: text("scope").notNull().default("tenant"),
+    /** The query string, without a leading `?`. Empty means the default view. */
+    params: text("params").notNull().default(""),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("work_saved_views_tenant_id_id_idx").on(t.tenantId, t.id),
+    // Per OWNER, not per tenant: two people may each have their own "Today",
+    // and a shared one does not stop somebody naming a private view the same.
+    uniqueIndex("work_saved_views_owner_name_idx").on(
+      t.tenantId,
+      t.createdByClerkUserId,
+      t.nameKey,
+    ),
+    check("work_saved_views_scope", sql`${t.scope} in ('tenant', 'private')`),
+    check(
+      "work_saved_views_name_not_blank",
+      sql`length(btrim(${t.name})) > 0`,
     ),
   ],
 );

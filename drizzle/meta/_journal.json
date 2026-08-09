@@ -743,6 +743,20 @@
       "when": 1786294752105,
       "tag": "0105_work_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1786318258932,
+      "tag": "0106_fancy_karma",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1786318314469,
+      "tag": "0107_work_links_views_rls",
+      "breakpoints": true
     }
   ]
 }

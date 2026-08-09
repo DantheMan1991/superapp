@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { CornerDownRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { urgencyLabel, urgencyOf, type UrgencyGroup } from "../core/grouping";
@@ -24,12 +25,15 @@ export function WorkList({
   today,
   members,
   showListName,
+  viewQuery,
   emptyMessage,
 }: {
   groups: UrgencyGroup<WorkRowView>[];
   today: string;
   members: MemberOption[];
   showListName: boolean;
+  /** The current view's query string, so opening a row keeps the view. */
+  viewQuery: string;
   emptyMessage: string;
 }) {
   const { pending, run } = useWorkAction();
@@ -65,15 +69,16 @@ export function WorkList({
                       aria-label="Filed under other work"
                     />
                   )}
-                  <span
-                    className={
+                  <Link
+                    href={itemHref(row.id, viewQuery)}
+                    className={`hover:underline ${
                       isClosedState(row.state)
                         ? "text-muted-foreground line-through"
                         : ""
-                    }
+                    }`}
                   >
                     {row.title}
-                  </span>
+                  </Link>
                 </span>
                 <DueBadge dueOn={row.dueOn} today={today} />
                 {showListName && row.listName && (
@@ -93,6 +98,19 @@ export function WorkList({
       ))}
     </div>
   );
+}
+
+/**
+ * Where clicking a row goes: the sheet, with the current view kept.
+ *
+ * `?item=` rides ALONGSIDE the view params rather than replacing them, so
+ * closing the sheet returns to the same filtered page — and so a link somebody
+ * pastes carries both what they were looking at and which item they meant.
+ */
+export function itemHref(itemId: string, viewQuery: string): string {
+  const params = new URLSearchParams(viewQuery);
+  params.set("item", itemId);
+  return `/dashboard/m/work?${params.toString()}`;
 }
 
 export function ListBadge({ name, color }: { name: string; color: string }) {

@@ -16,6 +16,16 @@ import {
   updateItem,
 } from "../src/modules/work/item-ops";
 import { ensureDefaultWorkList } from "../src/lib/work/provision";
+import {
+  attachLink,
+  detachLink,
+  resolveLinks,
+} from "../src/modules/work/link-ops";
+import {
+  createSavedView,
+  deleteSavedView,
+  listSavedViews,
+} from "../src/modules/work/saved-view-ops";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -292,6 +302,135 @@ d("work ops", () => {
       before.updatedAt.getTime(),
     );
     expect(after.title).toBe("Touched");
+  });
+
+  it("attaches a record once, however many times you ask", async () => {
+    const itemId = await asOwner((tx) =>
+      createItem(tx, ownerCtx(), { listId, title: "Has links" }),
+    );
+    const target = {
+      itemId,
+      extensionSlug: "crm",
+      entityType: "crm_party",
+      entityId: "00000000-0000-0000-0000-00000000dddd",
+    };
+    await asOwner((tx) => attachLink(tx, ownerCtx(), target));
+    await asOwner((tx) => attachLink(tx, ownerCtx(), target));
+
+    const links = await asOwner((tx) => resolveLinks(tx, ownerCtx(), [itemId]));
+    expect(links).toHaveLength(1);
+    // Nothing owns that id, so it resolves to nothing and renders as a
+    // dangling chip rather than vanishing or throwing.
+    expect(links[0].entity).toBeNull();
+
+    await asOwner((tx) => detachLink(tx, ownerCtx(), links[0].linkId));
+    expect(await asOwner((tx) => resolveLinks(tx, ownerCtx(), [itemId]))).toHaveLength(0);
+  });
+
+  it("resolves a work item through Work's own contributor", async () => {
+    // The round trip the whole slice exists for: Work is the HOST rendering the
+    // picker and the CONTRIBUTOR answering it, in two files that must not
+    // import each other's half.
+    const about = await asOwner((tx) =>
+      createItem(tx, ownerCtx(), { listId, title: "The other job" }),
+    );
+    const item = await asOwner((tx) =>
+      createItem(tx, ownerCtx(), { listId, title: "Depends on it" }),
+    );
+    await asOwner((tx) =>
+      attachLink(tx, ownerCtx(), {
+        itemId: item,
+        extensionSlug: "work",
+        entityType: "work_item",
+        entityId: about,
+      }),
+    );
+
+    const [link] = await asOwner((tx) => resolveLinks(tx, ownerCtx(), [item]));
+    expect(link.entity?.label).toBe("The other job");
+    expect(link.entity?.href).toBe(`/dashboard/m/work?item=${about}`);
+  });
+
+  it("refuses to attach anything to work the caller cannot see", async () => {
+    const hidden = await withSystem(async (tx) => {
+      const [list] = await tx
+        .insert(schema.workLists)
+        .values({ tenantId, name: "Hidden for links", visibility: "owners" })
+        .returning();
+      const [row] = await tx
+        .insert(schema.workItems)
+        .values({ tenantId, listId: list.id, title: "Hidden" })
+        .returning();
+      return row.id;
+    });
+    await expect(
+      asStaff((tx) =>
+        attachLink(tx, staffCtx(), {
+          itemId: hidden,
+          extensionSlug: "crm",
+          entityType: "crm_party",
+          entityId: "00000000-0000-0000-0000-00000000eeee",
+        }),
+      ),
+    ).rejects.toThrow(WorkError);
+  });
+
+  it("detaching something that is not there says so", async () => {
+    await expect(
+      asOwner((tx) =>
+        detachLink(tx, ownerCtx(), "00000000-0000-0000-0000-000000000000"),
+      ),
+    ).rejects.toThrow(WorkError);
+  });
+
+  it("saving over a name replaces that view rather than making a second", async () => {
+    await asOwner((tx) =>
+      createSavedView(tx, ownerCtx(), {
+        name: "Overdue",
+        params: "who=anyone&state=blocked",
+        scope: "tenant",
+      }),
+    );
+    await asOwner((tx) =>
+      createSavedView(tx, ownerCtx(), {
+        // Same name in different case — `name_key` is lowercased so these
+        // collide, which is what somebody adjusting and re-saving means.
+        name: "overdue",
+        params: "who=me",
+        scope: "private",
+      }),
+    );
+
+    const views = await asOwner((tx) => listSavedViews(tx, ownerCtx()));
+    const overdue = views.filter((v) => v.name.toLowerCase() === "overdue");
+    expect(overdue).toHaveLength(1);
+    expect(overdue[0].params).toBe("who=me");
+    expect(overdue[0].scope).toBe("private");
+    expect(overdue[0].mine).toBe(true);
+  });
+
+  it("two people may each have a view of the same name", async () => {
+    await asStaff((tx) =>
+      createSavedView(tx, staffCtx(), {
+        name: "Overdue",
+        params: "who=me&open=0",
+        scope: "private",
+      }),
+    );
+    const mine = await asStaff((tx) => listSavedViews(tx, staffCtx()));
+    expect(mine.filter((v) => v.mine && v.name === "Overdue")).toHaveLength(1);
+  });
+
+  it("will not delete a colleague's view", async () => {
+    const [ownersView] = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.workSavedViews)
+        .where(eq(schema.workSavedViews.createdByClerkUserId, OWNER)),
+    );
+    await expect(
+      asStaff((tx) => deleteSavedView(tx, staffCtx(), ownersView.id)),
+    ).rejects.toThrow(WorkError);
   });
 
   it("reports a rename of something invisible as not found", async () => {

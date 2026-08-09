@@ -247,6 +247,145 @@ d("work tables (RLS)", () => {
     );
   });
 
+  it("another tenant sees no links and no saved views", async () => {
+    await withSystem(async (tx) => {
+      await tx.insert(schema.workItemLinks).values({
+        tenantId: tenantA,
+        itemId: teamItem,
+        extensionSlug: "crm",
+        entityType: "crm_party",
+        entityId: "00000000-0000-0000-0000-0000000000aa",
+      });
+      await tx.insert(schema.workSavedViews).values({
+        tenantId: tenantA,
+        name: "Shared",
+        nameKey: "shared",
+        scope: "tenant",
+        params: "who=anyone",
+        createdByClerkUserId: OWNER,
+      });
+    });
+
+    const links = await asOtherTenant((tx) =>
+      tx.select().from(schema.workItemLinks),
+    );
+    expect(links).toHaveLength(0);
+
+    const views = await asOtherTenant((tx) =>
+      tx.select().from(schema.workSavedViews),
+    );
+    expect(views).toHaveLength(0);
+  });
+
+  it("a link inherits the item's visibility, three tables deep", async () => {
+    // links -> items -> lists. The link row states no rule of its own, so this
+    // is the whole chain being exercised at once.
+    await withSystem((tx) =>
+      tx.insert(schema.workItemLinks).values({
+        tenantId: tenantA,
+        itemId: ownersItem,
+        extensionSlug: "crm",
+        entityType: "crm_party",
+        entityId: "00000000-0000-0000-0000-0000000000bb",
+      }),
+    );
+
+    const staffSees = await asStaff((tx) =>
+      tx.select().from(schema.workItemLinks),
+    );
+    expect(
+      staffSees.map((row) => row.itemId),
+      "staff must not see a link hanging off an owners-only item",
+    ).not.toContain(ownersItem);
+
+    const ownerSees = await asOwner((tx) =>
+      tx.select().from(schema.workItemLinks),
+    );
+    expect(ownerSees.map((row) => row.itemId)).toContain(ownersItem);
+  });
+
+  it("staff cannot attach anything to work they cannot see", async () => {
+    await expect(
+      asStaff((tx) =>
+        tx.insert(schema.workItemLinks).values({
+          tenantId: tenantA,
+          itemId: ownersItem,
+          extensionSlug: "crm",
+          entityType: "crm_party",
+          entityId: "00000000-0000-0000-0000-0000000000cc",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a private saved view belongs to one person", async () => {
+    await withSystem((tx) =>
+      tx.insert(schema.workSavedViews).values({
+        tenantId: tenantA,
+        name: "Mine only",
+        nameKey: "mine only",
+        scope: "private",
+        params: "who=me&state=blocked",
+        createdByClerkUserId: OWNER,
+      }),
+    );
+
+    const mateSees = await asStaff((tx) =>
+      tx.select().from(schema.workSavedViews),
+    );
+    expect(mateSees.map((row) => row.name)).not.toContain("Mine only");
+    // …while the shared one from the previous test is visible to them.
+    expect(mateSees.map((row) => row.name)).toContain("Shared");
+
+    const ownerSees = await asOwner((tx) =>
+      tx.select().from(schema.workSavedViews),
+    );
+    expect(ownerSees.map((row) => row.name)).toContain("Mine only");
+  });
+
+  it("authorship of a saved view cannot be forged", async () => {
+    // WITH CHECK pins created_by to the acting user, so a staff member cannot
+    // write a view that claims to be the owner's.
+    await expect(
+      asStaff((tx) =>
+        tx.insert(schema.workSavedViews).values({
+          tenantId: tenantA,
+          name: "Not mine",
+          nameKey: "not mine",
+          scope: "tenant",
+          params: "",
+          createdByClerkUserId: OWNER,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a shared saved view is readable by all and deletable only by its author", async () => {
+    // The reason saved views have four command-specific policies rather than
+    // one FOR ALL: DELETE consults USING, so a USING wide enough to READ a
+    // colleague's shared view would be wide enough to delete it.
+    const deleted = await asStaff((tx) =>
+      tx
+        .delete(schema.workSavedViews)
+        .where(eq(schema.workSavedViews.name, "Shared"))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+
+    const stillThere = await asStaff((tx) =>
+      tx.select().from(schema.workSavedViews),
+    );
+    expect(stillThere.map((row) => row.name)).toContain("Shared");
+
+    const byAuthor = await asOwner((tx) =>
+      tx
+        .delete(schema.workSavedViews)
+        .where(eq(schema.workSavedViews.name, "Shared"))
+        .returning(),
+    );
+    expect(byAuthor).toHaveLength(1);
+  });
+
   it("the default list is one per tenant, and each tenant gets its own", async () => {
     await withSystem(async (tx) => {
       await tx

@@ -61,6 +61,12 @@ const MODULE_SLUGS = [
   "email",
   "hello",
   "scheduling",
+  // Added 2026-08-09, three slices late. `src/modules/work/` existed from slice
+  // 1 and was not in this list, so nothing stopped it importing another module
+  // AND nothing stopped another module importing it — the guard is generated
+  // from this array in both directions. A new module belongs here in the slice
+  // that creates its directory.
+  "work",
 ];
 
 const CROSS_MODULE_MESSAGE =
@@ -115,7 +121,28 @@ const EXTENSION_HOST = "email";
  * exactly as with mail's. Adding a host here is a deliberate act: it means that
  * module now renders a picker over everybody else's records.
  */
-const ENTITY_LINK_HOSTS = ["email", "scheduling"];
+const ENTITY_LINK_HOSTS = ["email", "scheduling", "work"];
+
+/**
+ * WORK IS THE FIRST MODULE THAT IS BOTH A HOST AND A CONTRIBUTOR, and that
+ * combination has an edge the per-module rule above cannot see.
+ *
+ * Being a host exempts the WHOLE directory from the registry ban — the rule is
+ * generated per module, not per file. But `src/modules/work/links.ts` is Work's
+ * CONTRIBUTION, imported BY the registry. If it imported the registry back, the
+ * two files would form a genuine import cycle: `registry -> work/links ->
+ * registry`, which JavaScript resolves by handing one of them a half-built
+ * module and is the kind of failure that shows up as `undefined is not a
+ * function` at request time, on one route, in production.
+ *
+ * So the contributor file gets the non-host rules put back. Everything else
+ * under `src/modules/work/` keeps the host exemption it needs to render the
+ * picker.
+ */
+const CONTRIBUTOR_FILE_MESSAGE =
+  "This file is Work's CONTRIBUTION to entity-links and is imported by the registry. " +
+  "Importing the registry from here creates a cycle (registry -> links -> registry). " +
+  "The host half of Work may import it; this file may not.";
 
 const ENTITY_LINKS_MESSAGE =
   "A module may import only src/lib/entity-links/types. The registry composes every " +
@@ -139,54 +166,92 @@ const ATTENTION_REGISTRY_MESSAGE =
   "platform wiring — importing either pulls in every other module's source and defeats the " +
   "isolation rule by one level of indirection.";
 
+/**
+ * The patterns one module directory is forbidden to import.
+ *
+ * Extracted so the per-file override below can ask for the NON-host version of
+ * a host module's rules without restating any of them — two copies of this list
+ * would drift, and the one that drifted would be the one nobody reads.
+ */
+function isolationPatterns(slug, { entityLinkHost }) {
+  return [
+    ...MODULE_SLUGS.filter((other) => other !== slug).map((other) => ({
+      group: pathsToModule(other),
+      message: CROSS_MODULE_MESSAGE,
+    })),
+    ...(slug === EXTENSION_HOST
+      ? []
+      : [
+          {
+            group: [
+              "@/lib/mail-extensions/registry",
+              "@/lib/mail-extensions/resolve",
+            ],
+            message: REGISTRY_MESSAGE,
+          },
+        ]),
+    // No host exemption — see ATTENTION_REGISTRY_MESSAGE above.
+    {
+      group: [
+        "@/lib/attention-sources/registry",
+        "@/lib/attention-sources/resolve",
+      ],
+      message: ATTENTION_REGISTRY_MESSAGE,
+    },
+    ...(entityLinkHost
+      ? []
+      : [
+          {
+            group: ["@/lib/entity-links/registry"],
+            message: ENTITY_LINKS_MESSAGE,
+          },
+        ]),
+  ];
+}
+
 const moduleIsolation = MODULE_SLUGS.map((slug) => ({
   files: [`src/modules/${slug}/**/*.{ts,tsx}`],
   rules: {
     "no-restricted-imports": [
       "error",
       {
-        patterns: [
-          ...MODULE_SLUGS.filter((other) => other !== slug).map((other) => ({
-            group: pathsToModule(other),
-            message: CROSS_MODULE_MESSAGE,
-          })),
-          ...(slug === EXTENSION_HOST
-            ? []
-            : [
-                {
-                  group: [
-                    "@/lib/mail-extensions/registry",
-                    "@/lib/mail-extensions/resolve",
-                  ],
-                  message: REGISTRY_MESSAGE,
-                },
-              ]),
-          // No host exemption — see ATTENTION_REGISTRY_MESSAGE above.
-          {
-            group: [
-              "@/lib/attention-sources/registry",
-              "@/lib/attention-sources/resolve",
-            ],
-            message: ATTENTION_REGISTRY_MESSAGE,
-          },
-          ...(ENTITY_LINK_HOSTS.includes(slug)
-            ? []
-            : [
-                {
-                  group: ["@/lib/entity-links/registry"],
-                  message: ENTITY_LINKS_MESSAGE,
-                },
-              ]),
-        ],
+        patterns: isolationPatterns(slug, {
+          entityLinkHost: ENTITY_LINK_HOSTS.includes(slug),
+        }),
       },
     ],
   },
 }));
 
+/**
+ * The one file inside a host module that is a CONTRIBUTOR — see
+ * CONTRIBUTOR_FILE_MESSAGE. Flat config is last-wins per rule, so this block
+ * REPLACES the module's patterns for this file, which is why it asks for the
+ * full non-host set rather than only the registry ban.
+ */
+const contributorFileInHost = {
+  files: ["src/modules/work/links.ts"],
+  rules: {
+    "no-restricted-imports": [
+      "error",
+      {
+        patterns: isolationPatterns("work", { entityLinkHost: false }).map(
+          (pattern) =>
+            pattern.group[0] === "@/lib/entity-links/registry"
+              ? { ...pattern, message: CONTRIBUTOR_FILE_MESSAGE }
+              : pattern,
+        ),
+      },
+    ],
+  },
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   ...moduleIsolation,
+  // AFTER moduleIsolation, deliberately: flat config is last-wins per rule.
+  contributorFileInHost,
   {
     // The extension contract and the resolver. `registry.ts` is deliberately
     // absent from this glob — it is the one file allowed to name modules.

@@ -12,6 +12,8 @@ export default defineConfig({
   },
   test: {
     include: ["tests/**/*.test.ts"],
+    // Clears tenants left behind by runs that were killed before afterAll.
+    globalSetup: ["tests/global-setup.ts"],
     // DB-backed tests share one Neon database; keep files sequential.
     fileParallelism: false,
     testTimeout: 30_000,

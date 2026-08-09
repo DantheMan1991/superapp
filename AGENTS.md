@@ -77,5 +77,13 @@ at `/admin/docs`.
   never run as it (`DATABASE_URL` = app_user).
 - `npm run test:isolation` — the two-tenant RLS certification; must pass
   before any deploy. Needs `DATABASE_URL` (dev/staging DB, never prod).
+- `npm run db:clean-test-tenants` — lists (dry run) the tenants left behind
+  by interrupted test runs; `-- --yes` deletes them. The suites stamp their
+  rows `<prefix>-${process.pid}` and drop them in `afterAll`, so anything
+  still matching is from a run that was killed. `vitest` also sweeps
+  stamped rows older than an hour before every run
+  (`tests/global-setup.ts`); the age filter keeps a concurrent run safe.
+  New suite that creates tenants → add its prefix to
+  `tests/test-tenants.ts` (`tests/test-stamps.test.ts` enforces this).
 - `npm run build` — must stay green; keys are not required for the build
   (all provider clients are lazy).

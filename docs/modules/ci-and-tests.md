@@ -7,6 +7,51 @@
 
 ## Build log
 
+### 2026-08-09 — The database suite runs AFTER the merge, not before (branch `claude/ci-fast-gate`)
+
+The founder was waiting about fifteen minutes per merge, on every slice of a
+ten-slice module, and called it: *"these CI tests really bog down the process…
+I feel like this should be done less frequently."* He is right, and the numbers
+back him.
+
+- **`checks` now also runs the PURE project** — 43 files, 1016 tests, **20
+  seconds**. Added with `--project pure` rather than letting
+  `database-guard.ts` skip the DB files: a suite that skips reports zero
+  failures, which is the exact shape of a green tick over no coverage.
+- **`tests` is gated on `if: github.event_name == 'push' || <label>`.** It runs
+  on the push to `main` after a merge, and on any PR labelled `full-tests`.
+- **`if:` rather than a trigger-level filter, deliberately.** A job skipped by
+  `if:` still reports a status; a `paths-ignore` skip reports nothing and would
+  wedge a required check forever. The workflow's own note already prescribed
+  this shape if the expensive job ever needed gating.
+
+**What this costs, stated plainly: `main` auto-deploys, so a failure is now
+found within ~12 minutes of merging rather than before it, and the bad commit
+is live for that window.** Revert-and-fix rather than catch-before-merge. Use
+the `full-tests` label for RLS, migrations, and anything touching a tenant
+table — the cases where finding out after the deploy is worst.
+
+**Three things made it the right trade:**
+
+1. The 12 minutes is almost entirely the sequential `db` project. The pure files
+   were never the cost.
+2. **CI was duplicating the local gate.** AGENTS.md already requires
+   `npm run test:isolation` locally whenever RLS or a tenant table is touched —
+   6.5 minutes — and CI then re-ran the same files. Every green CI run during
+   the scheduling slices was green because it had already passed locally.
+3. **Blocking bought less than it looked.** Every failure that actually reached
+   production during those slices did so through a fully green pipeline. The
+   `use server` export that broke module toggling passed lint, `tsc`, the whole
+   suite AND the build, because it only fails when a request evaluates the
+   action graph.
+
+Not a reason, but worth recording: the alternative considered and deferred was
+a per-run Neon branch, which would let the DB suite run in parallel instead of
+queueing repo-wide. That removes the queue without giving up
+catch-before-merge, and there is a trap in it — Neon-managed roles carry
+`BYPASSRLS`, so wiring `TEST_DATABASE_URL` to one would make the isolation
+suite certify nothing.
+
 ### 2026-08-08 — Documentation-only changes skip CI (branch `claude/ci-skip-docs`)
 
 PR #78 was two markdown files, and it spent twenty minutes running the database

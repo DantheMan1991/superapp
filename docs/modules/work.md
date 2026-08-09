@@ -13,6 +13,77 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Slice 0: schema, RLS, the read path (branch `claude/work-slice-0`)
+
+Two tables, four policies, **no SECURITY DEFINER helpers**, twelve isolation
+tests. No UI, no module registry entry, no seed row — the module is still
+`coming_soon` and slice 4 is what turns it on. Migrations `0104` (tables) and
+`0105` (RLS).
+
+- **Two tables, not the three the data model lists.** `work_lists` and
+  `work_items`. `work_item_links` lands in slice 3 with the surface that reads
+  it; a table with no reader is the speculative build this codebase avoids.
+  Items ARE here, because the property slice 0 exists to certify — that item
+  visibility INHERITS from the list — cannot be proven without both.
+- **No policy cycle, and therefore no definer helpers.** Worth recording
+  because the last two modules both needed them and the next reader will expect
+  them: scheduling needed `app_owns_calendar()` (a calendar's owner may share
+  it) and `app_is_attendee()` (being invited shows you an item without the
+  calendar), and each closed a cycle. Work has neither rule — a list is visible
+  to members or to owners, there is no per-person grant table to recurse into,
+  and **the assignee is not a visibility term**. The graph is one edge:
+  `work_items` → `work_lists` → nothing.
+- **The read path redacts nothing, because there is no level that would need
+  it.** Scheduling's `busy` and `titles` are partial redactions and RLS cannot
+  return half a row, which is what `app_schedule_range()` exists for. Work has
+  no such level, so the policies are the entire answer and
+  `src/modules/work/read.ts` is a plain query builder. If a "titles only" level
+  ever arrives, 0097 is the worked example — but nothing in application code
+  should start deciding visibility before then.
+- **`withWork()` exists from slice 0**, for the reason scheduling wrote down:
+  0077 named the fix, CRM never built it and now repeats the options at 49 call
+  sites under a header comment. It carries `userId` even though no policy reads
+  it yet, so slice 1 does not have to revisit every call site to assign work.
+- **The default list is per TENANT and rides along on membership sync.** That
+  is a workspace-level row provisioned from a person-level event, which is odd
+  and deliberate: it is the path every pre-existing tenant comes back through,
+  exactly as `ensurePrimaryCalendar` does. Idempotent via the partial unique
+  index, so the common case costs one no-op insert.
+- **drizzle-kit generated a migration that cannot run**, again — every
+  `ADD CONSTRAINT` before every `CREATE INDEX`, so the composite FKs referenced
+  unique indexes that did not exist yet (Postgres 42830). 0104 is hand-reordered
+  and says so in its header. This is a property of the generator, not of the
+  schema: expect it on the next module too.
+- **`rejects.toThrow(/constraint_name/)` does not test what it looks like it
+  tests.** Drizzle re-throws as `Failed query: …` and the constraint name only
+  survives on the pg error underneath, so the regex never matched and a bare
+  `toThrow()` would have passed for a typo'd column just as happily as for the
+  invariant. `tests/work.test.ts` walks the cause chain and names the
+  constraint instead.
+- **The state vocabulary is NOT in the schema file**, and moving it out was the
+  last change before the PR rather than the first. `WORK_STATES` lives in
+  `src/lib/work/vocabulary.ts` with no imports and no directive, because slice
+  1's board renders those labels in the browser and importing them from
+  `@/db/schema/work` would pull drizzle and every table definition into that
+  bundle. documents.md wrote this up after `server-only` propagated through a
+  type import; conventions §8 records the inverse, which took the CRM deal page
+  down in production.
+- **A test reads the CHECK back out of Postgres and compares it to
+  `WORK_STATES`.** The constraint is SQL literals and the constant is
+  TypeScript; neither can be generated from the other, so without this the
+  first drift shows up as a state the app offers and the database refuses.
+  Postgres rewrites `in (…)` as `= ANY (ARRAY[…])`, which is why the test parses
+  `pg_get_constraintdef` rather than comparing strings.
+- Verified against `pg_class` and `pg_policies` on the dev branch after
+  migrating, per the drift rule: both tables `relrowsecurity` AND
+  `relforcerowsecurity`, four policies, six CHECKs.
+- **The isolation suite failed on its first run and passed clean on its second**
+  — `Connection terminated unexpectedly` from the Neon driver, which took
+  `crm.test.ts` down and skipped 34 tests behind it. `close.test.ts` did the
+  same thing once and then passed 23/23. Recorded because a first-run failure in
+  this suite is not automatically a real one, and the tell is an infrastructure
+  error with no assertion attached.
+
 ### 2026-08-09 — Design settled, nothing built
 
 Chosen as the next core tool after Scheduling finished (#96–#107). Nothing in
@@ -89,9 +160,9 @@ throughout, per conventions §4 and every module since accounting.
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `work_lists` | The container, and the unit of sharing | `visibility` is `members` \| `owners`, text + CHECK, default `members`. Policy is `document_folders`' shape exactly: `tenant_id = app_current_tenant() AND (visibility = 'members' OR app_current_tenant_role() = 'owner')`. **No `effective_visibility` column** — lists do not nest, so there is no ancestor chain to roll down. One list per tenant is auto-provisioned (`Work`), the way scheduling provisions a primary calendar. `archived_at`, never deleted |
-| `work_items` | The unit of work | Inherits its list's visibility through an `EXISTS` against `work_lists` — RLS applies inside policy subqueries, so the visibility term is written once and cannot drift (the trick 0024 documents for `document_versions`). Columns below |
-| `work_item_links` | What a work item is about | Modelled on `schedule_item_links`/`mail_links` **exactly**: `entity_type` carries a FORMAT check (`^[a-z][a-z0-9_]{0,62}$`) and **no value whitelist**, plus `extension_slug`. Inherits from the item. Registering a new linkable type needs no migration to core |
+| `work_lists` | The container, and the unit of sharing | **BUILT (0104/0105).** `visibility` is `members` \| `owners`, text + CHECK, default `members`. Policy is `document_folders`' shape exactly: `tenant_id = app_current_tenant() AND (visibility = 'members' OR app_current_tenant_role() = 'owner')`. **No `effective_visibility` column** — lists do not nest, so there is no ancestor chain to roll down. One list per tenant is auto-provisioned (`Work`), the way scheduling provisions a primary calendar. `archived_at`, never deleted |
+| `work_items` | The unit of work | **BUILT (0104/0105).** Inherits its list's visibility through an `EXISTS` against `work_lists` — RLS applies inside policy subqueries, so the visibility term is written once and cannot drift (the trick 0024 documents for `document_versions`). Columns below |
+| `work_item_links` | What a work item is about | *Not built.* Slice 3. Modelled on `schedule_item_links`/`mail_links` **exactly**: `entity_type` carries a FORMAT check (`^[a-z][a-z0-9_]{0,62}$`) and **no value whitelist**, plus `extension_slug`. Inherits from the item. Registering a new linkable type needs no migration to core |
 
 `work_items` columns that carry a decision:
 
@@ -119,12 +190,31 @@ oversights.
 
 ## Key files & seams
 
-Nothing exists yet. The intended layout, matching `src/modules/scheduling/`:
+Built in slice 0:
 
-- `src/modules/work/WorkModule.tsx` — renderer, registered in `src/modules/index.ts`
+- `src/db/schema/work.ts` — the two tables, and the comments that explain them.
+- `drizzle/0104_slow_zemo.sql` — tables. **Hand-reordered; regenerating undoes it.**
+- `drizzle/0105_work_rls.sql` — four policies, and the note on why there are no
+  definer helpers.
+- `src/lib/work/with-work.ts` — `withWork(ctx, fn)`. The only door onto the
+  tables from a request.
+- `src/lib/work/provision.ts` — `ensureDefaultWorkList` / `findDefaultWorkListId`,
+  called from `upsertMembership` on both branches.
+- `src/lib/work/vocabulary.ts` — the values `state` and `visibility` may hold.
+  **No imports and no directive**, because the schema, a browser-rendered board
+  and the migration's CHECK all need them and cannot share a module. Importing
+  them from `@/db/schema/work` would drag drizzle into a client bundle.
+- `src/modules/work/core/state.ts` — the labels, and the one function that
+  decides whether a reader sees `status` or core's own word. Also no directive,
+  for conventions §8's reason.
+- `src/modules/work/read.ts` — the read path.
+- `tests/isolation/work.test.ts` · `tests/work.test.ts` · `tests/work-core.test.ts`.
+
+Still to come, and where it goes:
+
+- `src/modules/work/WorkModule.tsx` — renderer, registered in `src/modules/index.ts` (slice 1)
 - `src/modules/work/list-ops.ts` · `item-ops.ts` · `link-ops.ts` — server actions
-- `src/modules/work/core/` — pure, no db: state labels, urgency, view params
-- `src/modules/work/attention/source.ts` — the digest contribution
+- `src/modules/work/attention/source.ts` — the digest contribution (slice 4)
 - `src/modules/work/links.ts` — Work's own contribution to `entity-links` (see below)
 - `src/app/dashboard/m/work/` — the routes
 - `src/db/schema/work.ts`, re-exported by the barrel
@@ -259,7 +349,7 @@ Migrations start at **0104**.
 
 | # | Slice | Why here |
 | --- | --- | --- |
-| 0 | Schema + RLS + isolation tests + the read path. Default list auto-provisioned | The visibility rules are the expensive part; certify them against two tenants before any UI exists |
+| 0 | ✅ **Shipped.** Schema + RLS + 12 isolation tests + the read path. Default list auto-provisioned. `withWork()` | The visibility rules are the expensive part; certify them against two tenants before any UI exists |
 | 1 | Lists and items: create, edit, assign, close, nest. **"My work"** | The per-person surface first, because it is the one that gets opened daily and the one that proves the shape |
 | 2 | The list view with filters, and the board grouped by `state`, moved by menu | Two views over one dataset — the Notion lesson made concrete. If this needs a second query builder, slice 1 built the wrong read path |
 | 3 | Saved views as URL parameter sets. Links: Work as host **and** as contributor | The seam work. Documents' saved-view decision is reused, not re-derived |
@@ -277,7 +367,16 @@ something does, the boundary was drawn wrong.
 
 ## Open items
 
-Everything here is designed-and-not-built until slice 0 lands. Beyond that:
+- **`listWorkItems` has no pagination.** It returns every item matching the
+  filter, which is fine for the tenants that exist and is not fine for a list
+  with five thousand items on it. Slice 1's UI is what will meet this first, and
+  the fix is a limit plus a cursor on `(due_on, created_at)` — the index is
+  already in that order.
+- **Nothing keeps `updated_at` current.** There is no trigger; the ops that
+  land in slice 1 have to set it, and the first one that forgets will not fail
+  any test written so far.
+
+Beyond slice 0, and deferred on purpose:
 
 - **`priority` is deferred.** Nothing in v1 would read it. Revisit when a
   surface exists that would order by it and cannot use due date and state.

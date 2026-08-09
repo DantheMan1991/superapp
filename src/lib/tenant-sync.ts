@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { withSystem, schema } from "@/db";
 import { slugify } from "@/lib/slug";
 import { ensurePrimaryCalendar } from "@/lib/schedule/provision";
+import { ensureDefaultWorkList } from "@/lib/work/provision";
 import type { Membership, Tenant } from "@/db/schema";
 
 /**
@@ -144,6 +145,12 @@ export async function upsertMembership(params: {
       // the path their next role sync comes through. Idempotent, so the common
       // case costs one no-op insert.
       await ensurePrimaryCalendar(tx, tenant.id, params.clerkUserId);
+      // The work list is per TENANT, so this is one no-op insert per membership
+      // sync rather than per person. It rides along here for the same reason the
+      // calendar does — it is the path every pre-existing tenant comes back
+      // through — and not because provisioning a workspace-level row belongs to
+      // a membership event.
+      await ensureDefaultWorkList(tx, tenant.id);
       return {
         status: "synced",
         membership: updated,
@@ -160,6 +167,7 @@ export async function upsertMembership(params: {
       })
       .returning();
     await ensurePrimaryCalendar(tx, tenant.id, params.clerkUserId);
+    await ensureDefaultWorkList(tx, tenant.id);
     return { status: "synced", membership: created, previousRole: null } as const;
   });
 }

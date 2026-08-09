@@ -35,6 +35,7 @@ import {
   cancelItem,
   createItem,
   getItemDetail,
+  overrideOccurrence,
   respondToItem,
   updateItem,
 } from "./item-ops";
@@ -311,6 +312,8 @@ const eventFieldsSchema = z.object({
   allDay: z.boolean().optional(),
   showAs: z.enum(["free", "busy", "tentative", "away"]).optional(),
   sensitivity: z.enum(["normal", "private"]).optional(),
+  // Shape-checked here; `item-ops` refuses anything the expander cannot honour.
+  recurrenceRule: z.string().max(200).optional(),
   attendees: z.array(attendeeSchema).max(100).optional(),
 });
 
@@ -498,6 +501,7 @@ export async function getEventAction(
     allDay: boolean;
     showAs: "free" | "busy" | "tentative" | "away";
     sensitivity: "normal" | "private";
+    recurrenceRule: string;
     canEdit: boolean;
     myResponse: "needs_action" | "accepted" | "declined" | "tentative" | null;
     attendees: Array<{
@@ -547,6 +551,7 @@ export async function getEventAction(
         allDay: item.allDay,
         showAs: item.showAs,
         sensitivity: item.sensitivity,
+        recurrenceRule: item.recurrenceRule,
         canEdit: access.rows[0]?.access === "write",
         myResponse:
           item.attendees.find((a) => a.clerkUserId === ctx.userId)?.response ??
@@ -755,6 +760,46 @@ export async function revokeFeedTokenAction(
     });
 
     revalidatePath(`${BASE}/calendars`);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- One occurrence of a series -------------------------------------------- */
+
+const occurrenceSchema = z.object({
+  itemId: z.string().uuid(),
+  occurrenceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+/**
+ * Cancel a single occurrence, leaving the series alone.
+ *
+ * The commonest edit to a repeating event by a wide margin — "no standup on
+ * Friday" — and the reason the override table exists at all.
+ */
+export async function cancelOccurrenceAction(
+  input: z.infer<typeof occurrenceSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = occurrenceSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withSchedule(ctx, async (tx) => {
+      await overrideOccurrence(tx, ctx, { ...parsed.data, cancelled: true });
+      await logAuditInTx(tx, {
+        action: "scheduling.occurrence_cancelled",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "schedule_item",
+        targetId: parsed.data.itemId,
+        meta: { occurrenceDate: parsed.data.occurrenceDate },
+      });
+    });
+
+    revalidatePath(BASE);
     return { ok: true };
   } catch (err) {
     return fail(err);

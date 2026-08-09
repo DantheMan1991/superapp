@@ -15,6 +15,50 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-08 — Slice 1: calendars and sharing (branch `claude/scheduling-slice-1`)
+
+The four access levels stop being a schema decision and become something a
+person clicks. Create, rename, recolour, archive; share with a colleague or with
+the whole workspace, at any of the four levels.
+
+- **The module is REGISTERED from this slice, not slice 4.** The roadmap put the
+  registry entry with the seed-row flip; that was wrong, because slices 1–3
+  build UI and UI needs somewhere to live. `src/modules/index.ts` now has
+  `scheduling`, while the seed row stays `coming_soon` — `requireModuleEnabled`
+  gates on `tenant_modules`, not on `modules.status`, so a superadmin can switch
+  it on for one tenant to try it and nobody is sold it. Slice 4 still flips the
+  seed row.
+- **The module home IS the calendar list**, for now. Slice 2 makes the week view
+  the home and moves this to `/calendars`. A front door that only reported "you
+  have 3 calendars" would be a dead end — the same reason CRM's home is the
+  records list rather than an overview.
+- **The sharing dialog pins "Everyone in this workspace" at the top, always**,
+  even when nothing is shared, using the same control as a person. That is the
+  UI consequence of there being one mechanism: sharing with everybody is not a
+  separate feature to discover. Outlook does exactly this.
+- **Level wording is Outlook's, minus its "I".** *Free/busy only · Titles and
+  locations · All details · Can edit*. "Can view when I'm busy" reads as
+  somebody's personal availability, which is wrong on a business calendar; the
+  distinction the middle tier exists to make survives the rewording.
+- **Colour is open text in the column, an enum at the action boundary, and full
+  class strings in the component.** Three spellings of one idea, each for a
+  reason: the column stays open so a palette changes without a migration, the
+  Zod enum is what stops arbitrary text reaching a style attribute, and Tailwind
+  scans source text so an interpolated `bg-${color}-500` produces a class that
+  exists in no stylesheet.
+- **Archive, never delete.** A deleted calendar takes its items with it by FK
+  cascade. The primary cannot be archived at all — enforced in `calendar-ops`
+  rather than the database, because it is a product rule and the message needs
+  to explain itself. The UI omits the button rather than disabling it.
+- **`NOT_FOUND` and `FORBIDDEN` are indistinguishable for an invisible
+  calendar**, with a test that says so. A distinct "you may not see this" would
+  confirm the calendar exists to somebody probing.
+- **The guards in `calendar-ops` are NOT the security boundary** — 0097 is. They
+  exist so a refused action says why instead of reporting that nothing happened.
+  The ops tests run as a person through real RLS for exactly this reason: where
+  a guard and a policy disagree, that is what catches it.
+- 9 ops tests, run as a person rather than under `withSystem`.
+
 ### 2026-08-08 — Slice 0: schema, RLS, the read path (branch `claude/scheduling-slice-0`)
 
 Four tables, twelve policies, four helper functions, thirteen isolation tests.
@@ -115,6 +159,18 @@ should carry these invariants as comments, in the style of `0077`.
 Proposed layout. The three-file dependency graph is copied from
 `src/lib/mail-extensions/`, because that shape is already enforced by eslint and
 already proven by three implementors.
+
+Built in slice 1:
+
+- `src/modules/scheduling/SchedulingModule.tsx` — the renderer, registered in
+  `src/modules/index.ts`. Currently the calendar list; slice 2 replaces it.
+- `src/modules/scheduling/calendar-ops.ts` — calendars and shares. Takes the
+  caller's `tx`; its guards are for MESSAGES, not security.
+- `src/modules/scheduling/actions.ts` — gate → Zod → `withSchedule` → audit →
+  revalidate. `CALENDAR_COLORS` is the palette enum.
+- `src/modules/scheduling/components/calendar-manager.tsx` — the list, the
+  create/edit form and the sharing dialog.
+- `tests/scheduling-calendar-ops.test.ts` — 9 tests, run as a person.
 
 Built in slice 0:
 
@@ -404,7 +460,7 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 | # | Slice | Why here |
 | --- | --- | --- |
 | 0 | ✅ **Shipped.** Schema + RLS + 13 isolation tests. `withSchedule()`. Access-level projection in the read path. Primary calendar auto-provisioned on membership | The visibility rules are the expensive part; prove them against two tenants before any UI exists. The projection lands here because widening a boolean later means rewriting every caller |
-| 1 | Calendars: create, rename, colour, archive. Share with a person, share business-wide | Sharing is the module's defining behaviour and everything else assumes it works |
+| 1 | ✅ **Shipped.** Calendars: create, rename, colour, archive. Share with a person or the whole workspace, at any level. Module registered (seed row still `coming_soon`) | Sharing is the module's defining behaviour and everything else assumes it works |
 | 2 | Items + attendees. Month/week/day. `listRange` | Attendees are NOT deferred — see Decisions |
 | 3 | Links, and entity types from Accounting, CRM, Documents and Mail | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
 | 4 | Attention source + "my day". Registry entry, seed row flips to `available` | The digest gets its strongest source; the module goes live |
@@ -421,6 +477,16 @@ them. If something does, the boundary was drawn wrong.
 
 ## Open items
 
+- **NOBODY HAS CLICKED THE SLICE 1 UI.** It compiles, its actions are covered by
+  9 tests through real RLS, and the RLS itself is covered by 14 more — but the
+  dashboard is behind Clerk auth, so no agent can reach it and none of this
+  says the sharing dialog reads correctly to a human. The questions still open:
+  does "Free/busy only" read as a level or as a status, is the pinned
+  everyone-row understood as sharing rather than a setting, and does anybody
+  find the archive button before they look for delete.
+- **`listShares` is loaded for every administrable calendar up front.** One
+  query per calendar at page load. Right at a handful, wrong at hundreds, and
+  the fix is to load them when the dialog opens rather than to paginate.
 - **`app_calendar_access()` is called PER ROW**, both in the items policy and in
   `listRange`'s select list. It is `STABLE`, so Postgres may cache within a
   statement, but nothing has measured it and a busy month view is the query that

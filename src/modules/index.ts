@@ -4,6 +4,7 @@ import { CrmModule } from "./crm/CrmModule";
 import { DocumentsModule } from "./documents/DocumentsModule";
 import { EmailModule } from "./email/EmailModule";
 import { HelloModule } from "./hello/HelloModule";
+import { SchedulingModule } from "./scheduling/SchedulingModule";
 
 /**
  * Code-side module registry: slug → how it renders. The DB `modules` table
@@ -44,6 +45,15 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     // pane; the shell's centred column would spend half a monitor on margin.
     layout: "full",
     Component: EmailModule,
+  },
+  // Registered from slice 1 so the UI has somewhere to live, while the seed row
+  // stays `coming_soon` — a superadmin can switch it on for one tenant to try
+  // it, and nobody is sold it. Slice 4 flips the seed row.
+  scheduling: {
+    slug: "scheduling",
+    name: "Scheduling",
+    icon: "calendar",
+    Component: SchedulingModule,
   },
 };
 

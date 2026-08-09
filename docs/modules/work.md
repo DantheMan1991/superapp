@@ -13,6 +13,48 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Slice 1: lists, items, and "my work" (branch `claude/work-slice-1`)
+
+The module renders. Eight server actions, two client surfaces, 13 op tests and
+7 pure ones. **Module registered in `src/modules/index.ts`, seed row added as
+`coming_soon`** — a superadmin can switch it on for one tenant to try it, and
+nobody is sold it. Slice 4 flips the row. **No migration.**
+
+- **The module home is "my work", not a board.** The per-person view is what
+  gets opened daily and the one that proves the shape; a board over a dataset
+  nobody has populated proves nothing. Google Tasks' single good idea with the
+  part that makes it useless to a business fixed — the rows are the workspace's
+  work, assigned to a person, not a private per-account list.
+- **The row's date badge is computed in the BROWSER, the section headings on the
+  server.** crm.md carries this as an open item: a page rendered at 23:58 and
+  read at 00:02 keeps calling tomorrow's work "today" until something unrelated
+  re-renders. `today` is still the TENANT's day passed down — the browser's
+  clock is never consulted, only its render timing.
+- **An expert cannot be assigned work, and that is what keeps the loop closed.**
+  Experts are read-only here as in CRM, Documents and Scheduling — so an expert
+  who *could* be assigned work would be unable to mark it done.
+  `listAssignableMembers` already excludes them, so `assertAssignable` leans on
+  that rather than restating it, and a test pins it. crm.md records the gap this
+  closes: there, any string could be written into an assignee column, producing
+  work that appears in nobody's list and nobody's digest.
+- **`setItemState` is the only way to change a state**, because `state` and
+  `closed_at` are one fact across two columns and the CHECK refuses any write
+  where they disagree. There is no "just set the state" path to write and no way
+  for a later caller to invent one.
+- **The parent cycle check lives in the op, not the database.** The CHECK only
+  catches an item that is its own parent; A → B → A is two legal rows and one
+  illegal graph, so `setParent` walks up from the proposed parent. The walk
+  refuses to visit a node twice rather than trusting the data is already clean.
+- **`WORK_COLORS` is in `core/colors.ts`, not `actions.ts`** — a `"use server"`
+  file may export only async functions, and scheduling shipped a colour array in
+  its actions file on 2026-08-08 and took the superadmin tenant page down in
+  production. `tests/use-server-exports.test.ts` is the only thing in the
+  pipeline that catches it; `tsc`, eslint, vitest and the build all pass it.
+- **`updated_at` is now set by every op**, closing the open item slice 0 left:
+  there is no trigger, so the first op that forgot would not have failed a test.
+- The default list has no archive control in the UI at all. The action refuses
+  it, and a button that always fails is worse than no button.
+
 ### 2026-08-09 — Slice 0: schema, RLS, the read path (branch `claude/work-slice-0`)
 
 Two tables, four policies, **no SECURITY DEFINER helpers**, twelve isolation
@@ -210,10 +252,22 @@ Built in slice 0:
 - `src/modules/work/read.ts` — the read path.
 - `tests/isolation/work.test.ts` · `tests/work.test.ts` · `tests/work-core.test.ts`.
 
+Built in slice 1:
+
+- `src/modules/work/WorkModule.tsx` — the module home, "my work". Registered in
+  `src/modules/index.ts`; seed row is `coming_soon`.
+- `src/modules/work/actions.ts` — the eight server actions. **Only async
+  exports**; schemas and colours live in `core/`.
+- `src/modules/work/list-ops.ts` · `item-ops.ts` — the ops the actions call.
+- `src/modules/work/core/grouping.ts` — urgency, pure, client-safe.
+- `src/modules/work/core/errors.ts` · `core/colors.ts`.
+- `src/modules/work/components/my-work.tsx` · `components/list-manager.tsx`.
+- `src/app/dashboard/m/work/lists/page.tsx`.
+- `tests/work-ops.test.ts` · `tests/work-grouping.test.ts`.
+
 Still to come, and where it goes:
 
-- `src/modules/work/WorkModule.tsx` — renderer, registered in `src/modules/index.ts` (slice 1)
-- `src/modules/work/list-ops.ts` · `item-ops.ts` · `link-ops.ts` — server actions
+- `src/modules/work/link-ops.ts` — the "attach to…" surface (slice 3)
 - `src/modules/work/attention/source.ts` — the digest contribution (slice 4)
 - `src/modules/work/links.ts` — Work's own contribution to `entity-links` (see below)
 - `src/app/dashboard/m/work/` — the routes
@@ -350,7 +404,7 @@ Migrations start at **0104**.
 | # | Slice | Why here |
 | --- | --- | --- |
 | 0 | ✅ **Shipped.** Schema + RLS + 12 isolation tests + the read path. Default list auto-provisioned. `withWork()` | The visibility rules are the expensive part; certify them against two tenants before any UI exists |
-| 1 | Lists and items: create, edit, assign, close, nest. **"My work"** | The per-person surface first, because it is the one that gets opened daily and the one that proves the shape |
+| 1 | ✅ **Shipped.** Lists and items: create, edit, assign, close, nest. **"My work"**. Module registered, seed row `coming_soon` | The per-person surface first, because it is the one that gets opened daily and the one that proves the shape |
 | 2 | The list view with filters, and the board grouped by `state`, moved by menu | Two views over one dataset — the Notion lesson made concrete. If this needs a second query builder, slice 1 built the wrong read path |
 | 3 | Saved views as URL parameter sets. Links: Work as host **and** as contributor | The seam work. Documents' saved-view decision is reused, not re-derived |
 | 4 | Attention source, second in the digest. Seed row flips to `available` | The module goes live once the obligation it creates can reach a person |
@@ -372,9 +426,18 @@ something does, the boundary was drawn wrong.
   with five thousand items on it. Slice 1's UI is what will meet this first, and
   the fix is a limit plus a cursor on `(due_on, created_at)` — the index is
   already in that order.
-- **Nothing keeps `updated_at` current.** There is no trigger; the ops that
-  land in slice 1 have to set it, and the first one that forgets will not fail
-  any test written so far.
+- ~~**Nothing keeps `updated_at` current.**~~ — **fixed in slice 1.** Every op
+  sets it. There is still no trigger, so a future op that forgets will not fail
+  any test; the guard is that all of them go through `list-ops`/`item-ops`.
+- **NOBODY HAS CLICKED ANY OF THIS.** Slice 1 compiles, its ops are covered and
+  the build renders the routes, but the dashboard is behind Clerk auth and no
+  agent can reach it. The highest-value thing a human can do is switch the
+  module on for one tenant and try: adding work from "my work" versus from a
+  list, closing and reopening, handing work to somebody else, and an
+  owners-only list seen from a staff account.
+- **The seed row only exists after `npm run db:seed` runs.** Until then
+  `requireModuleEnabled(tenant, "work")` has no row to find and the module
+  cannot be switched on, however green the deploy is.
 
 Beyond slice 0, and deferred on purpose:
 

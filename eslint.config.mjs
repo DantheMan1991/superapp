@@ -181,6 +181,18 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // AND EVERY NESTED COPY OF THEM. `.next/**` anchors at the repo root, so it
+    // does not match a build output sitting inside a git worktree — and
+    // `.claude/worktrees/` accumulates those, each with its own full `.next`.
+    // The bundles in there are ordinary .js files whose NAMES contain
+    // "node_modules", so the default node_modules ignore misses them too.
+    //
+    // Left unignored this is not a slow lint, it is an unusable one: six stale
+    // worktrees carrying several hundred megabytes of generated chunks took
+    // `npm run lint` past seventeen minutes and 1.2 GB of resident memory
+    // before it was killed. CI never saw it because CI checks out clean.
+    "**/.next/**",
+    ".claude/**",
   ]),
 ]);
 

@@ -5,6 +5,7 @@ import { DocumentsModule } from "./documents/DocumentsModule";
 import { EmailModule } from "./email/EmailModule";
 import { HelloModule } from "./hello/HelloModule";
 import { SchedulingModule } from "./scheduling/SchedulingModule";
+import { WorkModule } from "./work/WorkModule";
 
 /**
  * Code-side module registry: slug → how it renders. The DB `modules` table
@@ -54,6 +55,15 @@ export const moduleRegistry: Record<string, ModuleDefinition> = {
     name: "Scheduling",
     icon: "calendar",
     Component: SchedulingModule,
+  },
+  // Registered from slice 1, while the seed row stays `coming_soon` — the same
+  // arrangement scheduling used. A superadmin can switch it on for one tenant
+  // to try it, and nobody is sold it. Slice 4 flips the seed row.
+  work: {
+    slug: "work",
+    name: "Work",
+    icon: "check-square",
+    Component: WorkModule,
   },
 };
 

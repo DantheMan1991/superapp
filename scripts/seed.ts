@@ -113,6 +113,26 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     status: "available",
     sortOrder: 60,
   },
+  {
+    id: "work",
+    name: "Work",
+    // Passes the neutrality test in docs/extension-model.md §3: a bookkeeping
+    // firm, a dental practice and a plumbing contractor all recognise work that
+    // is on somebody and due on a day.
+    //
+    // "Jobs" and "Projects" would NOT pass, and §8 already carries the receipt —
+    // "job" is what electrical calls its work while plumbing says Service Call
+    // and a GC says Project. A profile supplies that label; core's catalog copy
+    // must not.
+    //
+    // Description tracks what actually ships. Board, links and the daily digest
+    // follow, and get added here as they do.
+    description:
+      "What has to be done, who it is on, and whether it is done yet — with a list for each part of the business.",
+    category: "core",
+    status: "coming_soon",
+    sortOrder: 70,
+  },
 ];
 
 /**

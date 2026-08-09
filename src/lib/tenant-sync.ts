@@ -2,6 +2,7 @@ import "server-only";
 import { eq, and } from "drizzle-orm";
 import { withSystem, schema } from "@/db";
 import { slugify } from "@/lib/slug";
+import { ensurePrimaryCalendar } from "@/lib/schedule/provision";
 import type { Membership, Tenant } from "@/db/schema";
 
 /**
@@ -138,6 +139,11 @@ export async function upsertMembership(params: {
         .set({ role, clerkRoleSyncedAt: new Date() })
         .where(eq(schema.memberships.id, existing.id))
         .returning();
+      // Also on the EXISTING branch, not just on create: everybody who joined
+      // before scheduling existed has a membership and no calendar, and this is
+      // the path their next role sync comes through. Idempotent, so the common
+      // case costs one no-op insert.
+      await ensurePrimaryCalendar(tx, tenant.id, params.clerkUserId);
       return {
         status: "synced",
         membership: updated,
@@ -153,6 +159,7 @@ export async function upsertMembership(params: {
         clerkRoleSyncedAt: new Date(),
       })
       .returning();
+    await ensurePrimaryCalendar(tx, tenant.id, params.clerkUserId);
     return { status: "synced", membership: created, previousRole: null } as const;
   });
 }

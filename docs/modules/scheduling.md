@@ -4,8 +4,9 @@
 > on Outlook and Google rather than on a work-order queue — a **calendar** is the
 > unit of sharing, private by default, grantable to named people or to the whole
 > business. Core owns time, sharing and attendance; capability packs own
-> everything a particular trade calls that work. Nothing is built yet: this file
-> is the design, written before the first slice so it is not improvised.
+> everything a particular trade calls that work. Slice 0 is in — schema, RLS and
+> the read path — but there is no UI and no registry entry, so the module is
+> still an empty slot to a tenant until slice 4 turns it on.
 > Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
@@ -13,6 +14,38 @@
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-08-08 — Slice 0: schema, RLS, the read path (branch `claude/scheduling-slice-0`)
+
+Four tables, twelve policies, four helper functions, thirteen isolation tests.
+No UI, no module registry entry, no seed row — the module is still
+`coming_soon` and slice 4 is what turns it on.
+
+- **Four tables, not the six the design listed.** `schedule_calendars`,
+  `schedule_shares`, `schedule_items`, `schedule_item_attendees`. Links and the
+  per-person show/hide preference land with the slices that read them; a table
+  with no reader is the speculative build this codebase avoids. Items and
+  attendees are here because the property slice 0 exists to certify — that item
+  visibility INHERITS from the calendar — cannot be proven without both.
+- **The `visibility` column is gone. Everything is a share.** See Decisions;
+  this is the one place the built thing departs from the design as merged.
+- **`busy` and `titles` are not RLS at all.** Also Decisions. The row is
+  invisible to a direct SELECT below `details`, and `app_schedule_range()`
+  returns a projection instead, so nothing in application code redacts anything.
+- **Two policy cycles, not one.** calendars ↔ shares was predicted. items ↔
+  attendees was found while writing the policies: the item policy needs "am I an
+  attendee?" and the attendee policy inherits from the item. Both cut with
+  narrow `SECURITY DEFINER` booleans.
+- **`withSchedule()` exists**, which `withCrm()` never did — 0077 named the fix
+  and CRM still repeats the options at 49 call sites under a header comment.
+- **Every member gets a primary calendar**, provisioned from `upsertMembership`
+  on BOTH branches so people who predate the module get one on their next role
+  sync.
+- **drizzle-kit generated a migration that cannot run.** It emits every
+  `ADD CONSTRAINT` before every `CREATE INDEX`, so the composite FKs referenced
+  unique indexes that did not exist yet — Postgres 42830. Caught by running it
+  against the dev branch, which failed and rolled back clean. 0096 is
+  hand-reordered and says so; a regeneration would silently undo it.
 
 ### 2026-08-08 (later) — Checked the design against Outlook; three things were wrong
 
@@ -69,12 +102,12 @@ should carry these invariants as comments, in the style of `0077`.
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `schedule_calendars` | The container and **the unit of sharing** | `visibility` = `private` \| `members`, exactly as `crm_party_details` uses it. `owner_profile_id` NULL means the business owns it, not a person — **which is also how a bookable resource is modelled**, so do not add a `resources` table. `kind` is an OPEN taxonomy (P1) — core writes `personal` and nothing else. `extension_slug` records the pack that provisions and manages it; NULL means a person made it in the core UI, and it is the discriminator the UI groups on. One `is_primary` calendar per person, auto-created, undeletable |
-| `schedule_shares` | One grant: this calendar, to this person, at this level | `access` = `busy` \| `titles` \| `details` \| `write` — **four, not three**; see Decisions. **Its policy must never read `schedule_calendars`** — see the recursion trap in Decisions. Grantee is a `clerk_user_id`, matching `crm_record_collaborators` rather than a profile FK, because that is what `app_current_user()` returns |
-| `schedule_calendar_prefs` | Which calendars one person is currently showing, and in what colour to them | Per user in both directions, like `crm_view_pins`. Trivial table, but the toggle is used constantly in practice and its absence is felt immediately |
+| `schedule_calendars` | The container and **the unit of sharing** | **BUILT.** No `visibility` column — see Decisions. `owner_clerk_user_id` NULL means the business owns it, not a person — **which is also how a bookable resource is modelled**, so do not add a `resources` table. `kind` is an OPEN taxonomy (P1) — core writes `personal` and nothing else. `extension_slug` + `extension_key` record the pack that provisions it and make provisioning idempotent; NULL means a person made it in the core UI, and non-NULL is the discriminator the UI groups on. One `is_primary` calendar per person, partial unique index, auto-created |
+| `schedule_shares` | One grant: this calendar, to this person **or to everyone**, at this level | **BUILT.** `access` = `busy` \| `titles` \| `details` \| `write` — four, not three, and **the enum's declaration order is load-bearing** because the policies compare with `>=`. Grantee `''` means everyone in the workspace; it is a sentinel rather than NULL so the unique index stays plain and the policy stays out of three-valued logic. **Its policy reads no other table** — see the recursion trap in Decisions |
+| `schedule_calendar_prefs` | Which calendars one person is currently showing, and in what colour to them | *Not built.* Lands with the slice that renders the toggle |
 | `schedule_items` | One thing on a calendar | `starts_at`/`ends_at` timestamptz + `all_day` + `time_zone` (the zone it was authored in — needed for all-day and recurrence across DST; see [timezone.md](timezone.md)). **`show_as` = `free` \| `busy` \| `tentative` \| `away`** — availability reads this, not mere existence; see Decisions. `kind` OPEN taxonomy (P1). `metadata` jsonb NOT NULL DEFAULT `'{}'` (P2). `parent_id` self-FK, nullable — see Decisions. `sensitivity` = `normal` \| `private`. `cancelled_at` rather than a delete |
-| `schedule_item_attendees` | Who is on it | `profile_id` XOR (`external_email` + `external_name`), enforced by CHECK. `response` = `needs_action` \| `accepted` \| `declined` \| `tentative`. **This is the assignment data the digest needs**, and it ships in the same slice as the items table — see Decisions |
-| `schedule_item_links` | What it is about | Modelled on `mail_links` exactly: `entity_type` carries a FORMAT check and **no value whitelist**, plus `extension_slug`. A pack registers its own linkable types with no migration to core (P3) |
+| `schedule_item_attendees` | Who is on it | **BUILT.** `clerk_user_id` XOR (`external_email` + `external_name`), enforced by a `num_nonnulls` CHECK. `response` = `needs_action` \| `accepted` \| `declined` \| `tentative`. **This is the assignment data the digest needs**, and it shipped in slice 0 — see Decisions. Its policy inherits from the item; the item's policy calls `app_is_attendee()` rather than reading this table, and that asymmetry is what keeps the pair acyclic |
+| `schedule_item_links` | What it is about | *Not built.* Slice 3. Modelled on `mail_links` exactly: `entity_type` carries a FORMAT check and **no value whitelist**, plus `extension_slug`. A pack registers its own linkable types with no migration to core (P3) |
 | `schedule_item_overrides` | One occurrence of a recurring item, moved or cancelled | Only exists once recurrence lands. Series live as an RRULE on the item and are expanded on READ — nothing is materialised |
 
 ## Key files & seams
@@ -83,7 +116,24 @@ Proposed layout. The three-file dependency graph is copied from
 `src/lib/mail-extensions/`, because that shape is already enforced by eslint and
 already proven by three implementors.
 
-- `src/db/schema/scheduling.ts` — tables, re-exported by the `@/db/schema` barrel.
+Built in slice 0:
+
+- `src/db/schema/scheduling.ts` — the four tables, re-exported by the barrel.
+- `drizzle/0096_…sql` — tables. **Hand-reordered after generation**; the header
+  says why and a regeneration would undo it.
+- `drizzle/0097_scheduling_rls.sql` — policies, the four helpers, and the
+  projection. Its header carries the acyclic policy graph; read it before adding
+  a policy to any of these tables.
+- `src/lib/schedule/with-schedule.ts` — `withTenant` with the two options that
+  are not optional here.
+- `src/lib/schedule/access.ts` — pure. The level ordering and `accessAtLeast()`.
+  Safe on both sides of the server boundary.
+- `src/lib/schedule/range.ts` — `listRange()`, THE read path.
+- `src/lib/schedule/provision.ts` — `ensurePrimaryCalendar()`, called from
+  `upsertMembership`.
+- `tests/isolation/scheduling.test.ts` — 13 tests.
+
+Designed, not yet built:
 - `src/lib/schedule-extensions/types.ts` — **the contract. Imports nothing from
   `src/modules/**` or `src/packs/**`, and must not.**
 - `src/lib/schedule-extensions/registry.ts` — `server-only`. The single
@@ -109,35 +159,54 @@ use. It also happens to be the cheaper design: permissions attach to a handful
 of calendars rather than to thousands of items, and every downstream table
 inherits visibility through one join instead of carrying its own copy.
 
-**The sharing mechanism is `0077`'s, deliberately.** CRM already answered
-"private by default, shareable with named people": a `visibility` column on the
-container, a separate grants table, and a three-term OR in the container's
-policy. `schedule_items`, `schedule_item_attendees`, `schedule_item_links` and
-`schedule_item_overrides` then resolve visibility through a positive EXISTS
-against `schedule_calendars` and never restate the rule — which is exactly what
-`crm_affiliations`, `crm_deals`, `crm_activities` and `crm_tasks` do against
-`crm_party_details`. Two copies of a visibility rule drift. This is the
-arrangement that stops there being two.
+**The INHERITANCE is `0077`'s, deliberately.** CRM already answered "private by
+default, shareable with named people": a grants table, and everything downstream
+resolving through a positive EXISTS against the container rather than restating
+the rule. `schedule_items` and `schedule_item_attendees` inherit from
+`schedule_calendars` exactly the way `crm_affiliations`, `crm_deals`,
+`crm_activities` and `crm_tasks` inherit from `crm_party_details`. Two copies of
+a visibility rule drift; this is the arrangement that stops there being two, and
+it is what links and overrides will inherit for free when they land.
 
-**Four access levels, and two of them are PROJECTIONS rather than grants.**
-Checked against Outlook on 2026-08-08, which offers: *can view when I'm busy* ·
-*can view titles and locations* · *can view all details* · *can edit*. The
-design had three and was missing the middle one, and the middle one is the
-interesting case — it is neither "you may read this row" nor "you may not", but
-"you may read four of its columns".
+What did NOT survive from `0077` is the `visibility` column it puts in front of
+the grants table — see the next decision.
 
-This is the same wall free/busy hits, so it is one problem and not two: **an RLS
-predicate can grant or refuse a row, but it cannot return a redacted one.** So
-the read path resolves *my access level for this calendar* first and projects
-accordingly, and the definer helper returns a **projection chosen by access
-level** rather than a busy/free boolean. Designing it as a boolean and widening
-it later means rewriting every caller, which is exactly what the one-read-path
-rule below exists to prevent — so it lands that way in slice 0, before anything
-reads it.
+**There is no `visibility` column. Everything is a share.** This is where the
+built module departs from the design as merged, and the four access levels are
+what forced it: a binary `members` flag cannot say *everyone may see titles but
+not details*, which is precisely what a pack publishing a business-wide calendar
+wants to say. Copying `crm_party_details.visibility` would have meant two
+mechanisms for one idea — the thing `crm.ts` warns "teaches the next reader to
+invent a third".
 
-App-layer redaction is not an acceptable fallback here. `titles` must be a
-column list the database applies, not a `delete row.description` somewhere in a
-server action that the next surface forgets to copy.
+So workspace-wide sharing is a SHARE ROW with the sentinel grantee `''`,
+carrying a level like any other grant. Outlook renders it exactly this way:
+"People in my organization" is a row in the sharing list using the same dropdown
+as a person, not a separate switch. What `0077` contributed is still the shape
+of the thing — a grants table plus everything downstream inheriting through one
+EXISTS — just without the binary column in front of it.
+
+**Four access levels, and two of them are not RLS at all.**
+
+Outlook offers: *can view when I'm busy* · *can view titles and locations* ·
+*can view all details* · *can edit*. The design carried three; the missing
+middle one is the interesting case, because it is neither "you may read this
+row" nor "you may not" but "you may read some of its columns".
+
+**An RLS predicate can grant or refuse a row; it cannot return a redacted one.**
+So the levels split across two mechanisms, and this is the load-bearing fact
+about the whole module:
+
+| Level | Mechanism |
+| --- | --- |
+| `details`, `write` | The row is visible. Ordinary RLS. |
+| `busy`, `titles` | The row is **invisible to a direct SELECT**. `app_schedule_range()` returns a projection with the uncovered columns already NULL. |
+
+`busy` therefore appears in no policy. `listRange()` runs both and concatenates
+two disjoint sets — the SQL function stops at `access < 'details'` so nothing
+comes back twice. **No application code redacts anything**, which was the whole
+objection to doing this at the app layer: a `delete row.description` in one
+server action is a rule the next surface forgets.
 
 **`show_as` is a property of the ITEM, not of the share.** Outlook's compose
 form has a Busy/Free/Tentative/Away control, and conflating "an item exists in
@@ -157,13 +226,35 @@ one-way promise and said so in capitals.
 This bites harder here than it did in CRM, because of a requirement CRM did not
 have: **the calendar's owner must be able to share their own calendar**, not
 just a tenant owner — that is the whole Outlook model. The write policy on
-`schedule_shares` therefore wants to ask "do I own this calendar?", which is a
-read of `schedule_calendars`, which is the trap. `0077` already named the
-sanctioned way out: *"the answer is a SECURITY DEFINER helper, not an EXISTS."*
-So a narrow `app_owns_calendar(uuid) → boolean` that leaks nothing but a
-boolean, with its own isolation test. Do not solve it by denormalising the
-owner's id onto the share row — that copy goes wrong the day a calendar changes
-hands, and it goes wrong silently.
+`schedule_shares` therefore wants to ask "do I administer this calendar?", which
+is a read of `schedule_calendars`, which is the trap.
+
+**And there is a SECOND cycle the design did not predict**, found while writing
+the policies: `schedule_items` needs "am I an attendee?" — that is what lets an
+invitation show you an item on a calendar you cannot see — while
+`schedule_item_attendees` inherits its visibility from the item. items ↔
+attendees closes exactly like calendars ↔ shares.
+
+Both are cut the way `0077` prescribed — *"the answer is a SECURITY DEFINER
+helper, not an EXISTS"* — with the edge pointing one way in each pair:
+
+| Helper | Rights | Why |
+| --- | --- | --- |
+| `app_can_admin_calendar(uuid)` | definer | Lets shares' policy ask about a calendar without running its policy |
+| `app_is_attendee(uuid)` | definer | Lets items' policy ask about attendees without running theirs |
+| `app_calendar_access(uuid)` | **invoker** | Reads only `schedule_shares`, whose policy is self-contained, so there is no cycle to break and no reason to reach for definer rights |
+| `app_schedule_range(ts, ts)` | definer | Must read rows RLS deliberately refuses — that IS the projection |
+
+Definer rights are acceptable here for a reason `0061` states precisely when it
+refuses them: that file refused them for a trigger that **writes**, where they
+would have let it insert a row for any tenant and bought nothing. These read,
+return a boolean or an already-projected row, and pin themselves internally to
+`app_current_tenant()` and `app_current_user()` — so none can answer a question
+about another workspace or widen what the caller may see.
+
+Do not solve the first cycle by denormalising the owner's id onto the share row:
+that copy goes wrong the day a calendar changes hands, and it goes wrong
+silently.
 
 **`WITH CHECK` IS NOT CONSULTED FOR DELETE.** The role/ownership test goes in
 `USING` as well, or somebody revokes every grant they cannot create. `0067` and
@@ -267,7 +358,7 @@ has never been tested*. The view seam is the most speculative thing in this
 design, so the slice that introduces it must move a **core** view onto it — not
 add a placeholder — so that the first pack is the second user and not the first.
 
-**The digest is the reason attendees ship in slice 2 rather than being
+**The digest is the reason attendees shipped in slice 0 rather than being
 deferred.** [notifications.md](notifications.md) records that its slices 1 and 2
 shipped a
 per-person digest into a product where nothing set an assignee, so every staff
@@ -312,7 +403,7 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 
 | # | Slice | Why here |
 | --- | --- | --- |
-| 0 | Schema + RLS + isolation tests. `withSchedule()`. **Access-level projection in the read path.** Primary calendar auto-provisioned on membership | The visibility rules are the expensive part; prove them against two tenants before any UI exists. The projection lands here because widening a boolean later means rewriting every caller |
+| 0 | ✅ **Shipped.** Schema + RLS + 13 isolation tests. `withSchedule()`. Access-level projection in the read path. Primary calendar auto-provisioned on membership | The visibility rules are the expensive part; prove them against two tenants before any UI exists. The projection lands here because widening a boolean later means rewriting every caller |
 | 1 | Calendars: create, rename, colour, archive. Share with a person, share business-wide | Sharing is the module's defining behaviour and everything else assumes it works |
 | 2 | Items + attendees. Month/week/day. `listRange` | Attendees are NOT deferred — see Decisions |
 | 3 | Links, and entity types from Accounting, CRM, Documents and Mail | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
@@ -330,10 +421,28 @@ them. If something does, the boundary was drawn wrong.
 
 ## Open items
 
-- **The projection needs an isolation test per access level**, not one for
-  free/busy. Four levels means four assertions — `busy` returns no title,
-  `titles` returns a title and no body, `details` returns everything, `write`
-  can update — and the interesting failures are at the boundaries between them.
+- **`app_calendar_access()` is called PER ROW**, both in the items policy and in
+  `listRange`'s select list. It is `STABLE`, so Postgres may cache within a
+  statement, but nothing has measured it and a busy month view is the query that
+  will find out. If it bites, the fix is to resolve the caller's levels once per
+  request into a `VALUES` list and join, not to cache a level on a row — the
+  level is a fact about the reader, and storing it on the row is how the two
+  drift.
+- **Nobody has a primary calendar until their next membership sync.** Everyone
+  who joined before slice 0 gets one when Clerk next fires a role webhook for
+  them, which could be never. `findPrimaryCalendarId()` returns null for those
+  people and callers must handle it. A one-off backfill script is the obvious
+  fix and is deliberately not written yet — the first surface that needs it
+  (slice 2) is where the null actually starts costing something.
+- **An attendee-only item comes back with `access: null`**, meaning "you see
+  this because you are on it, not because the calendar is shared with you".
+  Renderers must treat it as read-only and must not offer to open the
+  surrounding calendar. Nothing enforces that yet beyond the field's doc
+  comment.
+- **Nothing tests a grant on a calendar somebody also ADMINISTERS.**
+  `app_calendar_access` short-circuits to `write` for an administrator before it
+  looks at shares at all, so a lower grant on your own calendar cannot demote
+  you — asserted by reading the function, not by a test.
 - **Categories are not `kind`, and both probably want to exist.** Outlook has
   user-created coloured categories alongside the structural type of an item.
   `kind` is registered by a pack (P1); a category would be tenant configuration

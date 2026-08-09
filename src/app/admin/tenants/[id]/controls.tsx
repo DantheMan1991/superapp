@@ -64,19 +64,27 @@ export function ModuleToggle({
   tenantId,
   moduleId,
   enabled,
-  available,
+  canToggle,
 }: {
   tenantId: string;
   moduleId: string;
   enabled: boolean;
-  available: boolean;
+  /**
+   * Whether the module has a renderer — NOT whether it is sellable.
+   *
+   * Named for the question it answers after the two were separated on
+   * 2026-08-09; it was `available`, which read as the catalog state and
+   * therefore got the catalog's value, leaving an implemented module
+   * un-switchable. See the comment in page.tsx.
+   */
+  canToggle: boolean;
 }) {
   const [pending, startTransition] = useTransition();
 
   return (
     <Switch
       checked={enabled}
-      disabled={pending || !available}
+      disabled={pending || !canToggle}
       onCheckedChange={(next) =>
         startTransition(async () => {
           const res = await toggleModule({ tenantId, moduleId, enabled: next });

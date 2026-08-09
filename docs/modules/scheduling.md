@@ -24,10 +24,16 @@ the whole workspace, at any of the four levels.
 - **The module is REGISTERED from this slice, not slice 4.** The roadmap put the
   registry entry with the seed-row flip; that was wrong, because slices 1–3
   build UI and UI needs somewhere to live. `src/modules/index.ts` now has
-  `scheduling`, while the seed row stays `coming_soon` — `requireModuleEnabled`
-  gates on `tenant_modules`, not on `modules.status`, so a superadmin can switch
-  it on for one tenant to try it and nobody is sold it. Slice 4 still flips the
+  `scheduling`, while the seed row stays `coming_soon`. Slice 4 still flips the
   seed row.
+
+  **This shipped with a claim that was FALSE: that a superadmin could switch it
+  on to try it.** `requireModuleEnabled` gates on `tenant_modules` and ignores
+  `modules.status`, which is where the claim came from — but the admin console's
+  toggle was disabled by `mod.status === "available"`, so nothing could reach the
+  UI on the one tenant allowed to see it. Found by the founder on the live site
+  the morning after. Fixed separately by splitting "implemented" from "sellable"
+  on the tenant page; the reasoning lives there.
 - **The module home IS the calendar list**, for now. Slice 2 makes the week view
   the home and moves this to `/calendars`. A front door that only reported "you
   have 3 calendars" would be a dead end — the same reason CRM's home is the

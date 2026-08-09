@@ -1,12 +1,20 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import { withSchedule } from "@/lib/schedule/with-schedule";
 import { SCHEDULE_ACCESS_LEVELS } from "@/lib/schedule/access";
+import {
+  addDays,
+  dateInTimezone,
+  startOfDayInTimezone,
+  timeOfDayInTimezone,
+  zonedTimeToInstant,
+} from "@/lib/timezone";
 // A colour is one of a fixed set, validated server-side: free-form would let a
 // caller put anything into a string the UI drops into a style attribute. The
 // COLUMN stays open text so a palette can change without a migration; the enum
@@ -21,6 +29,13 @@ import {
   updateCalendar,
   type SchedulingCtx,
 } from "./calendar-ops";
+import {
+  cancelItem,
+  createItem,
+  getItemDetail,
+  respondToItem,
+  updateItem,
+} from "./item-ops";
 
 /**
  * Server actions for scheduling. Canonical shape, the same one CRM uses:
@@ -41,7 +56,15 @@ const BASE = "/dashboard/m/scheduling";
 
 type ActionResult<T = undefined> = { ok: true; data?: T } | { error: string };
 
-async function gate(): Promise<SchedulingCtx> {
+/**
+ * The gate also carries the tenant's ZONE, because every time this module
+ * accepts is a wall clock and a wall clock without a zone is not a time.
+ *
+ * It comes from `ctx.tenant.timezone` — the request's own tenant row — never
+ * from the browser and never from the server's clock. Per-user zones are
+ * deliberately not a thing here; see src/lib/timezone.ts.
+ */
+async function gate(): Promise<SchedulingCtx & { timeZone: string }> {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "scheduling");
   // Fail closed for the accountant role, as CRM and Documents do. There is no
@@ -49,7 +72,12 @@ async function gate(): Promise<SchedulingCtx> {
   if (ctx.role === "expert") {
     throw new SchedulingError("FORBIDDEN", "accountant access is read-only");
   }
-  return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
+  return {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+    role: ctx.role,
+    timeZone: ctx.tenant.timezone,
+  };
 }
 
 function fail(err: unknown): { error: string } {
@@ -230,6 +258,291 @@ export async function revokeShareAction(
 
     revalidatePath(BASE);
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- Events ---------------------------------------------------------------- */
+
+/**
+ * A wall clock, as the form collects it.
+ *
+ * `date` and `time` stay separate strings all the way to the boundary, and the
+ * conversion to an instant happens HERE, once, with the tenant's zone — never in
+ * the browser, which knows only where the laptop is. Somebody in Denver editing
+ * a New York workspace's calendar is entering New York times.
+ */
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const timeSchema = z.string().regex(/^\d{2}:\d{2}$/);
+
+const attendeeSchema = z
+  .object({
+    clerkUserId: z.string().max(255).optional(),
+    externalEmail: z.string().email().max(320).optional(),
+    externalName: z.string().trim().max(120).optional(),
+    required: z.boolean().optional(),
+  })
+  // The database has this as a CHECK; refusing here means the message can say
+  // which of the two is missing rather than surfacing a constraint name.
+  .refine((a) => !!a.clerkUserId !== !!a.externalEmail, {
+    message: "an attendee is either a colleague or an email address, not both",
+  });
+
+const eventFieldsSchema = z.object({
+  calendarId: z.string().uuid(),
+  title: z.string().trim().min(1).max(200),
+  description: z.string().max(5000).optional(),
+  location: z.string().max(200).optional(),
+  startDate: dateSchema,
+  startTime: timeSchema,
+  endDate: dateSchema,
+  endTime: timeSchema,
+  allDay: z.boolean().optional(),
+  showAs: z.enum(["free", "busy", "tentative", "away"]).optional(),
+  sensitivity: z.enum(["normal", "private"]).optional(),
+  attendees: z.array(attendeeSchema).max(100).optional(),
+});
+
+type EventFields = z.infer<typeof eventFieldsSchema>;
+
+/**
+ * The two instants an event spans.
+ *
+ * An ALL-DAY event runs from local midnight to local midnight the following
+ * day — end-exclusive, which is what makes a one-day event occupy exactly one
+ * column and a three-day event exactly three. Storing 23:59 instead would leave
+ * a one-minute hole that every overlap query would have to know about.
+ */
+function resolveSpan(fields: EventFields, timeZone: string) {
+  if (fields.allDay) {
+    return {
+      startsAt: startOfDayInTimezone(fields.startDate, timeZone),
+      endsAt: startOfDayInTimezone(addDays(fields.endDate, 1), timeZone),
+    };
+  }
+  return {
+    startsAt: zonedTimeToInstant(fields.startDate, fields.startTime, timeZone),
+    endsAt: zonedTimeToInstant(fields.endDate, fields.endTime, timeZone),
+  };
+}
+
+export async function createEventAction(
+  input: EventFields,
+): Promise<ActionResult<{ itemId: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = eventFieldsSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+    const span = resolveSpan(parsed.data, ctx.timeZone);
+
+    const itemId = await withSchedule(ctx, async (tx) => {
+      const id = await createItem(tx, ctx, {
+        ...parsed.data,
+        ...span,
+        timeZone: ctx.timeZone,
+      });
+      await logAuditInTx(tx, {
+        action: "scheduling.event_created",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "schedule_item",
+        targetId: id,
+        // Identifiers and counts only — never the title, never who is on it.
+        // An audit log that quoted an event would be a second copy of the
+        // calendar, readable by people the calendar itself refuses.
+        meta: {
+          calendarId: parsed.data.calendarId,
+          attendees: parsed.data.attendees?.length ?? 0,
+        },
+      });
+      return id;
+    });
+
+    revalidatePath(BASE);
+    return { ok: true, data: { itemId } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const updateEventSchema = eventFieldsSchema.extend({
+  itemId: z.string().uuid(),
+});
+
+export async function updateEventAction(
+  input: z.infer<typeof updateEventSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = updateEventSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+    const { itemId, ...fields } = parsed.data;
+    const span = resolveSpan(fields, ctx.timeZone);
+
+    await withSchedule(ctx, async (tx) => {
+      await updateItem(tx, ctx, itemId, {
+        ...fields,
+        ...span,
+        timeZone: ctx.timeZone,
+      });
+      await logAuditInTx(tx, {
+        action: "scheduling.event_updated",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "schedule_item",
+        targetId: itemId,
+      });
+    });
+
+    revalidatePath(BASE);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const itemIdSchema = z.object({ itemId: z.string().uuid() });
+
+export async function cancelEventAction(
+  input: z.infer<typeof itemIdSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = itemIdSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withSchedule(ctx, async (tx) => {
+      await cancelItem(tx, ctx, parsed.data.itemId);
+      await logAuditInTx(tx, {
+        action: "scheduling.event_cancelled",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "schedule_item",
+        targetId: parsed.data.itemId,
+      });
+    });
+
+    revalidatePath(BASE);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const respondSchema = z.object({
+  itemId: z.string().uuid(),
+  response: z.enum(["accepted", "declined", "tentative"]),
+});
+
+/**
+ * Accept or decline. NOT audited, deliberately: a response is the attendee's
+ * own row on their own invitation, it is visible on the event to everybody who
+ * can see the event, and logging every tentative-then-accepted would bury the
+ * grants and cancellations that the log exists for.
+ */
+export async function respondToEventAction(
+  input: z.infer<typeof respondSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = respondSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withSchedule(ctx, (tx) =>
+      respondToItem(tx, ctx, parsed.data.itemId, parsed.data.response),
+    );
+
+    revalidatePath(BASE);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * One event, shaped for the form.
+ *
+ * An ACTION rather than props threaded down from the page, because the grid
+ * renders a whole month of items and shipping every description and attendee
+ * list to the browser to populate a dialog that may never open is a lot of
+ * somebody's calendar sent for nothing. Fetched when the dialog opens.
+ *
+ * The instants are split into the date and time strings the form edits, HERE,
+ * with the tenant's zone — the same conversion `resolveSpan` does in reverse,
+ * kept on the same side of the boundary so the two cannot disagree.
+ */
+export async function getEventAction(
+  input: z.infer<typeof itemIdSchema>,
+): Promise<
+  ActionResult<{
+    itemId: string;
+    calendarId: string;
+    title: string;
+    description: string;
+    location: string;
+    startDate: string;
+    startTime: string;
+    endDate: string;
+    endTime: string;
+    allDay: boolean;
+    showAs: "free" | "busy" | "tentative" | "away";
+    sensitivity: "normal" | "private";
+    canEdit: boolean;
+    myResponse: "needs_action" | "accepted" | "declined" | "tentative" | null;
+    attendees: Array<{
+      clerkUserId: string | null;
+      externalEmail: string | null;
+      externalName: string;
+      response: "needs_action" | "accepted" | "declined" | "tentative";
+    }>;
+  }>
+> {
+  try {
+    const ctx = await gate();
+    const parsed = itemIdSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const data = await withSchedule(ctx, async (tx) => {
+      const item = await getItemDetail(tx, parsed.data.itemId);
+      const access = (await tx.execute(
+        sql`select app_calendar_access(${item.calendarId}) as access`,
+      )) as unknown as { rows: Array<{ access: string | null }> };
+
+      // An all-day event is stored end-EXCLUSIVE (midnight to midnight), so the
+      // form has to show the day before as its last day or a one-day event
+      // reads as two.
+      const endForForm = item.allDay
+        ? addDays(dateInTimezone(item.endsAt, ctx.timeZone), -1)
+        : dateInTimezone(item.endsAt, ctx.timeZone);
+
+      return {
+        itemId: item.id,
+        calendarId: item.calendarId,
+        title: item.title,
+        description: item.description,
+        location: item.location,
+        startDate: dateInTimezone(item.startsAt, ctx.timeZone),
+        startTime: timeOfDayInTimezone(item.startsAt, ctx.timeZone),
+        endDate: endForForm,
+        endTime: timeOfDayInTimezone(item.endsAt, ctx.timeZone),
+        allDay: item.allDay,
+        showAs: item.showAs,
+        sensitivity: item.sensitivity,
+        canEdit: access.rows[0]?.access === "write",
+        myResponse:
+          item.attendees.find((a) => a.clerkUserId === ctx.userId)?.response ??
+          null,
+        attendees: item.attendees.map((a) => ({
+          clerkUserId: a.clerkUserId,
+          externalEmail: a.externalEmail,
+          externalName: a.externalName,
+          response: a.response,
+        })),
+      };
+    });
+
+    return { ok: true, data };
   } catch (err) {
     return fail(err);
   }

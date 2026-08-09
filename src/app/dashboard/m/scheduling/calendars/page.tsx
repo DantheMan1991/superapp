@@ -9,7 +9,9 @@ import {
   listShares,
   type ShareRow,
 } from "@/modules/scheduling/calendar-ops";
+import { listFeedTokens } from "@/modules/scheduling/feed-ops";
 import { CalendarManager } from "@/modules/scheduling/components/calendar-manager";
+import { FeedSubscription } from "@/modules/scheduling/components/feed-subscription";
 
 export const dynamic = "force-dynamic";
 
@@ -32,13 +34,16 @@ export default async function CalendarsPage() {
     role: ctx.role,
   };
 
-  const { calendars, members, shares } = await withSchedule(
+  const { calendars, members, shares, tokens } = await withSchedule(
     schedulingCtx,
     async (tx) => {
       const calendars = await listCalendars(tx, schedulingCtx, {
         includeArchived: true,
       });
       const members = await listAssignableMembers(tx, ctx.tenant.id);
+      // Scoped to the caller by policy, not by a predicate here — see
+      // listFeedTokens.
+      const tokens = await listFeedTokens(tx);
       const administrable = calendars.filter(
         (c) =>
           c.group === "mine" || (c.group === "business" && ctx.role === "owner"),
@@ -47,7 +52,7 @@ export default async function CalendarsPage() {
       for (const calendar of administrable) {
         shares[calendar.id] = await listShares(tx, calendar.id);
       }
-      return { calendars, members, shares };
+      return { calendars, members, shares, tokens };
     },
   );
 
@@ -70,6 +75,7 @@ export default async function CalendarsPage() {
         currentUserId={ctx.userId}
         isOwner={ctx.role === "owner"}
       />
+      <FeedSubscription tokens={tokens} />
     </div>
   );
 }

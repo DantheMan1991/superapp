@@ -7,6 +7,7 @@ import { schema, type Tx } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
+import { appUrl } from "@/lib/stripe-customer";
 import { withSchedule } from "@/lib/schedule/with-schedule";
 import { SCHEDULE_ACCESS_LEVELS } from "@/lib/schedule/access";
 import {
@@ -44,6 +45,7 @@ import {
   searchLinkTargets,
   type LinkTargetGroup,
 } from "./link-ops";
+import { mintFeedToken, revokeFeedToken } from "./feed-ops";
 
 /**
  * Server actions for scheduling. Canonical shape, the same one CRM uses:
@@ -682,6 +684,77 @@ export async function detachLinkAction(
     });
 
     revalidatePath(BASE);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- Subscribe feed -------------------------------------------------------- */
+
+const mintSchema = z.object({ label: z.string().trim().max(60) });
+
+/**
+ * Mint a subscribe link and return it ONCE.
+ *
+ * The plaintext token is in this response and nowhere else — only its hash
+ * reaches the database, so there is no second chance to show it. The UI has to
+ * display it immediately and say so.
+ *
+ * Audited, because a new credential to somebody's calendar is exactly the kind
+ * of thing an audit log exists for. THE TOKEN ITSELF IS NOT IN THE META: an
+ * audit row that carried it would be a working feed link sitting in a table
+ * that superadmins read.
+ */
+export async function mintFeedTokenAction(
+  input: z.infer<typeof mintSchema>,
+): Promise<ActionResult<{ url: string }>> {
+  try {
+    const ctx = await gate();
+    const parsed = mintSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    const token = await withSchedule(ctx, async (tx) => {
+      const minted = await mintFeedToken(tx, ctx, parsed.data.label);
+      await logAuditInTx(tx, {
+        action: "scheduling.feed_token_minted",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "schedule_feed_token",
+        meta: { label: parsed.data.label },
+      });
+      return minted;
+    });
+
+    revalidatePath(`${BASE}/calendars`);
+    return { ok: true, data: { url: appUrl(`/api/schedule/feed/${token}`) } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const revokeTokenSchema = z.object({ tokenId: z.string().uuid() });
+
+export async function revokeFeedTokenAction(
+  input: z.infer<typeof revokeTokenSchema>,
+): Promise<ActionResult> {
+  try {
+    const ctx = await gate();
+    const parsed = revokeTokenSchema.safeParse(input);
+    if (!parsed.success) return { error: "Invalid input" };
+
+    await withSchedule(ctx, async (tx) => {
+      await revokeFeedToken(tx, parsed.data.tokenId);
+      await logAuditInTx(tx, {
+        action: "scheduling.feed_token_revoked",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "schedule_feed_token",
+        targetId: parsed.data.tokenId,
+      });
+    });
+
+    revalidatePath(`${BASE}/calendars`);
     return { ok: true };
   } catch (err) {
     return fail(err);

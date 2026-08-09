@@ -520,6 +520,87 @@ d("scheduling tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  /* -- Subscribe feed tokens (0100/0101) ------------------------------------ */
+
+  it("a feed token is YOURS, and an owner is no exception", async () => {
+    // A token is a credential to one person's calendar. Being the boss is not a
+    // way into somebody's phone, so unlike every other table in this module
+    // there is no role term at all.
+    await withSystem((tx) =>
+      tx.insert(schema.scheduleFeedTokens).values([
+        { tenantId: tenantA, clerkUserId: MATE, tokenHash: `${STAMP}-mate-hash`, label: "Mate phone" },
+        { tenantId: tenantA, clerkUserId: OWNER, tokenHash: `${STAMP}-owner-hash`, label: "Owner phone" },
+      ]),
+    );
+
+    const mineAsMate = await asMate((tx) =>
+      tx.select().from(schema.scheduleFeedTokens),
+    );
+    expect(mineAsMate.map((r) => r.label)).toEqual(["Mate phone"]);
+
+    const mineAsOwner = await asOwner((tx) =>
+      tx.select().from(schema.scheduleFeedTokens),
+    );
+    expect(mineAsOwner.map((r) => r.label)).toEqual(["Owner phone"]);
+  });
+
+  it("an owner cannot REVOKE somebody else's subscription", async () => {
+    // WITH CHECK is not consulted for DELETE, and an UPDATE that set
+    // revoked_at would be the same silent unsubscribe. Both are refused.
+    const updated = await asOwner((tx) =>
+      tx
+        .update(schema.scheduleFeedTokens)
+        .set({ revokedAt: new Date() })
+        .where(eq(schema.scheduleFeedTokens.clerkUserId, MATE))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+
+    const deleted = await asOwner((tx) =>
+      tx
+        .delete(schema.scheduleFeedTokens)
+        .where(eq(schema.scheduleFeedTokens.clerkUserId, MATE))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("another tenant sees no feed tokens", async () => {
+    const rows = await withTenant(
+      tenantB,
+      (tx) => tx.select().from(schema.scheduleFeedTokens),
+      { role: "owner", userId: OTHER },
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("forgetting the user id denies feed tokens rather than widening them", async () => {
+    const rows = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.scheduleFeedTokens),
+      { role: "owner" },
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("one hash can exist only once, across every tenant", async () => {
+    // The route has no tenant context until the hash resolves, so the hash is
+    // the entire lookup key — a collision across tenants would be a
+    // cross-tenant read.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.scheduleFeedTokens)
+          .values({
+            tenantId: tenantB,
+            clerkUserId: OTHER,
+            tokenHash: `${STAMP}-mate-hash`,
+          })
+          .returning(),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("one primary calendar per person, enforced by the index", async () => {
     await expect(
       withSystem((tx) =>

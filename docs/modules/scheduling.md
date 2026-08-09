@@ -17,6 +17,48 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Slice 5: the subscribe feed (branch `claude/scheduling-slice-5`)
+
+A per-person iCalendar URL, for the phone that will never open Yosher.
+
+- **THE URL *IS* THE CREDENTIAL, and everything here is shaped by that.** A
+  calendar app cannot log in, so the token in the path is the only thing between
+  a stranger and somebody's schedule — and it will end up in a clipboard, a
+  screenshot and an IT ticket.
+  - **Only the HASH is stored** (SHA-256, unique GLOBALLY rather than per
+    tenant, because the route has no tenant context until the hash resolves).
+    A dump of the table hands nobody a working feed.
+  - **The token is returned exactly once**, from the mint action, and held in
+    component state. There is no second chance to display it and the UI says so.
+  - **The audit row does NOT carry the token.** It would be a working feed link
+    sitting in a table superadmins read.
+- **ONE `withSystem`, DOING ONE THING.** `feed-serve.ts` resolves the hash to a
+  person outside RLS — it has to, since there is no session — and then reopens
+  as that person for every event it serves. A feed that selected items under the
+  system context would serve whatever the token named, including calendars that
+  person cannot see. The two phases are kept visibly apart in the file for
+  exactly that reason.
+- **Unknown, revoked, and owner-has-left all return the same 404.**
+  Distinguishing them would confirm which tokens exist to somebody guessing.
+- **A feed token has NO role term in its policy at all** — the only table in the
+  module like that. Every other one lets an owner do something; being the boss
+  is not a way into somebody's phone. Tests assert an owner can neither read nor
+  revoke a colleague's.
+- **ICS is hand-written and tested, because its two real failure modes are
+  invisible.** Folding is counted in **octets**, not characters — 40 emoji is a
+  160-byte line some parsers stop reading — and a raw newline in a description
+  reads as the end of the property, silently truncating the event. 14 tests,
+  including one that asserts no split lands inside a multi-byte character.
+- **`UID` is the item's own id.** A client treats a changed uid as a different
+  event, so regenerating with fresh ids would delete and re-add somebody's whole
+  calendar on every refresh, alarms included.
+- **A `busy`-level item serialises as "Busy"** — the same word the app shows,
+  for the same reason. The feed carries what that person can see, private items
+  included: it is their own calendar, and redacting it would make the feed lie
+  about their day.
+- **Revoking cannot reach a copy a phone already has**, and the UI says so
+  rather than implying the link died the instant it was pressed.
+
 ### 2026-08-09 — Slice 4: the module goes live (branch `claude/scheduling-slice-4`)
 
 The digest gets its strongest source, and the seed row flips to `available`.
@@ -333,6 +375,16 @@ should carry these invariants as comments, in the style of `0077`.
 Proposed layout. The three-file dependency graph is copied from
 `src/lib/mail-extensions/`, because that shape is already enforced by eslint and
 already proven by three implementors.
+
+Built in slice 5:
+
+- `src/modules/scheduling/core/ics.ts` — RFC 5545 serialisation. **Pure.** Read
+  its header before touching folding or escaping.
+- `src/modules/scheduling/feed-ops.ts` — mint, list, revoke. Never `withSystem`.
+- `src/modules/scheduling/feed-serve.ts` — **the only `withSystem` in the
+  module**, and the two-phase resolve that keeps it to one query.
+- `src/app/api/schedule/feed/[token]/route.ts` — the unauthenticated route.
+- `drizzle/0100_…sql` + `drizzle/0101_schedule_feed_tokens_rls.sql`.
 
 Built in slice 4:
 
@@ -669,7 +721,7 @@ Slices, in order. Each is a PR that leaves `main` green and shippable.
 | 2 | ✅ **Shipped.** Events + attendees + RSVP. Week/day/month over `listRange`. Calendar becomes the module home | Attendees are NOT deferred — see Decisions |
 | 3 | ✅ **Shipped.** Links + the shared entity-link contract extracted out of Mail. Nine entity types, no new implementations | Reuses `mail_links`' primitive; makes the calendar part of the product rather than beside it |
 | 4 | ✅ **Shipped.** Attention source leading the digest. Seed row flips to `available` | The digest gets its strongest source; the module goes live |
-| 5 | Per-person subscribe feed: hashed revocable token, ICS, revoke button | Same query as 4, no session. Reaches the person who will never open the app |
+| 5 | ✅ **Shipped.** Per-person subscribe feed: hashed revocable token, ICS, revoke button | Same query as 4, no session. Reaches the person who will never open the app |
 | 6 | Extension seam: item kinds, item fields, managed calendars | First three pack primitives, all with existing precedent |
 | 7 | The view seam, with a core view moved onto it | The new primitive, shipped with two users |
 | 8 | Recurrence: RRULE + overrides, expanded on read | Hardest slice; deliberately after the seam is stable. The feed emits the RRULE and the phone expands it |
@@ -682,6 +734,14 @@ them. If something does, the boundary was drawn wrong.
 
 ## Open items
 
+- **The feed has no rate limiting.** A stranger guessing tokens costs a hash
+  and an indexed lookup per attempt, which is cheap for them and cheap for us,
+  but nothing throttles it. The token is 32 random bytes so guessing is not a
+  realistic threat; a burst limit is still the obvious next thing.
+- **The route path has no `.ics` extension.** The content type and
+  `Content-Disposition` filename are correct, and every client tested against
+  the spec should be fine — but some decide by extension, and nobody has
+  actually subscribed to this from a real phone yet.
 - **The entity types still live at `src/modules/<slug>/mail/extension.ts`**,
   because that is where they were written when mail was the only consumer. The
   directory name now lies slightly. Moving them to `<slug>/links.ts` is a

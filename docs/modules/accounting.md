@@ -13,6 +13,16 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-10 — Bank rules, and where a suggestion came from (branch `claude/bank-rules`)
+- **`bank_rules` + `bank_transactions.rule_suggestion`** (`0111`/`0112`). A rule states a mapping the owner has already decided; the AI categorizer reasons about a row it has never seen. Where both have an opinion the **rule wins**, and the review queue now badges the chip `RULE` or `AI · 87%` so the answer is never anonymous
+- **Prompted by the founder's own QuickBooks.** Seven of their rules are named `(Suggested) …` — QuickBooks watched them categorize, proposed the rule, and now applies it deterministically. We were re-inferring `Westfield → Insurance` through Claude on every import, at token cost, with no memory and no explanation
+- **Rules are learned, not only written.** After the same coding is chosen by hand `RULE_PROPOSAL_THRESHOLD` (3) times on one register, `proposeRuleFromHistory` mints an inactive-priority `(Suggested)` rule named after the mapping. The phrase comes from `commonDescriptionPhrase`, the longest contiguous run of words shared by every matching description — `OH WESTFIELD INS SIGNATURES` + `Westfield Ins 07/06` → `westfield ins`. A lone generic word (`deposit`, `payment`, `fee`) is refused; a generic *phrase* like `account maintenance fee` is kept
+- **Dismiss deactivates, it does not delete.** A deleted proposal would be re-proposed the moment the mapping was chosen again, because the duplicate check only sees rules that still exist. Inactive is what makes "no thanks" stick
+- **Auto-post yields to the period lock.** `applyRulesToUnreviewed` reads `closedThrough` ONCE up front and skips locked rows rather than catching `PERIOD_CLOSED` per row — catching mid-transaction would mean working on a transaction Postgres has already aborted. A rule must never be able to break a bank import
+- **The proposal runs in its own transaction**, after the entry commits. A try/catch inside the categorize transaction was written first and then removed: it is false comfort, since a failed INSERT aborts the whole transaction and the swallowed error would still have lost the posting
+- **No `set_dimension_member_ids`.** A jsonb array of member ids carries no referential integrity — the "jsonb tags" design the master plan rejected. It lands as a composite FK when the dimension write path exists
+- **`tests/isolation/banking.test.ts` is new, and overdue.** `reconciliations`, `reconciliation_lines` and `plaid_items` had **no isolation coverage at all**, and `bank_accounts` / `bank_transactions` were certified only incidentally by `documents.test.ts` — while the Data model section below claimed every table was covered. `plaid_items` stores the AES-256-GCM encrypted Plaid access token
+
 ### 2026-08-08 — The lint gate goes green (branch `claude/lint-clean`)
 - **11 orphaned `getSettings` reads removed.** The 2026-08-05 entry below moved every accounting "today" onto `tenants.timezone`; wherever the only use of `settings` had been `settings.bookkeepingTimezone`, the fetch itself was left behind. Each was a redundant round trip on a page load
 - **Found by eslint, not by grep.** There are 27 `const settings = await getSettings(...)` calls in the module and only these 11 were dead — a grep-and-delete would have broken the other 16. `posting.ts` alone has two, one live and one dead
@@ -113,17 +123,25 @@ export for the accountant.
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.) |
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens |
+| `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments`, `recurring_invoices` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party |
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
 | `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
 | `period_closes`, `close_notes` | S7 | Month-end close |
 
-All tables: `tenant_id`, FORCE RLS, covered by `tests/isolation/accounting.test.ts`.
+All tables: `tenant_id`, FORCE RLS. Isolation coverage is split by area, one file
+per area under `tests/isolation/` — `accounting.test.ts` (core ledger),
+`banking.test.ts` (feeds, reconciliation, rules, Plaid), `payables.test.ts`,
+`close.test.ts`, `documents.test.ts`. Until 2026-08-10 this line claimed
+`accounting.test.ts` covered everything, which was never true of the banking
+tables; if you add a table, add it to the file for its area and correct this
+sentence rather than leaving it aspirational.
 
 ## Key files & seams
 
 - `src/modules/accounting/` — `core/` (posting engine, reports, reconciliation), `banking/`, `invoicing/`, `documents/`, `payables/`, `close/`, `export/`, `ai/` (shared engine pattern), `templates/` (COA)
+- `banking/rules-match.ts` and `banking/rules-learn.ts` are **pure** (no `server-only`) — all the deciding lives there and is table-tested without a database, exactly as `ai/*-validate.ts` is split from `ai/*-code.ts`. The rules form imports `ruleConditionsSchema` from the matcher so the client validates against the same schema the action re-validates against
 - Tenant UI under `src/app/dashboard/m/accounting/`
 - AI engines all follow the same shape: pure prompt seam + pure validate seam + injectable model call + forced tool_choice + cooldown; suggestions never post — a human accepts
 
@@ -132,7 +150,9 @@ All tables: `tenant_id`, FORCE RLS, covered by `tests/isolation/accounting.test.
 - **Three-tier mutability**: draft (free edit) → posted (edit-with-version/void/reverse) → reconciled (immutable; reverse only). The DB backs each tier with triggers/FKs, not just app code.
 - **Derived, never stored**: invoice/bill statuses derive from payments; `closed_through` derives from period_closes; Retained Earnings is computed — no closing entries exist.
 - **All money is integer cents.** No floats, no division in report math.
-- **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts.
+- **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
+- **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
+- **A rule never overrides the period lock.** Auto-post skips rows dated in a closed period and leaves them for review; the import still succeeds.
 - **Email-in tokens must be lowercase** — mail infra lowercases local parts (found in production, `8147c2d`).
 - **Blob store is private** — use the presigned upload flow and pass the RW token explicitly server-side.
 - **Managed-source entries** (invoice/bill) can't be voided from the journal; void via their document's lifecycle.
@@ -142,3 +162,5 @@ All tables: `tenant_id`, FORCE RLS, covered by `tests/isolation/accounting.test.
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)
+- **Cash-basis reporting** — ruled out in the master plan, reopened 2026-08-10; needs an ADR superseding that scope decision plus a `basis` option on `getBalances`, the single query engine every report goes through
+- From the 2026-08-10 QuickBooks review, in rough value order: **invoice delivery** (PDF, payor view, send, `Sent`/`Viewed`) — we cannot deliver an invoice at all today; **automatic overdue reminders** on the built notifications machinery; **General Ledger** and **Transaction Detail by Account** (we ship 6 reports); **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel

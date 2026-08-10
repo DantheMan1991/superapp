@@ -10,6 +10,7 @@
 // to a file that was pure cannot silently start racing.
 export const DB_BACKED_TESTS = [
   "tests/attention-sources.test.ts",
+  "tests/banking-rules-db.test.ts",
   "tests/banking.test.ts",
   "tests/close.test.ts",
   "tests/contact.test.ts",
@@ -31,6 +32,7 @@ export const DB_BACKED_TESTS = [
   "tests/interview.test.ts",
   "tests/invoicing.test.ts",
   "tests/isolation/accounting.test.ts",
+  "tests/isolation/banking.test.ts",
   "tests/isolation/close.test.ts",
   "tests/isolation/core.test.ts",
   "tests/isolation/crm-rule-health.test.ts",

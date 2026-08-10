@@ -16,6 +16,7 @@ import {
 } from "@/modules/accounting/lib/money";
 import { findMatchCandidatesBatch } from "@/modules/accounting/banking/match";
 import { readAiSuggestion } from "@/modules/accounting/banking/review";
+import { readRuleSuggestion } from "@/modules/accounting/banking/rules";
 import { RegisterTabs, ReviewTable, SuggestButton } from "./register-controls";
 
 export const dynamic = "force-dynamic";
@@ -139,6 +140,7 @@ export default async function BankRegisterPage({
   );
   const rows = txns.map((t) => {
     const suggestion = readAiSuggestion(t);
+    const rule = readRuleSuggestion(t);
     return {
       attachmentCount: attachmentsOf.get(t.id) ?? 0,
       id: t.id,
@@ -154,6 +156,13 @@ export default async function BankRegisterPage({
             accountCode: suggestion.accountCode,
             confidence: suggestion.confidence,
             reason: suggestion.reason ?? null,
+          }
+        : null,
+      ruleSuggestion: rule
+        ? {
+            ruleName: rule.ruleName,
+            accountId: rule.accountId,
+            accountCode: rule.accountCode,
           }
         : null,
       matchCandidates: data.matchCandidates.get(t.id) ?? [],

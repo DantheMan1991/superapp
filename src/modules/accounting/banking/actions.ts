@@ -35,6 +35,20 @@ import {
 } from "./csv-parse";
 import { importTransactions } from "./import";
 import { categorizeTransaction, readAiSuggestion, setTransactionExcluded } from "./review";
+import {
+  applyRulesToUnreviewed,
+  confirmSuggestedRule,
+  createRule,
+  deleteRule,
+  dismissSuggestedRule,
+  proposeRuleFromHistory,
+  readRuleSuggestion,
+  reorderRules,
+  setRuleActive,
+  updateRule,
+  type ApplyRulesResult,
+} from "./rules";
+import { ruleConditionsSchema } from "./rules-match";
 import { matchTransactionToEntry, unmatchTransaction } from "./match";
 import { suggestCategoriesForBankAccount } from "../ai/suggest";
 import {
@@ -298,7 +312,13 @@ const mappingSchema = z
 
 export async function importCsvTransactionsAction(
   input: z.infer<typeof csvPayloadSchema> & { mapping: z.infer<typeof mappingSchema> },
-): Promise<ActionResult<{ imported: number; skippedDuplicates: number }>> {
+): Promise<
+  ActionResult<{
+    imported: number;
+    skippedDuplicates: number;
+    rules: ApplyRulesResult;
+  }>
+> {
   const ctx = await gate();
   const payload = csvPayloadSchema.safeParse(input);
   const mapping = mappingSchema.safeParse(input?.mapping);
@@ -336,7 +356,14 @@ export async function importCsvTransactionsAction(
         actorClerkUserId: ctx.userId,
         targetType: "bank_account",
         targetId: payload.data.bankAccountId,
-        meta: { imported: r.imported, skipped: r.skippedDuplicates, rowCount: txns.length },
+        meta: {
+          imported: r.imported,
+          skipped: r.skippedDuplicates,
+          rowCount: txns.length,
+          ruleMatched: r.rules.matched,
+          ruleAutoPosted: r.rules.autoPosted,
+          ruleSkippedLocked: r.rules.skippedLocked,
+        },
       });
       return r;
     });
@@ -363,26 +390,55 @@ export async function categorizeTransactionAction(
   const parsed = categorizeSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid input" };
   try {
-    await withTenant(ctx.tenantId, async (tx) => {
-      const { entry, fromSuggestion, confidence } = await categorizeTransaction(
-        tx,
-        ctx,
-        parsed.data,
-      );
-      await logAuditInTx(tx, {
-        action: "banking.txn_categorized",
-        tenantId: ctx.tenantId,
-        actorClerkUserId: ctx.userId,
-        targetType: "bank_transaction",
-        targetId: parsed.data.transactionId,
-        meta: {
-          entryId: entry.id,
-          accountId: parsed.data.accountId,
-          fromSuggestion,
-          confidence,
-        },
-      });
-    });
+    const { bankAccountId, fromRule } = await withTenant(
+      ctx.tenantId,
+      async (tx) => {
+        const r = await categorizeTransaction(tx, ctx, parsed.data);
+        await logAuditInTx(tx, {
+          action: "banking.txn_categorized",
+          tenantId: ctx.tenantId,
+          actorClerkUserId: ctx.userId,
+          targetType: "bank_transaction",
+          targetId: parsed.data.transactionId,
+          meta: {
+            entryId: r.entry.id,
+            accountId: parsed.data.accountId,
+            fromSuggestion: r.fromSuggestion,
+            fromRule: r.fromRule,
+            confidence: r.confidence,
+          },
+        });
+        return r;
+      },
+    );
+
+    // Learning from the decision runs in its OWN transaction, after the entry
+    // is committed. A try/catch inside the transaction above would be false
+    // comfort: a failed INSERT aborts the whole Postgres transaction, so
+    // swallowing the JS error would still lose the posting. Nothing here is a
+    // precondition for the categorization that just succeeded.
+    if (!fromRule) {
+      try {
+        await withTenant(ctx.tenantId, async (tx) => {
+          const proposed = await proposeRuleFromHistory(tx, ctx, {
+            bankAccountId,
+            accountId: parsed.data.accountId,
+          });
+          if (proposed) {
+            await logAuditInTx(tx, {
+              action: "banking.rule_proposed",
+              tenantId: ctx.tenantId,
+              actorClerkUserId: ctx.userId,
+              targetType: "bank_rule",
+              targetId: proposed.id,
+              meta: { accountId: parsed.data.accountId, name: proposed.name },
+            });
+          }
+        });
+      } catch (err) {
+        console.error("rule proposal failed", err);
+      }
+    }
     revalidateBanking();
     return { ok: true };
   } catch (err) {
@@ -473,11 +529,20 @@ export async function acceptSuggestionsAction(
           ),
         });
         if (!txn || txn.status !== "unreviewed") return false;
+        // A rule match is a decision the owner already made, so it is always
+        // acceptable; the model's guess still has to clear the threshold.
+        const rule = readRuleSuggestion(txn);
         const suggestion = readAiSuggestion(txn);
-        if (!suggestion || suggestion.confidence < ACCEPT_CONFIDENCE) return false;
+        const accountId =
+          rule?.accountId ??
+          (suggestion && suggestion.confidence >= ACCEPT_CONFIDENCE
+            ? suggestion.accountId
+            : null);
+        if (!accountId) return false;
         const { entry } = await categorizeTransaction(tx, ctx, {
           transactionId,
-          accountId: suggestion.accountId,
+          accountId,
+          ...(rule?.memo ? { memo: rule.memo } : {}),
         });
         await logAuditInTx(tx, {
           action: "banking.txn_categorized",
@@ -487,9 +552,10 @@ export async function acceptSuggestionsAction(
           targetId: transactionId,
           meta: {
             entryId: entry.id,
-            accountId: suggestion.accountId,
-            fromSuggestion: true,
-            confidence: suggestion.confidence,
+            accountId,
+            fromRule: rule !== null,
+            fromSuggestion: rule === null,
+            confidence: rule ? null : (suggestion?.confidence ?? null),
             bulk: true,
           },
         });
@@ -980,6 +1046,234 @@ export async function disconnectPlaidItemAction(
     });
     revalidateBanking();
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ----------------------------------------------------------------- rules
+
+function revalidateRules(): void {
+  revalidatePath(`${BASE}/banking/rules`);
+  revalidateBanking();
+}
+
+const ruleInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  appliesTo: z.enum(["money_in", "money_out", "both"]),
+  bankAccountId: z.string().uuid().nullable(),
+  matchMode: z.enum(["all", "any"]),
+  conditions: ruleConditionsSchema,
+  setAccountId: z.string().uuid(),
+  setMemo: z.string().trim().max(500).nullable(),
+  autoPost: z.boolean(),
+});
+
+const ruleRefSchema = z.object({ ruleId: z.string().uuid() });
+
+export async function createRuleAction(
+  input: z.infer<typeof ruleInputSchema>,
+): Promise<ActionResult<{ ruleId: string }>> {
+  const ctx = await gate();
+  const parsed = ruleInputSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const rule = await withTenant(ctx.tenantId, async (tx) => {
+      const created = await createRule(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.rule_created",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_rule",
+        targetId: created.id,
+        meta: {
+          name: created.name,
+          setAccountId: created.setAccountId,
+          autoPost: created.autoPost,
+        },
+      });
+      return created;
+    });
+    revalidateRules();
+    return { ok: true, data: { ruleId: rule.id } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function updateRuleAction(
+  input: z.infer<typeof ruleInputSchema> & z.infer<typeof ruleRefSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = ruleInputSchema.merge(ruleRefSchema).safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      const updated = await updateRule(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.rule_updated",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_rule",
+        targetId: updated.id,
+        meta: { name: updated.name, autoPost: updated.autoPost },
+      });
+    });
+    revalidateRules();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function deleteRuleAction(
+  input: z.infer<typeof ruleRefSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = ruleRefSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      await deleteRule(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.rule_deleted",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_rule",
+        targetId: parsed.data.ruleId,
+      });
+    });
+    revalidateRules();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const ruleActiveSchema = ruleRefSchema.extend({ active: z.boolean() });
+
+export async function setRuleActiveAction(
+  input: z.infer<typeof ruleActiveSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = ruleActiveSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      await setRuleActive(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: parsed.data.active
+          ? "banking.rule_activated"
+          : "banking.rule_deactivated",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_rule",
+        targetId: parsed.data.ruleId,
+      });
+    });
+    revalidateRules();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function confirmSuggestedRuleAction(
+  input: z.infer<typeof ruleRefSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = ruleRefSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      await confirmSuggestedRule(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.rule_confirmed",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_rule",
+        targetId: parsed.data.ruleId,
+      });
+    });
+    revalidateRules();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function dismissSuggestedRuleAction(
+  input: z.infer<typeof ruleRefSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = ruleRefSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      await dismissSuggestedRule(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.rule_dismissed",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_rule",
+        targetId: parsed.data.ruleId,
+      });
+    });
+    revalidateRules();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const reorderSchema = z.object({
+  ruleIds: z.array(z.string().uuid()).min(1).max(200),
+});
+
+export async function reorderRulesAction(
+  input: z.infer<typeof reorderSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = reorderSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, (tx) => reorderRules(tx, ctx, parsed.data));
+    revalidateRules();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const applyRulesSchema = z.object({
+  bankAccountId: z.string().uuid().optional(),
+});
+
+export async function applyRulesAction(
+  input: z.infer<typeof applyRulesSchema>,
+): Promise<ActionResult<ApplyRulesResult>> {
+  const ctx = await gate();
+  const parsed = applyRulesSchema.safeParse(input ?? {});
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const result = await withTenant(ctx.tenantId, async (tx) => {
+      const r = await applyRulesToUnreviewed(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "banking.rules_applied",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "bank_account",
+        targetId: parsed.data.bankAccountId ?? null,
+        meta: {
+          matched: r.matched,
+          autoPosted: r.autoPosted,
+          skippedLocked: r.skippedLocked,
+        },
+      });
+      return r;
+    });
+    revalidateRules();
+    return { ok: true, data: result };
   } catch (err) {
     return fail(err);
   }

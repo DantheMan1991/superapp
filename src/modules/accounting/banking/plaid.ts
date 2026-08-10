@@ -7,6 +7,7 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { getPlaid } from "@/lib/plaid";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { detachAllForTargets } from "../documents/links";
+import { applyRulesToUnreviewed, type ApplyRulesResult } from "./rules";
 
 /**
  * Plaid live connections. The access token is encrypted at rest and only
@@ -140,6 +141,7 @@ export interface SyncResult {
   modified: number;
   removed: number;
   skippedUnlinked: number;
+  rules: ApplyRulesResult;
 }
 
 /**
@@ -170,7 +172,13 @@ export async function syncPlaidItem(
   const byPlaidAccount = new Map(linked.map((b) => [b.plaidAccountId!, b]));
   const accessToken = decryptSecret(item.accessTokenEnc);
 
-  const result: SyncResult = { added: 0, modified: 0, removed: 0, skippedUnlinked: 0 };
+  const result: SyncResult = {
+    added: 0,
+    modified: 0,
+    removed: 0,
+    skippedUnlinked: 0,
+    rules: { matched: 0, autoPosted: 0, skippedLocked: 0 },
+  };
   let cursor = item.syncCursor ?? undefined;
   let hasMore = true;
 
@@ -304,6 +312,18 @@ export async function syncPlaidItem(
       );
     }
     throw err;
+  }
+
+  // Rules run once the cursor has been fully drained, in their own
+  // transaction: a rule that auto-posts must not be able to roll back a page
+  // of synced rows, and re-running the pass is idempotent.
+  for (const bank of linked) {
+    const applied = await withTenant(ctx.tenantId, (tx) =>
+      applyRulesToUnreviewed(tx, ctx, { bankAccountId: bank.id }),
+    );
+    result.rules.matched += applied.matched;
+    result.rules.autoPosted += applied.autoPosted;
+    result.rules.skippedLocked += applied.skippedLocked;
   }
   return result;
 }

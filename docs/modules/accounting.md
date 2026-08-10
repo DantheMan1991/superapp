@@ -13,6 +13,16 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-10 — Cash basis, derived at read time (branch `claude/cash-basis`)
+- **[ADR 0007](../decisions/0007-cash-basis-reporting.md) reverses the master plan's exclusion.** Cash basis was out of scope for the whole core phase; most US small businesses file on it, and it is the first question an accountant asks. The plan was not edited — ADRs are immutable, so the reversal is a new one
+- **`getBalances` gains `basis`, defaulting to `accrual`.** It is the single query engine every report goes through, so the toggle lands in exactly one place. The accrual path is unchanged — same SQL, same rows — and a test pins that passing no basis equals passing `"accrual"`
+- **Recognition moves to the payment dates, pro-rata.** Invoice and bill entries are excluded; each payment's AR/AP leg is replaced by that payment's share of the document's income or expense lines, carrying their dimension tags. Everything else (bank imports, manual journals) is already cash-dated and passes through
+- **The control leg is what keeps it balanced**: the offset is exactly the negation of what was recognised, so an overpayment leaves its residual on AR — unapplied cash is owed back to the customer, not revenue. "AR is always zero on cash basis" is therefore *nearly* true, deliberately
+- **`cash-basis-allocate.ts` is the only division in report math.** P5 pins report math to integer cents with no division and `report-builders.ts` says so at the top; pro-rata cannot honour that, so the division is quarantined in one pure module with a largest-remainder rule, BigInt intermediates, and 20 tests. Two invariants: each payment's split sums exactly to its allocation, and no cent is invented or lost by the order payments arrive in
+- **Reversals of invoice/bill entries are excluded too.** `reverseEntry` is only guarded in the journal *action*, not in core, so a reversal could in principle outlive the document nobody is recognising. Cheap insurance, not a currently reachable case
+- **Cash Activity has no basis toggle** and that is deliberate — it reads only bank, cash and credit-card accounts, which the adjustment never touches. Offering one would invite readers to hunt for a difference that cannot exist
+- **The basis is stamped on the report and in the CSV** — footer row *and* filename. Two correct profit figures for one period are only safe if a file forwarded to an accountant says which it is
+
 ### 2026-08-10 — Bank rules, and where a suggestion came from (branch `claude/bank-rules`)
 - **`bank_rules` + `bank_transactions.rule_suggestion`** (`0111`/`0112`). A rule states a mapping the owner has already decided; the AI categorizer reasons about a row it has never seen. Where both have an opinion the **rule wins**, and the review queue now badges the chip `RULE` or `AI · 87%` so the answer is never anonymous
 - **Prompted by the founder's own QuickBooks.** Seven of their rules are named `(Suggested) …` — QuickBooks watched them categorize, proposed the rule, and now applies it deterministically. We were re-inferring `Westfield → Insurance` through Claude on every import, at token cost, with no memory and no explanation
@@ -149,7 +159,8 @@ sentence rather than leaving it aspirational.
 
 - **Three-tier mutability**: draft (free edit) → posted (edit-with-version/void/reverse) → reconciled (immutable; reverse only). The DB backs each tier with triggers/FKs, not just app code.
 - **Derived, never stored**: invoice/bill statuses derive from payments; `closed_through` derives from period_closes; Retained Earnings is computed — no closing entries exist.
-- **All money is integer cents.** No floats, no division in report math.
+- **All money is integer cents.** No floats, and no division in report math — with exactly one quarantined exception, `core/cash-basis-allocate.ts`, where pro-rata recognition inherently divides. It uses BigInt intermediates and a largest-remainder rule so each split sums to the cent. Nowhere else in the report path may divide.
+- **Reports carry a basis.** Accrual is the default and the ledger as posted; cash re-recognises invoice income and bill expense on their payment dates ([ADR 0007](../decisions/0007-cash-basis-reporting.md)). Cash basis is derived at read time — there is no second ledger, and nothing about it is ever posted.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
 - **A rule never overrides the period lock.** Auto-post skips rows dated in a closed period and leaves them for review; the import still succeeds.
@@ -162,5 +173,4 @@ sentence rather than leaving it aspirational.
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)
-- **Cash-basis reporting** — ruled out in the master plan, reopened 2026-08-10; needs an ADR superseding that scope decision plus a `basis` option on `getBalances`, the single query engine every report goes through
 - From the 2026-08-10 QuickBooks review, in rough value order: **invoice delivery** (PDF, payor view, send, `Sent`/`Viewed`) — we cannot deliver an invoice at all today; **automatic overdue reminders** on the built notifications machinery; **General Ledger** and **Transaction Detail by Account** (we ship 6 reports); **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel

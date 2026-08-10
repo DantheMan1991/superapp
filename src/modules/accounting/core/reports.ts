@@ -7,7 +7,7 @@ import {
   previousYear,
   shiftYearsIso,
 } from "../lib/dates";
-import { getBalances } from "./balances";
+import { getBalances, type AccountingBasis } from "./balances";
 import { listAccounts } from "./coa";
 import { listDimensionMembers } from "./dimensions";
 import { getSettings } from "./guards";
@@ -35,13 +35,16 @@ export async function getProfitAndLoss(
     /** Ignored when compare is set (v1 pin: mutually exclusive). */
     dimensionType?: string;
     showZero?: boolean;
+    basis?: AccountingBasis;
   },
 ): Promise<ProfitAndLossReport> {
   const accounts = await listAccounts(tx, tenantId);
   const dimensionType = opts.compare ? undefined : opts.dimensionType;
+  const basis = opts.basis ?? "accrual";
   const current = await getBalances(tx, tenantId, {
     from: opts.from,
     to: opts.to,
+    basis,
     ...(dimensionType ? { groupByDimensionType: dimensionType } : {}),
   });
   let comparison;
@@ -53,7 +56,9 @@ export async function getProfitAndLoss(
     comparison = {
       mode: opts.compare,
       ...range,
-      rows: await getBalances(tx, tenantId, range),
+      // The comparison period is computed on the SAME basis — comparing cash
+      // against accrual would be two different questions in one column pair.
+      rows: await getBalances(tx, tenantId, { ...range, basis }),
     };
   }
   let dimension;
@@ -75,15 +80,22 @@ export async function getProfitAndLoss(
 export async function getBalanceSheet(
   tx: Tx,
   tenantId: string,
-  opts: { asOf: string; compare?: "prev-year"; showZero?: boolean },
+  opts: {
+    asOf: string;
+    compare?: "prev-year";
+    showZero?: boolean;
+    basis?: AccountingBasis;
+  },
 ): Promise<BalanceSheetReport> {
   const accounts = await listAccounts(tx, tenantId);
   const settings = await getSettings(tx, tenantId);
   const fyStart = fiscalYearStart(opts.asOf, settings.fiscalYearStartMonth);
+  const basis = opts.basis ?? "accrual";
   const fetchPair = async (asOf: string, fy: string) => ({
-    cumulative: await getBalances(tx, tenantId, { asOf }),
+    cumulative: await getBalances(tx, tenantId, { asOf, basis }),
     priorFyBoundary: await getBalances(tx, tenantId, {
       asOf: addDaysIso(fy, -1),
+      basis,
     }),
   });
   const current = await fetchPair(opts.asOf, fyStart);
@@ -100,6 +112,14 @@ export async function getBalanceSheet(
   );
 }
 
+/**
+ * No `basis` here, deliberately: this report reads only bank, cash and
+ * credit-card accounts, and the cash-basis adjustment never touches those —
+ * it moves income and expense between AR/AP and the P&L, leaving every
+ * register line exactly where it was. Cash Activity is the same report on
+ * either basis, so offering a toggle would only invite the reader to look for
+ * a difference that cannot exist.
+ */
 export async function getCashActivity(
   tx: Tx,
   tenantId: string,

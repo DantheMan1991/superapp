@@ -14,12 +14,20 @@ export const dynamic = "force-dynamic";
 export default async function BalanceSheetPage({
   searchParams,
 }: {
-  searchParams: Promise<{ asOf?: string; compare?: string; zero?: string }>;
+  searchParams: Promise<{
+    asOf?: string;
+    compare?: string;
+    zero?: string;
+    basis?: string;
+  }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
   const compare = sp.compare === "prev-year" ? sp.compare : undefined;
+  // Anything that is not exactly "cash" is accrual: an unreadable query string
+  // must never silently produce the other basis.
+  const basis = sp.basis === "cash" ? "cash" : "accrual";
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
@@ -29,6 +37,7 @@ export default async function BalanceSheetPage({
       asOf,
       compare,
       showZero: sp.zero === "1",
+      basis,
     });
     return { settings, today, asOf, report };
   });
@@ -53,11 +62,16 @@ export default async function BalanceSheetPage({
           </div>
           <p className="text-sm text-muted-foreground">
             {ctx.tenant.name} · as of {report.asOf} · fiscal year begins{" "}
-            {report.fyStart}
+            {report.fyStart} · {basis === "cash" ? "Cash" : "Accrual"} basis
           </p>
         </div>
         <ReportToolbar
-          exportParams={{ report: "balance-sheet", asOf: data.asOf, compare }}
+          exportParams={{
+            report: "balance-sheet",
+            asOf: data.asOf,
+            compare,
+            basis,
+          }}
         />
       </div>
 
@@ -72,6 +86,8 @@ export default async function BalanceSheetPage({
         asOf={data.asOf}
         compare={compare}
         compareOptions={[["prev-year", "Previous year"]]}
+        basis={basis}
+        showBasis
       />
 
       <ReportTable

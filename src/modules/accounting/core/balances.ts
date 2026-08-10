@@ -1,8 +1,9 @@
 import "server-only";
-import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Account } from "@/db/schema";
 import { toSafeCents } from "../lib/money";
+import { cashBasisAdjustment } from "./cash-basis";
 
 /**
  * The one query engine reports use. Compute-on-read by design: at this
@@ -20,6 +21,31 @@ export interface BalanceRow {
   netCents: number;
 }
 
+/**
+ * Which basis a report is computed on. Accrual is the ledger as posted; cash
+ * recognises invoice income and bill expense on their payment dates instead.
+ * See docs/decisions/0007-cash-basis-reporting.md.
+ */
+export type AccountingBasis = "accrual" | "cash";
+
+/** Sum two sets of rows by (account, dimension member). */
+function mergeRows(base: BalanceRow[], delta: BalanceRow[]): BalanceRow[] {
+  if (delta.length === 0) return base;
+  const byKey = new Map<string, BalanceRow>();
+  for (const row of [...base, ...delta]) {
+    const key = `${row.accountId}|${row.memberId ?? ""}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { ...row });
+      continue;
+    }
+    existing.debitCents += row.debitCents;
+    existing.creditCents += row.creditCents;
+    existing.netCents += row.netCents;
+  }
+  return [...byKey.values()];
+}
+
 export async function getBalances(
   tx: Tx,
   tenantId: string,
@@ -29,11 +55,14 @@ export async function getBalances(
     to?: string;
     accountIds?: string[];
     groupByDimensionType?: string;
+    /** Defaults to accrual: the accrual path is byte-identical to before. */
+    basis?: AccountingBasis;
   } = {},
 ): Promise<BalanceRow[]> {
   const jl = schema.journalLines;
   const je = schema.journalEntries;
   const ld = schema.lineDimensions;
+  const cash = opts.basis === "cash";
 
   const conditions = [
     eq(jl.tenantId, tenantId),
@@ -42,6 +71,21 @@ export async function getBalances(
     opts.from ? gte(je.entryDate, opts.from) : undefined,
     opts.to ? lte(je.entryDate, opts.to) : undefined,
     opts.accountIds?.length ? inArray(jl.accountId, opts.accountIds) : undefined,
+    // Cash basis drops the accrual recognition entirely; cash-basis.ts puts
+    // the income and expense back on the dates the money actually moved.
+    cash ? notInArray(je.source, ["invoice", "bill"] as const) : undefined,
+    // ...and so must any reversal OF one, or the reversal would survive its
+    // original and flip the sign of a document nobody is recognising.
+    // reverseEntry is not guarded in core (only the journal action is), so
+    // this is cheap insurance rather than a currently reachable case.
+    cash
+      ? sql`not exists (
+          select 1 from ${je} as reversed_src
+           where reversed_src.tenant_id = ${je.tenantId}
+             and reversed_src.id = ${je.reversesEntryId}
+             and reversed_src.source in ('invoice', 'bill')
+        )`
+      : undefined,
   ].filter(Boolean);
 
   const base = tx
@@ -75,13 +119,25 @@ export async function getBalances(
       ...(opts.groupByDimensionType ? [ld.memberId] : []),
     );
 
-  return rows.map((r) => ({
+  const accrualRows = rows.map((r) => ({
     accountId: r.accountId,
     memberId: r.memberId ?? null,
     debitCents: toSafeCents(r.debitCents),
     creditCents: toSafeCents(r.creditCents),
     netCents: toSafeCents(r.netCents),
   }));
+  if (!cash) return accrualRows;
+
+  return mergeRows(
+    accrualRows,
+    await cashBasisAdjustment(tx, tenantId, {
+      asOf: opts.asOf,
+      from: opts.from,
+      to: opts.to,
+      accountIds: opts.accountIds,
+      groupByDimensionType: opts.groupByDimensionType,
+    }),
+  );
 }
 
 export interface TrialBalanceRow {
@@ -109,8 +165,9 @@ export async function getTrialBalance(
   tx: Tx,
   tenantId: string,
   asOf: string,
+  basis: AccountingBasis = "accrual",
 ): Promise<TrialBalance> {
-  const balances = await getBalances(tx, tenantId, { asOf });
+  const balances = await getBalances(tx, tenantId, { asOf, basis });
   const byAccount = new Map(balances.map((b) => [b.accountId, b]));
   const accounts = await tx.query.accounts.findMany({
     where: eq(schema.accounts.tenantId, tenantId),

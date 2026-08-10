@@ -34,6 +34,7 @@ export {
   getBalances,
   getTrialBalance,
   ledgerIsBalanced,
+  type AccountingBasis,
   type BalanceRow,
   type TrialBalance,
   type TrialBalanceRow,

@@ -24,6 +24,7 @@ export default async function PnlPage({
     compare?: string;
     dim?: string;
     zero?: string;
+    basis?: string;
   }>;
 }) {
   const ctx = await requireTenant();
@@ -35,6 +36,9 @@ export default async function PnlPage({
       ? sp.compare
       : undefined;
   const dim = !compare && sp.dim?.match(/^[a-z0-9_]+$/) ? sp.dim : undefined;
+  // Anything that is not exactly "cash" is accrual: an unreadable query string
+  // must never silently produce the other basis.
+  const basis = sp.basis === "cash" ? "cash" : "accrual";
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
@@ -48,6 +52,7 @@ export default async function PnlPage({
       compare,
       dimensionType: dim,
       showZero: sp.zero === "1",
+      basis,
     });
     const members = await listDimensionMembers(tx, ctx.tenant.id);
     const dimensionTypes = [...new Set(members.map((m) => m.dimensionType))];
@@ -67,6 +72,7 @@ export default async function PnlPage({
             {ctx.tenant.name} · {report.period.from} to {report.period.to}
             {report.comparison &&
               ` · vs ${report.comparison.from} to ${report.comparison.to}`}
+            {` · ${basis === "cash" ? "Cash" : "Accrual"} basis`}
           </p>
         </div>
         <ReportToolbar
@@ -76,6 +82,7 @@ export default async function PnlPage({
             to: data.to,
             compare,
             dim,
+            basis,
           }}
         />
       </div>
@@ -97,6 +104,8 @@ export default async function PnlPage({
         ]}
         dim={dim}
         dimensionTypes={data.dimensionTypes}
+        basis={basis}
+        showBasis
       />
 
       <ReportTable

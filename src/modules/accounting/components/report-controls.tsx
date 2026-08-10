@@ -33,6 +33,8 @@ export function ReportControls({
   compareOptions,
   dim,
   dimensionTypes,
+  basis,
+  showBasis,
 }: {
   mode: "range" | "asOf";
   today: string;
@@ -45,6 +47,9 @@ export function ReportControls({
   compareOptions?: Array<[value: string, label: string]>;
   dim?: string;
   dimensionTypes?: string[];
+  /** Omit on reports that read the same on either basis (Cash Activity). */
+  basis?: string;
+  showBasis?: boolean;
 }) {
   const [range, setRange] = useState({ from: from ?? today, to: to ?? today });
   const [preset, setPreset] = useState<RangePreset>("custom");
@@ -120,6 +125,20 @@ export function ReportControls({
             className="h-9"
             defaultValue={asOf ?? today}
           />
+        </div>
+      )}
+
+      {showBasis && (
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Basis</Label>
+          <select
+            name="basis"
+            defaultValue={basis === "cash" ? "cash" : "accrual"}
+            className="border-input h-9 w-32 rounded-md border bg-transparent px-3 text-sm shadow-xs"
+          >
+            <option value="accrual">Accrual</option>
+            <option value="cash">Cash</option>
+          </select>
         </div>
       )}
 

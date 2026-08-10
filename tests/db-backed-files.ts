@@ -12,6 +12,7 @@ export const DB_BACKED_TESTS = [
   "tests/attention-sources.test.ts",
   "tests/banking-rules-db.test.ts",
   "tests/banking.test.ts",
+  "tests/cash-basis-db.test.ts",
   "tests/close.test.ts",
   "tests/contact.test.ts",
   "tests/crm-automation-ops.test.ts",

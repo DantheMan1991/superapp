@@ -5,7 +5,8 @@ import {
   Phone,
   Users,
 } from "lucide-react";
-import type { CrmActivity, CrmTask } from "@/db/schema";
+import type { CrmActivity } from "@/db/schema";
+import type { GroupableTask } from "../core/timeline";
 import type { TimelineItem, TimelineItemKind } from "../core/timeline";
 import { DeleteActivityButton, TaskToggle, DueBadge } from "./timeline-controls";
 
@@ -42,7 +43,7 @@ export function Timeline({
   /** For the delete control — only activities carry one. */
   activities: CrmActivity[];
   /** For the tick control — the stream carries no version. */
-  tasks: CrmTask[];
+  tasks: GroupableTask[];
   partyId: string;
 }) {
   if (items.length === 0) {

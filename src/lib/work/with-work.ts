@@ -36,3 +36,14 @@ export function withWork<T>(
 ): Promise<T> {
   return withTenant(ctx.tenantId, fn, { role: ctx.role, userId: ctx.userId });
 }
+
+/**
+ * What a WRITE needs, which is less than `withWork` takes.
+ *
+ * `role` is consumed by `withWork` itself, to set `app.tenant_role` before the
+ * transaction runs. Nothing inside `items.ts` or `entity-work.ts` reads it, and
+ * requiring it invited the automation engine — which runs on behalf of a user
+ * whose role it does not carry — to invent one. Asking for exactly what is used
+ * is what stops that.
+ */
+export type WorkWriteCtx = Pick<WorkCtx, "tenantId" | "userId">;

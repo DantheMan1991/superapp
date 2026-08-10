@@ -13,6 +13,56 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Slice 5b: CRM follow-ups become work items (branch `claude/work-slice-5b`)
+
+The switch, in one deploy. Migration `0109` copies the rows, CRM writes and
+reads work items, and **CRM's attention source is deleted** — those three
+cannot be separated, because copied rows plus two registered sources reports
+every follow-up twice.
+
+`crm_tasks` still exists and is now read by nothing. Slice 5c drops it, after
+this deploys (conventions §4).
+
+- **The data copy preserves ids**, so a link is a straight join rather than a
+  mapping table, a re-run is idempotent through the primary key, and any URL
+  already bookmarked still points at the same obligation.
+- **The entity type comes from `parties.kind`** — `person` → `contact`,
+  `organization` → `company`. Verified against the dev branch with seeded rows
+  before anything else was written, because this is the one error in the whole
+  slice that fails silently: a wrong type resolves to nothing and renders as a
+  deleted record.
+- **`WorkReadCtx` and `WorkWriteCtx` exist because the helpers do not read what
+  they were asking for.** A read only ever scopes by tenant, so CRM's
+  `listTasksForParty(tx, tenantId, partyId)` kept its signature and **no page or
+  component changed**. A write needs tenant and user but never `role` — and
+  requiring it had already invited the automation engine, which does not carry
+  the caller's role, to invent `role: "owner"`. Asking for exactly what is used
+  is what stopped that.
+- **Two silent-failure modes were found by a test failing for the wrong
+  reason**, both created by this change and both now closed:
+  1. A tenant with no default work list. CRM's automation runs each action in a
+     savepoint and swallows failures so a broken rule cannot roll back the
+     person's own work — so the rule would have created nothing, with no error
+     anywhere. `createWorkForEntity` now provisions the list rather than
+     throwing.
+  2. **A rule naming somebody who is not a member.** `crm_tasks.assignee` was
+     free text; Work validates against the roster, which is the fix crm.md
+     asked for — but a validation error inside that same savepoint would have
+     lost the follow-up entirely. An unknown name now falls back to
+     *unassigned*, where the digest's owner rollup catches it. Losing the
+     assignment beats losing the obligation.
+- **The `/tasks` page redirects rather than 404ing**, and deliberately does not
+  filter to CRM-linked work. `party_id` was nullable so "ring the accountant
+  back" had a home; a filtered page would have dropped exactly those. What
+  somebody came to that URL for — everything outstanding — is now the whole
+  list across every module.
+- **A merge relinks rather than rewriting a column.** `relinkEntity` drops the
+  loser's link where the item already points at the survivor, so a merge cannot
+  violate the unique index.
+- `groupTasks`, `TaskToggle` and the timeline component are typed against a
+  structural `GroupableTask` instead of the `CrmTask` row, which is what let the
+  storage move underneath them without any of them being touched.
+
 ### 2026-08-09 — Fix: the version guard had a TOCTOU window (branch `claude/work-slice-5b`)
 
 Slice 5a shipped `updateItem` reading the row, comparing `version`, then
@@ -651,7 +701,7 @@ Migrations start at **0104**.
 | 3 | ✅ **Shipped.** Saved views as URL parameter sets. Links: Work as host **and** as contributor | The seam work. Documents' saved-view decision is reused, not re-derived |
 | 4 | ✅ **Shipped.** Attention source, second in the digest. Seed row flips to `available` | The module goes live once the obligation it creates can reach a person |
 | 5a | ✅ **Shipped.** Shared write path in `src/lib/work/`, `version` column | CRM cannot import Work, so the write path had to move before CRM could raise a follow-up |
-| 5b | CRM writes and reads work items; data copied; CRM's source deleted | Must be ONE deploy — copying while CRM still reads `crm_tasks` double-counts every follow-up in the digest |
+| 5b | ✅ **Shipped.** CRM writes and reads work items; data copied; CRM's source deleted | Must be ONE deploy — copying while CRM still reads `crm_tasks` double-counts every follow-up in the digest |
 | 5c | `DROP TABLE crm_tasks` | conventions §4: a drop goes out AFTER the deploy that stopped reading it |
 | 6 | Recurring work (RRULE moved to `src/lib/` first, in its own PR) | Needs a real consumer; a maintenance schedule is the obvious one |
 | 7 | ⏸ Item kinds, item fields, pack views — **shared with scheduling's deferred 6 and 7** | Build with the first pack in hand, so the seam ships with two users rather than none |

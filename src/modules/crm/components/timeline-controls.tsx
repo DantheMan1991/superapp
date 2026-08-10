@@ -24,7 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { CrmActivityKind, CrmTask } from "@/db/schema";
+import type { CrmActivityKind } from "@/db/schema";
+import type { GroupableTask } from "../core/timeline";
 import { dueBucket } from "../core/timeline";
 import {
   createTaskAction,
@@ -333,7 +334,7 @@ export function AddTaskButton({
 }
 
 /** Tick or untick one follow-up. */
-export function TaskToggle({ task }: { task: CrmTask }) {
+export function TaskToggle({ task }: { task: GroupableTask }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const done = !!task.completedAt;

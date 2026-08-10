@@ -1,4 +1,4 @@
-import type { CrmActivity, CrmActivityKind, CrmTask } from "@/db/schema";
+import type { CrmActivity, CrmActivityKind } from "@/db/schema";
 
 /**
  * The timeline: merging heterogeneous things that happened into one ordered
@@ -79,10 +79,14 @@ export function activityToTimeline(
  * It still appears in the task list, which is where undated work belongs.
  */
 export function taskToTimeline(
-  task: Pick<
-    CrmTask,
-    "id" | "title" | "dueOn" | "completedAt" | "dealId" | "notes"
-  >,
+  task: {
+    id: string;
+    title: string;
+    dueOn: string | null;
+    completedAt: Date | null;
+    dealId: string | null;
+    notes: string;
+  },
 ): TimelineItem | null {
   if (task.completedAt) {
     return {
@@ -162,12 +166,31 @@ export function addDays(isoDate: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * The fields a grouped follow-up is read by.
+ *
+ * Structural rather than `CrmTask`: since work.md slice 5b these rows come out
+ * of `work_items`, and naming the table here would have made every consumer
+ * care where they are stored.
+ */
+export interface GroupableTask {
+  id: string;
+  title: string;
+  notes: string;
+  dueOn: string | null;
+  completedAt: Date | null;
+  partyId: string | null;
+  dealId: string | null;
+  version: number;
+  assigneeClerkUserId: string | null;
+}
+
 export interface TaskGroups {
-  overdue: CrmTask[];
-  today: CrmTask[];
-  soon: CrmTask[];
-  later: CrmTask[];
-  someday: CrmTask[];
+  overdue: GroupableTask[];
+  today: GroupableTask[];
+  soon: GroupableTask[];
+  later: GroupableTask[];
+  someday: GroupableTask[];
 }
 
 /**
@@ -177,7 +200,10 @@ export interface TaskGroups {
  * "what is outstanding" that also carries what is finished is a list nobody
  * trusts the top of.
  */
-export function groupTasks(tasks: CrmTask[], today: string): TaskGroups {
+export function groupTasks(
+  tasks: GroupableTask[],
+  today: string,
+): TaskGroups {
   const groups: TaskGroups = {
     overdue: [],
     today: [],

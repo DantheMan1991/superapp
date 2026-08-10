@@ -43,6 +43,23 @@ d("crm automation engine (database)", () => {
         .insert(schema.tenants)
         .values([{ clerkOrgId: STAMP, name: "Automation Test", slug: STAMP }])
         .returning();
+
+      /*
+       * `rep-a` IS A REAL MEMBER NOW, and that is the point of the fixture.
+       *
+       * Before work.md slice 5b a rule could assign a follow-up to any string,
+       * and this test passed with `rep-a` belonging to nobody — which is
+       * exactly the gap crm.md described as "work that appears in nobody's list
+       * and nobody's digest". Work validates against the roster, so the fixture
+       * has to describe a workspace that could really exist.
+       */
+      const [profile] = await tx
+        .insert(schema.profiles)
+        .values({ clerkUserId: "rep-a", email: `rep-a-${STAMP}@example.test` })
+        .returning();
+      await tx
+        .insert(schema.memberships)
+        .values({ tenantId: row.id, profileId: profile.id, role: "staff" });
       return row.id;
     });
   });
@@ -50,6 +67,12 @@ d("crm automation engine (database)", () => {
   afterAll(async () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
+      // `profiles` is NOT tenant-scoped, so deleting the tenant leaves this
+      // row behind and the next run would collide on `clerk_user_id`. The id
+      // cannot be stamped per process because the rule under test names it.
+      await tx
+        .delete(schema.profiles)
+        .where(eq(schema.profiles.clerkUserId, "rep-a"));
     });
   });
 
@@ -86,10 +109,21 @@ d("crm automation engine (database)", () => {
     const tasks = await withTenant(
       tenantId,
       (tx) =>
+        // A rule's follow-up is a WORK ITEM linked to the record since
+        // work.md slice 5b, so this reads the join rather than a column.
         tx
-          .select()
-          .from(schema.crmTasks)
-          .where(eq(schema.crmTasks.partyId, party.id)),
+          .select({
+            title: schema.workItems.title,
+            assigneeClerkUserId: schema.workItems.assigneeClerkUserId,
+            createdByClerkUserId: schema.workItems.createdByClerkUserId,
+            dueOn: schema.workItems.dueOn,
+          })
+          .from(schema.workItems)
+          .innerJoin(
+            schema.workItemLinks,
+            eq(schema.workItemLinks.itemId, schema.workItems.id),
+          )
+          .where(eq(schema.workItemLinks.entityId, party.id)),
       owner,
     );
     expect(tasks).toHaveLength(1);
@@ -122,10 +156,21 @@ d("crm automation engine (database)", () => {
     const tasks = await withTenant(
       tenantId,
       (tx) =>
+        // A rule's follow-up is a WORK ITEM linked to the record since
+        // work.md slice 5b, so this reads the join rather than a column.
         tx
-          .select()
-          .from(schema.crmTasks)
-          .where(eq(schema.crmTasks.partyId, party.id)),
+          .select({
+            title: schema.workItems.title,
+            assigneeClerkUserId: schema.workItems.assigneeClerkUserId,
+            createdByClerkUserId: schema.workItems.createdByClerkUserId,
+            dueOn: schema.workItems.dueOn,
+          })
+          .from(schema.workItems)
+          .innerJoin(
+            schema.workItemLinks,
+            eq(schema.workItemLinks.itemId, schema.workItems.id),
+          )
+          .where(eq(schema.workItemLinks.entityId, party.id)),
       owner,
     );
     // Exactly the one the record_created rule made, and nothing else.

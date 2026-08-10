@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { AnyColumn } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { relinkEntity } from "@/lib/work/entity-work";
 import type { Party } from "@/db/schema";
 import { loadParty } from "@/lib/parties";
 import { CrmError } from "./core/errors";
@@ -534,10 +535,18 @@ export async function applyMerge(
     .update(schema.crmActivities)
     .set({ partyId: survivorPartyId, updatedAt: new Date() })
     .where(scoped(schema.crmActivities));
-  await tx
-    .update(schema.crmTasks)
-    .set({ partyId: survivorPartyId, updatedAt: new Date() })
-    .where(scoped(schema.crmTasks));
+  // Follow-ups are work items now (work.md slice 5b), so they follow the
+  // survivor by having their LINK repointed rather than a column rewritten.
+  // `relinkEntity` drops the loser's link where the item already points at the
+  // survivor, so a merge cannot violate the unique index.
+  for (const entityType of ["contact", "company"] as const) {
+    await relinkEntity(
+      tx,
+      { tenantId },
+      { entityType, entityId: loserPartyId },
+      { entityType, entityId: survivorPartyId },
+    );
+  }
 
   /* 4. Roles, and the accounting rows that hang off them */
   await applyRole(tx, tenantId, "customer", plan, survivorPartyId);

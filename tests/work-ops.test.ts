@@ -433,6 +433,64 @@ d("work ops", () => {
     ).rejects.toThrow(WorkError);
   });
 
+  it("bumps version on every write, and refuses a stale edit", async () => {
+    // Ships ahead of its reader: slice 5b moves `crm_tasks` here, and those
+    // rows have carried an optimistic version since CRM slice 1. Arriving
+    // without it would silently send two people editing one follow-up back to
+    // last-write-wins.
+    const itemId = await asOwner((tx) =>
+      createItem(tx, ownerCtx(), { listId, title: "Contended" }),
+    );
+    const [fresh] = await asOwner((tx) =>
+      tx.select().from(schema.workItems).where(eq(schema.workItems.id, itemId)),
+    );
+    expect(fresh.version).toBe(1);
+
+    await asOwner((tx) =>
+      updateItem(tx, ownerCtx(), itemId, { title: "First" }, 1),
+    );
+    const [bumped] = await asOwner((tx) =>
+      tx.select().from(schema.workItems).where(eq(schema.workItems.id, itemId)),
+    );
+    expect(bumped.version).toBe(2);
+
+    // Somebody holding the old version is told, rather than silently winning.
+    await expect(
+      asOwner((tx) =>
+        updateItem(tx, ownerCtx(), itemId, { title: "Stale write" }, 1),
+      ),
+    ).rejects.toThrow(WorkError);
+    const [unchanged] = await asOwner((tx) =>
+      tx.select().from(schema.workItems).where(eq(schema.workItems.id, itemId)),
+    );
+    expect(unchanged.title).toBe("First");
+
+    // Omitting the version is last-write-wins — what every caller had before
+    // the column existed, so adding it changed no existing behaviour.
+    await asOwner((tx) =>
+      updateItem(tx, ownerCtx(), itemId, { title: "No guard" }),
+    );
+    const [after] = await asOwner((tx) =>
+      tx.select().from(schema.workItems).where(eq(schema.workItems.id, itemId)),
+    );
+    expect(after.title).toBe("No guard");
+    expect(after.version).toBe(3);
+  });
+
+  it("bumps version from the other write paths too", async () => {
+    const itemId = await asOwner((tx) =>
+      createItem(tx, ownerCtx(), { listId, title: "Touched many ways" }),
+    );
+    await asOwner((tx) => setAssignee(tx, ownerCtx(), itemId, STAFF));
+    await asOwner((tx) => setItemState(tx, ownerCtx(), itemId, "in_progress"));
+    const [row] = await asOwner((tx) =>
+      tx.select().from(schema.workItems).where(eq(schema.workItems.id, itemId)),
+    );
+    // Incremented in SQL, not read-then-written — two interleaved writes must
+    // not lose a bump, since that is the collision the column exists to catch.
+    expect(row.version).toBe(3);
+  });
+
   it("reports a rename of something invisible as not found", async () => {
     await expect(
       asStaff((tx) =>

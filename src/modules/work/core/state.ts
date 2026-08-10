@@ -1,8 +1,11 @@
-import {
-  WORK_STATES,
-  WORK_CLOSED_STATES,
-  type WorkState,
-} from "@/lib/work/vocabulary";
+import { WORK_STATES, type WorkState } from "@/lib/work/vocabulary";
+
+/**
+ * The predicates moved to `@/lib/work/vocabulary` in slice 5a, beside the
+ * values they test, so the shared write path can use them without depending on
+ * a module. Re-exported so no call site had to change.
+ */
+export { isClosedState, isWorkState } from "@/lib/work/vocabulary";
 
 /**
  * The state vocabulary, in one place, with no database anywhere near it.
@@ -34,15 +37,6 @@ const STATE_LABELS: Record<WorkState, string> = {
 
 /** Board column order. Least finished first, matching WORK_STATES. */
 export const WORK_STATE_ORDER: readonly WorkState[] = WORK_STATES;
-
-export function isWorkState(value: string): value is WorkState {
-  return (WORK_STATES as readonly string[]).includes(value);
-}
-
-/** Done or cancelled — finished with, either way. See `closed_at`. */
-export function isClosedState(state: WorkState): boolean {
-  return (WORK_CLOSED_STATES as readonly string[]).includes(state);
-}
 
 /**
  * What to show a person for one item's state.

@@ -10,9 +10,10 @@ const nextConfig: NextConfig = {
     // with @react-pdf/renderer as buffers. Without this the fonts are absent in
     // the serverless bundle and generation fails at request time — a failure
     // that cannot reproduce locally, where the repo is simply there.
-    "/dashboard/m/documents/templates/[templateId]": [
-      "./src/modules/documents/doc-templates/fonts/**/*",
-    ],
+    // The TTFs moved to src/lib/pdf/fonts when Accounting started generating
+    // invoice PDFs too — a module may not import another module.
+    "/dashboard/m/documents/templates/[templateId]": ["./src/lib/pdf/fonts/**/*"],
+    "/api/accounting/invoices/[id]/pdf": ["./src/lib/pdf/fonts/**/*"],
   },
   experimental: {
     // Bank CSV imports travel as text through a server action (preview +

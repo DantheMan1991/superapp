@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
+import { FileText } from "lucide-react";
 import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -153,18 +154,29 @@ export default async function InvoiceDetailPage({
           </p>
         </div>
         {!editing && (
-          <InvoiceActions
-            invoice={{
-              id: invoice.id,
-              version: invoice.version,
-              status: invoice.status,
-              number: invoice.invoiceNumber,
-              balanceCents: balance,
-            }}
-            depositOptions={depositOptions}
-            today={data.today}
-            canAct={isOwner}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={`/api/accounting/invoices/${invoice.id}/pdf`}
+              target="_blank"
+              rel="noopener"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              <FileText className="size-4" />
+              PDF
+            </a>
+            <InvoiceActions
+              invoice={{
+                id: invoice.id,
+                version: invoice.version,
+                status: invoice.status,
+                number: invoice.invoiceNumber,
+                balanceCents: balance,
+              }}
+              depositOptions={depositOptions}
+              today={data.today}
+              canAct={isOwner}
+            />
+          </div>
         )}
       </div>
 

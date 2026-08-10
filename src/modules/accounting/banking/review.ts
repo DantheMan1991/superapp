@@ -57,7 +57,13 @@ export async function categorizeTransaction(
     dimensionMemberIds?: string[];
     memo?: string;
   },
-): Promise<{ entry: JournalEntry; fromSuggestion: boolean; confidence: number | null }> {
+): Promise<{
+  entry: JournalEntry;
+  bankAccountId: string;
+  fromSuggestion: boolean;
+  fromRule: boolean;
+  confidence: number | null;
+}> {
   requireOwnerRole(ctx);
   const txn = await loadUnreviewedTxn(tx, ctx.tenantId, args.transactionId);
   const bankAccount = await loadBankAccount(tx, ctx.tenantId, txn.bankAccountId);
@@ -125,10 +131,15 @@ export async function categorizeTransaction(
     throw new LedgerError("TXN_NOT_UNREVIEWED", "transaction changed concurrently");
   }
 
+  // Which source the human actually agreed with. `fromRule` is what makes a
+  // rule's hit rate measurable; `fromSuggestion` is the AI's.
   const suggestion = readAiSuggestion(txn);
+  const rule = txn.ruleSuggestion as { accountId?: string } | null;
   return {
     entry,
+    bankAccountId: txn.bankAccountId,
     fromSuggestion: suggestion?.accountId === args.accountId,
+    fromRule: rule?.accountId === args.accountId,
     confidence: suggestion?.confidence ?? null,
   };
 }

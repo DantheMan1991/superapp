@@ -41,6 +41,16 @@ export const bankTransactionStatus = pgEnum("bank_transaction_status", [
   "excluded",
 ]);
 
+/** Which side of the register a rule is allowed to match. */
+export const bankRuleAppliesTo = pgEnum("bank_rule_applies_to", [
+  "money_in",
+  "money_out",
+  "both",
+]);
+
+/** Whether every condition must hold, or any one of them. */
+export const bankRuleMatchMode = pgEnum("bank_rule_match_mode", ["all", "any"]);
+
 export const reconciliationStatus = pgEnum("reconciliation_status", [
   "in_progress",
   "completed",
@@ -112,6 +122,16 @@ export const bankTransactions = pgTable(
     journalEntryId: uuid("journal_entry_id"),
     /** {accountId, accountCode, confidence, reason?, model, at} | null. */
     aiSuggestion: jsonb("ai_suggestion"),
+    /**
+     * {ruleId, ruleName, accountId, accountCode, memo?, at} | null.
+     *
+     * Deliberately a snapshot rather than an FK to `bank_rules`: a suggestion
+     * is a statement about what a rule said AT MATCH TIME, and editing or
+     * deleting the rule afterwards must not silently rewrite or erase what the
+     * owner is being shown. Same reasoning as `journal_entry_id`'s NO ACTION
+     * link — the app unlinks, the database does not cascade meaning.
+     */
+    ruleSuggestion: jsonb("rule_suggestion"),
     /** Original parsed CSV row / trimmed Plaid payload — provenance. */
     raw: jsonb("raw").notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -150,6 +170,77 @@ export const bankTransactions = pgTable(
       name: "bank_transactions_entry_fk",
       columns: [t.tenantId, t.journalEntryId],
       foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }),
+  ],
+);
+
+/**
+ * Deterministic categorization rules for the bank feed.
+ *
+ * The counterpart to `bank_transactions.ai_suggestion`: AI reasons about a row
+ * it has never seen, a rule states a mapping the owner has already decided. A
+ * rule is cheaper, instant, explainable and stable, so where one matches it
+ * WINS over the model — see `banking/rules-match.ts`.
+ *
+ * Rules may also be machine-proposed (`is_suggested`) after the same mapping is
+ * chosen by hand often enough. That is the graduation path: the model handles
+ * what is genuinely new, and anything routine hardens into a rule.
+ *
+ * No `set_dimension_member_ids` column: a jsonb array of member ids carries no
+ * referential integrity, which is precisely the "jsonb tags" design the master
+ * plan rejected for `line_dimensions`. It lands as a real composite FK once the
+ * dimension write path exists.
+ */
+export const bankRules = pgTable(
+  "bank_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Ascending; first match wins. Ties broken by created_at. */
+    priority: integer("priority").notNull().default(100),
+    isActive: boolean("is_active").notNull().default(true),
+    /** Machine-proposed from accepted history; renders as "(Suggested)". */
+    isSuggested: boolean("is_suggested").notNull().default(false),
+    appliesTo: bankRuleAppliesTo("applies_to").notNull().default("both"),
+    /** Null = every register in the tenant. */
+    bankAccountId: uuid("bank_account_id"),
+    matchMode: bankRuleMatchMode("match_mode").notNull().default("all"),
+    /** Zod-validated `[{field, op, value}]` — see rules-match.ts. */
+    conditions: jsonb("conditions").notNull().default([]),
+    /** The category this rule codes to. */
+    setAccountId: uuid("set_account_id").notNull(),
+    setMemo: text("set_memo"),
+    /** Post without human review. Off by default, and never overrides a lock. */
+    autoPost: boolean("auto_post").notNull().default(false),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("bank_rules_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("bank_rules_tenant_active_priority_idx").on(
+      t.tenantId,
+      t.isActive,
+      t.priority,
+    ),
+    foreignKey({
+      name: "bank_rules_bank_account_fk",
+      columns: [t.tenantId, t.bankAccountId],
+      foreignColumns: [bankAccounts.tenantId, bankAccounts.id],
+    }).onDelete("cascade"),
+    // NO ACTION: deactivating an account is the supported move, and a rule
+    // pointing at a deleted category must fail loudly rather than code to null.
+    foreignKey({
+      name: "bank_rules_set_account_fk",
+      columns: [t.tenantId, t.setAccountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
     }),
   ],
 );
@@ -283,6 +374,8 @@ export const plaidItems = pgTable(
 export type BankAccount = typeof bankAccounts.$inferSelect;
 
 export type BankTransaction = typeof bankTransactions.$inferSelect;
+
+export type BankRule = typeof bankRules.$inferSelect;
 
 export type Reconciliation = typeof reconciliations.$inferSelect;
 

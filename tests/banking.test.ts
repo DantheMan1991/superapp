@@ -416,11 +416,11 @@ d("banking (DB)", () => {
     const first = await withTenant(tenantId, (tx) =>
       importTransactions(tx, owner, { bankAccountId, txns }),
     );
-    expect(first).toEqual({ imported: 3, skippedDuplicates: 0 });
+    expect(first).toMatchObject({ imported: 3, skippedDuplicates: 0 });
     const again = await withTenant(tenantId, (tx) =>
       importTransactions(tx, owner, { bankAccountId, txns }),
     );
-    expect(again).toEqual({ imported: 0, skippedDuplicates: 3 });
+    expect(again).toMatchObject({ imported: 0, skippedDuplicates: 3 });
   });
 
   it("categorizes: balanced entry, staging linked, replay-safe, staff forbidden", async () => {

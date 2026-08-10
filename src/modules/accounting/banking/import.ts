@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { schema, type Tx } from "@/db";
 import { requireOwnerRole, type LedgerCtx } from "../core";
 import { loadBankAccount } from "./accounts";
+import { applyRulesToUnreviewed, type ApplyRulesResult } from "./rules";
 import type { NormalizedTxn } from "./csv-parse";
 
 /**
@@ -21,7 +22,11 @@ export async function importTransactions(
   tx: Tx,
   ctx: LedgerCtx,
   args: { bankAccountId: string; txns: NormalizedTxn[] },
-): Promise<{ imported: number; skippedDuplicates: number }> {
+): Promise<{
+  imported: number;
+  skippedDuplicates: number;
+  rules: ApplyRulesResult;
+}> {
   requireOwnerRole(ctx);
   const bankAccount = await loadBankAccount(tx, ctx.tenantId, args.bankAccountId);
   let imported = 0;
@@ -46,5 +51,10 @@ export async function importTransactions(
       .returning({ id: schema.bankTransactions.id });
     imported += rows.length;
   }
-  return { imported, skippedDuplicates: args.txns.length - imported };
+  // Rules run over the whole unreviewed queue, not just this batch: a rule
+  // written after the first import should still reach rows already waiting.
+  const rules = await applyRulesToUnreviewed(tx, ctx, {
+    bankAccountId: bankAccount.id,
+  });
+  return { imported, skippedDuplicates: args.txns.length - imported, rules };
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { and, eq, sql } from "drizzle-orm";
-import { Landmark } from "lucide-react";
+import { Filter, Landmark } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { plaidConfigured, plaidEnv } from "@/lib/plaid";
@@ -92,13 +92,22 @@ export default async function BankingPage() {
             Bank feeds, imports, and reconciliation for {ctx.tenant.name}.
           </p>
         </div>
-        {isOwner && (
-          <BankingHeaderButtons
-            plaidReady={plaidConfigured()}
-            bankAccounts={bankAccountOptions}
-            categories={categoryOptions}
-          />
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/dashboard/m/accounting/banking/rules"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            <Filter className="size-4" />
+            Rules
+          </Link>
+          {isOwner && (
+            <BankingHeaderButtons
+              plaidReady={plaidConfigured()}
+              bankAccounts={bankAccountOptions}
+              categories={categoryOptions}
+            />
+          )}
+        </div>
       </div>
 
       <AccountingNav />

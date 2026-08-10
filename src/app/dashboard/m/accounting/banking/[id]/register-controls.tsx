@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Paperclip, Sparkles } from "lucide-react";
+import { Filter, Paperclip, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -136,7 +136,21 @@ interface ReviewRow {
     confidence: number;
     reason: string | null;
   } | null;
+  ruleSuggestion: {
+    ruleName: string;
+    accountId: string;
+    accountCode: string;
+  } | null;
   matchCandidates: MatchCandidate[];
+}
+
+/**
+ * A rule beats the model. It is a decision the owner already made, it cannot
+ * drift between runs, and it can say why — so where both have an opinion, the
+ * rule is the one shown and the one the Accept button would post.
+ */
+function preferredAccountId(row: ReviewRow): string | undefined {
+  return row.ruleSuggestion?.accountId ?? row.suggestion?.accountId;
 }
 
 interface CategoryOption {
@@ -165,12 +179,12 @@ export function ReviewTable({
   const acceptable = rows.filter(
     (r) =>
       r.status === "unreviewed" &&
-      r.suggestion &&
-      r.suggestion.confidence >= ACCEPT_THRESHOLD,
+      (r.ruleSuggestion !== null ||
+        (r.suggestion !== null && r.suggestion.confidence >= ACCEPT_THRESHOLD)),
   );
 
   function categorize(row: ReviewRow) {
-    const accountId = chosen[row.id] ?? row.suggestion?.accountId;
+    const accountId = chosen[row.id] ?? preferredAccountId(row);
     if (!accountId) {
       toast.error("Pick a category first");
       return;
@@ -332,20 +346,31 @@ export function ReviewTable({
                           </span>
                         )}
                       </span>
-                      {row.status === "unreviewed" && row.suggestion && (
+                      {row.status === "unreviewed" && row.ruleSuggestion ? (
                         <span
-                          className={cn(
-                            "mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
-                            row.suggestion.confidence >= ACCEPT_THRESHOLD
-                              ? "bg-brand/10 text-brand"
-                              : "bg-muted text-muted-foreground",
-                          )}
-                          title={row.suggestion.reason ?? undefined}
+                          className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand"
+                          title={row.ruleSuggestion.ruleName}
                         >
-                          <Sparkles className="size-3" />
-                          {row.suggestion.accountCode} ·{" "}
-                          {Math.round(row.suggestion.confidence * 100)}%
+                          <Filter className="size-3" />
+                          RULE · {row.ruleSuggestion.accountCode}
                         </span>
+                      ) : (
+                        row.status === "unreviewed" &&
+                        row.suggestion && (
+                          <span
+                            className={cn(
+                              "mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
+                              row.suggestion.confidence >= ACCEPT_THRESHOLD
+                                ? "bg-brand/10 text-brand"
+                                : "bg-muted text-muted-foreground",
+                            )}
+                            title={row.suggestion.reason ?? undefined}
+                          >
+                            <Sparkles className="size-3" />
+                            AI · {row.suggestion.accountCode} ·{" "}
+                            {Math.round(row.suggestion.confidence * 100)}%
+                          </span>
+                        )
                       )}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm">
@@ -374,7 +399,7 @@ export function ReviewTable({
                       <TableCell>
                         {row.status === "unreviewed" && (
                           <Select
-                            value={chosen[row.id] ?? row.suggestion?.accountId ?? undefined}
+                            value={chosen[row.id] ?? preferredAccountId(row)}
                             onValueChange={(v) =>
                               setChosen((c) => ({ ...c, [row.id]: v }))
                             }

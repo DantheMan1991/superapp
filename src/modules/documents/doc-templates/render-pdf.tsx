@@ -1,9 +1,7 @@
 import "server-only";
-import path from "node:path";
 import { createElement, type ReactElement } from "react";
 import {
   Document,
-  Font,
   Page,
   StyleSheet,
   Text,
@@ -11,6 +9,7 @@ import {
   renderToBuffer,
 } from "@react-pdf/renderer";
 import { fromMarkdown } from "mdast-util-from-markdown";
+import { ensureNotoSans } from "@/lib/pdf/fonts";
 import { injectValues, type MdNode } from "./merge";
 
 /**
@@ -21,59 +20,13 @@ import { injectValues, type MdNode } from "./merge";
  * 3MB. `pdf-lib` is the other half of the plan and MODIFIES existing PDFs
  * (stamping, merging); this file only ever creates new ones.
  *
+ * Font registration moved to `@/lib/pdf/fonts` when Accounting started
+ * generating invoice PDFs — a module may not import another module, so the
+ * shared piece went to src/lib.
+ *
  * The merge happens on the PARSED TREE before any of this runs — see merge.ts.
  * Nothing here ever concatenates a value into markup.
  */
-
-/**
- * Noto Sans, read off disk and registered as a buffer.
- *
- * PDF's built-in Helvetica is WinAnsi (cp1252) only. That covers `ñ` but
- * silently mangles `Nguyễn`, `Łukasz`, `Öztürk` — ordinary names on an ordinary
- * crew list, and a lien waiver that misspells the payee is a defective
- * document. Registered from a Buffer rather than a URL so generation never
- * makes a network call, and `next.config.ts` traces the directory into the
- * serverless bundle.
- *
- * Module-level and idempotent: react-pdf keeps a global font registry, so
- * registering once per process is both necessary and sufficient.
- */
-let fontsReady = false;
-function ensureFonts(): void {
-  if (fontsReady) return;
-  // Absolute paths off process.cwd(), matching src/lib/build-docs.ts, which
-  // already reads repo files at request time on this deployment.
-  const dir = path.join(
-    process.cwd(),
-    "src",
-    "modules",
-    "documents",
-    "doc-templates",
-    "fonts",
-  );
-  // All FOUR faces. react-pdf does not synthesize: it throws "Could not
-  // resolve font for NotoSans, fontStyle italic" at render time if a face is
-  // missing, so an unregistered combination is a failed document rather than a
-  // slightly wrong one. `***both***` is reachable from ordinary Markdown, so
-  // bold-italic is registered too.
-  Font.register({
-    family: "NotoSans",
-    fonts: [
-      { src: path.join(dir, "NotoSans-Regular.ttf") },
-      { src: path.join(dir, "NotoSans-Bold.ttf"), fontWeight: "bold" },
-      { src: path.join(dir, "NotoSans-Italic.ttf"), fontStyle: "italic" },
-      {
-        src: path.join(dir, "NotoSans-BoldItalic.ttf"),
-        fontWeight: "bold",
-        fontStyle: "italic",
-      },
-    ],
-  });
-  // Without this, long unbroken strings (a URL, a 40-character part number)
-  // overflow the page instead of wrapping.
-  Font.registerHyphenationCallback((word) => [word]);
-  fontsReady = true;
-}
 
 const styles = StyleSheet.create({
   page: {
@@ -280,7 +233,7 @@ export interface RenderInput {
  * merge values land as text nodes in the tree that results.
  */
 export async function renderTemplatePdf(input: RenderInput): Promise<Uint8Array> {
-  ensureFonts();
+  ensureNotoSans();
 
   const tree = fromMarkdown(input.body) as unknown as MdNode;
   injectValues(tree, input.values);

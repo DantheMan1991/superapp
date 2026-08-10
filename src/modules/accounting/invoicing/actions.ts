@@ -25,6 +25,7 @@ import {
 } from "./invoices";
 import { recordPayment, unapplyPayment } from "./payments";
 import { invoiceLineSchema } from "./lines";
+import { sendInvoiceEmail } from "./send-invoice";
 import {
   createRecurringInvoice,
   generateRecurringInvoices,
@@ -583,6 +584,61 @@ export async function generateRecurringInvoicesAction(): Promise<
         errors: result.errors.map((e) => ({ name: e.name, error: e.error })),
       },
     };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+// ---------------------------------------------------------------- delivery
+
+const sendInvoiceSchema = z.object({
+  invoiceId: z.string().uuid(),
+  /** Blank = use the customer's stored address. */
+  to: z.string().trim().email().max(320).optional().or(z.literal("")),
+});
+
+/**
+ * Email the invoice to the customer, PDF attached.
+ *
+ * The send itself is idempotent per (invoice, recipient) — a double-clicked
+ * button reports success without a second email — so the action does not need
+ * its own guard against that.
+ */
+export async function sendInvoiceAction(
+  input: z.infer<typeof sendInvoiceSchema>,
+): Promise<ActionResult<{ to: string; duplicate: boolean }>> {
+  const ctx = await gate();
+  const parsed = sendInvoiceSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const { result, to } = await withTenant(ctx.tenantId, (tx) =>
+      sendInvoiceEmail(tx, ctx, {
+        invoiceId: parsed.data.invoiceId,
+        ...(parsed.data.to ? { toOverride: parsed.data.to } : {}),
+      }),
+    );
+    if (!result.ok) return { error: result.message };
+
+    // Audited AFTER the send, and only on success: an audit row saying an
+    // invoice was emailed when it was not is worse than no row at all.
+    await withTenant(ctx.tenantId, (tx) =>
+      logAuditInTx(tx, {
+        action: "invoice.emailed",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "invoice",
+        targetId: parsed.data.invoiceId,
+        // Identifiers and coarse metadata only — the recipient's domain, not
+        // the address, per the audit rule in AGENTS.md.
+        meta: {
+          toDomain: to.split("@")[1] ?? "",
+          duplicate: result.duplicate,
+          sentAs: result.sentAs.kind,
+        },
+      }),
+    );
+    revalidateSales(parsed.data.invoiceId);
+    return { ok: true, data: { to, duplicate: result.duplicate } };
   } catch (err) {
     return fail(err);
   }

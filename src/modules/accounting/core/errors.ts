@@ -36,6 +36,8 @@ export type LedgerErrorCode =
   | "INVOICE_NOT_DRAFT"
   | "INVOICE_NOT_OPEN"
   | "INVOICE_EMPTY"
+  | "INVOICE_NOT_SENDABLE"
+  | "INVOICE_NO_RECIPIENT"
   | "INVOICE_NUMBER_TAKEN"
   | "INVOICE_HAS_PAYMENTS"
   | "INVOICE_OVERPAYMENT"
@@ -132,6 +134,10 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   INVOICE_NOT_DRAFT: "Only draft invoices can be changed this way.",
   INVOICE_NOT_OPEN: "That invoice isn't open for payments.",
   INVOICE_EMPTY: "An invoice needs at least one line and a total above zero.",
+  INVOICE_NOT_SENDABLE:
+    "Only an issued invoice can be emailed — a draft would go out saying DRAFT, and a void one should not go out at all.",
+  INVOICE_NO_RECIPIENT:
+    "This customer has no email address. Add one, or type an address to send to.",
   INVOICE_NUMBER_TAKEN: "That invoice number is already in use.",
   INVOICE_HAS_PAYMENTS: "Remove the payments first, then void.",
   INVOICE_OVERPAYMENT: "That's more than the remaining balance.",

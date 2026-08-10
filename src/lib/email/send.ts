@@ -54,7 +54,17 @@ export interface SendEmailInput {
    */
   idempotencyKey: string;
   replyTo?: string | null;
+  /**
+   * Files to attach. For a document the recipient is expecting — an invoice —
+   * not a way to ship data around: the total is capped below, and the cap is
+   * far under the provider's so a rejected send is our error message rather
+   * than theirs.
+   */
+  attachments?: ReadonlyArray<{ filename: string; content: Uint8Array }>;
 }
+
+/** Total attachment bytes per message. Resend allows 40MB; we allow far less. */
+export const MAX_ATTACHMENT_BYTES = 5_000_000;
 
 export type SendResult =
   | { ok: true; id: string; duplicate: boolean; sentAs: SenderIdentity }
@@ -127,6 +137,18 @@ export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
       ok: false,
       reason: "invalid_recipient",
       message: "That doesn't look like an email address.",
+    };
+  }
+
+  const attachmentBytes = (input.attachments ?? []).reduce(
+    (sum, a) => sum + a.content.byteLength,
+    0,
+  );
+  if (attachmentBytes > MAX_ATTACHMENT_BYTES) {
+    return {
+      ok: false,
+      reason: "failed",
+      message: "That attachment is too large to email.",
     };
   }
 
@@ -258,6 +280,14 @@ export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
       text: input.text,
       ...(input.html ? { html: input.html } : {}),
       ...(sender.replyTo ? { replyTo: sender.replyTo } : {}),
+      ...(input.attachments?.length
+        ? {
+            attachments: input.attachments.map((a) => ({
+              filename: a.filename,
+              content: Buffer.from(a.content),
+            })),
+          }
+        : {}),
     });
 
     if (result.error) {

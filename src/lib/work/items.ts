@@ -146,12 +146,20 @@ export async function updateItem(
   input: UpdateItemInput,
   expectedVersion?: number,
 ): Promise<void> {
-  if (expectedVersion !== undefined) {
-    const current = await requireItem(tx, ctx, itemId);
-    if (current.version !== expectedVersion) {
-      throw new WorkError("STALE", "somebody else changed this first");
-    }
-  }
+  /*
+   * THE VERSION GOES IN THE `WHERE`, NOT IN A CHECK BEFORE IT.
+   *
+   * Slice 5a read the row, compared, then updated — which is a
+   * time-of-check-to-time-of-use window: Postgres runs at READ COMMITTED, so
+   * another transaction can commit between the SELECT and the UPDATE, and the
+   * comparison would have passed against data that was already stale. The
+   * write then silently overwrites the very edit the column exists to detect.
+   *
+   * A compare-and-swap has no window: the row either still carries the version
+   * the caller saw, in which case one row is updated, or it does not and zero
+   * are. `crm_tasks` has done it this way since CRM slice 1 and was the reason
+   * this was spotted at all.
+   */
   const updated = await tx
     .update(schema.workItems)
     .set({
@@ -163,10 +171,30 @@ export async function updateItem(
       and(
         eq(schema.workItems.tenantId, ctx.tenantId),
         eq(schema.workItems.id, itemId),
+        ...(expectedVersion === undefined
+          ? []
+          : [eq(schema.workItems.version, expectedVersion)]),
       ),
     )
     .returning({ id: schema.workItems.id });
-  if (updated.length === 0) throw new WorkError("NOT_FOUND", "work not found");
+
+  if (updated.length > 0) return;
+
+  // Zero rows means one of two things, and the caller deserves to be told
+  // which: the item is gone (or invisible), or somebody got there first.
+  if (expectedVersion !== undefined) {
+    const [exists] = await tx
+      .select({ id: schema.workItems.id })
+      .from(schema.workItems)
+      .where(
+        and(
+          eq(schema.workItems.tenantId, ctx.tenantId),
+          eq(schema.workItems.id, itemId),
+        ),
+      );
+    if (exists) throw new WorkError("STALE", "somebody else changed this first");
+  }
+  throw new WorkError("NOT_FOUND", "work not found");
 }
 
 export async function setAssignee(

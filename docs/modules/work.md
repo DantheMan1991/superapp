@@ -13,6 +13,52 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Fix: the version guard had a TOCTOU window (branch `claude/work-slice-5b`)
+
+Slice 5a shipped `updateItem` reading the row, comparing `version`, then
+updating. **That is not a compare-and-swap.** Postgres runs at READ COMMITTED,
+so another transaction can commit between the SELECT and the UPDATE; the
+comparison passes against data that is already stale and the write silently
+overwrites the very edit the column exists to detect.
+
+The version now goes in the `UPDATE … WHERE`, so the row either still carries
+what the caller saw (one row updated) or it does not (zero). Zero rows is then
+disambiguated with a follow-up existence check, so "somebody got there first"
+and "it is gone" stay different messages.
+
+**`crm_tasks` has done it correctly since CRM slice 1**, and reading it while
+planning 5b is the only reason this was caught — no test failed, because a
+TOCTOU window needs two concurrent transactions to expose and the suite runs
+one at a time. Worth remembering the next time an optimistic version is added
+anywhere: the check belongs in the predicate, never before it.
+
+### 2026-08-09 — Findings that reshape slice 5b (not yet built)
+
+Three things came out of planning it that the design above got wrong or did not
+consider. Recorded here so the session that builds it starts from them.
+
+1. **CRM registers `contact`, `company` and `deal` — not `crm_party` and
+   `crm_deal`.** The data model section above names types that do not exist.
+   Worse, `contact` and `company` are two types over the SAME `parties` table,
+   so the migration has to read `parties.kind` per row to pick one. Writing the
+   wrong string produces links that resolve to nothing and render as dangling
+   chips, which is silent.
+2. **`crm_tasks` holds UNATTACHED follow-ups**, and they have nowhere to go on a
+   page filtered to CRM-linked work. `party_id` is nullable precisely so "ring
+   the accountant back" has a home. A `/tasks` page showing only linked work
+   would drop them without saying so; the likely answer is that the page
+   redirects to Work and the record page keeps a section reading linked work,
+   but that is a UI decision the founder should make rather than discover.
+3. **The whole switch is one deploy and cannot be split.** Copying rows while
+   CRM still reads the originals double-counts every follow-up in the digest.
+   That rules out landing the shared helpers or the migration on their own as a
+   warm-up.
+
+Scope, for planning: 8 CRM ops rewritten, the record page and timeline
+component, one page redirected, the automation `create_task` action, note
+extraction, merge handling, CRM's attention source deleted, a data migration,
+and five test files. All at once, on a module that is live.
+
 ### 2026-08-09 — Slice 5a: the shared write path, and a version column (branch `claude/work-slice-5`)
 
 Prerequisites for the CRM migration. **Nothing user-visible; no behaviour

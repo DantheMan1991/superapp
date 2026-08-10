@@ -62,6 +62,12 @@ this deploys (conventions §4).
 - `groupTasks`, `TaskToggle` and the timeline component are typed against a
   structural `GroupableTask` instead of the `CrmTask` row, which is what let the
   storage move underneath them without any of them being touched.
+- **Two readers nearly survived the switch**, and "read by nothing" was briefly
+  untrue: the follow-ups REPORT and the merge PREVIEW both counted `crm_tasks`
+  in raw SQL, which greps for `crmTasks` do not find. Left alone they would not
+  have crashed — they would have gone on reporting a frozen snapshot that
+  stopped changing the moment the storage did, which is worse. Both now read
+  `work_items`, and the report's `completed_at` became `closed_at`.
 
 ### 2026-08-09 — Fix: the version guard had a TOCTOU window (branch `claude/work-slice-5b`)
 

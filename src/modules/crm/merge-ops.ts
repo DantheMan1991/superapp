@@ -334,8 +334,14 @@ async function countMoves(
         where tenant_id = ${tenantId} and party_id = ${loserPartyId}`),
     countRows(tx, sql`select count(*)::int as n from crm_activities
         where tenant_id = ${tenantId} and party_id = ${loserPartyId}`),
-    countRows(tx, sql`select count(*)::int as n from crm_tasks
-        where tenant_id = ${tenantId} and party_id = ${loserPartyId}`),
+    // Follow-ups are work items linked to the record (work.md slice 5b), so
+    // the preview counts what `relinkEntity` will actually move. Counting
+    // `crm_tasks` here would report a frozen snapshot that stopped changing
+    // the moment the storage did.
+    countRows(tx, sql`select count(*)::int as n from work_item_links
+        where tenant_id = ${tenantId}
+          and entity_type in ('contact', 'company')
+          and entity_id = ${loserPartyId}`),
   ]);
 
   // ONLY WHEN THE ROLE IS ABSORBED — meaning BOTH records hold it. A role only

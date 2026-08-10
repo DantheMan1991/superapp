@@ -135,18 +135,45 @@ d("crm reports (database)", () => {
           },
         ]);
 
-        await tx.insert(schema.crmTasks).values([
+        /*
+         * Follow-ups are WORK ITEMS linked to the record since work.md slice
+         * 5b. The unattached one is the case the report's LEFT joins exist for
+         * — "ring the accountant back" has no record, and dropping it would
+         * understate somebody's workload, which is the one thing this report
+         * is for.
+         */
+        const [list] = await tx
+          .insert(schema.workLists)
+          .values({ tenantId, name: "Work", isDefault: true })
+          .returning();
+        const items = await tx
+          .insert(schema.workItems)
+          .values([
+            {
+              tenantId, listId: list.id, title: "Send the quote",
+              assigneeClerkUserId: "rep-a", createdByClerkUserId: "owner-user",
+            },
+            {
+              tenantId, listId: list.id, title: "Ring the accountant",
+              assigneeClerkUserId: "rep-a", createdByClerkUserId: "owner-user",
+            },
+            {
+              tenantId, listId: list.id, title: "Chase Bob",
+              assigneeClerkUserId: "rep-b", state: "done",
+              closedAt: new Date(), closedByClerkUserId: "rep-b",
+              createdByClerkUserId: "owner-user",
+            },
+          ])
+          .returning();
+        await tx.insert(schema.workItemLinks).values([
           {
-            tenantId, partyId: acme.id, title: "Send the quote",
-            assigneeClerkUserId: "rep-a", createdByClerkUserId: "owner-user",
+            tenantId, itemId: items[0].id, extensionSlug: "crm",
+            entityType: "company", entityId: acme.id,
+            createdByClerkUserId: "owner-user",
           },
           {
-            tenantId, partyId: null, title: "Ring the accountant",
-            assigneeClerkUserId: "rep-a", createdByClerkUserId: "owner-user",
-          },
-          {
-            tenantId, partyId: bob.id, title: "Chase Bob", assigneeClerkUserId: "rep-b",
-            completedAt: new Date(), completedByClerkUserId: "rep-b",
+            tenantId, itemId: items[2].id, extensionSlug: "crm",
+            entityType: "contact", entityId: bob.id,
             createdByClerkUserId: "owner-user",
           },
         ]);

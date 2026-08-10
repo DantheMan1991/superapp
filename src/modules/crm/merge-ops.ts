@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { AnyColumn } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { relinkEntity } from "@/lib/work/entity-work";
 import type { Party } from "@/db/schema";
 import { loadParty } from "@/lib/parties";
 import { CrmError } from "./core/errors";
@@ -333,8 +334,14 @@ async function countMoves(
         where tenant_id = ${tenantId} and party_id = ${loserPartyId}`),
     countRows(tx, sql`select count(*)::int as n from crm_activities
         where tenant_id = ${tenantId} and party_id = ${loserPartyId}`),
-    countRows(tx, sql`select count(*)::int as n from crm_tasks
-        where tenant_id = ${tenantId} and party_id = ${loserPartyId}`),
+    // Follow-ups are work items linked to the record (work.md slice 5b), so
+    // the preview counts what `relinkEntity` will actually move. Counting
+    // `crm_tasks` here would report a frozen snapshot that stopped changing
+    // the moment the storage did.
+    countRows(tx, sql`select count(*)::int as n from work_item_links
+        where tenant_id = ${tenantId}
+          and entity_type in ('contact', 'company')
+          and entity_id = ${loserPartyId}`),
   ]);
 
   // ONLY WHEN THE ROLE IS ABSORBED — meaning BOTH records hold it. A role only
@@ -534,10 +541,18 @@ export async function applyMerge(
     .update(schema.crmActivities)
     .set({ partyId: survivorPartyId, updatedAt: new Date() })
     .where(scoped(schema.crmActivities));
-  await tx
-    .update(schema.crmTasks)
-    .set({ partyId: survivorPartyId, updatedAt: new Date() })
-    .where(scoped(schema.crmTasks));
+  // Follow-ups are work items now (work.md slice 5b), so they follow the
+  // survivor by having their LINK repointed rather than a column rewritten.
+  // `relinkEntity` drops the loser's link where the item already points at the
+  // survivor, so a merge cannot violate the unique index.
+  for (const entityType of ["contact", "company"] as const) {
+    await relinkEntity(
+      tx,
+      { tenantId },
+      { entityType, entityId: loserPartyId },
+      { entityType, entityId: survivorPartyId },
+    );
+  }
 
   /* 4. Roles, and the accounting rows that hang off them */
   await applyRole(tx, tenantId, "customer", plan, survivorPartyId);

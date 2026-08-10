@@ -219,108 +219,16 @@ dd("the real sources, against Postgres", () => {
     );
   });
 
-  it("CRM source finds an overdue task assigned to the person", async () => {
-    const { withTenant, schema } = await import("../src/db");
-    const { crmAttentionSource } = await import(
-      "../src/modules/crm/attention/source"
-    );
+  /*
+   * THE THREE CRM-SOURCE TESTS THAT WERE HERE ARE GONE, not skipped.
+   *
+   * `crmAttentionSource` was deleted in work.md slice 5b when follow-ups became
+   * work items. Everything they asserted — an overdue item reaching its
+   * assignee, one person's work not reaching another, unassigned work rolling
+   * up to an owner and not to staff — is covered against the source that
+   * replaced it, in tests/work-attention.test.ts.
+   */
 
-    await withTenant(
-      tenantId,
-      (tx) =>
-        tx.insert(schema.crmTasks).values({
-          tenantId,
-          title: "Call the roofer back",
-          dueOn: "2026-08-01",
-          assigneeClerkUserId: "user_1",
-          createdByClerkUserId: "user_1",
-        }),
-      { role: "owner", userId: "user_1" },
-    );
-
-    const result = await withTenant(
-      tenantId,
-      (tx) =>
-        collectAttention(
-          tx,
-          { tenantId, userId: "user_1", role: "owner", today: "2026-08-06" },
-          [crmAttentionSource],
-        ),
-      { role: "owner", userId: "user_1" },
-    );
-
-    expect(result.complete).toBe(true);
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].title).toBe("Call the roofer back");
-    expect(result.items[0].urgency).toBe("overdue");
-    expect(result.items[0].detail).toBe("5 days overdue");
-    expect(result.items[0].unassigned).toBe(false);
-  });
-
-  it("CRM source does NOT give one person's task to another", async () => {
-    const { withTenant } = await import("../src/db");
-    const { crmAttentionSource } = await import(
-      "../src/modules/crm/attention/source"
-    );
-    const result = await withTenant(
-      tenantId,
-      (tx) =>
-        collectAttention(
-          tx,
-          { tenantId, userId: "user_2", role: "staff", today: "2026-08-06" },
-          [crmAttentionSource],
-        ),
-      { role: "staff", userId: "user_2" },
-    );
-    expect(result.items).toEqual([]);
-    expect(result.complete).toBe(true);
-  });
-
-  it("unassigned work reaches the owner, flagged, and not staff", async () => {
-    const { withTenant, schema } = await import("../src/db");
-    const { crmAttentionSource } = await import(
-      "../src/modules/crm/attention/source"
-    );
-
-    await withTenant(
-      tenantId,
-      (tx) =>
-        tx.insert(schema.crmTasks).values({
-          tenantId,
-          title: "Nobody has picked this up",
-          dueOn: "2026-08-06",
-          assigneeClerkUserId: null,
-          createdByClerkUserId: "user_1",
-        }),
-      { role: "owner", userId: "user_1" },
-    );
-
-    const owner = await withTenant(
-      tenantId,
-      (tx) =>
-        collectAttention(
-          tx,
-          { tenantId, userId: "user_9", role: "owner", today: "2026-08-06" },
-          [crmAttentionSource],
-        ),
-      { role: "owner", userId: "user_9" },
-    );
-    const unassigned = owner.items.filter((i) => i.unassigned);
-    expect(unassigned).toHaveLength(1);
-    expect(unassigned[0].title).toBe("Nobody has picked this up");
-
-    const staff = await withTenant(
-      tenantId,
-      (tx) =>
-        collectAttention(
-          tx,
-          { tenantId, userId: "user_9", role: "staff", today: "2026-08-06" },
-          [crmAttentionSource],
-        ),
-      { role: "staff", userId: "user_9" },
-    );
-    expect(staff.items).toEqual([]);
-  });
 
   it("accounting source's SQL executes, and it stays silent for non-owners", async () => {
     const { withTenant } = await import("../src/db");

@@ -14,11 +14,32 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
-> **Older entries live in [`crm-build-log`](./crm-build-log).**
-> This section keeps the most recent work only. Add new entries at the top
-> here; when it grows past a few screens, sweep the oldest across. The
-> dossier is read at the start of every session that touches this module, so
-> its length is a real cost.
+### 2026-08-09 — Follow-ups moved to Work (branch `claude/work-slice-5b`)
+
+`crm_tasks` is no longer read by anything. A follow-up is a **work item linked
+to the record** — see [work.md](work.md) slice 5b — and the table is dropped in
+a separate PR after this deploys.
+
+- **Nothing in CRM's UI changed.** `listTasksForParty(tx, tenantId, partyId)`
+  and its siblings kept their signatures, and `groupTasks`/`TaskToggle`/the
+  timeline component are now typed against a structural `GroupableTask` rather
+  than the `CrmTask` row. `FollowUp` keeps CRM's words — `notes`, `completedAt`,
+  `partyId`, `dealId` — over a table that spells them `description`,
+  `closed_at` and two link rows.
+- **`/dashboard/m/crm/tasks` redirects to Work** and does NOT filter to
+  CRM-linked work. `party_id` was nullable so an unattached follow-up had a
+  home; filtering would have dropped exactly those.
+- **A rule that names a non-member now creates the follow-up UNASSIGNED.** This
+  module's own dossier recorded the gap that any string could be written into
+  an assignee column; Work validates against the roster, and the automation
+  engine's savepoint would have swallowed that error and lost the follow-up
+  entirely. Losing the assignment beats losing the obligation.
+- **CRM's attention source is deleted.** It had to go in the same deploy as the
+  data copy: with the rows copied and both sources registered, every follow-up
+  would appear twice in the digest. Work's source covers the same ground and
+  more.
+- A merge now **relinks** a follow-up to the survivor instead of rewriting
+  `party_id`.
 
 ### 2026-08-08 — Build log archived; the dossier is readable again (branch `claude/split-oversized-files-2`)
 

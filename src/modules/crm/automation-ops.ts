@@ -1,6 +1,8 @@
 import "server-only";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { createWorkForEntity } from "@/lib/work/entity-work";
+import { listAssignableMembers } from "@/lib/team";
 import type { CrmAutomationRule } from "@/db/schema";
 import { logAuditInTx } from "@/lib/audit";
 import {
@@ -300,21 +302,57 @@ async function performAction(
         action.dueInDays ?? 0,
       );
 
-      const assignee = action.assignee?.trim()
+      const named = action.assignee?.trim()
         ? action.assignee.trim()
         : await recordOwner(tx, ctx);
 
-      await tx.insert(schema.crmTasks).values({
-        tenantId: ctx.tenantId,
-        partyId: ctx.partyId,
-        title: (action.title ?? "").trim(),
-        dueOn: due,
-        assigneeClerkUserId: assignee,
+      /*
+       * A RULE MAY NAME SOMEBODY WHO IS NOT A MEMBER, AND THE WORK STILL HAS TO
+       * SURVIVE THAT.
+       *
+       * `crm_tasks.assignee_clerk_user_id` was free text — crm.md records that
+       * a rule could assign to any string, producing work in nobody's list.
+       * Work validates against the roster instead, which is the fix, but a
+       * validation error here would be swallowed by this file's savepoint and
+       * the follow-up would simply not exist. Silently losing the obligation is
+       * worse than losing the assignment, so an unknown name falls back to
+       * unassigned — where the digest's owner rollup picks it up.
+       */
+      const roster = await listAssignableMembers(tx, ctx.tenantId);
+      const assignee = roster.some((m) => m.clerkUserId === named) ? named : null;
+
+      // A follow-up is a work item linked to the record (work.md slice 5b).
+      // The rule still names a party, so the link type comes from what that
+      // party IS — `contact` for a person, `company` for an organisation.
+      const [party] = await tx
+        .select({ kind: schema.parties.kind })
+        .from(schema.parties)
+        .where(
+          and(
+            eq(schema.parties.tenantId, ctx.tenantId),
+            eq(schema.parties.id, ctx.partyId),
+          ),
+        );
+      if (!party) return;
+
+      await createWorkForEntity(
+        tx,
         // Attributed to the person whose action triggered it, not to a system
         // user. There is no system user, and inventing one would make the
-        // audit trail lie about who caused the row to exist.
-        createdByClerkUserId: ctx.userId,
-      });
+        // audit trail lie about who caused the row to exist. No role: a write
+        // does not read one, and this engine does not carry the caller's.
+        { tenantId: ctx.tenantId, userId: ctx.userId },
+        {
+          extensionSlug: "crm",
+          entityType: party.kind === "person" ? "contact" : "company",
+          entityId: ctx.partyId,
+        },
+        {
+          title: (action.title ?? "").trim(),
+          dueOn: due,
+          assignee,
+        },
+      );
       return;
     }
 

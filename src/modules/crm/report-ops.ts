@@ -103,10 +103,17 @@ function baseFrom(type: ReportTypeId): SQL {
       // LEFT join to details: an unattached follow-up ("ring the accountant
       // back") has no record, and a report that dropped those would understate
       // somebody's workload — which is the one thing this report is for.
+      //
+      // Reads `work_items` since work.md slice 5b. The LEFT joins are what keep
+      // an unattached follow-up in the report: the link row is optional, and so
+      // is the CRM record behind it.
       return sql`
-        from crm_tasks t
+        from work_items t
+        left join work_item_links wl
+          on wl.tenant_id = t.tenant_id and wl.item_id = t.id
+         and wl.entity_type in ('contact', 'company')
         left join crm_party_details d
-          on d.tenant_id = t.tenant_id and d.party_id = t.party_id`;
+          on d.tenant_id = t.tenant_id and d.party_id = wl.entity_id`;
   }
 }
 
@@ -188,7 +195,7 @@ function groupExpression(type: ReportTypeId, key: string): SQL | null {
           task_due_month: sql`to_char(t.due_on, 'YYYY-MM')`,
           // A boolean rendered as text, so the group key is a string like
           // every other one and the renderer needs no special case.
-          task_done: sql`case when t.completed_at is null then 'Outstanding' else 'Done' end`,
+          task_done: sql`case when t.closed_at is null then 'Outstanding' else 'Done' end`,
         }[key] ?? null
       );
   }
@@ -249,7 +256,7 @@ function filterColumn(type: ReportTypeId, key: string): SQL | null {
     case "followups":
       return (
         {
-          task_done: sql`(t.completed_at is not null)`,
+          task_done: sql`(t.closed_at is not null)`,
           task_due: sql`t.due_on`,
         }[key] ?? null
       );

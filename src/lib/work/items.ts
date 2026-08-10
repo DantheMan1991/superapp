@@ -4,7 +4,7 @@ import { schema, type Tx } from "@/db";
 import { listAssignableMembers } from "@/lib/team";
 import { isClosedState, type WorkState } from "@/lib/work/vocabulary";
 import { WorkError } from "@/lib/work/errors";
-import type { WorkCtx } from "@/lib/work/with-work";
+import type { WorkWriteCtx } from "@/lib/work/with-work";
 
 /**
  * THE write path for a work item. One implementation, two callers.
@@ -68,7 +68,7 @@ export interface UpdateItemInput {
  */
 async function assertAssignable(
   tx: Tx,
-  ctx: WorkCtx,
+  ctx: WorkWriteCtx,
   clerkUserId: string | null,
 ): Promise<void> {
   if (clerkUserId === null) return;
@@ -81,7 +81,7 @@ async function assertAssignable(
 /** The item, if the caller can see it. Used to turn silence into a reason. */
 async function requireItem(
   tx: Tx,
-  ctx: WorkCtx,
+  ctx: WorkWriteCtx,
   itemId: string,
 ): Promise<{ id: string; listId: string; parentId: string | null; version: number }> {
   const [row] = await tx
@@ -104,7 +104,7 @@ async function requireItem(
 
 export async function createItem(
   tx: Tx,
-  ctx: WorkCtx,
+  ctx: WorkWriteCtx,
   input: CreateItemInput,
 ): Promise<string> {
   await assertAssignable(tx, ctx, input.assignee ?? null);
@@ -141,7 +141,7 @@ export async function createItem(
  */
 export async function updateItem(
   tx: Tx,
-  ctx: WorkCtx,
+  ctx: WorkWriteCtx,
   itemId: string,
   input: UpdateItemInput,
   expectedVersion?: number,
@@ -199,7 +199,7 @@ export async function updateItem(
 
 export async function setAssignee(
   tx: Tx,
-  ctx: WorkCtx,
+  ctx: WorkWriteCtx,
   itemId: string,
   assignee: string | null,
 ): Promise<void> {
@@ -231,7 +231,7 @@ export async function setAssignee(
  */
 export async function setItemState(
   tx: Tx,
-  ctx: WorkCtx,
+  ctx: WorkWriteCtx,
   itemId: string,
   state: WorkState,
 ): Promise<void> {
@@ -264,7 +264,7 @@ export async function setItemState(
  */
 export async function setParent(
   tx: Tx,
-  ctx: WorkCtx,
+  ctx: WorkWriteCtx,
   itemId: string,
   parentId: string | null,
 ): Promise<void> {

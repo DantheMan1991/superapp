@@ -1,6 +1,5 @@
 import "server-only";
 import { accountingAttentionSource } from "@/modules/accounting/attention/source";
-import { crmAttentionSource } from "@/modules/crm/attention/source";
 import { schedulingAttentionSource } from "@/modules/scheduling/attention/source";
 import { workAttentionSource } from "@/modules/work/attention/source";
 import type { AttentionSource } from "./types";
@@ -27,13 +26,18 @@ import type { AttentionSource } from "./types";
  * attached — a 7am digest that opens with an overdue invoice buries the 8am
  * site visit under it.
  *
- * WORK IS SECOND, from 2026-08-09. It took the place follow-ups held, on the
- * reason follow-ups held it: real assignee, real agreed date. Work has a
- * stronger claim to it than CRM does, because clearing the item IS the point of
- * the record — closing it removes the line, with nothing to mark read — and
- * because it covers the whole business rather than the part of it that happens
- * to be a customer conversation. Follow-ups move to third, and slice 5 of
- * docs/modules/work.md merges them into this source and deletes CRM's.
+ * WORK IS SECOND, from 2026-08-09, and there is no CRM source any more.
+ *
+ * Follow-ups held second place for the reason Work now holds it: a real
+ * assignee and a real agreed date. Work has the stronger claim, because
+ * clearing the item IS the point of the record — closing it removes the line,
+ * with nothing to mark read — and because it covers the whole business rather
+ * than the part that happens to be a customer conversation.
+ *
+ * `crmAttentionSource` was DELETED in work.md slice 5b, in the same deploy that
+ * copied `crm_tasks` into `work_items`. Those two cannot be separated: with the
+ * rows copied and both sources registered, every follow-up would be reported
+ * twice, once by each.
  *
  * Accounting is last because it reaches owners only and has no per-record
  * assignee at all.
@@ -41,7 +45,6 @@ import type { AttentionSource } from "./types";
 export const attentionSources: readonly AttentionSource[] = [
   schedulingAttentionSource,
   workAttentionSource,
-  crmAttentionSource,
   accountingAttentionSource,
 ];
 

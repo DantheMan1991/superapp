@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { CrmActivity, CrmTask } from "../src/db/schema";
+import type { CrmActivity } from "../src/db/schema";
+import type { GroupableTask } from "../src/modules/crm/core/timeline";
 import {
   activityToTimeline,
   addDays,
@@ -39,11 +40,17 @@ function activity(over: Partial<CrmActivity> = {}): CrmActivity {
   } as CrmActivity;
 }
 
-function task(over: Partial<CrmTask> = {}): CrmTask {
+/**
+ * A follow-up, as the pure timeline functions read one.
+ *
+ * `GroupableTask` rather than the `crm_tasks` row: the table was dropped in
+ * work.md slice 5c and these functions never depended on it — they read a
+ * shape, which is what the structural type says out loud.
+ */
+function task(over: Partial<GroupableTask> = {}): GroupableTask {
   seq += 1;
   return {
     id: `task-${seq}`,
-    tenantId: "t1",
     partyId: "p1",
     dealId: null,
     title: `Task ${seq}`,
@@ -51,13 +58,9 @@ function task(over: Partial<CrmTask> = {}): CrmTask {
     dueOn: null,
     assigneeClerkUserId: null,
     completedAt: null,
-    completedByClerkUserId: null,
-    createdByClerkUserId: "u1",
     version: 1,
-    createdAt: new Date(0),
-    updatedAt: new Date(0),
     ...over,
-  } as CrmTask;
+  };
 }
 
 describe("mergeTimeline", () => {
@@ -203,7 +206,7 @@ describe("groupTasks", () => {
     // A list whose job is "what is outstanding" that also carries what is
     // finished is a list nobody trusts the top of.
     const groups = groupTasks(
-      [task({ dueOn: "2026-08-01", completedAt: new Date() , completedByClerkUserId: "u1" })],
+      [task({ dueOn: "2026-08-01", completedAt: new Date() })],
       today,
     );
     expect(Object.values(groups).flat()).toHaveLength(0);

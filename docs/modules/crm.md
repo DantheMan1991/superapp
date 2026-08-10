@@ -14,6 +14,21 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-10 — `crm_tasks` dropped (branch `claude/work-slice-5c`)
+
+The table is gone (`drizzle/0110`). Its rows were copied into `work_items` by
+0109, ids preserved and verified against production, and nothing has read it
+since the slice 5b deploy.
+
+**The one property that did not survive**: this module's task policy BRANCHED —
+an attached follow-up inherited its record's visibility, so a follow-up on a
+`restricted` record was hidden from staff. A work item inherits its LIST
+instead, and Work has no per-record visibility to inherit. Production had zero
+restricted records when this shipped, so no follow-up changed hands; a tenant
+that needs the old behaviour puts that work in an owners-only list. The four
+isolation tests that certified the branch are removed, with that difference
+written into their place.
+
 ### 2026-08-09 — Follow-ups moved to Work (branch `claude/work-slice-5b`)
 
 `crm_tasks` is no longer read by anything. A follow-up is a **work item linked

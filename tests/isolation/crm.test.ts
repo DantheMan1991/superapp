@@ -243,38 +243,24 @@ d("crm isolation (RLS + record visibility)", () => {
           occurredAt: new Date(),
           createdByClerkUserId: "owner-user",
         });
-        await tx.insert(schema.crmTasks).values({
-          tenantId: tenantA,
-          partyId: partyOf.aSecret,
-          title: "Confidential follow-up",
-          createdByClerkUserId: "owner-user",
-        });
       },
       { role: "owner", userId: "owner-user" },
     );
 
-    const [activities, tasks] = await withTenant(
+    const activities = await withTenant(
       tenantA,
-      async (tx) => [
-        await tx.select().from(schema.crmActivities),
-        await tx.select().from(schema.crmTasks),
-      ],
+      (tx) => tx.select().from(schema.crmActivities),
       { role: "staff", userId: "collab-user" },
     );
     expect(activities.map((a) => a.partyId)).toContain(partyOf.aSecret);
-    expect(tasks.map((t) => t.partyId)).toContain(partyOf.aSecret);
 
     // And a colleague without the grant still sees neither.
-    const [theirActivities, theirTasks] = await withTenant(
+    const theirActivities = await withTenant(
       tenantA,
-      async (tx) => [
-        await tx.select().from(schema.crmActivities),
-        await tx.select().from(schema.crmTasks),
-      ],
+      (tx) => tx.select().from(schema.crmActivities),
       { role: "staff", userId: "other-user" },
     );
     expect(theirActivities.map((a) => a.partyId)).not.toContain(partyOf.aSecret);
-    expect(theirTasks.map((t) => t.partyId)).not.toContain(partyOf.aSecret);
   });
 
   it("STAFF CANNOT GRANT THEMSELVES ACCESS", async () => {
@@ -740,109 +726,26 @@ d("crm isolation (RLS + record visibility)", () => {
     expect(asStaff.map((a) => a.partyId)).toContain(partyOf.aOpen);
   });
 
-  /**
-   * The task policy BRANCHES, which is the one genuinely new shape in slice 4:
-   * an unattached task is plain tenant-scoped, an attached one inherits. Both
-   * halves need proving, and so does the write side — a staff member must not
-   * be able to attach a task to a record they cannot see.
+  /*
+   * THE FOUR `crm_tasks` TESTS THAT WERE HERE ARE GONE WITH THE TABLE
+   * (work.md slice 5c, drizzle/0110).
+   *
+   * They certified a policy that BRANCHED — unattached follow-ups plain
+   * tenant-scoped, attached ones inheriting the record's visibility. Work does
+   * not branch: an item inherits its LIST, and `tests/isolation/work.test.ts`
+   * certifies that chain three tables deep, including that staff cannot attach
+   * to work they cannot see.
+   *
+   * ONE PROPERTY DID NOT SURVIVE THE MOVE, AND IT IS RECORDED IN work.md
+   * RATHER THAN LOST HERE: a follow-up on a RESTRICTED record used to be hidden
+   * from staff by inheritance. A work item is visible to its list's audience
+   * instead. Production had zero restricted records when this shipped, so
+   * nothing changed hands — but the two models genuinely differ, and a tenant
+   * that needs the old behaviour puts that work in an owners-only list.
    */
-  it("an unattached task is visible to every member", async () => {
-    await withTenant(
-      tenantA,
-      (tx) =>
-        tx.insert(schema.crmTasks).values({
-          tenantId: tenantA,
-          title: "Ring the accountant back",
-          createdByClerkUserId: "user-owner",
-        }),
-      { role: "owner" },
-    );
 
-    const asStaff = await withTenant(
-      tenantA,
-      (tx) => tx.select().from(schema.crmTasks),
-      { role: "staff" },
-    );
-    expect(asStaff.map((t) => t.title)).toContain("Ring the accountant back");
-  });
 
-  it("a task attached to a restricted record is hidden from staff", async () => {
-    await withTenant(
-      tenantA,
-      (tx) =>
-        tx.insert(schema.crmTasks).values({
-          tenantId: tenantA,
-          partyId: partyOf.aSecret,
-          title: "Chase the confidential one",
-          createdByClerkUserId: "user-owner",
-        }),
-      { role: "owner" },
-    );
-
-    const asStaff = await withTenant(
-      tenantA,
-      (tx) => tx.select().from(schema.crmTasks),
-      { role: "staff" },
-    );
-    expect(asStaff.map((t) => t.title)).not.toContain("Chase the confidential one");
-
-    const asOwner = await withTenant(
-      tenantA,
-      (tx) => tx.select().from(schema.crmTasks),
-      { role: "owner" },
-    );
-    expect(asOwner.map((t) => t.title)).toContain("Chase the confidential one");
-  });
-
-  it("staff cannot ATTACH a task to a restricted record", async () => {
-    // The WITH CHECK half. Without it a staff member could file work against a
-    // record they cannot open, and then not see what they had just written.
-    await expect(
-      withTenant(
-        tenantA,
-        (tx) =>
-          tx.insert(schema.crmTasks).values({
-            tenantId: tenantA,
-            partyId: partyOf.aSecret,
-            title: "Smuggled",
-            createdByClerkUserId: "user-staff",
-          }),
-        { role: "staff" },
-      ),
-    ).rejects.toThrow();
-  });
-
-  it("a task cannot be half-completed", async () => {
-    // The CHECK constraint: completed_at and completed_by are one fact stored
-    // in two columns, and a row carrying only half of it is uninterpretable.
-    await expect(
-      withTenant(
-        tenantA,
-        (tx) =>
-          tx.insert(schema.crmTasks).values({
-            tenantId: tenantA,
-            title: "Half done",
-            completedAt: new Date(),
-            createdByClerkUserId: "user-owner",
-          }),
-        { role: "owner" },
-      ),
-    ).rejects.toThrow();
-  });
-
-  it("cannot write activity or tasks into the other tenant", async () => {
-    await expect(
-      withTenant(
-        tenantA,
-        (tx) =>
-          tx.insert(schema.crmTasks).values({
-            tenantId: tenantB,
-            title: "Cross-tenant task",
-            createdByClerkUserId: "attacker",
-          }),
-        { role: "owner" },
-      ),
-    ).rejects.toThrow();
+  it("cannot write activity into the other tenant", async () => {
   });
 
   /* -- The CRM mail extension (slice 5) ----------------------------------- */

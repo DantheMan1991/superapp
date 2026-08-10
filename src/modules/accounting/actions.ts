@@ -434,11 +434,13 @@ const exportCsvSchema = z.discriminatedUnion("report", [
     to: dateStr,
     compare: z.enum(["prev-period", "prev-year"]).optional(),
     dim: z.string().regex(/^[a-z0-9_]+$/).max(32).optional(),
+    basis: z.enum(["accrual", "cash"]).optional(),
   }),
   z.object({
     report: z.literal("balance-sheet"),
     asOf: dateStr,
     compare: z.enum(["prev-year"]).optional(),
+    basis: z.enum(["accrual", "cash"]).optional(),
   }),
   z.object({
     report: z.literal("cash"),
@@ -466,20 +468,25 @@ export async function exportReportCsv(
           to: p.to,
           compare: p.compare,
           dimensionType: p.dim,
+          basis: p.basis,
         });
         return {
-          filename: `profit-and-loss_${p.from}_${p.to}.csv`,
-          csv: toCsv(pnlToCsvRows(report)),
+          // The basis is in the FILENAME as well as the content: these files
+          // get emailed to accountants, and two profit figures for the same
+          // period are only safe if you can tell them apart at a glance.
+          filename: `profit-and-loss_${p.from}_${p.to}_${p.basis ?? "accrual"}.csv`,
+          csv: toCsv(pnlToCsvRows(report, p.basis ?? "accrual")),
         };
       }
       if (p.report === "balance-sheet") {
         const report = await getBalanceSheet(tx, ctx.tenantId, {
           asOf: p.asOf,
           compare: p.compare,
+          basis: p.basis,
         });
         return {
-          filename: `balance-sheet_${p.asOf}.csv`,
-          csv: toCsv(balanceSheetToCsvRows(report)),
+          filename: `balance-sheet_${p.asOf}_${p.basis ?? "accrual"}.csv`,
+          csv: toCsv(balanceSheetToCsvRows(report, p.basis ?? "accrual")),
         };
       }
       const report = await getCashActivity(tx, ctx.tenantId, {

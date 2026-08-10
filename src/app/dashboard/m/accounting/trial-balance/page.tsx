@@ -28,17 +28,21 @@ export const dynamic = "force-dynamic";
 export default async function TrialBalancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ asOf?: string }>;
+  searchParams: Promise<{ asOf?: string; basis?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
 
+  // Anything that is not exactly "cash" is accrual: an unreadable query string
+  // must never silently produce the other basis.
+  const basis = sp.basis === "cash" ? "cash" : "accrual";
+
   const { tb, asOf, settings } = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
     const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
-    const tb = await getTrialBalance(tx, ctx.tenant.id, asOf);
+    const tb = await getTrialBalance(tx, ctx.tenant.id, asOf, basis);
     return { tb, asOf, settings };
   });
 
@@ -51,7 +55,7 @@ export default async function TrialBalancePage({
           <h1 className="text-2xl font-semibold tracking-tight">Trial Balance</h1>
           <p className="text-sm text-muted-foreground">
             Every account&apos;s balance as of {asOf} — the two columns must
-            agree.
+            agree. {basis === "cash" ? "Cash" : "Accrual"} basis.
           </p>
         </div>
         {inBalance ? (
@@ -70,6 +74,20 @@ export default async function TrialBalancePage({
               As of
             </label>
             <Input id="asOf" name="asOf" type="date" defaultValue={asOf} className="h-9" />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="basis" className="text-xs font-medium text-muted-foreground">
+              Basis
+            </label>
+            <select
+              id="basis"
+              name="basis"
+              defaultValue={basis}
+              className="border-input h-9 w-32 rounded-md border bg-transparent px-3 text-sm shadow-xs"
+            >
+              <option value="accrual">Accrual</option>
+              <option value="cash">Cash</option>
+            </select>
           </div>
           <Button type="submit" variant="outline" size="sm">
             Run

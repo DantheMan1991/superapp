@@ -5,7 +5,7 @@ import type {
   ProfitAndLossReport,
   ReportRow,
 } from "../core/report-builders";
-import type { TrialBalance } from "../core/balances";
+import type { AccountingBasis, TrialBalance } from "../core/balances";
 
 /**
  * RFC 4180 CSV construction (pure, client-safe). Amounts go through
@@ -31,7 +31,22 @@ function amount(cents: number | undefined): string {
   return cents === undefined ? "" : centsToCsvAmount(cents);
 }
 
-export function pnlToCsvRows(report: ProfitAndLossReport): string[][] {
+/**
+ * A basis row is appended to every statement export.
+ *
+ * Cash and accrual produce two different, both-correct profit figures for the
+ * same period. A CSV that does not say which one it is gets forwarded to an
+ * accountant and read as the other — so the answer travels with the file, in
+ * the content as well as the filename.
+ */
+function basisRow(basis: AccountingBasis): string[] {
+  return [`${basis === "cash" ? "Cash" : "Accrual"} basis`];
+}
+
+export function pnlToCsvRows(
+  report: ProfitAndLossReport,
+  basis: AccountingBasis = "accrual",
+): string[][] {
   const header: string[] = ["Account"];
   if (report.columns) {
     header.push(...report.columns.map((c) => c.label));
@@ -54,10 +69,13 @@ export function pnlToCsvRows(report: ProfitAndLossReport): string[][] {
     }
     return cells;
   });
-  return [header, ...body];
+  return [header, ...body, basisRow(basis)];
 }
 
-export function balanceSheetToCsvRows(report: BalanceSheetReport): string[][] {
+export function balanceSheetToCsvRows(
+  report: BalanceSheetReport,
+  basis: AccountingBasis = "accrual",
+): string[][] {
   const header = ["Account", `As of ${report.asOf}`];
   if (report.comparison) header.push(`As of ${report.comparison.asOf}`);
   const body = report.rows.map((row) => {
@@ -65,7 +83,7 @@ export function balanceSheetToCsvRows(report: BalanceSheetReport): string[][] {
     if (report.comparison) cells.push(amount(row.comparisonCents));
     return cells;
   });
-  return [header, ...body];
+  return [header, ...body, basisRow(basis)];
 }
 
 export function trialBalanceToCsvRows(

@@ -41,3 +41,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0004](0004-capability-packs-and-industry-profiles.md) | Capability packs + industry profiles, not per-industry modules | 2026-07-27 | Accepted |
 | [0005](0005-polling-over-push-for-mail-freshness.md) | Polling over push for mail freshness | 2026-08-02 | Accepted |
 | [0006](0006-agents-act-by-delegation.md) | An agent is a delegation from a person, not a principal | 2026-08-06 | Proposed |
+| [0007](0007-cash-basis-reporting.md) | Cash-basis reporting, derived at read time | 2026-08-10 | Accepted |

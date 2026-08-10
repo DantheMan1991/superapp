@@ -48,3 +48,21 @@ export const WORK_CLOSED_STATES = ["done", "cancelled"] as const;
 /** How much of a list the tenant's staff may see. */
 export const WORK_VISIBILITIES = ["members", "owners"] as const;
 export type WorkVisibility = (typeof WORK_VISIBILITIES)[number];
+
+/**
+ * The two predicates over those values.
+ *
+ * HERE RATHER THAN IN THE MODULE, since slice 5a: `src/lib/work/items.ts` is
+ * the shared write path that CRM will call, and `src/lib/` may not depend on a
+ * module. A predicate over a constant declared in this file belongs beside it
+ * anyway — the module's `core/state.ts` keeps the LABELS, which are
+ * presentation, and re-exports these so nothing had to change at a call site.
+ */
+export function isWorkState(value: string): value is WorkState {
+  return (WORK_STATES as readonly string[]).includes(value);
+}
+
+/** Done or cancelled — finished with, either way. See `work_items.closed_at`. */
+export function isClosedState(state: WorkState): boolean {
+  return (WORK_CLOSED_STATES as readonly string[]).includes(state);
+}

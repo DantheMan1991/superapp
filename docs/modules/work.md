@@ -13,6 +13,47 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Slice 5a: the shared write path, and a version column (branch `claude/work-slice-5`)
+
+Prerequisites for the CRM migration. **Nothing user-visible; no behaviour
+change.** Migration `0108` adds one column.
+
+**SLICE 5 IS THREE PULL REQUESTS, NOT ONE.** Planning it revealed two things
+the design in this dossier did not account for:
+
+1. **CRM cannot import Work.** Module isolation forbids it, so CRM cannot call
+   `src/modules/work/item-ops.ts` to raise a follow-up. The write path had to
+   move to `src/lib/work/items.ts` first — the alternative was a second write
+   path inside CRM duplicating every guard, which would drift within a release.
+   `src/lib/schedule/` set the precedent.
+2. **Copying `crm_tasks` into `work_items` while CRM still reads the originals
+   would make one follow-up appear TWICE in the digest**, once from each
+   source. So the copy and the deletion of CRM's attention source have to land
+   in the same deploy. The dossier previously said the two sources would report
+   different rows and nothing would double-count; that is true only until the
+   copy happens, and this corrects it.
+
+So: **5a** prerequisites (here), **5b** the switch — CRM writes and reads work
+items, data copied, CRM's source deleted — and **5c** `DROP TABLE crm_tasks`,
+which conventions §4 requires to go out AFTER the deploy that stops reading it.
+
+- **`work_items.version` ships ahead of its reader**, deliberately. `crm_tasks`
+  has carried an optimistic version since CRM slice 1, and arriving without one
+  would silently drop a property follow-ups have today — two people editing one
+  item would go back to last-write-wins. Documents' pattern: ship the column
+  with the schema, not with the screen.
+- **`expectedVersion` is opt-in.** A caller with nothing to be stale about (a
+  rule firing, an import) omits it and gets exactly the behaviour every caller
+  had before the column existed, so adding the guard changed nothing.
+- **The bump is `version = version + 1` in SQL**, never read-then-write —
+  read-then-write loses a bump when two writes interleave, which is precisely
+  the collision the column exists to detect.
+- `WorkError` and the state predicates moved to `src/lib/work/` beside the
+  values they test, for the same reason as the write path. The module
+  re-exports both, so no call site changed. `friendlyMessage` stayed in the
+  module: turning a code into a sentence is presentation, and CRM may want
+  different words.
+
 ### 2026-08-09 — Slice 4: the digest source, and the module goes live (branch `claude/work-slice-4`)
 
 **The seed row flips to `available`.** No migration. One attention source, 10
@@ -563,7 +604,9 @@ Migrations start at **0104**.
 | 2 | ✅ **Shipped.** The list view with filters, and the board grouped by `state`, moved by menu | Two views over one dataset — the Notion lesson made concrete. It did not need a second query builder; `listWorkItems` grew two filters |
 | 3 | ✅ **Shipped.** Saved views as URL parameter sets. Links: Work as host **and** as contributor | The seam work. Documents' saved-view decision is reused, not re-derived |
 | 4 | ✅ **Shipped.** Attention source, second in the digest. Seed row flips to `available` | The module goes live once the obligation it creates can reach a person |
-| 5 | CRM follow-ups migrate onto work items; `crm_tasks` is deleted | Its own slice, after the core is proven. Read the trap above before starting |
+| 5a | ✅ **Shipped.** Shared write path in `src/lib/work/`, `version` column | CRM cannot import Work, so the write path had to move before CRM could raise a follow-up |
+| 5b | CRM writes and reads work items; data copied; CRM's source deleted | Must be ONE deploy — copying while CRM still reads `crm_tasks` double-counts every follow-up in the digest |
+| 5c | `DROP TABLE crm_tasks` | conventions §4: a drop goes out AFTER the deploy that stopped reading it |
 | 6 | Recurring work (RRULE moved to `src/lib/` first, in its own PR) | Needs a real consumer; a maintenance schedule is the obvious one |
 | 7 | ⏸ Item kinds, item fields, pack views — **shared with scheduling's deferred 6 and 7** | Build with the first pack in hand, so the seam ships with two users rather than none |
 | 8 | ⏸ Work on the calendar | Deferred until `dispatch` needs it. The mechanism is scheduling contributing a linkable type and the calendar reading an overlay — not a second source inside `app_schedule_range()` |

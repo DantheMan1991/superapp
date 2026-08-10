@@ -222,6 +222,16 @@ export const workItems = pgTable(
      */
     closedAt: timestamp("closed_at", { withTimezone: true }),
     closedByClerkUserId: text("closed_by_clerk_user_id"),
+    /**
+     * Optimistic concurrency. Bumped by every write through the shared path.
+     *
+     * Added in slice 5a, ahead of its reader, because `crm_tasks` has carried
+     * one since CRM slice 1 and slice 5b moves those rows here — arriving
+     * without it would silently drop a property follow-ups have today, sending
+     * two people editing one item back to last-write-wins. Documents' pattern:
+     * ship the column with the schema, not with the screen.
+     */
+    version: integer("version").notNull().default(1),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

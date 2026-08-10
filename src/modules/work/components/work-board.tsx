@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { CornerDownRight } from "lucide-react";
 import { WORK_STATE_ORDER, coreStateLabel } from "../core/state";
 import type { MemberOption, WorkRowView } from "../core/row";
-import { DueBadge, ListBadge } from "./work-list";
+import { DueBadge, ListBadge, itemHref } from "./work-list";
 import {
   AssigneeControl,
   CloseToggle,
@@ -33,11 +34,14 @@ export function WorkBoard({
   today,
   members,
   showListName,
+  viewQuery,
 }: {
   rows: WorkRowView[];
   today: string;
   members: MemberOption[];
   showListName: boolean;
+  /** The current view's query string, so opening a card keeps the view. */
+  viewQuery: string;
 }) {
   const { pending, run } = useWorkAction();
 
@@ -80,7 +84,12 @@ export function WorkBoard({
                             aria-label="Filed under other work"
                           />
                         )}
-                        {row.title}
+                        <Link
+                          href={itemHref(row.id, viewQuery)}
+                          className="hover:underline"
+                        >
+                          {row.title}
+                        </Link>
                       </span>
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5">

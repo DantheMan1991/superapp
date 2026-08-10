@@ -91,6 +91,45 @@ export async function listWorkLists(
   return rows as WorkListRow[];
 }
 
+/**
+ * One item by id, whether or not it matches the view on screen.
+ *
+ * The sheet is opened by `?item=<id>` from anywhere — including a link in
+ * another module — so it cannot be served out of the rows the current filter
+ * happened to return. Null when the item does not exist or RLS refuses it, and
+ * the caller renders the same "nothing here" for both: distinguishing them
+ * would confirm that an item they cannot see exists.
+ */
+export async function getWorkItem(
+  tx: Tx,
+  tenantId: string,
+  itemId: string,
+): Promise<WorkItemRow | null> {
+  const [row] = await tx
+    .select({
+      id: schema.workItems.id,
+      listId: schema.workItems.listId,
+      title: schema.workItems.title,
+      description: schema.workItems.description,
+      state: schema.workItems.state,
+      status: schema.workItems.status,
+      dueOn: schema.workItems.dueOn,
+      startsOn: schema.workItems.startsOn,
+      assigneeClerkUserId: schema.workItems.assigneeClerkUserId,
+      parentId: schema.workItems.parentId,
+      kind: schema.workItems.kind,
+      closedAt: schema.workItems.closedAt,
+    })
+    .from(schema.workItems)
+    .where(
+      and(
+        eq(schema.workItems.tenantId, tenantId),
+        eq(schema.workItems.id, itemId),
+      ),
+    );
+  return (row as WorkItemRow) ?? null;
+}
+
 export interface WorkItemFilter {
   listId?: string;
   /**

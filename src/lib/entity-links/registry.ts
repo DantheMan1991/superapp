@@ -2,6 +2,7 @@ import "server-only";
 import { accountingMailExtension } from "@/modules/accounting/mail/extension";
 import { crmMailExtension } from "@/modules/crm/mail/extension";
 import { documentsMailExtension } from "@/modules/documents/mail/extension";
+import { workEntityLinks } from "@/modules/work/links";
 import type { EntityLinkProvider } from "./types";
 
 /**
@@ -32,10 +33,24 @@ import type { EntityLinkProvider } from "./types";
  * and the other is a file move across a live module. Keeping them separate is
  * what makes the first one safe to review.
  */
+/**
+ * WORK IS BOTH A CONTRIBUTOR AND A HOST, which nothing here was before.
+ *
+ * It appears below as a provider, and `src/modules/work/link-ops.ts` imports
+ * this file to render its own picker. Those are two different files on purpose:
+ * `work/links.ts` must never import this registry, or the graph closes into a
+ * cycle. eslint.config.mjs pins that with a rule aimed at that single file,
+ * because the per-module rule exempts a host's whole directory and would not
+ * catch it.
+ *
+ * It is also the first provider named `links.ts` rather than
+ * `mail/extension.ts` — see the naming debt below, which it does not inherit.
+ */
 export const entityLinkProviders: readonly EntityLinkProvider[] = [
   accountingMailExtension,
   crmMailExtension,
   documentsMailExtension,
+  workEntityLinks,
 ];
 
 /** By slug, for turning a stored `extension_slug` back into code. */

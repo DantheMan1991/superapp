@@ -20,8 +20,10 @@ import {
   DEFAULT_VIEW,
   isFiltered,
   workViewHref,
+  workViewToQuery,
   type WorkView,
 } from "../core/view-params";
+import { SavedViews, type SavedViewOption } from "./saved-views";
 
 /**
  * The filters, and the choice of how to draw the results.
@@ -41,11 +43,13 @@ export function FilterBar({
   lists,
   members,
   currentUserId,
+  savedViews,
 }: {
   view: WorkView;
   lists: ListOption[];
   members: MemberOption[];
   currentUserId: string;
+  savedViews: SavedViewOption[];
 }) {
   const router = useRouter();
   const [q, setQ] = useState(view.q);
@@ -193,6 +197,7 @@ export function FilterBar({
         </form>
 
         <div className="ml-auto flex items-center gap-2">
+          <SavedViews views={savedViews} currentParams={workViewToQuery(view)} />
           {view.display === "list" && (
             <Button
               variant="ghost"

@@ -3,12 +3,20 @@ import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { todayInTimezone } from "@/lib/timezone";
 import { withWork } from "@/lib/work/with-work";
 import type { WorkState } from "@/lib/work/vocabulary";
-import { listWorkItems, listWorkLists } from "./read";
+import { getWorkItem, listWorkItems, listWorkLists } from "./read";
+import { resolveLinks } from "./link-ops";
+import { listSavedViews } from "./saved-view-ops";
 import { groupByUrgency, isDeferred } from "./core/grouping";
 import type { WorkRowView } from "./core/row";
-import { parseWorkView, resolveAssignee } from "./core/view-params";
+import {
+  parseWorkView,
+  resolveAssignee,
+  workViewHref,
+  workViewToQuery,
+} from "./core/view-params";
 import { AddWork } from "./components/add-work";
 import { FilterBar } from "./components/filter-bar";
+import { ItemSheet, type SheetItem, type SheetLink } from "./components/item-sheet";
 import { WorkBoard } from "./components/work-board";
 import { WorkList } from "./components/work-list";
 
@@ -42,17 +50,37 @@ export async function WorkModule({
   const today = todayInTimezone(ctx.tenant.timezone);
   const view = parseWorkView(searchParams);
 
-  const { lists, items, members } = await withWork(workCtx, async (tx) => ({
-    lists: await listWorkLists(tx, ctx.tenant.id),
-    items: await listWorkItems(tx, ctx.tenant.id, {
-      listId: view.listId ?? undefined,
-      assignee: resolveAssignee(view.assignee, ctx.userId),
-      openOnly: view.openOnly,
-      states: view.states,
-      q: view.q || undefined,
-    }),
-    members: await listAssignableMembers(tx, ctx.tenant.id),
-  }));
+  /*
+   * `?item=` is NOT part of the view, deliberately. It says which sheet is
+   * open, which is not a filter and must not end up inside a saved view — a
+   * view called "Overdue on site" that also reopens one particular item every
+   * time it is used would be carrying somebody's accident forever.
+   */
+  const rawItem = searchParams["item"];
+  const openItemId = (Array.isArray(rawItem) ? rawItem[0] : rawItem) ?? null;
+
+  const { lists, items, members, savedViews, openItem, openLinks } =
+    await withWork(workCtx, async (tx) => {
+      const openItem = openItemId
+        ? await getWorkItem(tx, ctx.tenant.id, openItemId)
+        : null;
+      return {
+        lists: await listWorkLists(tx, ctx.tenant.id),
+        items: await listWorkItems(tx, ctx.tenant.id, {
+          listId: view.listId ?? undefined,
+          assignee: resolveAssignee(view.assignee, ctx.userId),
+          openOnly: view.openOnly,
+          states: view.states,
+          q: view.q || undefined,
+        }),
+        members: await listAssignableMembers(tx, ctx.tenant.id),
+        savedViews: await listSavedViews(tx, workCtx),
+        openItem,
+        openLinks: openItem
+          ? await resolveLinks(tx, workCtx, [openItem.id])
+          : [],
+      };
+    });
 
   const listById = new Map(lists.map((list) => [list.id, list]));
   const labelByUser = new Map(
@@ -94,6 +122,36 @@ export async function WorkModule({
     label: memberLabel(member),
   }));
   const showListName = view.listId === null;
+  const viewQuery = workViewToQuery(view);
+
+  const sheetItem: SheetItem | null = openItem
+    ? {
+        id: openItem.id,
+        title: openItem.title,
+        description: openItem.description,
+        state: openItem.state as WorkState,
+        status: openItem.status,
+        dueOn: openItem.dueOn,
+        startsOn: openItem.startsOn,
+        listId: openItem.listId,
+        listName: listById.get(openItem.listId)?.name ?? "",
+        listColor: listById.get(openItem.listId)?.color ?? "",
+        assignee: openItem.assigneeClerkUserId,
+        assigneeLabel: openItem.assigneeClerkUserId
+          ? (labelByUser.get(openItem.assigneeClerkUserId) ??
+            "Someone who has left")
+          : null,
+        hasParent: openItem.parentId !== null,
+      }
+    : null;
+
+  const sheetLinks: SheetLink[] = openLinks.map((link) => ({
+    linkId: link.linkId,
+    entityType: link.entityType,
+    label: link.entity?.label ?? null,
+    sublabel: link.entity?.sublabel,
+    href: link.entity?.href,
+  }));
 
   return (
     <div className="space-y-4">
@@ -102,6 +160,13 @@ export async function WorkModule({
         lists={listOptions}
         members={memberOptions}
         currentUserId={ctx.userId}
+        savedViews={savedViews.map((saved) => ({
+          id: saved.id,
+          name: saved.name,
+          params: saved.params,
+          scope: saved.scope,
+          mine: saved.mine,
+        }))}
       />
       <AddWork
         lists={listOptions}
@@ -120,6 +185,7 @@ export async function WorkModule({
           today={today}
           members={memberOptions}
           showListName={showListName}
+          viewQuery={viewQuery}
         />
       ) : (
         <WorkList
@@ -127,6 +193,7 @@ export async function WorkModule({
           today={today}
           members={memberOptions}
           showListName={showListName}
+          viewQuery={viewQuery}
           emptyMessage={
             view.assignee === "me"
               ? "Nothing is on you right now."
@@ -136,6 +203,12 @@ export async function WorkModule({
           }
         />
       )}
+      <ItemSheet
+        item={sheetItem}
+        links={sheetLinks}
+        members={memberOptions}
+        backHref={workViewHref(view)}
+      />
     </div>
   );
 }

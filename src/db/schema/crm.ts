@@ -959,72 +959,18 @@ export const crmActivities = pgTable(
   ],
 );
 
-/**
- * A follow-up.
+/*
+ * `crmTasks` WAS HERE, and is gone (work.md slice 5c, drizzle/0110).
  *
- * BOTH `party_id` AND `deal_id` ARE OPTIONAL, deliberately. "Ring the
- * accountant back" is a real task that belongs to nobody in the CRM, and a
- * product that refuses to hold it sends that task to a sticky note. The RLS
- * policy therefore branches: attached tasks inherit the record's visibility,
- * unattached ones are plain tenant-scoped.
+ * A follow-up is a work item linked to the record — `work_items` plus a
+ * `work_item_links` row of type `contact`, `company` or `deal`. The move is
+ * why CRM's ops take a `WorkReadCtx`/`WorkWriteCtx` and why `GroupableTask`
+ * in `core/timeline.ts` is structural rather than a table row.
+ *
+ * The two properties this table had that the new one keeps: an UNATTACHED
+ * follow-up is still legal (no link row), and an optimistic `version` still
+ * guards a concurrent edit.
  */
-export const crmTasks = pgTable(
-  "crm_tasks",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
-    partyId: uuid("party_id"),
-    dealId: uuid("deal_id"),
-    title: text("title").notNull(),
-    notes: text("notes").notNull().default(""),
-    /** A DATE, not a timestamp. Follow-ups are due on a day, not at 14:32. */
-    dueOn: date("due_on", { mode: "string" }),
-    assigneeClerkUserId: text("assignee_clerk_user_id"),
-    /**
-     * Completion is a TIME, not a boolean, so "done" and "done last Tuesday"
-     * are the same fact rather than two columns that can disagree. Null is
-     * open; clearing it reopens.
-     */
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    completedByClerkUserId: text("completed_by_clerk_user_id"),
-    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
-    version: integer("version").notNull().default(1),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("crm_tasks_tenant_id_id_idx").on(t.tenantId, t.id),
-    index("crm_tasks_party_idx").on(t.tenantId, t.partyId),
-    index("crm_tasks_deal_idx").on(t.tenantId, t.dealId),
-    // "What is open, soonest first" — the query the task list is made of.
-    index("crm_tasks_open_idx")
-      .on(t.tenantId, t.dueOn)
-      .where(sql`completed_at is null`),
-    index("crm_tasks_assignee_idx").on(t.tenantId, t.assigneeClerkUserId),
-    foreignKey({
-      name: "crm_tasks_party_fk",
-      columns: [t.tenantId, t.partyId],
-      foreignColumns: [parties.tenantId, parties.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "crm_tasks_deal_fk",
-      columns: [t.tenantId, t.dealId],
-      foreignColumns: [crmDeals.tenantId, crmDeals.id],
-    }).onDelete("cascade"),
-    // Completed means both stamps, or neither. A row with one is a half-write
-    // nobody could interpret, so the database refuses it.
-    check(
-      "crm_tasks_completion_pair",
-      sql`(${t.completedAt} is null) = (${t.completedByClerkUserId} is null)`,
-    ),
-  ],
-);
 
 export type CrmPartyDetails = typeof crmPartyDetails.$inferSelect;
 
@@ -1050,8 +996,6 @@ export type CrmFieldDef = typeof crmFieldDefs.$inferSelect;
 export type CrmActivity = typeof crmActivities.$inferSelect;
 
 export type CrmActivityKind = CrmActivity["kind"];
-
-export type CrmTask = typeof crmTasks.$inferSelect;
 
 export type CrmPipeline = typeof crmPipelines.$inferSelect;
 

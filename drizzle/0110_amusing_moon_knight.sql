@@ -1,0 +1,40 @@
+-- Work slice 5c: drop `crm_tasks`.
+--
+-- ============================================================================
+-- APPLY THIS **AFTER** THE DEPLOY, NOT BEFORE IT. THE ONLY MIGRATION IN THE
+-- REPO WITH THAT ORDER.
+-- ============================================================================
+--
+-- conventions §4: every other migration goes out ahead of the deploy so the
+-- currently-running code keeps working. A DROP is the exception and reverses
+-- it, because drizzle names every column of a table in the SELECT it builds —
+-- run this first and the *previous* release starts answering
+-- `relation "crm_tasks" does not exist` on any path that still reads it.
+--
+-- Specifically: this must not run until the deploy carrying work.md slice 5b is
+-- live. That release is the one that moved CRM's follow-ups, its report and its
+-- merge preview onto `work_items`. Before it, three live paths read this table.
+--
+-- Nothing enforces the order. What makes it safe is that the wrong way round is
+-- loud and the right way round is harmless — 0075_accounting_contacts_contract
+-- says the same thing for the same reason.
+--
+-- ── WHAT IS LOST, STATED PLAINLY ────────────────────────────────────────────
+--
+-- The rows are NOT lost: 0109 copied every one of them into `work_items`,
+-- preserving ids, and verified against production that no copy disagreed with
+-- its source. What this drops is the original, which has been read by nothing
+-- since 5b deployed.
+--
+-- Two columns have no counterpart and go for good, both deliberately:
+--
+--   * `completed_by_clerk_user_id` → `closed_by_clerk_user_id`, which 0109
+--     carried across. Not lost, renamed.
+--   * `party_id` / `deal_id` → link rows. Not lost, moved.
+--
+-- CASCADE is drizzle's default and is accurate here: nothing references this
+-- table, so it drops alone. If a future reader adds a foreign key to it, this
+-- statement would silently take that with it — which is one more reason the
+-- table should not survive this release.
+
+DROP TABLE "crm_tasks" CASCADE;

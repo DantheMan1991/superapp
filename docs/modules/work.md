@@ -13,6 +13,34 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-10 — Slice 5c: `crm_tasks` is dropped (branch `claude/work-slice-5c`)
+
+The table goes. Migration `0110`, and **it is the only migration in the repo
+that must be applied AFTER its deploy rather than before it.**
+
+- **conventions §4 reverses here, and the header says so at length.** Every
+  other migration goes out ahead of the deploy so the running code keeps
+  working; a DROP is the exception, because drizzle names every column of a
+  table in the SELECT it builds, so running it early makes the PREVIOUS release
+  answer `relation "crm_tasks" does not exist`. Nothing enforces the order —
+  what makes it safe is that the wrong way round is loud and the right way
+  round is harmless, which is `0075_accounting_contacts_contract`'s reasoning
+  verbatim.
+- **Applied to the dev branch and the suites re-run against a database that no
+  longer has the table**, which is the only way to know the drop is really
+  unreferenced rather than merely believed to be.
+- **Four isolation tests went with it**, and one property genuinely did not
+  survive the move — recorded where somebody will find it rather than deleted
+  quietly. `crm_tasks`' policy BRANCHED: an attached follow-up inherited the
+  record's visibility, so a follow-up on a RESTRICTED record was hidden from
+  staff. A work item inherits its LIST instead. Production had zero restricted
+  records when this shipped, so nothing changed hands, but the two models
+  differ and a tenant needing the old behaviour puts that work in an
+  owners-only list.
+- `GroupableTask` replaced `CrmTask` in the pure timeline test too. Those
+  functions never depended on the table — they read a shape, which the
+  structural type now says out loud.
+
 ### 2026-08-09 — Slice 5b: CRM follow-ups become work items (branch `claude/work-slice-5b`)
 
 The switch, in one deploy. Migration `0109` copies the rows, CRM writes and
@@ -708,7 +736,7 @@ Migrations start at **0104**.
 | 4 | ✅ **Shipped.** Attention source, second in the digest. Seed row flips to `available` | The module goes live once the obligation it creates can reach a person |
 | 5a | ✅ **Shipped.** Shared write path in `src/lib/work/`, `version` column | CRM cannot import Work, so the write path had to move before CRM could raise a follow-up |
 | 5b | ✅ **Shipped.** CRM writes and reads work items; data copied; CRM's source deleted | Must be ONE deploy — copying while CRM still reads `crm_tasks` double-counts every follow-up in the digest |
-| 5c | `DROP TABLE crm_tasks` | conventions §4: a drop goes out AFTER the deploy that stopped reading it |
+| 5c | ✅ **Shipped.** `DROP TABLE crm_tasks` | conventions §4: a drop goes out AFTER the deploy that stopped reading it |
 | 6 | Recurring work (RRULE moved to `src/lib/` first, in its own PR) | Needs a real consumer; a maintenance schedule is the obvious one |
 | 7 | ⏸ Item kinds, item fields, pack views — **shared with scheduling's deferred 6 and 7** | Build with the first pack in hand, so the seam ships with two users rather than none |
 | 8 | ⏸ Work on the calendar | Deferred until `dispatch` needs it. The mechanism is scheduling contributing a linkable type and the calendar reading an overlay — not a second source inside `app_schedule_range()` |

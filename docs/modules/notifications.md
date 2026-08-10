@@ -12,6 +12,32 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-09 — Work joins the digest, second (branch `claude/work-slice-4`)
+
+A fourth source, registered between scheduling and follow-ups. Nothing in this
+module changed — which is the point of the seam, and worth one entry to record
+that it held.
+
+- **Section order is now scheduling · work · follow-ups · accounting.** Work
+  took the place CRM held, on the reason CRM held it: real assignee, real agreed
+  date. It has the stronger claim, because closing the item IS the point of the
+  record rather than a side effect, and because it spans the whole business
+  instead of the part that happens to be a customer conversation.
+- **Work's source is the first to deep-link to a record this module has no page
+  for.** `AttentionItem.href` has always asked for the record rather than a
+  list; Work could only satisfy it because its slice 3 made a single item
+  addressable (`?item=`). Worth noting as the shape a future source should
+  copy — if a module cannot produce a URL for one row, that is a gap in the
+  module, not a licence to link to its index.
+- **A blocked item still counts as an obligation**, which is a judgement this
+  contract had not been asked to make before. The reasoning is in
+  [work.md](work.md); the part that matters here is that a source must not let a
+  record's own state silence it, or the digest becomes something people learn to
+  distrust one row at a time.
+- **`crm_tasks` is scheduled to merge into Work** (work.md slice 5), at which
+  point CRM's source is deleted rather than left running beside it. Until then
+  the two report different rows and nothing double-counts.
+
 ### 2026-08-07 — First live run: the machinery worked, the provider refused
 
 The digest cron fired for the first time at **07:00 America/New_York** (11:00

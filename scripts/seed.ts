@@ -130,7 +130,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     description:
       "What has to be done, who it is on, and whether it is done yet — with a list for each part of the business.",
     category: "core",
-    status: "coming_soon",
+    // `available` from slice 4 (2026-08-09): the module goes live once the
+    // obligation it creates can reach a person. Until the digest could carry
+    // it, work assigned to somebody was only visible to whoever opened the page.
+    status: "available",
     sortOrder: 70,
   },
 ];

@@ -5,13 +5,50 @@
 > never three containers. Layer 1 — industry-blind: a plumbing profile labels a
 > work item a Service Call, a GC calls it a Project, a dental practice calls it
 > a recall, and core learns none of those words.
-> Status: `coming_soon` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: `available` · Scope: `module` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
+
+### 2026-08-09 — Slice 4: the digest source, and the module goes live (branch `claude/work-slice-4`)
+
+**The seed row flips to `available`.** No migration. One attention source, 10
+source tests, 5 pure ones.
+
+- **The module goes live when the obligation it creates can reach a person, not
+  when the UI works.** Until this slice, work assigned to somebody was visible
+  only to whoever opened the page — which is the failure notifications.md
+  records verbatim: the digest shipped into a product where nothing set an
+  assignee, so every staff member's digest was empty by construction.
+- **Work is SECOND in the digest, ahead of CRM follow-ups.** It took the place
+  follow-ups held, on the reason follow-ups held it — real assignee, real agreed
+  date — and has the stronger claim, because closing the item IS the point of
+  the record and because it covers the whole business rather than the part that
+  happens to be a customer conversation. Scheduling still leads: it is the only
+  section with a time attached.
+- **Four things are deliberately not an obligation**: undated work (nobody
+  agreed a date, so nothing has been missed), deferred work (`starts_on` ahead
+  of today — being told about something you decided not to start is the
+  definition of noise), closed work, and anything past the seven-day horizon the
+  page's own "this week" section uses.
+- **But BLOCKED work still nags, and that is a decision.** The tempting rule is
+  that it should not, since the assignee cannot act. It nags anyway: the action
+  is real — chase whatever is blocking it — and excluding it would let anybody
+  silence a late item by setting a state. **A digest that can be switched off
+  per row is one nobody can trust.** What the state earns is a mention in the
+  detail line, so the reader knows why it has not moved.
+- **The href is the item itself**, which only became addressable in slice 3. The
+  contract asks for a deep link rather than a list precisely so the email is
+  actionable without a round trip, and `?item=` is what supplies it. A slice
+  that had shipped the digest before the sheet would have linked to a page and
+  called it done.
+- Reuses `urgencyOf` from `core/grouping.ts` rather than re-deriving the
+  comparison, so the digest and the page can never disagree about what is
+  overdue. The three-value `AttentionUrgency` is mapped from the page's
+  five-value one, not asserted.
 
 ### 2026-08-09 — Slice 3: links both ways, and saved views (branch `claude/work-slice-3`)
 
@@ -525,7 +562,7 @@ Migrations start at **0104**.
 | 1 | ✅ **Shipped.** Lists and items: create, edit, assign, close, nest. **"My work"**. Module registered, seed row `coming_soon` | The per-person surface first, because it is the one that gets opened daily and the one that proves the shape |
 | 2 | ✅ **Shipped.** The list view with filters, and the board grouped by `state`, moved by menu | Two views over one dataset — the Notion lesson made concrete. It did not need a second query builder; `listWorkItems` grew two filters |
 | 3 | ✅ **Shipped.** Saved views as URL parameter sets. Links: Work as host **and** as contributor | The seam work. Documents' saved-view decision is reused, not re-derived |
-| 4 | Attention source, second in the digest. Seed row flips to `available` | The module goes live once the obligation it creates can reach a person |
+| 4 | ✅ **Shipped.** Attention source, second in the digest. Seed row flips to `available` | The module goes live once the obligation it creates can reach a person |
 | 5 | CRM follow-ups migrate onto work items; `crm_tasks` is deleted | Its own slice, after the core is proven. Read the trap above before starting |
 | 6 | Recurring work (RRULE moved to `src/lib/` first, in its own PR) | Needs a real consumer; a maintenance schedule is the obvious one |
 | 7 | ⏸ Item kinds, item fields, pack views — **shared with scheduling's deferred 6 and 7** | Build with the first pack in hand, so the seam ships with two users rather than none |

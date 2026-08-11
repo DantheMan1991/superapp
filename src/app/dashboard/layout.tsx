@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
-import { AppShell, type NavItem } from "@/components/app-shell";
+import {
+  AppShell,
+  type NavGroup,
+  type NavItem,
+} from "@/components/app-shell";
 import { requireTenant, isSuperAdmin } from "@/lib/auth";
 import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
@@ -22,47 +26,64 @@ export default async function DashboardLayout({
     getMailBadge(ctx.tenant.id, ctx.userId, ctx.role),
   ]);
 
-  const navItems: NavItem[] = [
-    { href: "/dashboard", label: "Overview", icon: "dashboard", exact: true },
-    // Everyone, not owners only: the whole premise is that each person sees
-    // their own work. It sits directly under Overview because it is the page
-    // the morning email links to.
-    { href: "/dashboard/today", label: "What needs you", icon: "checks" },
-    // Only modules that are both switched on AND implemented appear in nav.
-    ...active
-      .filter(({ module }) => moduleRegistry[module.id])
-      .map(({ module }) => ({
-        href: `/dashboard/m/${module.id}`,
-        label: module.name,
-        icon: moduleRegistry[module.id]?.icon ?? "boxes",
-      })),
+  // Only modules that are both switched on AND implemented appear in nav.
+  const moduleItems: NavItem[] = active
+    .filter(({ module }) => moduleRegistry[module.id])
+    .map(({ module }) => ({
+      href: `/dashboard/m/${module.id}`,
+      label: module.name,
+      icon: moduleRegistry[module.id]?.icon ?? "boxes",
+      // The slug doubles as the accent name: `--accent-accounting` and friends
+      // are declared in globals.css, so adding a module means adding one token,
+      // not editing the shell.
+      accent: module.id,
+    }));
+
+  const navGroups: NavGroup[] = [
+    {
+      label: "Workspace",
+      items: [
+        { href: "/dashboard", label: "Overview", icon: "dashboard", exact: true },
+        // Everyone, not owners only: the whole premise is that each person sees
+        // their own work. It sits directly under Overview because it is the page
+        // the morning email links to.
+        { href: "/dashboard/today", label: "What needs you", icon: "checks" },
+      ],
+    },
+    // A tenant with nothing switched on should not see an empty caption.
+    ...(moduleItems.length > 0
+      ? [{ label: "Modules", items: moduleItems }]
+      : []),
+    {
+      label: "Business",
+      items: [
+        { href: "/dashboard/hours", label: "Hours", icon: "clock" },
+        { href: "/dashboard/team", label: "Team", icon: "users" },
+      ],
+    },
   ];
 
-  navItems.push({ href: "/dashboard/hours", label: "Hours", icon: "clock" });
-  navItems.push({ href: "/dashboard/team", label: "Team", icon: "users" });
-
   if (ctx.role === "owner") {
-    // Owner-only, and named "Email setup" rather than "Email" because the Mail
-    // module sits in this same list: this one decides what address the
-    // business's outbound mail claims to come from, that one is the inbox.
-    navItems.push({
-      href: "/dashboard/email",
-      label: "Email setup",
-      icon: "settings",
-    });
-    navItems.push({
-      href: "/dashboard/billing",
-      label: "Billing",
-      icon: "billing",
-    });
-    navItems.push({
-      href: "/dashboard/settings",
-      label: "Business settings",
-      icon: "wrench",
+    navGroups.push({
+      label: "Settings",
+      items: [
+        // Named "Email setup" rather than "Email" because the Mail module sits
+        // in this same rail: this one decides what address the business's
+        // outbound mail claims to come from, that one is the inbox.
+        { href: "/dashboard/email", label: "Email setup", icon: "settings" },
+        { href: "/dashboard/billing", label: "Billing", icon: "billing" },
+        {
+          href: "/dashboard/settings",
+          label: "Business settings",
+          icon: "wrench",
+        },
+      ],
     });
   }
 
-  const mailNav = navItems.find((item) => item.href === "/dashboard/m/email");
+  const mailNav = moduleItems.find(
+    (item) => item.href === "/dashboard/m/email",
+  );
   if (mailNav) {
     // The dot wins over the count: a mailbox that needs reconnecting has an
     // unknown amount of mail behind it, so a number there would be a guess.
@@ -79,7 +100,7 @@ export default async function DashboardLayout({
   return (
     <AppShell
       contextLabel={ctx.tenant.name}
-      navItems={navItems}
+      navGroups={navGroups}
       fullWidthPathPrefixes={fullWidthPathPrefixes}
       footer={
         <div className="space-y-3">

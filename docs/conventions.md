@@ -267,6 +267,15 @@ npm run test:isolation   # required before deploy
     object) can never hit the cache, and only blocks the compiler from
     memoizing properly. Delete it and let the compiler do it.
 - shadcn/ui + Tailwind. Check `src/components/ui` before adding a dependency.
+- **Compose a primitive from `src/components/app/` before writing a heading,
+  empty state or table panel by hand** — `PageHeader`, `EmptyState`, `DataTable`,
+  `StatCard`, `FilterPills`, `CategoryStrip`, `EntityCard`, `SectionRow`. The
+  token rules that go with them (`--divider` inside a container vs `--border` at
+  its edge, elevation instead of outline, never a literal radius) are in
+  [modules/design-system.md](modules/design-system.md); the reasoning is in
+  [ADR 0008](decisions/0008-warm-neutrals-and-layered-elevation.md). `src/components/ui`
+  stays stock shadcn so it remains upgradeable — app-level composites do not go
+  there.
 - Modules declare layout needs via `ModuleDefinition.layout`; the shell never
   branches on a module slug.
 - Mobile matters — a real share of usage is one-handed, in the field, on a

@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ListChecks } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { EmptyState } from "@/components/app/empty-state";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
@@ -60,24 +62,23 @@ export default async function TodayPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            What needs you
-          </h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        title="What needs you"
+        description={
+          <>
             Outstanding work as of {today}, in{" "}
             {ctx.tenant.timezone.replace("_", " ")}.
-          </p>
-        </div>
-        <DigestToggle daily={wantsDaily} />
-      </div>
+          </>
+        }
+        actions={<DigestToggle daily={wantsDaily} />}
+      />
+
 
       {/* A source that could not be asked is stated, never swallowed. An
           undercount presented as a total is worse than no number at all. */}
       {result.failed.length > 0 && (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+        <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/5 p-4">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <div className="text-sm">
             <p className="font-medium">This list may be incomplete.</p>
             <p className="text-muted-foreground">
@@ -94,18 +95,20 @@ export default async function TodayPage() {
         // Silence is ambiguous — it reads as "did this break?". An explicit
         // all-clear is a message, and it is the one that earns the channel its
         // credibility on the days it has nothing to say.
-        <div className="rounded-lg border border-dashed p-8 text-center">
-          <p className="text-sm font-medium">
-            {result.complete
+        <EmptyState
+          panel
+          icon={<ListChecks />}
+          title={
+            result.complete
               ? "Nothing needs you today."
-              : "Nothing to show from the sections we could check."}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {result.complete
+              : "Nothing to show from the sections we could check."
+          }
+          description={
+            result.complete
               ? "No follow-ups due and nothing waiting on you."
-              : "Reload in a moment for the full picture."}
-          </p>
-        </div>
+              : "Reload in a moment for the full picture."
+          }
+        />
       ) : (
         <div className="space-y-6">
           {mine.length > 0 && <ItemList items={mine} today={today} />}
@@ -137,7 +140,7 @@ function ItemList({
   today: string;
 }) {
   return (
-    <ul className="divide-y rounded-lg border">
+    <ul className="divide-y divide-divider overflow-hidden rounded-2xl bg-card shadow-elevation-1">
       {items.map((item) => (
         <li key={item.key}>
           {/* The whole row is the link. Every item is one click from the record
@@ -145,7 +148,7 @@ function ItemList({
               do the finding twice. */}
           <Link
             href={item.href}
-            className="flex items-start justify-between gap-4 p-4 hover:bg-muted/50"
+            className="flex items-start justify-between gap-4 p-4 transition-colors hover:bg-muted/60"
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{item.title}</p>

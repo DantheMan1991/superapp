@@ -1,7 +1,8 @@
-import { and, eq } from "drizzle-orm";
+﻿import { and, eq } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listVendors } from "@/modules/accounting/payables/vendors";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
@@ -45,13 +46,10 @@ export default async function NewBillPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">New bill</h1>
-        <p className="text-sm text-muted-foreground">
-          Record what a vendor billed {ctx.tenant.name}. Approval posts it to
-          the ledger.
-        </p>
-      </div>
+      <PageHeader
+        title="New bill"
+        description={`Record what a vendor billed ${ctx.tenant.name}. Approval posts it to the ledger.`}
+      />
       <AccountingNav />
       <PurchasesNav />
       <BillBuilder

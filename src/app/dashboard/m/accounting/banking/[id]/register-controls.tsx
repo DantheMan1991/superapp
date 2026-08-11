@@ -102,7 +102,7 @@ export function RegisterTabs({
           className={cn(
             "rounded-t-md border-b-2 px-3 py-1.5 text-sm font-medium",
             active === t.key
-              ? "border-brand text-foreground"
+              ? "border-module-accent text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground",
           )}
         >
@@ -351,7 +351,7 @@ export function ReviewTable({
                       </span>
                       {row.status === "unreviewed" && row.ruleSuggestion ? (
                         <span
-                          className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] text-brand"
+                          className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-module-accent/10 px-2 py-0.5 text-[11px] text-module-accent"
                           title={row.ruleSuggestion.ruleName}
                         >
                           <Filter className="size-3" />
@@ -364,7 +364,7 @@ export function ReviewTable({
                             className={cn(
                               "mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
                               row.suggestion.confidence >= ACCEPT_THRESHOLD
-                                ? "bg-brand/10 text-brand"
+                                ? "bg-module-accent/10 text-module-accent"
                                 : "bg-muted text-muted-foreground",
                             )}
                             title={row.suggestion.reason ?? undefined}

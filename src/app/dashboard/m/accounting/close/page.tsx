@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
   getCloseChecklist,
@@ -118,24 +119,22 @@ export default async function ClosePage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Close</h1>
-          <p className="text-sm text-muted-foreground">
-            Month-end review, period lock, and the close history.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {canExport && <ExportBooksDialog />}
-          {data.settings.closedThrough ? (
-            <Badge variant="secondary">
-              Closed through {data.settings.closedThrough}
-            </Badge>
-          ) : (
-            <Badge variant="outline">Books open</Badge>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Close"
+        description="Month-end review, period lock, and the close history."
+        actions={
+          <>
+            {canExport && <ExportBooksDialog />}
+            {data.settings.closedThrough ? (
+              <Badge variant="secondary">
+                Closed through {data.settings.closedThrough}
+              </Badge>
+            ) : (
+              <Badge variant="outline">Books open</Badge>
+            )}
+          </>
+        }
+      />
 
       <AccountingNav />
 
@@ -237,7 +236,7 @@ export default async function ClosePage({
                     </TableCell>
                     <TableCell>
                       {c.status === "completed" ? (
-                        <Badge className="bg-emerald-600 hover:bg-emerald-600">
+                        <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
                           Completed
                         </Badge>
                       ) : (

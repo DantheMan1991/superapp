@@ -3,9 +3,13 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
+import { Receipt } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { FilterPills } from "@/components/app/filter-pills";
 import {
   Table,
   TableBody,
@@ -104,10 +108,10 @@ export default async function InvoicesPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Invoices</h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        title="Invoices"
+        description={
+          <>
             {formatCentsSigned(data.aging.totalCents)} outstanding
             {data.aging.overdueCents > 0 && (
               <>
@@ -118,107 +122,128 @@ export default async function InvoicesPage({
                 </span>
               </>
             )}
-          </p>
-        </div>
-        <Button asChild size="sm">
-          <Link href="/dashboard/m/accounting/sales/invoices/new">New invoice</Link>
-        </Button>
-      </div>
+          </>
+        }
+        actions={
+          <Button asChild size="sm">
+            <Link href="/dashboard/m/accounting/sales/invoices/new">
+              New invoice
+            </Link>
+          </Button>
+        }
+      />
 
       <AccountingNav />
-      <SalesNav />
 
-      <div className="flex gap-1 border-b pb-px">
-        {FILTERS.map((f) => (
-          <Link
-            key={f.key}
-            href={`/dashboard/m/accounting/sales/invoices?f=${f.key}`}
-            className={cn(
-              "rounded-t-md border-b-2 px-3 py-1.5 text-sm font-medium",
-              filter.key === f.key
-                ? "border-brand text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {f.label}
-          </Link>
-        ))}
+      {/*
+        One row where there were two. `SalesNav` picks the list, the pills filter
+        it, and putting them on the same line is what takes this page from three
+        rows of navigation above the first invoice down to one and a half. They
+        are visually distinct — accent-tinted versus solid — so eight adjacent
+        pills do not read as one control. See filter-pills.tsx.
+      */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SalesNav />
+        <FilterPills
+          activeKey={filter.key}
+          items={FILTERS.map((f) => ({
+            key: f.key,
+            label: f.label,
+            href: `/dashboard/m/accounting/sales/invoices?f=${f.key}`,
+          }))}
+          className="print:hidden"
+        />
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {data.invoices.length === 0 ? (
-            <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-              No invoices here yet.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Number</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Issued</TableHead>
-                    <TableHead>Due</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead className="text-right">Balance</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.invoices.map((inv) => {
-                    const paid = toSafeCents(inv.paidCents);
-                    const balance =
-                      inv.status === "void" ? 0 : inv.totalCents - paid;
-                    const overdue =
-                      balance > 0 &&
-                      !!inv.dueDate &&
-                      inv.dueDate < data.today &&
-                      inv.status !== "draft";
-                    return (
-                      <TableRow key={inv.id}>
-                        <TableCell className="font-mono text-xs">
-                          <Link
-                            className="hover:underline"
-                            href={`/dashboard/m/accounting/sales/invoices/${inv.id}`}
-                          >
-                            {inv.number}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="max-w-[200px] truncate text-sm">
-                          {inv.customerName}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap font-mono text-xs">
-                          {inv.issueDate}
-                        </TableCell>
-                        <TableCell
-                          className={cn(
-                            "whitespace-nowrap font-mono text-xs",
-                            overdue && "font-semibold text-destructive",
-                          )}
-                        >
-                          {inv.dueDate ?? "—"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={STATUS_BADGE[inv.status] ?? "outline"}>
-                            {inv.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {formatCentsSigned(inv.totalCents)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {formatCentsSigned(balance)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <DataTable
+        isEmpty={data.invoices.length === 0}
+        empty={
+          <EmptyState
+            icon={<Receipt />}
+            title={
+              filter.key === "all"
+                ? "Bill your first customer"
+                : `Nothing under ${filter.label}`
+            }
+            description={
+              filter.key === "all"
+                ? "Raise an invoice and the receivable posts to the ledger for you."
+                : "The other filters may have what you are looking for."
+            }
+            action={
+              filter.key === "all" ? (
+                <Button asChild size="sm">
+                  <Link href="/dashboard/m/accounting/sales/invoices/new">
+                    New invoice
+                  </Link>
+                </Button>
+              ) : undefined
+            }
+          />
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Number</TableHead>
+              <TableHead>Customer</TableHead>
+              <TableHead>Issued</TableHead>
+              <TableHead>Due</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Total</TableHead>
+              <TableHead className="text-right">Balance</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.invoices.map((inv) => {
+              const paid = toSafeCents(inv.paidCents);
+              const balance = inv.status === "void" ? 0 : inv.totalCents - paid;
+              const overdue =
+                balance > 0 &&
+                !!inv.dueDate &&
+                inv.dueDate < data.today &&
+                inv.status !== "draft";
+              return (
+                <TableRow key={inv.id}>
+                  <TableCell className="font-mono text-xs">
+                    <Link
+                      className="hover:underline"
+                      href={`/dashboard/m/accounting/sales/invoices/${inv.id}`}
+                    >
+                      {inv.number}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="max-w-[200px] truncate text-sm">
+                    {inv.customerName}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-xs">
+                    {inv.issueDate}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "whitespace-nowrap font-mono text-xs",
+                      overdue && "font-semibold text-destructive",
+                    )}
+                  >
+                    {inv.dueDate ?? "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={STATUS_BADGE[inv.status] ?? "outline"}>
+                      {inv.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {formatCentsSigned(inv.totalCents)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-sm">
+                    {formatCentsSigned(balance)}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </DataTable>
     </div>
   );
 }

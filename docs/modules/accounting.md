@@ -13,6 +13,66 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-10 — UI: the nav collapses, and three contrast failures go with it (branch `claude/ui-foundation`)
+
+Presentation only — no query, action, schema or policy changed. The shared
+vocabulary this uses is in [design-system.md](design-system.md); the reasoning is
+[ADR 0008](../decisions/0008-warm-neutrals-and-layered-elevation.md).
+
+- **`AccountingNav` is now a `CategoryStrip`.** Ten text tabs that wrapped onto
+  two lines became one row that scrolls sideways, with an icon over each label.
+  The component name and export did not change, so all ~25 pages importing it
+  picked this up without an edit.
+- **Three rows of navigation became one and a half.** The invoices page rendered
+  `AccountingNav` *plus* `SalesNav` *plus* a status filter row before the first
+  invoice. `SalesNav`/`PurchasesNav` are now `FilterPills` on the `accent`
+  variant and share a single row with the status pills on the `solid` variant —
+  distinct enough that eight adjacent pills do not read as one control. The rule
+  worth keeping: **a strip moves between sections, pills filter the list you are
+  on.**
+- **Fixed: `text-brand` was failing WCAG AA in production.** `--brand` measures
+  **2.81:1** on white, below even the 3:1 bar for icons and large text, and it was
+  the active state of `SalesNav` and `PurchasesNav` and the icon chip on every
+  banking account card. All now use `--module-accent`, which is pitched to clear
+  4.5:1. Three separate call sites, one root cause.
+- **Hardcoded `amber-50/300/900`** on the Plaid sandbox banner moved to the
+  `--warning` token, so it follows the theme instead of being light-mode-only.
+- **The banking Rules link was an anchor styled to look like a button** — it had
+  no focus ring. It is a real `Button asChild` now.
+- Converted: the hub (eight hand-built cards → `StatCard`), invoices, customers,
+  recurring, bills, vendors, accounts, journal, banking, receipts.
+- **`--module-accent` is set for every module route** by a client layout at
+  `src/app/dashboard/m/layout.tsx`, using `display: contents` so it adds no box
+  that could break a full-width module's height chain.
+- **Reports and trial balance converted too**, plus a second contrast pass.
+  `ReportTable` is shared by P&L, Balance Sheet and both aging reports, so
+  converting it once covered four report bodies. Seven `bg-emerald-600` badges
+  became `bg-success/12 text-success-foreground` — the first attempt used
+  `bg-success` with white text and **measured 3.28:1**, so it was replaced with a
+  tint plus a new dark `--success-foreground` (5.9–6.2:1 light, 9–10:1 dark).
+  Three more bare `text-brand` sites fixed in `register-controls.tsx` and
+  `bill-builder.tsx` — the AI/rule suggestion chips in the bank review queue.
+
+- **Detail and `new` pages finished.** Every page in the module now uses
+  `PageHeader` — `text-2xl font-semibold tracking-tight` appears **zero** times
+  under `src/app/dashboard/m/accounting/`. Status badges moved into the header's
+  actions slot alongside the buttons, which is where a verdict belongs.
+- **`ui/card.tsx` swapped `ring-1 ring-foreground/10` for `shadow-elevation-1`.**
+  One edit, and every remaining `Card` in the *whole app* matches `Panel` — worth
+  far more than converting another thirty call sites, and it closes most of the
+  "half-migrated" gap ADR 0008 warned about. `DialogContent` took
+  `--elevation-3` the same way.
+- **The invoice detail page's print rules are untouched.** Its `print:hidden` on
+  the on-screen header, the separate print-only header, and the
+  `print:table-cell` columns are all exactly as they were. Note `ring-1` was
+  itself a box-shadow in Tailwind, so swapping it for another box-shadow changes
+  nothing about what reaches paper.
+- Four more hardcoded `amber-*` banners (posted-entry edit warning, duplicate-bill
+  warning) moved onto `--warning`.
+
+**Not verified:** the printed invoice has not been checked against a real print
+preview in either state. The change is argued to be inert, not observed to be.
+
 ### 2026-08-10 — Rules learn a payee, and the feed screen fixes (branch `claude/rules-payee`)
 - **Rules can set the payee** (`0113`: `bank_rules.set_vendor_id`, `bank_transactions.vendor_id`). Found by driving the real app against the QuickBooks benchmark: every one of their rules sets a payee as well as a category, and without it a matched row still needed the vendor typed in by hand — half the work the rule was meant to save
 - **The payee is applied to the row, not suggested.** Unlike the category it posts nothing, so there is nothing to accept. **A payee already set by hand is never overwritten** by a later rule run

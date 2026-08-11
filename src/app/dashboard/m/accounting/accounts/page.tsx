@@ -2,7 +2,8 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant } from "@/db";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listAccounts, type AccountTypeValue } from "@/modules/accounting/core";
 import { AddAccountButton, AccountRowActions, type SlimAccount } from "./account-dialogs";
@@ -62,17 +63,11 @@ export default async function AccountsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Chart of Accounts
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            The categories every dollar in {ctx.tenant.name} flows through.
-          </p>
-        </div>
-        {isOwner && <AddAccountButton accounts={slim} />}
-      </div>
+      <PageHeader
+        title="Chart of Accounts"
+        description={`The categories every dollar in ${ctx.tenant.name} flows through.`}
+        actions={isOwner && <AddAccountButton accounts={slim} />}
+      />
 
       <AccountingNav />
 
@@ -81,51 +76,52 @@ export default async function AccountsPage() {
           const rows = tree(null, type, 0);
           if (rows.length === 0) return null;
           return (
-            <Card key={type}>
-              <CardContent className="p-0">
-                <div className="border-b bg-muted/40 px-4 py-2 text-sm font-semibold">
-                  {TYPE_LABELS[type]}
-                </div>
-                <ul className="divide-y">
-                  {rows.map((a) => (
-                    <li
-                      key={a.id}
-                      className="flex items-center justify-between gap-3 px-4 py-2.5"
+            <Panel key={type}>
+              {/* The group label reads as part of the panel, so it takes a
+                  divider rather than a border — same weight decision as the
+                  rows beneath it. */}
+              <div className="border-b border-divider bg-muted/40 px-4 py-2 text-sm font-medium">
+                {TYPE_LABELS[type]}
+              </div>
+              <ul className="divide-y divide-divider">
+                {rows.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-muted/60"
+                  >
+                    <div
+                      className="flex min-w-0 items-center gap-3"
+                      style={{ paddingLeft: `${a.depth * 20}px` }}
                     >
-                      <div
-                        className="flex min-w-0 items-center gap-3"
-                        style={{ paddingLeft: `${a.depth * 20}px` }}
-                      >
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {a.code}
-                        </span>
-                        <span className="truncate text-sm font-medium">
-                          {a.name}
-                        </span>
-                        {a.isSystem && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            system
-                          </Badge>
-                        )}
-                        {!a.isActive && (
-                          <Badge variant="outline" className="text-[10px]">
-                            inactive
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span className="hidden text-xs text-muted-foreground sm:inline">
-                          {a.subtype.replaceAll("_", " ")}
-                        </span>
-                        {isOwner && (
-                          <AccountRowActions account={a} accounts={slim} />
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
+                      <span className="font-mono text-xs text-subtle-foreground tabular-nums">
+                        {a.code}
+                      </span>
+                      <span className="truncate text-sm font-medium">
+                        {a.name}
+                      </span>
+                      {a.isSystem && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          system
+                        </Badge>
+                      )}
+                      {!a.isActive && (
+                        <Badge variant="outline" className="text-[10px]">
+                          inactive
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="hidden text-xs text-subtle-foreground sm:inline">
+                        {a.subtype.replaceAll("_", " ")}
+                      </span>
+                      {isOwner && (
+                        <AccountRowActions account={a} accounts={slim} />
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
           );
         })}
       </div>

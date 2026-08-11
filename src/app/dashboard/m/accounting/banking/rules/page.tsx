@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listRules } from "@/modules/accounting/banking/rules";
 import { describeConditions } from "@/modules/accounting/banking/rules-match";
@@ -82,12 +83,11 @@ export default async function BankRulesPage() {
           <ArrowLeft className="size-3.5" />
           Banking
         </Link>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Rules</h1>
-        <p className="text-sm text-muted-foreground">
-          Tell the books how to categorize a transaction once, and it happens
-          every time. Rules run before the AI suggestion and win where both have
-          an opinion.
-        </p>
+        <PageHeader
+          className="mt-1"
+          title="Rules"
+          description="Tell the books how to categorize a transaction once, and it happens every time. Rules run before the AI suggestion and win where both have an opinion."
+        />
       </div>
       <AccountingNav />
       <RulesTable

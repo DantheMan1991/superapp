@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listLinksForDocument } from "@/modules/accounting/documents/links";
 import { readExtraction } from "@/modules/accounting/ai/extract-validate";
@@ -126,27 +127,33 @@ export default async function ReceiptDetailPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <Link
-            href="/dashboard/m/accounting/receipts"
-            className="mb-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-3 w-3" /> Inbox
-          </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {row.vendorName ?? doc.fileName}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {doc.source === "email"
-              ? `Emailed by ${doc.emailFrom || "unknown sender"}${doc.emailSubject ? ` · “${doc.emailSubject}”` : ""}`
-              : "Uploaded"}
-            {" · "}
-            {doc.createdAt.toISOString().slice(0, 10)}
-            {doc.status === "trashed" && " · in trash"}
-          </p>
-        </div>
-        <DocumentRowActions row={row} accounts={accountOptions} isOwner={isOwner} />
+      <div>
+        <Link
+          href="/dashboard/m/accounting/receipts"
+          className="mb-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-3 w-3" /> Inbox
+        </Link>
+        <PageHeader
+          title={row.vendorName ?? doc.fileName}
+          description={
+            <>
+              {doc.source === "email"
+                ? `Emailed by ${doc.emailFrom || "unknown sender"}${doc.emailSubject ? ` · “${doc.emailSubject}”` : ""}`
+                : "Uploaded"}
+              {" · "}
+              {doc.createdAt.toISOString().slice(0, 10)}
+              {doc.status === "trashed" && " · in trash"}
+            </>
+          }
+          actions={
+            <DocumentRowActions
+              row={row}
+              accounts={accountOptions}
+              isOwner={isOwner}
+            />
+          }
+        />
       </div>
 
       <AccountingNav />

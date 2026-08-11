@@ -27,7 +27,23 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
+  /*
+   * Third neutral tier and the in-content hairline. Airbnb runs three text
+   * weights (#222 / #6C6C6C / #8C8C8C) and two border weights (#DDD for a
+   * container edge, #EBEBEB for a divider inside one); with a single `--border`
+   * a table's row lines carry the same weight as the panel around them, which
+   * is what made our lists read as heavy.
+   */
+  --color-divider: var(--divider);
+  --color-subtle-foreground: var(--subtle-foreground);
+  /*
+   * Set per module by the route wrapper, so `text-module-accent` /
+   * `bg-module-accent/10` mean "this module's colour" in a shared primitive
+   * without the primitive knowing which module it is rendering inside.
+   */
+  --color-module-accent: var(--module-accent);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -51,42 +67,132 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /*
+   * Elevation, transcribed from Airbnb's live stylesheet. The shape is the
+   * point: each step opens with a 1px near-transparent ring and layers real
+   * shadow on top, so an element reads as lifted rather than outlined. This
+   * replaces `ring-1 ring-foreground/10` on cards, which drew a hard line at
+   * every edge and flattened the whole page.
+   */
+  --shadow-elevation-1: var(--elevation-1);
+  --shadow-elevation-2: var(--elevation-2);
+  --shadow-elevation-3: var(--elevation-3);
+  /* Airbnb sets -0.18px at 20px, i.e. about -0.01em; -0.02em at our larger
+     heading sizes lands in the same optical place. */
+  --tracking-heading: -0.02em;
 }
 
 /*
  * Design tokens — the Yosher brand, from the logo lockup.
  * Primary: brand navy. Accent: brand green (emerald-teal).
  * Sidebar runs dark navy in both themes for an ops-cockpit feel.
+ *
+ * NEUTRALS ARE WARM (hue ~85), and that is deliberate — see
+ * docs/decisions/0008. The background has always been faintly warm, but every
+ * grey stacked on it used to be hue 265, i.e. blue, so panels and borders
+ * fought the page they sat on and the whole app read cool and institutional.
+ * Hue 265 is now reserved for exactly two things: `--primary` and the
+ * `--sidebar-*` family. Everything neutral is hue 85 at very low chroma.
  */
 :root {
-  --background: oklch(0.988 0.002 90);
-  --foreground: oklch(0.2 0.03 265);
+  --background: oklch(0.985 0.003 85);
+  --foreground: oklch(0.26 0.007 85);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.03 265);
+  /* var() rather than a repeated literal: these three tracked `--foreground`
+     by hand before, which is a drift waiting to happen. */
+  --card-foreground: var(--foreground);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.03 265);
+  --popover-foreground: var(--foreground);
   --primary: oklch(0.3 0.08 265);
   --primary-foreground: oklch(0.985 0.005 90);
-  --secondary: oklch(0.955 0.008 265);
-  --secondary-foreground: oklch(0.3 0.06 265);
-  --muted: oklch(0.96 0.006 265);
-  --muted-foreground: oklch(0.52 0.02 265);
+  --secondary: oklch(0.955 0.005 85);
+  --secondary-foreground: oklch(0.32 0.008 85);
+  --muted: oklch(0.968 0.004 85);
+  --muted-foreground: oklch(0.49 0.008 85);
+  /*
+   * Third text tier, for metadata that must not compete with the second.
+   *
+   * Airbnb's equivalent is #8C8C8C, which is 3.54:1 on white and therefore
+   * fails WCAG AA for normal-size text. Ours was set to match it and measured
+   * 3.18:1. This tier carries table headers, stat footnotes and a card's second
+   * meta line — all real text — so it is darkened to clear 4.5:1 instead.
+   * Copying the reference exactly was the wrong call here; the tier is still
+   * visibly lighter than `--muted-foreground`, which is the job it has to do.
+   */
+  --subtle-foreground: oklch(0.555 0.008 85);
   --accent: oklch(0.95 0.025 170);
   --accent-foreground: oklch(0.32 0.06 170);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.915 0.008 265);
-  --input: oklch(0.915 0.008 265);
+  /* Warmed from a pure red towards Airbnb's #C13515: at the old chroma an
+     overdue badge was the loudest thing on a page full of money. */
+  --destructive: oklch(0.52 0.17 35);
+  --border: oklch(0.888 0.005 85);
+  /* Lighter than `--border`, for hairlines *inside* a container. */
+  --divider: oklch(0.932 0.004 85);
+  --input: oklch(0.888 0.005 85);
   --ring: oklch(0.55 0.09 265);
   --brand: oklch(0.67 0.12 170);
   --brand-foreground: oklch(0.26 0.05 170);
   --success: oklch(0.62 0.15 150);
+  /*
+   * The dark twin of `--success`, for text and glyphs — the same split as
+   * `--brand` / `--accent-brand`, and for the same measured reason. `--success`
+   * at oklch(0.62 …) is 3.43:1 on card and 3.03:1 on its own 12% tint, so a
+   * green status chip drawn with it fails AA. It is also too light to carry
+   * white text as a *fill* (3.28:1), which is what those badges were doing
+   * before: there is no single green that is both, so a status chip is a pale
+   * tint with dark text.
+   */
+  --success-foreground: oklch(0.45 0.13 150);
   --warning: oklch(0.75 0.15 80);
   --chart-1: oklch(0.45 0.1 265);
   --chart-2: oklch(0.67 0.12 170);
   --chart-3: oklch(0.62 0.15 150);
   --chart-4: oklch(0.5 0.1 300);
   --chart-5: oklch(0.65 0.12 220);
-  --radius: 0.5rem;
+  /*
+   * 0.75rem, up from 0.5rem. The `@theme inline` block above derives the whole
+   * scale from this one value, so sm/md/lg/xl/2xl now land on 7/10/12/17/22px —
+   * the 8/14/20 family Airbnb actually uses (20px is their single most-used
+   * radius, by a factor of five). Changing this one number is the entire
+   * rounding change; do not add literal radii elsewhere.
+   */
+  --radius: 0.75rem;
+
+  --elevation-1:
+    0 0 0 1px rgb(0 0 0 / 0.02), 0 2px 6px rgb(0 0 0 / 0.04),
+    0 4px 8px rgb(0 0 0 / 0.1);
+  --elevation-2: 0 0 0 1px rgb(0 0 0 / 0.02), 0 2px 4px rgb(0 0 0 / 0.16);
+  --elevation-3: 0 0 0 1px rgb(0 0 0 / 0.02), 0 8px 24px rgb(0 0 0 / 0.1);
+
+  /*
+   * Per-module accent. `--module-accent` is what primitives read; the named
+   * values below are what a module's route wrapper assigns it. Hues are pulled
+   * from the chart ramp so a module's colour and its charts agree.
+   */
+  /*
+   * These are FOREGROUND colours — they land on icons, on an active underline
+   * and on a large figure, all against white or the warm page. So they are
+   * pitched in the 0.50–0.56 lightness band, where each clears 4.5:1 on card.
+   *
+   * `--brand` itself is deliberately not used here. At oklch(0.67 …) it is
+   * 2.81:1 on white, which fails even the 3:1 bar that applies to icons and
+   * large text. It stays what it is — a brand *surface* colour, correct behind
+   * dark text on the sidebar badge — and `--accent-brand` is its legible twin
+   * for drawing with.
+   *
+   * The rail re-declares all of these at lifted values further down, because it
+   * is dark in both themes and these would disappear into the navy.
+   */
+  --accent-brand: oklch(0.52 0.11 170);
+  --module-accent: var(--accent-brand);
+  --accent-accounting: oklch(0.52 0.11 170);
+  --accent-crm: oklch(0.5 0.16 295);
+  --accent-documents: oklch(0.55 0.12 75);
+  --accent-email: oklch(0.52 0.14 245);
+  --accent-scheduling: oklch(0.52 0.1 200);
+  --accent-work: oklch(0.53 0.16 35);
+  --accent-hello: oklch(0.52 0.15 320);
+
   --sidebar: oklch(0.25 0.06 265);
   --sidebar-foreground: oklch(0.93 0.008 265);
   --sidebar-primary: oklch(0.67 0.12 170);
@@ -98,28 +204,62 @@
 }
 
 .dark {
-  --background: oklch(0.17 0.03 265);
-  --foreground: oklch(0.96 0.005 90);
-  --card: oklch(0.215 0.035 265);
-  --card-foreground: oklch(0.96 0.005 90);
-  --popover: oklch(0.215 0.035 265);
-  --popover-foreground: oklch(0.96 0.005 90);
+  --background: oklch(0.175 0.004 85);
+  --foreground: oklch(0.96 0.004 85);
+  --card: oklch(0.215 0.005 85);
+  --card-foreground: var(--foreground);
+  /* One step lighter than `--card`, where it used to be identical: a menu
+     opening over a card needs to read as being above it. */
+  --popover: oklch(0.235 0.005 85);
+  --popover-foreground: var(--foreground);
   --primary: oklch(0.85 0.04 265);
   --primary-foreground: oklch(0.22 0.05 265);
-  --secondary: oklch(0.28 0.04 265);
-  --secondary-foreground: oklch(0.96 0.005 90);
-  --muted: oklch(0.27 0.035 265);
-  --muted-foreground: oklch(0.7 0.015 265);
+  --secondary: oklch(0.275 0.006 85);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.265 0.005 85);
+  --muted-foreground: oklch(0.705 0.008 85);
+  /* 0.615 rather than 0.6: at 0.6 this measured 4.46:1 against `--card`, which
+     rounds the wrong side of AA. */
+  --subtle-foreground: oklch(0.62 0.007 85);
   --accent: oklch(0.32 0.05 170);
   --accent-foreground: oklch(0.92 0.04 170);
-  --destructive: oklch(0.704 0.191 22.216);
+  --destructive: oklch(0.68 0.17 35);
   --border: oklch(1 0 0 / 10%);
+  --divider: oklch(1 0 0 / 6%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.67 0.12 170);
   --brand: oklch(0.67 0.12 170);
   --brand-foreground: oklch(0.95 0.03 170);
   --success: oklch(0.68 0.14 150);
+  /* Lifted rather than darkened: on dark the tint is dark, so the text goes up. */
+  --success-foreground: oklch(0.82 0.13 150);
   --warning: oklch(0.78 0.14 80);
+
+  /*
+   * Layered shadow is nearly invisible against a dark surface, so on dark the
+   * hairline does the lifting and the shadow only deepens the separation. Same
+   * token names, so no component needs a dark: variant.
+   */
+  --elevation-1:
+    0 0 0 1px rgb(255 255 255 / 0.08), 0 2px 6px rgb(0 0 0 / 0.3);
+  --elevation-2:
+    0 0 0 1px rgb(255 255 255 / 0.1), 0 2px 4px rgb(0 0 0 / 0.4);
+  --elevation-3:
+    0 0 0 1px rgb(255 255 255 / 0.12), 0 8px 24px rgb(0 0 0 / 0.45);
+
+  /* Lifted for legibility on a dark page; the light-mode values are pitched to
+     clear AA against white and are far too dark here — measured 3.43:1 on
+     `--card` before these two were added, which is why the list must stay
+     complete: a module whose accent is missing from this block silently falls
+     back to its light value. */
+  --accent-brand: oklch(0.75 0.13 170);
+  --accent-accounting: oklch(0.75 0.13 170);
+  --accent-crm: oklch(0.68 0.15 295);
+  --accent-documents: oklch(0.78 0.13 75);
+  --accent-email: oklch(0.7 0.13 245);
+  --accent-scheduling: oklch(0.72 0.1 200);
+  --accent-work: oklch(0.72 0.15 35);
+  --accent-hello: oklch(0.72 0.13 320);
   --chart-1: oklch(0.6 0.1 265);
   --chart-2: oklch(0.67 0.12 170);
   --chart-3: oklch(0.68 0.14 150);
@@ -133,6 +273,23 @@
   --sidebar-accent-foreground: oklch(0.97 0.005 90);
   --sidebar-border: oklch(0.29 0.05 265);
   --sidebar-ring: oklch(0.67 0.12 170);
+}
+
+/*
+ * The rail is dark in BOTH themes, so it always needs the lifted accent values
+ * — the light-mode ones are tuned for contrast against white and go muddy on
+ * navy. Scoping them to the surface means a nav row can say
+ * `text-module-accent` and be legible without knowing which theme is active.
+ */
+[data-sidebar-surface] {
+  --accent-brand: oklch(0.72 0.13 170);
+  --accent-accounting: oklch(0.72 0.13 170);
+  --accent-crm: oklch(0.68 0.15 295);
+  --accent-documents: oklch(0.78 0.13 75);
+  --accent-email: oklch(0.7 0.13 245);
+  --accent-scheduling: oklch(0.72 0.1 200);
+  --accent-work: oklch(0.72 0.15 35);
+  --accent-hello: oklch(0.72 0.13 320);
 }
 
 @layer base {

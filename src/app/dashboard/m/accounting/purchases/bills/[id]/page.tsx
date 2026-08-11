@@ -7,6 +7,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
 import {
   Table,
   TableBody,
@@ -139,50 +140,55 @@ export default async function BillDetailPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <Link
-            href="/dashboard/m/accounting/purchases/bills"
-            className="mb-1 inline-block text-xs text-muted-foreground hover:text-foreground"
-          >
-            ← Bills
-          </Link>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {vendor?.name ?? "Bill"}
-            </h1>
-            <Badge variant={STATUS_BADGE[bill.status] ?? "outline"}>
-              {bill.status.replaceAll("_", " ")}
-            </Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {bill.billNumber && (
-              <>
-                Vendor invoice <span className="font-mono">{bill.billNumber}</span>
-                {" · "}
-              </>
-            )}
-            {bill.billDate}
-            {bill.dueDate && ` · due ${bill.dueDate}`}
-            {" · "}
-            <span className="font-mono font-medium">
-              {formatCentsSigned(bill.totalCents)}
-            </span>
-            {["approved", "partial"].includes(bill.status) && (
-              <>
-                {" · "}
-                <span className="font-mono">{formatCentsSigned(remaining)}</span>{" "}
-                remaining
-              </>
-            )}
-          </p>
-        </div>
-        <BillActions
-          billId={bill.id}
-          version={bill.version}
-          status={bill.status}
-          isOwner={isOwner}
-          journalEntryId={bill.journalEntryId}
+      <div>
+        <Link
+          href="/dashboard/m/accounting/purchases/bills"
+          className="mb-1 inline-block text-xs text-muted-foreground hover:text-foreground"
+        >
+          ← Bills
+        </Link>
+        <PageHeader
+          title={vendor?.name ?? "Bill"}
+          description={
+            <>
+              {bill.billNumber && (
+                <>
+                  Vendor invoice{" "}
+                  <span className="font-mono">{bill.billNumber}</span>
+                  {" · "}
+                </>
+              )}
+              {bill.billDate}
+              {bill.dueDate && ` · due ${bill.dueDate}`}
+              {" · "}
+              <span className="font-mono font-medium tabular-nums">
+                {formatCentsSigned(bill.totalCents)}
+              </span>
+              {["approved", "partial"].includes(bill.status) && (
+                <>
+                  {" · "}
+                  <span className="font-mono tabular-nums">
+                    {formatCentsSigned(remaining)}
+                  </span>{" "}
+                  remaining
+                </>
+              )}
+            </>
+          }
+          actions={
+            <>
+              <Badge variant={STATUS_BADGE[bill.status] ?? "outline"}>
+                {bill.status.replaceAll("_", " ")}
+              </Badge>
+              <BillActions
+                billId={bill.id}
+                version={bill.version}
+                status={bill.status}
+                isOwner={isOwner}
+                journalEntryId={bill.journalEntryId}
+              />
+            </>
+          }
         />
       </div>
 
@@ -190,7 +196,7 @@ export default async function BillDetailPage({
       <PurchasesNav />
 
       {data.duplicates.length > 0 && bill.status !== "paid" && (
-        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <p className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">
           Possible duplicate: this vendor also has{" "}
           {data.duplicates
             .map((d) => `${d.billNumber || "a bill"} (${d.billDate}, ${d.status})`)

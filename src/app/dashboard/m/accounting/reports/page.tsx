@@ -2,12 +2,7 @@ import Link from "next/link";
 import { BarChart3, Hourglass, Landmark, Wallet } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 
 export const dynamic = "force-dynamic";
@@ -56,26 +51,30 @@ export default async function ReportsHubPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
-        <p className="text-sm text-muted-foreground">
-          Financial statements for {ctx.tenant.name}, computed live from the
-          ledger.
-        </p>
-      </div>
+      <PageHeader
+        title="Reports"
+        description={`Financial statements for ${ctx.tenant.name}, computed live from the ledger.`}
+      />
       <AccountingNav />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {REPORTS.map((r) => (
-          <Link key={r.href} href={r.href} className="group">
-            <Card className="h-full transition-colors group-hover:border-brand/50">
-              <CardHeader>
-                <div className="mb-1 flex size-9 items-center justify-center rounded-lg bg-brand/10 text-brand">
-                  <r.icon className="size-4.5" />
-                </div>
-                <CardTitle className="text-base">{r.title}</CardTitle>
-                <CardDescription>{r.description}</CardDescription>
-              </CardHeader>
-            </Card>
+          <Link
+            key={r.href}
+            href={r.href}
+            // Same tile as the Overview module grid: elevation that lifts on
+            // hover, and the accent chip on `--module-accent` rather than
+            // `text-brand`, which measured 2.81:1 on white.
+            className="block h-full rounded-2xl bg-card p-4 shadow-elevation-1 transition-shadow hover:shadow-elevation-3 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
+            <div className="flex size-9 items-center justify-center rounded-lg bg-module-accent/10 text-module-accent">
+              <r.icon className="size-[18px]" />
+            </div>
+            <p className="mt-3 font-heading font-medium tracking-heading">
+              {r.title}
+            </p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {r.description}
+            </p>
           </Link>
         ))}
       </div>

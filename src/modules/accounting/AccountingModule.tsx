@@ -3,15 +3,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { Calculator } from "lucide-react";
 import { withTenant, schema } from "@/db";
 import type { TenantContext } from "@/lib/auth";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
+import { StatCard } from "@/components/app/stat-card";
 import { getSettings, ledgerIsBalanced } from "./core";
 import { formatCentsSigned, toSafeCents } from "./lib/money";
 import { AccountingNav } from "./components/accounting-nav";
@@ -149,146 +143,90 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-brand/10 text-brand">
-            <Calculator className="size-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Accounting</h1>
-            <p className="text-sm text-muted-foreground">
-              Double-entry books for {ctx.tenant.name}.
-            </p>
-          </div>
-        </div>
-        <Button asChild>
-          <Link href="/dashboard/m/accounting/journal/new">New entry</Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="Accounting"
+        description={`Double-entry books for ${ctx.tenant.name}.`}
+        icon={<Calculator />}
+        actions={
+          <Button asChild>
+            <Link href="/dashboard/m/accounting/journal/new">New entry</Link>
+          </Button>
+        }
+      />
 
       <AccountingNav />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Ledger health</CardDescription>
-            <CardTitle className="text-base">
-              {data.balanced ? (
-                <Badge className="bg-emerald-600 hover:bg-emerald-600">
-                  In balance
-                </Badge>
-              ) : (
-                <Badge variant="destructive">Out of balance</Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            Debits equal credits across all posted entries.
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Active accounts</CardDescription>
-            <CardTitle className="text-2xl">{data.accountCount}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            <Link className="underline-offset-2 hover:underline" href="/dashboard/m/accounting/accounts">
-              Manage the chart of accounts
-            </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Posted entries</CardDescription>
-            <CardTitle className="text-2xl">{count("posted")}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            {count("draft")} draft{count("draft") === 1 ? "" : "s"} ·{" "}
-            {count("void")} void
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Accounts receivable</CardDescription>
-            <CardTitle className="text-2xl">
-              {formatCentsSigned(data.arOutstandingCents)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            <Link
-              className="underline-offset-2 hover:underline"
-              href="/dashboard/m/accounting/reports/ar-aging"
-            >
-              Open invoices — see the aging report
-            </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Bank feed</CardDescription>
-            <CardTitle className="text-2xl">{data.unreviewed}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            <Link
-              className="underline-offset-2 hover:underline"
-              href="/dashboard/m/accounting/banking"
-            >
-              {data.unreviewed === 0
-                ? "Nothing waiting for review"
-                : "Transactions waiting for review"}
-            </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Accounts payable</CardDescription>
-            <CardTitle className="text-2xl">
-              {formatCentsSigned(data.apOutstandingCents)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            <Link
-              className="underline-offset-2 hover:underline"
-              href="/dashboard/m/accounting/purchases/bills"
-            >
-              {data.awaitingApproval > 0
-                ? `${data.awaitingApproval} bill${data.awaitingApproval === 1 ? "" : "s"} awaiting approval`
-                : "Open bills — see A/P aging"}
-            </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Inbox</CardDescription>
-            <CardTitle className="text-2xl">{data.receiptInbox}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            <Link
-              className="underline-offset-2 hover:underline"
-              href="/dashboard/m/accounting/receipts"
-            >
-              {data.receiptInbox === 0
-                ? "Nothing waiting to be filed"
-                : "Documents waiting to be filed"}
-            </Link>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Books closed through</CardDescription>
-            <CardTitle className="text-2xl">
-              {data.settings.closedThrough ?? "—"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
-            <Link
-              href="/dashboard/m/accounting/close"
-              className="underline-offset-2 hover:underline"
-            >
-              Month-end close, review &amp; export →
-            </Link>
-          </CardContent>
-        </Card>
+      {/*
+        Eight `StatCard`s where there were eight hand-built cards. Three of them
+        had drifted onto different value sizes, and every footnote was its own
+        inline link; `href` now makes the whole card the target, which is both a
+        larger hit area and one less thing to style per card.
+      */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          label="Ledger health"
+          value={data.balanced ? "In balance" : "Out of balance"}
+          tone={data.balanced ? "success" : "destructive"}
+          footnote="Debits equal credits across all posted entries."
+        />
+        <StatCard
+          label="Active accounts"
+          value={data.accountCount}
+          href="/dashboard/m/accounting/accounts"
+          footnote="Manage the chart of accounts"
+        />
+        <StatCard
+          label="Posted entries"
+          value={count("posted")}
+          footnote={
+            <>
+              {count("draft")} draft{count("draft") === 1 ? "" : "s"} ·{" "}
+              {count("void")} void
+            </>
+          }
+        />
+        <StatCard
+          label="Accounts receivable"
+          value={formatCentsSigned(data.arOutstandingCents)}
+          href="/dashboard/m/accounting/reports/ar-aging"
+          footnote="Open invoices — see the aging report"
+        />
+        <StatCard
+          label="Bank feed"
+          value={data.unreviewed}
+          href="/dashboard/m/accounting/banking"
+          footnote={
+            data.unreviewed === 0
+              ? "Nothing waiting for review"
+              : "Transactions waiting for review"
+          }
+        />
+        <StatCard
+          label="Accounts payable"
+          value={formatCentsSigned(data.apOutstandingCents)}
+          href="/dashboard/m/accounting/purchases/bills"
+          footnote={
+            data.awaitingApproval > 0
+              ? `${data.awaitingApproval} bill${data.awaitingApproval === 1 ? "" : "s"} awaiting approval`
+              : "Open bills — see A/P aging"
+          }
+        />
+        <StatCard
+          label="Inbox"
+          value={data.receiptInbox}
+          href="/dashboard/m/accounting/receipts"
+          footnote={
+            data.receiptInbox === 0
+              ? "Nothing waiting to be filed"
+              : "Documents waiting to be filed"
+          }
+        />
+        <StatCard
+          label="Books closed through"
+          value={data.settings.closedThrough ?? "—"}
+          href="/dashboard/m/accounting/close"
+          footnote="Month-end close, review and export"
+        />
       </div>
     </div>
   );

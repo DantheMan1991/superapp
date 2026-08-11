@@ -6,6 +6,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
   getReconciliationView,
@@ -53,18 +54,11 @@ export default async function ReconcilePage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Reconcile — {bankAccount.name}
-          </h1>
-          {view && <Badge variant="secondary">in progress</Badge>}
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Match the books to the bank statement. Cleared entries are locked —
-          uncheck a transaction to edit its entry.
-        </p>
-      </div>
+      <PageHeader
+        title={`Reconcile — ${bankAccount.name}`}
+        description="Match the books to the bank statement. Cleared entries are locked — uncheck a transaction to edit its entry."
+        actions={view && <Badge variant="secondary">in progress</Badge>}
+      />
 
       <AccountingNav />
 

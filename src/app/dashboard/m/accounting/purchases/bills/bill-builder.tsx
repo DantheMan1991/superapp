@@ -387,7 +387,7 @@ export function BillBuilder({
                       className={cn(
                         "ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
                         suggestion.confidence >= 0.7
-                          ? "bg-brand/10 text-brand"
+                          ? "bg-module-accent/10 text-module-accent"
                           : "bg-muted text-muted-foreground",
                       )}
                       title={suggestion.reason}

@@ -3,7 +3,9 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant } from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -14,7 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import Link from "next/link";
-import { Lock } from "lucide-react";
+import { Lock, Scale } from "lucide-react";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { getSettings, getTrialBalance } from "@/modules/accounting/core";
 import {
@@ -50,20 +52,26 @@ export default async function TrialBalancePage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Trial Balance</h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        title="Trial Balance"
+        description={
+          <>
             Every account&apos;s balance as of {asOf} — the two columns must
             agree. {basis === "cash" ? "Cash" : "Accrual"} basis.
-          </p>
-        </div>
-        {inBalance ? (
-          <Badge className="bg-emerald-600 hover:bg-emerald-600">In balance</Badge>
-        ) : (
-          <Badge variant="destructive">OUT OF BALANCE</Badge>
-        )}
-      </div>
+          </>
+        }
+        actions={
+          inBalance ? (
+            // The hardcoded emerald-600 predates the token set; `--success` is
+            // the same intent and follows the theme.
+            <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
+              In balance
+            </Badge>
+          ) : (
+            <Badge variant="destructive">Out of balance</Badge>
+          )
+        }
+      />
 
       <AccountingNav />
 
@@ -105,52 +113,55 @@ export default async function TrialBalancePage({
         </Link>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {tb.rows.length === 0 ? (
-            <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-              Nothing posted yet as of this date.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-20">Code</TableHead>
-                  <TableHead>Account</TableHead>
-                  <TableHead className="text-right">Debit</TableHead>
-                  <TableHead className="text-right">Credit</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tb.rows.map((r) => (
-                  <TableRow key={r.account.id}>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {r.account.code}
-                    </TableCell>
-                    <TableCell className="text-sm">{r.account.name}</TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {r.debitCents ? formatCents(r.debitCents) : ""}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {r.creditCents ? formatCents(r.creditCents) : ""}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                <TableRow className="border-t-2 font-semibold">
-                  <TableCell />
-                  <TableCell className="text-sm">Totals</TableCell>
-                  <TableCell className="text-right font-mono text-sm">
-                    {formatCents(tb.totalDebitCents)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm">
-                    {formatCents(tb.totalCreditCents)}
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <DataTable
+        isEmpty={tb.rows.length === 0}
+        empty={
+          <EmptyState
+            icon={<Scale />}
+            title="Nothing posted as of this date"
+            description="Try a later date, or post an entry to start the books."
+          />
+        }
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-20">Code</TableHead>
+              <TableHead>Account</TableHead>
+              <TableHead className="text-right">Debit</TableHead>
+              <TableHead className="text-right">Credit</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {tb.rows.map((r) => (
+              <TableRow key={r.account.id}>
+                <TableCell className="font-mono text-xs text-subtle-foreground tabular-nums">
+                  {r.account.code}
+                </TableCell>
+                <TableCell className="text-sm">{r.account.name}</TableCell>
+                <TableCell className="text-right font-mono text-sm tabular-nums">
+                  {r.debitCents ? formatCents(r.debitCents) : ""}
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm tabular-nums">
+                  {r.creditCents ? formatCents(r.creditCents) : ""}
+                </TableCell>
+              </TableRow>
+            ))}
+            {/* The totals row is the point of this report, so it keeps a
+                heavier rule than the divider between accounts. */}
+            <TableRow className="border-t-2 border-border font-semibold">
+              <TableCell />
+              <TableCell className="text-sm">Totals</TableCell>
+              <TableCell className="text-right font-mono text-sm tabular-nums">
+                {formatCents(tb.totalDebitCents)}
+              </TableCell>
+              <TableCell className="text-right font-mono text-sm tabular-nums">
+                {formatCents(tb.totalCreditCents)}
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </DataTable>
     </div>
   );
 }

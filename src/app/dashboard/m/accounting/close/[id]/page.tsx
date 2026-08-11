@@ -15,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
   LedgerError,
@@ -81,44 +82,49 @@ export default async function CloseDetailPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            <Link
-              href="/dashboard/m/accounting/close"
-              className="underline-offset-2 hover:underline"
-            >
-              Close
-            </Link>{" "}
-            / {close.periodEnd}
-          </p>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Close through {close.periodEnd}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Completed by {who(close.completedByClerkUserId)} on{" "}
-            {close.completedAt.toISOString().slice(0, 10)}
-            {close.status === "reopened" &&
-              ` · reopened by ${who(close.reopenedByClerkUserId)}${
-                close.reopenedAt
-                  ? ` on ${close.reopenedAt.toISOString().slice(0, 10)}`
-                  : ""
-              }`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {completed ? (
-            <Badge className="bg-emerald-600 hover:bg-emerald-600">Completed</Badge>
-          ) : (
-            <Badge variant="secondary">Reopened</Badge>
-          )}
-          {close.signedOffAt && (
-            <Badge variant="outline">
-              <PenLine className="mr-1 h-3 w-3" />
-              Signed off · {who(close.signedOffByClerkUserId)}
-            </Badge>
-          )}
-        </div>
+      <div>
+        <p className="text-sm text-muted-foreground">
+          <Link
+            href="/dashboard/m/accounting/close"
+            className="underline-offset-2 hover:underline"
+          >
+            Close
+          </Link>{" "}
+          / {close.periodEnd}
+        </p>
+        <PageHeader
+          className="mt-1"
+          title={`Close through ${close.periodEnd}`}
+          description={
+            <>
+              Completed by {who(close.completedByClerkUserId)} on{" "}
+              {close.completedAt.toISOString().slice(0, 10)}
+              {close.status === "reopened" &&
+                ` · reopened by ${who(close.reopenedByClerkUserId)}${
+                  close.reopenedAt
+                    ? ` on ${close.reopenedAt.toISOString().slice(0, 10)}`
+                    : ""
+                }`}
+            </>
+          }
+          actions={
+            <>
+              {completed ? (
+                <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
+                  Completed
+                </Badge>
+              ) : (
+                <Badge variant="secondary">Reopened</Badge>
+              )}
+              {close.signedOffAt && (
+                <Badge variant="outline">
+                  <PenLine className="mr-1 h-3 w-3" />
+                  Signed off · {who(close.signedOffByClerkUserId)}
+                </Badge>
+              )}
+            </>
+          }
+        />
       </div>
 
       <AccountingNav />

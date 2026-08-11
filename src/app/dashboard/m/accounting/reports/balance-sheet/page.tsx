@@ -2,6 +2,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant } from "@/db";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
 import { ReportTable } from "@/modules/accounting/components/report-table";
@@ -46,34 +47,36 @@ export default async function BalanceSheetPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Balance Sheet
-            </h1>
+      <PageHeader
+        title="Balance Sheet"
+        description={
+          <>
+            {ctx.tenant.name} · as of {report.asOf} · fiscal year begins{" "}
+            {report.fyStart} · {basis === "cash" ? "Cash" : "Accrual"} basis
+          </>
+        }
+        actions={
+          <>
+            {/* The balanced check belongs beside the export control rather than
+                next to the title: it is the report's verdict, not its name. */}
             {report.balanced ? (
-              <Badge className="bg-emerald-600 hover:bg-emerald-600">
+              <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
                 In balance
               </Badge>
             ) : (
-              <Badge variant="destructive">OUT OF BALANCE</Badge>
+              <Badge variant="destructive">Out of balance</Badge>
             )}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {ctx.tenant.name} · as of {report.asOf} · fiscal year begins{" "}
-            {report.fyStart} · {basis === "cash" ? "Cash" : "Accrual"} basis
-          </p>
-        </div>
-        <ReportToolbar
-          exportParams={{
-            report: "balance-sheet",
-            asOf: data.asOf,
-            compare,
-            basis,
-          }}
-        />
-      </div>
+            <ReportToolbar
+              exportParams={{
+                report: "balance-sheet",
+                asOf: data.asOf,
+                compare,
+                basis,
+              }}
+            />
+          </>
+        }
+      />
 
       <div className="print:hidden">
         <AccountingNav />

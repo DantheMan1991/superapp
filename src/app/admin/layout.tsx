@@ -23,13 +23,28 @@ export default async function AdminLayout({
   return (
     <AppShell
       contextLabel="Platform admin"
-      navItems={[
-        { href: "/admin", label: "Clients", icon: "users", exact: true },
-        { href: "/admin/retainers", label: "Retainers", icon: "clock" },
-        { href: "/admin/audits", label: "Discovery", icon: "sparkles" },
-        { href: "/admin/modules", label: "Modules", icon: "boxes" },
-        { href: "/admin/docs", label: "Build docs", icon: "book" },
-        { href: "/admin/audit", label: "Audit log", icon: "audit" },
+      navGroups={[
+        {
+          label: "Clients",
+          items: [
+            { href: "/admin", label: "Clients", icon: "users", exact: true },
+            { href: "/admin/retainers", label: "Retainers", icon: "clock" },
+          ],
+        },
+        {
+          label: "Platform",
+          items: [
+            { href: "/admin/audits", label: "Discovery", icon: "sparkles" },
+            { href: "/admin/modules", label: "Modules", icon: "boxes" },
+          ],
+        },
+        {
+          label: "Records",
+          items: [
+            { href: "/admin/docs", label: "Build docs", icon: "book" },
+            { href: "/admin/audit", label: "Audit log", icon: "audit" },
+          ],
+        },
       ]}
       footer={
         <div className="flex items-center justify-between">

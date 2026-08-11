@@ -14,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
 import { getSettings } from "@/modules/accounting/core";
@@ -118,29 +119,56 @@ export default async function EntryPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Journal entry
-            </h1>
-            <Badge
-              variant={
-                entry.status === "posted"
-                  ? "default"
-                  : entry.status === "draft"
-                    ? "secondary"
-                    : "outline"
-              }
-            >
-              {entry.status}
-            </Badge>
-            {inClosedPeriod && <Badge variant="outline">closed period</Badge>}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {entry.entryDate} · {entry.source.replaceAll("_", " ")}
-            {entry.memo ? ` · ${entry.memo}` : ""}
-          </p>
+      <div>
+        <PageHeader
+          title="Journal entry"
+          description={
+            <>
+              {entry.entryDate} · {entry.source.replaceAll("_", " ")}
+              {entry.memo ? ` · ${entry.memo}` : ""}
+            </>
+          }
+          actions={
+            <>
+              <Badge
+                variant={
+                  entry.status === "posted"
+                    ? "default"
+                    : entry.status === "draft"
+                      ? "secondary"
+                      : "outline"
+                }
+              >
+                {entry.status}
+              </Badge>
+              {inClosedPeriod && <Badge variant="outline">closed period</Badge>}
+              {!editing && (
+                <>
+                  {isOwner &&
+                    (entry.status === "draft" ||
+                      (entry.status === "posted" &&
+                        canMutatePosted &&
+                        !reversal)) && (
+                      <a
+                        className="text-sm font-medium underline underline-offset-2"
+                        href={`/dashboard/m/accounting/journal/${entry.id}?edit=1`}
+                      >
+                        Edit
+                      </a>
+                    )}
+                  <EntryActions
+                    entryId={entry.id}
+                    version={entry.version}
+                    status={entry.status}
+                    canPost={isOwner}
+                    canMutatePosted={canMutatePosted && !reversal}
+                  />
+                </>
+              )}
+            </>
+          }
+        />
+        <div className="mt-1">
           {entry.reversesEntryId && (
             <p className="mt-1 text-xs text-muted-foreground">
               Reversal of{" "}
@@ -166,27 +194,6 @@ export default async function EntryPage({
             </p>
           )}
         </div>
-        {!editing && (
-          <div className="flex items-center gap-2">
-            {isOwner &&
-              (entry.status === "draft" ||
-                (entry.status === "posted" && canMutatePosted && !reversal)) && (
-                <a
-                  className="text-sm font-medium underline underline-offset-2"
-                  href={`/dashboard/m/accounting/journal/${entry.id}?edit=1`}
-                >
-                  Edit
-                </a>
-              )}
-            <EntryActions
-              entryId={entry.id}
-              version={entry.version}
-              status={entry.status}
-              canPost={isOwner}
-              canMutatePosted={canMutatePosted && !reversal}
-            />
-          </div>
-        )}
       </div>
 
       <AccountingNav />
@@ -194,7 +201,7 @@ export default async function EntryPage({
       {editing ? (
         <>
           {entry.status === "posted" && (
-            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <p className="rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">
               You are editing a posted entry. The change takes effect
               immediately and the before/after is recorded in the audit log.
             </p>

@@ -13,6 +13,14 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-10 — Rules learn a payee, and the feed screen fixes (branch `claude/rules-payee`)
+- **Rules can set the payee** (`0113`: `bank_rules.set_vendor_id`, `bank_transactions.vendor_id`). Found by driving the real app against the QuickBooks benchmark: every one of their rules sets a payee as well as a category, and without it a matched row still needed the vendor typed in by hand — half the work the rule was meant to save
+- **The payee is applied to the row, not suggested.** Unlike the category it posts nothing, so there is nothing to accept. **A payee already set by hand is never overwritten** by a later rule run
+- **It stops at the staging row.** `journal_entries` has no party column and inventing one for this would be a far larger change than the feed screen needs, so the payee is feed metadata and a "From/To" column, not something that reaches the ledger. Say so before promising a vendor report built on it
+- **Two layout bugs on the rules table**, both found by using it rather than reading it: the table overflowed its card and hid Turn off / Edit / Delete behind a horizontal scrollbar, and a long rule name overlapped the next column. Columns now collapse by breakpoint and fold into the name cell instead of disappearing
+- **The import result now says what the rules did.** It already computed `{matched, autoPosted, skippedLocked}` and threw it away, which made the feature invisible at the one moment it ran
+- **Accessible names on every Select trigger** in the rule dialog — they read as bare `combobox` before, unlike the labelled ones in the benchmark
+
 ### 2026-08-10 — Invoice delivery: the PDF, and sending it (branch `claude/invoice-pdf`)
 - **`/api/accounting/invoices/[id]/pdf`** renders the invoice with `@react-pdf/renderer`. Until now the module could not produce an invoice document at all — `pdf` appeared in it only as an *input* mime type for receipt extraction
 - **A GET route, not a server action.** Actions are capped at 4MB and return through the RSC channel; this is a file somebody saves, prints or forwards. Same shape as the books export. Auth is re-checked on every fetch, and the expert role may read it — a PDF of the books is a report, not a mutation
@@ -146,7 +154,7 @@ export for the accountant.
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.) |
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens |
-| `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
+| `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments`, `recurring_invoices` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party |
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
@@ -173,6 +181,9 @@ sentence rather than leaving it aspirational.
 - **Three-tier mutability**: draft (free edit) → posted (edit-with-version/void/reverse) → reconciled (immutable; reverse only). The DB backs each tier with triggers/FKs, not just app code.
 - **Derived, never stored**: invoice/bill statuses derive from payments; `closed_through` derives from period_closes; Retained Earnings is computed — no closing entries exist.
 - **All money is integer cents.** No floats, and no division in report math — with exactly one quarantined exception, `core/cash-basis-allocate.ts`, where pro-rata recognition inherently divides. It uses BigInt intermediates and a largest-remainder rule so each split sums to the cent. Nowhere else in the report path may divide.
+- **Cash basis does not zero AR/AP that came from a manual journal.** Only
+  invoice and bill documents are re-recognised; a hand-written entry crediting
+  AP has no payment to re-date to and stays put. See [ADR 0007](../decisions/0007-cash-basis-reporting.md).
 - **Reports carry a basis.** Accrual is the default and the ledger as posted; cash re-recognises invoice income and bill expense on their payment dates ([ADR 0007](../decisions/0007-cash-basis-reporting.md)). Cash basis is derived at read time — there is no second ledger, and nothing about it is ever posted.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.

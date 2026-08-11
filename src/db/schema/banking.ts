@@ -23,6 +23,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { accounts, journalEntries, journalLines } from "./ledger";
+// One-way: payables knows nothing of banking, so the payee FK does not cycle.
+import { vendors } from "./payables";
 
 export const bankAccountKind = pgEnum("bank_account_kind", [
   "checking",
@@ -132,6 +134,15 @@ export const bankTransactions = pgTable(
      * link — the app unlinks, the database does not cascade meaning.
      */
     ruleSuggestion: jsonb("rule_suggestion"),
+    /**
+     * Who the money went to or came from, once somebody (or a rule) says so.
+     *
+     * The bank only ever gives us a description; the payee is a judgement laid
+     * over it. Kept on the STAGING row rather than the ledger because a
+     * journal entry has no party column, and inventing one for this would be a
+     * far larger change than the feed screen needs — see the dossier.
+     */
+    vendorId: uuid("vendor_id"),
     /** Original parsed CSV row / trimmed Plaid payload — provenance. */
     raw: jsonb("raw").notNull().default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -170,6 +181,13 @@ export const bankTransactions = pgTable(
       name: "bank_transactions_entry_fk",
       columns: [t.tenantId, t.journalEntryId],
       foreignColumns: [journalEntries.tenantId, journalEntries.id],
+    }),
+    // NO ACTION: deactivating a vendor is the supported move. A feed row that
+    // silently lost its payee would be worse than one that refuses to delete.
+    foreignKey({
+      name: "bank_transactions_vendor_fk",
+      columns: [t.tenantId, t.vendorId],
+      foreignColumns: [vendors.tenantId, vendors.id],
     }),
   ],
 );
@@ -212,6 +230,8 @@ export const bankRules = pgTable(
     conditions: jsonb("conditions").notNull().default([]),
     /** The category this rule codes to. */
     setAccountId: uuid("set_account_id").notNull(),
+    /** Optional payee. Half the work a rule saves is not typing the vendor. */
+    setVendorId: uuid("set_vendor_id"),
     setMemo: text("set_memo"),
     /** Post without human review. Off by default, and never overrides a lock. */
     autoPost: boolean("auto_post").notNull().default(false),
@@ -241,6 +261,11 @@ export const bankRules = pgTable(
       name: "bank_rules_set_account_fk",
       columns: [t.tenantId, t.setAccountId],
       foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    foreignKey({
+      name: "bank_rules_set_vendor_fk",
+      columns: [t.tenantId, t.setVendorId],
+      foreignColumns: [vendors.tenantId, vendors.id],
     }),
   ],
 );

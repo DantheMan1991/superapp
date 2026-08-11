@@ -49,7 +49,11 @@ export function ImportWizard({
   const [pending, startTransition] = useTransition();
   const [csvText, setCsvText] = useState<string | null>(null);
   const [preview, setPreview] = useState<CsvPreview | null>(null);
-  const [done, setDone] = useState<{ imported: number; skippedDuplicates: number } | null>(null);
+  const [done, setDone] = useState<{
+    imported: number;
+    skippedDuplicates: number;
+    rules?: { matched: number; autoPosted: number; skippedLocked: number };
+  } | null>(null);
   const [mapping, setMapping] = useState({
     dateCol: NONE,
     descCol: NONE,
@@ -154,6 +158,21 @@ export function ImportWizard({
               ? ` · ${done.skippedDuplicates} duplicate${done.skippedDuplicates === 1 ? "" : "s"} skipped`
               : ""}
             .
+            {/* What the rules did. The import already computed this; saying
+                nothing made the feature invisible at the one moment it ran. */}
+            {done.rules && done.rules.matched > 0 && (
+              <>
+                {" "}
+                {done.rules.matched} matched a rule
+                {done.rules.autoPosted > 0
+                  ? `, ${done.rules.autoPosted} posted automatically`
+                  : ""}
+                {done.rules.skippedLocked > 0
+                  ? `, ${done.rules.skippedLocked} left for review because the period is closed`
+                  : ""}
+                .
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -269,7 +269,7 @@ npm run test:isolation   # required before deploy
 - shadcn/ui + Tailwind. Check `src/components/ui` before adding a dependency.
 - **Compose a primitive from `src/components/app/` before writing a heading,
   empty state or table panel by hand** — `PageHeader`, `EmptyState`, `DataTable`,
-  `StatCard`, `FilterPills`, `CategoryStrip`, `EntityCard`, `SectionRow`. The
+  `StatCard`, `FilterPills`, `CategoryStrip`, `Panel`, `SectionRow`. The
   token rules that go with them (`--divider` inside a container vs `--border` at
   its edge, elevation instead of outline, never a literal radius) are in
   [modules/design-system.md](modules/design-system.md); the reasoning is in

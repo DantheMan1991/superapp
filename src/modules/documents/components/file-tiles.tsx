@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { FileText, FolderOpen, Lock } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { formatBytes } from "../lib/format";
 import { canPreview, fileKindLabel } from "../lib/view-mode";
 import { PdfThumbnail } from "./pdf-canvas";
@@ -12,9 +11,37 @@ import { PdfThumbnail } from "./pdf-canvas";
  * None of that needs JavaScript, and a folder of two hundred files should not
  * ship two hundred client components. The drag wrappers around them are the
  * only client part.
+ *
+ * The card language here is the Airbnb half of the design system (see
+ * docs/modules/design-system.md): a media block, then a tight title, then one
+ * quiet line of metadata, with elevation instead of a border and a lift on
+ * hover. Two details are worth keeping:
+ *
+ * - **A chip floats over the media block rather than sitting under it.**
+ *   Translucent surface plus `--elevation-1`, which is the trick that makes it
+ *   read as being *above* the thumbnail instead of printed on it. It carries the
+ *   file type on a tile that has no preview to speak for itself, and the
+ *   owners-only lock on a folder.
+ * - **`overflow-hidden` on the media block** is what keeps the image's hover
+ *   scale inside the rounded corner.
  */
 
 const BASE = "/dashboard/m/documents/browse";
+
+/** Shared so a folder tile and a file tile are always the same shape. */
+const TILE =
+  "group/tile flex h-full flex-col gap-2 rounded-2xl bg-card p-3 shadow-elevation-1 transition-shadow hover:shadow-elevation-3 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none";
+
+/**
+ * The media block. Grid rows size to their tallest member, so a folder next to
+ * a file used to stretch to the file's height and every row ended up a
+ * different size. Matching the two shapes is what makes the grid uniform.
+ */
+const MEDIA =
+  "relative flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-module-accent/8";
+
+const CHIP =
+  "absolute top-1.5 left-1.5 rounded-[10px] bg-card/85 px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase shadow-elevation-1 backdrop-blur-sm";
 
 export function FolderTile({
   id,
@@ -26,30 +53,21 @@ export function FolderTile({
   restricted: boolean;
 }) {
   return (
-    <Link
-      draggable={false}
-      href={`${BASE}/${id}`}
-      className="flex h-full flex-col gap-2 rounded-md border p-3 transition-colors hover:bg-secondary/50"
-    >
-      {/* Same aspect-square media block as a file tile. Grid rows size to
-          their tallest member, so a folder next to a file used to stretch to
-          the file's height and every row ended up a different size. Matching
-          the two shapes is what makes the grid uniform. */}
-      <div className="flex aspect-square items-center justify-center rounded bg-secondary/40">
-        <FolderOpen className="size-10 text-muted-foreground" />
-      </div>
-      <span className="line-clamp-2 break-words text-sm font-medium">{name}</span>
-      <div className="mt-auto">
-        {restricted ? (
-          <Badge variant="secondary" className="gap-1">
-            <Lock className="size-3" />
+    <Link draggable={false} href={`${BASE}/${id}`} className={TILE}>
+      <div className={MEDIA}>
+        <FolderOpen className="size-10 text-module-accent" />
+        {restricted && (
+          <span className={CHIP}>
+            <Lock className="mr-0.5 inline size-2.5 align-[-1px]" />
             Owners
-          </Badge>
-        ) : (
-          // Keeps the baseline aligned with a file tile's size line.
-          <span className="text-xs text-muted-foreground">Folder</span>
+          </span>
         )}
       </div>
+      <span className="line-clamp-2 text-sm font-medium break-words">
+        {name}
+      </span>
+      {/* Keeps the baseline aligned with a file tile's size line. */}
+      <span className="mt-auto text-xs text-subtle-foreground">Folder</span>
     </Link>
   );
 }
@@ -73,14 +91,15 @@ export function FileTile({
   const label = title || fileName;
   const preview = showPreview && canPreview(mimeType);
   const isPdf = showPreview && mimeType === "application/pdf";
+  const kind = fileKindLabel(mimeType, fileName);
 
   return (
     <a
       draggable={false}
       href={`/api/documents/${id}/file`}
-      className="flex h-full flex-col gap-2 rounded-md border p-3 transition-colors hover:bg-secondary/50"
+      className={TILE}
     >
-      <div className="flex aspect-square items-center justify-center overflow-hidden rounded bg-secondary/40">
+      <div className={MEDIA}>
         {preview ? (
           // Same-origin and authenticated, exactly like opening the file.
           // loading="lazy" so a folder of photos does not fetch every full
@@ -92,22 +111,22 @@ export function FileTile({
             alt=""
             loading="lazy"
             decoding="async"
-            className="size-full object-cover"
+            className="size-full object-cover transition-transform duration-200 group-hover/tile:scale-[1.03]"
           />
         ) : isPdf ? (
           // Drawn by pdf.js to a canvas, not framed — see pdf-canvas.tsx.
           <PdfThumbnail url={`/api/documents/${id}/file`} />
         ) : (
-          <div className="flex flex-col items-center gap-1 text-muted-foreground">
-            <FileText className="size-8" />
-            <span className="text-[10px] font-medium uppercase tracking-wide">
-              {fileKindLabel(mimeType, fileName)}
-            </span>
-          </div>
+          <FileText className="size-9 text-module-accent/70" />
         )}
+        {/* On a real preview the image says what it is, so the chip would be
+            noise. On a typed tile it is the only thing that does. */}
+        {!preview && <span className={CHIP}>{kind}</span>}
       </div>
-      <span className="line-clamp-2 break-words text-sm font-medium">{label}</span>
-      <span className="mt-auto text-xs text-muted-foreground">
+      <span className="line-clamp-2 text-sm font-medium break-words">
+        {label}
+      </span>
+      <span className="mt-auto text-xs text-subtle-foreground tabular-nums">
         {formatBytes(sizeBytes)}
       </span>
     </a>

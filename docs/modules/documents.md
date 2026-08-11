@@ -52,11 +52,27 @@ vocabulary is in [design-system.md](design-system.md);
   it is what a client's own customer sees. `--module-accent` is unset there, so
   no accent chip is passed.
 
-**`EntityCard` still has no caller.** It was built for a card grid with
-thumbnails, and Documents renders files as a divided list — `folder-browser.tsx`
-has no grid view. Adding one is a *feature*, not a migration, so it was not done
-here. Either add a grid/list toggle deliberately, or delete `EntityCard` until
-something needs it; leaving it unused indefinitely is the worst of the three.
+- **The grid views got the card language, and `EntityCard` was deleted.**
+  Correcting a wrong claim made earlier the same day: this module was said to
+  have no grid view, and adding one was called a new feature. It already had
+  three view modes (`list` / `icons` / `thumbs`), `TileGrid`, `FileTile`,
+  `FolderTile`, image previews, pdf.js thumbnails and a cookie so the server
+  renders the right layout on first paint. The claim came from grepping for a
+  list wrapper and stopping there.
+
+  So `file-tiles.tsx` was brought up to the card language instead — elevation
+  rather than a border, the rounder radius, a hover lift, the media block tinted
+  with `--module-accent`, and a **floating chip** (translucent surface plus
+  `--elevation-1`) carrying the file type on tiles with no preview and the
+  owners-only lock on a folder. The chip is suppressed when there IS a real
+  preview, because the image already says what it is.
+
+  `EntityCard` is **gone**. It was written for this job before the module was
+  understood, and `FileTile` is strictly better at it: it knows mime types, it
+  knows which files can show a real preview and why (a CSP consequence, see
+  `lib/view-mode.ts`), and it keeps folder and file tiles the same shape so grid
+  rows stay uniform. The shared `TILE` and `MEDIA` constants are what enforce
+  that last part — change one and both tiles move together.
 
 ### 2026-08-08 — Build log archived, and the DMS test file split (branch `claude/split-oversized-files-2`)
 

@@ -4,6 +4,7 @@ import { ChevronRight, FileText, FolderOpen, Lock } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import {
   listFolderContents,
@@ -107,12 +108,13 @@ export async function FolderBrowser({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {folder ? folder.name : "Documents"}
-          </h1>
-          <nav className="mt-1 flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+      {/* The breadcrumb goes in `description`, which takes a node — the crumbs
+          are drop targets, so this is interactive chrome rather than a caption
+          and it has to stay inside the header's own block. */}
+      <PageHeader
+        title={folder ? folder.name : "Documents"}
+        description={
+          <span className="flex flex-wrap items-center gap-1">
             {/* Crumbs are drop targets so things can be dragged UP a level.
                 Without this the only direction you can drag is deeper. */}
             <BreadcrumbDropTarget folderId={null}>
@@ -139,23 +141,25 @@ export async function FolderBrowser({
                 <span className="text-foreground">{folder.name}</span>
               </span>
             )}
-          </nav>
-        </div>
-        <div className="flex items-center gap-2">
-          {folder?.effectiveVisibility === "owners" && (
-            <Badge variant="secondary" className="gap-1">
-              <Lock className="size-3" />
-              {folder.visibility === "owners" ? "Owners only" : "Inherited"}
-            </Badge>
-          )}
-          <ViewSwitch current={view} />
-          <UploadButton
-            tenantId={ctx.tenant.id}
-            folderId={folder?.id ?? null}
-          />
-          <NewFolderButton parentId={folder?.id ?? null} isOwner={isOwner} />
-        </div>
-      </div>
+          </span>
+        }
+        actions={
+          <>
+            {folder?.effectiveVisibility === "owners" && (
+              <Badge variant="secondary" className="gap-1">
+                <Lock className="size-3" />
+                {folder.visibility === "owners" ? "Owners only" : "Inherited"}
+              </Badge>
+            )}
+            <ViewSwitch current={view} />
+            <UploadButton
+              tenantId={ctx.tenant.id}
+              folderId={folder?.id ?? null}
+            />
+            <NewFolderButton parentId={folder?.id ?? null} isOwner={isOwner} />
+          </>
+        }
+      />
 
       <DocumentsNav />
 

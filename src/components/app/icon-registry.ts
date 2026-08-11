@@ -35,10 +35,11 @@ import {
  * Scheduling and Work all silently fell through to the `Boxes` fallback. One
  * map, imported by both sides, is what stops that recurring.
  *
- * Note `check-square` resolves to lucide's `SquareCheck`. lucide-react v1
- * dropped the old `CheckSquare` alias, so the name in the module registry can
- * never match an export directly — this indirection is load-bearing, not
- * decoration.
+ * Note `check-square` resolves to lucide's `SquareCheck`. Either spelling would
+ * work — v1 still re-exports `SquareCheck as CheckSquare` — so the bug was only
+ * ever the missing key, not the name. `getIcon` falls back to `Boxes` instead of
+ * throwing, which is exactly why three wrong icons shipped unnoticed: add the
+ * name here when you add a module.
  *
  * Components only, no helpers: a `"use client"` module may import from here
  * freely because this file is not itself a client module.

@@ -1,7 +1,11 @@
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant } from "@/db";
+import { Hourglass } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
 import { ReportTable } from "@/modules/accounting/components/report-table";
@@ -36,24 +40,26 @@ export default async function ArAgingPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">A/R Aging</h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        title="A/R Aging"
+        description={
+          <>
             {ctx.tenant.name} · open balances as of {report.asOf} by days past
             due. Voided invoices are excluded.
-          </p>
-        </div>
-        {report.overdueCents > 0 ? (
-          <Badge variant="destructive">
-            {formatCentsSigned(report.overdueCents)} overdue
-          </Badge>
-        ) : (
-          <Badge className="bg-emerald-600 hover:bg-emerald-600">
-            Nothing overdue
-          </Badge>
-        )}
-      </div>
+          </>
+        }
+        actions={
+          report.overdueCents > 0 ? (
+            <Badge variant="destructive">
+              {formatCentsSigned(report.overdueCents)} overdue
+            </Badge>
+          ) : (
+            <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
+              Nothing overdue
+            </Badge>
+          )
+        }
+      />
 
       <div className="print:hidden">
         <AccountingNav />
@@ -67,9 +73,13 @@ export default async function ArAgingPage({
       />
 
       {report.rows.length <= 1 ? (
-        <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          No open invoices as of this date.
-        </p>
+        <Panel>
+          <EmptyState
+            icon={<Hourglass />}
+            title="Nothing outstanding"
+            description="No open invoices as of this date."
+          />
+        </Panel>
       ) : (
         <ReportTable
           rows={report.rows}

@@ -84,7 +84,15 @@ also a Tailwind utility.
   `text-muted-foreground`, nothing recedes.
 - **Never `text-brand` on a light surface.** `--brand` is 2.81:1 on white — it is
   a surface colour for dark text to sit on. Use `--accent-brand` (or
-  `--module-accent`) for a glyph or a figure.
+  `--module-accent`) for a glyph or a figure. Note `text-brand-foreground` is a
+  *different* token and is fine: it is the dark green.
+- **A status chip is a pale tint with dark text**, never a saturated fill.
+  `--success` measured 3.43:1 on card and only 3.28:1 as a fill under white text,
+  so neither direction passed on its own — hence `--success-foreground`, its dark
+  twin, and `bg-success/12 text-success-foreground` (5.9–6.2:1 light, 9–10:1
+  dark). The same `--brand` / `--accent-brand` split, for the same reason. There
+  is no single mid-tone that is both a legible foreground on white and a legible
+  background for white text.
 - **The `--accent-*` set is declared three times** — `:root`, `.dark`, and
   `[data-sidebar-surface]` — and adding a module means adding it to **all three**.
   A missing entry does not error; it inherits a value tuned for the wrong
@@ -150,9 +158,14 @@ sub-nav and a filter row stacked above the first invoice.
   strings and `icon-registry.ts` resolves them. That indirection is also why the
   registry must stay in sync with `src/modules/index.ts` — it silently did not,
   for three modules, until 2026-08-10.
-- **lucide-react v1 dropped `CheckSquare`.** It is `SquareCheck` now. Verify an
-  icon name exists before adding it to the registry; a missing one falls through
-  to `Boxes` without erroring, which is how the last one went unnoticed.
+- **A missing registry key fails silently.** `getIcon` falls back to `Boxes`
+  rather than throwing, which is how three modules shipped with the wrong icon
+  and nobody noticed. Adding a module means adding its icon name here.
+- **Grep the alias block, not just `declare const`, when checking an icon name.**
+  lucide-react re-exports old names (`SquareCheck as CheckSquare`,
+  `ChartColumn as BarChart3`) in one long `export { … }` statement. A
+  `^declare const X` grep says a name is gone when it is only aliased — that
+  mistake produced a wrong claim in this repo's ADR on 2026-08-10.
 - **`measure` in `CategoryStrip` runs from a ref callback, not an effect.** As an
   effect it would be a `setState` on mount, which `react-hooks/set-state-in-effect`
   flags. The `useCallback` around it is load-bearing: an inline ref would detach,

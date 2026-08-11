@@ -45,10 +45,20 @@ vocabulary this uses is in [design-system.md](design-system.md); the reasoning i
   `src/app/dashboard/m/layout.tsx`, using `display: contents` so it adds no box
   that could break a full-width module's height chain.
 
-**Still on the old vocabulary** (next slice): the six report pages, trial
-balance, close, and the detail/new pages for invoices, bills, journal entries and
-receipts. The invoice detail page prints, so its print styles need checking
-before it is touched.
+- **Reports and trial balance converted too**, plus a second contrast pass.
+  `ReportTable` is shared by P&L, Balance Sheet and both aging reports, so
+  converting it once covered four report bodies. Seven `bg-emerald-600` badges
+  became `bg-success/12 text-success-foreground` — the first attempt used
+  `bg-success` with white text and **measured 3.28:1**, so it was replaced with a
+  tint plus a new dark `--success-foreground` (5.9–6.2:1 light, 9–10:1 dark).
+  Three more bare `text-brand` sites fixed in `register-controls.tsx` and
+  `bill-builder.tsx` — the AI/rule suggestion chips in the bank review queue.
+
+**Still on the old vocabulary** (next slice): the detail and `new` pages —
+invoices, bills, journal entries, receipts, the bank register and reconcile, and
+the close pages' bodies. Their headers and status colours are done; what remains
+is the `Card`-wrapped panels inside them. **The invoice detail page prints**, so
+check its print styles before touching it.
 
 ### 2026-08-10 — Invoice delivery: the PDF, and sending it (branch `claude/invoice-pdf`)
 - **`/api/accounting/invoices/[id]/pdf`** renders the invoice with `@react-pdf/renderer`. Until now the module could not produce an invoice document at all — `pdf` appeared in it only as an *input* mime type for receipt extraction

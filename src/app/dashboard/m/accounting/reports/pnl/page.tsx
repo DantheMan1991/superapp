@@ -1,6 +1,7 @@
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant } from "@/db";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
 import { ReportTable } from "@/modules/accounting/components/report-table";
@@ -63,29 +64,29 @@ export default async function PnlPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Profit &amp; Loss
-          </h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        title="Profit & Loss"
+        description={
+          <>
             {ctx.tenant.name} · {report.period.from} to {report.period.to}
             {report.comparison &&
               ` · vs ${report.comparison.from} to ${report.comparison.to}`}
             {` · ${basis === "cash" ? "Cash" : "Accrual"} basis`}
-          </p>
-        </div>
-        <ReportToolbar
-          exportParams={{
-            report: "pnl",
-            from: data.from,
-            to: data.to,
-            compare,
-            dim,
-            basis,
-          }}
-        />
-      </div>
+          </>
+        }
+        actions={
+          <ReportToolbar
+            exportParams={{
+              report: "pnl",
+              from: data.from,
+              to: data.to,
+              compare,
+              dim,
+              basis,
+            }}
+          />
+        }
+      />
 
       <div className="print:hidden">
         <AccountingNav />

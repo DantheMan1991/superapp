@@ -151,9 +151,17 @@ private icon map:
   been rendering the generic `Boxes` fallback**. The map now lives in
   `src/components/app/icon-registry.ts`, imported by both sides, which is what
   stops it drifting again.
-- `check-square` could never have resolved: lucide-react v1 dropped the
-  `CheckSquare` alias in favour of `SquareCheck`. The registry's indirection is
-  load-bearing, not decoration.
+
+  **Correction, same day.** This entry first also claimed `check-square` could
+  never have resolved because lucide-react v1 had dropped the `CheckSquare`
+  alias. That is wrong — v1 still exports `SquareCheck as CheckSquare`. The
+  claim came from grepping only `declare const` lines in the type declarations,
+  which miss the alias block entirely. The bug is unchanged and was only ever
+  the missing map key; the icon name would have worked under either spelling.
+  Corrected here rather than left standing, because a wrong technical claim in
+  the build record is worse than an untidy one. The registry still earns its
+  place — an icon cannot cross a server/client boundary as a component — just
+  not for the reason originally given.
 
 The command pill sits in the rail rather than above the content, which is a
 departure from the plan as approved. Two reasons: it stays mounted on the

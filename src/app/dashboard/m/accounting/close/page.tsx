@@ -237,7 +237,7 @@ export default async function ClosePage({
                     </TableCell>
                     <TableCell>
                       {c.status === "completed" ? (
-                        <Badge className="bg-emerald-600 hover:bg-emerald-600">
+                        <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
                           Completed
                         </Badge>
                       ) : (

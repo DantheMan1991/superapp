@@ -599,7 +599,9 @@ export function PlaidConnectionCard({
           {item.status === "error" ? (
             <Badge variant="destructive">reconnect needed</Badge>
           ) : (
-            <Badge className="bg-emerald-600 hover:bg-emerald-600">connected</Badge>
+            <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
+              connected
+            </Badge>
           )}
         </div>
         <CardDescription>

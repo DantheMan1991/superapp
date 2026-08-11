@@ -27,6 +27,7 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
   /*
    * Third neutral tier and the in-content hairline. Airbnb runs three text
@@ -132,6 +133,16 @@
   --brand: oklch(0.67 0.12 170);
   --brand-foreground: oklch(0.26 0.05 170);
   --success: oklch(0.62 0.15 150);
+  /*
+   * The dark twin of `--success`, for text and glyphs — the same split as
+   * `--brand` / `--accent-brand`, and for the same measured reason. `--success`
+   * at oklch(0.62 …) is 3.43:1 on card and 3.03:1 on its own 12% tint, so a
+   * green status chip drawn with it fails AA. It is also too light to carry
+   * white text as a *fill* (3.28:1), which is what those badges were doing
+   * before: there is no single green that is both, so a status chip is a pale
+   * tint with dark text.
+   */
+  --success-foreground: oklch(0.45 0.13 150);
   --warning: oklch(0.75 0.15 80);
   --chart-1: oklch(0.45 0.1 265);
   --chart-2: oklch(0.67 0.12 170);
@@ -220,6 +231,8 @@
   --brand: oklch(0.67 0.12 170);
   --brand-foreground: oklch(0.95 0.03 170);
   --success: oklch(0.68 0.14 150);
+  /* Lifted rather than darkened: on dark the tint is dark, so the text goes up. */
+  --success-foreground: oklch(0.82 0.13 150);
   --warning: oklch(0.78 0.14 80);
 
   /*

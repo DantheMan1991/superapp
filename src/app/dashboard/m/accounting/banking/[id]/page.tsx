@@ -181,7 +181,9 @@ export default async function BankRegisterPage({
               {bankAccount.name}
             </h1>
             {bankAccount.plaidItemId && (
-              <Badge className="bg-emerald-600 hover:bg-emerald-600">connected</Badge>
+              <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
+                connected
+              </Badge>
             )}
             {!bankAccount.isActive && <Badge variant="outline">inactive</Badge>}
           </div>

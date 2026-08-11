@@ -172,7 +172,9 @@ export function SavedViewsStrip({
             key={view.id}
             className={cn(
               "inline-flex items-center rounded-full border text-xs",
-              active ? "border-brand bg-secondary" : "border-border",
+              active
+                ? "border-module-accent bg-secondary"
+                : "border-border",
             )}
           >
             <Link href={view.href} className="py-1 pl-3 pr-1 hover:underline">

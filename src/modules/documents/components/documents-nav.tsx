@@ -1,20 +1,44 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  FolderOpen,
+  Inbox,
+  LayoutDashboard,
+  Search,
+  Share2,
+  Tags,
+  Trash2,
+  FileText,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
+import {
+  CategoryStrip,
+  type CategoryItem,
+} from "@/components/app/category-strip";
 
-const TABS = [
-  { href: "/dashboard/m/documents", label: "Overview", exact: true },
-  { href: "/dashboard/m/documents/browse", label: "Browse" },
-  { href: "/dashboard/m/documents/inbox", label: "Inbox" },
-  { href: "/dashboard/m/documents/search", label: "Search" },
-  { href: "/dashboard/m/documents/tags", label: "Tags" },
-  { href: "/dashboard/m/documents/templates", label: "Templates" },
-  { href: "/dashboard/m/documents/shares", label: "Shared links" },
-  { href: "/dashboard/m/documents/trash", label: "Trash" },
+const TABS: CategoryItem[] = [
+  {
+    href: "/dashboard/m/documents",
+    label: "Overview",
+    icon: LayoutDashboard,
+    exact: true,
+  },
+  { href: "/dashboard/m/documents/browse", label: "Browse", icon: FolderOpen },
+  { href: "/dashboard/m/documents/inbox", label: "Inbox", icon: Inbox },
+  { href: "/dashboard/m/documents/search", label: "Search", icon: Search },
+  { href: "/dashboard/m/documents/tags", label: "Tags", icon: Tags },
+  {
+    href: "/dashboard/m/documents/templates",
+    label: "Templates",
+    icon: FileText,
+  },
+  {
+    href: "/dashboard/m/documents/shares",
+    label: "Shared links",
+    icon: Share2,
+  },
+  { href: "/dashboard/m/documents/trash", label: "Trash", icon: Trash2 },
 ];
 
 /**
@@ -24,9 +48,15 @@ const TABS = [
  * Search is a plain GET form: the query belongs in the URL so a result set can
  * be linked, bookmarked and reloaded. No server action, no client state to
  * lose.
+ *
+ * Eight text tabs became a `CategoryStrip` — one row that scrolls rather than
+ * wrapping, with an icon over each label. The search box rides in the strip's
+ * `trailing` slot, which is what keeps it on the same hairline as the sections
+ * and out of the scroller, so it cannot scroll out of reach. Its old active
+ * state was `border-brand`, and `--brand` measures 2.81:1 on white; the strip
+ * uses `--module-accent`, which here is Documents' amber.
  */
 export function DocumentsNav() {
-  const pathname = usePathname();
   const params = useSearchParams();
   const router = useRouter();
   // The URL is the single source of truth for the query. The input is
@@ -36,53 +66,35 @@ export function DocumentsNav() {
   const urlQuery = params.get("q") ?? "";
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-px">
-      <nav className="flex flex-wrap gap-1">
-        {TABS.map((tab) => {
-          const active = tab.exact
-            ? pathname === tab.href
-            : pathname.startsWith(tab.href);
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              className={cn(
-                "rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-                active
-                  ? "border-brand text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {tab.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      <form
-        className="relative pb-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const value = new FormData(e.currentTarget).get("q");
-          const trimmed = String(value ?? "").trim();
-          if (trimmed.length === 0) return;
-          router.push(
-            `/dashboard/m/documents/search?q=${encodeURIComponent(trimmed)}`,
-          );
-        }}
-      >
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          key={urlQuery}
-          type="search"
-          name="q"
-          defaultValue={urlQuery}
-          placeholder="Search files…"
-          maxLength={200}
-          aria-label="Search documents"
-          className="w-56 pl-8"
-        />
-      </form>
-    </div>
+    <CategoryStrip
+      items={TABS}
+      trailing={
+        <form
+          className="relative"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const value = new FormData(e.currentTarget).get("q");
+            const trimmed = String(value ?? "").trim();
+            if (trimmed.length === 0) return;
+            router.push(
+              `/dashboard/m/documents/search?q=${encodeURIComponent(trimmed)}`,
+            );
+          }}
+        >
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            key={urlQuery}
+            type="search"
+            name="q"
+            defaultValue={urlQuery}
+            placeholder="Search files…"
+            maxLength={200}
+            aria-label="Search documents"
+            // Pill, matching the command trigger in the rail: both are search.
+            className="h-9 w-56 rounded-full pl-9"
+          />
+        </form>
+      }
+    />
   );
 }

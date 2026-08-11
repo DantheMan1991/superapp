@@ -135,7 +135,7 @@ function SheetPreviewPane({ documentId }: { documentId: string }) {
               className={cn(
                 "rounded border px-2 py-1 text-xs",
                 i === active
-                  ? "border-brand bg-secondary font-medium"
+                  ? "border-module-accent bg-secondary font-medium"
                   : "text-muted-foreground hover:text-foreground",
                 s.rows.length === 0 && i !== active && "opacity-50",
               )}

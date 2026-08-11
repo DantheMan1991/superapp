@@ -5,6 +5,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { Badge } from "@/components/ui/badge";
 import { listTemplates } from "@/modules/documents/doc-templates/template-ops";
+import { PageHeader } from "@/components/app/page-header";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
 import { NewTemplateButton } from "@/modules/documents/components/template-controls";
 
@@ -34,17 +35,11 @@ export default async function DocumentTemplatesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Templates</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Write a document once, fill in the blanks every time after. A
-            published version is frozen, so you can always tell what a document
-            said on the day it went out.
-          </p>
-        </div>
-        <NewTemplateButton />
-      </div>
+      <PageHeader
+        title="Templates"
+        description="Write a document once, fill in the blanks every time after. A published version is frozen, so you can always tell what a document said on the day it went out."
+        actions={<NewTemplateButton />}
+      />
 
       <DocumentsNav />
 

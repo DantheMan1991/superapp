@@ -2,6 +2,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { countDocumentsByTag, listTags } from "@/modules/documents/tag-ops";
+import { PageHeader } from "@/components/app/page-header";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
 import { TagManager } from "@/modules/documents/components/tag-controls";
 
@@ -30,13 +31,10 @@ export default async function DocumentsTagsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Tags</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          A shared vocabulary for the whole business. Renaming a tag updates it
-          everywhere; only an owner can delete one.
-        </p>
-      </div>
+      <PageHeader
+        title="Tags"
+        description="A shared vocabulary for the whole business. Renaming a tag updates it everywhere; only an owner can delete one."
+      />
 
       <DocumentsNav />
 

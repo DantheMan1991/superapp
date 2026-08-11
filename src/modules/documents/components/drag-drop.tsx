@@ -233,7 +233,7 @@ export function FolderDropTarget({
     <div
       className={cn(
         className,
-        over && "bg-brand/10 ring-1 ring-brand ring-inset",
+        over && "bg-module-accent/10 ring-1 ring-module-accent ring-inset",
         busy && "opacity-60",
       )}
       onDragEnter={(e) => {
@@ -323,7 +323,7 @@ export function UploadDropZone({
     >
       {children}
       {(over || busy) && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md border-2 border-dashed border-brand bg-background/80">
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-module-accent bg-background/80">
           <p className="text-sm font-medium">
             {busy ? "Uploading…" : "Drop to upload here"}
           </p>
@@ -379,7 +379,7 @@ export function BreadcrumbDropTarget({
     <span
       className={cn(
         "rounded px-1",
-        over && "bg-brand/15 ring-1 ring-brand",
+        over && "bg-module-accent/15 ring-1 ring-module-accent",
       )}
       onDragEnter={(e) => {
         if (hasInternalDrag(e.dataTransfer)) setOver(true);

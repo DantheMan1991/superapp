@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +22,12 @@ export interface CategoryItem {
 
 interface CategoryStripProps {
   items: readonly CategoryItem[];
+  /**
+   * Rendered to the right of the sections, on the same hairline and outside the
+   * scroller. For a control that belongs to the whole module rather than to one
+   * section — Documents puts its search box here.
+   */
+  trailing?: ReactNode;
   className?: string;
 }
 
@@ -37,7 +49,11 @@ interface CategoryStripProps {
  * reachable on a trackpad-less desktop. They appear only on the side that has
  * something left to reveal.
  */
-export function CategoryStrip({ items, className }: CategoryStripProps) {
+export function CategoryStrip({
+  items,
+  trailing,
+  className,
+}: CategoryStripProps) {
   const pathname = usePathname();
   const scroller = useRef<HTMLDivElement | null>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
@@ -101,10 +117,19 @@ export function CategoryStrip({ items, className }: CategoryStripProps) {
   };
 
   return (
-    <div className={cn("relative", className)}>
+    // The hairline lives on the WRAPPER, not the scroller, so that it runs the
+    // full width including anything in `trailing`. The active item still sits on
+    // it: the item's bottom edge coincides with the wrapper's content edge, so
+    // `-mb-px` pulls its 2px underline down over the hairline.
+    <div
+      className={cn(
+        "relative flex items-end gap-4 border-b border-divider",
+        className,
+      )}
+    >
       <div
         ref={scroller}
-        className="flex gap-7 overflow-x-auto border-b border-divider [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-w-0 flex-1 gap-7 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {items.map((item) => {
           const Icon = item.icon;
@@ -129,6 +154,12 @@ export function CategoryStrip({ items, className }: CategoryStripProps) {
           );
         })}
       </div>
+
+      {/* Sits beside the sections on the same hairline — Documents puts its
+          search box here so search stays reachable from every page in the
+          cabinet, which is deliberate (see its dossier). Outside the scroller,
+          so it never scrolls out of reach. */}
+      {trailing && <div className="shrink-0 pb-2">{trailing}</div>}
 
       {/* Overlaid on the strip's own edges, with a fade so labels slide under
           the button rather than colliding with it. */}

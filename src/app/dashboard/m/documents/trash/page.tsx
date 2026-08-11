@@ -4,6 +4,9 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { listTrashedDocuments } from "@/modules/documents/trash";
 import { formatBytes } from "@/modules/documents/lib/format";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
 import { DocumentRowMenu } from "@/modules/documents/components/document-controls";
 
@@ -26,25 +29,29 @@ export default async function DocumentsTrashPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Trash</h1>
-        <p className="text-sm text-muted-foreground">
-          Restoring puts a file back where it was filed. Nothing here is ever
-          permanently deleted.
-        </p>
-      </div>
+      <PageHeader
+        title="Trash"
+        description="Restoring puts a file back where it was filed. Nothing here is ever permanently deleted."
+      />
 
       <DocumentsNav />
 
       {documents.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-md border px-4 py-12 text-center">
-          <Trash2 className="size-6 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">The trash is empty.</p>
-        </div>
+        <Panel>
+          <EmptyState
+            icon={<Trash2 />}
+            title="The trash is empty"
+            description="Anything you delete lands here first, and can be put back where it was filed."
+          />
+        </Panel>
       ) : (
-        <div className="divide-y rounded-md border">
+        <Panel>
+          <div className="divide-y divide-divider">
           {documents.map((doc) => (
-            <div key={doc.id} className="flex items-center gap-3 px-4 py-3">
+            <div
+              key={doc.id}
+              className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/60"
+            >
               <FileText className="size-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">
@@ -59,7 +66,8 @@ export default async function DocumentsTrashPage() {
               <DocumentRowMenu documentId={doc.id} folders={[]} trashed />
             </div>
           ))}
-        </div>
+          </div>
+        </Panel>
       )}
     </div>
   );

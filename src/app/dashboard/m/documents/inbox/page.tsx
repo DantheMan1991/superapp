@@ -8,6 +8,7 @@ import { listTags } from "@/modules/documents/tag-ops";
 import { TagChips } from "@/modules/documents/components/tag-chips";
 import { formatBytes } from "@/modules/documents/lib/format";
 import { folderOptions } from "@/modules/documents/lib/folder-labels";
+import { PageHeader } from "@/components/app/page-header";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
 import {
   DocumentRowMenu,
@@ -59,16 +60,11 @@ export default async function DocumentsInboxPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
-          <p className="text-sm text-muted-foreground">
-            Captured but not filed yet — uploads and emailed attachments land
-            here.
-          </p>
-        </div>
-        <UploadButton tenantId={ctx.tenant.id} folderId={null} />
-      </div>
+      <PageHeader
+        title="Inbox"
+        description="Captured but not filed yet — uploads and emailed attachments land here."
+        actions={<UploadButton tenantId={ctx.tenant.id} folderId={null} />}
+      />
 
       <DocumentsNav />
 

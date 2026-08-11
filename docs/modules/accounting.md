@@ -194,8 +194,17 @@ sentence rather than leaving it aspirational.
 
 ## Open items
 
+**Never confirmed by a human** (as of 2026-08-10, found while driving the live
+app): the **Send button on an issued invoice** — the draft case is proven, but
+two attempts to click Issue did not register, so nobody has watched Send appear
+and work; and a **focus oddity in the rule dialog**, where typing after opening
+the category Select went into the condition-value box instead of the dropdown.
+Both may be artefacts of browser automation rather than defects. Check them by
+hand before building on either screen.
+
+
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)
 - **Invoice delivery is done** (PDF + email, 2026-08-10). What is NOT built: a `Viewed` signal, which would need a tracked open or a public link — and a public payor view is deliberately not planned, since payment processing for tenants' customers is out of scope by design
-- From the 2026-08-10 QuickBooks review, in rough value order: **automatic overdue reminders** on the built notifications machinery; **General Ledger** and **Transaction Detail by Account** (we ship 6 reports); **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel
+- From the 2026-08-10 QuickBooks review, in rough value order: **automatic overdue reminders** on the built notifications machinery; **General Ledger** and **Transaction Detail by Account** (we ship 6 reports); **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists

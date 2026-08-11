@@ -9,6 +9,9 @@ import {
 import { loadSharedContents } from "@/modules/documents/shares/contents";
 import { recordShareEvent } from "@/modules/documents/shares/events";
 import { formatBytes } from "@/modules/documents/lib/format";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
 import { UnlockForm } from "./unlock-form";
 
 export const dynamic = "force-dynamic";
@@ -101,53 +104,70 @@ export default async function SharePage({
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
-      <header className="mb-6 border-b pb-4">
-        <p className="text-sm text-muted-foreground">
-          Shared by {tenantName}
-        </p>
-        <h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          {share.folderId && <FolderOpen className="size-5" />}
-          {share.label || contents.rootName}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          This link stops working on {expires}.
-          {!share.canDownload && " View only."}
-        </p>
+      {/*
+        Kept deliberately plain. This is the one page in the app that renders
+        without a session — it is what a client's own customer sees — so it takes
+        the token system (elevation, `--divider`) without the dashboard's rail,
+        module accent or category strip. `--module-accent` is unset here, so
+        `PageHeader`'s chip would fall back to the brand accent; no icon is
+        passed, so nothing tinted appears at all.
+      */}
+      <header className="mb-6 border-b border-divider pb-4">
+        <p className="text-sm text-muted-foreground">Shared by {tenantName}</p>
+        <PageHeader
+          className="mt-1"
+          title={share.label || contents.rootName}
+          description={
+            <>
+              This link stops working on {expires}.
+              {!share.canDownload && " View only."}
+            </>
+          }
+        />
       </header>
 
       {contents.files.length === 0 ? (
-        <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          Nothing here yet.
-        </p>
+        <Panel>
+          <EmptyState
+            icon={<FolderOpen />}
+            title="Nothing here yet"
+            description="Whoever shared this link has not added anything to it."
+          />
+        </Panel>
       ) : (
-        <ul className="divide-y rounded-md border">
-          {contents.files.map((file) => (
-            <li key={file.id} className="flex items-center gap-3 px-4 py-3">
-              <FileText className="size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <a
-                  href={`/s/${encodeURIComponent(token)}/f/${file.id}`}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="truncate text-sm font-medium hover:underline"
-                >
-                  {file.name}
-                </a>
-                <p className="text-xs text-muted-foreground">
-                  {formatBytes(file.sizeBytes)}
-                </p>
-              </div>
-              {share.canDownload && (
-                <a
-                  href={`/s/${encodeURIComponent(token)}/f/${file.id}?download=1`}
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                >
-                  Download
-                </a>
-              )}
-            </li>
-          ))}
-        </ul>
+        <Panel>
+          <ul className="divide-y divide-divider">
+            {contents.files.map((file) => (
+              <li
+                key={file.id}
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/60"
+              >
+                <FileText className="size-4 shrink-0 text-subtle-foreground" />
+                <div className="min-w-0 flex-1">
+                  <a
+                    href={`/s/${encodeURIComponent(token)}/f/${file.id}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="truncate text-sm font-medium hover:underline"
+                  >
+                    {file.name}
+                  </a>
+                  <p className="text-xs text-subtle-foreground tabular-nums">
+                    {formatBytes(file.sizeBytes)}
+                  </p>
+                </div>
+                {share.canDownload && (
+                  <a
+                    href={`/s/${encodeURIComponent(token)}/f/${file.id}?download=1`}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Download
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Panel>
       )}
 
       <footer className="mt-8 text-center text-xs text-muted-foreground">

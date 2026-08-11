@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { Loader2, Save, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -128,36 +129,34 @@ export function TemplateEditor({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {templateName}
-          </h1>
-          {publishedVersionNo !== null && (
-            <Badge variant="secondary">Published v{publishedVersionNo}</Badge>
-          )}
-          {draftVersionNo !== null && (
-            <Badge variant="outline">Draft v{draftVersionNo}</Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" disabled={pending} onClick={() => save()}>
-            {pending ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Save className="size-4" />
+      <PageHeader
+        title={templateName}
+        actions={
+          <>
+            {publishedVersionNo !== null && (
+              <Badge variant="secondary">Published v{publishedVersionNo}</Badge>
             )}
-            Save draft
-          </Button>
-          <Button disabled={pending} onClick={publish}>
-            <Send className="size-4" />
-            Publish
-          </Button>
-        </div>
-      </div>
+            {draftVersionNo !== null && (
+              <Badge variant="outline">Draft v{draftVersionNo}</Badge>
+            )}
+            <Button variant="outline" disabled={pending} onClick={() => save()}>
+              {pending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Save className="size-4" />
+              )}
+              Save draft
+            </Button>
+            <Button disabled={pending} onClick={publish}>
+              <Send className="size-4" />
+              Publish
+            </Button>
+          </>
+        }
+      />
 
       {publishedVersionNo !== null && (
-        <p className="rounded-md border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">
+        <p className="rounded-xl border border-divider bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">
           v{publishedVersionNo} is published and can never change. Saving here
           keeps a separate draft; publishing it creates v
           {(draftVersionNo ?? publishedVersionNo + 1)}.

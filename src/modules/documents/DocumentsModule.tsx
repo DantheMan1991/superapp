@@ -3,6 +3,9 @@ import { ChevronRight, FolderOpen, Inbox, Lock } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
+import { SectionRow } from "@/components/app/section-row";
+import { EmptyState } from "@/components/app/empty-state";
 import { countDocumentsByFolder, listRootFolders } from "./folders";
 import { DocumentsNav } from "./components/documents-nav";
 import { UploadButton } from "./components/document-controls";
@@ -34,56 +37,48 @@ export async function DocumentsModule({ ctx }: { ctx: TenantContext }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-brand/15 text-brand-foreground">
-            <FolderOpen className="size-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
-            <p className="text-sm text-muted-foreground">
-              Every file the business runs on — office, field and shop floor.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <UploadButton tenantId={ctx.tenant.id} folderId={null} />
-          <NewFolderButton parentId={null} isOwner={ctx.role === "owner"} />
-        </div>
-      </div>
+      <PageHeader
+        title="Documents"
+        description="Every file the business runs on — office, field and shop floor."
+        icon={<FolderOpen />}
+        actions={
+          <>
+            <UploadButton tenantId={ctx.tenant.id} folderId={null} />
+            <NewFolderButton parentId={null} isOwner={ctx.role === "owner"} />
+          </>
+        }
+      />
 
       <DocumentsNav />
 
+      {/* The Inbox is a destination, not a statistic, so it stays a full-width
+          row rather than joining the folder grid. */}
       <Link
         href={`${BASE}/inbox`}
-        className="flex items-center gap-3 rounded-md border px-4 py-4 transition-colors hover:bg-accent/40"
+        className="flex items-center gap-3 rounded-2xl bg-card px-4 py-4 shadow-elevation-1 transition-shadow hover:shadow-elevation-3 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
       >
-        <Inbox className="size-5 shrink-0 text-muted-foreground" />
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-module-accent/10 text-module-accent">
+          <Inbox className="size-[18px]" />
+        </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">Inbox</p>
+          <p className="font-heading font-medium tracking-heading">Inbox</p>
           <p className="text-sm text-muted-foreground">
             {counts.inbox === 0
               ? "Nothing waiting to be filed."
               : `${counts.inbox} ${counts.inbox === 1 ? "file" : "files"} waiting to be filed.`}
           </p>
         </div>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        <ChevronRight className="size-4 shrink-0 text-subtle-foreground" />
       </Link>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Folders</h2>
-          <Link
-            href={`${BASE}/browse`}
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            Browse all
-          </Link>
-        </div>
+      <SectionRow title="Folders" href={`${BASE}/browse`}>
         {folders.length === 0 ? (
-          <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-            No folders yet. Create the first one above.
-          </p>
+          <EmptyState
+            panel
+            icon={<FolderOpen />}
+            title="Start your filing cabinet"
+            description="Create a folder above, or drop files into the Inbox and file them from there."
+          />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {folders.map((folder) => {
@@ -92,14 +87,14 @@ export async function DocumentsModule({ ctx }: { ctx: TenantContext }) {
                 <Link
                   key={folder.id}
                   href={`${BASE}/browse/${folder.id}`}
-                  className="flex items-center gap-3 rounded-md border px-4 py-3 transition-colors hover:bg-accent/40"
+                  className="flex items-center gap-3 rounded-2xl bg-card px-4 py-3.5 shadow-elevation-1 transition-shadow hover:shadow-elevation-3 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                 >
-                  <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                  <FolderOpen className="size-4 shrink-0 text-module-accent" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">
                       {folder.name}
                     </p>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-subtle-foreground">
                       {n === 0 ? "Empty" : `${n} ${n === 1 ? "file" : "files"}`}
                     </p>
                   </div>
@@ -114,7 +109,7 @@ export async function DocumentsModule({ ctx }: { ctx: TenantContext }) {
             })}
           </div>
         )}
-      </div>
+      </SectionRow>
     </div>
   );
 }

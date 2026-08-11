@@ -18,6 +18,10 @@ import {
 } from "@/modules/documents/shares/status";
 import { listFolders } from "@/modules/documents/folders";
 import { buildFolderLabels } from "@/modules/documents/lib/folder-labels";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
 import { ShareRowActions } from "./share-row-actions";
 
@@ -69,25 +73,23 @@ export default async function SharedLinksPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Shared links</h1>
-        <p className="text-sm text-muted-foreground">
-          Anyone holding one of these can open what it points at, without
-          signing in. Turning a link off takes effect immediately.
-        </p>
-      </div>
+      <PageHeader
+        title="Shared links"
+        description="Anyone holding one of these can open what it points at, without signing in. Turning a link off takes effect immediately."
+      />
 
       <DocumentsNav />
 
       {rows.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-md border px-4 py-12 text-center">
-          <Link2 className="size-6 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            No links yet. Share a file or folder from Browse.
-          </p>
-        </div>
+        <Panel>
+          <EmptyState
+            icon={<Link2 />}
+            title="Share something"
+            description="Open a file or folder in Browse and create a link. Anyone holding it can see what it points at without signing in."
+          />
+        </Panel>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
+        <DataTable>
           <Table>
             <TableHeader>
               <TableRow>
@@ -153,7 +155,7 @@ export default async function SharedLinksPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </DataTable>
       )}
     </div>
   );

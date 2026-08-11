@@ -114,7 +114,8 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `DataTable` + `RowActions` | no | `<Card><CardContent className="p-0">` around a table |
 | `StatCard` | no | Eight hand-built cards in `AccountingModule.tsx` |
 | `FilterPills` | no | Underlined filter tab rows |
-| `CategoryStrip` | **yes** | Wrapping module tab rows (`AccountingNav`, `SalesNav`) |
+| `CategoryStrip` | **yes** | Wrapping module tab rows (`AccountingNav`, `DocumentsNav`) |
+| `Panel` | no | `<Card><CardContent className="p-0">` around a list |
 | `EntityCard` | no | — (new: record-as-card, for grid views) |
 | `SectionRow` | no | — (new: titled band on a hub page) |
 | `CommandPalette` | **yes** | — (new: ⌘K, in the rail) |
@@ -132,6 +133,15 @@ hand-built tables and a column API would mean rewriting every one.
   <Table>…unchanged…</Table>
 </DataTable>
 ```
+
+### `CategoryStrip`'s hairline and `trailing` slot
+
+The bottom hairline lives on the **wrapper**, not the scroller, so it runs the
+full width including anything passed as `trailing`. The active item still sits on
+it because its bottom edge coincides with the wrapper's content edge, so `-mb-px`
+pulls the 2px underline down over the hairline. Documents puts its search box in
+`trailing` — outside the scroller, so it cannot scroll out of reach, and on the
+same line as the sections.
 
 ### `CategoryStrip` vs `FilterPills`
 

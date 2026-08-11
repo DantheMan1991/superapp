@@ -19,6 +19,45 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 > dossier is read at the start of every session that touches this module, so
 > its length is a real cost.
 
+### 2026-08-10 — UI: the cabinet takes the shared vocabulary (branch `claude/ui-documents`)
+
+Presentation only — no query, action, schema, policy or RLS change. The
+vocabulary is in [design-system.md](design-system.md);
+[ADR 0008](../decisions/0008-warm-neutrals-and-layered-elevation.md) has the why.
+
+- **`DocumentsNav` is a `CategoryStrip`.** Eight text tabs that wrapped became one
+  row that scrolls, with an icon over each label. The **search box moved into the
+  strip's new `trailing` slot** — same hairline as the sections, outside the
+  scroller so it cannot scroll out of reach. Its placement in the nav is
+  deliberate (search reachable from every page in the cabinet) and that is
+  preserved.
+- **`CategoryStrip` gained `trailing`** for this, which moved its hairline from
+  the scroller to the wrapper so the line runs the full width. Accounting passes
+  no `trailing` and was checked for regression — its strip is unchanged.
+- **Fixed: four more `--brand` contrast failures.** `--brand` is 2.81:1 on white.
+  It was the nav's active underline, the active saved-view chip
+  (`view-controls.tsx`), the active page chip in `file-viewer.tsx`, and **all
+  three drag-and-drop drop-target states** in `drag-drop.tsx` — the ring and the
+  dashed overlay that tell you where a file is about to land. All now
+  `--module-accent`, which for this module is amber.
+- **The module now reads amber**, not brand green: the hub chip, folder icons,
+  the strip's active underline and the drop targets all take
+  `--accent-documents`, matching its icon in the rail. That is the per-module
+  accent doing navigation.
+- Converted: the hub, plus browse/inbox/search/tags/templates/shares/trash
+  headers, and their empty states and list panels.
+- **The public share surface (`/s/[token]`) is included.** It takes the tokens
+  (elevation, `--divider`, `EmptyState`) but deliberately **not** the rail,
+  module accent or strip — it is the one page that renders without a session, and
+  it is what a client's own customer sees. `--module-accent` is unset there, so
+  no accent chip is passed.
+
+**`EntityCard` still has no caller.** It was built for a card grid with
+thumbnails, and Documents renders files as a divided list — `folder-browser.tsx`
+has no grid view. Adding one is a *feature*, not a migration, so it was not done
+here. Either add a grid/list toggle deliberately, or delete `EntityCard` until
+something needs it; leaving it unused indefinitely is the worst of the three.
+
 ### 2026-08-08 — Build log archived, and the DMS test file split (branch `claude/split-oversized-files-2`)
 
 Nothing about the module changed. Two files that every Documents session had to

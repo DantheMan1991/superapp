@@ -23,6 +23,7 @@ import { tallyTextExtraction } from "@/modules/documents/text/summary";
 import { summarizeUnsearchable } from "@/modules/documents/text/state";
 import { buildFolderLabels } from "@/modules/documents/lib/folder-labels";
 import { formatBytes } from "@/modules/documents/lib/format";
+import { PageHeader } from "@/components/app/page-header";
 import { DocumentsNav } from "@/modules/documents/components/documents-nav";
 import { DocumentRowMenu } from "@/modules/documents/components/document-controls";
 import { TagChips } from "@/modules/documents/components/tag-chips";
@@ -189,18 +190,15 @@ export default async function DocumentsSearchPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Search</h1>
-          <p className="text-sm text-muted-foreground">
-            Looks inside files as well as at their names, titles, descriptions
-            and tags. Filter by tag with no search text at all.
-          </p>
-        </div>
-        {hasFilters && (
-          <SaveViewButton query={query} suggestedName={suggestedName} />
-        )}
-      </div>
+      <PageHeader
+        title="Search"
+        description="Looks inside files as well as at their names, titles, descriptions and tags. Filter by tag with no search text at all."
+        actions={
+          hasFilters && (
+            <SaveViewButton query={query} suggestedName={suggestedName} />
+          )
+        }
+      />
 
       <DocumentsNav />
 

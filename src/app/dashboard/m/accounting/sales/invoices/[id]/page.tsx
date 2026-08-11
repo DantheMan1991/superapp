@@ -3,6 +3,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { FileText } from "lucide-react";
 import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
+import { listContactPoints } from "@/lib/parties/contacts";
+import { preferredContactValue } from "@/lib/parties/contact-values";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +28,8 @@ import {
 } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../../sales-nav";
 import { InvoiceBuilder } from "../invoice-builder";
-import { InvoiceActions } from "./invoice-detail-controls";
+import { listInvoiceSends } from "@/modules/accounting/invoicing/send-invoice";
+import { InvoiceActions, SendInvoiceButton } from "./invoice-detail-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +97,12 @@ export default async function InvoiceDetailPage({
       ),
       orderBy: asc(schema.customers.name),
     });
+    // "Has this been sent?" is DERIVED from the outbound-email log rather than
+    // stored on the invoice — one fact, one home, like status and closedThrough.
+    const sends = await listInvoiceSends(tx, ctx.tenant.id, invoice.id);
+    const contacts = customer
+      ? await listContactPoints(tx, ctx.tenant.id, customer.partyId)
+      : [];
     return {
       invoice,
       customer,
@@ -101,6 +110,8 @@ export default async function InvoiceDetailPage({
       accounts,
       payments,
       paid,
+      sends,
+      customerEmail: preferredContactValue(contacts, "email") ?? "",
       bankAccounts,
       undeposited,
       customersActive,
@@ -164,6 +175,16 @@ export default async function InvoiceDetailPage({
               <FileText className="size-4" />
               PDF
             </a>
+            <SendInvoiceButton
+              invoiceId={invoice.id}
+              status={invoice.status}
+              defaultTo={data.customerEmail}
+              lastSentAt={
+                data.sends.find((s) => s.status === "sent")?.createdAt.toISOString().slice(0, 10) ??
+                null
+              }
+              canAct={isOwner}
+            />
             <InvoiceActions
               invoice={{
                 id: invoice.id,

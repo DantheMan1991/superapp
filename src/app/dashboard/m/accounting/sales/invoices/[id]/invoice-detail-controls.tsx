@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Printer } from "lucide-react";
+import { Printer, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,7 @@ import {
   deleteInvoiceDraftAction,
   issueInvoiceAction,
   recordInvoicePaymentAction,
+  sendInvoiceAction,
   unapplyInvoicePaymentAction,
   voidInvoiceAction,
 } from "@/modules/accounting/invoicing/actions";
@@ -278,3 +279,91 @@ function UnapplyButton({ paymentId, version }: { paymentId: string; version: num
 }
 
 InvoiceActions.Unapply = UnapplyButton;
+
+/**
+ * Email the invoice to the customer, PDF attached.
+ *
+ * Only offered for a sendable invoice: a draft would go out saying DRAFT and a
+ * void one should not go out at all, so the server refuses both — this just
+ * keeps the button off screen rather than letting somebody find out by
+ * clicking it.
+ */
+export function SendInvoiceButton({
+  invoiceId,
+  status,
+  defaultTo,
+  lastSentAt,
+  canAct,
+}: {
+  invoiceId: string;
+  status: string;
+  defaultTo: string;
+  lastSentAt: string | null;
+  canAct: boolean;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState(defaultTo);
+  const [pending, startTransition] = useTransition();
+
+  if (!canAct || !["issued", "partial", "paid"].includes(status)) return null;
+
+  function send() {
+    startTransition(async () => {
+      const result = await sendInvoiceAction({ invoiceId, to: to.trim() });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        result.data?.duplicate
+          ? `Already sent to ${result.data.to} — not sent twice`
+          : `Invoice sent to ${result.data?.to}`,
+      );
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <Button variant="outline" size="sm" className="h-9" onClick={() => setOpen(true)}>
+        <Send className="size-4" />
+        {lastSentAt ? "Send again" : "Send"}
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Email this invoice</DialogTitle>
+            <DialogDescription>
+              The invoice goes out as a PDF attachment.
+              {lastSentAt ? ` Last sent ${lastSentAt}.` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="send-to">To</Label>
+            <Input
+              id="send-to"
+              type="email"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="customer@example.com"
+            />
+            <p className="text-xs text-muted-foreground">
+              Sending the same invoice to the same address twice is a no-op, not
+              a second email.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button onClick={send} disabled={pending || to.trim() === ""}>
+              Send
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

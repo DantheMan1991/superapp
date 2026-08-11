@@ -8,6 +8,8 @@ import { preferredContactValue } from "@/lib/parties/contact-values";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
@@ -148,33 +150,36 @@ export default async function InvoiceDetailPage({
         </p>
       </div>
 
-      <div className="flex flex-wrap items-start justify-between gap-4 print:hidden">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {invoice.invoiceNumber}
-            </h1>
-            <Badge variant={STATUS_BADGE[invoice.status] ?? "outline"}>
-              {invoice.status}
-            </Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">
+      {/* `print:hidden` stays exactly where it was — the printed invoice uses
+          the print-only header above, and none of the print rules on this page
+          are touched by the UI migration. */}
+      <PageHeader
+        className="print:hidden"
+        title={invoice.invoiceNumber}
+        description={
+          <>
             {customer?.name} · issued {invoice.issueDate}
             {invoice.dueDate ? ` · due ${invoice.dueDate}` : ""}
             {invoice.memo ? ` · ${invoice.memo}` : ""}
-          </p>
-        </div>
-        {!editing && (
-          <div className="flex flex-wrap items-center gap-2">
-            <a
-              href={`/api/accounting/invoices/${invoice.id}/pdf`}
-              target="_blank"
-              rel="noopener"
-              className="inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors hover:bg-muted"
-            >
-              <FileText className="size-4" />
-              PDF
-            </a>
+          </>
+        }
+        actions={
+          <>
+            <Badge variant={STATUS_BADGE[invoice.status] ?? "outline"}>
+              {invoice.status}
+            </Badge>
+            {!editing && (
+          <>
+            <Button asChild variant="outline" size="sm">
+              <a
+                href={`/api/accounting/invoices/${invoice.id}/pdf`}
+                target="_blank"
+                rel="noopener"
+              >
+                <FileText className="size-4" />
+                PDF
+              </a>
+            </Button>
             <SendInvoiceButton
               invoiceId={invoice.id}
               status={invoice.status}
@@ -197,9 +202,11 @@ export default async function InvoiceDetailPage({
               today={data.today}
               canAct={isOwner}
             />
-          </div>
-        )}
-      </div>
+          </>
+            )}
+          </>
+        }
+      />
 
       <div className="print:hidden">
         <AccountingNav />

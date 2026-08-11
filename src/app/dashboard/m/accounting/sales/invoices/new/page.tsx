@@ -1,7 +1,8 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+﻿import { and, asc, eq, inArray } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { suggestInvoiceNumber } from "@/modules/accounting/invoicing/numbering";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
@@ -41,12 +42,10 @@ export default async function NewInvoicePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">New invoice</h1>
-        <p className="text-sm text-muted-foreground">
-          Saved as a draft — nothing posts to the books until you issue it.
-        </p>
-      </div>
+      <PageHeader
+        title="New invoice"
+        description="Saved as a draft — nothing posts to the books until you issue it."
+      />
       <AccountingNav />
       <SalesNav />
       {data.customers.length === 0 ? (

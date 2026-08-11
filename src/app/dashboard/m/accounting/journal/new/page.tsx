@@ -1,7 +1,8 @@
-import { and, asc, eq } from "drizzle-orm";
+﻿import { and, asc, eq } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { EntryEditor } from "../entry-editor";
@@ -33,12 +34,10 @@ export default async function NewEntryPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">New journal entry</h1>
-        <p className="text-sm text-muted-foreground">
-          Debits on the left, credits on the right — they must match to post.
-        </p>
-      </div>
+      <PageHeader
+        title="New journal entry"
+        description="Debits on the left, credits on the right — they must match to post."
+      />
       <AccountingNav />
       <EntryEditor
         accounts={accounts}

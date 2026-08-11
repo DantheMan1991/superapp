@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ImportWizard } from "./import-wizard";
 
@@ -31,15 +32,10 @@ export default async function ImportPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Import statement — {bankAccount.name}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Upload the CSV your bank exports. Re-importing an overlapping file is
-          safe — duplicates are skipped automatically.
-        </p>
-      </div>
+      <PageHeader
+        title={`Import statement — ${bankAccount.name}`}
+        description="Upload the CSV your bank exports. Re-importing an overlapping file is safe — duplicates are skipped automatically."
+      />
       <AccountingNav />
       <ImportWizard bankAccountId={id} canImport={ctx.role === "owner"} />
     </div>

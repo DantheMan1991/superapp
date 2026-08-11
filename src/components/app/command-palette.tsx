@@ -128,7 +128,8 @@ export function CommandPalette({ items, className }: CommandPaletteProps) {
           showCloseButton={false}
           // Higher than centre and wider than the default `sm:max-w-sm`: a
           // palette that grows downwards should not jump as the list resizes.
-          className="top-[12%] max-w-[calc(100%-2rem)] translate-y-0 gap-0 overflow-hidden p-0 shadow-elevation-3 ring-0 sm:max-w-lg"
+          // `ring-0` is gone: DialogContent carries `--elevation-3` itself now.
+          className="top-[12%] max-w-[calc(100%-2rem)] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-lg"
           onKeyDown={onListKeyDown}
         >
           <DialogTitle className="sr-only">Jump to</DialogTitle>

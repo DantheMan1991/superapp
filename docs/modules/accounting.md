@@ -53,11 +53,25 @@ vocabulary this uses is in [design-system.md](design-system.md); the reasoning i
   Three more bare `text-brand` sites fixed in `register-controls.tsx` and
   `bill-builder.tsx` — the AI/rule suggestion chips in the bank review queue.
 
-**Still on the old vocabulary** (next slice): the detail and `new` pages —
-invoices, bills, journal entries, receipts, the bank register and reconcile, and
-the close pages' bodies. Their headers and status colours are done; what remains
-is the `Card`-wrapped panels inside them. **The invoice detail page prints**, so
-check its print styles before touching it.
+- **Detail and `new` pages finished.** Every page in the module now uses
+  `PageHeader` — `text-2xl font-semibold tracking-tight` appears **zero** times
+  under `src/app/dashboard/m/accounting/`. Status badges moved into the header's
+  actions slot alongside the buttons, which is where a verdict belongs.
+- **`ui/card.tsx` swapped `ring-1 ring-foreground/10` for `shadow-elevation-1`.**
+  One edit, and every remaining `Card` in the *whole app* matches `Panel` — worth
+  far more than converting another thirty call sites, and it closes most of the
+  "half-migrated" gap ADR 0008 warned about. `DialogContent` took
+  `--elevation-3` the same way.
+- **The invoice detail page's print rules are untouched.** Its `print:hidden` on
+  the on-screen header, the separate print-only header, and the
+  `print:table-cell` columns are all exactly as they were. Note `ring-1` was
+  itself a box-shadow in Tailwind, so swapping it for another box-shadow changes
+  nothing about what reaches paper.
+- Four more hardcoded `amber-*` banners (posted-entry edit warning, duplicate-bill
+  warning) moved onto `--warning`.
+
+**Not verified:** the printed invoice has not been checked against a real print
+preview in either state. The change is argued to be inert, not observed to be.
 
 ### 2026-08-10 — Rules learn a payee, and the feed screen fixes (branch `claude/rules-payee`)
 - **Rules can set the payee** (`0113`: `bank_rules.set_vendor_id`, `bank_transactions.vendor_id`). Found by driving the real app against the QuickBooks benchmark: every one of their rules sets a payee as well as a category, and without it a matched row still needed the vendor typed in by hand — half the work the rule was meant to save

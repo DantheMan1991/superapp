@@ -8,6 +8,7 @@ import { withTenant, schema } from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { getBalances } from "@/modules/accounting/core";
 import {
@@ -191,43 +192,48 @@ export default async function BankRegisterPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {bankAccount.name}
-            </h1>
+      <PageHeader
+        title={bankAccount.name}
+        description={
+          <>
+            {bankAccount.kind.replaceAll("_", " ")}
+            {bankAccount.institution ? ` · ${bankAccount.institution}` : ""}
+            {bankAccount.last4 ? ` ···· ${bankAccount.last4}` : ""} ·{" "}
+            {bankAccount.kind === "credit_card" ? "owed" : "balance"}{" "}
+            <span className="font-mono font-medium tabular-nums">
+              {formatCentsSigned(display)}
+            </span>
+          </>
+        }
+        actions={
+          <>
             {bankAccount.plaidItemId && (
               <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
                 connected
               </Badge>
             )}
             {!bankAccount.isActive && <Badge variant="outline">inactive</Badge>}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {bankAccount.kind.replaceAll("_", " ")}
-            {bankAccount.institution ? ` · ${bankAccount.institution}` : ""}
-            {bankAccount.last4 ? ` ···· ${bankAccount.last4}` : ""} ·{" "}
-            {bankAccount.kind === "credit_card" ? "owed" : "balance"}{" "}
-            <span className="font-mono font-medium">{formatCentsSigned(display)}</span>
-          </p>
-        </div>
-        {isOwner && (
-          <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm" variant="outline">
-              <Link href={`/dashboard/m/accounting/banking/${id}/import`}>
-                Import CSV
-              </Link>
-            </Button>
-            <SuggestButton bankAccountId={id} disabled={countOf("unreviewed") === 0} />
-            <Button asChild size="sm" variant="outline">
-              <Link href={`/dashboard/m/accounting/banking/${id}/reconcile`}>
-                Reconcile
-              </Link>
-            </Button>
-          </div>
-        )}
-      </div>
+            {isOwner && (
+              <>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/dashboard/m/accounting/banking/${id}/import`}>
+                    Import CSV
+                  </Link>
+                </Button>
+                <SuggestButton
+                  bankAccountId={id}
+                  disabled={countOf("unreviewed") === 0}
+                />
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/dashboard/m/accounting/banking/${id}/reconcile`}>
+                    Reconcile
+                  </Link>
+                </Button>
+              </>
+            )}
+          </>
+        }
+      />
 
       <AccountingNav />
 

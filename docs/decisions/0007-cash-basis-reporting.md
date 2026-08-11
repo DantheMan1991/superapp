@@ -75,6 +75,17 @@ regress.
   allocate, the residual stays on AR rather than becoming income — unapplied
   cash is genuinely a liability to the customer, not revenue. So "AR is always
   zero on cash basis" is *nearly* true, and the exception is deliberate.
+- **A manual journal entry that touches AR or AP is left alone**, and this is
+  the second reason those accounts can carry a balance on a cash-basis balance
+  sheet. Only invoices and bills are re-recognised, because only they have a
+  document and payments to re-date *to*; a hand-written `Dr Vehicles / Cr AP`
+  has neither, and inventing a recognition date for it would be a guess.
+  Confirmed on real data 2026-08-10: a tenant showed AP of 17,198.33 accrual
+  against 521.00 cash, the difference being exactly one unpaid bill, with the
+  521.00 remainder a hand-journaled vehicle purchase. Both bases balanced.
+  If this becomes a complaint, the fix is to let a journal line be tagged with
+  a recognition date — not to silently strip AR/AP rows the ledger never
+  explained.
 - **Two numbers for the same period.** Users can now produce two different and
   both-correct profit figures. The basis is therefore stamped on the rendered
   report and on every CSV export; an exported statement that does not say which

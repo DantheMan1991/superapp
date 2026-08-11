@@ -85,6 +85,30 @@ async function main() {
       process.exitCode = 1;
     }
 
+    // The payee columns and their composite FKs (0113). A migration that
+    // reports success has not necessarily added what you think it added.
+    const payee = await pool.query(
+      `select table_name, column_name
+         from information_schema.columns
+        where table_schema = 'public'
+          and (table_name, column_name) in
+              (('bank_transactions','vendor_id'), ('bank_rules','set_vendor_id'))
+        order by table_name`,
+    );
+    console.log("\npayee columns:");
+    console.table(payee.rows);
+    const payeeFks = await pool.query(
+      `select conname from pg_constraint
+        where conname in ('bank_transactions_vendor_fk', 'bank_rules_set_vendor_fk')
+        order by conname`,
+    );
+    console.log("payee foreign keys:", payeeFks.rows.map((r) => r.conname));
+    const payeeOk = payee.rows.length === 2 && payeeFks.rows.length === 2;
+    if (!payeeOk) {
+      console.error("PAYEE COLUMNS OR FKS MISSING");
+      process.exitCode = 1;
+    }
+
     const col = await pool.query(
       `select column_name, data_type, is_nullable
          from information_schema.columns
@@ -96,7 +120,7 @@ async function main() {
     console.log("\nbank_transactions suggestion columns:");
     console.table(col.rows);
 
-    if (missing.length === 0 && unprotected.length === 0 && col.rows.length === 2) {
+    if (missing.length === 0 && unprotected.length === 0 && col.rows.length === 2 && payeeOk) {
       console.log("\nOK — every banking table has FORCE RLS and at least one policy.");
     }
   } finally {

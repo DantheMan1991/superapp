@@ -22,6 +22,13 @@ export default async function BankRulesPage() {
       where: eq(schema.bankAccounts.tenantId, tenantId),
       orderBy: (b, { asc }) => [asc(b.createdAt)],
     });
+    const vendorRows = await tx.query.vendors.findMany({
+      where: and(
+        eq(schema.vendors.tenantId, tenantId),
+        eq(schema.vendors.isActive, true),
+      ),
+      orderBy: (v, { asc }) => [asc(v.name)],
+    });
     const categories = await tx.query.accounts.findMany({
       where: and(
         eq(schema.accounts.tenantId, tenantId),
@@ -29,7 +36,7 @@ export default async function BankRulesPage() {
       ),
       orderBy: (a, { asc }) => [asc(a.code)],
     });
-    return { rules, bankAccounts, categories };
+    return { rules, bankAccounts, categories, vendorRows };
   });
 
   // A rule may not code to a register's own account — that would be a transfer,
@@ -37,6 +44,7 @@ export default async function BankRulesPage() {
   const registerAccountIds = new Set(data.bankAccounts.map((b) => b.accountId));
   const accountName = new Map(data.categories.map((a) => [a.id, `${a.code} · ${a.name}`]));
   const registerName = new Map(data.bankAccounts.map((b) => [b.id, b.name]));
+  const vendorName = new Map(data.vendorRows.map((v) => [v.id, v.name]));
 
   const rows = data.rules.map((r) => ({
     id: r.id,
@@ -53,7 +61,13 @@ export default async function BankRulesPage() {
     conditions: r.conditions,
     conditionsLabel: describeConditions(r.conditions, r.matchMode),
     setAccountId: r.setAccountId,
-    setsLabel: `Set category to "${accountName.get(r.setAccountId) ?? "Unknown"}"`,
+    setVendorId: r.setVendorId,
+    setsLabel: [
+      `Set category to "${accountName.get(r.setAccountId) ?? "Unknown"}"`,
+      ...(r.setVendorId
+        ? [`set payee to "${vendorName.get(r.setVendorId) ?? "Unknown"}"`]
+        : []),
+    ].join(", "),
     setMemo: r.setMemo,
     autoPost: r.autoPost,
   }));
@@ -82,6 +96,7 @@ export default async function BankRulesPage() {
         categories={data.categories
           .filter((a) => !registerAccountIds.has(a.id))
           .map((a) => ({ id: a.id, code: a.code, name: a.name }))}
+        vendors={data.vendorRows.map((v) => ({ id: v.id, name: v.name }))}
         canAct={ctx.role === "owner"}
       />
     </div>

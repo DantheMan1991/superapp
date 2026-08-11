@@ -35,6 +35,7 @@ function rule(over: Partial<MatchableRule> = {}): MatchableRule {
     matchMode: "all",
     conditions: [{ field: "description", op: "contains", value: "westfield" }],
     setAccountId: INSURANCE,
+    setVendorId: null,
     setMemo: null,
     autoPost: false,
     createdAt: new Date("2026-01-01T00:00:00Z"),
@@ -174,12 +175,21 @@ describe("matchRules — ordering", () => {
     expect(matchRules(txn(), [b, older])?.accountId).toBe(UTILITIES);
   });
 
-  it("carries the memo and auto-post flag of the winner", () => {
-    const r = rule({ setMemo: "Monthly premium", autoPost: true });
+  it("carries the memo, payee and auto-post flag of the winner", () => {
+    const r = rule({
+      setMemo: "Monthly premium",
+      setVendorId: "vendor-westfield",
+      autoPost: true,
+    });
     const match = matchRules(txn(), [r]);
     expect(match?.memo).toBe("Monthly premium");
+    expect(match?.vendorId).toBe("vendor-westfield");
     expect(match?.autoPost).toBe(true);
     expect(match?.ruleName).toBe("Westfield as Insurance");
+  });
+
+  it("reports no payee when the rule names none", () => {
+    expect(matchRules(txn(), [rule()])?.vendorId).toBeNull();
   });
 });
 

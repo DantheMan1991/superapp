@@ -22,6 +22,7 @@ interface BankFixture {
   bankAccountId: string;
   txnId: string;
   ruleId: string;
+  vendorId: string;
   reconciliationId: string;
   reconciliationLineId: string;
   plaidItemId: string;
@@ -76,6 +77,14 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
           amountCents: -64067,
           externalHash: `${STAMP_BANK}-${tag}-1`,
         })
+        .returning();
+      const [party] = await tx
+        .insert(schema.parties)
+        .values({ tenantId, kind: "organization", displayName: `Payee ${tag}` })
+        .returning();
+      const [vendor] = await tx
+        .insert(schema.vendors)
+        .values({ tenantId, partyId: party.id, name: `Payee ${tag}` })
         .returning();
       const [rule] = await tx
         .insert(schema.bankRules)
@@ -143,6 +152,7 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
         bankAccountId: bank.id,
         txnId: txn.id,
         ruleId: rule.id,
+        vendorId: vendor.id,
         reconciliationId: recon.id,
         reconciliationLineId: reconLine.id,
         plaidItemId: item.id,
@@ -279,6 +289,33 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
           setAccountId: fx.b.expenseAccountId,
           conditions: [{ field: "description", op: "contains", value: "x" }],
         }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a rule and a feed row cannot name the OTHER tenant's payee", async () => {
+    // Own tenant_id, so RLS passes; the composite FK is what refuses it. Added
+    // when rules learned to set a payee — a new cross-tenant reference is a new
+    // thing for the database to be asked to enforce.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.bankRules).values({
+          tenantId: tenantA,
+          name: "rule onto B's payee",
+          bankAccountId: fx.a.bankAccountId,
+          setAccountId: fx.a.expenseAccountId,
+          setVendorId: fx.b.vendorId,
+          conditions: [{ field: "description", op: "contains", value: "x" }],
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx
+          .update(schema.bankTransactions)
+          .set({ vendorId: fx.b.vendorId })
+          .where(eq(schema.bankTransactions.id, fx.a.txnId)),
       ),
     ).rejects.toThrow();
   });

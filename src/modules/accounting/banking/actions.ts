@@ -1065,6 +1065,7 @@ const ruleInputSchema = z.object({
   matchMode: z.enum(["all", "any"]),
   conditions: ruleConditionsSchema,
   setAccountId: z.string().uuid(),
+  setVendorId: z.string().uuid().nullable(),
   setMemo: z.string().trim().max(500).nullable(),
   autoPost: z.boolean(),
 });

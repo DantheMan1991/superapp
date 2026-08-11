@@ -141,6 +141,8 @@ interface ReviewRow {
     accountId: string;
     accountCode: string;
   } | null;
+  /** Who was paid, once a rule or a person has said so. */
+  payee: string | null;
   matchCandidates: MatchCandidate[];
 }
 
@@ -318,6 +320,7 @@ export function ReviewTable({
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Description</TableHead>
+                  <TableHead className="hidden sm:table-cell">Payee</TableHead>
                   <TableHead className="text-right">In</TableHead>
                   <TableHead className="text-right">Out</TableHead>
                   {tab === "all" && <TableHead>Status</TableHead>}
@@ -371,6 +374,11 @@ export function ReviewTable({
                             {Math.round(row.suggestion.confidence * 100)}%
                           </span>
                         )
+                      )}
+                    </TableCell>
+                    <TableCell className="hidden text-sm sm:table-cell">
+                      {row.payee ?? (
+                        <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm">

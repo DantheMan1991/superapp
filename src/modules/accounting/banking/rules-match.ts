@@ -77,6 +77,7 @@ export interface MatchableRule {
   matchMode: "all" | "any";
   conditions: unknown;
   setAccountId: string;
+  setVendorId: string | null;
   setMemo: string | null;
   autoPost: boolean;
   createdAt: Date;
@@ -86,6 +87,8 @@ export interface RuleMatch {
   ruleId: string;
   ruleName: string;
   accountId: string;
+  /** Null when the rule says nothing about who was paid. */
+  vendorId: string | null;
   memo: string | null;
   autoPost: boolean;
 }
@@ -176,6 +179,7 @@ export function matchRules(
       ruleId: rule.id,
       ruleName: rule.name,
       accountId: rule.setAccountId,
+      vendorId: rule.setVendorId,
       memo: rule.setMemo,
       autoPost: rule.autoPost,
     };

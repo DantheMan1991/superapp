@@ -5,6 +5,7 @@ import { withTenant, withSystem, schema } from "../src/db";
 import { setClosedThrough, type LedgerCtx } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { createBankAccount } from "../src/modules/accounting/banking/accounts";
+import { createVendor } from "../src/modules/accounting/payables/vendors";
 import { importTransactions } from "../src/modules/accounting/banking/import";
 import { categorizeTransaction } from "../src/modules/accounting/banking/review";
 import {
@@ -110,6 +111,7 @@ d("bank rules (DB)", () => {
           { field: "description", op: "contains", value: "westfield" },
         ],
         setAccountId: insurance,
+        setVendorId: null,
         setMemo: null,
         autoPost: false,
       }),
@@ -148,6 +150,7 @@ d("bank rules (DB)", () => {
           { field: "description", op: "contains", value: "division of water" },
         ],
         setAccountId: utilities,
+        setVendorId: null,
         setMemo: "Monthly water",
         autoPost: true,
       }),
@@ -322,6 +325,81 @@ d("bank rules (DB)", () => {
     expect(reproposed).toBeNull();
   });
 
+  it("a rule sets the payee onto the row, and never overwrites one already there", async () => {
+    const insurance = await accountId("6100");
+    const vendor = await withTenant(tenantId, (tx) =>
+      createVendor(tx, owner, { name: "Westfield Insurance Co" }),
+    );
+    await withTenant(tenantId, (tx) =>
+      createRule(tx, owner, {
+        name: "Signatures as Insurance",
+        appliesTo: "both",
+        bankAccountId: null,
+        matchMode: "all",
+        conditions: [{ field: "description", op: "contains", value: "signatures" }],
+        setAccountId: insurance,
+        setVendorId: vendor.id,
+        setMemo: null,
+        autoPost: false,
+      }),
+    );
+
+    await importRows([
+      { date: "2026-07-20", description: "OH SIGNATURES INS", cents: -12_345 },
+    ]);
+    const [row] = await txnsFor("OH SIGNATURES INS");
+    // The payee is applied to the row itself, not merely suggested: it posts
+    // nothing, so there is nothing to accept.
+    expect(row.vendorId).toBe(vendor.id);
+    const suggestion = readRuleSuggestion(row);
+    expect(suggestion?.vendorId).toBe(vendor.id);
+    expect(suggestion?.vendorName).toBe("Westfield Insurance Co");
+
+    // A payee chosen by hand outranks the rule on a re-run.
+    const other = await withTenant(tenantId, (tx) =>
+      createVendor(tx, owner, { name: "Someone Else Ltd" }),
+    );
+    await withTenant(tenantId, (tx) =>
+      tx
+        .update(schema.bankTransactions)
+        .set({ vendorId: other.id })
+        .where(eq(schema.bankTransactions.id, row.id)),
+    );
+    await withTenant(tenantId, (tx) =>
+      applyRulesToUnreviewed(tx, owner, { bankAccountId: registerId }),
+    );
+    const [after] = await txnsFor("OH SIGNATURES INS");
+    expect(after.vendorId).toBe(other.id);
+  });
+
+  it("refuses a payee that is not an active vendor", async () => {
+    const insurance = await accountId("6100");
+    const vendor = await withTenant(tenantId, (tx) =>
+      createVendor(tx, owner, { name: "Deactivated Vendor" }),
+    );
+    await withTenant(tenantId, (tx) =>
+      tx
+        .update(schema.vendors)
+        .set({ isActive: false })
+        .where(eq(schema.vendors.id, vendor.id)),
+    );
+    await expect(
+      withTenant(tenantId, (tx) =>
+        createRule(tx, owner, {
+          name: "Dead payee",
+          appliesTo: "both",
+          bankAccountId: null,
+          matchMode: "all",
+          conditions: [{ field: "description", op: "contains", value: "zzz" }],
+          setAccountId: insurance,
+          setVendorId: vendor.id,
+          setMemo: null,
+          autoPost: false,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("a rule may not code to the register's own account", async () => {
     await expect(
       withTenant(tenantId, (tx) =>
@@ -332,6 +410,7 @@ d("bank rules (DB)", () => {
           matchMode: "all",
           conditions: [{ field: "description", op: "contains", value: "x" }],
           setAccountId: registerAccountId,
+          setVendorId: null,
           setMemo: null,
           autoPost: false,
         }),
@@ -351,6 +430,7 @@ d("bank rules (DB)", () => {
           matchMode: "all",
           conditions: [{ field: "description", op: "contains", value: "x" }],
           setAccountId: insurance,
+          setVendorId: null,
           setMemo: null,
           autoPost: false,
         }),

@@ -117,6 +117,20 @@ export default async function BankRegisterPage({
             )
             .groupBy(schema.documentLinks.bankTransactionId)
         : [];
+    // Payee names for the rows that have one — one query, not one per row.
+    const vendorIds = [
+      ...new Set(txns.map((t) => t.vendorId).filter((v): v is string => !!v)),
+    ];
+    const vendorRows =
+      vendorIds.length === 0
+        ? []
+        : await tx.query.vendors.findMany({
+            where: and(
+              eq(schema.vendors.tenantId, tenantId),
+              inArray(schema.vendors.id, vendorIds),
+            ),
+            columns: { id: true, name: true },
+          });
     return {
       bankAccount,
       balance,
@@ -125,6 +139,7 @@ export default async function BankRegisterPage({
       categories,
       matchCandidates,
       attachmentCounts,
+      vendorRows,
     };
   });
   if (!data) notFound();
@@ -138,6 +153,7 @@ export default async function BankRegisterPage({
   const attachmentsOf = new Map(
     data.attachmentCounts.map((a) => [a.bankTransactionId, a.n]),
   );
+  const vendorName = new Map(data.vendorRows.map((v) => [v.id, v.name]));
   const rows = txns.map((t) => {
     const suggestion = readAiSuggestion(t);
     const rule = readRuleSuggestion(t);
@@ -165,6 +181,7 @@ export default async function BankRegisterPage({
             accountCode: rule.accountCode,
           }
         : null,
+      payee: t.vendorId ? (vendorName.get(t.vendorId) ?? null) : null,
       matchCandidates: data.matchCandidates.get(t.id) ?? [],
     };
   });

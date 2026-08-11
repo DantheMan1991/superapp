@@ -70,6 +70,7 @@ export interface RuleRow {
   conditions: unknown;
   conditionsLabel: string;
   setAccountId: string;
+  setVendorId: string | null;
   setsLabel: string;
   setMemo: string | null;
   autoPost: boolean;
@@ -82,6 +83,10 @@ interface Register {
 interface Category {
   id: string;
   code: string;
+  name: string;
+}
+interface Vendor {
+  id: string;
   name: string;
 }
 
@@ -107,11 +112,13 @@ export function RulesTable({
   rows,
   registers,
   categories,
+  vendors,
   canAct,
 }: {
   rows: RuleRow[];
   registers: Register[];
   categories: Category[];
+  vendors: Vendor[];
   canAct: boolean;
 }) {
   const router = useRouter();
@@ -190,12 +197,10 @@ export function RulesTable({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-16">Order</TableHead>
-                  <TableHead>Rule</TableHead>
-                  <TableHead>Applied to</TableHead>
-                  <TableHead>Conditions</TableHead>
-                  <TableHead>Sets</TableHead>
-                  <TableHead>Auto-post</TableHead>
+                  <TableHead className="w-14">Order</TableHead>
+                  <TableHead className="min-w-[14rem]">Rule</TableHead>
+                  <TableHead className="hidden lg:table-cell">Conditions</TableHead>
+                  <TableHead className="hidden md:table-cell">Sets</TableHead>
                   <TableHead>Status</TableHead>
                   {canAct && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
@@ -232,32 +237,29 @@ export function RulesTable({
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="max-w-[16rem]">
-                      <span className="text-sm font-medium">{row.name}</span>
-                      {row.appliesTo !== "both" && (
-                        <span className="block text-[11px] text-muted-foreground">
-                          {row.appliesTo === "money_in" ? "Money in" : "Money out"}{" "}
-                          only
-                        </span>
-                      )}
+                    <TableCell className="align-top">
+                      <span className="block break-words text-sm font-medium">
+                        {row.name}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                        {row.appliedTo}
+                        {row.appliesTo !== "both" &&
+                          ` · ${row.appliesTo === "money_in" ? "money in" : "money out"} only`}
+                        {row.autoPost && " · posts automatically"}
+                      </span>
+                      {/* On narrow screens the two hidden columns fold to here,
+                          so nothing is unreachable rather than merely off-screen. */}
+                      <span className="mt-1 block break-words text-[11px] text-muted-foreground lg:hidden">
+                        {row.conditionsLabel} → {row.setsLabel}
+                      </span>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {row.appliedTo}
-                    </TableCell>
-                    <TableCell className="max-w-[18rem] text-sm text-muted-foreground">
+                    <TableCell className="hidden max-w-[20rem] break-words align-top text-sm text-muted-foreground lg:table-cell">
                       {row.conditionsLabel}
                     </TableCell>
-                    <TableCell className="max-w-[16rem] text-sm text-muted-foreground">
+                    <TableCell className="hidden max-w-[18rem] break-words align-top text-sm text-muted-foreground md:table-cell">
                       {row.setsLabel}
                     </TableCell>
-                    <TableCell>
-                      {row.autoPost ? (
-                        <Badge variant="secondary">Auto-post</Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Review</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
+                    <TableCell className="align-top">
                       {row.isSuggested ? (
                         <Badge variant="outline">Suggested</Badge>
                       ) : row.isActive ? (
@@ -267,8 +269,8 @@ export function RulesTable({
                       )}
                     </TableCell>
                     {canAct && (
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
+                      <TableCell className="align-top text-right">
+                        <div className="flex flex-wrap justify-end gap-1">
                           {row.isSuggested && (
                             <>
                               <Button
@@ -358,6 +360,7 @@ export function RulesTable({
           rule={editing}
           registers={registers}
           categories={categories}
+          vendors={vendors}
           onClose={() => {
             setCreating(false);
             setEditing(null);
@@ -385,16 +388,20 @@ function conditionsOf(raw: unknown): Condition[] {
   });
 }
 
+const NO_VENDOR = "__none__";
+
 function RuleDialog({
   rule,
   registers,
   categories,
+  vendors,
   onClose,
   onSaved,
 }: {
   rule: RuleRow | null;
   registers: Register[];
   categories: Category[];
+  vendors: Vendor[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -409,6 +416,7 @@ function RuleDialog({
     rule ? conditionsOf(rule.conditions) : [emptyCondition()],
   );
   const [setAccountId, setSetAccountId] = useState(rule?.setAccountId ?? "");
+  const [setVendorId, setSetVendorId] = useState(rule?.setVendorId ?? NO_VENDOR);
   const [setMemo, setSetMemo] = useState(rule?.setMemo ?? "");
   const [autoPost, setAutoPost] = useState(rule?.autoPost ?? false);
 
@@ -456,6 +464,7 @@ function RuleDialog({
       matchMode,
       conditions: parsedConditions.data,
       setAccountId,
+      setVendorId: setVendorId === NO_VENDOR ? null : setVendorId,
       setMemo: setMemo.trim() === "" ? null : setMemo.trim(),
       autoPost,
     };
@@ -500,7 +509,7 @@ function RuleDialog({
                 value={appliesTo}
                 onValueChange={(v) => setAppliesTo(v as AppliesTo)}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label="Apply to">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -513,7 +522,7 @@ function RuleDialog({
             <div className="space-y-1.5">
               <Label>In register</Label>
               <Select value={bankAccountId} onValueChange={setBankAccountId}>
-                <SelectTrigger>
+                <SelectTrigger aria-label="In register">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -535,7 +544,7 @@ function RuleDialog({
                 value={matchMode}
                 onValueChange={(v) => setMatchMode(v as MatchMode)}
               >
-                <SelectTrigger className="h-8 w-32">
+                <SelectTrigger className="h-8 w-32" aria-label="Match mode">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -554,7 +563,7 @@ function RuleDialog({
                     patch(index, { field: v as ConditionField })
                   }
                 >
-                  <SelectTrigger className="h-9 w-36">
+                  <SelectTrigger className="h-9 w-36" aria-label={`Condition ${index + 1} field`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -566,7 +575,7 @@ function RuleDialog({
                   value={condition.op}
                   onValueChange={(v) => patch(index, { op: v })}
                 >
-                  <SelectTrigger className="h-9 w-40">
+                  <SelectTrigger className="h-9 w-40" aria-label={`Condition ${index + 1} operator`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -618,7 +627,7 @@ function RuleDialog({
             <div className="space-y-1.5">
               <Label>Set category to</Label>
               <Select value={setAccountId} onValueChange={setSetAccountId}>
-                <SelectTrigger>
+                <SelectTrigger aria-label="Set category to">
                   <SelectValue placeholder="Pick category" />
                 </SelectTrigger>
                 <SelectContent>
@@ -630,6 +639,25 @@ function RuleDialog({
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1.5">
+              <Label>Set payee to (optional)</Label>
+              <Select value={setVendorId} onValueChange={setSetVendorId}>
+                <SelectTrigger aria-label="Set payee to">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_VENDOR}>Leave the payee alone</SelectItem>
+                  {vendors.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      {v.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="rule-memo">Memo (optional)</Label>
               <Input

@@ -36,6 +36,9 @@ export interface StoredRuleSuggestion {
   ruleName: string;
   accountId: string;
   accountCode: string;
+  /** Snapshot of the payee the rule named, for the same reason as the rest. */
+  vendorId?: string;
+  vendorName?: string;
   memo?: string;
   at: string;
 }
@@ -102,6 +105,22 @@ async function assertUsableCategory(
   }
 }
 
+/** A rule may only name a vendor that exists, belongs here, and is active. */
+async function assertUsableVendor(
+  tx: Tx,
+  tenantId: string,
+  vendorId: string | null,
+): Promise<void> {
+  if (vendorId === null) return;
+  const vendor = await tx.query.vendors.findFirst({
+    where: and(eq(schema.vendors.tenantId, tenantId), eq(schema.vendors.id, vendorId)),
+    columns: { id: true, isActive: true },
+  });
+  if (!vendor || !vendor.isActive) {
+    throw new LedgerError("VENDOR_NOT_FOUND", "payee is not an active vendor");
+  }
+}
+
 export interface RuleInput {
   name: string;
   appliesTo: "money_in" | "money_out" | "both";
@@ -109,6 +128,8 @@ export interface RuleInput {
   matchMode: "all" | "any";
   conditions: RuleCondition[];
   setAccountId: string;
+  /** Null = the rule says nothing about the payee. */
+  setVendorId: string | null;
   setMemo: string | null;
   autoPost: boolean;
   isActive?: boolean;
@@ -121,6 +142,7 @@ export async function createRule(
 ): Promise<BankRule> {
   requireOwnerRole(ctx);
   await assertUsableCategory(tx, ctx.tenantId, input.setAccountId);
+  await assertUsableVendor(tx, ctx.tenantId, input.setVendorId);
   const rows = await tx
     .insert(schema.bankRules)
     .values({
@@ -131,6 +153,7 @@ export async function createRule(
       matchMode: input.matchMode,
       conditions: input.conditions,
       setAccountId: input.setAccountId,
+      setVendorId: input.setVendorId,
       setMemo: input.setMemo,
       autoPost: input.autoPost,
       isActive: input.isActive ?? true,
@@ -147,6 +170,7 @@ export async function updateRule(
   requireOwnerRole(ctx);
   await loadRule(tx, ctx.tenantId, args.ruleId);
   await assertUsableCategory(tx, ctx.tenantId, args.setAccountId);
+  await assertUsableVendor(tx, ctx.tenantId, args.setVendorId);
   const rows = await tx
     .update(schema.bankRules)
     .set({
@@ -156,6 +180,7 @@ export async function updateRule(
       matchMode: args.matchMode,
       conditions: args.conditions,
       setAccountId: args.setAccountId,
+      setVendorId: args.setVendorId,
       setMemo: args.setMemo,
       autoPost: args.autoPost,
       isActive: args.isActive ?? true,
@@ -314,6 +339,7 @@ function toMatchable(rule: BankRule): MatchableRule {
     matchMode: rule.matchMode,
     conditions: rule.conditions,
     setAccountId: rule.setAccountId,
+    setVendorId: rule.setVendorId,
     setMemo: rule.setMemo,
     autoPost: rule.autoPost,
     createdAt: rule.createdAt,
@@ -376,6 +402,21 @@ export async function applyRulesToUnreviewed(
   });
   const codeById = new Map(accounts.map((a) => [a.id, a.code]));
 
+  const vendorIds = [
+    ...new Set(matchable.map((r) => r.setVendorId).filter((v): v is string => !!v)),
+  ];
+  const vendorRows =
+    vendorIds.length === 0
+      ? []
+      : await tx.query.vendors.findMany({
+          where: and(
+            eq(schema.vendors.tenantId, ctx.tenantId),
+            inArray(schema.vendors.id, vendorIds),
+          ),
+          columns: { id: true, name: true },
+        });
+  const vendorNameById = new Map(vendorRows.map((v) => [v.id, v.name]));
+
   const autoPostable: Array<{ txnId: string; match: RuleMatch }> = [];
   const now = new Date().toISOString();
 
@@ -395,12 +436,25 @@ export async function applyRulesToUnreviewed(
       ruleName: match.ruleName,
       accountId: match.accountId,
       accountCode: codeById.get(match.accountId) ?? "",
+      ...(match.vendorId
+        ? {
+            vendorId: match.vendorId,
+            vendorName: vendorNameById.get(match.vendorId) ?? "",
+          }
+        : {}),
       ...(match.memo ? { memo: match.memo } : {}),
       at: now,
     };
     await tx
       .update(schema.bankTransactions)
-      .set({ ruleSuggestion: suggestion, updatedAt: new Date() })
+      .set({
+        ruleSuggestion: suggestion,
+        // The payee is applied straight to the row, not merely suggested:
+        // unlike the category it posts nothing, so there is nothing to accept.
+        // A payee already set by hand is never overwritten.
+        ...(match.vendorId && !txn.vendorId ? { vendorId: match.vendorId } : {}),
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(schema.bankTransactions.tenantId, ctx.tenantId),

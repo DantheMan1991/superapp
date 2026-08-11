@@ -13,6 +13,15 @@ export interface FilterPill {
 interface FilterPillsProps {
   items: readonly FilterPill[];
   activeKey: string;
+  /**
+   * `solid` (default) is a filter: which subset of this list am I seeing.
+   * `accent` is a sub-navigation: which list am I on.
+   *
+   * The two exist because accounting renders both on one row — Invoices /
+   * Customers / Recurring beside Open / Drafts / Paid — and two identical pill
+   * groups side by side would read as one confusing eight-item control.
+   */
+  variant?: "solid" | "accent";
   className?: string;
 }
 
@@ -29,7 +38,12 @@ interface FilterPillsProps {
  * narrow the *rows* of the list you are already on. Underline for navigation,
  * fill for filtering.
  */
-export function FilterPills({ items, activeKey, className }: FilterPillsProps) {
+export function FilterPills({
+  items,
+  activeKey,
+  variant = "solid",
+  className,
+}: FilterPillsProps) {
   return (
     <div className={cn("flex flex-wrap gap-1.5", className)}>
       {items.map((item) => {
@@ -42,7 +56,9 @@ export function FilterPills({ items, activeKey, className }: FilterPillsProps) {
             className={cn(
               "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
               active
-                ? "bg-foreground text-background"
+                ? variant === "accent"
+                  ? "bg-module-accent/12 text-module-accent"
+                  : "bg-foreground text-background"
                 : "bg-muted text-muted-foreground hover:bg-secondary hover:text-foreground",
             )}
           >
@@ -51,7 +67,11 @@ export function FilterPills({ items, activeKey, className }: FilterPillsProps) {
               <span
                 className={cn(
                   "tabular-nums",
-                  active ? "text-background/70" : "text-subtle-foreground",
+                  active
+                    ? variant === "accent"
+                      ? "opacity-70"
+                      : "text-background/70"
+                    : "text-subtle-foreground",
                 )}
               >
                 {item.count}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -54,28 +54,45 @@ export function CategoryStrip({ items, className }: CategoryStripProps) {
   }, []);
 
   /**
-   * Measured from a ref callback rather than an effect. As an effect this would
-   * be a `setState` on mount, which is what `react-hooks/set-state-in-effect`
-   * flags — and it would also measure a frame later than it needs to. React 19
-   * lets a ref callback return its own cleanup, so the observer is torn down
-   * here too. `useCallback` is load-bearing: an inline function would be a new
-   * ref every render, and React would detach, re-attach and re-measure in a
-   * loop.
+   * A plain ref object, and the first measurement in an effect.
+   *
+   * This was first written as a ref *callback* that both stored the element and
+   * returned its own cleanup, to avoid an effect entirely. It measured
+   * correctly and the buttons rendered — but `scroller.current` was null by the
+   * time one was clicked, so they silently did nothing. Verified in the browser:
+   * scrolling the element by hand moved it 200px, clicking the button moved it 0.
+   * A plain ref object has none of that subtlety; React assigns it at commit and
+   * leaves it alone until unmount.
+   *
+   * The effect satisfies `react-hooks/set-state-in-effect` the way
+   * conventions.md §8 prescribes — the state change is *scheduled* rather than
+   * called synchronously in the effect body.
+   *
+   * `setTimeout`, not `requestAnimationFrame`, and that distinction is not
+   * cosmetic: rAF is paused in a background tab, so a strip rendered in one
+   * never measured and its buttons never appeared until something else forced a
+   * resize. Timers still fire when backgrounded. Found while testing this in an
+   * unfocused window, which is exactly the condition that would have hidden it.
    */
-  const attach = useCallback(
-    (el: HTMLDivElement | null) => {
-      scroller.current = el;
-      if (!el) return;
-      measure(el);
-      const observer = new ResizeObserver(() => measure(el));
-      observer.observe(el);
-      return () => {
-        observer.disconnect();
-        scroller.current = null;
-      };
-    },
-    [measure],
-  );
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const onScroll = () => measure(el);
+    // A native listener rather than React's `onScroll` prop. `scroll` does not
+    // bubble, so it is not delegated like most events, and a programmatic
+    // `scrollBy` was reaching the DOM without the edge state ever updating —
+    // the buttons stayed on the side you had already scrolled away from.
+    // Listening on the element directly removes the question entirely.
+    el.addEventListener("scroll", onScroll, { passive: true });
+    const timer = setTimeout(() => measure(el), 0);
+    const observer = new ResizeObserver(onScroll);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [measure]);
 
   const nudge = (direction: -1 | 1) => {
     const el = scroller.current;
@@ -86,8 +103,7 @@ export function CategoryStrip({ items, className }: CategoryStripProps) {
   return (
     <div className={cn("relative", className)}>
       <div
-        ref={attach}
-        onScroll={(event) => measure(event.currentTarget)}
+        ref={scroller}
         className="flex gap-7 overflow-x-auto border-b border-divider [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {items.map((item) => {

@@ -4,8 +4,11 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { listContactPointsFor } from "@/lib/parties/contacts";
 import { preferredContactValue } from "@/lib/parties/contact-values";
+import { Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { formatCentsSigned, toSafeCents } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../sales-nav";
@@ -85,68 +88,66 @@ export default async function CustomersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Customers</h1>
-          <p className="text-sm text-muted-foreground">
-            Who {ctx.tenant.name} bills.
-          </p>
-        </div>
-        {isOwnerOrStaff && <AddCustomerButton />}
-      </div>
+      <PageHeader
+        title="Customers"
+        description={`Who ${ctx.tenant.name} bills.`}
+        actions={isOwnerOrStaff && <AddCustomerButton />}
+      />
 
       <AccountingNav />
       <SalesNav />
 
-      <Card>
-        <CardContent className="p-0">
-          {data.customers.length === 0 ? (
-            <p className="px-4 py-12 text-center text-sm text-muted-foreground">
-              No customers yet — add the first one to start invoicing.
-            </p>
-          ) : (
-            <ul className="divide-y">
-              {data.customers.map((c) => (
-                <li
-                  key={c.id}
-                  className="flex items-center justify-between gap-3 px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-2 text-sm font-medium">
-                      {c.name}
-                      {!c.isActive && <Badge variant="outline">inactive</Badge>}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {[reach(c.partyId).email, reach(c.partyId).phone]
-                        .filter(Boolean)
-                        .join(" · ") || "—"}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3">
-                    {(openOf.get(c.id) ?? 0) > 0 && (
-                      <span className="font-mono text-sm">
-                        {formatCentsSigned(openOf.get(c.id)!)} open
-                      </span>
-                    )}
-                    <CustomerRowActions
-                      customer={{
-                        id: c.id,
-                        version: c.version,
-                        name: c.name,
-                        email: reach(c.partyId).email,
-                        phone: reach(c.partyId).phone,
-                        address: c.address,
-                        notes: c.notes,
-                        isActive: c.isActive,
-                      }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      <Panel
+        isEmpty={data.customers.length === 0}
+        empty={
+          <EmptyState
+            icon={<Users />}
+            title="Add your first customer"
+            description="You need somebody to bill before you can raise an invoice."
+            action={isOwnerOrStaff ? <AddCustomerButton /> : undefined}
+          />
+        }
+      >
+        <ul className="divide-y divide-divider">
+          {data.customers.map((c) => (
+            <li
+              key={c.id}
+              className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/60"
+            >
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  {c.name}
+                  {!c.isActive && <Badge variant="outline">inactive</Badge>}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {[reach(c.partyId).email, reach(c.partyId).phone]
+                    .filter(Boolean)
+                    .join(" · ") || "—"}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
+                {(openOf.get(c.id) ?? 0) > 0 && (
+                  <span className="font-mono text-sm tabular-nums">
+                    {formatCentsSigned(openOf.get(c.id)!)} open
+                  </span>
+                )}
+                <CustomerRowActions
+                  customer={{
+                    id: c.id,
+                    version: c.version,
+                    name: c.name,
+                    email: reach(c.partyId).email,
+                    phone: reach(c.partyId).phone,
+                    address: c.address,
+                    notes: c.notes,
+                    isActive: c.isActive,
+                  }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Panel>
     </div>
   );
 }

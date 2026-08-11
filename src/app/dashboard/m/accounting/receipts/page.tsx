@@ -4,9 +4,11 @@ import { FileText, Inbox } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
-import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
+import { FilterPills } from "@/components/app/filter-pills";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listDocuments } from "@/modules/accounting/documents/documents";
 import { readExtraction } from "@/modules/accounting/ai/extract-validate";
@@ -126,16 +128,11 @@ export default async function ReceiptsPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
-          <p className="text-sm text-muted-foreground">
-            Everything arrives here — bills and receipts, uploaded or emailed,
-            read automatically and routed to your books.
-          </p>
-        </div>
-        <UploadButton tenantId={tenantId} />
-      </div>
+      <PageHeader
+        title="Inbox"
+        description="Everything arrives here — bills and receipts, uploaded or emailed, read automatically and routed to your books."
+        actions={<UploadButton tenantId={tenantId} />}
+      />
 
       <AccountingNav />
 
@@ -150,48 +147,42 @@ export default async function ReceiptsPage({
         />
       )}
 
-      <div className="flex gap-1 border-b pb-px">
-        {TABS.map((t) => (
-          <Link
-            key={t.key}
-            href={`/dashboard/m/accounting/receipts?tab=${t.key}`}
-            className={cn(
-              "rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              tab === t.key
-                ? "border-brand text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t.label}
-            <span className="ml-1.5 text-xs text-muted-foreground">
-              {countOf.get(t.key === "trash" ? "trashed" : t.key) ?? 0}
-            </span>
-          </Link>
-        ))}
-      </div>
+      {/* The counts ride on the pills, which is why these are pills and not a
+          strip: they filter one list rather than moving between sections. */}
+      <FilterPills
+        activeKey={tab}
+        items={TABS.map((t) => ({
+          key: t.key,
+          label: t.label,
+          href: `/dashboard/m/accounting/receipts?tab=${t.key}`,
+          count: countOf.get(t.key === "trash" ? "trashed" : t.key) ?? 0,
+        }))}
+        className="print:hidden"
+      />
 
-      {rows.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
-            <Inbox className="h-8 w-8 text-muted-foreground" />
-            <p className="text-sm font-medium">
-              {tab === "inbox"
+      <Panel
+        isEmpty={rows.length === 0}
+        empty={
+          <EmptyState
+            icon={<Inbox />}
+            title={
+              tab === "inbox"
                 ? "Nothing waiting"
                 : tab === "filed"
                   ? "Nothing filed yet"
-                  : "Trash is empty"}
-            </p>
-            <p className="max-w-sm text-xs text-muted-foreground">
-              {tab === "inbox"
+                  : "Trash is empty"
+            }
+            description={
+              tab === "inbox"
                 ? "Upload a bill or receipt — or forward one to your email-in address — and it will land here, read and ready to file."
                 : tab === "filed"
                   ? "Documents attached to transactions show up here."
-                  : "Trashed documents can be restored any time — nothing is ever permanently deleted."}
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="divide-y rounded-md border">
+                  : "Trashed documents can be restored any time — nothing is ever permanently deleted."
+            }
+          />
+        }
+      >
+        <div className="divide-y divide-divider">
           {rows.map((row) => (
             <div
               key={row.id}
@@ -252,7 +243,7 @@ export default async function ReceiptsPage({
             </div>
           ))}
         </div>
-      )}
+      </Panel>
     </div>
   );
 }

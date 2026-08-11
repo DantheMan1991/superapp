@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Panel } from "@/components/app/panel";
 import { cn } from "@/lib/utils";
 
 interface DataTableProps {
@@ -48,43 +49,34 @@ export function DataTable({
   className,
 }: DataTableProps) {
   return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-2xl bg-card shadow-elevation-1",
-        className,
-      )}
-    >
-      {isEmpty && empty ? (
-        empty
-      ) : (
-        <div
-          className={cn(
-            "w-full overflow-x-auto",
-            // Header: quieter and shorter than the body it labels.
-            "[&_thead_th]:h-9 [&_thead_th]:px-3 [&_thead_th]:text-xs [&_thead_th]:font-medium [&_thead_th]:text-subtle-foreground",
-            "[&_thead_tr]:border-divider",
-            // Body rows.
-            "[&_tbody_tr]:border-divider [&_tbody_tr]:transition-colors",
-            "[&_tbody_tr:last-child]:border-0",
-            "[&_tbody_tr:hover]:bg-muted/60",
-            "[&_td]:px-3 [&_td]:py-2.5",
-            // Money and dates line up column-wise without each call site
-            // remembering to ask for it.
-            "[&_td.tabular-nums]:tabular-nums",
-            // Row actions stay hidden until the row is hovered or a control
-            // inside it is focused — Notion's pattern. Focus-within is what
-            // keeps it reachable by keyboard.
-            "[&_[data-slot=row-actions]]:opacity-0 [&_[data-slot=row-actions]]:transition-opacity",
-            "[&_tbody_tr:hover_[data-slot=row-actions]]:opacity-100",
-            "[&_[data-slot=row-actions]:focus-within]:opacity-100",
-            stickyHeader &&
-              "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:bg-card",
-          )}
-        >
-          {children}
-        </div>
-      )}
-    </div>
+    <Panel isEmpty={isEmpty} empty={empty} className={className}>
+      <div
+        className={cn(
+          "w-full overflow-x-auto",
+          // Header: quieter and shorter than the body it labels.
+          "[&_thead_th]:h-9 [&_thead_th]:px-3 [&_thead_th]:text-xs [&_thead_th]:font-medium [&_thead_th]:text-subtle-foreground",
+          "[&_thead_tr]:border-divider",
+          // Body rows.
+          "[&_tbody_tr]:border-divider [&_tbody_tr]:transition-colors",
+          "[&_tbody_tr:last-child]:border-0",
+          "[&_tbody_tr:hover]:bg-muted/60",
+          "[&_td]:px-3 [&_td]:py-2.5",
+          // Money and dates line up column-wise without each call site
+          // remembering to ask for it.
+          "[&_td.tabular-nums]:tabular-nums",
+          // Row actions stay hidden until the row is hovered or a control
+          // inside it is focused — Notion's pattern. Focus-within is what
+          // keeps it reachable by keyboard.
+          "[&_[data-slot=row-actions]]:opacity-0 [&_[data-slot=row-actions]]:transition-opacity",
+          "[&_tbody_tr:hover_[data-slot=row-actions]]:opacity-100",
+          "[&_[data-slot=row-actions]:focus-within]:opacity-100",
+          stickyHeader &&
+            "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:bg-card",
+        )}
+      >
+        {children}
+      </div>
+    </Panel>
   );
 }
 

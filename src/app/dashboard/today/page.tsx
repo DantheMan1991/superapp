@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, ListChecks } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { Panel } from "@/components/app/panel";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
@@ -140,7 +141,8 @@ function ItemList({
   today: string;
 }) {
   return (
-    <ul className="divide-y divide-divider overflow-hidden rounded-2xl bg-card shadow-elevation-1">
+    <Panel>
+      <ul className="divide-y divide-divider">
       {items.map((item) => (
         <li key={item.key}>
           {/* The whole row is the link. Every item is one click from the record
@@ -160,9 +162,10 @@ function ItemList({
             </div>
             <UrgencyBadge urgency={item.urgency} dueOn={item.dueOn} today={today} />
           </Link>
-        </li>
-      ))}
-    </ul>
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }
 

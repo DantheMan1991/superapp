@@ -2,7 +2,11 @@ import { and, eq } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
+import { Building2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
 import {
   Table,
   TableBody,
@@ -61,26 +65,26 @@ export default async function VendorsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
-          <p className="text-sm text-muted-foreground">
-            Who {ctx.tenant.name} buys from. A default expense account prefills
-            new bill lines.
-          </p>
-        </div>
-        <VendorDialogButton accounts={accountOptions} />
-      </div>
+      <PageHeader
+        title="Vendors"
+        description={`Who ${ctx.tenant.name} buys from. A default expense account prefills new bill lines.`}
+        actions={<VendorDialogButton accounts={accountOptions} />}
+      />
 
       <AccountingNav />
       <PurchasesNav />
 
-      {data.vendors.length === 0 ? (
-        <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          No vendors yet — they&apos;re created automatically when you make a
-          bill from an emailed document, or add one here.
-        </p>
-      ) : (
+      <DataTable
+        isEmpty={data.vendors.length === 0}
+        empty={
+          <EmptyState
+            icon={<Building2 />}
+            title="No vendors yet"
+            description="They are created for you when a bill comes in from an emailed document, or you can add one now."
+            action={<VendorDialogButton accounts={accountOptions} />}
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -132,7 +136,7 @@ export default async function VendorsPage() {
             ))}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
     </div>
   );
 }

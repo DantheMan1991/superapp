@@ -13,6 +13,43 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-10 — UI: the nav collapses, and three contrast failures go with it (branch `claude/ui-foundation`)
+
+Presentation only — no query, action, schema or policy changed. The shared
+vocabulary this uses is in [design-system.md](design-system.md); the reasoning is
+[ADR 0008](../decisions/0008-warm-neutrals-and-layered-elevation.md).
+
+- **`AccountingNav` is now a `CategoryStrip`.** Ten text tabs that wrapped onto
+  two lines became one row that scrolls sideways, with an icon over each label.
+  The component name and export did not change, so all ~25 pages importing it
+  picked this up without an edit.
+- **Three rows of navigation became one and a half.** The invoices page rendered
+  `AccountingNav` *plus* `SalesNav` *plus* a status filter row before the first
+  invoice. `SalesNav`/`PurchasesNav` are now `FilterPills` on the `accent`
+  variant and share a single row with the status pills on the `solid` variant —
+  distinct enough that eight adjacent pills do not read as one control. The rule
+  worth keeping: **a strip moves between sections, pills filter the list you are
+  on.**
+- **Fixed: `text-brand` was failing WCAG AA in production.** `--brand` measures
+  **2.81:1** on white, below even the 3:1 bar for icons and large text, and it was
+  the active state of `SalesNav` and `PurchasesNav` and the icon chip on every
+  banking account card. All now use `--module-accent`, which is pitched to clear
+  4.5:1. Three separate call sites, one root cause.
+- **Hardcoded `amber-50/300/900`** on the Plaid sandbox banner moved to the
+  `--warning` token, so it follows the theme instead of being light-mode-only.
+- **The banking Rules link was an anchor styled to look like a button** — it had
+  no focus ring. It is a real `Button asChild` now.
+- Converted: the hub (eight hand-built cards → `StatCard`), invoices, customers,
+  recurring, bills, vendors, accounts, journal, banking, receipts.
+- **`--module-accent` is set for every module route** by a client layout at
+  `src/app/dashboard/m/layout.tsx`, using `display: contents` so it adds no box
+  that could break a full-width module's height chain.
+
+**Still on the old vocabulary** (next slice): the six report pages, trial
+balance, close, and the detail/new pages for invoices, bills, journal entries and
+receipts. The invoice detail page prints, so its print styles need checking
+before it is touched.
+
 ### 2026-08-10 — Invoice delivery: the PDF, and sending it (branch `claude/invoice-pdf`)
 - **`/api/accounting/invoices/[id]/pdf`** renders the invoice with `@react-pdf/renderer`. Until now the module could not produce an invoice document at all — `pdf` appeared in it only as an *input* mime type for receipt extraction
 - **A GET route, not a server action.** Actions are capped at 4MB and return through the RSC channel; this is a file somebody saves, prints or forwards. Same shape as the books export. Auth is re-checked on every fetch, and the expert role may read it — a PDF of the books is a report, not a mutation

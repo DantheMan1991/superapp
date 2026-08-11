@@ -1,32 +1,34 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { FilterPills, type FilterPill } from "@/components/app/filter-pills";
 
-const TABS = [
-  { href: "/dashboard/m/accounting/purchases/bills", label: "Bills" },
-  { href: "/dashboard/m/accounting/purchases/vendors", label: "Vendors" },
+const TABS: FilterPill[] = [
+  {
+    key: "bills",
+    label: "Bills",
+    href: "/dashboard/m/accounting/purchases/bills",
+  },
+  {
+    key: "vendors",
+    label: "Vendors",
+    href: "/dashboard/m/accounting/purchases/vendors",
+  },
 ];
 
+/**
+ * Which list inside Purchases. The Sales equivalent carries the reasoning for
+ * the `accent` variant, including the contrast failure it fixes.
+ */
 export function PurchasesNav() {
   const pathname = usePathname();
+  const active = TABS.find((tab) => pathname.startsWith(tab.href));
   return (
-    <div className="flex gap-1 print:hidden">
-      {TABS.map((tab) => (
-        <Link
-          key={tab.href}
-          href={tab.href}
-          className={cn(
-            "rounded-md px-3 py-1.5 text-sm font-medium",
-            pathname.startsWith(tab.href)
-              ? "bg-brand/10 text-brand"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {tab.label}
-        </Link>
-      ))}
-    </div>
+    <FilterPills
+      items={TABS}
+      activeKey={active?.key ?? ""}
+      variant="accent"
+      className="print:hidden"
+    />
   );
 }

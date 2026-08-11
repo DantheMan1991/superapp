@@ -3,9 +3,13 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
-import { cn } from "@/lib/utils";
+import { ShoppingCart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { FilterPills } from "@/components/app/filter-pills";
 import {
   Table,
   TableBody,
@@ -95,55 +99,74 @@ export default async function BillsPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Bills</h1>
-          <p className="text-sm text-muted-foreground">
+      <PageHeader
+        title="Bills"
+        description={
+          <>
             What {ctx.tenant.name} owes vendors —{" "}
-            <span className="font-mono">{formatCentsSigned(data.aging.totalCents)}</span>{" "}
+            <span className="tabular-nums">
+              {formatCentsSigned(data.aging.totalCents)}
+            </span>{" "}
             outstanding
             {data.aging.overdueCents > 0 && (
               <>
                 {" · "}
-                <span className="font-medium text-destructive">
+                <span className="font-medium text-destructive tabular-nums">
                   {formatCentsSigned(data.aging.overdueCents)} overdue
                 </span>
               </>
             )}
             .
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/dashboard/m/accounting/purchases/bills/new">New bill</Link>
-        </Button>
-      </div>
+          </>
+        }
+        actions={
+          <Button asChild size="sm">
+            <Link href="/dashboard/m/accounting/purchases/bills/new">
+              New bill
+            </Link>
+          </Button>
+        }
+      />
 
       <AccountingNav />
-      <PurchasesNav />
 
-      <div className="flex flex-wrap gap-1 border-b pb-px">
-        {TABS.map((t) => (
-          <Link
-            key={t.key}
-            href={`/dashboard/m/accounting/purchases/bills?tab=${t.key}`}
-            className={cn(
-              "rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors",
-              tab === t.key
-                ? "border-brand text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t.label}
-          </Link>
-        ))}
+      {/* Sub-nav and status filter share one row, as on the invoices page. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <PurchasesNav />
+        <FilterPills
+          activeKey={tab}
+          items={TABS.map((t) => ({
+            key: t.key,
+            label: t.label,
+            href: `/dashboard/m/accounting/purchases/bills?tab=${t.key}`,
+          }))}
+          className="print:hidden"
+        />
       </div>
 
-      {data.bills.length === 0 ? (
-        <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          No bills here yet. Create one, or open the Inbox and use “Create
-          bill” on an emailed bill.
-        </p>
-      ) : (
+      <DataTable
+        isEmpty={data.bills.length === 0}
+        empty={
+          <EmptyState
+            icon={<ShoppingCart />}
+            title={tab === "all" ? "Record your first bill" : "Nothing here"}
+            description={
+              tab === "all"
+                ? "Add one directly, or open the Inbox and use “Create bill” on an emailed one."
+                : "Another status filter may have what you are after."
+            }
+            action={
+              tab === "all" ? (
+                <Button asChild size="sm">
+                  <Link href="/dashboard/m/accounting/purchases/bills/new">
+                    New bill
+                  </Link>
+                </Button>
+              ) : undefined
+            }
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -198,7 +221,7 @@ export default async function BillsPage({
             })}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
     </div>
   );
 }

@@ -10,7 +10,9 @@ import {
   buildReminderEmail,
   reminderIdempotencyKey,
   reminderKeyPrefix,
+  reminderTestIdempotencyKey,
   sentOffsetsFromKeys,
+  testSubject,
 } from "../src/modules/accounting/invoicing/reminder-email";
 
 /**
@@ -157,6 +159,37 @@ describe("reminderIdempotencyKey", () => {
     const theirs = reminderIdempotencyKey(OTHER, 7, "a@b.com");
     expect(mine.startsWith(reminderKeyPrefix(INV))).toBe(true);
     expect(theirs.startsWith(reminderKeyPrefix(INV))).toBe(false);
+  });
+
+  it("keeps a TEST send out of the real namespace entirely", () => {
+    // THE PROPERTY THE TEST BUTTON RESTS ON. If a test send counted as an
+    // offset already sent, pressing "Test" on the 7-day wording would stop the
+    // customer ever getting the real 7-day reminder — a test that silently
+    // breaks the feature it is testing.
+    const testKey = reminderTestIdempotencyKey(INV, 7, "me@biz.com", "2026-08-12T09:30");
+    expect(testKey.startsWith("reminder-test:")).toBe(true);
+    expect(testKey.startsWith(reminderKeyPrefix(INV))).toBe(false);
+    expect(sentOffsetsFromKeys([testKey])).toEqual([]);
+
+    // ...and it does not collide with the real key for the same offset.
+    expect(testKey).not.toBe(reminderIdempotencyKey(INV, 7, "me@biz.com"));
+  });
+
+  it("lets a deliberate re-test through, but not a double-click", () => {
+    const at = (nonce: string) =>
+      reminderTestIdempotencyKey(INV, 7, "me@biz.com", nonce);
+    // Same minute → same key → the log dedupes it into one email.
+    expect(at("2026-08-12T09:30")).toBe(at("2026-08-12T09:30"));
+    // A minute later → a new key → it sends again, which is the point.
+    expect(at("2026-08-12T09:31")).not.toBe(at("2026-08-12T09:30"));
+  });
+
+  it("marks the subject and leaves the body alone", () => {
+    // The body must stay byte-identical: reading what the customer would read
+    // is the entire reason to press the button.
+    expect(testSubject("Overdue: invoice INV-0007 from Upward LLC")).toBe(
+      "[Test] Overdue: invoice INV-0007 from Upward LLC",
+    );
   });
 
   it("ignores keys it cannot parse instead of throwing", () => {

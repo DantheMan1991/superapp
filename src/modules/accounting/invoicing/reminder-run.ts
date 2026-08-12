@@ -5,13 +5,12 @@ import { sendEmail } from "@/lib/email/send";
 import { preferredContactValue } from "@/lib/parties/contact-values";
 import { listContactPoints } from "@/lib/parties/contacts";
 import { localHourInTimezone, todayInTimezone } from "@/lib/timezone";
-import { renderInvoicePdf } from "./invoice-pdf";
 import {
-  buildReminderEmail,
   reminderIdempotencyKey,
   reminderKeyPrefix,
   sentOffsetsFromKeys,
 } from "./reminder-email";
+import { renderReminderMessage } from "./reminder-render";
 import {
   dueReminderOffset,
   parseOffsets,
@@ -340,30 +339,10 @@ export async function runInvoiceReminders(
           continue;
         }
         try {
-          const email = buildReminderEmail({
+          // Shared with the owner's test-send button — see reminder-render.ts
+          // for why there is exactly one of these.
+          const { email, pdf } = await renderReminderMessage(item.due, {
             businessName: work.businessName,
-            invoiceNumber: item.due.invoiceNumber,
-            customerName: item.due.customerName,
-            balanceCents: item.due.balanceCents,
-            dueDate: item.due.dueDate,
-            offset: item.due.offset,
-            memo: item.due.memo,
-          });
-
-          // The invoice AS ISSUED, not the balance. A reminder that attaches a
-          // document whose total silently equals the outstanding amount is a
-          // different invoice from the one the customer agreed to, and the
-          // first person to notice would be their bookkeeper.
-          const pdf = await renderInvoicePdf({
-            businessName: work.businessName,
-            invoiceNumber: item.due.invoiceNumber,
-            status: item.due.status,
-            issueDate: item.due.issueDate,
-            dueDate: item.due.dueDate,
-            memo: item.due.memo,
-            totalCents: item.due.totalCents,
-            paidCents: item.due.paidCents,
-            customerName: item.due.customerName,
             customerAddress: item.customerAddress,
             customerEmail: item.customerEmail,
             lines: item.lines,

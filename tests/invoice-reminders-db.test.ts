@@ -13,7 +13,11 @@ import {
 } from "../src/modules/accounting/invoicing/invoices";
 import { recordPayment } from "../src/modules/accounting/invoicing/payments";
 import { remindersDueForTenant } from "../src/modules/accounting/invoicing/reminder-run";
-import { reminderIdempotencyKey } from "../src/modules/accounting/invoicing/reminder-email";
+import {
+  reminderIdempotencyKey,
+  reminderTestIdempotencyKey,
+} from "../src/modules/accounting/invoicing/reminder-email";
+import { sendTestReminder } from "../src/modules/accounting/invoicing/reminder-test";
 import {
   getReminderSettings,
   listInvoiceReminders,
@@ -361,6 +365,89 @@ d("invoice reminders (DB)", () => {
     );
     expect(history.map((h) => h.offset).sort((x, y) => x - y)).toEqual([0, 7]);
     expect(history.every((h) => h.status === "sent")).toBe(true);
+  });
+
+  // ------------------------------------------------------------- test sends
+
+  it("a TEST send never suppresses the real reminder for that offset", async () => {
+    // The same property the pure test pins, proved against the real query —
+    // the sweep's `like('reminder:%')` must not match `reminder-test:%`.
+    const inv = await issuedInvoice("2026-06-15");
+    const to = "owner@example.com";
+    await withSystem(async (tx) => {
+      await tx.insert(schema.outboundEmails).values([
+        {
+          tenantId,
+          kind: "invoice_reminder_test",
+          toAddress: to,
+          toDomain: "example.com",
+          subject: "[Test] reminder",
+          status: "sent",
+          idempotencyKey: reminderTestIdempotencyKey(inv.id, 7, to, "2026-06-22T08:00"),
+        },
+      ]);
+    });
+
+    const rows = await due("2026-06-22");
+    expect(rows.find((r) => r.invoiceId === inv.id)?.offset).toBe(7);
+  });
+
+  it("a test send stays out of the customer-facing history", async () => {
+    const inv = await issuedInvoice("2026-06-15");
+    const to = "owner@example.com";
+    await withSystem(async (tx) => {
+      await tx.insert(schema.outboundEmails).values([
+        {
+          tenantId,
+          kind: "invoice_reminder_test",
+          toAddress: to,
+          toDomain: "example.com",
+          subject: "[Test] reminder",
+          status: "sent",
+          idempotencyKey: reminderTestIdempotencyKey(inv.id, 0, to, "2026-06-15T08:00"),
+        },
+      ]);
+    });
+    // The panel answers "what did the CUSTOMER receive", so a test is not it.
+    const history = await withTenant(tenantId, (tx) =>
+      listInvoiceReminders(tx, tenantId, inv.id),
+    );
+    expect(history).toHaveLength(0);
+  });
+
+  it("refuses to preview an invoice with nothing to chase", async () => {
+    const noDue = await issuedInvoice(null);
+    await expect(
+      withTenant(tenantId, (tx) =>
+        sendTestReminder(tx, owner, { invoiceId: noDue.id, nonce: "n" }),
+      ),
+    ).rejects.toThrow(/REMINDER_NOT_TESTABLE|due date/i);
+
+    const paid = await issuedInvoice("2026-06-15", 10_000);
+    await withTenant(tenantId, (tx) =>
+      recordPayment(tx, owner, {
+        invoiceId: paid.id,
+        expectedVersion: paid.version,
+        paymentDate: "2026-06-10",
+        amountCents: 10_000,
+        depositAccountId: bankLedgerAccountId,
+        method: "check",
+      }),
+    );
+    await expect(
+      withTenant(tenantId, (tx) =>
+        sendTestReminder(tx, owner, { invoiceId: paid.id, nonce: "n" }),
+      ),
+    ).rejects.toThrow(/REMINDER_NOT_TESTABLE|unpaid/i);
+  });
+
+  it("is an owner action", async () => {
+    const inv = await issuedInvoice("2026-06-15");
+    await expect(
+      withTenant(tenantId, (tx) =>
+        sendTestReminder(tx, staff, { invoiceId: inv.id, nonce: "n" }),
+      ),
+    ).rejects.toThrow(/FORBIDDEN|owner/i);
   });
 
   // --------------------------------------------------------------------- cap

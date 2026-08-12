@@ -13,6 +13,39 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — "Send this reminder to me" (branch `claude/accounting-reminder-test`)
+
+Reminders shipped with no way to watch one work short of switching them on
+over real customers and waiting for 8am. This is the missing half.
+
+- **One renderer, not two.** `reminder-render.ts` was extracted from the sweep
+  so the nightly job and the test button build the identical message. Two code
+  paths that build "the same" email is exactly how a test button becomes
+  reassuring and wrong, so the extraction is the feature — the button is the
+  easy part.
+- **The test key lives outside the real namespace**, `reminder-test:` rather
+  than `reminder:`, and that one character does three jobs:
+  `sentOffsetsFromKeys` requires the first segment to be exactly `reminder`, the
+  sweep's `like('reminder:%')` does not match it, and `listInvoiceReminders`
+  filters it out. So **testing the 7-day wording cannot stop the real 7-day
+  reminder going out**, and the history panel keeps meaning "what the customer
+  received". Pinned by a pure test and again by a DB test.
+- **The nonce is a minute bucket**, so a double-clicked button is one email
+  while a deliberate re-test a minute later sends again. That inverts the real
+  key's rule deliberately: here, sending again is the point. Computed in the
+  action, so the key builder stays clock-free and table-testable.
+- **The subject is marked `[Test]` and the body is byte-identical.** Reading
+  what the customer would read is the whole reason to press it; the subject
+  carries the warning so a forwarded copy cannot be mistaken for the real one.
+- **The recipient is the owner's own address from `profiles`**, never a
+  parameter — the same rule the digest follows. The invoice id is the only
+  thing the client chooses; which offset gets previewed is decided server-side.
+- **It works while reminders are OFF**, which is when somebody most wants to
+  read one. When the schedule has already run its course the last offset is
+  used as the stand-in.
+- New `EmailKind` `invoice_reminder_test`, so test sends are trivially
+  separable in the log.
+
 ### 2026-08-11 — Automatic overdue reminders (branch `claude/accounting-overdue-reminders`)
 
 The first thing in the module that **emails a person with nobody at the
@@ -59,8 +92,10 @@ keyboard**. Everything below follows from that one fact.
   cannot silence another's reminder. Found while writing them:
   **`outbound_emails` refuses a member INSERT outright**, so that log cannot be
   forged from inside a tenant at all.
-- **Still unproven by a human:** nothing has watched a real reminder arrive.
-  The cron needs `CRON_SECRET` set and a tenant with reminders switched on.
+- ~~**Still unproven by a human:** nothing has watched a real reminder
+  arrive.~~ Addressed 2026-08-12 by the test-send button above — press Test on
+  any row of `/sales/reminders`. The unattended cron path still needs
+  `CRON_SECRET` set and a tenant with reminders switched on.
 
 ### 2026-08-10 — UI: the nav collapses, and three contrast failures go with it (branch `claude/ui-foundation`)
 
@@ -281,6 +316,7 @@ sentence rather than leaving it aspirational.
 ## Key files & seams
 
 - `src/modules/accounting/` — `core/` (posting engine, reports, reconciliation), `banking/`, `invoicing/`, `documents/`, `payables/`, `close/`, `export/`, `ai/` (shared engine pattern), `templates/` (COA)
+- `invoicing/reminder-render.ts` is the single place a reminder message is built — the sweep and the owner's test send both go through it, deliberately
 - `invoicing/reminder-schedule.ts` and `invoicing/reminder-email.ts` are **pure** for the same reason, and it matters most here: this is the one path that emails somebody nobody on our side chose, so proving its behaviour on a table of cases is the control. `reminder-run.ts` (the sweep) only finds rows and sends; it decides nothing
 - `banking/rules-match.ts` and `banking/rules-learn.ts` are **pure** (no `server-only`) — all the deciding lives there and is table-tested without a database, exactly as `ai/*-validate.ts` is split from `ai/*-code.ts`. The rules form imports `ruleConditionsSchema` from the matcher so the client validates against the same schema the action re-validates against
 - Tenant UI under `src/app/dashboard/m/accounting/`
@@ -298,6 +334,7 @@ sentence rather than leaving it aspirational.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
 - **Automatic reminders are off until an owner turns them on**, and the switch cannot be turned on with an empty schedule — a control that says on and does nothing is a state somebody discovers three months later.
+- **Anything that previews an outbound message must share the renderer that sends it.** `reminder-render.ts` exists so the test button and the nightly sweep cannot drift; a preview built by its own code path is worse than none, because it is believed. Apply the same rule to any future preview (invoice, statement, digest).
 - **Reminders overtake, they do not queue.** Only the latest applicable offset can fire, so enabling the feature over an old book sends one email per invoice rather than one per missed offset. Nothing else in the module needs this rule; it exists because the alternative loses a client on the first morning.
 - **A rule never overrides the period lock.** Auto-post skips rows dated in a closed period and leaves them for review; the import still succeeds.
 - **Email-in tokens must be lowercase** — mail infra lowercases local parts (found in production, `8147c2d`).

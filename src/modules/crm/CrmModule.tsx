@@ -4,6 +4,10 @@ import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
+import { CrmNav } from "./components/crm-nav";
 import { listRecords } from "./party-ops";
 import { listViews, pinnedViewId, resolveView } from "./view-ops";
 import { decodeConditions, describeFilter } from "./core/views";
@@ -114,42 +118,23 @@ export async function CrmModule({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-brand/15 text-brand-foreground">
-            <Contact className="size-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">CRM</h1>
-            <p className="text-sm text-muted-foreground">
-              Everyone the business deals with, and where each one stands.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button asChild variant="outline">
-            <Link href={`${BASE}/tasks`}>Follow-ups</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`${BASE}/deals`}>Board</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`${BASE}/fields`}>Fields</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`${BASE}/reports`}>Reports</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`${BASE}/automations`}>Automations</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href={`${BASE}/duplicates`}>Duplicates</Link>
-          </Button>
-          <Button asChild>
+      {/*
+        Six of the seven buttons that used to live here were navigation, not
+        actions. They are the `CrmNav` strip below now, which leaves the header
+        with the one thing that actually does something.
+      */}
+      <PageHeader
+        title="CRM"
+        description="Everyone the business deals with, and where each one stands."
+        icon={<Contact />}
+        actions={
+          <Button asChild size="sm">
             <Link href={`${BASE}/records/new`}>Add a record</Link>
           </Button>
-        </div>
-      </div>
+        }
+      />
+
+      <CrmNav />
 
       <ViewControls
         views={views}
@@ -170,24 +155,38 @@ export async function CrmModule({
       */}
       <p className="text-xs text-muted-foreground">{describeFilter(activeConditions)}</p>
 
-      {records.length === 0 ? (
-        <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          {isFiltered
-            ? "Nothing matches that."
-            : "No records yet. Add the first one above — anyone you invoice or buy from already appears here."}
-        </p>
-      ) : (
-        <ul className="divide-y rounded-md border">
+      <Panel
+        isEmpty={records.length === 0}
+        empty={
+          <EmptyState
+            icon={<Contact />}
+            title={isFiltered ? "Nothing matches that" : "Add your first record"}
+            description={
+              isFiltered
+                ? "Loosen a filter, or clear them to see everyone."
+                : "Anyone you invoice or buy from already appears here — the party spine means a customer and a vendor can be the same record."
+            }
+            action={
+              isFiltered ? undefined : (
+                <Button asChild size="sm">
+                  <Link href={`${BASE}/records/new`}>Add a record</Link>
+                </Button>
+              )
+            }
+          />
+        }
+      >
+        <ul className="divide-y divide-divider">
           {records.map(({ party, details, isCustomer, isVendor }) => (
             <li key={party.id}>
               <Link
                 href={`${BASE}/records/${party.id}`}
-                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent/40"
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/60"
               >
                 {party.kind === "person" ? (
-                  <User className="size-4 shrink-0 text-muted-foreground" />
+                  <User className="size-4 shrink-0 text-module-accent" />
                 ) : (
-                  <Building2 className="size-4 shrink-0 text-muted-foreground" />
+                  <Building2 className="size-4 shrink-0 text-module-accent" />
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
@@ -213,12 +212,12 @@ export async function CrmModule({
                     <Badge variant="outline">Restricted</Badge>
                   )}
                 </div>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                <ChevronRight className="size-4 shrink-0 text-subtle-foreground" />
               </Link>
             </li>
           ))}
         </ul>
-      )}
+      </Panel>
 
       {/*
         THE 500-ROW CAP IS GONE. It used to stop the list and say so, which is

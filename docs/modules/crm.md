@@ -14,6 +14,41 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-10 — UI: CRM gets a sub-nav it never had (branch `claude/ui-crm`)
+
+Presentation and IA — no query, action, schema or policy changed. Vocabulary in
+[design-system.md](design-system.md);
+[ADR 0008](../decisions/0008-warm-neutrals-and-layered-elevation.md) has the why.
+
+- **`CrmNav` is new** (`components/crm-nav.tsx`), a `CategoryStrip` over the
+  module's sections. This module had **no sub-nav at all**: the hub carried
+  **six outline buttons** — Follow-ups, Board, Fields, Reports, Automations,
+  Duplicates — sitting where a page's actions go, so navigation was dressed as
+  actions and the one real action (Add a record) was the seventh button in the
+  row. And no sub-page carried anything, so once you were on Duplicates the only
+  way back was the browser's back button. This is therefore an **IA change**, not
+  only a restyle.
+- **Follow-ups is deliberately absent from the strip.** `/dashboard/m/crm/tasks`
+  is a redirect into Work (slice 5b) and its own header says the route survives
+  "in the CRM nav until every link is chased down" — this is that link, chased
+  down. A strip tab that lands you in another module, with the strip gone and no
+  active state to match, is worse than no tab; Work is already its own row in the
+  rail.
+- **Every page converted.** `text-2xl font-semibold tracking-tight` appears
+  **zero** times under `src/app/dashboard/m/crm/` and `src/modules/crm/`, and the
+  strip renders on all ten real pages. Record rows and the three report lists
+  moved onto `Panel` + `--divider`; the person/company glyphs onto the violet
+  `--module-accent`, so CRM reads violet the way accounting reads emerald and
+  documents amber.
+- **Back links kept only where they mean something.** `pipelines` is reached from
+  the Board and `deals/[dealId]`, `records/[partyId]/deals/new` and
+  `reports/[reportId]` all sit under a section, so their contextual "up" link
+  survives alongside the strip — the same arrangement accounting's bill and
+  invoice detail pages use. The lone "All records" links on the *top-level*
+  sections were removed, because there the strip is the way back.
+- **`tasks` deliberately has no strip.** It is a `redirect()` and renders no UI
+  at all.
+
 ### 2026-08-10 — `crm_tasks` dropped (branch `claude/work-slice-5c`)
 
 The table is gone (`drizzle/0110`). Its rows were copied into `work_items` by

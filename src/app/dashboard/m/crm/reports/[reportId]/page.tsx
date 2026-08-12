@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -124,12 +126,9 @@ export default async function ReportPage({
         All reports
       </Link>
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        <p className="text-sm text-muted-foreground">
-          {describeReport(definition)}
-        </p>
-      </div>
+      <PageHeader title={title} description={describeReport(definition)} />
+
+      <CrmNav />
 
       {/* Controls. Each one is a link that re-runs the query server-side. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">

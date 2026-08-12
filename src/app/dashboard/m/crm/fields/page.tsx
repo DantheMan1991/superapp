@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -7,8 +7,6 @@ import { listFieldDefs } from "@/modules/crm/field-ops";
 import { FieldManager } from "@/modules/crm/components/field-manager";
 
 export const dynamic = "force-dynamic";
-
-const BASE = "/dashboard/m/crm";
 
 /**
  * Custom field settings.
@@ -33,20 +31,12 @@ export default async function FieldsPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" />
-        All records
-      </Link>
+      <PageHeader
+        title="Fields"
+        description="The things this business tracks that the standard fields do not cover."
+      />
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Fields</h1>
-        <p className="text-sm text-muted-foreground">
-          The things this business tracks that the standard fields do not cover.
-        </p>
-      </div>
+      <CrmNav />
 
       {isOwner ? (
         <FieldManager defs={defs} />

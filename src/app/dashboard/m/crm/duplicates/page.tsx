@@ -1,15 +1,16 @@
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { Lock } from "lucide-react";
 import { and, eq, inArray } from "drizzle-orm";
 import { withTenant, schema } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
 import { findMergeCandidates } from "@/modules/crm/merge-ops";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { DuplicateList } from "@/modules/crm/components/duplicate-list";
 
 export const dynamic = "force-dynamic";
-
-const BASE = "/dashboard/m/crm";
 
 /**
  * Duplicates, and the merge tool.
@@ -33,15 +34,15 @@ export default async function DuplicatesPage() {
   if (ctx.role !== "owner") {
     return (
       <div className="mx-auto w-full max-w-3xl space-y-6">
-        <BackLink />
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Duplicates</h1>
-        </div>
-        <p className="rounded-md border px-4 py-3 text-sm text-muted-foreground">
-          Only an owner can merge records. Merging moves invoices and bills onto
-          one customer and cannot be undone, so it is kept to the people who own
-          the books.
-        </p>
+        <PageHeader title="Duplicates" />
+        <CrmNav />
+        <Panel>
+          <EmptyState
+            icon={<Lock />}
+            title="Owners only"
+            description="Merging moves invoices and bills onto one customer and cannot be undone, so it is kept to the people who own the books."
+          />
+        </Panel>
       </div>
     );
   }
@@ -79,29 +80,14 @@ export default async function DuplicatesPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <BackLink />
+      <PageHeader
+        title="Duplicates"
+        description="Records that look like the same business or person. Nothing is merged until you choose which one to keep."
+      />
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Duplicates</h1>
-        <p className="text-sm text-muted-foreground">
-          Records that look like the same business or person. Nothing is merged
-          until you choose which one to keep.
-        </p>
-      </div>
+      <CrmNav />
 
       <DuplicateList candidates={candidates} names={names} />
     </div>
-  );
-}
-
-function BackLink() {
-  return (
-    <Link
-      href={BASE}
-      className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-    >
-      <ChevronLeft className="size-4" />
-      All records
-    </Link>
   );
 }

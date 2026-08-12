@@ -787,3 +787,164 @@ export function buildCashActivity(
   }
   return { groups, period: { from: opts.from, to: opts.to } };
 }
+
+// ------------------------------------------------------------ general ledger
+
+export interface GeneralLedgerInputLine {
+  accountId: string;
+  entryId: string;
+  entryDate: string;
+  /** manual | invoice | bill_payment | … — what created the entry. */
+  source: string;
+  entryMemo: string;
+  lineMemo: string;
+  /** Signed cents, ledger convention: positive = debit. */
+  amountCents: number;
+  lineNo: number;
+}
+
+export interface GeneralLedgerLine {
+  entryId: string;
+  entryDate: string;
+  source: string;
+  entryMemo: string;
+  lineMemo: string;
+  /** Always a positive magnitude; exactly one of the two is non-zero. */
+  debitCents: number;
+  creditCents: number;
+  /** Balance after this line, on the account's natural side (P6). */
+  runningCents: number;
+}
+
+export interface GeneralLedgerAccount {
+  accountId: string;
+  code: string;
+  name: string;
+  accountType: AccountTypeValue;
+  /** Both on the account's natural side (P6), like every other report. */
+  openingCents: number;
+  closingCents: number;
+  debitTotalCents: number;
+  creditTotalCents: number;
+  lines: GeneralLedgerLine[];
+}
+
+export interface GeneralLedgerReport {
+  accounts: GeneralLedgerAccount[];
+  period: { from: string; to: string };
+  totalDebitCents: number;
+  totalCreditCents: number;
+  /** Lines actually rendered. */
+  lineCount: number;
+  /** Lines that matched the period before any cap was applied. */
+  matchedLineCount: number;
+  /**
+   * True when the cap bit, so the report is a PREFIX of the period rather than
+   * the whole of it. Surfaced in the UI and the CSV: a silently truncated
+   * ledger reads as a complete one, which is the worst possible failure for a
+   * report an accountant ties out against.
+   */
+  truncated: boolean;
+}
+
+/**
+ * The general ledger: every posted line in the period, grouped by account,
+ * with an opening balance and a running balance down each account.
+ *
+ * Deterministic order is part of the contract, not an accident of the query
+ * plan — (entryDate, entryId, lineNo). A running balance whose order can shift
+ * between two runs of the same report is worse than no running balance, since
+ * the numbers differ while the totals agree.
+ *
+ * An account with a non-zero opening balance and NO activity is still
+ * included, with an empty line list. That is what makes the closing balances
+ * here reconcile to the trial balance at the same date — omitting those rows
+ * would leave a difference an accountant has to chase.
+ */
+export function buildGeneralLedger(
+  accounts: Account[],
+  opening: BalanceRow[],
+  lines: GeneralLedgerInputLine[],
+  opts: { from: string; to: string; matchedLineCount?: number },
+): GeneralLedgerReport {
+  const openingNet = new Map(opening.map((r) => [r.accountId, r.netCents]));
+
+  const byAccount = new Map<string, GeneralLedgerInputLine[]>();
+  for (const line of lines) {
+    const list = byAccount.get(line.accountId);
+    if (list) list.push(line);
+    else byAccount.set(line.accountId, [line]);
+  }
+
+  const out: GeneralLedgerAccount[] = [];
+  let totalDebit = 0;
+  let totalCredit = 0;
+  let lineCount = 0;
+
+  for (const account of [...accounts].sort((a, b) => a.code.localeCompare(b.code))) {
+    const own = byAccount.get(account.id) ?? [];
+    const openingDisplay = displayCents(
+      account.accountType,
+      openingNet.get(account.id) ?? 0,
+    );
+    // Nothing to say about this account in this period.
+    if (own.length === 0 && openingDisplay === 0) continue;
+
+    own.sort(
+      (a, b) =>
+        a.entryDate.localeCompare(b.entryDate) ||
+        a.entryId.localeCompare(b.entryId) ||
+        a.lineNo - b.lineNo,
+    );
+
+    let running = openingDisplay;
+    let debitTotal = 0;
+    let creditTotal = 0;
+    const built: GeneralLedgerLine[] = own.map((l) => {
+      const debit = l.amountCents > 0 ? l.amountCents : 0;
+      const credit = l.amountCents < 0 ? -l.amountCents : 0;
+      debitTotal += debit;
+      creditTotal += credit;
+      // The running balance moves on the account's natural side, so an expense
+      // account climbs as it is debited and income climbs as it is credited.
+      running += displayCents(account.accountType, l.amountCents);
+      return {
+        entryId: l.entryId,
+        entryDate: l.entryDate,
+        source: l.source,
+        entryMemo: l.entryMemo,
+        lineMemo: l.lineMemo,
+        debitCents: debit,
+        creditCents: credit,
+        runningCents: running,
+      };
+    });
+
+    totalDebit += debitTotal;
+    totalCredit += creditTotal;
+    lineCount += built.length;
+
+    out.push({
+      accountId: account.id,
+      code: account.code,
+      name: account.name,
+      accountType: account.accountType,
+      openingCents: openingDisplay,
+      closingCents: running,
+      debitTotalCents: debitTotal,
+      creditTotalCents: creditTotal,
+      lines: built,
+    });
+  }
+
+  const matched = opts.matchedLineCount ?? lineCount;
+  return {
+    accounts: out,
+    period: { from: opts.from, to: opts.to },
+    totalDebitCents: totalDebit,
+    totalCreditCents: totalCredit,
+    lineCount,
+    matchedLineCount: matched,
+    truncated: matched > lineCount,
+  };
+}

@@ -2,6 +2,7 @@ import { centsToCsvAmount } from "./money";
 import type {
   BalanceSheetReport,
   CashActivityReport,
+  GeneralLedgerReport,
   ProfitAndLossReport,
   ReportRow,
 } from "../core/report-builders";
@@ -137,5 +138,72 @@ export function cashActivityToCsvRows(report: CashActivityReport): string[][] {
       centsToCsvAmount(group.totals.closingCents),
     ]);
   }
+  return rows;
+}
+
+/**
+ * One row per ledger line, with each account's opening and closing as their
+ * own rows so the file reads the way the screen does.
+ *
+ * A truncated report says so IN THE FILE, on the first line. These get emailed
+ * to accountants and opened months later with no memory of the screen that
+ * produced them, so "this is only part of the period" has to travel with the
+ * data rather than sit next to the download button.
+ */
+export function generalLedgerToCsvRows(report: GeneralLedgerReport): string[][] {
+  const rows: string[][] = [];
+  if (report.truncated) {
+    rows.push([
+      `INCOMPLETE — showing the first ${report.lineCount} of ${report.matchedLineCount} lines for ${report.period.from} to ${report.period.to}. Narrow the dates or filter to fewer accounts.`,
+    ]);
+  }
+  rows.push([
+    "Account",
+    "Date",
+    "Source",
+    "Entry memo",
+    "Line memo",
+    "Debit",
+    "Credit",
+    "Balance",
+  ]);
+
+  for (const account of report.accounts) {
+    const label = `${account.code} ${account.name}`;
+    rows.push([label, "", "", "", "Opening balance", "", "", centsToCsvAmount(account.openingCents)]);
+    for (const line of account.lines) {
+      rows.push([
+        label,
+        line.entryDate,
+        line.source,
+        line.entryMemo,
+        line.lineMemo,
+        line.debitCents ? centsToCsvAmount(line.debitCents) : "",
+        line.creditCents ? centsToCsvAmount(line.creditCents) : "",
+        centsToCsvAmount(line.runningCents),
+      ]);
+    }
+    rows.push([
+      label,
+      "",
+      "",
+      "",
+      "Closing balance",
+      centsToCsvAmount(account.debitTotalCents),
+      centsToCsvAmount(account.creditTotalCents),
+      centsToCsvAmount(account.closingCents),
+    ]);
+  }
+
+  rows.push([
+    "Totals",
+    "",
+    "",
+    "",
+    "",
+    centsToCsvAmount(report.totalDebitCents),
+    centsToCsvAmount(report.totalCreditCents),
+    "",
+  ]);
   return rows;
 }

@@ -46,6 +46,42 @@ over real customers and waiting for 8am. This is the missing half.
 - New `EmailKind` `invoice_reminder_test`, so test sends are trivially
   separable in the log.
 
+### 2026-08-11 — General Ledger (branch `claude/accounting-general-ledger`)
+
+The seventh report, and the first one that is line-level rather than
+aggregated. `getBalances` sums; this one lists.
+
+- **It reconciles to the trial balance, and that is the test that matters.**
+  An accountant's first move with a new ledger is to tie it back, and a report
+  that disagrees is not slightly off, it is unusable. Pinned in
+  `tests/reports.test.ts`: every trial-balance row's signed net, converted
+  through `displayCents`, equals that account's GL closing balance.
+- **Accounts with an opening balance and no movement are kept**, with an empty
+  line list. That is *why* the reconciliation holds — dropping them would leave
+  a difference somebody has to chase.
+- **Running balances move on the account's natural side (P6)**, so income
+  climbs when credited, while the Debit and Credit columns stay ledger-side and
+  positive. The builder sorts by `(entryDate, entryId, lineNo)` itself rather
+  than trusting the query plan: a running balance whose order can shift between
+  two runs of the same report is worse than none, because the numbers differ
+  while the totals agree.
+- **ACCRUAL ONLY, deliberately.** Cash basis here is a read-time
+  re-recognition producing per-account *adjustments*, not re-dated journal
+  lines (ADR 0007) — so a cash-basis GL would show synthetic rows no entry
+  backs and nobody can drill into. A ledger you cannot tie back to an entry is
+  worse than one that honestly covers a single basis. Same shape of decision as
+  Cash Activity's missing basis toggle, different reason. To build it properly,
+  build line-level re-dating first, not a toggle.
+- **Capped at 5,000 lines, and it says so.** The cap applies in chronological
+  order, so a truncated report is the earliest part of the period rather than
+  an arbitrary sample; the banner and the **first row of the CSV** both say it
+  is incomplete. A truncated report no longer ties to the trial balance, and
+  the banner says that too.
+- **"Transaction Detail by Account" is this report with one account chosen**,
+  not a second report. `ReportControls` gained an optional `accounts` filter
+  that renders inside its existing GET form.
+- One new query, no schema change, no migration.
+
 ### 2026-08-11 — Automatic overdue reminders (branch `claude/accounting-overdue-reminders`)
 
 The first thing in the module that **emails a person with nobody at the
@@ -320,6 +356,7 @@ sentence rather than leaving it aspirational.
 - `invoicing/reminder-schedule.ts` and `invoicing/reminder-email.ts` are **pure** for the same reason, and it matters most here: this is the one path that emails somebody nobody on our side chose, so proving its behaviour on a table of cases is the control. `reminder-run.ts` (the sweep) only finds rows and sends; it decides nothing
 - `banking/rules-match.ts` and `banking/rules-learn.ts` are **pure** (no `server-only`) — all the deciding lives there and is table-tested without a database, exactly as `ai/*-validate.ts` is split from `ai/*-code.ts`. The rules form imports `ruleConditionsSchema` from the matcher so the client validates against the same schema the action re-validates against
 - Tenant UI under `src/app/dashboard/m/accounting/`
+- **Reports are all the same two pieces**: a pure builder in `core/report-builders.ts` (fixture-testable, no database, no division) and a thin fetch wrapper in `core/reports.ts`. `getBalances` is the one aggregate engine they share; the General Ledger is the only one that also runs its own line-level query, because it lists rather than sums
 - AI engines all follow the same shape: pure prompt seam + pure validate seam + injectable model call + forced tool_choice + cooldown; suggestions never post — a human accepts
 
 ## Decisions & gotchas
@@ -331,6 +368,8 @@ sentence rather than leaving it aspirational.
   invoice and bill documents are re-recognised; a hand-written entry crediting
   AP has no payment to re-date to and stays put. See [ADR 0007](../decisions/0007-cash-basis-reporting.md).
 - **Reports carry a basis.** Accrual is the default and the ledger as posted; cash re-recognises invoice income and bill expense on their payment dates ([ADR 0007](../decisions/0007-cash-basis-reporting.md)). Cash basis is derived at read time — there is no second ledger, and nothing about it is ever posted.
+- **Two reports have NO basis toggle, for two different reasons.** Cash Activity reads only registers, which the adjustment never touches, so both bases give the same numbers. The General Ledger is line-level, and cash basis produces per-account adjustments rather than re-dated lines — a cash-basis GL could only show synthetic rows nobody can drill into. Neither omission is an oversight; do not "finish" either by adding the control.
+- **A report that truncates says so, in the file as well as on screen.** The General Ledger's 5,000-line cap writes an `INCOMPLETE` first row into the CSV, because these files are opened months later with no memory of the screen that produced them.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
 - **Automatic reminders are off until an owner turns them on**, and the switch cannot be turned on with an empty schedule — a control that says on and does nothing is a state somebody discovers three months later.
@@ -357,4 +396,5 @@ hand before building on either screen.
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)
 - **Invoice delivery is done** (PDF + email, 2026-08-10). What is NOT built: a `Viewed` signal, which would need a tracked open or a public link — and a public payor view is deliberately not planned, since payment processing for tenants' customers is out of scope by design
 - **Automatic overdue reminders are DONE** (2026-08-11) — see the build log. What is not built: a reminder for **bills we owe** (the AP mirror), and reminder wording an owner can edit, both deliberately left until somebody asks
-- From the 2026-08-10 QuickBooks review, in rough value order: **General Ledger** and **Transaction Detail by Account** (we ship 6 reports); **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists
+- **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
+- From the 2026-08-10 QuickBooks review, the rest in rough value order: **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists

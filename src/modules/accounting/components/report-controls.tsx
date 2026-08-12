@@ -35,6 +35,8 @@ export function ReportControls({
   dimensionTypes,
   basis,
   showBasis,
+  account,
+  accounts,
 }: {
   mode: "range" | "asOf";
   today: string;
@@ -50,6 +52,16 @@ export function ReportControls({
   /** Omit on reports that read the same on either basis (Cash Activity). */
   basis?: string;
   showBasis?: boolean;
+  /** Currently selected account id, or "" for all. General Ledger only. */
+  account?: string;
+  /**
+   * Narrow the report to one account. Passing the list turns the control on.
+   *
+   * On the General Ledger this is what makes "Transaction Detail by Account"
+   * the same report rather than a second one — the two differ only by whether
+   * an account is chosen.
+   */
+  accounts?: Array<{ id: string; code: string; name: string }>;
 }) {
   const [range, setRange] = useState({ from: from ?? today, to: to ?? today });
   const [preset, setPreset] = useState<RangePreset>("custom");
@@ -138,6 +150,27 @@ export function ReportControls({
           >
             <option value="accrual">Accrual</option>
             <option value="cash">Cash</option>
+          </select>
+        </div>
+      )}
+
+      {accounts && accounts.length > 0 && (
+        <div className="space-y-1.5">
+          <Label htmlFor="account" className="text-xs text-muted-foreground">
+            Account
+          </Label>
+          <select
+            id="account"
+            name="account"
+            defaultValue={account ?? ""}
+            className="border-input h-9 w-64 rounded-md border bg-transparent px-3 text-sm shadow-xs"
+          >
+            <option value="">All accounts</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.code} · {a.name}
+              </option>
+            ))}
           </select>
         </div>
       )}

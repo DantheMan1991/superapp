@@ -16,6 +16,7 @@ import {
   friendlyMessage,
   getBalanceSheet,
   getCashActivity,
+  getGeneralLedger,
   getProfitAndLoss,
   postDraft,
   postEntry,
@@ -27,6 +28,7 @@ import {
 import {
   balanceSheetToCsvRows,
   cashActivityToCsvRows,
+  generalLedgerToCsvRows,
   pnlToCsvRows,
   toCsv,
 } from "./lib/csv";
@@ -447,6 +449,14 @@ const exportCsvSchema = z.discriminatedUnion("report", [
     from: dateStr,
     to: dateStr,
   }),
+  z.object({
+    report: z.literal("general-ledger"),
+    from: dateStr,
+    to: dateStr,
+    // Bounded so a crafted request cannot turn the filter into an enormous
+    // IN list; the COA is nowhere near this many accounts.
+    accountIds: z.array(z.string().uuid()).max(200).optional(),
+  }),
 ]);
 
 /**
@@ -487,6 +497,17 @@ export async function exportReportCsv(
         return {
           filename: `balance-sheet_${p.asOf}_${p.basis ?? "accrual"}.csv`,
           csv: toCsv(balanceSheetToCsvRows(report, p.basis ?? "accrual")),
+        };
+      }
+      if (p.report === "general-ledger") {
+        const report = await getGeneralLedger(tx, ctx.tenantId, {
+          from: p.from,
+          to: p.to,
+          ...(p.accountIds?.length ? { accountIds: p.accountIds } : {}),
+        });
+        return {
+          filename: `general-ledger_${p.from}_${p.to}.csv`,
+          csv: toCsv(generalLedgerToCsvRows(report)),
         };
       }
       const report = await getCashActivity(tx, ctx.tenantId, {

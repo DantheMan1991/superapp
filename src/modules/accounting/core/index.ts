@@ -67,8 +67,10 @@ export {
   type ReconciliationView,
 } from "./reconciliation";
 export {
+  GENERAL_LEDGER_LINE_CAP,
   getBalanceSheet,
   getCashActivity,
+  getGeneralLedger,
   getProfitAndLoss,
 } from "./reports";
 export {
@@ -76,6 +78,7 @@ export {
   PNL_SECTION_BY_SUBTYPE,
   buildBalanceSheet,
   buildCashActivity,
+  buildGeneralLedger,
   buildProfitAndLoss,
   bsGroupFor,
   displayCents,
@@ -83,6 +86,10 @@ export {
   type BalanceSheetReport,
   type CashActivityReport,
   type CashActivityRow,
+  type GeneralLedgerAccount,
+  type GeneralLedgerInputLine,
+  type GeneralLedgerLine,
+  type GeneralLedgerReport,
   type ProfitAndLossReport,
   type ReportColumn,
   type ReportRow,

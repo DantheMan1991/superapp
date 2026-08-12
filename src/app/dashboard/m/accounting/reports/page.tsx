@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BarChart3, Hourglass, Landmark, Wallet } from "lucide-react";
+import { BarChart3, BookOpen, Hourglass, Landmark, Wallet } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { PageHeader } from "@/components/app/page-header";
@@ -21,6 +21,13 @@ const REPORTS = [
     title: "Balance Sheet",
     description:
       "What the business owns and owes as of a date, with computed Retained Earnings and Net Income.",
+  },
+  {
+    href: "/dashboard/m/accounting/reports/general-ledger",
+    icon: BookOpen,
+    title: "General Ledger",
+    description:
+      "Every posted line in the period, by account, with opening and running balances. Pick one account for a transaction detail.",
   },
   {
     href: "/dashboard/m/accounting/reports/cash",

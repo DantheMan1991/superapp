@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
+import { listRecordHistory } from "@/modules/accounting/history/list";
+import { RecordHistory } from "@/modules/accounting/components/record-history";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
 import { loadBillLines, findPossibleDuplicates } from "@/modules/accounting/payables/bills";
 import { paidCentsFor } from "@/modules/accounting/payables/payments";
@@ -105,10 +107,20 @@ export default async function BillDetailPage({
             billDate: bill.billDate,
             excludeBillId: bill.id,
           });
+    // Bill, its payments and its approval entry — a bill payment is audited
+    // against the PAYMENT, so the bill alone would omit the money paid out.
+    const history = await listRecordHistory(tx, ctx.tenant.id, [
+      { type: "bill", id: bill.id },
+      ...payments.map((p) => ({ type: "bill_payment", id: p.id })),
+      ...(bill.journalEntryId
+        ? [{ type: "journal_entry", id: bill.journalEntryId }]
+        : []),
+    ]);
     return {
       bill,
       vendor,
       lines,
+      history,
       accounts,
       allAccounts,
       payments,
@@ -322,6 +334,8 @@ export default async function BillDetailPage({
           </CardContent>
         </Card>
       )}
+
+      <RecordHistory events={data.history} />
 
       <DocumentAttachments
         tenantId={tenantId}

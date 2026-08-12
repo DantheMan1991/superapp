@@ -35,6 +35,8 @@ import {
   getReminderSettings,
   listInvoiceReminders,
 } from "@/modules/accounting/invoicing/reminders";
+import { listRecordHistory } from "@/modules/accounting/history/list";
+import { RecordHistory } from "@/modules/accounting/components/record-history";
 import {
   listPaymentMethods,
   listPaymentTerms,
@@ -117,6 +119,19 @@ export default async function InvoiceDetailPage({
     // send log, so the panel shows delivery status rather than a stored tick.
     const reminders = await listInvoiceReminders(tx, ctx.tenant.id, invoice.id);
     const reminderSettings = await getReminderSettings(tx, ctx.tenant.id);
+    /**
+     * The invoice, its payments and its posting entry. A payment is audited
+     * against the PAYMENT and the posting against the ENTRY, so filtering on
+     * the invoice alone would show "created, issued" and silently omit the
+     * money — see history/list.ts.
+     */
+    const history = await listRecordHistory(tx, ctx.tenant.id, [
+      { type: "invoice", id: invoice.id },
+      ...payments.map((p) => ({ type: "invoice_payment", id: p.id })),
+      ...(invoice.journalEntryId
+        ? [{ type: "journal_entry", id: invoice.journalEntryId }]
+        : []),
+    ]);
     const [productRows, termRows] = await Promise.all([
       listProducts(tx, ctx.tenant.id, { activeOnly: true }),
       listPaymentTerms(tx, ctx.tenant.id, { activeOnly: true }),
@@ -137,6 +152,7 @@ export default async function InvoiceDetailPage({
       sends,
       reminders,
       reminderSettings,
+      history,
       products: productRows.map((p) => ({
         id: p.id,
         name: p.name,
@@ -412,6 +428,8 @@ export default async function InvoiceDetailPage({
           canAct={isOwner}
         />
       </div>
+
+      <RecordHistory events={data.history} />
 
       <div className="print:hidden">
         <DocumentAttachments

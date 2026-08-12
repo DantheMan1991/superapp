@@ -370,6 +370,107 @@ export interface MailContactSource {
   ): Promise<MailContactCandidate[]>;
 }
 
+/* -- Drafting a record from a conversation -------------------------------- */
+
+/**
+ * A conversation, reduced to what a drafter needs: who said what, in order.
+ *
+ * MAIL FETCHES THIS, NOT THE EXTENSION, and that is the whole reason the seam
+ * is shaped this way. Message bodies are not in our database — `mail_thread_index`
+ * holds metadata only — and `mail_accounts` is scoped to ONE USER by RLS
+ * (`0043`), because a thread is somebody's private correspondence. So the text
+ * can only be read by the mailbox's owner, through their own JMAP connection,
+ * which is mail's job. An extension is handed the text and never goes looking
+ * for it.
+ */
+export interface DraftableThread {
+  subject: string;
+  /** Oldest first. Plain text, already stripped of quoting and size-capped. */
+  messages: Array<{
+    /** Display address of the sender, for matching a party. */
+    from: string;
+    /** ISO date the message was sent. */
+    date: string;
+    text: string;
+  }>;
+}
+
+export interface DraftedLine {
+  description: string;
+  /** Decimal string, the module's own quantity convention. */
+  quantity: string;
+  unitPriceCents: number;
+  /**
+   * Which message this figure came from, and the words relied on.
+   *
+   * `verified` is set by the drafter, not the model: it means the quote was
+   * found in the message it claims to come from. An unverified line is still
+   * SHOWN — silently dropping a figure somebody may be owed is its own kind of
+   * wrong — but it arrives unticked, so it cannot be accepted by inattention.
+   */
+  citation: {
+    messageIndex: number;
+    quote: string;
+    verified: boolean;
+  } | null;
+}
+
+export interface DraftedRecord {
+  /** "invoice" | "bill" — which direction this conversation implies. */
+  kind: string;
+  /** Matched party, or null when the drafter could not recognise one. */
+  partyId: string | null;
+  partyName: string;
+  issueDate: string;
+  dueDate: string | null;
+  lines: DraftedLine[];
+  /** What the drafter could not determine, shown as caveats above the lines. */
+  caveats: string[];
+}
+
+/**
+ * Reading a conversation and proposing a business record from it.
+ *
+ * The one place this product can lead rather than catch up: we own the
+ * mailbox, the documents and the ledger, so "turn this agreement into an
+ * invoice, and show me the sentence that justifies each line" is a question
+ * only we are positioned to answer.
+ *
+ * THE PROPOSAL IS NEVER POSTED. `accept` creates a DRAFT, exactly like every
+ * other AI surface in the product — a human reads the evidence and presses the
+ * button. See docs/modules/accounting.md.
+ */
+export interface MailThreadDrafter {
+  /** Stable key, also the `DraftedRecord.kind`. */
+  kind: string;
+  /** Button label, e.g. "Draft an invoice". */
+  label: string;
+  /**
+   * Propose a record from the conversation, or null when there is nothing to
+   * propose. Takes the caller's `tx` (rule 1) so it can only read what the
+   * person asking may read.
+   *
+   * Throwing is allowed here, unlike `search`/`resolve`: this runs from an
+   * explicit button press with somewhere to show the error, not while
+   * rendering the inbox.
+   */
+  draft(
+    tx: Tx,
+    ctx: EntityLinkCtx,
+    thread: DraftableThread,
+  ): Promise<DraftedRecord | null>;
+  /**
+   * Turn a reviewed proposal into a real draft record, returning its ref so
+   * mail can link the thread to it. Re-validates everything: the record
+   * arriving here has been through a browser and is untrusted input.
+   */
+  accept(
+    tx: Tx,
+    ctx: EntityLinkCtx,
+    record: DraftedRecord,
+  ): Promise<LinkableEntityRef>;
+}
+
 /* -- The extension itself ------------------------------------------------ */
 
 export interface MailExtension {
@@ -393,4 +494,9 @@ export interface MailExtension {
   images?: MailImageSource;
   /** People the composer can address. Accounting implements it; a CRM would too. */
   contacts?: MailContactSource;
+  /**
+   * Records this module can draft from a conversation. Accounting contributes
+   * an invoice and a bill; a future layer could contribute a job or a quote.
+   */
+  drafters?: readonly MailThreadDrafter[];
 }

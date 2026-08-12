@@ -13,6 +13,54 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — Draft an invoice or bill from an email thread (branch `claude/accounting-invoice-from-thread`)
+
+The one place this product can lead rather than catch up: we own the mailbox,
+the documents and the ledger, so "turn this agreement into an invoice, and show
+me the sentence that justifies each line" is a question only we are positioned
+to answer.
+
+- **CITATIONS ARE THE FEATURE.** Every proposed line quotes the message it came
+  from, and `ai/thread-draft-validate.ts` checks that the quote **actually
+  appears in that message**. Whitespace is forgiven (mail bodies get re-wrapped
+  in transit); punctuation, spelling and word order are not, so a paraphrase
+  fails. This is what lets a reader trust the output in the five seconds they
+  will actually give it.
+- **An unverified line is KEPT, FLAGGED, and unticked** — never silently
+  dropped. Hiding a figure somebody may be owed is its own kind of wrong, and
+  the reader has the conversation open behind the dialog. The failure mode is
+  "look at this one", not "this quietly vanished".
+- **The architecture was decided by RLS, not by taste.** Message bodies are not
+  in our database (`mail_thread_index` is metadata only) and `mail_accounts` is
+  scoped to ONE USER (`0043`), because a thread is private correspondence. So
+  only the mailbox's owner can obtain the text — mail fetches it and hands it
+  over; the extension never goes looking. That is why this cannot live on the
+  invoice page.
+- **New mail-extension hook, `drafters`.** Accounting contributes two; a future
+  layer could contribute a job or a quote. Mail still never imports a module —
+  `registry.ts` remains the only meeting point, and eslint still enforces it.
+- **Bills get uncoded lines on purpose.** `bill_lines.account_id` is nullable by
+  design (P9), so a drafted bill lands uncoded and the existing bill-coding AI
+  does the categorising it is already good at. Invoices cannot do the same —
+  `invoice_lines.income_account_id` is required — so every drafted line lands on
+  the lowest-numbered active income account and the reviewer re-points it. The
+  prompt is deliberately NOT given the chart of accounts: the hard part of
+  reading a thread is what was agreed and for how much, and adding
+  categorisation makes it worse at the part that matters.
+- **Thinking is ON for this engine**, unlike the four older ones which pin it
+  off to preserve their `claude-opus-4-8` behaviour. Deciding whether a
+  conversation contains an actual agreement is exactly the reasoning
+  `src/lib/claude.ts` says to give room to.
+- A malformed payload and "nothing was agreed here" render almost identically —
+  an empty line list — so the validator distinguishes them explicitly and the
+  reader is told which they are looking at. Found by a test.
+- **Deliberately NOT built:** the accepted draft is not auto-linked back to the
+  thread. Linking in this product *publishes* a filed copy into Documents
+  (see [email.md](email.md)), which is a heavier act than this flow should
+  perform silently — the memo records the provenance and the existing
+  "Attach to…" button is one click away. Migration `0115` adds the cooldown
+  marker only.
+
 ### 2026-08-12 — P&L by Month (branch `claude/accounting-pnl-by-month`)
 
 The column spread the by-dimension P&L already had, pointed at time instead of
@@ -411,6 +459,7 @@ sentence rather than leaving it aspirational.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
 - **Automatic reminders are off until an owner turns them on**, and the switch cannot be turned on with an empty schedule — a control that says on and does nothing is a state somebody discovers three months later.
+- **An AI claim about a source is checked against the source.** The thread drafter verifies every quote appears in the message it cites; an unverifiable one is shown flagged and unticked, never dropped and never presented as fact. Any future "the assistant found this in X" owes the reader the same check — a citation nobody verifies is worse than no citation, because it is believed.
 - **Anything that previews an outbound message must share the renderer that sends it.** `reminder-render.ts` exists so the test button and the nightly sweep cannot drift; a preview built by its own code path is worse than none, because it is believed. Apply the same rule to any future preview (invoice, statement, digest).
 - **Reminders overtake, they do not queue.** Only the latest applicable offset can fire, so enabling the feature over an old book sends one email per invoice rather than one per missed offset. Nothing else in the module needs this rule; it exists because the alternative loses a client on the first morning.
 - **A rule never overrides the period lock.** Auto-post skips rows dated in a closed period and leaves them for review; the import still succeeds.
@@ -443,4 +492,5 @@ compiled-and-tested, not seen.
 - **Automatic overdue reminders are DONE** (2026-08-11) — see the build log. What is not built: a reminder for **bills we owe** (the AP mirror), and reminder wording an owner can edit, both deliberately left until somebody asks
 - **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
 - **P&L by Month is DONE** (2026-08-12) — the by-dimension column spread generalized to time. What is NOT built: quarter and year columns, which the same `periods` seam would carry with a different bucketer
-- From the 2026-08-10 QuickBooks review, the rest in rough value order: drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists
+- **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
+- From the 2026-08-10 QuickBooks review, the rest in rough value order: Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists

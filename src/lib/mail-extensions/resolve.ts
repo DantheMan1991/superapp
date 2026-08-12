@@ -10,6 +10,7 @@ import type {
   MailExtensionCtx,
   MailContactCandidate,
   MailImageCandidate,
+  MailThreadDrafter,
 } from "./types";
 
 /**
@@ -324,4 +325,36 @@ export function templateContributors(
  */
 export function allTemplateContributors(): MailEntityType[] {
   return templateContributors(mailExtensions);
+}
+
+/**
+ * Every record-drafter the enabled modules contribute, flattened.
+ *
+ * Flat rather than grouped, like the contact sources: the reading pane shows
+ * one short row of "Draft an invoice / Draft a bill" buttons, and which module
+ * supplied each is not something the reader needs to think about.
+ */
+export function draftersFrom(
+  extensions: readonly MailExtension[],
+): Array<{ extension: MailExtension; drafter: MailThreadDrafter }> {
+  const out: Array<{ extension: MailExtension; drafter: MailThreadDrafter }> = [];
+  for (const extension of extensions) {
+    for (const drafter of extension.drafters ?? []) {
+      out.push({ extension, drafter });
+    }
+  }
+  return out;
+}
+
+/** One drafter by (extension slug, kind), for dispatching an action. */
+export function findDrafter(
+  extensions: readonly MailExtension[],
+  extensionSlug: string,
+  kind: string,
+): { extension: MailExtension; drafter: MailThreadDrafter } | null {
+  return (
+    draftersFrom(extensions).find(
+      (d) => d.extension.slug === extensionSlug && d.drafter.kind === kind,
+    ) ?? null
+  );
 }

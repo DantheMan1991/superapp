@@ -116,7 +116,6 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `FilterPills` | no | Underlined filter tab rows |
 | `CategoryStrip` | **yes** | Wrapping module tab rows (`AccountingNav`, `DocumentsNav`) |
 | `Panel` | no | `<Card><CardContent className="p-0">` around a list |
-| `EntityCard` | no | — (new: record-as-card, for grid views) |
 | `SectionRow` | no | — (new: titled band on a hub page) |
 | `CommandPalette` | **yes** | — (new: ⌘K, in the rail) |
 | `icon-registry.ts` | no | The shell's private `ICONS` map |
@@ -197,11 +196,8 @@ sub-nav and a filter row stacked above the first invoice.
   "Jump to a page" so it does not promise records.
 - **`PageHeader` is not sticky.** The plan called for it; left out of the
   foundation PR rather than destabilise 73 pages at once. It is a prop away.
-- **`EntityCard`'s corner action needs a scrim.** A white glyph over a light
-  monogram is low-contrast; it works over a real thumbnail but not over the
-  fallback. `EntityCard` and `SectionRow`'s scrolling variant are both **unused
-  so far** — they land with the documents/mail PR, and neither has been seen on a
-  real page yet.
+- **`SectionRow`'s scrolling variant is still unused.** The component itself is
+  in use (the Documents hub), but nothing passes `scroll` yet.
 - **The dashboard logs a Clerk hydration mismatch** in dev, from
   `OrganizationSwitcher` in the sidebar footer. It predates this work (the footer
   JSX is unchanged) but it masks any real hydration bug that shows up later.

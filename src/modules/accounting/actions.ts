@@ -436,6 +436,7 @@ const exportCsvSchema = z.discriminatedUnion("report", [
     to: dateStr,
     compare: z.enum(["prev-period", "prev-year"]).optional(),
     dim: z.string().regex(/^[a-z0-9_]+$/).max(32).optional(),
+    spread: z.literal("month").optional(),
     basis: z.enum(["accrual", "cash"]).optional(),
   }),
   z.object({
@@ -478,13 +479,14 @@ export async function exportReportCsv(
           to: p.to,
           compare: p.compare,
           dimensionType: p.dim,
+          spread: p.spread,
           basis: p.basis,
         });
         return {
           // The basis is in the FILENAME as well as the content: these files
           // get emailed to accountants, and two profit figures for the same
           // period are only safe if you can tell them apart at a glance.
-          filename: `profit-and-loss_${p.from}_${p.to}_${p.basis ?? "accrual"}.csv`,
+          filename: `profit-and-loss${p.spread === "month" ? "-by-month" : ""}_${p.from}_${p.to}_${p.basis ?? "accrual"}.csv`,
           csv: toCsv(pnlToCsvRows(report, p.basis ?? "accrual")),
         };
       }

@@ -37,6 +37,8 @@ export function ReportControls({
   showBasis,
   account,
   accounts,
+  spread,
+  showSpread,
 }: {
   mode: "range" | "asOf";
   today: string;
@@ -62,6 +64,16 @@ export function ReportControls({
    * an account is chosen.
    */
   accounts?: Array<{ id: string; code: string; name: string }>;
+  /**
+   * Column axis: "" for one total column, "month" for P&L by Month.
+   *
+   * Its OWN parameter rather than another value in `dim`, deliberately:
+   * `dimension_members.dimension_type` is free text, not an enum, so a tenant
+   * can legitimately have a dimension called "month" and a shared value space
+   * would collide with it.
+   */
+  spread?: string;
+  showSpread?: boolean;
 }) {
   const [range, setRange] = useState({ from: from ?? today, to: to ?? today });
   const [preset, setPreset] = useState<RangePreset>("custom");
@@ -171,6 +183,23 @@ export function ReportControls({
                 {a.code} · {a.name}
               </option>
             ))}
+          </select>
+        </div>
+      )}
+
+      {showSpread && (
+        <div className="space-y-1.5">
+          <Label htmlFor="spread" className="text-xs text-muted-foreground">
+            Columns
+          </Label>
+          <select
+            id="spread"
+            name="spread"
+            defaultValue={spread === "month" ? "month" : ""}
+            className="border-input h-9 w-36 rounded-md border bg-transparent px-3 text-sm shadow-xs"
+          >
+            <option value="">One total</option>
+            <option value="month">By month</option>
           </select>
         </div>
       )}

@@ -61,7 +61,7 @@ export function pnlToCsvRows(
     const cells: string[] = [indent(row)];
     if (report.columns) {
       cells.push(
-        ...(row.perMemberCents?.map((c) => centsToCsvAmount(c)) ??
+        ...(row.perColumnCents?.map((c) => centsToCsvAmount(c)) ??
           report.columns.map(() => "")),
       );
     } else {

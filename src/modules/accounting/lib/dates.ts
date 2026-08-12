@@ -134,3 +134,59 @@ export function presetRange(
       return { from: todayIso, to: todayIso };
   }
 }
+
+/** Fixed English abbreviations — deterministic, never the runner's locale. */
+const MONTH_ABBR = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+export interface MonthBucket {
+  /** Stable key, `yyyy-mm`. */
+  key: string;
+  /** What the column header reads, e.g. "Mar 2026". */
+  label: string;
+  /** CLIPPED to the requested range, so a part-month is a part-month. */
+  from: string;
+  to: string;
+}
+
+/**
+ * Split a date range into calendar months, clipped at both ends.
+ *
+ * A range of 15 Jan – 20 Mar yields three buckets: 15–31 Jan, all of Feb, and
+ * 1–20 Mar. Clipping rather than rounding out to whole months is what makes
+ * the columns sum to the ungrouped report for the same range — a monthly P&L
+ * whose columns do not add up to the plain one is worse than no monthly P&L.
+ *
+ * Labels are built from a fixed table, not `toLocaleString`: a report header
+ * that reads differently on a machine with a different locale is a bug nobody
+ * finds until an accountant compares two printouts.
+ *
+ * Returns [] when `to` is before `from`, rather than throwing — callers treat
+ * an empty spread as "no columns", which is the same as not asking for one.
+ */
+export function monthsInRange(from: string, to: string): MonthBucket[] {
+  if (to < from) return [];
+  const buckets: MonthBucket[] = [];
+  let { y, m } = parts(from);
+  // Lexical comparison is correct for yyyy-mm-dd and is the module convention.
+  while (iso(y, m, 1) <= to) {
+    const first = iso(y, m, 1);
+    const last = iso(y, m, lastDayOfMonth(y, m));
+    buckets.push({
+      key: `${y}-${pad2(m)}`,
+      label: `${MONTH_ABBR[m - 1]} ${y}`,
+      // Clip: the first bucket starts at `from`, the last ends at `to`.
+      from: first < from ? from : first,
+      to: last > to ? to : last,
+    });
+    if (m === 12) {
+      y += 1;
+      m = 1;
+    } else {
+      m += 1;
+    }
+  }
+  return buckets;
+}

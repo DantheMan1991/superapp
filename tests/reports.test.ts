@@ -27,6 +27,7 @@ import {
 import {
   addDaysIso,
   fiscalYearStart,
+  monthsInRange,
   presetRange,
   previousPeriod,
   previousYear,
@@ -150,6 +151,38 @@ describe("dates (P1/P3)", () => {
       from: "2026-06-14",
       to: "2026-06-14",
     });
+  });
+
+  it("monthsInRange clips the first and last months to the range", () => {
+    // Clipping rather than rounding out to whole months is what makes the
+    // columns sum to the ungrouped report for the same range.
+    const b = monthsInRange("2026-01-15", "2026-03-20");
+    expect(b.map((x) => [x.key, x.from, x.to])).toEqual([
+      ["2026-01", "2026-01-15", "2026-01-31"],
+      ["2026-02", "2026-02-01", "2026-02-28"],
+      ["2026-03", "2026-03-01", "2026-03-20"],
+    ]);
+    expect(b.map((x) => x.label)).toEqual(["Jan 2026", "Feb 2026", "Mar 2026"]);
+  });
+
+  it("monthsInRange handles year boundaries, leap Februaries and a single day", () => {
+    expect(monthsInRange("2025-11-20", "2026-01-05").map((x) => x.key)).toEqual([
+      "2025-11",
+      "2025-12",
+      "2026-01",
+    ]);
+    expect(monthsInRange("2024-02-01", "2024-02-29")[0].to).toBe("2024-02-29");
+    expect(monthsInRange("2026-06-15", "2026-06-15")).toEqual([
+      {
+        key: "2026-06",
+        label: "Jun 2026",
+        from: "2026-06-15",
+        to: "2026-06-15",
+      },
+    ]);
+    // Backwards range is empty rather than an exception — callers treat that
+    // as "no columns", which is the same as not asking for a spread.
+    expect(monthsInRange("2026-06-30", "2026-06-01")).toEqual([]);
   });
 
   it("previousYear shifts both ends", () => {
@@ -314,9 +347,9 @@ describe("P&L builder", () => {
       "Total",
     ]);
     const row = report.rows.find((r) => r.accountId === "opex");
-    expect(row?.perMemberCents).toEqual([3_000, 2_000, 500, 5_500]);
+    expect(row?.perColumnCents).toEqual([3_000, 2_000, 500, 5_500]);
     const totalRow = report.rows.find((r) => r.label === "Net Income");
-    expect(totalRow?.perMemberCents).toEqual([-3_000, -2_000, -500, -5_500]);
+    expect(totalRow?.perColumnCents).toEqual([-3_000, -2_000, -500, -5_500]);
 
     // Cap: 5 members, cap 2 → top-2 + Other + Total.
     const manyMembers = ["m1", "m2", "m3", "m4", "m5"].map((id, i) => ({
@@ -335,7 +368,7 @@ describe("P&L builder", () => {
     );
     expect(capped.columns?.map((c) => c.label)).toEqual(["M4", "M5", "Other", "Total"]);
     const cappedRow = capped.rows.find((r) => r.accountId === "opex");
-    expect(cappedRow?.perMemberCents).toEqual([4_000, 5_000, 6_000, 15_000]);
+    expect(cappedRow?.perColumnCents).toEqual([4_000, 5_000, 6_000, 15_000]);
   });
 
   it("comparison merges one-sided accounts", () => {
@@ -356,6 +389,59 @@ describe("P&L builder", () => {
     expect(opex).toMatchObject({ cents: 0, comparisonCents: 700 });
     expect(report.netIncomeCents).toBe(1_000);
     expect(report.comparisonNetIncomeCents).toBe(-700);
+  });
+
+  it("spreads across month columns, with Total last and summing the rest", () => {
+    // The Total column is summed from the buckets rather than copied from the
+    // ungrouped figure, so this is the calculator check a reader would do.
+    const report = buildProfitAndLoss(accounts, rows, {
+      from: "2026-01-01",
+      to: "2026-03-31",
+      periods: [
+        { key: "2026-01", label: "Jan 2026", rows: [mkRow("sales", -60_000)] },
+        { key: "2026-02", label: "Feb 2026", rows: [mkRow("sales", -30_000)] },
+        {
+          key: "2026-03",
+          label: "Mar 2026",
+          rows: [mkRow("sales", -10_000), mkRow("opex", 5_000)],
+        },
+      ],
+    });
+
+    expect(report.columns?.map((c) => c.label)).toEqual([
+      "Jan 2026",
+      "Feb 2026",
+      "Mar 2026",
+      "Total",
+    ]);
+
+    const sales = report.rows.find((r) => r.accountId === "sales")!;
+    // Income is credit-normal, so credits show positive (P6).
+    expect(sales.perColumnCents).toEqual([60_000, 30_000, 10_000, 100_000]);
+
+    const opex = report.rows.find((r) => r.accountId === "opex")!;
+    expect(opex.perColumnCents).toEqual([0, 0, 5_000, 5_000]);
+
+    // Every row's Total equals the sum of its month columns.
+    for (const row of report.rows) {
+      if (!row.perColumnCents) continue;
+      const cols = row.perColumnCents.slice(0, -1);
+      const total = row.perColumnCents[row.perColumnCents.length - 1];
+      expect(cols.reduce((s, c) => s + c, 0)).toBe(total);
+    }
+  });
+
+  it("has no Other or Unassigned column, unlike the dimension spread", () => {
+    // Every posted line falls in exactly one month, so there is nothing left
+    // over to collect — a column that could only ever be zero would be noise.
+    const report = buildProfitAndLoss(accounts, rows, {
+      from: "2026-01-01",
+      to: "2026-01-31",
+      periods: [
+        { key: "2026-01", label: "Jan 2026", rows: [mkRow("sales", -1_000)] },
+      ],
+    });
+    expect(report.columns?.map((c) => c.key)).toEqual(["2026-01", "total"]);
   });
 });
 
@@ -788,7 +874,7 @@ d("reports integration (DB)", () => {
     );
     const mapleIdx = byDim.columns!.findIndex((c) => c.label === "123 Maple St");
     const repairsRow = byDim.rows.find((r) => r.accountId === repairs);
-    expect(repairsRow?.perMemberCents?.[mapleIdx]).toBe(8_000);
+    expect(repairsRow?.perColumnCents?.[mapleIdx]).toBe(8_000);
 
     const { entry } = await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
@@ -916,5 +1002,72 @@ d("reports integration (DB)", () => {
     expect(gl.lineCount).toBe(2);
     expect(gl.truncated).toBe(true);
     expect(gl.matchedLineCount).toBeGreaterThan(2);
+  });
+
+  /**
+   * THE PROPERTY THAT MAKES P&L BY MONTH TRUSTWORTHY: splitting a period into
+   * columns must not change what it says. A monthly P&L whose columns do not
+   * add back up to the plain one for the same range is worse than no monthly
+   * P&L, because it looks authoritative while disagreeing with the statement
+   * beside it.
+   */
+  it("monthly columns add back up to the same P&L without a spread", async () => {
+    const range = { from: "2025-01-01", to: "2026-12-31" };
+    const [plain, monthly] = await withTenant(tenantId, async (tx) => [
+      await getProfitAndLoss(tx, tenantId, range),
+      await getProfitAndLoss(tx, tenantId, { ...range, spread: "month" }),
+    ]);
+
+    expect(monthly.netIncomeCents).toBe(plain.netIncomeCents);
+    // 24 months plus the Total column.
+    expect(monthly.columns).toHaveLength(25);
+    expect(monthly.columns!.at(-1)!.key).toBe("total");
+
+    const plainByAccount = new Map(
+      plain.rows.filter((r) => r.accountId).map((r) => [r.accountId!, r.cents]),
+    );
+    let checked = 0;
+    for (const row of monthly.rows) {
+      if (!row.accountId || !row.perColumnCents) continue;
+      const cols = row.perColumnCents.slice(0, -1);
+      const total = row.perColumnCents.at(-1)!;
+      // Columns sum to Total, and Total matches the ungrouped figure.
+      expect(cols.reduce((s, c) => s + c, 0)).toBe(total);
+      expect(total).toBe(plainByAccount.get(row.accountId));
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it("refuses an over-long range rather than shortening it silently", async () => {
+    await expect(
+      withTenant(tenantId, (tx) =>
+        getProfitAndLoss(tx, tenantId, {
+          from: "2020-01-01",
+          to: "2026-12-31",
+          spread: "month",
+        }),
+      ),
+    ).rejects.toThrow(/PNL_TOO_MANY_MONTHS|24 months/i);
+  });
+
+  it("a month spread wins the column axis over compare and dim", async () => {
+    // One axis, one occupant — the same v1 pin compare and dim already carry.
+    const report = await withTenant(tenantId, (tx) =>
+      getProfitAndLoss(tx, tenantId, {
+        from: "2026-01-01",
+        to: "2026-03-31",
+        spread: "month",
+        compare: "prev-year",
+        dimensionType: "property",
+      }),
+    );
+    expect(report.comparison).toBeUndefined();
+    expect(report.columns?.map((c) => c.label)).toEqual([
+      "Jan 2026",
+      "Feb 2026",
+      "Mar 2026",
+      "Total",
+    ]);
   });
 });

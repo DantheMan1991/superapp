@@ -13,6 +13,42 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — P&L by Month (branch `claude/accounting-pnl-by-month`)
+
+The column spread the by-dimension P&L already had, pointed at time instead of
+dimension members. Most of this was generalizing what existed rather than
+adding machinery.
+
+- **Columns sum to the ungrouped report, and that is the test that matters.**
+  A monthly P&L whose columns do not add back up to the plain one for the same
+  range is worse than none — it looks authoritative while disagreeing with the
+  statement beside it. Pinned in `tests/reports.test.ts`: every account's Total
+  column equals its `cents` from a spread-less run over the same range.
+- **`monthsInRange` clips the first and last months to the requested range**,
+  so 15 Jan – 20 Mar gives 15–31 Jan, all of Feb, 1–20 Mar. Clipping rather
+  than rounding out to whole months is *why* the columns add up.
+- **Month labels come from a fixed table, never `toLocaleString`.** A report
+  header that reads differently on a machine with a different locale is a bug
+  nobody finds until two printouts get compared.
+- **The Total column is summed from the buckets**, not copied from the
+  ungrouped figure, so it is literally the sum of the columns beside it — the
+  calculator check a reader actually does.
+- **`perMemberCents` → `perColumnCents`.** The name stopped being true the
+  moment a column could be a month; mechanical rename across 7 files.
+- **`spread` is its own query parameter, not another value in `dim`.**
+  `dimension_members.dimension_type` is free text, not an enum, so a tenant can
+  legitimately have a dimension called "month" and a shared value space would
+  collide with it.
+- **One column axis, one occupant.** A month spread now beats both `compare`
+  and `dim`, extending the existing v1 pin. A test caught that the first
+  version suppressed `dim` but not `compare`, which would have left rows
+  carrying a `comparisonCents` nothing rendered and a header saying "vs …"
+  about a comparison that was not on screen.
+- **Over 24 months it REFUSES rather than truncating.** Unlike the General
+  Ledger, where a truncated report still shows real lines, a silently shortened
+  P&L is simply a wrong one. The page catches the error and says so.
+- No schema change, no migration.
+
 ### 2026-08-12 — "Send this reminder to me" (branch `claude/accounting-reminder-test`)
 
 Reminders shipped with no way to watch one work short of switching them on
@@ -369,6 +405,8 @@ sentence rather than leaving it aspirational.
   AP has no payment to re-date to and stays put. See [ADR 0007](../decisions/0007-cash-basis-reporting.md).
 - **Reports carry a basis.** Accrual is the default and the ledger as posted; cash re-recognises invoice income and bill expense on their payment dates ([ADR 0007](../decisions/0007-cash-basis-reporting.md)). Cash basis is derived at read time — there is no second ledger, and nothing about it is ever posted.
 - **Two reports have NO basis toggle, for two different reasons.** Cash Activity reads only registers, which the adjustment never touches, so both bases give the same numbers. The General Ledger is line-level, and cash basis produces per-account adjustments rather than re-dated lines — a cash-basis GL could only show synthetic rows nobody can drill into. Neither omission is an oversight; do not "finish" either by adding the control.
+- **Truncate or refuse, depending on whether a partial answer is still true.** The General Ledger truncates and says so — its lines are real, just fewer. A P&L over too many months REFUSES, because a statement missing three of its months is not a shorter statement, it is a wrong one.
+- **One column axis, one occupant.** `compare`, `dim` and `spread` all want the same columns; a month spread beats both, `compare` beats `dim`. Adding a fourth means picking its place in that order, not adding another optional field.
 - **A report that truncates says so, in the file as well as on screen.** The General Ledger's 5,000-line cap writes an `INCOMPLETE` first row into the CSV, because these files are opened months later with no memory of the screen that produced them.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
@@ -404,4 +442,5 @@ compiled-and-tested, not seen.
 - **Invoice delivery is done** (PDF + email, 2026-08-10). What is NOT built: a `Viewed` signal, which would need a tracked open or a public link — and a public payor view is deliberately not planned, since payment processing for tenants' customers is out of scope by design
 - **Automatic overdue reminders are DONE** (2026-08-11) — see the build log. What is not built: a reminder for **bills we owe** (the AP mirror), and reminder wording an owner can edit, both deliberately left until somebody asks
 - **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
-- From the 2026-08-10 QuickBooks review, the rest in rough value order: **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists
+- **P&L by Month is DONE** (2026-08-12) — the by-dimension column spread generalized to time. What is NOT built: quarter and year columns, which the same `periods` seam would carry with a different bucketer
+- From the 2026-08-10 QuickBooks review, the rest in rough value order: drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists

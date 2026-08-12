@@ -47,7 +47,7 @@ export function ReportTable({
         <TableBody>
           {rows.map((row, i) => {
             const amounts = columns
-              ? (row.perMemberCents ?? columns.map(() => undefined))
+              ? (row.perColumnCents ?? columns.map(() => undefined))
               : [
                   row.cents,
                   ...(comparisonHeader ? [row.comparisonCents] : []),

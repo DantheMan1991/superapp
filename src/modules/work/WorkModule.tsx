@@ -1,3 +1,7 @@
+import Link from "next/link";
+import { ListChecks } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
 import type { TenantContext } from "@/lib/auth";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { todayInTimezone } from "@/lib/timezone";
@@ -155,6 +159,23 @@ export async function WorkModule({
 
   return (
     <div className="space-y-4">
+      {/*
+        This module had NO heading at all — it opened straight onto the filter
+        bar, so the page had no h1 and nothing named it. `Lists` moves up here
+        too: it was the last button in the filter bar's right-hand cluster,
+        after Saved views / Hide finished / Clear, which made the only route to
+        that page a navigation control hidden among filter controls.
+      */}
+      <PageHeader
+        title="Work"
+        description="Everything outstanding, across the whole business."
+        icon={<ListChecks />}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link href="/dashboard/m/work/lists">Lists</Link>
+          </Button>
+        }
+      />
       <FilterBar
         view={view}
         lists={listOptions}

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Columns3, List, Search, X } from "lucide-react";
@@ -222,9 +221,8 @@ export function FilterBar({
               Clear
             </Button>
           )}
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/dashboard/m/work/lists">Lists</Link>
-          </Button>
+          {/* The Lists link moved to the page header — it is navigation, and
+              this cluster is filter controls. See WorkModule.tsx. */}
         </div>
       </div>
     </div>

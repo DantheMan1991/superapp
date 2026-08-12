@@ -55,7 +55,7 @@ export function WorkList({
             {urgencyLabel(group.urgency)}
             <span className="ml-2 tabular-nums">{group.items.length}</span>
           </h2>
-          <ul className="divide-y rounded-lg border">
+          <ul className="divide-y divide-divider rounded-lg border">
             {group.items.map((row) => (
               <li
                 key={row.id}

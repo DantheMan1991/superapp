@@ -49,7 +49,7 @@ export function FeedSubscription({ tokens }: { tokens: FeedTokenRow[] }) {
   }
 
   return (
-    <section className="space-y-3 rounded-md border p-4">
+    <section className="space-y-3 rounded-2xl bg-card p-4 shadow-elevation-1">
       <div>
         <h2 className="flex items-center gap-1.5 text-sm font-medium">
           <Rss className="size-3.5" /> Subscribe from another calendar
@@ -62,7 +62,7 @@ export function FeedSubscription({ tokens }: { tokens: FeedTokenRow[] }) {
       </div>
 
       {minted && (
-        <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+        <div className="space-y-2 rounded-xl border border-warning/40 bg-warning/10 p-3">
           <p className="text-xs font-medium">
             Copy this now — it is not shown again.
           </p>
@@ -89,7 +89,7 @@ export function FeedSubscription({ tokens }: { tokens: FeedTokenRow[] }) {
       )}
 
       {tokens.length > 0 && (
-        <ul className="divide-y rounded-md border">
+        <ul className="divide-y divide-divider rounded-xl border border-border">
           {tokens.map((t) => (
             <li
               key={t.id}

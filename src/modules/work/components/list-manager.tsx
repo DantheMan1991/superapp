@@ -6,6 +6,8 @@ import { Archive, ArchiveRestore, Lock, Pencil, Plus, Users } from "lucide-react
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
 import {
   Dialog,
   DialogContent,
@@ -80,21 +82,22 @@ export function ListManager({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Lists</h1>
-          <p className="text-sm text-muted-foreground">
-            A list is how work is grouped, and the only thing that decides who
-            can see it.
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="mr-1 h-4 w-4" />
-          New list
-        </Button>
-      </div>
+      {/* `PageHeader`, so this is the page's ONE h1. It used to be a `text-xl`
+          heading invented inside this component, which meant the Lists page had
+          no page-level title and its heading did not match any other screen. */}
+      <PageHeader
+        title="Lists"
+        description="A list is how work is grouped, and the only thing that decides who can see it."
+        actions={
+          <Button size="sm" onClick={() => setCreating(true)}>
+            <Plus className="mr-1 h-4 w-4" />
+            New list
+          </Button>
+        }
+      />
 
-      <ul className="divide-y rounded-lg border">
+      <Panel>
+        <ul className="divide-y divide-divider">
         {lists.map((list) => (
           <li key={list.id} className="flex flex-wrap items-center gap-3 p-3">
             <span
@@ -153,8 +156,9 @@ export function ListManager({
               </Button>
             )}
           </li>
-        ))}
-      </ul>
+          ))}
+        </ul>
+      </Panel>
 
       <ListDialog
         open={creating}

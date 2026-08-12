@@ -3,13 +3,9 @@ import { desc, eq, sql as dsql } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { withSystem, schema } from "@/db";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
+import { StatCard } from "@/components/app/stat-card";
+import { DataTable } from "@/components/app/data-table";
 import {
   Table,
   TableBody,
@@ -70,45 +66,34 @@ export default async function AdminClientsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Clients</h1>
-          <p className="text-sm text-muted-foreground">
-            Your whole book of business — prospects through paying clients.
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/admin/clients/new">
-            <Plus className="size-4" /> Add business
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="Clients"
+        description="Your whole book of business — prospects through paying clients."
+        actions={
+          <Button asChild size="sm">
+            <Link href="/admin/clients/new">
+              <Plus className="size-4" /> Add business
+            </Link>
+          </Button>
+        }
+      />
 
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+      {/* These are `StatCard`s in everything but name — the label/value/tabular
+          relationship was hand-built here before the primitive existed. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map((stat) => (
-          <Card key={stat.label} className="py-4">
-            <CardContent className="space-y-1">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {stat.label}
-              </p>
-              <p className="text-2xl font-semibold tabular-nums tracking-tight">
-                {stat.value}
-              </p>
-            </CardContent>
-          </Card>
+          <StatCard key={stat.label} label={stat.label} value={stat.value} />
         ))}
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            {rows.length} client{rows.length === 1 ? "" : "s"}
-          </CardTitle>
-          <CardDescription>
-            Click a row to manage modules, billing, and notes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <div>
+        <h2 className="font-heading font-medium tracking-heading">
+          {rows.length} client{rows.length === 1 ? "" : "s"}
+        </h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          Click a row to manage modules, billing, and notes.
+        </p>
+        <DataTable>
           <Table>
             <TableHeader>
               <TableRow>
@@ -167,8 +152,8 @@ export default async function AdminClientsPage() {
               ))}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+        </DataTable>
+      </div>
     </div>
   );
 }

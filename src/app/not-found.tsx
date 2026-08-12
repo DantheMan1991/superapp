@@ -9,7 +9,7 @@ export default function NotFound() {
         <Compass className="size-7 text-brand-foreground" />
       </div>
       <div className="max-w-sm space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="font-heading text-2xl font-semibold tracking-heading">
           Page not found
         </h1>
         <p className="text-sm text-muted-foreground">

@@ -56,7 +56,7 @@ export default async function AdminRetainersPage() {
       </div>
 
       {running.length > 0 && (
-        <Card className="border-amber-500/50 bg-amber-500/5">
+        <Card className="bg-warning/10 ring-2 ring-warning/40">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Timers running</CardTitle>
             <CardDescription>
@@ -149,7 +149,7 @@ export default async function AdminRetainersPage() {
                     </TableCell>
                     <TableCell>
                       {retainer?.timerStartedAt ? (
-                        <span className="text-xs font-medium text-amber-600">
+                        <span className="text-xs font-medium text-warning-foreground">
                           ● running
                         </span>
                       ) : (

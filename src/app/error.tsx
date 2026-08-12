@@ -21,7 +21,7 @@ export default function ErrorPage({
         <TriangleAlert className="size-7 text-destructive" />
       </div>
       <div className="max-w-sm space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="font-heading text-2xl font-semibold tracking-heading">
           Something went wrong
         </h1>
         <p className="text-sm text-muted-foreground">

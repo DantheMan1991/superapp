@@ -1,12 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { withSystem, schema } from "@/db";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PageHeader } from "@/components/app/page-header";
+import { DataTable } from "@/components/app/data-table";
 import {
   Table,
   TableBody,
@@ -36,20 +31,19 @@ export default async function AdminAuditPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
-        <p className="text-sm text-muted-foreground">
-          Sensitive actions across the platform — admin access, module changes,
-          billing events.
-        </p>
-      </div>
+      <PageHeader
+        title="Audit log"
+        description="Sensitive actions across the platform — admin access, module changes, billing events."
+      />
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Latest {rows.length} events</CardTitle>
-          <CardDescription>Append-only. Identifiers, never secrets.</CardDescription>
-        </CardHeader>
-        <CardContent>
+      <div>
+        <h2 className="font-heading font-medium tracking-heading">
+          Latest {rows.length} events
+        </h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          Append-only. Identifiers, never secrets.
+        </p>
+        <DataTable stickyHeader>
           <Table>
             <TableHeader>
               <TableRow>
@@ -92,8 +86,8 @@ export default async function AdminAuditPage() {
               ))}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+        </DataTable>
+      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { withSystem, schema } from "@/db";
+import { PageHeader } from "@/components/app/page-header";
 import type { AuditMessage } from "@/db/schema";
 import { AuditWorkspace } from "./workspace";
 
@@ -28,28 +29,28 @@ export default async function AuditDetailPage({
         <ArrowLeft className="size-4" /> All discovery
       </Link>
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {audit.businessName}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          <span className="capitalize">{audit.industry}</span>
-          {audit.contactName && <> · {audit.contactName}</>}
-          {" · started "}
-          {audit.createdAt.toLocaleDateString()}
-          {audit.tenantId && (
-            <>
-              {" · "}
-              <Link
-                href={`/admin/tenants/${audit.tenantId}`}
-                className="underline hover:text-foreground"
-              >
-                CRM record
-              </Link>
-            </>
-          )}
-        </p>
-      </div>
+      <PageHeader
+        title={audit.businessName}
+        description={
+          <>
+            <span className="capitalize">{audit.industry}</span>
+            {audit.contactName && <> · {audit.contactName}</>}
+            {" · started "}
+            {audit.createdAt.toLocaleDateString()}
+            {audit.tenantId && (
+              <>
+                {" · "}
+                <Link
+                  href={`/admin/tenants/${audit.tenantId}`}
+                  className="underline hover:text-foreground"
+                >
+                  CRM record
+                </Link>
+              </>
+            )}
+          </>
+        }
+      />
 
       <AuditWorkspace
         auditId={audit.id}

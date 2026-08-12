@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listBuildDocs } from "@/lib/build-docs";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
 import {
   Card,
   CardDescription,
@@ -15,15 +16,17 @@ export default async function AdminDocsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Build docs</h1>
-        <p className="text-sm text-muted-foreground">
-          The build record: what each part of the platform is, how it got that
-          way, and the decisions behind it. Source of truth lives in the repo
-          (<code>docs/</code>); the PR that changes a thing updates the doc that
-          describes it.
-        </p>
-      </div>
+      <PageHeader
+        title="Build docs"
+        description={
+          <>
+            The build record: what each part of the platform is, how it got that
+            way, and the decisions behind it. Source of truth lives in the repo
+            (<code>docs/</code>); the PR that changes a thing updates the doc
+            that describes it.
+          </>
+        }
+      />
 
       {sections.map((section) => (
         <section key={section.key || "platform"} className="space-y-3">

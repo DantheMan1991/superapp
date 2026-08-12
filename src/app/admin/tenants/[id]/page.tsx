@@ -131,7 +131,7 @@ export default async function TenantDetailPage({
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="font-heading text-2xl font-semibold tracking-heading">
             {tenant.name}
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
@@ -348,8 +348,15 @@ export default async function TenantDetailPage({
         </div>
 
         <div className="space-y-6">
+          {/*
+            `--brand` is a surface colour (2.81:1 as a foreground); as a border at
+            40% it was barely visible. `--module-accent` rather than
+            `--accent-brand` directly, because only the former is registered in
+            `@theme` — `ring-accent-brand` would not generate a class at all.
+            Outside a module route it resolves to the same colour.
+          */}
           {isProspect && (
-            <Card className="border-brand/40">
+            <Card className="ring-2 ring-module-accent/40">
               <CardHeader>
                 <CardTitle className="text-base">Prospect</CardTitle>
                 <CardDescription>
@@ -408,7 +415,7 @@ export default async function TenantDetailPage({
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Books</span>
                   {ledgerIntegrity.balanced ? (
-                    <Badge className="bg-emerald-600 hover:bg-emerald-600">
+                    <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">
                       Balanced
                     </Badge>
                   ) : (

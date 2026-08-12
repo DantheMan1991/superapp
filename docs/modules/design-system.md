@@ -195,6 +195,26 @@ sub-nav and a filter row stacked above the first invoice.
   client components; a server component importing a *helper* (not a component)
   from one throws only at render, and the build is the only thing that catches it.
 
+## Where `PageHeader` does NOT belong
+
+`PageHeader` is a left-aligned title / description / actions row for a page
+inside the dashboard shell. Three kinds of screen deliberately keep a hand-built
+heading, and they are not oversights:
+
+- **Centred full-screen states** — `onboarding`, `error.tsx`, `not-found.tsx`.
+  They are single-purpose and centred; an actions row on the right is the wrong
+  shape. They take `font-heading` + `tracking-heading` and nothing else.
+- **The public share page** (`/s/[token]`) uses it, but with no accent chip —
+  `--module-accent` is unset outside a module route.
+- **The `(marketing)` route group** is out of scope entirely. Its `h2`s use
+  `tracking-tight` on purpose; do not sweep them.
+
+## Coverage
+
+`text-2xl font-semibold tracking-tight` — the string this replaced — is now at
+**zero** under `dashboard/`, `admin/`, every `src/modules/*`, and `s/[token]`.
+What remains is the three centred states above and `(marketing)`.
+
 ## Open items
 
 - **The sweep.** ~70 surfaces still hand-roll their header, empty state and table

@@ -2,8 +2,15 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { CalendarCog, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import {
+  CalendarCog,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
 import {
   formatTimeInTimezone,
   minutesIntoDay,
@@ -78,6 +85,13 @@ export function CalendarView({
 
   return (
     <div className="space-y-4">
+      {/* The module had no title at all — the only h1 was the date range below,
+          which changed every time you paged a week. */}
+      <PageHeader
+        title="Schedule"
+        description="Jobs, appointments and time off, on the calendars you can see."
+        icon={<CalendarDays />}
+      />
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" asChild>
@@ -97,11 +111,22 @@ export function CalendarView({
               </Link>
             </Button>
           </div>
-          <h1 className="text-lg font-semibold">{rangeTitle(mode, range)}</h1>
+          {/*
+            NOT an h1. This is the range you are looking at — page state, not the
+            page's name — and it was the only h1 on the screen, so the module had
+            no title and the heading changed every time you paged a week. It
+            keeps its visual weight; the `PageHeader` above owns the h1.
+          */}
+          <p
+            aria-live="polite"
+            className="font-heading text-lg font-semibold tracking-heading"
+          >
+            {rangeTitle(mode, range)}
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex rounded-md border p-0.5">
+          <div className="flex rounded-lg border border-border p-0.5">
             {(["day", "week", "month"] as const).map((m) => (
               <Link
                 key={m}
@@ -114,10 +139,13 @@ export function CalendarView({
               </Link>
             ))}
           </div>
-          <Button variant="ghost" size="icon" className="size-8" asChild>
+          {/* Labelled, not an icon with sr-only text. This is the only route to
+              the Calendars page, and an unlabelled cog is a poor front door to
+              the screen that decides who can see what. */}
+          <Button variant="outline" size="sm" asChild>
             <Link href={`${BASE}/calendars`}>
               <CalendarCog className="size-4" />
-              <span className="sr-only">Manage calendars</span>
+              Calendars
             </Link>
           </Button>
           <Button
@@ -247,7 +275,7 @@ function TimeGrid({
   const { allDay, timed } = partitionAllDay(items);
 
   return (
-    <div className="overflow-x-auto rounded-md border">
+    <div className="overflow-x-auto rounded-xl border border-border">
       <div style={{ minWidth: days.length > 1 ? 640 : undefined }}>
         {/* Day headings */}
         <div
@@ -412,7 +440,7 @@ function MonthGrid({
   onAdd: (date: string) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-md border">
+    <div className="overflow-hidden rounded-xl border border-border">
       <div className="grid grid-cols-7 border-b bg-muted/30 text-center text-xs text-muted-foreground">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
           <div key={d} className="py-1.5">

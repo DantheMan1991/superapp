@@ -17,6 +17,32 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-10 — UI: the only h1 was the date range (branch `claude/ui-work-scheduling`)
+
+Presentation and IA — no query, action, schema or policy changed. Two of these
+are usability defects rather than restyles.
+
+- **The module had no title.** Its only `<h1>` was the date range in
+  `calendar-view.tsx` ("August 2026"), which meant the page was unnamed *and* its
+  heading changed every time you paged a week — a screen reader landing on the
+  page would hear a date rather than what the screen is. There is a `PageHeader`
+  ("Schedule", teal accent) now, and the range is a `<p>` that keeps its visual
+  weight and gained `aria-live="polite"` so paging is announced.
+- **`Calendars` was an icon-only cog with `sr-only` text**, and it is the only
+  route to the screen that decides who can see which calendar. It is a labelled
+  `Calendars` button now.
+- **`CalendarManager`'s `<h1>` was a bare `text-xl`** invented inside the
+  component, so that page had no page-level title either. Now a `PageHeader`.
+- Chrome moved onto the tokens: `--divider` for in-container hairlines, the
+  rounder radius, elevation on the feed-subscription panel, and two hardcoded
+  amber warning banners onto `--warning`.
+
+**The calendar colour palettes were deliberately left alone.** `COLOR_CLASSES` in
+`calendar-view.tsx` and `calendar-manager.tsx` (`amber: "bg-amber-500"`, etc.) are
+a user's chosen calendar colours — a fixed palette, not theme tokens — and
+"modernising" them onto semantic tokens would collapse distinct calendars into the
+same colour.
+
 ### 2026-08-09 — Free/busy and availability (branch `claude/scheduling-availability`)
 
 The last slice of the roadmap. **No migration** — it is pure interval maths over

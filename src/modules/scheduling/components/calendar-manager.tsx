@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
 import {
   Dialog,
   DialogContent,
@@ -140,17 +141,17 @@ export function CalendarManager({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Calendars</h1>
-          <p className="text-sm text-muted-foreground">
-            Everything you keep time in. Each one is private until you share it.
-          </p>
-        </div>
-        <Button onClick={() => setCreating(true)} disabled={pending}>
-          <Plus className="mr-1.5 size-4" /> New calendar
-        </Button>
-      </div>
+      {/* The page's one h1. It was a `text-xl` heading invented inside this
+          component, which left the Calendars page with no page-level title. */}
+      <PageHeader
+        title="Calendars"
+        description="Everything you keep time in. Each one is private until you share it."
+        actions={
+          <Button size="sm" onClick={() => setCreating(true)} disabled={pending}>
+            <Plus className="mr-1.5 size-4" /> New calendar
+          </Button>
+        }
+      />
 
       {(["mine", "shared", "business"] as const).map((group) => {
         const rows = visible.filter((c) => c.group === group);
@@ -165,7 +166,7 @@ export function CalendarManager({
               </h2>
               <p className="text-xs text-muted-foreground">{meta.blurb}</p>
             </div>
-            <ul className="divide-y rounded-md border">
+            <ul className="divide-y divide-divider rounded-xl border border-border">
               {rows.map((calendar) => (
                 <li
                   key={calendar.id}
@@ -497,7 +498,7 @@ function ShareDialog({
           </div>
 
           {people.length > 0 && (
-            <ul className="divide-y rounded-md border">
+            <ul className="divide-y divide-divider rounded-xl border border-border">
               {people.map((share) => (
                 <li
                   key={share.id}

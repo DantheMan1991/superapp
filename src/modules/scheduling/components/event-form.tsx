@@ -564,7 +564,7 @@ export function EventForm({
             <div className="space-y-1.5">
               <Label>People</Label>
               {attendees.length > 0 && (
-                <ul className="divide-y rounded-md border">
+                <ul className="divide-y divide-divider rounded-xl border border-border">
                   {attendees.map((a, i) => (
                     <li
                       key={a.clerkUserId ?? a.externalEmail ?? i}
@@ -593,7 +593,7 @@ export function EventForm({
                 </ul>
               )}
               {(clash.busy.length > 0 || clash.unknown.length > 0) && (
-                <div className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+                <div className="space-y-1 rounded-xl border border-warning/40 bg-warning/10 p-2 text-xs">
                   {clash.busy.length > 0 && (
                     <p>
                       <span className="font-medium">Already busy:</span>{" "}
@@ -671,7 +671,7 @@ export function EventForm({
               <div className="space-y-1.5">
                 <Label>Related to</Label>
                 {links.length > 0 && (
-                  <ul className="divide-y rounded-md border">
+                  <ul className="divide-y divide-divider rounded-xl border border-border">
                     {links.map((l) => (
                       <li
                         key={l.linkId}

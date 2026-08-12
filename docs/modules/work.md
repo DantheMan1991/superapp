@@ -747,6 +747,28 @@ after 7. Its board columns, progress fields and dependency edges all land in
 something does, the boundary was drawn wrong.
 
 
+## UI: 2026-08-10 — the module had no heading (branch `claude/ui-work-scheduling`)
+
+Presentation and IA — no query, action, schema or policy changed. Recorded here
+rather than only in a build log because two of these are usability defects, not
+restyles, and they are the kind a module nobody has clicked accumulates.
+
+- **`WorkModule` had NO `<h1>`.** It opened straight onto the filter bar, so the
+  page was unnamed, had no heading for a screen reader to land on, and carried no
+  module identity. It has a `PageHeader` now — "Work", with the coral accent.
+- **`Lists` was the last button in the filter bar's right-hand cluster**, after
+  Saved views / Hide finished / Clear — a navigation control hidden among filter
+  controls, and the *only* route to that page. It is a header action now.
+- **The Lists page's `<h1>` was invented inside `ListManager`** as a bare
+  `text-xl`, so that page had no page-level title either and its heading matched
+  nothing else in the product. It is a `PageHeader`, and the list sits in a
+  `Panel`.
+
+Worth keeping in mind when the deferred slices land: both defects are the sort
+that only show up when somebody opens the screen, and **[the note below about
+nobody having clicked this is still true](#open-items)** — a header and a moved
+button do not change that.
+
 ## Open items
 
 - **`listWorkItems` has no pagination, and slice 2 gave it a second caller that

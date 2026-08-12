@@ -156,7 +156,12 @@ async function extractPdf(bytes: Uint8Array, deadline: number): Promise<Extracte
     let chars = 0;
 
     for (let n = 1; n <= pages; n++) {
-      if (Date.now() > deadline) break;
+      // `>=`, not `>`: the deadline is the moment the budget is SPENT, not the
+      // moment after. With a 20s budget the difference is one millisecond and
+      // nothing notices — but it is what makes a budget of zero mean "parse
+      // nothing", deterministically, instead of "parse one page if the clock
+      // has not ticked yet". That ambiguity was a genuinely flaky test.
+      if (Date.now() >= deadline) break;
       const page = await pdf.getPage(n);
       const content = await page.getTextContent();
       // Joined with a space, never concatenated. Text items are positioned
@@ -206,7 +211,8 @@ async function extractXlsx(bytes: Uint8Array, deadline: number): Promise<Extract
   let sheets = 0;
 
   for (const sheet of workbook.worksheets) {
-    if (Date.now() > deadline || chars >= EXTRACT_MAX_CHARS) break;
+    // `>=` for the same reason as the PDF loop above.
+    if (Date.now() >= deadline || chars >= EXTRACT_MAX_CHARS) break;
     const lines: string[] = [];
     // eachRow/eachCell, never rowCount/columnCount — those are derived from
     // metadata the WRITING application chooses to emit, and a real Excel file

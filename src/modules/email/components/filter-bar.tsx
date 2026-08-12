@@ -41,7 +41,7 @@ export function FilterBar({
           className={cn(
             "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
             chip.active
-              ? "border-brand bg-brand/15 font-medium text-brand-foreground"
+              ? "border-module-accent bg-module-accent/12 font-medium text-module-accent"
               : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
           )}
         >

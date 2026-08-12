@@ -310,7 +310,9 @@ export async function MailView({
       <MailPoller mailboxId={account.mailboxId} />
 
       <div className="flex items-center gap-3 border-b px-4 py-2.5">
-        <Mail className="size-5 shrink-0 text-brand" />
+        {/* `text-brand` measured 2.81:1 on white. `--module-accent` is this
+            module's blue and is pitched to clear AA. */}
+        <Mail className="size-5 shrink-0 text-module-accent" />
         <span className="truncate text-sm font-medium">Mail</span>
         <Button asChild size="sm" variant="outline" className="shrink-0">
           <Link href={mailHref(params, { compose: "new", message: undefined, templates: undefined, autofile: undefined })}>

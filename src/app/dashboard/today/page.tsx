@@ -79,7 +79,7 @@ export default async function TodayPage() {
           undercount presented as a total is worse than no number at all. */}
       {result.failed.length > 0 && (
         <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/5 p-4">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
           <div className="text-sm">
             <p className="font-medium">This list may be incomplete.</p>
             <p className="text-muted-foreground">

@@ -3,7 +3,10 @@ import { cn } from "@/lib/utils";
 
 const TENANT_STATUS_STYLES: Record<string, string> = {
   prospect: "bg-muted text-muted-foreground",
-  onboarding: "bg-warning/15 text-warning-foreground text-amber-700 dark:text-amber-300",
+  // `text-warning-foreground` used to resolve to nothing here — the token did
+  // not exist — and the amber pair beside it was doing the real work. Now that
+  // the token is defined, the hardcoded pair is redundant.
+  onboarding: "bg-warning/15 text-warning-foreground",
   active: "bg-success/15 text-emerald-700 dark:text-emerald-300",
   paused: "bg-muted text-muted-foreground",
   churned: "bg-destructive/10 text-destructive",

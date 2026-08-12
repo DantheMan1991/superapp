@@ -64,7 +64,7 @@ export function ReadingPane({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-5 py-4">
+      <div className="border-b border-divider px-5 py-4">
         <h2 className="text-lg font-semibold tracking-tight">
           {message.subject || (
             <span className="italic text-muted-foreground">No subject</span>
@@ -146,7 +146,7 @@ export function ReadingPane({
           notice is a perfectly good phishing button.
         */}
         {!showImages && message.htmlBody && hasRemoteContent(message.htmlBody) && (
-          <div className="mx-5 mt-4 flex flex-wrap items-center gap-2 rounded-md border bg-secondary/40 px-3 py-2 text-sm">
+          <div className="mx-5 mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-divider bg-secondary/40 px-3 py-2 text-sm">
             <EyeOff className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 text-muted-foreground">
               Images are blocked so the sender can&apos;t tell you opened this.
@@ -170,7 +170,7 @@ export function ReadingPane({
         </div>
 
         {attachments.length > 0 && (
-          <div className="border-t px-5 py-4">
+          <div className="border-t border-divider px-5 py-4">
             <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium">
               <Paperclip className="size-4 text-muted-foreground" />
               {attachments.length}{" "}
@@ -206,7 +206,7 @@ export function ReadingPane({
                       // The link downloads; it never navigates the app to
                       // attacker-supplied bytes.
                       download={policy.fileName}
-                      className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-accent/40"
+                      className="flex items-center gap-2 rounded-xl border border-divider px-3 py-2 text-sm transition-colors hover:bg-accent/40"
                     >
                       <span className="max-w-[220px] truncate">
                         {policy.fileName}

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { TenantContext } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
 import {
   Card,
   CardContent,
@@ -68,17 +69,11 @@ export async function EmailModule({
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 lg:py-8">
       <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-brand/15 text-brand-foreground">
-            <Mail className="size-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Mail</h1>
-            <p className="text-sm text-muted-foreground">
-              Your business mailbox, beside the work it&apos;s about.
-            </p>
-          </div>
-        </div>
+        <PageHeader
+          title="Mail"
+          description="Your business mailbox, beside the work it's about."
+          icon={<Mail />}
+        />
 
         {!configured ? (
           <Card>

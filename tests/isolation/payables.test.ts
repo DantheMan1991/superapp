@@ -282,6 +282,76 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
     expect(deleted).toHaveLength(0);
   });
 
+  /**
+   * `recurring_entries` is the second recurrence mechanism (journals and
+   * bills). It carries an `auto_post` flag, so a row that crossed a tenant
+   * boundary would not merely be readable — it would eventually POST into
+   * somebody else's ledger by itself.
+   */
+  it("recurring entries are per-tenant, and cannot be smuggled across", async () => {
+    const [a] = await withTenant(tenantA, (tx) =>
+      tx
+        .insert(schema.recurringEntries)
+        .values({
+          tenantId: tenantA,
+          kind: "bill",
+          name: "Yard rent A",
+          vendorId: fx.a.vendorId,
+          template: {
+            kind: "bill",
+            dueInDays: 30,
+            lines: [{ description: "rent", amountCents: 100_000, accountId: null }],
+          },
+          dayOfMonth: 1,
+          nextRunDate: "2026-09-01",
+          createdByClerkUserId: "user-a",
+        })
+        .returning(),
+    );
+    expect(a.tenantId).toBe(tenantA);
+
+    const seenByB = await withTenant(tenantB, (tx) =>
+      tx.select().from(schema.recurringEntries),
+    );
+    expect(seenByB.every((r) => r.tenantId === tenantB)).toBe(true);
+    expect(seenByB.some((r) => r.id === a.id)).toBe(false);
+
+    await expect(
+      withTenant(tenantB, (tx) =>
+        tx.insert(schema.recurringEntries).values({
+          tenantId: tenantA,
+          kind: "journal",
+          name: "smuggled",
+          template: { kind: "journal", lines: [] },
+          dayOfMonth: 1,
+          nextRunDate: "2026-09-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: a recurring bill cannot name the OTHER tenant's vendor", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.recurringEntries).values({
+          tenantId: tenantA,
+          kind: "bill",
+          name: "cross-tenant rent",
+          vendorId: fx.b.vendorId,
+          template: {
+            kind: "bill",
+            dueInDays: 30,
+            lines: [{ description: "rent", amountCents: 1, accountId: null }],
+          },
+          dayOfMonth: 1,
+          nextRunDate: "2026-09-01",
+          createdByClerkUserId: "user-a",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("default-deny: no context sees no payables rows", async () => {
     const rows = await withSystem(async (tx) => {
       await tx.execute(sql`select set_config('app.role', '', true)`);
@@ -291,6 +361,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         tx.select().from(schema.bills),
         tx.select().from(schema.billLines),
         tx.select().from(schema.billPayments),
+        tx.select().from(schema.recurringEntries),
       ]);
     });
     for (const r of rows) expect(r).toHaveLength(0);

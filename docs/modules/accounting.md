@@ -13,6 +13,51 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — Obligation statuses and the MoneyBar (branch `claude/accounting-moneybar`)
+
+The last item from the 2026-08-10 QuickBooks review. Read-side only: no schema
+change, no migration, nothing persisted.
+
+- **`issued` is a lifecycle state; "Overdue 60 days" is an obligation.** The
+  first says what the software did, the second says what somebody is owed — and
+  that is the difference between a list you scan and a list you act on. The
+  lifecycle status is still what the database stores and what every guard
+  checks; `obligationFor` is a rendering of it, computed at read time.
+- **BALANCE BEATS STATUS.** `paid` derives from payments and the two are written
+  in one transaction, but if they ever disagreed the money is the fact and the
+  status is a summary of it. Pinned by a test.
+- **Void and draft are read BEFORE the date maths**, so a stale due date on a
+  voided invoice can never render as an alarm.
+- **`destructive` is spent only on overdue money.** "Due in 3 days" is not red;
+  if it were, neither figure would mean anything. A zero Overdue total is not
+  red either — a red zero is a false alarm.
+- **The MoneyBar's figures cover EVERY row, not the 200 the table shows.** A
+  total that silently described a page would be the number somebody trusts to
+  decide whether to worry. The display query therefore runs LAST, so an active
+  bucket is a real predicate rather than a filter applied after `limit(200)`.
+- **AR buckets are Overdue / Not due yet / Not deposited / Deposited.** Two are
+  about the document and two about the money, which is deliberate: "which
+  cheques have I not banked?" needs the payment side, and `undeposited_funds`
+  is read as a SUBTYPE rather than hard-coded to 1250, since a tenant may have
+  renumbered it.
+- **AP buckets swap the deposit pair for Awaiting approval / Paid recently.** A
+  bill awaiting approval is an obligation on a PERSON with no date to be late
+  against, so it keeps its own bucket and its own label rather than being
+  rendered as a due date.
+- **A bucket takes over the list**; the status pills stay visible and clear it.
+  Two filters that could disagree on one page is worse than one that wins.
+- An empty bucket compiles to `false`, never `id in ('')` — the column is a
+  uuid, so the empty-string sentinel would be a type error at the database
+  rather than a query matching nothing.
+- `daysBetween` was **exported from `lib/dates.ts` rather than copied**. It was
+  private, and `aging-core.ts` and `attention/source.ts` had each already grown
+  their own — three implementations of one calendar subtraction. New callers use
+  the shared one; the other two are left alone rather than swept up inside an
+  unrelated change.
+- **Not built:** obligation language on the invoice and bill DETAIL pages (both
+  still show the lifecycle badge), and a deposits screen for the two money
+  buckets to link into.
+
 ### 2026-08-12 — Per-record History panel (branch `claude/accounting-record-history`)
 
 "What has happened to this invoice." No new table and no new writes: every
@@ -588,6 +633,7 @@ sentence rather than leaving it aspirational.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
 - **Automatic reminders are off until an owner turns them on**, and the switch cannot be turned on with an empty schedule — a control that says on and does nothing is a state somebody discovers three months later.
 - **A recurring template may post; an AI suggestion never may.** Same line bank rules drew: a schedule the owner wrote down and can read back is a decision, replayed. It is off by default, journals only, and it still yields to the period lock — a closed month leaves a draft and says so.
+- **Lifecycle status is stored; obligation language is rendered.** `obligationFor` is never persisted and never checked by a guard — every rule in the module still reads `status`. A derived label that started being written back would be a second source of truth for whether an invoice is paid.
 - **Reference data deactivates, never deletes, and never rewrites history.** A saved item or term may be named on records that already exist. The payment-method list goes further: it has no foreign key from `invoice_payments`, so renaming a method changes the label and nothing else — the code a payment recorded is what it recorded.
 - **An AI claim about a source is checked against the source.** The thread drafter verifies every quote appears in the message it cites; an unverifiable one is shown flagged and unticked, never dropped and never presented as fact. Any future "the assistant found this in X" owes the reader the same check — a citation nobody verifies is worse than no citation, because it is believed.
 - **Anything that previews an outbound message must share the renderer that sends it.** `reminder-render.ts` exists so the test button and the nightly sweep cannot drift; a preview built by its own code path is worse than none, because it is believed. Apply the same rule to any future preview (invoice, statement, digest).
@@ -626,4 +672,5 @@ compiled-and-tested, not seen.
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - **Recurring journals and bills are DONE** (2026-08-12). Still open from the same thread: **folding `recurring_invoices` into `recurring_entries`**, so the module has one recurrence mechanism rather than two
-- **The last item from the 2026-08-10 QuickBooks review**: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built
+- **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
+- ~~The last item from that review~~: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built

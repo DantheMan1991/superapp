@@ -19,6 +19,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import { MoneyBar } from "@/modules/accounting/components/money-bar";
+import {
+  AP_BUCKETS,
+  AP_BUCKET_LABEL,
+  RECENT_DAYS,
+  documentBucket,
+  isApBucket,
+  obligationFor,
+  type ApBucket,
+  type ObligationTone,
+} from "@/modules/accounting/lib/obligation";
+import { addDaysIso } from "@/modules/accounting/lib/dates";
 import { getApAging } from "@/modules/accounting/payables/aging-feed";
 import { toSafeCents } from "@/modules/accounting/lib/money";
 import {
@@ -38,27 +50,106 @@ const TABS = [
   { key: "void", label: "Void" },
 ] as const;
 
-const STATUS_BADGE: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  draft: "outline",
-  awaiting_approval: "secondary",
-  approved: "default",
-  partial: "default",
-  paid: "secondary",
-  void: "outline",
+/** Obligation tone -> badge. `destructive` is spent only on overdue money. */
+const TONE_BADGE: Record<ObligationTone, "default" | "secondary" | "destructive" | "outline"> = {
+  overdue: "destructive",
+  due: "default",
+  neutral: "secondary",
+  settled: "outline",
 };
 
 export default async function BillsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; bucket?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const tenantId = ctx.tenant.id;
   const sp = await searchParams;
-  const tab = TABS.some((t) => t.key === sp.tab) ? sp.tab! : "all";
+  const bucket = isApBucket(sp.bucket) ? sp.bucket : null;
+  // A bucket takes over the list; the status tabs stay visible and clear it.
+  const tab = bucket ? "all" : TABS.some((t) => t.key === sp.tab) ? sp.tab! : "all";
 
   const data = await withTenant(tenantId, async (tx) => {
+    const today = todayInTimezone(ctx.tenant.timezone);
+
+    /**
+     * The bar covers EVERY bill, not the 200 the table shows — a total that
+     * silently described a page would be the number somebody trusts to decide
+     * whether to worry.
+     */
+    const allRows = await tx
+      .select({
+        id: schema.bills.id,
+        status: schema.bills.status,
+        dueDate: schema.bills.dueDate,
+        totalCents: schema.bills.totalCents,
+        paidCents: sql<string>`coalesce((select sum(${schema.billPayments.amountCents}) from ${schema.billPayments} where ${schema.billPayments.tenantId} = ${schema.bills.tenantId} and ${schema.billPayments.billId} = ${schema.bills.id}), 0)`,
+      })
+      .from(schema.bills)
+      .where(eq(schema.bills.tenantId, tenantId));
+
+    const recentPayments = await tx
+      .select({
+        billId: schema.billPayments.billId,
+        amountCents: schema.billPayments.amountCents,
+        paymentDate: schema.billPayments.paymentDate,
+      })
+      .from(schema.billPayments)
+      .where(eq(schema.billPayments.tenantId, tenantId));
+
+    const since = addDaysIso(today, -RECENT_DAYS);
+    const paidRecentlyByBill = new Map<string, number>();
+    for (const p of recentPayments) {
+      if (p.paymentDate < since) continue;
+      paidRecentlyByBill.set(
+        p.billId,
+        (paidRecentlyByBill.get(p.billId) ?? 0) + p.amountCents,
+      );
+    }
+
+    const tally: Record<ApBucket, [number, number]> = {
+      overdue: [0, 0],
+      not_due: [0, 0],
+      awaiting_approval: [0, 0],
+      paid_recently: [0, 0],
+    };
+    const inBucket = new Map<string, Set<string>>();
+    const put = (key: string, id: string) => {
+      const set = inBucket.get(key) ?? new Set<string>();
+      set.add(id);
+      inBucket.set(key, set);
+    };
+    for (const row of allRows) {
+      const balance = row.totalCents - toSafeCents(row.paidCents);
+      // A bill awaiting approval is an obligation on a PERSON, not yet on the
+      // ledger, so it gets its own bucket rather than being folded into the
+      // date-based ones.
+      if (row.status === "awaiting_approval") {
+        tally.awaiting_approval[0] += balance;
+        tally.awaiting_approval[1] += 1;
+        put("awaiting_approval", row.id);
+      }
+      const doc = documentBucket({
+        status: row.status,
+        dueDate: row.dueDate,
+        balanceCents: balance,
+        today,
+      });
+      if (doc && row.status !== "awaiting_approval") {
+        tally[doc][0] += balance;
+        tally[doc][1] += 1;
+        put(doc, row.id);
+      }
+      const recent = paidRecentlyByBill.get(row.id) ?? 0;
+      if (recent > 0) {
+        tally.paid_recently[0] += recent;
+        tally.paid_recently[1] += 1;
+        put("paid_recently", row.id);
+      }
+    }
+
     const statusFilter =
       tab === "all"
         ? undefined
@@ -88,13 +179,19 @@ export default async function BillsPage({
                 statusFilter as ("approved" | "partial")[],
               )
             : undefined,
+          // An empty bucket becomes `false` rather than `id in ('')`, which
+          // would be a uuid type error at the database.
+          bucket
+            ? (inBucket.get(bucket)?.size ?? 0) > 0
+              ? inArray(schema.bills.id, [...inBucket.get(bucket)!])
+              : sql`false`
+            : undefined,
         ),
       )
       .orderBy(desc(schema.bills.billDate), desc(schema.bills.createdAt))
       .limit(200);
-    const today = todayInTimezone(ctx.tenant.timezone);
     const aging = await getApAging(tx, tenantId, today);
-    return { bills, aging };
+    return { bills, aging, today, tally, inBucket };
   });
 
   return (
@@ -129,6 +226,20 @@ export default async function BillsPage({
       />
 
       <AccountingNav />
+
+      <MoneyBar
+        noun="bill"
+        activeKey={bucket}
+        clearHref="/dashboard/m/accounting/purchases/bills"
+        buckets={AP_BUCKETS.map((key) => ({
+          key,
+          label: AP_BUCKET_LABEL[key],
+          cents: data.tally[key][0],
+          count: data.tally[key][1],
+          href: `/dashboard/m/accounting/purchases/bills?bucket=${key}`,
+          alarm: key === "overdue",
+        }))}
+      />
 
       {/* Sub-nav and status filter share one row, as on the invoices page. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -182,6 +293,13 @@ export default async function BillsPage({
           <TableBody>
             {data.bills.map(({ bill, vendorName, paidCents }) => {
               const balance = bill.totalCents - toSafeCents(paidCents);
+              const obligation = obligationFor({
+                status: bill.status,
+                dueDate: bill.dueDate,
+                balanceCents: balance,
+                today: data.today,
+              });
+              const awaiting = bill.status === "awaiting_approval";
               return (
                 <TableRow key={bill.id}>
                   <TableCell>
@@ -212,8 +330,11 @@ export default async function BillsPage({
                         )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_BADGE[bill.status] ?? "outline"}>
-                      {bill.status.replaceAll("_", " ")}
+                    {/* Awaiting approval is an obligation on a PERSON and has
+                        no date to be late against, so it keeps its own label
+                        rather than being rendered as a due date. */}
+                    <Badge variant={awaiting ? "secondary" : TONE_BADGE[obligation.tone]}>
+                      {awaiting ? "Awaiting approval" : obligation.label}
                     </Badge>
                   </TableCell>
                 </TableRow>

@@ -38,7 +38,15 @@ export function shiftYearsIso(dateIso: string, years: number): string {
   return iso(y + years, m, d);
 }
 
-function daysBetween(fromIso: string, toIso: string): number {
+/**
+ * Whole days from `from` to `to`; negative when `to` is earlier.
+ *
+ * Exported 2026-08-12 for the obligation statuses. It was private, and by then
+ * `aging-core.ts` and `attention/source.ts` had each grown their own copy —
+ * three implementations of one calendar subtraction. New callers use this one;
+ * the other two are left alone rather than swept up inside an unrelated change.
+ */
+export function daysBetween(fromIso: string, toIso: string): number {
   const a = parts(fromIso);
   const b = parts(toIso);
   const ms =

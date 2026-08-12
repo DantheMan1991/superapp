@@ -41,6 +41,7 @@ export type LedgerErrorCode =
   | "INVOICE_NUMBER_TAKEN"
   | "REMINDER_OFFSETS_INVALID"
   | "REMINDER_SCHEDULE_EMPTY"
+  | "REMINDER_NOT_TESTABLE"
   | "INVOICE_HAS_PAYMENTS"
   | "INVOICE_OVERPAYMENT"
   | "PAYMENT_NOT_FOUND"
@@ -145,6 +146,8 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "That reminder schedule isn't valid — each entry is a whole number of days near the due date.",
   REMINDER_SCHEDULE_EMPTY:
     "Add at least one reminder before turning reminders on.",
+  REMINDER_NOT_TESTABLE:
+    "Only an unpaid invoice with a due date has a reminder to preview.",
   INVOICE_HAS_PAYMENTS: "Remove the payments first, then void.",
   INVOICE_OVERPAYMENT: "That's more than the remaining balance.",
   PAYMENT_NOT_FOUND: "That payment no longer exists.",

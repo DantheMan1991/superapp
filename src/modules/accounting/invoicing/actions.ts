@@ -31,6 +31,7 @@ import {
   setInvoiceRemindersMuted,
   updateReminderSettings,
 } from "./reminders";
+import { sendTestReminder } from "./reminder-test";
 import {
   MAX_OFFSET,
   MAX_OFFSETS,
@@ -760,6 +761,50 @@ export async function setCustomerRemindersMutedAction(
     });
     revalidateSales();
     return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const testReminderSchema = z.object({ invoiceId: z.string().uuid() });
+
+/**
+ * Send this invoice's next reminder to the owner, to check the wording.
+ *
+ * The invoice id is the ONLY thing the client chooses. Which reminder gets
+ * previewed, and above all who receives it, are decided server-side — the
+ * recipient comes from `profiles`, so this action cannot be turned into a way
+ * to mail an arbitrary address from the tenant's own domain.
+ */
+export async function sendTestReminderAction(
+  input: z.infer<typeof testReminderSchema>,
+): Promise<ActionResult<{ to: string; offset: number }>> {
+  const ctx = await gate();
+  const parsed = testReminderSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    // Minute bucket: a double-clicked button is one email, a deliberate
+    // re-test a minute later is a new one. Computed here rather than in the
+    // pure key builder, which stays clock-free and table-testable.
+    const nonce = new Date().toISOString().slice(0, 16);
+    const { to, offset, result } = await withTenant(ctx.tenantId, (tx) =>
+      sendTestReminder(tx, ctx, { invoiceId: parsed.data.invoiceId, nonce }),
+    );
+    if (!result.ok) return { error: result.message };
+
+    await withTenant(ctx.tenantId, (tx) =>
+      logAuditInTx(tx, {
+        action: "invoice.reminder_tested",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "invoice",
+        targetId: parsed.data.invoiceId,
+        // The offset is the interesting fact; the address is the actor's own
+        // and is not recorded, per the audit rule in AGENTS.md.
+        meta: { offset, duplicate: result.duplicate },
+      }),
+    );
+    return { ok: true, data: { to, offset } };
   } catch (err) {
     return fail(err);
   }

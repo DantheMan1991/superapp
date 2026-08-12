@@ -62,6 +62,46 @@ export function reminderKeyPrefix(invoiceId: string): string {
 }
 
 /**
+ * The key for an owner's test send — DELIBERATELY OUTSIDE the real namespace.
+ *
+ * `reminder-test:` rather than `reminder:` is load-bearing in three places at
+ * once, and all three are the difference between a useful test button and one
+ * that quietly breaks the feature it is testing:
+ *
+ *   • `sentOffsetsFromKeys` requires the first segment to be exactly
+ *     `reminder`, so a test never counts as an offset already sent — testing
+ *     the 7-day wording must not stop the real 7-day reminder going out;
+ *   • the sweep's `like(..., 'reminder:%')` does not match it, for the same
+ *     reason, at the query level too;
+ *   • `listInvoiceReminders` filters on `reminder:<id>:`, so the history panel
+ *     keeps showing what the CUSTOMER received and nothing else.
+ *
+ * `nonce` is supplied by the caller (a minute bucket), so a double-clicked
+ * button is one email while a deliberate re-test a minute later works. That is
+ * the opposite of the real key's rule, and correct for the opposite reason:
+ * here, sending again is the point.
+ */
+export function reminderTestIdempotencyKey(
+  invoiceId: string,
+  offset: number,
+  recipient: string,
+  nonce: string,
+): string {
+  return `reminder-test:${invoiceId}:${offset}:${recipient.trim().toLowerCase()}:${nonce}`;
+}
+
+/**
+ * Marks a test in the subject and NOWHERE ELSE.
+ *
+ * The body stays byte-identical to what the customer would receive, because
+ * checking the wording is the entire reason to press the button. The subject
+ * carries the warning so a forwarded copy cannot be mistaken for a real one.
+ */
+export function testSubject(subject: string): string {
+  return `[Test] ${subject}`;
+}
+
+/**
  * Recover the offsets already sent for an invoice from its log keys.
  *
  * This is what makes `sentOffsets` derivable rather than stored — the same

@@ -22,7 +22,10 @@ import {
 } from "@/modules/accounting/invoicing/reminder-email";
 import { formatCentsSigned } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../sales-nav";
-import { ReminderSettingsForm } from "./reminder-controls";
+import {
+  ReminderSettingsForm,
+  SendTestReminderButton,
+} from "./reminder-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -169,14 +172,23 @@ export default async function RemindersPage() {
       </Panel>
 
       <div className="space-y-3">
-        <h2 className="text-sm font-medium tracking-heading">
-          Next reminders
-          {!data.settings.enabled && (
-            <span className="ml-2 font-normal text-muted-foreground">
-              — nothing will send while reminders are off
-            </span>
+        <div className="space-y-1">
+          <h2 className="text-sm font-medium tracking-heading">
+            Next reminders
+            {!data.settings.enabled && (
+              <span className="ml-2 font-normal text-muted-foreground">
+                — nothing will send while reminders are off
+              </span>
+            )}
+          </h2>
+          {isOwner && data.upcoming.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              <strong className="font-medium">Test</strong> emails that
+              reminder to you instead of the customer — the same message, word
+              for word, so you can read one before switching reminders on.
+            </p>
           )}
-        </h2>
+        </div>
 
         <DataTable
           isEmpty={data.upcoming.length === 0}
@@ -196,6 +208,9 @@ export default async function RemindersPage() {
                 <th className="px-4 py-2 font-medium">Due</th>
                 <th className="px-4 py-2 text-right font-medium">Balance</th>
                 <th className="px-4 py-2 font-medium">Next reminder</th>
+                <th className="px-4 py-2 font-medium">
+                  <span className="sr-only">Send a test</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-divider">
@@ -227,6 +242,9 @@ export default async function RemindersPage() {
                       {row.sentCount > 0 &&
                         ` · ${row.sentCount} sent`}
                     </span>
+                  </td>
+                  <td className="px-2 py-3 text-right">
+                    {isOwner && <SendTestReminderButton invoiceId={row.id} />}
                   </td>
                 </tr>
               ))}

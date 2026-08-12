@@ -35,6 +35,13 @@ export type EmailKind =
    */
   | "invoice_reminder"
   /**
+   * An owner testing the reminder wording on themselves. Its own kind so it is
+   * trivially separable in the log and can never be counted as a reminder the
+   * customer received — the recipient always comes from `profiles`, never from
+   * anything typed into a form.
+   */
+  | "invoice_reminder_test"
+  /**
    * The daily digest. The only kind sent to OUR OWN users rather than to a
    * tenant's customers — which is why it goes from the platform domain and not
    * from the tenant's, and why its recipient always came from `profiles`

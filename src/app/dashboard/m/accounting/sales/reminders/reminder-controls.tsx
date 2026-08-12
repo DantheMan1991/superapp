@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { Plus, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { updateReminderSettingsAction } from "@/modules/accounting/invoicing/actions";
+import {
+  sendTestReminderAction,
+  updateReminderSettingsAction,
+} from "@/modules/accounting/invoicing/actions";
 import {
   describeOffset,
   MAX_OFFSET,
@@ -184,5 +187,45 @@ export function ReminderSettingsForm({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Send this one to me" — the way to see a reminder without involving a
+ * customer.
+ *
+ * Deliberately per-row rather than one button at the top: the interesting
+ * question is what a PARTICULAR invoice will say, and the wording differs by
+ * how overdue it is. It works while reminders are switched off, which is when
+ * somebody most wants to read one before committing.
+ */
+export function SendTestReminderButton({ invoiceId }: { invoiceId: string }) {
+  const [pending, startTransition] = useTransition();
+
+  function send() {
+    startTransition(async () => {
+      const result = await sendTestReminderAction({ invoiceId });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      const { to } = result.data!;
+      toast.success(`Test reminder sent to ${to}`, {
+        description: "The body is exactly what the customer would receive.",
+      });
+    });
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={send}
+      disabled={pending}
+      title="Send this reminder to your own address"
+    >
+      <Send className="size-3.5" />
+      {pending ? "Sending…" : "Test"}
+    </Button>
   );
 }

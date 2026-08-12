@@ -2,9 +2,11 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { COA_TEMPLATES } from "./general";
+import { provisionCatalogue } from "./catalogue";
 
 /**
- * Provision accounting for a tenant: settings row + template accounts.
+ * Provision accounting for a tenant: settings row + template accounts +
+ * the reference lists (terms, payment methods).
  * Fully idempotent — re-running creates nothing and never renames or
  * reactivates accounts the tenant has since modified. Runs inside a
  * withTenant transaction (withSystem never writes accounting rows).
@@ -52,5 +54,11 @@ export async function provisionAccounting(
       created += 1;
     }
   }
+
+  // The reference lists come with the chart, and are idempotent the same way.
+  // Provisioning is re-run on existing tenants (it is how a template gains an
+  // account), so this is also the backfill path for tenants that predate them.
+  await provisionCatalogue(tx, tenantId);
+
   return { accountsCreated: created };
 }

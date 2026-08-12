@@ -13,6 +13,46 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — Catalogue: saved items, payment terms, payment methods (branch `claude/accounting-products-terms`)
+
+The three lists a business reuses on every invoice. Migrations `0116` (tables)
+and `0117` (RLS), both applied to dev AND production before the PR opened.
+
+- **`products` is a SAVED LINE, not inventory.** No quantity on hand, no cost
+  of goods, no stock movement — picking one fills a line's description, price
+  and account so the tenth invoice does not need them typed again. Calling it
+  "products" is already the generous reading, and the schema comment says so
+  before somebody builds stock tracking on it.
+- **`payment_terms.due_in_days` is the whole of the arithmetic.** No "net EOM",
+  no "2/10 net 30": an early-payment discount changes what is OWED, which is a
+  posting question rather than a date question, and half of it would be worse
+  than none. **At most one default per tenant, enforced by a partial unique
+  index** rather than by care.
+- **Terms drive the due date, and typing a date clears the term.** A hand-typed
+  date is a deliberate override, so the term stops claiming to describe it.
+  An EXISTING draft keeps the date it was saved with — re-deriving on open would
+  silently move a date somebody chose. `terms.ts` is pure because the browser
+  computes the date as you type and the server recomputes it on save, and two
+  implementations of one rule is how those come to disagree.
+- **`payment_methods` replaces a zod enum that was written into a text column**,
+  and the five old values are seeded WITH THEIR EXISTING CODES so historic
+  payments still render as names. **There is deliberately no FK** from
+  `invoice_payments.method`: deactivating or renaming a method must never
+  rewrite what a posted payment recorded. A method's `code` is therefore
+  derived once at creation and never changes; renaming changes the LABEL only.
+- **The payment action now validates the method against the tenant's own list**,
+  inside the posting transaction, so a method deactivated mid-flight cannot slip
+  between the check and the write. It was previously a fixed enum, which no
+  longer describes what the column may hold.
+- **`customers.payment_terms_id` null means "whatever the default is"**, not
+  "no terms" — so changing the default moves every customer who never had a
+  special arrangement, which is what somebody editing the default expects.
+- Provisioned with the chart of accounts and idempotent the same way, so
+  re-provisioning is also the backfill path for tenants that predate the lists.
+- **Not built:** setting a customer's default terms from the customer form (the
+  column and the resolution logic are both live; only the control is missing),
+  and using saved items on BILLS, where `expense_account_id` is already carried.
+
 ### 2026-08-12 — Draft an invoice or bill from an email thread (branch `claude/accounting-invoice-from-thread`)
 
 The one place this product can lead rather than catch up: we own the mailbox,
@@ -424,6 +464,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
 | `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
 | `period_closes`, `close_notes` | S7 | Month-end close |
+| `products`, `payment_terms`, `payment_methods` | 2026-08-12 | The catalogue: saved invoice lines, named terms (`due_in_days`, one default per tenant by partial unique index), and the tenant-owned payment-method list. `invoice_payments.method` stores a method's CODE with **no FK** — deactivating a method must never rewrite a posted payment. `customers.payment_terms_id` (nullable = use the default) |
 
 All tables: `tenant_id`, FORCE RLS. Isolation coverage is split by area, one file
 per area under `tests/isolation/` — `accounting.test.ts` (core ledger),
@@ -459,6 +500,7 @@ sentence rather than leaving it aspirational.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
 - **Automatic reminders are off until an owner turns them on**, and the switch cannot be turned on with an empty schedule — a control that says on and does nothing is a state somebody discovers three months later.
+- **Reference data deactivates, never deletes, and never rewrites history.** A saved item or term may be named on records that already exist. The payment-method list goes further: it has no foreign key from `invoice_payments`, so renaming a method changes the label and nothing else — the code a payment recorded is what it recorded.
 - **An AI claim about a source is checked against the source.** The thread drafter verifies every quote appears in the message it cites; an unverifiable one is shown flagged and unticked, never dropped and never presented as fact. Any future "the assistant found this in X" owes the reader the same check — a citation nobody verifies is worse than no citation, because it is believed.
 - **Anything that previews an outbound message must share the renderer that sends it.** `reminder-render.ts` exists so the test button and the nightly sweep cannot drift; a preview built by its own code path is worse than none, because it is believed. Apply the same rule to any future preview (invoice, statement, digest).
 - **Reminders overtake, they do not queue.** Only the latest applicable offset can fire, so enabling the feature over an old book sends one email per invoice rather than one per missed offset. Nothing else in the module needs this rule; it exists because the alternative loses a client on the first morning.
@@ -493,4 +535,5 @@ compiled-and-tested, not seen.
 - **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
 - **P&L by Month is DONE** (2026-08-12) — the by-dimension column spread generalized to time. What is NOT built: quarter and year columns, which the same `periods` seam would carry with a different bucketer
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
-- From the 2026-08-10 QuickBooks review, the rest in rough value order: Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists
+- **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
+- From the 2026-08-10 QuickBooks review, the rest in rough value order: recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists

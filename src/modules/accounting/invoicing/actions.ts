@@ -32,6 +32,7 @@ import {
   updateReminderSettings,
 } from "./reminders";
 import { sendTestReminder } from "./reminder-test";
+import { listPaymentMethods } from "./catalogue";
 import {
   MAX_OFFSET,
   MAX_OFFSETS,
@@ -387,7 +388,13 @@ const recordPaymentSchema = z.object({
     .positive()
     .refine((n) => n <= MAX_AMOUNT_CENTS),
   depositAccountId: z.string().uuid(),
-  method: z.enum(["cash", "check", "card", "bank_transfer", "other"]),
+  /**
+   * A payment-method CODE. No longer a fixed enum — the tenant owns the list
+   * (`payment_methods`), so the shape is validated here and membership is
+   * checked against their own rows below. Accepting any slug would let a
+   * crafted request write a method the list never offered.
+   */
+  method: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
   memo: z.string().trim().max(500).optional(),
 });
 
@@ -399,6 +406,18 @@ export async function recordInvoicePaymentAction(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     await withTenant(ctx.tenantId, async (tx) => {
+      // The method must be one this tenant actually offers. Checked inside the
+      // same transaction as the posting, so a method deactivated mid-flight
+      // cannot slip through between the check and the write.
+      const methods = await listPaymentMethods(tx, ctx.tenantId, {
+        activeOnly: true,
+      });
+      if (!methods.some((m) => m.code === parsed.data.method)) {
+        throw new LedgerError(
+          "PAYMENT_METHOD_INVALID",
+          "that payment method is not on this business's list",
+        );
+      }
       const { payment, invoice } = await recordPayment(tx, ctx, parsed.data);
       await logAuditInTx(tx, {
         action: "invoice.payment_recorded",

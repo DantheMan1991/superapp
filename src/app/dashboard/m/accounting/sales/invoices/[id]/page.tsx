@@ -35,6 +35,11 @@ import {
   getReminderSettings,
   listInvoiceReminders,
 } from "@/modules/accounting/invoicing/reminders";
+import {
+  listPaymentMethods,
+  listPaymentTerms,
+  listProducts,
+} from "@/modules/accounting/invoicing/catalogue";
 import { nextReminder } from "@/modules/accounting/invoicing/reminder-schedule";
 import { InvoiceRemindersPanel } from "@/modules/accounting/components/invoice-reminders-panel";
 import { InvoiceActions, SendInvoiceButton } from "./invoice-detail-controls";
@@ -112,6 +117,13 @@ export default async function InvoiceDetailPage({
     // send log, so the panel shows delivery status rather than a stored tick.
     const reminders = await listInvoiceReminders(tx, ctx.tenant.id, invoice.id);
     const reminderSettings = await getReminderSettings(tx, ctx.tenant.id);
+    const [productRows, termRows] = await Promise.all([
+      listProducts(tx, ctx.tenant.id, { activeOnly: true }),
+      listPaymentTerms(tx, ctx.tenant.id, { activeOnly: true }),
+    ]);
+    const methodRows = await listPaymentMethods(tx, ctx.tenant.id, {
+      activeOnly: true,
+    });
     const contacts = customer
       ? await listContactPoints(tx, ctx.tenant.id, customer.partyId)
       : [];
@@ -125,6 +137,19 @@ export default async function InvoiceDetailPage({
       sends,
       reminders,
       reminderSettings,
+      products: productRows.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        unitPriceCents: p.unitPriceCents,
+        incomeAccountId: p.incomeAccountId,
+      })),
+      terms: termRows.map((t) => ({
+        id: t.id,
+        name: t.name,
+        dueInDays: t.dueInDays,
+      })),
+      paymentMethods: methodRows.map((m) => ({ code: m.code, name: m.name })),
       customerEmail: preferredContactValue(contacts, "email") ?? "",
       bankAccounts,
       undeposited,
@@ -213,6 +238,7 @@ export default async function InvoiceDetailPage({
               depositOptions={depositOptions}
               today={data.today}
               canAct={isOwner}
+              paymentMethods={data.paymentMethods}
             />
           </>
             )}
@@ -235,6 +261,8 @@ export default async function InvoiceDetailPage({
             .map((a) => ({ id: a.id, code: a.code, name: a.name }))}
           suggestedNumber={invoice.invoiceNumber}
           today={data.today}
+          products={data.products}
+          terms={data.terms}
           invoice={{
             id: invoice.id,
             version: invoice.version,

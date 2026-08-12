@@ -37,6 +37,143 @@ export const invoiceStatus = pgEnum("invoice_status", [
 
 export const recurringFrequency = pgEnum("recurring_frequency", ["monthly"]);
 
+/* ------------------------------------------------------------------------
+ * Catalogue (2026-08-12): the three lists a business reuses on every
+ * invoice — what it sells, when it expects to be paid, and how the money
+ * arrived. All three are per-tenant reference data, seeded with sensible
+ * defaults when accounting is provisioned and freely editable after.
+ * ---------------------------------------------------------------------- */
+
+export const productKind = pgEnum("product_kind", ["service", "product"]);
+
+/**
+ * Something the business sells often enough to be worth saving.
+ *
+ * Deliberately NOT inventory. There is no quantity on hand, no cost of
+ * goods tracking and no stock movement — this is a saved LINE, so the
+ * tenth invoice for the same job does not need the description and price
+ * typed again. Real inventory is a different feature with a different data
+ * model, and calling this "products" is already the generous reading.
+ */
+export const products = pgTable(
+  "products",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    kind: productKind("kind").notNull().default("service"),
+    /** Default unit price in cents. Signed, so a saved discount is possible. */
+    unitPriceCents: bigint("unit_price_cents", { mode: "number" })
+      .notNull()
+      .default(0),
+    /** Where an invoice line for this lands. Nullable: sell-only or buy-only. */
+    incomeAccountId: uuid("income_account_id"),
+    /** Where a bill line for this lands. Nullable for the same reason. */
+    expenseAccountId: uuid("expense_account_id"),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("products_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("products_tenant_active_idx").on(t.tenantId, t.isActive),
+    // Two saved lines with the same name is a duplicate, not a fact.
+    uniqueIndex("products_tenant_name_idx").on(t.tenantId, t.name),
+    foreignKey({
+      name: "products_income_account_fk",
+      columns: [t.tenantId, t.incomeAccountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    foreignKey({
+      name: "products_expense_account_fk",
+      columns: [t.tenantId, t.expenseAccountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+  ],
+);
+
+/**
+ * When payment is expected, as a named rule.
+ *
+ * `due_in_days` is the whole of the arithmetic: due date = issue date + N.
+ * Deliberately no "net EOM" or "2/10 net 30" — early-payment discounts
+ * change what is OWED, which is a posting question rather than a date
+ * question, and inventing half of it would be worse than not having it.
+ */
+export const paymentTerms = pgTable(
+  "payment_terms",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    dueInDays: integer("due_in_days").notNull().default(0),
+    /** The one offered first on a new invoice. At most one per tenant. */
+    isDefault: boolean("is_default").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("payment_terms_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("payment_terms_tenant_name_idx").on(t.tenantId, t.name),
+    // At most one default, enforced by the database rather than by care.
+    uniqueIndex("payment_terms_tenant_default_idx")
+      .on(t.tenantId)
+      .where(sql`${t.isDefault} = true`),
+    check("payment_terms_due_in_days", sql`${t.dueInDays} between 0 and 365`),
+  ],
+);
+
+/**
+ * How money arrived, as a list the tenant owns.
+ *
+ * `invoice_payments.method` stays TEXT and keeps its existing values — the
+ * five that used to be a zod enum are seeded as rows so historic payments
+ * still resolve to a name. This table decides what the dropdown OFFERS; it
+ * is not a foreign key, because renaming or deactivating a method must
+ * never rewrite what a posted payment recorded.
+ */
+export const paymentMethods = pgTable(
+  "payment_methods",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Stored into `invoice_payments.method`. Stable once used. */
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("payment_methods_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("payment_methods_tenant_code_idx").on(t.tenantId, t.code),
+  ],
+);
+
 export const customers = pgTable(
   "customers",
   {
@@ -76,6 +213,12 @@ export const customers = pgTable(
      * disputed invoice.
      */
     remindersMuted: boolean("reminders_muted").notNull().default(false),
+    /**
+     * This customer's usual terms, overriding the tenant default. Null means
+     * "whatever the default is" rather than "no terms" — so changing the
+     * default moves every customer who never had a special arrangement.
+     */
+    paymentTermsId: uuid("payment_terms_id"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -87,6 +230,11 @@ export const customers = pgTable(
   (t) => [
     uniqueIndex("customers_tenant_id_id_idx").on(t.tenantId, t.id),
     index("customers_tenant_idx").on(t.tenantId),
+    foreignKey({
+      name: "customers_payment_terms_fk",
+      columns: [t.tenantId, t.paymentTermsId],
+      foreignColumns: [paymentTerms.tenantId, paymentTerms.id],
+    }),
     // A party holds the customer role at most once. Two AR relationships with
     // the same identity is a duplicate, not a fact.
     uniqueIndex("customers_tenant_party_idx").on(t.tenantId, t.partyId),
@@ -473,3 +621,9 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type InvoicePayment = typeof invoicePayments.$inferSelect;
 
 export type RecurringInvoice = typeof recurringInvoices.$inferSelect;
+
+export type Product = typeof products.$inferSelect;
+
+export type PaymentTerm = typeof paymentTerms.$inferSelect;
+
+export type PaymentMethod = typeof paymentMethods.$inferSelect;

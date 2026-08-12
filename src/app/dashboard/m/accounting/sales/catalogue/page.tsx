@@ -1,0 +1,205 @@
+import { and, asc, eq } from "drizzle-orm";
+import { Package } from "lucide-react";
+import { requireTenant } from "@/lib/auth";
+import { requireModuleEnabled } from "@/lib/modules";
+import { withTenant, schema } from "@/db";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
+import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import {
+  listPaymentMethods,
+  listPaymentTerms,
+  listProducts,
+} from "@/modules/accounting/invoicing/catalogue";
+import { formatCentsSigned } from "@/modules/accounting/lib/money";
+import { SalesNav } from "../sales-nav";
+import {
+  ActiveToggle,
+  AddMethodButton,
+  AddProductButton,
+  AddTermButton,
+  DefaultBadge,
+  MakeDefaultButton,
+} from "./catalogue-controls";
+
+export const dynamic = "force-dynamic";
+
+export default async function CataloguePage() {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, "accounting");
+
+  const data = await withTenant(ctx.tenant.id, async (tx) => {
+    const [products, terms, methods, incomeAccounts] = await Promise.all([
+      listProducts(tx, ctx.tenant.id),
+      listPaymentTerms(tx, ctx.tenant.id),
+      listPaymentMethods(tx, ctx.tenant.id),
+      tx.query.accounts.findMany({
+        where: and(
+          eq(schema.accounts.tenantId, ctx.tenant.id),
+          eq(schema.accounts.isActive, true),
+          eq(schema.accounts.accountType, "income"),
+        ),
+        orderBy: asc(schema.accounts.code),
+      }),
+    ]);
+    return { products, terms, methods, incomeAccounts };
+  });
+
+  const isOwner = ctx.role === "owner";
+  const accountLabel = new Map(
+    data.incomeAccounts.map((a) => [a.id, `${a.code} · ${a.name}`]),
+  );
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Catalogue"
+        description="What you sell, when you expect to be paid, and how the money arrives. Deactivating keeps history intact — nothing here is ever deleted."
+      />
+
+      <AccountingNav />
+      <SalesNav />
+
+      {/* -- saved items -- */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium tracking-heading">Saved items</h2>
+          {isOwner && (
+            <AddProductButton
+              incomeAccounts={data.incomeAccounts.map((a) => ({
+                id: a.id,
+                code: a.code,
+                name: a.name,
+              }))}
+            />
+          )}
+        </div>
+        <Panel
+          isEmpty={data.products.length === 0}
+          empty={
+            <EmptyState
+              icon={<Package />}
+              title="Nothing saved yet"
+              description="Save the things you invoice for repeatedly, so the tenth invoice does not need the description and price typed again."
+            />
+          }
+        >
+          <ul className="divide-y divide-divider">
+            {data.products.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-3 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="flex items-center gap-2 text-sm font-medium">
+                    {p.name}
+                    {!p.isActive && <Badge variant="outline">inactive</Badge>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    <span className="tabular-nums">
+                      {formatCentsSigned(p.unitPriceCents)}
+                    </span>
+                    {p.incomeAccountId
+                      ? ` · ${accountLabel.get(p.incomeAccountId) ?? "account"}`
+                      : ""}
+                    {p.description ? ` · ${p.description}` : ""}
+                  </p>
+                </div>
+                {isOwner && (
+                  <ActiveToggle
+                    id={p.id}
+                    version={p.version}
+                    active={p.isActive}
+                    kind="product"
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      </div>
+
+      {/* -- terms -- */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium tracking-heading">Payment terms</h2>
+          {isOwner && <AddTermButton />}
+        </div>
+        <Panel>
+          <ul className="divide-y divide-divider">
+            {data.terms.map((t) => (
+              <li
+                key={t.id}
+                className="flex items-center justify-between gap-3 px-4 py-3"
+              >
+                <div>
+                  <p className="flex items-center gap-2 text-sm font-medium">
+                    {t.name}
+                    {t.isDefault && <DefaultBadge />}
+                    {!t.isActive && <Badge variant="outline">inactive</Badge>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {t.dueInDays === 0
+                      ? "Due the day it is issued"
+                      : `Due ${t.dueInDays} days after the issue date`}
+                  </p>
+                </div>
+                {isOwner && (
+                  <div className="flex items-center gap-1">
+                    {!t.isDefault && t.isActive && (
+                      <MakeDefaultButton termId={t.id} />
+                    )}
+                    <ActiveToggle
+                      id={t.id}
+                      version={t.version}
+                      active={t.isActive}
+                      kind="term"
+                    />
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      </div>
+
+      {/* -- payment methods -- */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium tracking-heading">
+            Payment methods
+          </h2>
+          {isOwner && <AddMethodButton />}
+        </div>
+        <Panel>
+          <ul className="divide-y divide-divider">
+            {data.methods.map((m) => (
+              <li
+                key={m.id}
+                className="flex items-center justify-between gap-3 px-4 py-3"
+              >
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  {m.name}
+                  {!m.isActive && <Badge variant="outline">inactive</Badge>}
+                  <span className="font-mono text-xs text-subtle-foreground">
+                    {m.code}
+                  </span>
+                </p>
+                {isOwner && (
+                  <ActiveToggle
+                    id={m.id}
+                    version={m.version}
+                    active={m.isActive}
+                    kind="method"
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      </div>
+    </div>
+  );
+}

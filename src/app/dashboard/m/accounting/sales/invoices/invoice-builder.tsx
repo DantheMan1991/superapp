@@ -27,6 +27,12 @@ import {
   formatCentsSigned,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
+import {
+  describeTerm,
+  dueDateFromTerms,
+  resolveTerm,
+  type TermLike,
+} from "@/modules/accounting/invoicing/terms";
 
 export interface BuilderCustomer {
   id: string;
@@ -37,6 +43,15 @@ export interface BuilderAccount {
   id: string;
   code: string;
   name: string;
+}
+
+/** A saved line: picking one fills description, price and account at once. */
+export interface BuilderProduct {
+  id: string;
+  name: string;
+  description: string;
+  unitPriceCents: number;
+  incomeAccountId: string | null;
 }
 
 interface LineRow {
@@ -82,6 +97,9 @@ export function InvoiceBuilder({
   suggestedNumber,
   today,
   invoice,
+  products = [],
+  terms = [],
+  defaultTermId = null,
 }: {
   customers: BuilderCustomer[];
   incomeAccounts: BuilderAccount[];
@@ -89,6 +107,10 @@ export function InvoiceBuilder({
   today: string;
   /** When set, edits this draft instead of creating. */
   invoice?: BuilderInvoice;
+  products?: BuilderProduct[];
+  terms?: TermLike[];
+  /** The tenant's default term, applied to a NEW invoice only. */
+  defaultTermId?: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -96,7 +118,29 @@ export function InvoiceBuilder({
   const [customerId, setCustomerId] = useState(invoice?.customerId ?? "");
   const [number, setNumber] = useState(invoice?.invoiceNumber ?? suggestedNumber);
   const [issueDate, setIssueDate] = useState(invoice?.issueDate ?? today);
-  const [dueDate, setDueDate] = useState(invoice?.dueDate ?? "");
+  // An EXISTING draft keeps the date it was saved with — re-deriving it from
+  // terms on open would silently move a date somebody chose by hand.
+  const initialTerm = invoice ? null : resolveTerm(terms, null, defaultTermId);
+  const [termId, setTermId] = useState(initialTerm?.id ?? "");
+  const [dueDate, setDueDate] = useState(
+    invoice?.dueDate ??
+      (initialTerm ? dueDateFromTerms(invoice?.issueDate ?? today, initialTerm.dueInDays) : ""),
+  );
+
+  const chosenTerm = terms.find((t) => t.id === termId) ?? null;
+
+  /** Terms drive the date; typing a date directly clears the term. */
+  function applyTerm(nextTermId: string) {
+    setTermId(nextTermId);
+    const term = terms.find((t) => t.id === nextTermId);
+    if (term) setDueDate(dueDateFromTerms(issueDate, term.dueInDays));
+  }
+
+  /** Re-derive when the issue date moves, so the pair stays consistent. */
+  function applyIssueDate(next: string) {
+    setIssueDate(next);
+    if (chosenTerm) setDueDate(dueDateFromTerms(next, chosenTerm.dueInDays));
+  }
   const [memo, setMemo] = useState(invoice?.memo ?? "");
   const [rows, setRows] = useState<LineRow[]>(
     invoice
@@ -207,21 +251,48 @@ export function InvoiceBuilder({
               id="inv-issue"
               type="date"
               value={issueDate}
-              onChange={(e) => setIssueDate(e.target.value)}
+              onChange={(e) => applyIssueDate(e.target.value)}
             />
           </div>
         </div>
         <div className="grid gap-3 sm:grid-cols-4">
+          {terms.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="inv-terms">Terms</Label>
+              <Select value={termId} onValueChange={applyTerm}>
+                <SelectTrigger id="inv-terms">
+                  <SelectValue placeholder="Custom" />
+                </SelectTrigger>
+                <SelectContent>
+                  {terms.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="inv-due">Due date (optional)</Label>
             <Input
               id="inv-due"
               type="date"
               value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              onChange={(e) => {
+                // A hand-typed date is a deliberate override, so the term stops
+                // claiming to describe it.
+                setTermId("");
+                setDueDate(e.target.value);
+              }}
             />
+            {chosenTerm && (
+              <p className="text-xs text-muted-foreground">
+                {describeTerm(chosenTerm, issueDate)}
+              </p>
+            )}
           </div>
-          <div className="space-y-1.5 sm:col-span-3">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="inv-memo">Memo</Label>
             <Input
               id="inv-memo"
@@ -314,14 +385,50 @@ export function InvoiceBuilder({
           </div>
         </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setRows((rs) => [...rs, emptyRow(defaultAccount)])}
-        >
-          <Plus className="mr-1.5 size-4" /> Add line
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setRows((rs) => [...rs, emptyRow(defaultAccount)])}
+          >
+            <Plus className="mr-1.5 size-4" /> Add line
+          </Button>
+
+          {products.length > 0 && (
+            <Select
+              value=""
+              onValueChange={(id) => {
+                const product = products.find((p) => p.id === id);
+                if (!product) return;
+                // Appends a line rather than replacing one: picking a saved
+                // item is "add this to the invoice", not "change that row".
+                setRows((rs) => [
+                  ...rs,
+                  {
+                    key: crypto.randomUUID(),
+                    description: product.description || product.name,
+                    quantity: "1",
+                    unitPrice: (Math.abs(product.unitPriceCents) / 100).toFixed(2),
+                    discount: product.unitPriceCents < 0,
+                    incomeAccountId: product.incomeAccountId ?? defaultAccount,
+                  },
+                ]);
+              }}
+            >
+              <SelectTrigger className="w-56" aria-label="Add a saved item">
+                <SelectValue placeholder="Add a saved item…" />
+              </SelectTrigger>
+              <SelectContent>
+                {products.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
 
         <div className="flex items-center justify-between border-t pt-4">
           <p className="font-mono text-lg font-semibold">

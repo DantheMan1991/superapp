@@ -40,6 +40,11 @@ export type LedgerErrorCode =
   | "INVOICE_NO_RECIPIENT"
   | "INVOICE_NUMBER_TAKEN"
   | "PNL_TOO_MANY_MONTHS"
+  | "PRODUCT_NAME_TAKEN"
+  | "TERM_NAME_TAKEN"
+  | "TERM_NOT_FOUND"
+  | "PAYMENT_METHOD_INVALID"
+  | "PAYMENT_METHOD_TAKEN"
   | "REMINDER_OFFSETS_INVALID"
   | "REMINDER_SCHEDULE_EMPTY"
   | "REMINDER_NOT_TESTABLE"
@@ -145,6 +150,11 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   INVOICE_NUMBER_TAKEN: "That invoice number is already in use.",
   PNL_TOO_MANY_MONTHS:
     "That's too long a range for monthly columns — pick 24 months or fewer.",
+  PRODUCT_NAME_TAKEN: "A saved item already has that name.",
+  TERM_NAME_TAKEN: "A payment term already has that name.",
+  TERM_NOT_FOUND: "That payment term no longer exists.",
+  PAYMENT_METHOD_INVALID: "Give the payment method a name.",
+  PAYMENT_METHOD_TAKEN: "That payment method already exists.",
   REMINDER_OFFSETS_INVALID:
     "That reminder schedule isn't valid — each entry is a whole number of days near the due date.",
   REMINDER_SCHEDULE_EMPTY:

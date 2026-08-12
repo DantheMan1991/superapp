@@ -48,11 +48,14 @@ export function InvoiceActions({
   depositOptions,
   today,
   canAct,
+  paymentMethods,
 }: {
   invoice: InvoiceRef;
   depositOptions: Array<{ id: string; label: string }>;
   today: string;
   canAct: boolean;
+  /** The tenant's own list. Codes are what get stored on the payment. */
+  paymentMethods: Array<{ code: string; name: string }>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -61,7 +64,9 @@ export function InvoiceActions({
     date: today,
     amount: (invoice.balanceCents / 100).toFixed(2),
     depositAccountId: depositOptions[0]?.id ?? "",
-    method: "check" as "cash" | "check" | "card" | "bank_transfer" | "other",
+    // Whatever the tenant listed first, rather than a hardcoded "check" that
+    // might not be one of their methods at all.
+    method: paymentMethods[0]?.code ?? "other",
     memo: "",
   });
 
@@ -216,17 +221,17 @@ export function InvoiceActions({
                 <Label>Method</Label>
                 <Select
                   value={pay.method}
-                  onValueChange={(v) => setPay({ ...pay, method: v as typeof pay.method })}
+                  onValueChange={(v) => setPay({ ...pay, method: v })}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="check">Check</SelectItem>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
-                    <SelectItem value="bank_transfer">Bank transfer</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    {paymentMethods.map((m) => (
+                      <SelectItem key={m.code} value={m.code}>
+                        {m.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

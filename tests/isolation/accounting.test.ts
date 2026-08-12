@@ -20,6 +20,8 @@ interface AccFixture {
   memberId: string;
   customerId: string;
   invoiceId: string;
+  termId: string;
+  productId: string;
 }
 
 d("accounting isolation (RLS + composite tenant FKs)", () => {
@@ -83,6 +85,26 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         dimensionType: "property",
         memberId: member.id,
       });
+      // The catalogue: three reference lists, one of each per tenant.
+      const [term] = await tx
+        .insert(schema.paymentTerms)
+        .values({ tenantId, name: `Net 30 ${tag}`, dueInDays: 30, isDefault: true })
+        .returning();
+      await tx.insert(schema.paymentMethods).values({
+        tenantId,
+        code: `wire_${tag.toLowerCase()}`,
+        name: `Wire ${tag}`,
+      });
+      const [product] = await tx
+        .insert(schema.products)
+        .values({
+          tenantId,
+          name: `Callout fee ${tag}`,
+          unitPriceCents: 9_900,
+          incomeAccountId: null,
+        })
+        .returning();
+
       // An overdue, chaseable invoice — the input the reminder sweep selects
       // over. Raw inserts, per the note on seedParty: this suite certifies what
       // the DATABASE enforces.
@@ -114,6 +136,8 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         memberId: member.id,
         customerId: customer.id,
         invoiceId: invoice.id,
+        termId: term.id,
+        productId: product.id,
       };
     });
   }
@@ -155,6 +179,13 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
       expect(members.every((r) => r.tenantId === tenantA)).toBe(true);
       const dims = await tx.select().from(schema.lineDimensions);
       expect(dims.every((r) => r.tenantId === tenantA)).toBe(true);
+      const products = await tx.select().from(schema.products);
+      expect(products.length).toBeGreaterThan(0);
+      expect(products.every((r) => r.tenantId === tenantA)).toBe(true);
+      const terms = await tx.select().from(schema.paymentTerms);
+      expect(terms.every((r) => r.tenantId === tenantA)).toBe(true);
+      const methods = await tx.select().from(schema.paymentMethods);
+      expect(methods.every((r) => r.tenantId === tenantA)).toBe(true);
     });
   });
 
@@ -318,6 +349,41 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
     expect(forA.some((r) => r.invoiceId === fx.a.invoiceId)).toBe(true);
   });
 
+  it("composite FK: a customer cannot take the OTHER tenant's payment terms", async () => {
+    // tenant_id passes RLS (it is A's own), but (tenant_id, payment_terms_id)
+    // does not exist as a pair — the FK itself must reject it.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx
+          .update(schema.customers)
+          .set({ paymentTermsId: fx.b.termId })
+          .where(eq(schema.customers.id, fx.a.customerId)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: a product cannot point at the OTHER tenant's account", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.products).values({
+          tenantId: tenantA,
+          name: "smuggled product",
+          incomeAccountId: fx.b.accountId,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot INSERT catalogue rows attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx
+          .insert(schema.paymentMethods)
+          .values({ tenantId: tenantB, code: "smuggled", name: "Smuggled" }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("no context → default deny on all accounting tables", async () => {
     const counts = await withSystem(async (tx) => {
       await tx.execute(sql`select set_config('app.role', '', true)`);
@@ -329,6 +395,9 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         tx.select().from(schema.dimensionMembers),
         tx.select().from(schema.lineDimensions),
         tx.select().from(schema.accountingSettings),
+        tx.select().from(schema.products),
+        tx.select().from(schema.paymentTerms),
+        tx.select().from(schema.paymentMethods),
       ]);
     });
     for (const rows of counts) expect(rows).toHaveLength(0);

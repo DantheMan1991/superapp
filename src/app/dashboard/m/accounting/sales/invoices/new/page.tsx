@@ -4,6 +4,10 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import {
+  listPaymentTerms,
+  listProducts,
+} from "@/modules/accounting/invoicing/catalogue";
 import { suggestInvoiceNumber } from "@/modules/accounting/invoicing/numbering";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../../sales-nav";
@@ -32,10 +36,30 @@ export default async function NewInvoicePage() {
       orderBy: asc(schema.accounts.code),
     });
     const suggestedNumber = await suggestInvoiceNumber(tx, ctx.tenant.id);
+    const [productRows, termRows] = await Promise.all([
+      listProducts(tx, ctx.tenant.id, { activeOnly: true }),
+      listPaymentTerms(tx, ctx.tenant.id, { activeOnly: true }),
+    ]);
+    const products = productRows.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      unitPriceCents: p.unitPriceCents,
+      incomeAccountId: p.incomeAccountId,
+    }));
+    const terms = termRows.map((t) => ({
+      id: t.id,
+      name: t.name,
+      dueInDays: t.dueInDays,
+    }));
+    const defaultTermId = termRows.find((t) => t.isDefault)?.id ?? null;
     return {
       customers,
       incomeAccounts,
       suggestedNumber,
+      products,
+      terms,
+      defaultTermId,
       today: todayInTimezone(ctx.tenant.timezone),
     };
   });
@@ -62,6 +86,9 @@ export default async function NewInvoicePage() {
           }))}
           suggestedNumber={data.suggestedNumber}
           today={data.today}
+          products={data.products}
+          terms={data.terms}
+          defaultTermId={data.defaultTermId}
         />
       )}
     </div>

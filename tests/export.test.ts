@@ -64,7 +64,7 @@ function minimalBooksData(): BooksData {
     invoices: [],
     invoiceLines: [],
     invoicePayments: [],
-    recurringInvoices: [],
+    recurringEntries: [],
     vendors: [],
     bills: [],
     billLines: [],

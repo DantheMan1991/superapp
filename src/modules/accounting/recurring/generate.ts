@@ -7,26 +7,28 @@ import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { getSettings } from "../core/guards";
 import { postEntry } from "../core/posting";
 import { createBillDraft } from "../payables/bills";
+import { createInvoiceDraft } from "../invoicing/invoices";
 import { addDaysIso } from "../lib/dates";
 import { todayInTimezone } from "../lib/money";
-import { advanceMonthly } from "../invoicing/recurring";
+import { advanceMonthly } from "./schedule";
 import {
   parseRecurringEntryTemplate,
   type RecurringEntryTemplate,
 } from "./template";
 
 /**
- * Generating the things a business books on a schedule that are not invoices:
- * journals (the monthly depreciation entry) and bills (the rent that arrives
- * every month whether or not anybody sends a copy).
+ * Everything a business books on a schedule: journals (the monthly
+ * depreciation entry), bills (the rent that arrives every month whether or not
+ * anybody sends a copy) and invoices (the same rent, from the other side).
  *
- * The SHAPE is deliberately the same as `invoicing/recurring.ts`, because the
- * hard-won parts of that loop are not invoice-specific: one transaction PER
- * TEMPLATE so a bad one never rolls back the others, compare-and-swap on
- * `version` so a double-click cannot double-generate, and catch-up that
- * creates one period-dated record per missed period rather than one dated
- * today. `advanceMonthly` is imported from there rather than copied — the same
- * function, so the two cannot drift on month arithmetic.
+ * This loop started as the invoice-only `invoicing/recurring.ts` and was
+ * rewritten kind-agnostic when a second recurrence appeared; the third folded
+ * the original back INTO it, which is why the invoice branch reads like a
+ * translation of that file. The hard-won parts were never invoice-specific:
+ * one transaction PER TEMPLATE so a bad one never rolls back the others,
+ * compare-and-swap on `version` so a double-click cannot double-generate, and
+ * catch-up that creates one period-dated record per missed period rather than
+ * one dated today.
  */
 
 /** Missed periods one run will make up. Same bound as recurring invoices. */
@@ -69,12 +71,16 @@ async function assertTemplateReferences(
   tenantId: string,
   template: RecurringEntryTemplate,
 ): Promise<void> {
+  // Each kind names its account differently: a journal line IS an account, an
+  // invoice line points at income, and a bill line may be uncoded (P9).
   const accountIds =
     template.kind === "journal"
       ? template.lines.map((l) => l.accountId)
-      : template.lines
-          .map((l) => l.accountId)
-          .filter((id): id is string => id !== null && id !== undefined);
+      : template.kind === "invoice"
+        ? template.lines.map((l) => l.incomeAccountId)
+        : template.lines
+            .map((l) => l.accountId)
+            .filter((id): id is string => id !== null && id !== undefined);
   if (accountIds.length === 0) return;
 
   const found = await tx
@@ -183,6 +189,19 @@ export async function generateRecurringEntries(
               idempotencyKey: `recurring:${entry.id}:${next}`,
             });
             if (status === "posted") posted += 1;
+          } else if (template.kind === "invoice") {
+            // Invoices are ALWAYS drafts too, and always were: a human reviews
+            // before AR posts, and generation never touches the ledger, which
+            // is what makes it immune to PERIOD_CLOSED. That rule came with
+            // `recurring_invoices` and survives the move unchanged.
+            await createInvoiceDraft(tx, ctx, {
+              customerId: entry.customerId!,
+              issueDate: next,
+              dueDate: addDaysIso(next, template.dueInDays),
+              memo: template.memo ?? entry.name,
+              lines: template.lines,
+              recurringEntryId: entry.id,
+            });
           } else {
             // Bills are ALWAYS drafts. Approving a bill is what posts it, and
             // that approval is the control an owner already exercises over

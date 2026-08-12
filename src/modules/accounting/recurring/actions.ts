@@ -50,6 +50,7 @@ function revalidateRecurring(): void {
   revalidatePath(`${BASE}/recurring`);
   revalidatePath(`${BASE}/journal`);
   revalidatePath(`${BASE}/purchases/bills`);
+  revalidatePath(`${BASE}/sales/invoices`);
   revalidatePath(`${BASE}/trial-balance`);
 }
 
@@ -57,6 +58,7 @@ const createSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
     vendorId: z.string().uuid().nullable().optional(),
+    customerId: z.string().uuid().nullable().optional(),
     dayOfMonth: z.number().int().min(1).max(28),
     nextRunDate: z
       .string()
@@ -65,11 +67,16 @@ const createSchema = z
     autoPost: z.boolean().optional(),
     template: recurringEntryTemplateSchema,
   })
-  // The two shape rules the database also carries, checked here so the message
-  // is a sentence rather than a constraint-violation string.
+  // The shape rules the database also carries (`recurring_entries_party_shape`),
+  // checked here so the message is a sentence rather than a
+  // constraint-violation string.
   .refine(
     (v) => (v.template.kind === "bill" ? !!v.vendorId : !v.vendorId),
-    "A bill needs a supplier; a journal must not have one",
+    "A bill needs a supplier; nothing else may have one",
+  )
+  .refine(
+    (v) => (v.template.kind === "invoice" ? !!v.customerId : !v.customerId),
+    "An invoice needs a customer; nothing else may have one",
   )
   .refine(
     (v) => !v.autoPost || v.template.kind === "journal",
@@ -99,6 +106,7 @@ export async function createRecurringEntryAction(
           kind: parsed.data.template.kind,
           name: parsed.data.name,
           vendorId: parsed.data.vendorId ?? null,
+          customerId: parsed.data.customerId ?? null,
           template: parsed.data.template,
           dayOfMonth: parsed.data.dayOfMonth,
           nextRunDate: parsed.data.nextRunDate,

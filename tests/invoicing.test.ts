@@ -27,12 +27,7 @@ import {
   parseInvoiceNumberSuffix,
 } from "../src/modules/accounting/invoicing/numbering";
 import { agingBucketIndex, buildArAging } from "../src/modules/accounting/invoicing/aging";
-import {
-  advanceMonthly,
-  recurringTemplateSchema,
-  createRecurringInvoice,
-  generateRecurringInvoices,
-} from "../src/modules/accounting/invoicing/recurring";
+import { generateRecurringEntries } from "../src/modules/accounting/recurring/generate";
 import {
   createCustomer,
   updateCustomer,
@@ -115,31 +110,6 @@ describe("aging buckets (P17)", () => {
     const acme = report.rows.find((r) => r.label === "Acme")!;
     expect(acme.perColumnCents).toEqual([5_000, 6_000, 0, 0, 0, 11_000]);
     expect(report.rows.at(-1)).toMatchObject({ kind: "total" });
-  });
-});
-
-describe("recurring (P11)", () => {
-  it("advanceMonthly rolls months and years, keeps day", () => {
-    expect(advanceMonthly("2026-01-28", 28)).toBe("2026-02-28");
-    expect(advanceMonthly("2026-12-15", 15)).toBe("2027-01-15");
-    expect(advanceMonthly("2026-03-01", 1)).toBe("2026-04-01");
-  });
-  it("template schema rejects bad shapes", () => {
-    const goodLine = {
-      description: "Rent",
-      quantity: "1",
-      unitPriceCents: 100_000,
-      incomeAccountId: "00000000-0000-0000-0000-000000000000",
-    };
-    expect(
-      recurringTemplateSchema.safeParse({ lines: [goodLine], dueInDays: 15 }).success,
-    ).toBe(true);
-    expect(
-      recurringTemplateSchema.safeParse({ lines: [], dueInDays: 15 }).success,
-    ).toBe(false);
-    expect(
-      recurringTemplateSchema.safeParse({ lines: [goodLine], dueInDays: -1 }).success,
-    ).toBe(false);
   });
 });
 
@@ -606,28 +576,39 @@ d("invoicing (DB)", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("recurring: catch-up drafts with period dates, cap, CAS (T-D10)", async () => {
+  it("recurring invoice: catch-up drafts with period dates, cap, CAS (T-D10)", async () => {
+    // Recurring invoices moved from their own table into `recurring_entries`
+    // alongside journals and bills. Same guarantees, one engine: this test
+    // outlived the module it was written for.
     const sales = await accountId("4000");
-    const template = await withTenant(tenantId, (tx) =>
-      createRecurringInvoice(tx, owner, {
-        customerId,
-        name: "Rent — Test",
-        dayOfMonth: 1,
-        nextRunDate: "2026-05-01", // 3 periods behind (May, Jun, Jul vs late-Jul today)
-        template: {
-          lines: [line(120_000, sales)],
-          dueInDays: 10,
-        },
-      }),
-    );
-    const result = await generateRecurringInvoices(owner);
+    const template = await withTenant(tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(schema.recurringEntries)
+        .values({
+          tenantId,
+          kind: "invoice",
+          name: "Rent — Test",
+          customerId,
+          dayOfMonth: 1,
+          nextRunDate: "2026-05-01", // 3 periods behind (May, Jun, Jul vs late-Jul today)
+          template: {
+            kind: "invoice",
+            lines: [line(120_000, sales)],
+            dueInDays: 10,
+          },
+          createdByClerkUserId: owner.userId,
+        })
+        .returning();
+      return row;
+    });
+    const result = await generateRecurringEntries(owner);
     expect(result.errors).toHaveLength(0);
     expect(result.created).toBeGreaterThanOrEqual(3);
     const drafts = await withTenant(tenantId, (tx) =>
       tx.query.invoices.findMany({
         where: and(
           eq(schema.invoices.tenantId, tenantId),
-          eq(schema.invoices.recurringInvoiceId, template.id),
+          eq(schema.invoices.recurringEntryId, template.id),
         ),
       }),
     );
@@ -636,7 +617,7 @@ d("invoicing (DB)", () => {
     expect(drafts.map((i) => i.issueDate).sort()[0]).toBe("2026-05-01");
     expect(drafts[0].dueDate).not.toBeNull();
     // Second run: nothing due.
-    const again = await generateRecurringInvoices(owner);
+    const again = await generateRecurringEntries(owner);
     expect(again.created).toBe(0);
   });
 

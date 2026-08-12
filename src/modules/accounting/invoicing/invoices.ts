@@ -148,7 +148,10 @@ export interface InvoiceDraftInput {
   dueDate?: string | null;
   memo?: string;
   lines: InvoiceLineInput[];
+  /** DEPRECATED with the table it points at; dropped in the follow-up PR. */
   recurringInvoiceId?: string | null;
+  /** The unified template that generated this invoice. */
+  recurringEntryId?: string | null;
 }
 
 /**
@@ -176,6 +179,7 @@ export async function createInvoiceDraft(
     dueDate: input.dueDate ?? null,
     memo: input.memo ?? "",
     recurringInvoiceId: input.recurringInvoiceId ?? null,
+    recurringEntryId: input.recurringEntryId ?? null,
     createdByClerkUserId: ctx.userId,
   });
 
@@ -211,7 +215,7 @@ export async function updateInvoiceDraft(
   args: {
     invoiceId: string;
     expectedVersion: number;
-    patch: Omit<InvoiceDraftInput, "recurringInvoiceId">;
+    patch: Omit<InvoiceDraftInput, "recurringInvoiceId" | "recurringEntryId">;
   },
 ): Promise<Invoice> {
   const invoice = await loadInvoice(tx, ctx.tenantId, args.invoiceId);

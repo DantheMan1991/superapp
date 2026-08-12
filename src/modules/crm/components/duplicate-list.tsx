@@ -292,8 +292,8 @@ function PlanSummary({
           <span>
             {[
               m.invoices ? count(m.invoices, "invoice") : null,
-              m.recurringInvoices
-                ? count(m.recurringInvoices, "recurring invoice")
+              m.recurringEntries
+                ? count(m.recurringEntries, "recurring entry")
                 : null,
               m.bills ? count(m.bills, "bill") : null,
             ]

@@ -12,6 +12,10 @@ import { listRecurringEntries } from "@/modules/accounting/recurring/generate";
 import { parseRecurringEntryTemplate } from "@/modules/accounting/recurring/template";
 import { formatCentsSigned, todayInTimezone } from "@/modules/accounting/lib/money";
 import {
+  computeLineAmounts,
+  invoiceTotalCents,
+} from "@/modules/accounting/invoicing/lines";
+import {
   AddRecurringEntryButton,
   GenerateRecurringEntriesButton,
   RecurringEntryToggle,
@@ -24,7 +28,7 @@ export default async function RecurringEntriesPage() {
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
-    const [entries, accounts, vendors] = await Promise.all([
+    const [entries, accounts, vendors, customers] = await Promise.all([
       listRecurringEntries(tx, ctx.tenant.id),
       tx.query.accounts.findMany({
         where: and(
@@ -40,34 +44,53 @@ export default async function RecurringEntriesPage() {
         ),
         orderBy: asc(schema.vendors.name),
       }),
+      tx.query.customers.findMany({
+        where: and(
+          eq(schema.customers.tenantId, ctx.tenant.id),
+          eq(schema.customers.isActive, true),
+        ),
+        orderBy: asc(schema.customers.name),
+      }),
     ]);
-    return { entries, accounts, vendors };
+    return { entries, accounts, vendors, customers };
   });
 
   const isOwner = ctx.role === "owner";
   const vendorName = new Map(data.vendors.map((v) => [v.id, v.name]));
+  const customerName = new Map(data.customers.map((c) => [c.id, c.name]));
   const today = todayInTimezone(ctx.tenant.timezone);
 
-  /** Σ debits, so a journal row can show its size at a glance. */
-  function journalSize(template: unknown): number {
+  /**
+   * What one run of this template is worth, so a row shows its size at a
+   * glance. A journal sums its DEBITS only (summing both sides would always
+   * give zero); the other two sum their lines, an invoice line being
+   * quantity × unit price.
+   */
+  function templateSize(template: unknown): number {
     const parsed = parseRecurringEntryTemplate(template);
-    if (!parsed || parsed.kind !== "journal") return 0;
-    return parsed.lines
-      .filter((l) => l.amountCents > 0)
-      .reduce((s, l) => s + l.amountCents, 0);
+    if (!parsed) return 0;
+    if (parsed.kind === "journal") {
+      return parsed.lines
+        .filter((l) => l.amountCents > 0)
+        .reduce((s, l) => s + l.amountCents, 0);
+    }
+    if (parsed.kind === "bill") {
+      return parsed.lines.reduce((s, l) => s + l.amountCents, 0);
+    }
+    return invoiceTotalCents(computeLineAmounts(parsed.lines));
   }
 
-  function billSize(template: unknown): number {
-    const parsed = parseRecurringEntryTemplate(template);
-    if (!parsed || parsed.kind !== "bill") return 0;
-    return parsed.lines.reduce((s, l) => s + l.amountCents, 0);
-  }
+  const KIND_LABEL = {
+    journal: "Journal",
+    bill: "Bill",
+    invoice: "Invoice",
+  } as const;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Recurring entries"
-        description="Journals and bills the books produce every month. Catch-up dates each one to the month it was for, never to today."
+        description="Everything the books produce every month — invoices, bills and journals. Catch-up dates each one to the month it was for, never to today."
         actions={
           isOwner && (
             <>
@@ -79,6 +102,7 @@ export default async function RecurringEntriesPage() {
                   name: a.name,
                 }))}
                 vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
+                customers={data.customers.map((c) => ({ id: c.id, name: c.name }))}
                 today={today}
               />
             </>
@@ -94,14 +118,20 @@ export default async function RecurringEntriesPage() {
           <EmptyState
             icon={<Repeat />}
             title="Nothing recurring yet"
-            description="A monthly depreciation journal, or the rent that arrives whether or not anybody sends a copy. Invoices have their own list under Sales."
+            description="The rent you invoice on the first, the rent you pay on the fifth, or the monthly depreciation journal — anything the books produce on a schedule."
           />
         }
       >
         <ul className="divide-y divide-divider">
           {data.entries.map((e) => {
             const broken = parseRecurringEntryTemplate(e.template) === null;
-            const size = e.kind === "journal" ? journalSize(e.template) : billSize(e.template);
+            const size = templateSize(e.template);
+            const party =
+              e.kind === "bill"
+                ? e.vendorId && (vendorName.get(e.vendorId) ?? "Supplier")
+                : e.kind === "invoice"
+                  ? e.customerId && (customerName.get(e.customerId) ?? "Customer")
+                  : null;
             return (
               <li
                 key={e.id}
@@ -110,9 +140,7 @@ export default async function RecurringEntriesPage() {
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
                     {e.name}
-                    <Badge variant="outline">
-                      {e.kind === "journal" ? "Journal" : "Bill"}
-                    </Badge>
+                    <Badge variant="outline">{KIND_LABEL[e.kind]}</Badge>
                     {e.autoPost && <Badge>posts automatically</Badge>}
                     {!e.isActive && <Badge variant="outline">paused</Badge>}
                     {broken && (
@@ -120,9 +148,7 @@ export default async function RecurringEntriesPage() {
                     )}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {e.kind === "bill" && e.vendorId
-                      ? `${vendorName.get(e.vendorId) ?? "Supplier"} · `
-                      : ""}
+                    {party ? `${party} · ` : ""}
                     <span className="tabular-nums">{formatCentsSigned(size)}</span>
                     {" · day "}
                     {e.dayOfMonth}

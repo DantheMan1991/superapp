@@ -40,10 +40,28 @@ interface AccountOption {
   name: string;
 }
 
-interface VendorOption {
+interface PartyOption {
   id: string;
   name: string;
 }
+
+/** One row of an invoice template — its own shape, because an invoice line
+ *  carries a quantity and a unit price where a bill line carries a total. */
+interface InvoiceRow {
+  key: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  incomeAccountId: string;
+}
+
+const emptyInvoiceRow = (): InvoiceRow => ({
+  key: crypto.randomUUID(),
+  description: "",
+  quantity: "1",
+  unitPrice: "",
+  incomeAccountId: "",
+});
 
 interface JournalRow {
   key: string;
@@ -135,7 +153,7 @@ export function RecurringEntryToggle({
 }
 
 /**
- * Creating a recurring journal or bill.
+ * Creating a recurring invoice, bill or journal.
  *
  * The journal side shows a running imbalance as you type, because an entry
  * that does not balance is refused at save — and finding that out after
@@ -145,21 +163,24 @@ export function RecurringEntryToggle({
 export function AddRecurringEntryButton({
   accounts,
   vendors,
+  customers,
   today,
 }: {
   accounts: AccountOption[];
-  vendors: VendorOption[];
+  vendors: PartyOption[];
+  customers: PartyOption[];
   today: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [kind, setKind] = useState<"journal" | "bill">("journal");
+  const [kind, setKind] = useState<"invoice" | "bill" | "journal">("invoice");
   const [name, setName] = useState("");
   const [dayOfMonth, setDayOfMonth] = useState("1");
   const [nextRunDate, setNextRunDate] = useState(today);
   const [autoPost, setAutoPost] = useState(false);
   const [vendorId, setVendorId] = useState(vendors[0]?.id ?? "");
+  const [customerId, setCustomerId] = useState(customers[0]?.id ?? "");
   const [dueInDays, setDueInDays] = useState("30");
   const [rows, setRows] = useState<JournalRow[]>([
     emptyRow(accounts[0]?.id ?? ""),
@@ -168,6 +189,9 @@ export function AddRecurringEntryButton({
   const [billDesc, setBillDesc] = useState("");
   const [billAmount, setBillAmount] = useState("");
   const [billAccountId, setBillAccountId] = useState("");
+  const [invoiceRows, setInvoiceRows] = useState<InvoiceRow[]>([
+    emptyInvoiceRow(),
+  ]);
 
   const parsedRows = rows.map((r) => {
     const cents = parseMoneyToCents(r.amount);
@@ -197,22 +221,34 @@ export function AddRecurringEntryButton({
               amountCents: p.cents!,
             })),
           }
-        : {
-            kind: "bill" as const,
-            dueInDays: Number(dueInDays) || 0,
-            lines: [
-              {
-                description: billDesc.trim(),
-                amountCents: parseMoneyToCents(billAmount) ?? 0,
-                accountId: billAccountId || null,
-              },
-            ],
-          };
+        : kind === "invoice"
+          ? {
+              kind: "invoice" as const,
+              dueInDays: Number(dueInDays) || 0,
+              lines: invoiceRows.map((r) => ({
+                description: r.description.trim(),
+                quantity: r.quantity.trim(),
+                unitPriceCents: parseMoneyToCents(r.unitPrice) ?? 0,
+                incomeAccountId: r.incomeAccountId,
+              })),
+            }
+          : {
+              kind: "bill" as const,
+              dueInDays: Number(dueInDays) || 0,
+              lines: [
+                {
+                  description: billDesc.trim(),
+                  amountCents: parseMoneyToCents(billAmount) ?? 0,
+                  accountId: billAccountId || null,
+                },
+              ],
+            };
 
     startTransition(async () => {
       const result = await createRecurringEntryAction({
         name: name.trim(),
         vendorId: kind === "bill" ? vendorId : null,
+        customerId: kind === "invoice" ? customerId : null,
         dayOfMonth: day,
         nextRunDate,
         autoPost: kind === "journal" ? autoPost : false,
@@ -222,7 +258,7 @@ export function AddRecurringEntryButton({
         toast.error(result.error);
         return;
       }
-      toast.success(kind === "journal" ? "Recurring journal added" : "Recurring bill added");
+      toast.success(`Recurring ${kind} added`);
       setOpen(false);
       router.refresh();
     });
@@ -232,9 +268,19 @@ export function AddRecurringEntryButton({
     name.trim() !== "" &&
     (kind === "journal"
       ? usable.length >= 2 && imbalance === 0
-      : vendorId !== "" &&
-        billDesc.trim() !== "" &&
-        parseMoneyToCents(billAmount) !== null);
+      : kind === "invoice"
+        ? customerId !== "" &&
+          invoiceRows.length > 0 &&
+          invoiceRows.every(
+            (r) =>
+              r.incomeAccountId !== "" &&
+              /^\d{1,10}(\.\d{1,2})?$/.test(r.quantity.trim()) &&
+              Number(r.quantity) > 0 &&
+              parseMoneyToCents(r.unitPrice) !== null,
+          )
+        : vendorId !== "" &&
+          billDesc.trim() !== "" &&
+          parseMoneyToCents(billAmount) !== null);
 
   return (
     <>
@@ -257,14 +303,17 @@ export function AddRecurringEntryButton({
                 <Label htmlFor="rec-kind">Type</Label>
                 <Select
                   value={kind}
-                  onValueChange={(v) => setKind(v as "journal" | "bill")}
+                  onValueChange={(v) =>
+                    setKind(v as "invoice" | "bill" | "journal")
+                  }
                 >
                   <SelectTrigger id="rec-kind">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="journal">Journal entry</SelectItem>
+                    <SelectItem value="invoice">Invoice</SelectItem>
                     <SelectItem value="bill">Bill</SelectItem>
+                    <SelectItem value="journal">Journal entry</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -275,7 +324,11 @@ export function AddRecurringEntryButton({
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={
-                    kind === "journal" ? "Monthly depreciation" : "Yard rent"
+                    kind === "journal"
+                      ? "Monthly depreciation"
+                      : kind === "invoice"
+                        ? "Unit 4 rent"
+                        : "Yard rent"
                   }
                 />
               </div>
@@ -303,7 +356,7 @@ export function AddRecurringEntryButton({
                   onChange={(e) => setNextRunDate(e.target.value)}
                 />
               </div>
-              {kind === "bill" && (
+              {kind !== "journal" && (
                 <div className="space-y-1.5">
                   <Label htmlFor="rec-due">Due in days</Label>
                   <Input
@@ -419,6 +472,111 @@ export function AddRecurringEntryButton({
                     onCheckedChange={setAutoPost}
                   />
                 </div>
+              </div>
+            ) : kind === "invoice" ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="rec-customer">Customer</Label>
+                  <Select value={customerId} onValueChange={setCustomerId}>
+                    <SelectTrigger id="rec-customer">
+                      <SelectValue placeholder="Pick a customer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {customers.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Lines</Label>
+                  {invoiceRows.map((row, i) => (
+                    <div key={row.key} className="grid gap-2 sm:grid-cols-12">
+                      <Input
+                        className="sm:col-span-4"
+                        value={row.description}
+                        onChange={(e) => {
+                          const next = [...invoiceRows];
+                          next[i] = { ...row, description: e.target.value };
+                          setInvoiceRows(next);
+                        }}
+                        placeholder="Description"
+                        aria-label={`Description for line ${i + 1}`}
+                      />
+                      <Input
+                        className="sm:col-span-1"
+                        value={row.quantity}
+                        onChange={(e) => {
+                          const next = [...invoiceRows];
+                          next[i] = { ...row, quantity: e.target.value };
+                          setInvoiceRows(next);
+                        }}
+                        inputMode="decimal"
+                        aria-label={`Quantity for line ${i + 1}`}
+                      />
+                      <Input
+                        className="sm:col-span-2"
+                        value={row.unitPrice}
+                        onChange={(e) => {
+                          const next = [...invoiceRows];
+                          next[i] = { ...row, unitPrice: e.target.value };
+                          setInvoiceRows(next);
+                        }}
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        aria-label={`Unit price for line ${i + 1}`}
+                      />
+                      <div className="sm:col-span-4">
+                        <Select
+                          value={row.incomeAccountId}
+                          onValueChange={(v) => {
+                            const next = [...invoiceRows];
+                            next[i] = { ...row, incomeAccountId: v };
+                            setInvoiceRows(next);
+                          }}
+                        >
+                          <SelectTrigger aria-label={`Income account for line ${i + 1}`}>
+                            <SelectValue placeholder="Income account" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {accounts.map((a) => (
+                              <SelectItem key={a.id} value={a.id}>
+                                {a.code} · {a.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="sm:col-span-1"
+                        disabled={invoiceRows.length <= 1}
+                        onClick={() =>
+                          setInvoiceRows(invoiceRows.filter((_, j) => j !== i))
+                        }
+                        aria-label={`Remove line ${i + 1}`}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setInvoiceRows([...invoiceRows, emptyInvoiceRow()])}
+                  >
+                    <Plus className="mr-1.5 size-4" /> Add line
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Invoices are always created as drafts — issuing one is what
+                  posts it and starts the clock on getting paid.
+                </p>
               </div>
             ) : (
               <div className="space-y-3">

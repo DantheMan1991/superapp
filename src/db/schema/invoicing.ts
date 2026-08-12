@@ -25,7 +25,7 @@ import {
 import { tenants } from "./platform";
 import { parties } from "./parties";
 import { accounts, dimensionMembers, entryEditPolicy, journalEntries, journalLines } from "./ledger";
-import { billLines } from "./payables";
+import { billLines, vendors } from "./payables";
 
 export const invoiceStatus = pgEnum("invoice_status", [
   "draft",
@@ -247,10 +247,13 @@ export const customers = pgTable(
 );
 
 /**
- * Recurring invoice templates (the rent-roll seam). The template is jsonb
- * — zod-validated at write AND re-validated at generation time (accounts
- * and dimension members may have deactivated since; generation skips
- * invalid templates with a report instead of failing the run).
+ * RETIRED 2026-08-12. Folded into `recurringEntries` below (`0121`/`0122`),
+ * which carries the same rows under `kind = 'invoice'` with the same ids.
+ *
+ * Nothing reads it. It is still declared because the TABLE still exists: a
+ * DROP must follow the deploy that stopped selecting it, never precede it
+ * (docs/conventions.md 4), so `drizzle/0123` and the deletion of this block
+ * are a separate PR that lands after the fold has deployed.
  */
 export const recurringInvoices = pgTable(
   "recurring_invoices",
@@ -296,6 +299,135 @@ export const recurringInvoices = pgTable(
   ],
 );
 
+/* ------------------------------------------------------------------------
+ * Recurring entries live HERE rather than in payables.ts, and the reason is
+ * a dependency cycle rather than taste: an invoice template references
+ * `customers`, which is defined in this file, while a bill template
+ * references `vendors` in payables.ts. payables.ts cannot import invoicing
+ * (invoicing already imports `bill_lines` from it), and a circular import
+ * between two eagerly-evaluated drizzle schema files is a real breakage.
+ * This file can reach both, so the table sits here.
+ * ---------------------------------------------------------------------- */
+
+export const recurringEntryKind = pgEnum("recurring_entry_kind", [
+  "journal",
+  "bill",
+  "invoice",
+]);
+
+/**
+ * EVERYTHING the books produce on a schedule: invoices, bills and journals.
+ *
+ * It began as the two the module could not express at all — the QuickBooks file
+ * this is benchmarked against runs a monthly depreciation JOURNAL — and
+ * absorbed `recurring_invoices` on 2026-08-12 (`0121`/`0122`), so there is one
+ * recurrence mechanism rather than two.
+ *
+ * ONE TABLE WITH A `kind`, not one table per kind, because everything except
+ * the payload is identical: a name, a monthly day, a next run date, a catch-up
+ * position and an active flag. `template` is jsonb, zod-validated at write AND
+ * re-validated at generation — accounts, customers and vendors may all have
+ * deactivated since it was saved.
+ *
+ * `recurring_invoices` and `invoices.recurring_invoice_id` still EXIST at the
+ * time of writing and are no longer read. They go in a separate migration in a
+ * separate PR, because a DROP must follow the deploy that stopped selecting
+ * them (docs/conventions.md 4).
+ */
+export const recurringEntries = pgTable(
+  "recurring_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    kind: recurringEntryKind("kind").notNull(),
+    name: text("name").notNull(),
+    /** Bills only; a journal has no counterparty. */
+    vendorId: uuid("vendor_id"),
+    /** Invoices only. The other half of what used to be `recurring_invoices`. */
+    customerId: uuid("customer_id"),
+    /** Shape depends on `kind` — see modules/accounting/recurring/template.ts. */
+    template: jsonb("template").notNull(),
+    /**
+     * NO `frequency` COLUMN, unlike `recurring_invoices`.
+     *
+     * That enum has exactly one value (`monthly`), so the column carries no
+     * information — and importing it here would make `payables` depend on
+     * `invoicing`, which already depends on `payables` for `bill_lines`. A
+     * circular import between two eagerly-evaluated drizzle schema files is a
+     * real breakage, not a style question. When a second cadence actually
+     * arrives it earns a column then, in both tables at once.
+     */
+    dayOfMonth: integer("day_of_month").notNull(),
+    nextRunDate: date("next_run_date", { mode: "string" }).notNull(),
+    /**
+     * JOURNALS ONLY, and off by default.
+     *
+     * The same decision bank rules already carry: a template is a decision the
+     * owner wrote down, replayed deterministically, so it MAY post — unlike a
+     * model's guess, which never may. A monthly depreciation entry you have to
+     * approve by hand is the chore this feature exists to remove. It still
+     * never overrides the period lock: a run landing in a closed period leaves
+     * a draft instead, exactly as an auto-posting rule does.
+     */
+    autoPost: boolean("auto_post").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    lastGeneratedAt: timestamp("last_generated_at", { withTimezone: true }),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("recurring_entries_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("recurring_entries_tenant_next_idx")
+      .on(t.tenantId, t.nextRunDate)
+      .where(sql`${t.isActive} = true`),
+    foreignKey({
+      name: "recurring_entries_vendor_fk",
+      columns: [t.tenantId, t.vendorId],
+      foreignColumns: [vendors.tenantId, vendors.id],
+    }),
+    foreignKey({
+      name: "recurring_entries_customer_fk",
+      columns: [t.tenantId, t.customerId],
+      foreignColumns: [customers.tenantId, customers.id],
+    }),
+    // 1–28 keeps month advancement a total function, same as recurring_invoices.
+    check("recurring_entries_day_of_month", sql`${t.dayOfMonth} between 1 and 28`),
+    /**
+     * Each kind names EXACTLY the party it needs and no other. A bill owes a
+     * vendor, an invoice is owed by a customer, a journal has no counterparty
+     * at all — and the database says so rather than trusting three call sites
+     * to remember.
+     */
+    /**
+     * Compared as TEXT, not as the enum, and that is load-bearing rather than
+     * stylistic: Postgres refuses to USE a newly added enum label in the same
+     * transaction that adds it (`check_safe_enum_use`), so a constraint naming
+     * `'invoice'` alongside `ALTER TYPE ... ADD VALUE 'invoice'` fails outright.
+     * Casting sidesteps it without splitting the migration in two. Found by
+     * running it against the dev branch.
+     */
+    check(
+      "recurring_entries_party_shape",
+      sql`(${t.kind}::text = 'bill' and ${t.vendorId} is not null and ${t.customerId} is null)
+       or (${t.kind}::text = 'invoice' and ${t.customerId} is not null and ${t.vendorId} is null)
+       or (${t.kind}::text = 'journal' and ${t.vendorId} is null and ${t.customerId} is null)`,
+    ),
+    // Auto-post is a journal-only affordance; a bill posts by being approved.
+    check(
+      "recurring_entries_auto_post_shape",
+      sql`${t.autoPost} = false or ${t.kind} = 'journal'`,
+    ),
+  ],
+);
+
 export const invoices = pgTable(
   "invoices",
   {
@@ -316,7 +448,14 @@ export const invoices = pgTable(
     totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
     /** The issuance entry. Null while draft; survives void (audit trail). */
     journalEntryId: uuid("journal_entry_id"),
+    /**
+     * DEPRECATED, dropped in the follow-up PR. Superseded by
+     * `recurring_entry_id` below; kept for this deploy because a DROP must
+     * follow the deploy that stops selecting the column, never precede it.
+     */
     recurringInvoiceId: uuid("recurring_invoice_id"),
+    /** The template that generated this invoice, in the unified table. */
+    recurringEntryId: uuid("recurring_entry_id"),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -350,6 +489,11 @@ export const invoices = pgTable(
       name: "invoices_recurring_fk",
       columns: [t.tenantId, t.recurringInvoiceId],
       foreignColumns: [recurringInvoices.tenantId, recurringInvoices.id],
+    }),
+    foreignKey({
+      name: "invoices_recurring_entry_fk",
+      columns: [t.tenantId, t.recurringEntryId],
+      foreignColumns: [recurringEntries.tenantId, recurringEntries.id],
     }),
     check("invoices_total_nonnegative", sql`${t.totalCents} >= 0`),
   ],
@@ -621,6 +765,8 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 export type InvoicePayment = typeof invoicePayments.$inferSelect;
 
 export type RecurringInvoice = typeof recurringInvoices.$inferSelect;
+
+export type RecurringEntry = typeof recurringEntries.$inferSelect;
 
 export type Product = typeof products.$inferSelect;
 

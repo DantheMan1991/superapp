@@ -848,6 +848,20 @@
       "when": 1786545945217,
       "tag": "0120_audit_log_target_index",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1786577247639,
+      "tag": "0121_easy_kabuki",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1786577275202,
+      "tag": "0122_recurring_invoices_backfill",
+      "breakpoints": true
     }
   ]
 }

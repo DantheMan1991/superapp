@@ -5,10 +5,10 @@ import {
   parseRecurringEntryTemplate,
   recurringEntryTemplateSchema,
 } from "../src/modules/accounting/recurring/template";
-import { advanceMonthly } from "../src/modules/accounting/invoicing/recurring";
+import { advanceMonthly } from "../src/modules/accounting/recurring/schedule";
 
 /**
- * Recurring journals and bills — the pure half.
+ * Recurring invoices, bills and journals — the pure half.
  *
  * The balance rule is the one that matters. The posting engine would reject an
  * unbalanced entry anyway, but it would do so once a month inside a generation
@@ -101,9 +101,58 @@ describe("template parsing", () => {
     expect(parsed?.kind === "bill" && parsed.lines[0].accountId).toBeNull();
   });
 
+  it("accepts an invoice template, quantity and unit price and all", () => {
+    // Folded in from `recurring_invoices`, which had no `kind` of its own: the
+    // table it lived in WAS the discriminator, and migration 0122 wrote the tag
+    // into every row on the way across.
+    const parsed = parseRecurringEntryTemplate({
+      kind: "invoice",
+      dueInDays: 15,
+      lines: [
+        {
+          description: "Unit 4 rent",
+          quantity: "1",
+          unitPriceCents: 120_000,
+          incomeAccountId: ACC_A,
+        },
+      ],
+    });
+    expect(parsed?.kind).toBe("invoice");
+  });
+
+  it("refuses an invoice line missing the income account it must post to", () => {
+    // A bill line may be uncoded and get categorised later; an invoice line
+    // may not, because issuing is what posts it.
+    expect(
+      parseRecurringEntryTemplate({
+        kind: "invoice",
+        dueInDays: 15,
+        lines: [{ description: "Rent", quantity: "1", unitPriceCents: 120_000 }],
+      }),
+    ).toBeNull();
+    // And the bounds the old table checked are still checked.
+    expect(
+      parseRecurringEntryTemplate({ kind: "invoice", dueInDays: 15, lines: [] }),
+    ).toBeNull();
+    expect(
+      parseRecurringEntryTemplate({
+        kind: "invoice",
+        dueInDays: -1,
+        lines: [
+          {
+            description: "Rent",
+            quantity: "1",
+            unitPriceCents: 120_000,
+            incomeAccountId: ACC_A,
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
   it("returns null for junk rather than throwing", () => {
     // One malformed row must cost its own run and nothing else.
-    for (const bad of [null, "nonsense", 42, [], {}, { kind: "invoice" }]) {
+    for (const bad of [null, "nonsense", 42, [], {}, { kind: "nosuchkind" }]) {
       expect(parseRecurringEntryTemplate(bad)).toBeNull();
     }
   });
@@ -122,10 +171,10 @@ describe("template parsing", () => {
   });
 });
 
-describe("monthly advance is shared with recurring invoices", () => {
+describe("monthly advance", () => {
   it("moves to the same day next month", () => {
-    // Imported from invoicing/recurring.ts rather than reimplemented, so the
-    // two recurrence mechanisms cannot drift on month arithmetic.
+    // ONE implementation for all three kinds — it started life inside the
+    // invoice-only module and moved out rather than being reimplemented.
     expect(advanceMonthly("2026-01-15", 15)).toBe("2026-02-15");
     expect(advanceMonthly("2026-12-01", 1)).toBe("2027-01-01");
     // Day 28 is the cap the DB check enforces, so every month has one.

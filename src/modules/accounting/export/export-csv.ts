@@ -24,7 +24,7 @@ import type {
   PeriodClose,
   Reconciliation,
   ReconciliationLine,
-  RecurringInvoice,
+  RecurringEntry,
   Vendor,
 } from "@/db/schema";
 import { preferredContactValue } from "@/lib/parties/contact-values";
@@ -70,7 +70,7 @@ export interface BooksData {
   invoices: Invoice[];
   invoiceLines: InvoiceLine[];
   invoicePayments: InvoicePayment[];
-  recurringInvoices: RecurringInvoice[];
+  recurringEntries: RecurringEntry[];
   vendors: Vendor[];
   bills: Bill[];
   billLines: BillLine[];
@@ -321,15 +321,20 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     ),
   );
 
+  // One file for all three kinds since `recurring_invoices` folded in. The
+  // template body stays omitted — it is jsonb of a different shape per kind,
+  // and a CSV cell is the wrong place for it.
   files.push(
     file(
-      "sales/recurring_invoices.csv",
-      "Recurring invoice templates (template body omitted)",
-      ["id", "name", "customer", "frequency", "day_of_month", "next_run_date", "active", "last_generated_at"],
-      data.recurringInvoices.map((r) => [
-        r.id, r.name, custName(r.customerId), r.frequency,
-        String(r.dayOfMonth), r.nextRunDate, String(r.isActive),
-        ts(r.lastGeneratedAt),
+      "ledger/recurring_entries.csv",
+      "Recurring invoice, bill and journal templates (template body omitted)",
+      ["id", "kind", "name", "customer", "vendor", "day_of_month", "next_run_date", "auto_post", "active", "last_generated_at"],
+      data.recurringEntries.map((r) => [
+        r.id, r.kind, r.name,
+        r.customerId ? custName(r.customerId) : "",
+        r.vendorId ? vendName(r.vendorId) : "",
+        String(r.dayOfMonth), r.nextRunDate, String(r.autoPost),
+        String(r.isActive), ts(r.lastGeneratedAt),
       ]),
     ),
   );

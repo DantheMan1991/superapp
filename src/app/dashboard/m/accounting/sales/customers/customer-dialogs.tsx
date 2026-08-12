@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   createCustomerAction,
   setCustomerActiveAction,
+  setCustomerRemindersMutedAction,
   updateCustomerAction,
 } from "@/modules/accounting/invoicing/actions";
 
@@ -146,7 +147,12 @@ export function AddCustomerButton() {
 export function CustomerRowActions({
   customer,
 }: {
-  customer: CustomerForm & { id: string; version: number; isActive: boolean };
+  customer: CustomerForm & {
+    id: string;
+    version: number;
+    isActive: boolean;
+    remindersMuted: boolean;
+  };
 }) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -193,6 +199,26 @@ export function CustomerRowActions({
     });
   }
 
+  /** Standing: covers invoices this customer does not have yet. */
+  function toggleRemindersMuted() {
+    startTransition(async () => {
+      const result = await setCustomerRemindersMutedAction({
+        customerId: customer.id,
+        expectedVersion: customer.version,
+        muted: !customer.remindersMuted,
+      });
+      if ("error" in result) toast.error(result.error);
+      else {
+        toast.success(
+          customer.remindersMuted
+            ? "Reminders resumed for this customer"
+            : "This customer will not be chased automatically",
+        );
+        router.refresh();
+      }
+    });
+  }
+
   return (
     <>
       <DropdownMenu>
@@ -204,6 +230,9 @@ export function CustomerRowActions({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => setEditOpen(true)}>Edit</DropdownMenuItem>
+          <DropdownMenuItem onSelect={toggleRemindersMuted} disabled={pending}>
+            {customer.remindersMuted ? "Resume reminders" : "Never send reminders"}
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={toggleActive} disabled={pending}>
             {customer.isActive ? "Deactivate" : "Reactivate"}
           </DropdownMenuItem>

@@ -28,6 +28,13 @@ export type EmailKind =
   | "esign"
   | "test"
   /**
+   * An automatic invoice reminder. Separate from `invoice` deliberately: it is
+   * the only kind sent with NO human at the keyboard, so being able to count,
+   * cap or stop reminders without touching invoice sends is worth a value in
+   * the union. Off by default per tenant — see accounting_settings.
+   */
+  | "invoice_reminder"
+  /**
    * The daily digest. The only kind sent to OUR OWN users rather than to a
    * tenant's customers — which is why it goes from the platform domain and not
    * from the tenant's, and why its recipient always came from `profiles`

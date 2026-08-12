@@ -49,6 +49,55 @@ aggregated. `getBalances` sums; this one lists.
   that renders inside its existing GET form.
 - One new query, no schema change, no migration.
 
+### 2026-08-11 — Automatic overdue reminders (branch `claude/accounting-overdue-reminders`)
+
+The first thing in the module that **emails a person with nobody at the
+keyboard**. Everything below follows from that one fact.
+
+- **Off by default, per tenant.** `accounting_settings.reminders_enabled`
+  defaults false. A migration must never start mailing a client's customers;
+  an owner turns it on deliberately, and the action is audited in both
+  directions because "when did this start" will eventually be asked.
+- **The schedule is a list of day offsets relative to the due date**, negatives
+  allowed — the default is `[-3, 0, 7, 14, 30]`: a nudge before, one on the
+  day, then chasing. Stored as zod-validated jsonb on the same
+  validate-at-write-AND-at-read contract as `recurring_invoices.template`.
+- **"Latest applicable offset wins" is the whole design**, and it is in one
+  pure function (`invoicing/reminder-schedule.ts`, no `server-only`, 27 table
+  tests). Turning reminders on over a book of 90-day-old invoices sends **one**
+  email each, not five; an invoice 30 days late is never told it is "due in
+  three days"; each offset fires at most once; when the last one is sent the
+  invoice goes quiet forever. A missed cron run is self-healing rather than a
+  lost reminder — the same offset is still latest-and-unsent tomorrow.
+- **No `last_reminded_at` column.** What has been sent is derived from
+  `outbound_emails` via the key `reminder:<invoiceId>:<offset>:<recipient>`,
+  the same call `send-invoice.ts` made. The offset is in the key rather than
+  the date so the autumn DST repeat of 01:00–02:00 cannot become a second
+  email. It also means the history panel shows *delivery status*, so a bounce
+  reads as a bounce.
+- **Two mutes, both applied in the query rather than filtered after**:
+  `invoices.reminders_muted` (a dispute, a plan agreed by phone) and
+  `customers.reminders_muted` (standing — the big account you would rather
+  phone). A mute checked late is a mute a refactor can drop.
+- **Its own cron** (`/api/cron/invoice-reminders`, hourly, wakes at each
+  tenant's local 8am), not a passenger on the digest. The reason is blast
+  radius: the digest mails our own users, this mails our clients' customers.
+  An incident in one must not stop the other. 8am is an hour after the digest
+  so an owner reads "invoice 12 is 30 days overdue" before their customer does.
+- **Capped at 50 per tenant per sweep**, well under the 100/hour valve in
+  `lib/email/send.ts` — which fails sends rather than deferring them. The
+  remainder is deferred rather than lost, for free, by the schedule rule above.
+- **The attached PDF is the invoice as issued**, not the outstanding balance. A
+  reminder whose attachment quietly shows a different total from the invoice
+  the customer agreed to is the kind of thing their bookkeeper notices.
+- Isolation: the sweep gets its own two cases in `tests/isolation/accounting.test.ts`
+  — it never selects another tenant's invoices, and one tenant's send log
+  cannot silence another's reminder. Found while writing them:
+  **`outbound_emails` refuses a member INSERT outright**, so that log cannot be
+  forged from inside a tenant at all.
+- **Still unproven by a human:** nothing has watched a real reminder arrive.
+  The cron needs `CRON_SECRET` set and a tenant with reminders switched on.
+
 ### 2026-08-10 — UI: the nav collapses, and three contrast failures go with it (branch `claude/ui-foundation`)
 
 Presentation only — no query, action, schema or policy changed. The shared
@@ -248,11 +297,11 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `accounts` | S1 | Chart of accounts, hierarchical |
 | `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger |
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
-| `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.) |
+| `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.). Gained `reminders_enabled` (default **false**) and `reminder_offsets` jsonb (`0114`) |
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
-| `customers`, `invoices`, `invoice_lines`, `invoice_payments`, `recurring_invoices` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party |
+| `customers`, `invoices`, `invoice_lines`, `invoice_payments`, `recurring_invoices` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing |
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
 | `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
 | `period_closes`, `close_notes` | S7 | Month-end close |
@@ -268,6 +317,7 @@ sentence rather than leaving it aspirational.
 ## Key files & seams
 
 - `src/modules/accounting/` — `core/` (posting engine, reports, reconciliation), `banking/`, `invoicing/`, `documents/`, `payables/`, `close/`, `export/`, `ai/` (shared engine pattern), `templates/` (COA)
+- `invoicing/reminder-schedule.ts` and `invoicing/reminder-email.ts` are **pure** for the same reason, and it matters most here: this is the one path that emails somebody nobody on our side chose, so proving its behaviour on a table of cases is the control. `reminder-run.ts` (the sweep) only finds rows and sends; it decides nothing
 - `banking/rules-match.ts` and `banking/rules-learn.ts` are **pure** (no `server-only`) — all the deciding lives there and is table-tested without a database, exactly as `ai/*-validate.ts` is split from `ai/*-code.ts`. The rules form imports `ruleConditionsSchema` from the matcher so the client validates against the same schema the action re-validates against
 - Tenant UI under `src/app/dashboard/m/accounting/`
 - **Reports are all the same two pieces**: a pure builder in `core/report-builders.ts` (fixture-testable, no database, no division) and a thin fetch wrapper in `core/reports.ts`. `getBalances` is the one aggregate engine they share; the General Ledger is the only one that also runs its own line-level query, because it lists rather than sums
@@ -286,6 +336,8 @@ sentence rather than leaving it aspirational.
 - **A report that truncates says so, in the file as well as on screen.** The General Ledger's 5,000-line cap writes an `INCOMPLETE` first row into the CSV, because these files are opened months later with no memory of the screen that produced them.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
+- **Automatic reminders are off until an owner turns them on**, and the switch cannot be turned on with an empty schedule — a control that says on and does nothing is a state somebody discovers three months later.
+- **Reminders overtake, they do not queue.** Only the latest applicable offset can fire, so enabling the feature over an old book sends one email per invoice rather than one per missed offset. Nothing else in the module needs this rule; it exists because the alternative loses a client on the first morning.
 - **A rule never overrides the period lock.** Auto-post skips rows dated in a closed period and leaves them for review; the import still succeeds.
 - **Email-in tokens must be lowercase** — mail infra lowercases local parts (found in production, `8147c2d`).
 - **Blob store is private** — use the presigned upload flow and pass the RW token explicitly server-side.
@@ -306,5 +358,6 @@ hand before building on either screen.
 - Recurring-invoice cron (fast-follow; zero schema change needed)
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)
 - **Invoice delivery is done** (PDF + email, 2026-08-10). What is NOT built: a `Viewed` signal, which would need a tracked open or a public link — and a public payor view is deliberately not planned, since payment processing for tenants' customers is out of scope by design
-- **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, seven reports now. See the build log for the accrual-only decision
-- From the 2026-08-10 QuickBooks review, in rough value order: **automatic overdue reminders** on the built notifications machinery; **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists
+- **Automatic overdue reminders are DONE** (2026-08-11) — see the build log. What is not built: a reminder for **bills we owe** (the AP mirror), and reminder wording an owner can edit, both deliberately left until somebody asks
+- **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
+- From the 2026-08-10 QuickBooks review, the rest in rough value order: **P&L by Month** via a generalized column spread; drafting an invoice or bill **from an email thread with cited sources**; Products & Services, Terms, Payment Methods; recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists

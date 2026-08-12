@@ -39,6 +39,8 @@ export type LedgerErrorCode =
   | "INVOICE_NOT_SENDABLE"
   | "INVOICE_NO_RECIPIENT"
   | "INVOICE_NUMBER_TAKEN"
+  | "REMINDER_OFFSETS_INVALID"
+  | "REMINDER_SCHEDULE_EMPTY"
   | "INVOICE_HAS_PAYMENTS"
   | "INVOICE_OVERPAYMENT"
   | "PAYMENT_NOT_FOUND"
@@ -139,6 +141,10 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   INVOICE_NO_RECIPIENT:
     "This customer has no email address. Add one, or type an address to send to.",
   INVOICE_NUMBER_TAKEN: "That invoice number is already in use.",
+  REMINDER_OFFSETS_INVALID:
+    "That reminder schedule isn't valid — each entry is a whole number of days near the due date.",
+  REMINDER_SCHEDULE_EMPTY:
+    "Add at least one reminder before turning reminders on.",
   INVOICE_HAS_PAYMENTS: "Remove the payments first, then void.",
   INVOICE_OVERPAYMENT: "That's more than the remaining balance.",
   PAYMENT_NOT_FOUND: "That payment no longer exists.",

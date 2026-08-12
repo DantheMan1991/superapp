@@ -69,6 +69,13 @@ export const customers = pgTable(
     address: text("address").notNull().default(""),
     notes: text("notes").notNull().default(""),
     isActive: boolean("is_active").notNull().default(true),
+    /**
+     * Never chase this customer automatically — the big account you would
+     * rather phone. Standing, so it covers invoices that do not exist yet;
+     * `invoices.reminders_muted` is the one-off counterpart for a single
+     * disputed invoice.
+     */
+    remindersMuted: boolean("reminders_muted").notNull().default(false),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -154,6 +161,9 @@ export const invoices = pgTable(
     issueDate: date("issue_date", { mode: "string" }).notNull(),
     dueDate: date("due_date", { mode: "string" }),
     memo: text("memo").notNull().default(""),
+    /** Stop chasing this one invoice — a dispute, or a payment plan agreed by
+     * phone. Distinct from muting the customer, which is standing. */
+    remindersMuted: boolean("reminders_muted").notNull().default(false),
     /** Denormalized Σ line amounts; recomputed in the same tx as line writes. */
     totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
     /** The issuance entry. Null while draft; survives void (audit trail). */
@@ -385,6 +395,22 @@ export const accountingSettings = pgTable(
       .default("standard"),
     // `bookkeeping_timezone` lived here from 0007 until 0088. The business
     // day is `tenants.timezone` now — one clock, readable by every module.
+    /**
+     * Automatic invoice reminders. OFF is the only safe default: these emails
+     * go to the tenant's CUSTOMERS, so nothing may start sending because a
+     * migration ran — an owner turns it on deliberately.
+     */
+    remindersEnabled: boolean("reminders_enabled").notNull().default(false),
+    /**
+     * Days relative to the due date, negative = before it: `[-3, 0, 7, 14, 30]`
+     * means a nudge three days out, one on the day, then chasing.
+     *
+     * jsonb and zod-validated at write AND re-read, the same contract
+     * `recurring_invoices.template` keeps — an offsets list an owner edited
+     * last year has to survive a validator that has since got stricter, and
+     * failing one tenant's sweep is better than failing the run.
+     */
+    reminderOffsets: jsonb("reminder_offsets").notNull().default([-3, 0, 7, 14, 30]),
     /** AI-suggestion cooldown marker (30s between batches per tenant). */
     aiLastSuggestedAt: timestamp("ai_last_suggested_at", { withTimezone: true }),
     /**

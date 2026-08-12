@@ -7,6 +7,10 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { formatCents } from "@/lib/money";
 import { listAssignableMembers, memberLabel } from "@/lib/team";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { CrmError } from "@/modules/crm/core/errors";
@@ -105,48 +109,49 @@ export default async function RecordPage({
         All records
       </Link>
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-lg bg-brand/15 text-brand-foreground">
-            {party.kind === "person" ? (
-              <User className="size-5" />
-            ) : (
-              <Building2 className="size-5" />
+      <PageHeader
+        title={party.displayName}
+        icon={party.kind === "person" ? <User /> : <Building2 />}
+        description={
+          <span className="flex flex-wrap items-center gap-1.5">
+            {isCustomer && <Badge variant="secondary">Customer</Badge>}
+            {isVendor && <Badge variant="secondary">Vendor</Badge>}
+            {!party.isActive && <Badge variant="outline">Archived</Badge>}
+            {details?.visibility === "restricted" && (
+              <Badge variant="outline" className="gap-1">
+                <Lock className="size-3" />
+                Restricted
+              </Badge>
             )}
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {party.displayName}
-            </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              {isCustomer && <Badge variant="secondary">Customer</Badge>}
-              {isVendor && <Badge variant="secondary">Vendor</Badge>}
-              {!party.isActive && <Badge variant="outline">Archived</Badge>}
-              {details?.visibility === "restricted" && (
-                <Badge variant="outline" className="gap-1">
-                  <Lock className="size-3" />
-                  Restricted
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {!details && <AdoptButton partyId={party.id} />}
-          <ArchiveButton
-            partyId={party.id}
-            partyVersion={party.version}
-            isActive={party.isActive}
-          />
-        </div>
-      </div>
+          </span>
+        }
+        actions={
+          <>
+            {!details && <AdoptButton partyId={party.id} />}
+            <ArchiveButton
+              partyId={party.id}
+              partyVersion={party.version}
+              isActive={party.isActive}
+            />
+          </>
+        }
+      />
+
+      <CrmNav />
 
       {!details ? (
-        <p className="rounded-md border px-4 py-8 text-center text-sm text-muted-foreground">
-          {isOwner
-            ? "This record is not in the CRM yet. Add it to track a stage, notes and connections."
-            : "You can see who this is, but not what the CRM holds on them. That is either because nobody has worked this record yet, or because it is restricted."}
-        </p>
+        <Panel>
+          <EmptyState
+            icon={party.kind === "person" ? <User /> : <Building2 />}
+            title={isOwner ? "Not in the CRM yet" : "Nothing to show here"}
+            description={
+              isOwner
+                ? "Add it to track a stage, notes and connections."
+                : "You can see who this is, but not what the CRM holds on them — either nobody has worked this record yet, or it is restricted."
+            }
+            action={isOwner ? <AdoptButton partyId={party.id} /> : undefined}
+          />
+        </Panel>
       ) : (
         <>
           <RecordForm

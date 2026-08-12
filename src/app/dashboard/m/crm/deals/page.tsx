@@ -1,5 +1,9 @@
 import Link from "next/link";
-import { Building2, ChevronLeft, User } from "lucide-react";
+import { Building2, KanbanSquare, User } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { EmptyState } from "@/components/app/empty-state";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -74,18 +78,16 @@ export default async function DealsBoardPage({
 
   if (!board) {
     return (
-      <div className="mx-auto w-full max-w-2xl space-y-6">
-        <Link
-          href={BASE}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="size-4" />
-          All records
-        </Link>
-        <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-          An owner needs to set up the first pipeline before this board can be
-          used.
-        </p>
+      <div className="space-y-6">
+        <PageHeader title="Board" />
+        <CrmNav />
+        <Panel>
+          <EmptyState
+            icon={<KanbanSquare />}
+            title="No pipeline yet"
+            description="An owner needs to set up the first pipeline before this board can be used."
+          />
+        </Panel>
       </div>
     );
   }
@@ -97,26 +99,20 @@ export default async function DealsBoardPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <Link
-            href={BASE}
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ChevronLeft className="size-4" />
-            All records
-          </Link>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
-            {pipeline.name}
-          </h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <PipelinePicker pipelines={pipelines} currentId={pipeline.id} />
-          <Button asChild variant="outline">
-            <Link href={`${BASE}/pipelines`}>Stages</Link>
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title={pipeline.name}
+        description="Deals by stage, in this business's own words."
+        actions={
+          <>
+            <PipelinePicker pipelines={pipelines} currentId={pipeline.id} />
+            <Button asChild variant="outline" size="sm">
+              <Link href={`${BASE}/pipelines`}>Stages</Link>
+            </Button>
+          </>
+        }
+      />
+
+      <CrmNav />
 
       {live.length === 0 ? (
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">

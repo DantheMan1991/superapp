@@ -34,14 +34,20 @@ Presentation and IA — no query, action, schema or policy changed. Vocabulary i
   down. A strip tab that lands you in another module, with the strip gone and no
   active state to match, is worse than no tab; Work is already its own row in the
   rail.
-- Converted so far: the hub (`CrmModule.tsx`), duplicates, automations, fields,
-  reports. Record rows and report lists moved onto `Panel` + `--divider`, and the
-  person/company glyphs onto the violet `--module-accent`.
-
-**Not yet converted** (same mechanical pattern, next slice): `deals`,
-`deals/[dealId]`, `pipelines`, `records/new`, `records/[partyId]`,
-`records/[partyId]/deals/new`, `reports/[reportId]`. Those still hand-roll their
-headers and still use ad-hoc back links rather than the strip.
+- **Every page converted.** `text-2xl font-semibold tracking-tight` appears
+  **zero** times under `src/app/dashboard/m/crm/` and `src/modules/crm/`, and the
+  strip renders on all ten real pages. Record rows and the three report lists
+  moved onto `Panel` + `--divider`; the person/company glyphs onto the violet
+  `--module-accent`, so CRM reads violet the way accounting reads emerald and
+  documents amber.
+- **Back links kept only where they mean something.** `pipelines` is reached from
+  the Board and `deals/[dealId]`, `records/[partyId]/deals/new` and
+  `reports/[reportId]` all sit under a section, so their contextual "up" link
+  survives alongside the strip — the same arrangement accounting's bill and
+  invoice detail pages use. The lone "All records" links on the *top-level*
+  sections were removed, because there the strip is the way back.
+- **`tasks` deliberately has no strip.** It is a `redirect()` and renders no UI
+  at all.
 
 ### 2026-08-10 — `crm_tasks` dropped (branch `claude/work-slice-5c`)
 

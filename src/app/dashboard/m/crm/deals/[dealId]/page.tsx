@@ -5,6 +5,8 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { Separator } from "@/components/ui/separator";
 import { CrmError } from "@/modules/crm/core/errors";
 import { loadDeal } from "@/modules/crm/deal-ops";
@@ -61,10 +63,10 @@ export default async function DealPage({
         Board
       </Link>
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">{deal.title}</h1>
-          <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+      <PageHeader
+        title={deal.title}
+        description={
+          <span className="flex flex-wrap items-center gap-1.5">
             {party.kind === "person" ? (
               <User className="size-4 shrink-0" />
             ) : (
@@ -77,27 +79,29 @@ export default async function DealPage({
               {party.displayName}
             </Link>
             {primaryContact && <span>· {primaryContact.displayName}</span>}
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Badge variant={stage.outcome === "open" ? "secondary" : "outline"}>
               {stage.name}
             </Badge>
             {deal.closedAt && (
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs">
                 closed {deal.closedAt.toISOString().slice(0, 10)}
               </span>
             )}
-          </div>
-        </div>
-        <MoveDealButton
-          dealId={deal.id}
-          dealVersion={deal.version}
-          partyId={deal.partyId}
-          currentStageId={deal.stageId}
-          stages={stages}
-          label="Move stage"
-        />
-      </div>
+          </span>
+        }
+        actions={
+          <MoveDealButton
+            dealId={deal.id}
+            dealVersion={deal.version}
+            partyId={deal.partyId}
+            currentStageId={deal.stageId}
+            stages={stages}
+            label="Move stage"
+          />
+        }
+      />
+
+      <CrmNav />
 
       <DealForm
         mode="edit"

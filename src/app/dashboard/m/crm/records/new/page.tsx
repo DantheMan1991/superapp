@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -33,13 +35,12 @@ export default async function NewRecordPage() {
         All records
       </Link>
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Add a record</h1>
-        <p className="text-sm text-muted-foreground">
-          A company or a person. Anyone already invoiced or paid through
-          Accounting is here already — search before adding.
-        </p>
-      </div>
+      <PageHeader
+        title="Add a record"
+        description="A company or a person. Anyone already invoiced or paid through Accounting is here already — search before adding."
+      />
+
+      <CrmNav />
 
       <RecordForm
         mode="create"

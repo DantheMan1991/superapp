@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -53,13 +55,12 @@ export default async function NewDealPage({
         {data.record.party.displayName}
       </Link>
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Add a deal</h1>
-        <p className="text-sm text-muted-foreground">
-          It starts in the first stage of the default pipeline. You can move it
-          from the board.
-        </p>
-      </div>
+      <PageHeader
+        title="Add a deal"
+        description="It starts in the first stage of the default pipeline. You can move it from the board."
+      />
+
+      <CrmNav />
 
       <DealForm
         mode="create"

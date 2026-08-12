@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -54,6 +56,8 @@ export default async function PipelinesPage({
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
+      {/* The back link stays: this page is reached FROM the Board, so "Board"
+          is a step up rather than a duplicate of the strip below. */}
       <Link
         href={`${BASE}/deals`}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -62,14 +66,12 @@ export default async function PipelinesPage({
         Board
       </Link>
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {data?.pipeline.name ?? "Pipeline"}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          The steps a deal moves through, in this business&apos;s own words.
-        </p>
-      </div>
+      <PageHeader
+        title={data?.pipeline.name ?? "Pipeline"}
+        description="The steps a deal moves through, in this business's own words."
+      />
+
+      <CrmNav />
 
       {!data ? (
         <p className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">

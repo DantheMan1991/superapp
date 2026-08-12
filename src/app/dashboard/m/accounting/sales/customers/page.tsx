@@ -141,6 +141,7 @@ export default async function CustomersPage() {
                     address: c.address,
                     notes: c.notes,
                     isActive: c.isActive,
+                    remindersMuted: c.remindersMuted,
                   }}
                 />
               </div>

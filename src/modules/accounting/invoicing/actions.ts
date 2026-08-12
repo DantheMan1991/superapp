@@ -27,6 +27,16 @@ import { recordPayment, unapplyPayment } from "./payments";
 import { invoiceLineSchema } from "./lines";
 import { sendInvoiceEmail } from "./send-invoice";
 import {
+  setCustomerRemindersMuted,
+  setInvoiceRemindersMuted,
+  updateReminderSettings,
+} from "./reminders";
+import {
+  MAX_OFFSET,
+  MAX_OFFSETS,
+  MIN_OFFSET,
+} from "./reminder-schedule";
+import {
   createRecurringInvoice,
   generateRecurringInvoices,
   recurringTemplateSchema,
@@ -639,6 +649,117 @@ export async function sendInvoiceAction(
     );
     revalidateSales(parsed.data.invoiceId);
     return { ok: true, data: { to, duplicate: result.duplicate } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* ---------------------------------------------------------------- reminders */
+
+const reminderSettingsSchema = z.object({
+  enabled: z.boolean(),
+  offsets: z.array(z.number().int().min(MIN_OFFSET).max(MAX_OFFSET)).max(MAX_OFFSETS),
+});
+
+/**
+ * Turn automatic reminders on or off, and set the schedule.
+ *
+ * AUDITED IN BOTH DIRECTIONS, unlike most settings writes. This is the switch
+ * that decides whether the platform mails a client's customers without anyone
+ * clicking send, so "when did this start" and "who turned it on" are questions
+ * that will eventually be asked.
+ */
+export async function updateReminderSettingsAction(
+  input: z.infer<typeof reminderSettingsSchema>,
+): Promise<ActionResult<{ enabled: boolean; offsets: number[] }>> {
+  const ctx = await gate();
+  const parsed = reminderSettingsSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const settings = await withTenant(ctx.tenantId, async (tx) => {
+      const updated = await updateReminderSettings(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: parsed.data.enabled
+          ? "invoice.reminders_enabled"
+          : "invoice.reminders_disabled",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "accounting_settings",
+        targetId: ctx.tenantId,
+        // The schedule itself is not a secret and is the thing that changed.
+        meta: { offsets: updated.offsets },
+      });
+      return updated;
+    });
+    revalidateSales();
+    revalidatePath(`${BASE}/sales/reminders`);
+    return { ok: true, data: settings };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const muteInvoiceSchema = z.object({
+  invoiceId: z.string().uuid(),
+  expectedVersion: z.number().int().min(1),
+  muted: z.boolean(),
+});
+
+/** Stop chasing one invoice — a dispute, or a plan agreed by phone. */
+export async function setInvoiceRemindersMutedAction(
+  input: z.infer<typeof muteInvoiceSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = muteInvoiceSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      const inv = await setInvoiceRemindersMuted(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: parsed.data.muted
+          ? "invoice.reminders_muted"
+          : "invoice.reminders_unmuted",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "invoice",
+        targetId: inv.id,
+      });
+    });
+    revalidateSales(parsed.data.invoiceId);
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const muteCustomerSchema = z.object({
+  customerId: z.string().uuid(),
+  expectedVersion: z.number().int().min(1),
+  muted: z.boolean(),
+});
+
+/** Never chase this customer automatically — standing, across all invoices. */
+export async function setCustomerRemindersMutedAction(
+  input: z.infer<typeof muteCustomerSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = muteCustomerSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      const c = await setCustomerRemindersMuted(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: parsed.data.muted
+          ? "invoice.customer_reminders_muted"
+          : "invoice.customer_reminders_unmuted",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "customer",
+        targetId: c.id,
+      });
+    });
+    revalidateSales();
+    return { ok: true };
   } catch (err) {
     return fail(err);
   }

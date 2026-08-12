@@ -2,7 +2,9 @@ import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../../src/db";
-import { d } from "./_shared";
+import { d, seedParty } from "./_shared";
+import { remindersDueForTenant } from "../../src/modules/accounting/invoicing/reminder-run";
+import { reminderIdempotencyKey } from "../../src/modules/accounting/invoicing/reminder-email";
 
 /**
  * Accounting tables: RLS isolation PLUS the composite-tenant-FK guarantees
@@ -16,6 +18,8 @@ interface AccFixture {
   entryId: string;
   lineId: string;
   memberId: string;
+  customerId: string;
+  invoiceId: string;
 }
 
 d("accounting isolation (RLS + composite tenant FKs)", () => {
@@ -79,11 +83,37 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         dimensionType: "property",
         memberId: member.id,
       });
+      // An overdue, chaseable invoice — the input the reminder sweep selects
+      // over. Raw inserts, per the note on seedParty: this suite certifies what
+      // the DATABASE enforces.
+      const [customer] = await tx
+        .insert(schema.customers)
+        .values({
+          tenantId,
+          partyId: await seedParty(tx, tenantId, `Customer ${tag}`),
+          name: `Customer ${tag}`,
+        })
+        .returning();
+      const [invoice] = await tx
+        .insert(schema.invoices)
+        .values({
+          tenantId,
+          customerId: customer.id,
+          invoiceNumber: `INV-${tag}`,
+          status: "issued",
+          issueDate: "2026-07-01",
+          dueDate: "2026-07-15",
+          totalCents: 50_000,
+          createdByClerkUserId: `user-${tag}`,
+        })
+        .returning();
       return {
         accountId: cash.id,
         entryId: entry.id,
         lineId: lines[0].id,
         memberId: member.id,
+        customerId: customer.id,
+        invoiceId: invoice.id,
       };
     });
   }
@@ -232,6 +262,60 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         .returning(),
     );
     expect(deleted).toHaveLength(0);
+  });
+
+  /**
+   * The reminder sweep is the one piece of accounting that EMAILS somebody
+   * without a human clicking send, so a tenant boundary it fails to hold is
+   * not a leaked read — it is one business's customer receiving another
+   * business's demand for money. Certified here rather than only in the
+   * feature's own suite.
+   */
+  it("the reminder sweep only ever selects the calling tenant's invoices", async () => {
+    const offsets = [0, 7, 14, 30];
+    const forA = await withTenant(tenantA, (tx) =>
+      remindersDueForTenant(tx, tenantA, "2026-08-15", offsets),
+    );
+    expect(forA.length).toBeGreaterThan(0);
+    expect(forA.every((r) => r.invoiceId !== fx.b.invoiceId)).toBe(true);
+    expect(forA.some((r) => r.invoiceId === fx.a.invoiceId)).toBe(true);
+
+    // And asking for B's rows while in A's context returns nothing at all,
+    // rather than quietly answering with A's.
+    const bFromA = await withTenant(tenantA, (tx) =>
+      remindersDueForTenant(tx, tenantB, "2026-08-15", offsets),
+    );
+    expect(bFromA).toHaveLength(0);
+  });
+
+  it("one tenant's send log cannot suppress another tenant's reminder", async () => {
+    // The sweep derives "already sent" from outbound_emails by key prefix. If
+    // that read were not tenant-scoped, a busy tenant could silence a quiet
+    // one — a failure that looks like nothing happening, which is the hardest
+    // kind to notice.
+    // withSystem, because `outbound_emails` refuses a member INSERT outright —
+    // the send log is written only by `sendEmail`, never by tenant code. That
+    // is a stronger guarantee than this test needs, and worth stating: the row
+    // below cannot be forged from inside a tenant at all.
+    await withSystem((tx) =>
+      tx.insert(schema.outboundEmails).values({
+        tenantId: tenantB,
+        kind: "invoice_reminder",
+        toAddress: "someone@example.com",
+        toDomain: "example.com",
+        subject: "reminder",
+        status: "sent",
+        // Deliberately keyed to tenant A's invoice — the row a boundary
+        // failure would let A's sweep read.
+        idempotencyKey: reminderIdempotencyKey(fx.a.invoiceId, 30, "someone@example.com"),
+      }),
+    );
+
+    const forA = await withTenant(tenantA, (tx) =>
+      remindersDueForTenant(tx, tenantA, "2026-08-15", [0, 7, 14, 30]),
+    );
+    // A still gets its reminder: B's row is invisible to A.
+    expect(forA.some((r) => r.invoiceId === fx.a.invoiceId)).toBe(true);
   });
 
   it("no context → default deny on all accounting tables", async () => {

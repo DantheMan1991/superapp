@@ -45,7 +45,14 @@ export function invoiceSendKeyPrefix(invoiceId: string): string {
   return `invoice:${invoiceId}:`;
 }
 
-function escapeHtml(value: string): string {
+/**
+ * Exported for `reminder-email.ts`, which builds the same kind of message for
+ * the same recipient. Kept here rather than imported from the mail module: an
+ * accounting file reaching into `src/modules/email/` would be the first
+ * module-to-module import in the codebase, and a six-line escape is not worth
+ * opening that door.
+ */
+export function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

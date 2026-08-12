@@ -390,6 +390,13 @@ the category Select went into the condition-value box instead of the dropdown.
 Both may be artefacts of browser automation rather than defects. Check them by
 hand before building on either screen.
 
+A third, of a different kind: **the General Ledger page has never been
+rendered by a signed-in person** (2026-08-12). `getGeneralLedger` is proven
+against a real database, reconciliation included, and the route compiles and
+resolves — but the page body only executes behind a Clerk session, which
+agent sessions cannot open. Treat every screen shipped this way as
+compiled-and-tested, not seen.
+
 
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)

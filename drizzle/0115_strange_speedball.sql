@@ -1,0 +1,1 @@
+ALTER TABLE "accounting_settings" ADD COLUMN "ai_last_thread_draft_at" timestamp with time zone;

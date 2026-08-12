@@ -425,6 +425,16 @@ export const accountingSettings = pgTable(
     aiLastBillCodedAt: timestamp("ai_last_bill_coded_at", { withTimezone: true }),
     /** AI close-narrative cooldown marker (15s). */
     aiLastNarrativeAt: timestamp("ai_last_narrative_at", { withTimezone: true }),
+    /**
+     * AI thread-drafting cooldown marker (15s). Its own, like every other
+     * tool's — the point of separate markers is that one tool's cooldown never
+     * blocks a different one. This is the most expensive call in the module (a
+     * whole conversation, with thinking on), so it is also the one most worth
+     * throttling.
+     */
+    aiLastThreadDraftAt: timestamp("ai_last_thread_draft_at", {
+      withTimezone: true,
+    }),
     /** Full-books export cooldown marker (60s — the zip is expensive). */
     booksExportLastAt: timestamp("books_export_last_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })

@@ -18,6 +18,36 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 > it grows past a few screens, sweep the oldest into the archive. The dossier is
 > read at the start of every mail session, so its length is a real cost.
 
+### 2026-08-12 — Drafting a business record from a thread (branch `claude/accounting-invoice-from-thread`)
+
+A fifth mail-extension slot, and the second that lets a layer *do* something
+rather than store something. Accounting fills it with "Draft an invoice" and
+"Draft a bill"; the full reasoning is in
+[accounting.md](accounting.md).
+
+- **`MailExtension.drafters`** — a module offers `draft(tx, ctx, thread)` and
+  `accept(tx, ctx, record)`. Both take the caller's `tx`, like `search`,
+  `resolve`, the image source and the contact source, and for the same reason
+  (S12): what a drafter can see is what the person asking can see.
+- **MAIL FETCHES THE CONVERSATION; THE EXTENSION NEVER GOES LOOKING.** This is
+  the constraint that shaped the whole feature, and it is one this dossier
+  already recorded from the other direction: bodies are not in our database,
+  and `mail_accounts` is scoped to one user by `0043` because a thread is
+  private correspondence. Only the mailbox's owner can obtain the text. So the
+  action resolves the connection, calls `getThread`, flattens each body with
+  the same `render/transcript.ts` `htmlToText` that builds a filed copy's
+  searchable half, and hands the extension plain text.
+- **`accept` produces a DRAFT, never a posting** — the rule every AI surface in
+  the product follows.
+- Unlike `search`/`resolve`, a drafter MAY throw: it runs from an explicit
+  button press with somewhere to show the error, not while rendering the inbox.
+- The reading pane grows one row of buttons, rendered only when a module
+  contributes one. A tenant without Accounting sees nothing — an inert button
+  advertising a module you have not bought is worse than no button.
+- **Not done on purpose:** accepting does not auto-link the new record to the
+  thread. Linking here *publishes* a filed copy into Documents, and that is too
+  heavy an act to perform as a side effect; "Attach to…" is one click away.
+
 ### 2026-08-10 — UI: the mail client on the shared tokens (branch `claude/ui-mail`)
 
 Presentation only — no JMAP call, action, schema or policy changed. Vocabulary in

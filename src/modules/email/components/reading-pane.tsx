@@ -11,6 +11,7 @@ import { blobExpiry, signBlobClaim } from "../render/signing";
 import { MessageFrame } from "./message-frame";
 import { MessageActions } from "./message-actions";
 import { ThreadLinks } from "./thread-links";
+import { ThreadDrafters } from "./thread-drafters";
 
 /**
  * The open message.
@@ -135,6 +136,15 @@ export function ReadingPane({
           mailboxId={mailboxId}
           mailAccountId={accountId}
           emailId={message.id}
+          threadId={message.threadId}
+        />
+
+        {/* The other direction: not "what is this thread about" but "what does
+            this thread OBLIGE". Owning the mailbox and the ledger is what lets
+            a conversation become a draft invoice with its sources cited. */}
+        <ThreadDrafters
+          ctx={ctx}
+          mailboxId={mailboxId}
           threadId={message.threadId}
         />
       </div>

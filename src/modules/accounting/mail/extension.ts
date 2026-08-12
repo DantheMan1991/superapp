@@ -11,6 +11,7 @@ import type {
 import { listContactPointsFor } from "@/lib/parties/contacts";
 import { preferredContactValue } from "@/lib/parties/contact-values";
 import { formatCents } from "../lib/money";
+import { accountingThreadDrafters } from "./thread-drafters";
 
 /**
  * What Accounting contributes to Mail: four things a conversation is usually
@@ -559,6 +560,7 @@ export const accountingMailExtension: MailExtension = {
   name: "Accounting",
   entityTypes: [invoiceEntity, billEntity, customerEntity, vendorEntity],
   contacts: { search: searchContacts },
+  drafters: accountingThreadDrafters,
 };
 
 /* -- People the composer can address ------------------------------------- */

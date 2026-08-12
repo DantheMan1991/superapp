@@ -2,6 +2,7 @@
 
 import {
   BookOpen,
+  Repeat,
   ChartColumn,
   Inbox,
   Landmark,
@@ -51,6 +52,11 @@ const TABS: CategoryItem[] = [
     icon: ListTree,
   },
   { href: "/dashboard/m/accounting/journal", label: "Journal", icon: BookOpen },
+  {
+    href: "/dashboard/m/accounting/recurring",
+    label: "Recurring",
+    icon: Repeat,
+  },
   {
     href: "/dashboard/m/accounting/reports",
     label: "Reports",

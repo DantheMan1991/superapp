@@ -54,6 +54,51 @@ than a second record that could disagree with the first.
 - **Not built:** history on journal entries, customers and vendors — the query
   is target-agnostic, so each is a one-line addition when wanted.
 
+### 2026-08-12 — Recurring journals and bills (branch `claude/accounting-recurring-journals`)
+
+The benchmark QuickBooks file runs a monthly depreciation JOURNAL, which this
+module could not express at all — the only recurrence it had was
+`recurring_invoices`, and an invoice is the one recurring document that has a
+customer and a due date. Migrations `0118` (table) and `0119` (RLS), both
+applied to dev AND production before the PR opened.
+
+- **One table with a `kind`, not one per kind.** Everything except the payload
+  is identical: a name, a monthly day, a next run date, a catch-up position, an
+  active flag. `template` is jsonb, zod-validated at write AND re-validated at
+  generation, the same contract `recurring_invoices.template` keeps.
+- **`recurring_invoices` is NOT folded in, and that is a stated limit rather
+  than an oversight.** It is live, has rows, has its own UI and a customer FK,
+  so absorbing it means a data migration and a rewrite this change did not
+  need. `kind` has room for `'invoice'` when that is worth doing. **Until then
+  the module has two recurrence mechanisms** — the schema comment says so, and
+  so does this line, because the alternative is somebody discovering it.
+- **A journal may POST automatically; a bill never does.** The same decision
+  bank rules already carry: a template is a decision the owner wrote down,
+  replayed deterministically, so it may act — unlike a model's guess. Off by
+  default. A bill stays a draft because *approving* a bill is what posts it,
+  and that approval is the control an owner already exercises over money
+  going out; generating an approved bill would remove it.
+- **A rule never overrides the period lock**, here as everywhere: an
+  auto-posting run whose date falls in a closed period lands as a DRAFT and is
+  counted in `deferredToDraft`, so somebody can see a depreciation entry is
+  sitting unposted rather than assuming it went in.
+- **The balance check is at WRITE time.** The posting engine would reject an
+  unbalanced journal anyway — but once a month, at generation, where the only
+  evidence is an error row nobody reads. `journalTemplateBalances` is pure, the
+  create action refuses on it, and the dialog shows a running imbalance as you
+  type.
+- **`advanceMonthly` is imported from `invoicing/recurring.ts`, not copied**, so
+  the two mechanisms cannot drift on month arithmetic. Catch-up is capped at 12
+  and dates each entry to the month it was FOR, never to today.
+- **Idempotency key `recurring:<templateId>:<date>`** on posted journals, so a
+  re-run cannot double-post a month even if the version CAS is beaten.
+- **No `frequency` column**, unlike `recurring_invoices`: that enum has exactly
+  one value, and importing it would make `payables` depend on `invoicing`,
+  which already depends on `payables` for `bill_lines` — a circular import
+  between two eagerly-evaluated drizzle schema files is a real breakage.
+- **Not built:** editing a template (pause/resume and re-create only), and any
+  cadence other than monthly.
+
 ### 2026-08-12 — Catalogue: saved items, payment terms, payment methods (branch `claude/accounting-products-terms`)
 
 The three lists a business reuses on every invoice. Migrations `0116` (tables)
@@ -505,6 +550,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
 | `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
 | `period_closes`, `close_notes` | S7 | Month-end close |
+| `recurring_entries` | 2026-08-12 | Recurring journals and bills. `kind` discriminates the jsonb `template`; two CHECKs pin the shape (a bill has a vendor, a journal has none; only a journal may `auto_post`). Separate from `recurring_invoices`, deliberately and temporarily — see the build log |
 | `products`, `payment_terms`, `payment_methods` | 2026-08-12 | The catalogue: saved invoice lines, named terms (`due_in_days`, one default per tenant by partial unique index), and the tenant-owned payment-method list. `invoice_payments.method` stores a method's CODE with **no FK** — deactivating a method must never rewrite a posted payment. `customers.payment_terms_id` (nullable = use the default) |
 
 All tables: `tenant_id`, FORCE RLS. Isolation coverage is split by area, one file
@@ -541,6 +587,7 @@ sentence rather than leaving it aspirational.
 - **AI never writes to the ledger.** Every AI feature (categorization, extraction, bill coding, close narrative) only suggests or prefills; a human action posts. **A RULE may post** (`auto_post`) — the difference is that a rule is a decision the owner wrote down, replayed deterministically, not a model's guess.
 - **A rule beats the model** wherever both have an opinion, in the queue, in the bulk Accept, and in the chip that is shown. A rule is explainable, free, and identical on every run.
 - **Automatic reminders are off until an owner turns them on**, and the switch cannot be turned on with an empty schedule — a control that says on and does nothing is a state somebody discovers three months later.
+- **A recurring template may post; an AI suggestion never may.** Same line bank rules drew: a schedule the owner wrote down and can read back is a decision, replayed. It is off by default, journals only, and it still yields to the period lock — a closed month leaves a draft and says so.
 - **Reference data deactivates, never deletes, and never rewrites history.** A saved item or term may be named on records that already exist. The payment-method list goes further: it has no foreign key from `invoice_payments`, so renaming a method changes the label and nothing else — the code a payment recorded is what it recorded.
 - **An AI claim about a source is checked against the source.** The thread drafter verifies every quote appears in the message it cites; an unverifiable one is shown flagged and unticked, never dropped and never presented as fact. Any future "the assistant found this in X" owes the reader the same check — a citation nobody verifies is worse than no citation, because it is believed.
 - **Anything that previews an outbound message must share the renderer that sends it.** `reminder-render.ts` exists so the test button and the nightly sweep cannot drift; a preview built by its own code path is worse than none, because it is believed. Apply the same rule to any future preview (invoice, statement, digest).
@@ -578,4 +625,5 @@ compiled-and-tested, not seen.
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
-- From the 2026-08-10 QuickBooks review, the rest in rough value order: recurring journals and bills; a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists
+- **Recurring journals and bills are DONE** (2026-08-12). Still open from the same thread: **folding `recurring_invoices` into `recurring_entries`**, so the module has one recurrence mechanism rather than two
+- **The last item from the 2026-08-10 QuickBooks review**: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built

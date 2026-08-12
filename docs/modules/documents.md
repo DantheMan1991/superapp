@@ -19,6 +19,34 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 > dossier is read at the start of every session that touches this module, so
 > its length is a real cost.
 
+### 2026-08-12 — The extraction deadline is inclusive, and a flaky test is gone (branch `claude/fix-flaky-extraction-deadline`)
+
+`tests/documents-text.test.ts > "gives up rather than hanging when the deadline
+passes"` reddened `main` **three times in one day** — on the merges of #130,
+#132 and #134, none of which touched this module. Every red build in that
+window had to be diagnosed before it could be dismissed, which is the real cost:
+red stopped meaning anything.
+
+- **The assertion was the bug, not the engine.** The test passed `timeoutMs: 0`
+  and assumed a zero budget could never parse a page. The in-loop check was
+  `Date.now() > deadline`, which is FALSE within the same millisecond — so on a
+  fast runner the loop parsed page one and correctly returned `done`, and the
+  test's `expect(["empty","failed"]).toContain(...)` failed on correct behaviour.
+- **Fixed in the engine, because a zero budget parsing one page is itself
+  wrong.** Both loops (PDF and XLSX) now break on `Date.now() >= deadline`: the
+  deadline is the moment the budget is SPENT, not the moment after. With the
+  real 20s budget the difference is one millisecond and nothing notices; with a
+  budget of zero it is the difference between deterministic and coin-flip.
+- **The test now asserts exactly what happens** — `state: "empty"`, empty text,
+  `scanned: 0` — instead of a loose two-value set that was hiding the ambiguity.
+- **A second test was added deliberately**: a generous budget still parses in
+  full (`done`, both pages, text present). Without it, "parses nothing" could be
+  made to pass by breaking extraction outright, which is the obvious way for a
+  future change to satisfy the first test and be badly wrong.
+- Verified by running the file five times consecutively, though the argument
+  that matters is structural: `>=` is always true when `deadline === now`, so
+  the same-millisecond case no longer exists to be raced.
+
 ### 2026-08-10 — UI: the cabinet takes the shared vocabulary (branch `claude/ui-documents`)
 
 Presentation only — no query, action, schema, policy or RLS change. The

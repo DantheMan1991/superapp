@@ -353,11 +353,37 @@ describe("bounds", () => {
     expect(result.text).toBe("");
   });
 
-  it("gives up rather than hanging when the deadline passes", async () => {
+  /**
+   * WAS FLAKY, AND THE ASSERTION WAS THE BUG. It accepted `empty | failed` and
+   * assumed a zero budget could never parse a page — but the in-loop check was
+   * `Date.now() > deadline`, which is FALSE within the same millisecond, so a
+   * fast runner parsed page one and correctly returned `done`. It reddened
+   * `main` three times in a day for a reason unrelated to whatever had merged.
+   *
+   * The engine now treats the deadline as the moment the budget is spent
+   * (`>=`), so a budget of zero parses nothing — which is what a zero budget
+   * should mean. That makes this deterministic enough to assert exactly, and a
+   * loose `toContain` is no longer hiding what the engine actually does.
+   */
+  it("parses nothing at all when the budget is already spent", async () => {
     const bytes = await pdfOf(textPage("Fulton Lumber"), textPage("second page"));
-    // A deadline already spent: every in-loop check fires immediately.
     const result = await extractDocumentText(bytes, PDF, { timeoutMs: 0 });
-    expect(["empty", "failed"]).toContain(result.state);
+    expect(result.state).toBe("empty");
+    expect(result.text).toBe("");
+    expect(result.scanned).toBe(0);
+  });
+
+  /**
+   * The other half, and the reason the deadline exists: a budget must not stop
+   * a document that fits inside it. Without this, "parse nothing" could be made
+   * to pass by breaking extraction outright.
+   */
+  it("still parses in full when the budget is generous", async () => {
+    const bytes = await pdfOf(textPage("Fulton Lumber"), textPage("second page"));
+    const result = await extractDocumentText(bytes, PDF, { timeoutMs: 20_000 });
+    expect(result.state).toBe("done");
+    expect(result.text).toContain("Fulton Lumber");
+    expect(result.scanned).toBe(2);
   });
 });
 

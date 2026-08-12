@@ -42,8 +42,12 @@ export interface ReportRow {
   code?: string;
   cents?: number;
   comparisonCents?: number;
-  /** Aligned with ProfitAndLossReport.columns; by-dimension only. */
-  perMemberCents?: number[];
+  /**
+   * Aligned with `ProfitAndLossReport.columns`, whatever those columns are —
+   * dimension members or months. Named `perMemberCents` until months arrived
+   * and made that a lie.
+   */
+  perColumnCents?: number[];
 }
 
 export interface ReportColumn {
@@ -209,7 +213,7 @@ function sectionTrees(sectionAccounts: Account[]): TreeNode[] {
 interface AccountAmounts {
   cents: number;
   comparisonCents?: number;
-  perMemberCents?: number[];
+  perColumnCents?: number[];
 }
 
 const ZERO = (n: number | undefined) => n === undefined || n === 0;
@@ -217,7 +221,7 @@ const ZERO = (n: number | undefined) => n === undefined || n === 0;
 function amountsVisible(a: AccountAmounts | undefined): boolean {
   if (!a) return false;
   if (!ZERO(a.cents) || !ZERO(a.comparisonCents)) return true;
-  return (a.perMemberCents ?? []).some((c) => c !== 0);
+  return (a.perColumnCents ?? []).some((c) => c !== 0);
 }
 
 function addAmounts(into: AccountAmounts, from: AccountAmounts | undefined): void {
@@ -226,9 +230,9 @@ function addAmounts(into: AccountAmounts, from: AccountAmounts | undefined): voi
   if (from.comparisonCents !== undefined) {
     into.comparisonCents = (into.comparisonCents ?? 0) + from.comparisonCents;
   }
-  if (from.perMemberCents) {
-    into.perMemberCents = into.perMemberCents ?? from.perMemberCents.map(() => 0);
-    from.perMemberCents.forEach((c, i) => (into.perMemberCents![i] += c));
+  if (from.perColumnCents) {
+    into.perColumnCents = into.perColumnCents ?? from.perColumnCents.map(() => 0);
+    from.perColumnCents.forEach((c, i) => (into.perColumnCents![i] += c));
   }
 }
 
@@ -248,7 +252,7 @@ function emitSection(
   const blank = (): AccountAmounts => ({
     cents: 0,
     ...(hasComparison ? { comparisonCents: 0 } : {}),
-    ...(columnCount > 0 ? { perMemberCents: Array(columnCount).fill(0) } : {}),
+    ...(columnCount > 0 ? { perColumnCents: Array(columnCount).fill(0) } : {}),
   });
 
   function subtreeSum(node: TreeNode): AccountAmounts {
@@ -277,7 +281,7 @@ function emitSection(
       cents: own.cents,
       ...(hasComparison ? { comparisonCents: own.comparisonCents ?? 0 } : {}),
       ...(columnCount > 0
-        ? { perMemberCents: own.perMemberCents ?? Array(columnCount).fill(0) }
+        ? { perColumnCents: own.perColumnCents ?? Array(columnCount).fill(0) }
         : {}),
     });
     const visibleChildren = node.children.filter(visible);
@@ -290,7 +294,7 @@ function emitSection(
         depth,
         cents: sub.cents,
         ...(hasComparison ? { comparisonCents: sub.comparisonCents ?? 0 } : {}),
-        ...(columnCount > 0 ? { perMemberCents: sub.perMemberCents } : {}),
+        ...(columnCount > 0 ? { perColumnCents: sub.perColumnCents } : {}),
       });
     }
   }
@@ -309,7 +313,7 @@ function emitSection(
     depth: 0,
     cents: total.cents,
     ...(hasComparison ? { comparisonCents: total.comparisonCents ?? 0 } : {}),
-    ...(columnCount > 0 ? { perMemberCents: total.perMemberCents } : {}),
+    ...(columnCount > 0 ? { perColumnCents: total.perColumnCents } : {}),
   });
   return { rows, total };
 }
@@ -334,6 +338,17 @@ export function buildProfitAndLoss(
       type: string;
       members: Array<Pick<DimensionMember, "id" | "displayName">>;
     };
+    /**
+     * One column per time bucket — the "P&L by Month" spread.
+     *
+     * The buckets must PARTITION `opts.from`–`opts.to`, because the Total
+     * column is summed from them and is expected to equal the same report run
+     * without a spread. `monthsInRange` clips at both ends for exactly that
+     * reason. Mutually exclusive with `dimension` and `comparison`, the same
+     * v1 pin those two already carry: there is one column axis, and three
+     * things cannot share it.
+     */
+    periods?: Array<{ key: string; label: string; rows: BalanceRow[] }>;
     maxMemberColumns?: number;
     showZero?: boolean;
   },
@@ -381,6 +396,18 @@ export function buildProfitAndLoss(
     ];
     columnKeyForMember = (memberId) =>
       memberId === null ? "unassigned" : keptSet.has(memberId) ? memberId : "other";
+  } else if (opts.periods && opts.periods.length > 0) {
+    // One column per bucket, in the order given, then Total. No "Other" and
+    // no "Unassigned": unlike dimension members, every posted line falls in
+    // exactly one month, so there is nothing left over to collect.
+    columns = [
+      ...opts.periods.map((p) => ({
+        key: p.key,
+        label: p.label,
+        memberId: null,
+      })),
+      { key: "total", label: "Total", memberId: null },
+    ];
   }
   const columnIndex = new Map((columns ?? []).map((c, i) => [c.key, i]));
   const columnCount = columns?.length ?? 0;
@@ -393,7 +420,7 @@ export function buildProfitAndLoss(
       a = {
         cents: 0,
         ...(hasComparison ? { comparisonCents: 0 } : {}),
-        ...(columnCount > 0 ? { perMemberCents: Array(columnCount).fill(0) } : {}),
+        ...(columnCount > 0 ? { perColumnCents: Array(columnCount).fill(0) } : {}),
       };
       amounts.set(id, a);
     }
@@ -408,9 +435,33 @@ export function buildProfitAndLoss(
     if (columns && columnKeyForMember) {
       const key = columnKeyForMember(row.memberId);
       const idx = columnIndex.get(key);
-      if (idx !== undefined) a.perMemberCents![idx] += d;
-      a.perMemberCents![columnIndex.get("total")!] += d;
+      if (idx !== undefined) a.perColumnCents![idx] += d;
+      a.perColumnCents![columnIndex.get("total")!] += d;
     }
+  }
+
+  /**
+   * Month columns come from their OWN queries, one per bucket, rather than
+   * from `current` — a BalanceRow carries no date, so there is nothing in the
+   * aggregate rows to bucket by.
+   *
+   * The Total column is summed from the buckets rather than copied from
+   * `cents`, so it is literally the sum of the columns beside it. That is what
+   * a reader checks with a calculator, and it makes the buckets-partition-the-
+   * range assumption testable instead of assumed.
+   */
+  if (columns && opts.periods) {
+    const totalIdx = columnIndex.get("total")!;
+    opts.periods.forEach((period, i) => {
+      for (const row of period.rows) {
+        const account = byId.get(row.accountId);
+        if (!account) continue;
+        const d = displayCents(account.accountType, row.netCents);
+        const a = ensure(row.accountId);
+        a.perColumnCents![i] += d;
+        a.perColumnCents![totalIdx] += d;
+      }
+    });
   }
   for (const row of opts.comparison?.rows ?? []) {
     const account = byId.get(row.accountId);
@@ -456,7 +507,7 @@ export function buildProfitAndLoss(
     const value: AccountAmounts = {
       cents: 0,
       ...(hasComparison ? { comparisonCents: 0 } : {}),
-      ...(columnCount > 0 ? { perMemberCents: Array(columnCount).fill(0) } : {}),
+      ...(columnCount > 0 ? { perColumnCents: Array(columnCount).fill(0) } : {}),
     };
     parts.forEach((p, i) => {
       value.cents += signs[i] * p.cents;
@@ -464,9 +515,9 @@ export function buildProfitAndLoss(
         value.comparisonCents =
           (value.comparisonCents ?? 0) + signs[i] * (p.comparisonCents ?? 0);
       }
-      if (columnCount > 0 && p.perMemberCents) {
-        p.perMemberCents.forEach(
-          (c, j) => (value.perMemberCents![j] += signs[i] * c),
+      if (columnCount > 0 && p.perColumnCents) {
+        p.perColumnCents.forEach(
+          (c, j) => (value.perColumnCents![j] += signs[i] * c),
         );
       }
     });
@@ -477,7 +528,7 @@ export function buildProfitAndLoss(
         depth: 0,
         cents: value.cents,
         ...(hasComparison ? { comparisonCents: value.comparisonCents ?? 0 } : {}),
-        ...(columnCount > 0 ? { perMemberCents: value.perMemberCents } : {}),
+        ...(columnCount > 0 ? { perColumnCents: value.perColumnCents } : {}),
       },
       value,
     };

@@ -5,10 +5,12 @@ import { toSafeCents } from "../lib/money";
 import {
   addDaysIso,
   fiscalYearStart,
+  monthsInRange,
   previousPeriod,
   previousYear,
   shiftYearsIso,
 } from "../lib/dates";
+import { LedgerError } from "./errors";
 import { getBalances, type AccountingBasis } from "./balances";
 import { listAccounts } from "./coa";
 import { listDimensionMembers } from "./dimensions";
@@ -30,6 +32,17 @@ import {
  * builder. Read-only; compute-on-read per the balances.ts design note.
  */
 
+/**
+ * Months one P&L may spread across.
+ *
+ * Each column is its own `getBalances` call, so this is a query budget as much
+ * as a legibility one — and thirty-odd columns is past the point where anybody
+ * reads a row anyway. Over the cap the report REFUSES rather than showing the
+ * first two years of a five-year range: a silently shortened P&L is a wrong
+ * one, unlike the General Ledger's truncation, which still shows real lines.
+ */
+export const MAX_MONTH_COLUMNS = 24;
+
 export async function getProfitAndLoss(
   tx: Tx,
   tenantId: string,
@@ -39,12 +52,18 @@ export async function getProfitAndLoss(
     compare?: "prev-period" | "prev-year";
     /** Ignored when compare is set (v1 pin: mutually exclusive). */
     dimensionType?: string;
+    /** One column per calendar month. Also mutually exclusive with the above. */
+    spread?: "month";
     showZero?: boolean;
     basis?: AccountingBasis;
   },
 ): Promise<ProfitAndLossReport> {
   const accounts = await listAccounts(tx, tenantId);
-  const dimensionType = opts.compare ? undefined : opts.dimensionType;
+  // The column axis has one occupant. Compare wins over a dimension (the
+  // existing pin); a month spread wins over both, because asking for it is
+  // the more specific request.
+  const spread = opts.spread;
+  const dimensionType = opts.compare || spread ? undefined : opts.dimensionType;
   const basis = opts.basis ?? "accrual";
   const current = await getBalances(tx, tenantId, {
     from: opts.from,
@@ -52,8 +71,36 @@ export async function getProfitAndLoss(
     basis,
     ...(dimensionType ? { groupByDimensionType: dimensionType } : {}),
   });
+  let periods;
+  if (spread === "month") {
+    const buckets = monthsInRange(opts.from, opts.to);
+    if (buckets.length > MAX_MONTH_COLUMNS) {
+      throw new LedgerError(
+        "PNL_TOO_MANY_MONTHS",
+        `a monthly P&L covers at most ${MAX_MONTH_COLUMNS} months`,
+      );
+    }
+    periods = await Promise.all(
+      buckets.map(async (b) => ({
+        key: b.key,
+        label: b.label,
+        // Every column on the SAME basis as the report as a whole — a cash
+        // month next to an accrual one would be two different questions in
+        // one table, the same reasoning the comparison column follows.
+        rows: await getBalances(tx, tenantId, {
+          from: b.from,
+          to: b.to,
+          basis,
+        }),
+      })),
+    );
+  }
   let comparison;
-  if (opts.compare) {
+  // Skipped entirely when a month spread is asked for, not merely ignored
+  // downstream: building it anyway would leave the rows carrying a
+  // `comparisonCents` nothing renders, and the page header saying "vs …"
+  // about a comparison that is not on screen.
+  if (opts.compare && !spread) {
     const range =
       opts.compare === "prev-period"
         ? previousPeriod(opts.from, opts.to)
@@ -78,6 +125,7 @@ export async function getProfitAndLoss(
     to: opts.to,
     comparison,
     dimension,
+    periods,
     showZero: opts.showZero,
   });
 }

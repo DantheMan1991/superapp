@@ -111,7 +111,7 @@ describe("aging buckets (P17)", () => {
     expect(report.totalCents).toBe(11_000);
     expect(report.overdueCents).toBe(6_000);
     const acme = report.rows.find((r) => r.label === "Acme")!;
-    expect(acme.perMemberCents).toEqual([5_000, 6_000, 0, 0, 0, 11_000]);
+    expect(acme.perColumnCents).toEqual([5_000, 6_000, 0, 0, 0, 11_000]);
     expect(report.rows.at(-1)).toMatchObject({ kind: "total" });
   });
 });

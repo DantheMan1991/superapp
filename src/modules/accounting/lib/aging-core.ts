@@ -85,7 +85,7 @@ export function buildPartyAging(
       label: p.name,
       depth: 1,
       accountId: partyId,
-      perMemberCents: [...p.buckets, p.total],
+      perColumnCents: [...p.buckets, p.total],
     };
   });
   const grandTotal = grand.reduce((s, v) => s + v, 0);
@@ -93,7 +93,7 @@ export function buildPartyAging(
     kind: "total",
     label: "Total",
     depth: 0,
-    perMemberCents: [...grand, grandTotal],
+    perColumnCents: [...grand, grandTotal],
   });
 
   return {

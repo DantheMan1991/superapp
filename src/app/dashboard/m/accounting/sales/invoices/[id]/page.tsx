@@ -31,6 +31,12 @@ import {
 import { SalesNav } from "../../sales-nav";
 import { InvoiceBuilder } from "../invoice-builder";
 import { listInvoiceSends } from "@/modules/accounting/invoicing/send-invoice";
+import {
+  getReminderSettings,
+  listInvoiceReminders,
+} from "@/modules/accounting/invoicing/reminders";
+import { nextReminder } from "@/modules/accounting/invoicing/reminder-schedule";
+import { InvoiceRemindersPanel } from "@/modules/accounting/components/invoice-reminders-panel";
 import { InvoiceActions, SendInvoiceButton } from "./invoice-detail-controls";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +108,10 @@ export default async function InvoiceDetailPage({
     // "Has this been sent?" is DERIVED from the outbound-email log rather than
     // stored on the invoice — one fact, one home, like status and closedThrough.
     const sends = await listInvoiceSends(tx, ctx.tenant.id, invoice.id);
+    // Same derivation, same reason: what chasing has happened is read from the
+    // send log, so the panel shows delivery status rather than a stored tick.
+    const reminders = await listInvoiceReminders(tx, ctx.tenant.id, invoice.id);
+    const reminderSettings = await getReminderSettings(tx, ctx.tenant.id);
     const contacts = customer
       ? await listContactPoints(tx, ctx.tenant.id, customer.partyId)
       : [];
@@ -113,6 +123,8 @@ export default async function InvoiceDetailPage({
       payments,
       paid,
       sends,
+      reminders,
+      reminderSettings,
       customerEmail: preferredContactValue(contacts, "email") ?? "",
       bankAccounts,
       undeposited,
@@ -340,6 +352,38 @@ export default async function InvoiceDetailPage({
           )}
         </>
       )}
+
+      <div className="print:hidden">
+        <InvoiceRemindersPanel
+          invoiceId={invoice.id}
+          version={invoice.version}
+          muted={invoice.remindersMuted}
+          customerMuted={customer?.remindersMuted ?? false}
+          enabled={data.reminderSettings.enabled}
+          nextLabel={
+            // Only meaningful while the invoice is actually chaseable; a paid
+            // or void one has no next reminder to describe.
+            balance > 0 && !invoice.remindersMuted && !customer?.remindersMuted
+              ? (() => {
+                  const next = nextReminder({
+                    dueDate: invoice.dueDate,
+                    today: data.today,
+                    offsets: data.reminderSettings.offsets,
+                    sentOffsets: data.reminders.map((r) => r.offset),
+                  });
+                  return next ? `on ${next.date}` : null;
+                })()
+              : null
+          }
+          history={data.reminders.map((r) => ({
+            offset: r.offset,
+            toAddress: r.toAddress,
+            status: r.status,
+            sentOn: r.createdAt.toISOString().slice(0, 10),
+          }))}
+          canAct={isOwner}
+        />
+      </div>
 
       <div className="print:hidden">
         <DocumentAttachments

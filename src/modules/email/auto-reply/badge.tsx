@@ -50,8 +50,9 @@ export function AutoReplyBadge({
         href={href}
         className={cn(
           "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-          "border-amber-300 bg-amber-50 text-amber-900",
-          "dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200",
+          // One token pair instead of a light/dark palette pair — `--warning`
+          // already flips, so the `dark:` half was doing the theme's job by hand.
+          "border-warning/40 bg-warning/10 text-foreground",
         )}
       >
         <PlaneTakeoff className="size-3.5" />

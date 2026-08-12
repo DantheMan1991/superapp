@@ -68,6 +68,8 @@ also a Tailwind utility.
 | `--module-accent` | `text-module-accent`, `bg-module-accent/10` | The current module's colour; defaults to `--accent-brand` |
 | `--accent-<slug>` | — | Per-module hue, assigned to `--module-accent` by the route |
 | `--accent-brand` | — | The AA-safe emerald for **drawing with**. Not `--brand` |
+| `--success` / `--warning` | `bg-success/12`, `bg-warning/10` | Status **fills** only |
+| `--success-foreground` / `--warning-foreground` | `text-*-foreground` | The dark twins, for text and glyphs on those tints |
 
 ### Rules that are easy to get wrong
 
@@ -86,6 +88,13 @@ also a Tailwind utility.
   a surface colour for dark text to sit on. Use `--accent-brand` (or
   `--module-accent`) for a glyph or a figure. Note `text-brand-foreground` is a
   *different* token and is fine: it is the dark green.
+- **`--warning` and `--success` are FILLS. Never draw with them.** Both are
+  mid-to-light tones: `--warning` measures **2.18:1** on the page and `--success`
+  3.43:1 on card, so an icon or a figure drawn in either fails even the 3:1 bar.
+  Use `--warning-foreground` / `--success-foreground` — their dark twins — for
+  anything you can read. This has now been got wrong twice by "modernising"
+  `text-amber-600` onto `text-warning`, which made it worse; measure before
+  swapping a hardcoded colour for a token.
 - **A status chip is a pale tint with dark text**, never a saturated fill.
   `--success` measured 3.43:1 on card and only 3.28:1 as a fill under white text,
   so neither direction passed on its own — hence `--success-foreground`, its dark

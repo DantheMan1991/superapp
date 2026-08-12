@@ -461,7 +461,7 @@ export function ThreadList({
       {selected.size > 0 && (
         // Replaces nothing and covers nothing — it appears above the list, so
         // the messages you selected stay visible while you decide.
-        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1 border-b bg-secondary/70 px-2 py-1.5 backdrop-blur">
+        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1 border-b border-divider bg-secondary/70 px-2 py-1.5 backdrop-blur">
           <span className="px-1 text-xs font-medium tabular-nums">
             {selected.size} selected
           </span>
@@ -555,7 +555,7 @@ export function ThreadList({
         </div>
       )}
 
-      <label className="flex items-center gap-2 border-b px-3 py-1.5 text-xs text-muted-foreground">
+      <label className="flex items-center gap-2 border-b border-divider px-3 py-1.5 text-xs text-muted-foreground">
         <input
           type="checkbox"
           checked={allSelected}
@@ -570,7 +570,10 @@ export function ThreadList({
         Select all on this page
       </label>
 
-      <ul className="divide-y">
+      {/* `--divider`, not `--border`: these hairlines are inside the thread
+          pane. The pane's own edges keep `--border`, which is what separates
+          rail from list from reading pane. */}
+      <ul className="divide-y divide-divider">
         {rows.map((row) => {
           const active = row.emailId === selectedId;
           const checked = selected.has(row.emailId);
@@ -593,7 +596,7 @@ export function ThreadList({
                 type="button"
                 onClick={() => toggleFlag(row)}
                 disabled={flagTransitioning}
-                className="flex shrink-0 items-center px-2 text-muted-foreground transition-colors hover:text-amber-500 disabled:opacity-50"
+                className="flex shrink-0 items-center px-2 text-muted-foreground transition-colors hover:text-warning-foreground disabled:opacity-50"
                 aria-pressed={flagged}
                 aria-label={
                   flagged
@@ -604,7 +607,7 @@ export function ThreadList({
                 <Flag
                   className={cn(
                     "size-3.5",
-                    flagged && "fill-current text-amber-500",
+                    flagged && "fill-current text-warning-foreground",
                   )}
                 />
               </button>

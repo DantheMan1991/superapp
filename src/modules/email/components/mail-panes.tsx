@@ -92,7 +92,7 @@ export function FolderRail({
             <Icon className="size-4 shrink-0" />
             <span className="min-w-0 flex-1 truncate">{folder.name}</span>
             {folder.unreadEmails > 0 && (
-              <span className="shrink-0 rounded-full bg-brand/15 px-1.5 text-xs font-medium tabular-nums text-brand-foreground">
+              <span className="shrink-0 rounded-full bg-module-accent/12 px-1.5 text-xs font-medium text-module-accent tabular-nums">
                 {folder.unreadEmails > 99 ? "99+" : folder.unreadEmails}
               </span>
             )}

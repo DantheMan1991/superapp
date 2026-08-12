@@ -18,6 +18,42 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 > it grows past a few screens, sweep the oldest into the archive. The dossier is
 > read at the start of every mail session, so its length is a real cost.
 
+### 2026-08-10 — UI: the mail client on the shared tokens (branch `claude/ui-mail`)
+
+Presentation only — no JMAP call, action, schema or policy changed. Vocabulary in
+[design-system.md](design-system.md);
+[ADR 0008](../decisions/0008-warm-neutrals-and-layered-elevation.md) has the why.
+
+**This module is deliberately treated differently.** It is the only one with
+`layout: "full"`, and it is a list-beside-detail-pane client, so the
+`PageHeader` + `CategoryStrip` + `DataTable` pattern the other modules took does
+not apply. The three-column grid, its height chain (`min-h-0` / `overflow-auto`)
+and the `border` weight on the pane separators are **untouched** — pane edges are
+structural and correctly `--border`. What changed is colour and the hairlines
+*inside* a pane.
+
+- **Fixed: `text-brand` on the Mail glyph** in `MailView.tsx` (2.81:1) and
+  **`border-brand`** on the active filter chip. Both now `--module-accent`, which
+  for this module is blue and measures **5.41:1** on card in light, 6.66:1 in dark.
+- **The module reads blue now**, not brand green: the header glyph, the active
+  filter chip and the unread count in the folder rail all take `--accent-email`,
+  matching its icon in the rail.
+- **In-pane hairlines moved to `--divider`** — the thread list's row dividers, its
+  sticky bulk-action bar, the select-all row, and the reading pane's header,
+  footer and quoted-text blocks. Pane separators kept `--border`.
+- **Six hardcoded amber banners moved onto the warning tokens**, including two
+  that carried a hand-written `dark:` palette pair doing the theme's job by hand.
+
+**A mistake worth recording, because it was made twice.** Replacing
+`text-amber-600` with `text-warning` on those icons made contrast *worse*:
+`--warning` is a fill at oklch(0.75 …) and measures **2.18:1** on the page, below
+even the 3:1 bar for a glyph. `--warning-foreground` was added as its dark twin
+(the same split `--success` already needed) and everything readable moved onto it
+— minimum **6.13:1** across both themes now. `status-badge.tsx` had also been
+referencing `text-warning-foreground` for some time with **no such token
+defined**, propped up by a hardcoded `text-amber-700 dark:text-amber-300`; that
+class now resolves, and the hardcoded pair is gone.
+
 ### 2026-08-08 — A probe for granting access to a shared mailbox (branch `claude/mail-grant-probe`)
 
 `npm run mail:probe-grant` (`scripts/jmap-grant-probe.ts`), following the house

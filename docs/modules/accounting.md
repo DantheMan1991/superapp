@@ -13,6 +13,45 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — The thread drafter has a live test, and it passes (branch `claude/live-thread-draft-test`)
+
+The drafter shipped as the only AI engine in the module WITHOUT a gated live
+test — `extract`, `bill-code`, `narrative` and `interview` all had one. Its
+fixture tests proved the validator rejects bad output; nothing proved good
+output ever arrives, because the fixtures were written by the same hand as the
+validator. If the prompt were weak the symptom would be every line arriving
+unticked, and no test in the repo would have noticed.
+
+```
+RUN_LIVE_THREAD_DRAFT=1 npx vitest run tests/live-thread-draft.test.ts
+```
+
+**RUN 2026-08-12 against `claude-opus-5`. All three cases pass.** What it
+actually produced, on a conversation agreeing $3,450 labour + $780 materials:
+
+- Two lines, **both citations verified** — `"Second fix carpentry comes to
+  $3,450.00 for labour"` and `"plus $780.00 for materials"`, each found in the
+  message it cited. Amounts exact to the cent, party matched to the id offered.
+- Three caveats, one of them better than anything designed for: *"The client
+  asked to be invoiced on completion of the work, which was due to start on the
+  20th; this draft is dated today and may be premature."*
+
+**The negative case is the one that matters** and it holds: given the same job
+discussed with only a RANGE (*"somewhere between three and five thousand"*) and
+an explicit "I'll get you a proper number once I've been round", it returned
+**zero lines** and said why. A range discussed is not a price agreed, and
+inventing $4,000 there is the failure that would make the feature
+untrustworthy — worse than proposing nothing.
+
+- `callThreadDraftModel` is now exported, the same split `bill-code.ts` makes
+  for `callBillCodingModel`, so the live test drives the real model without a
+  database.
+- **Found by running it:** the model flagged that *"our usual 30 days"* was
+  mentioned but set no due date, because the drafter has no idea payment terms
+  exist. `payment_terms` shipped the same day — resolving the customer's default
+  term in the accept path is now a real, small improvement. Recorded in Open
+  items rather than bolted on here.
+
 ### 2026-08-12 — Obligation statuses and the MoneyBar (branch `claude/accounting-moneybar`)
 
 The last item from the 2026-08-10 QuickBooks review. Read-side only: no schema
@@ -668,7 +707,7 @@ compiled-and-tested, not seen.
 - **Automatic overdue reminders are DONE** (2026-08-11) — see the build log. What is not built: a reminder for **bills we owe** (the AP mirror), and reminder wording an owner can edit, both deliberately left until somebody asks
 - **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
 - **P&L by Month is DONE** (2026-08-12) — the by-dimension column spread generalized to time. What is NOT built: quarter and year columns, which the same `periods` seam would carry with a different bucketer
-- **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
+- **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations, and **proven against the real API** (see the build log; `RUN_LIVE_THREAD_DRAFT=1`). Now worth doing: the drafter sets no due date because it does not know `payment_terms` exists — resolving the customer's default term in the accept path would close that. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - **Recurring journals and bills are DONE** (2026-08-12). Still open from the same thread: **folding `recurring_invoices` into `recurring_entries`**, so the module has one recurrence mechanism rather than two

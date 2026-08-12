@@ -49,7 +49,17 @@ export interface ThreadDraftDeps {
   }) => Promise<unknown>;
 }
 
-async function defaultCallModel(args: {
+/**
+ * The real model call, EXPORTED so a live test can drive it without a
+ * database — the same split `bill-code.ts` makes for `callBillCodingModel`.
+ *
+ * What the fixture tests prove is that the validator rejects bad output. What
+ * only this can prove is that GOOD output arrives at all: that a real
+ * conversation yields lines whose citations verify against the messages they
+ * cite. No amount of fixture testing substitutes for that, because the
+ * fixtures are written by the same hand as the validator.
+ */
+export async function callThreadDraftModel(args: {
   system: string;
   user: string;
   tool: ReturnType<typeof threadDraftTool>;
@@ -172,7 +182,7 @@ export async function draftFromThread(
 
   const parties = await loadParties(tx, ctx.tenantId, kind);
   const tool = threadDraftTool(kind);
-  const raw = await (deps.callModel ?? defaultCallModel)({
+  const raw = await (deps.callModel ?? callThreadDraftModel)({
     system: threadDraftSystemPrompt(kind),
     user: buildThreadDraftUserTurn(thread, parties, today),
     tool,

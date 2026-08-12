@@ -50,6 +50,8 @@ import {
   loadInvoiceLines,
 } from "../src/modules/accounting/invoicing/invoices";
 import { recordPayment, unapplyPayment } from "../src/modules/accounting/invoicing/payments";
+import { listRecordHistory } from "../src/modules/accounting/history/list";
+import { logAuditInTx } from "../src/lib/audit";
 
 // =====================================================================
 // Pure suite
@@ -790,6 +792,116 @@ d("invoicing (DB)", () => {
       }),
     );
     expect(gone).toHaveLength(0);
+  });
+
+  /**
+   * THE REASON `listRecordHistory` TAKES SEVERAL TARGETS.
+   *
+   * A payment is audited against the PAYMENT row, not the invoice, so a panel
+   * filtering on the invoice alone would show "created, issued" and silently
+   * omit the money — which is the half somebody opens the history for.
+   */
+  it("an invoice's history includes events audited against its payments", async () => {
+    const sales = await accountId("4000");
+    const bank = await withTenant(tenantId, (tx) =>
+      createBankAccount(tx, owner, { name: "History Checking", kind: "checking" }),
+    );
+    const draft = await withTenant(tenantId, (tx) =>
+      createInvoiceDraft(tx, owner, {
+        customerId,
+        issueDate: "2026-06-01",
+        dueDate: "2026-06-30",
+        lines: [line(30_000, sales)],
+      }),
+    );
+    const issued = await withTenant(tenantId, (tx) =>
+      issueInvoice(tx, owner, {
+        invoiceId: draft.id,
+        expectedVersion: draft.version,
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      logAuditInTx(tx, {
+        action: "invoice.issued",
+        tenantId,
+        actorClerkUserId: owner.userId,
+        targetType: "invoice",
+        targetId: issued.id,
+        meta: { number: issued.invoiceNumber },
+      }),
+    );
+    const payment = await withTenant(tenantId, (tx) =>
+      recordPayment(tx, owner, {
+        invoiceId: issued.id,
+        expectedVersion: issued.version,
+        paymentDate: "2026-06-10",
+        amountCents: 10_000,
+        depositAccountId: bank.ledgerAccount.id,
+        method: "check",
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      logAuditInTx(tx, {
+        action: "invoice.payment_recorded",
+        tenantId,
+        actorClerkUserId: owner.userId,
+        targetType: "invoice_payment",
+        targetId: payment.payment.id,
+        meta: { invoiceId: issued.id },
+      }),
+    );
+
+    // The invoice alone finds only its own event...
+    const invoiceOnly = await withTenant(tenantId, (tx) =>
+      listRecordHistory(tx, tenantId, [{ type: "invoice", id: issued.id }]),
+    );
+    expect(invoiceOnly.map((e) => e.action)).toEqual(["invoice.issued"]);
+
+    // ...and passing the payment too is what makes the panel complete.
+    const full = await withTenant(tenantId, (tx) =>
+      listRecordHistory(tx, tenantId, [
+        { type: "invoice", id: issued.id },
+        { type: "invoice_payment", id: payment.payment.id },
+      ]),
+    );
+    expect(full.map((e) => e.action).sort()).toEqual([
+      "invoice.issued",
+      "invoice.payment_recorded",
+    ]);
+    // Newest first, and rendered rather than raw.
+    expect(full[0].at.getTime()).toBeGreaterThanOrEqual(full[1].at.getTime());
+    expect(full.map((e) => e.label)).toContain("Payment recorded");
+  });
+
+  it("a record's history never includes another record's events", async () => {
+    const sales = await accountId("4000");
+    const a = await withTenant(tenantId, (tx) =>
+      createInvoiceDraft(tx, owner, {
+        customerId,
+        issueDate: "2026-06-01",
+        lines: [line(1_000, sales)],
+      }),
+    );
+    const b = await withTenant(tenantId, (tx) =>
+      createInvoiceDraft(tx, owner, {
+        customerId,
+        issueDate: "2026-06-01",
+        lines: [line(2_000, sales)],
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      logAuditInTx(tx, {
+        action: "invoice.draft_updated",
+        tenantId,
+        actorClerkUserId: owner.userId,
+        targetType: "invoice",
+        targetId: b.id,
+      }),
+    );
+    const forA = await withTenant(tenantId, (tx) =>
+      listRecordHistory(tx, tenantId, [{ type: "invoice", id: a.id }]),
+    );
+    expect(forA).toEqual([]);
   });
 
   it("isolation: cross-tenant invoice smuggles rejected", async () => {

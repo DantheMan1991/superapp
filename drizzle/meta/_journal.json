@@ -841,6 +841,13 @@
       "when": 1786544070053,
       "tag": "0119_recurring_entries_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1786545945217,
+      "tag": "0120_audit_log_target_index",
+      "breakpoints": true
     }
   ]
 }

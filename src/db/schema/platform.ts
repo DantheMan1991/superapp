@@ -366,6 +366,20 @@ export const auditLog = pgTable(
   (t) => [
     index("audit_log_tenant_idx").on(t.tenantId),
     index("audit_log_created_idx").on(t.createdAt),
+    /**
+     * "What has happened to THIS record" — the per-record history panel.
+     *
+     * Added when that panel was built (2026-08-12), because it is the first
+     * read that filters by target rather than by tenant or time. Without it
+     * the query scans every audit row the tenant has ever written, which is a
+     * table that only grows and is never pruned.
+     */
+    index("audit_log_target_idx").on(
+      t.tenantId,
+      t.targetType,
+      t.targetId,
+      t.createdAt,
+    ),
   ],
 );
 

@@ -13,6 +13,47 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — Per-record History panel (branch `claude/accounting-record-history`)
+
+"What has happened to this invoice." No new table and no new writes: every
+financial mutation already writes an audit row in the SAME TRANSACTION as the
+change, so the history is a consequence of a rule that already existed rather
+than a second record that could disagree with the first.
+
+- **`listRecordHistory` takes SEVERAL targets, not one**, and that signature is
+  the feature. An invoice's payments are audited against the PAYMENT row and
+  its posting against the ENTRY, so a panel filtering on the invoice alone
+  shows "created, issued" and silently omits the money — which is the half
+  somebody opens a history for. The caller passes its own related ids; nothing
+  guesses. Pinned by a DB test asserting both halves: the invoice alone finds
+  one event, the invoice plus its payment finds both.
+- **Labels are DERIVED, not enumerated.** There are 77 accounting actions today
+  and the number only goes up; a hand-written map would be stale within a week,
+  and a stale map fails in the worst available way — omitting the event
+  somebody is looking for. `<domain>.<verb>` is split and humanised, with a
+  short override table for the ones that read badly, so a brand-new action
+  nobody thought about still renders as a sentence. **The raw action stays on
+  the row's `title`**, because somebody reconciling against the audit log needs
+  the slug the log actually holds.
+- **`meta` is never dumped.** It carries whatever each call site thought worth
+  recording — before/after blobs, internal ids — so only keys with an agreed
+  meaning are read. Adding a key to an audit call can therefore never change
+  this panel by accident.
+- **The panel renders NOTHING when there is nothing to say**, like
+  `EntityThreads`: a record created before this existed has no rows, and a
+  permanently empty History card on every invoice would be furniture.
+- **`audit_log` gained its first target index** (`0120`) — this is the first
+  read that filters by target rather than by tenant or time, on a table that
+  only ever grows.
+- **Numbered `0120`, not `0118`.** PR #137 was open at the same time and
+  already claimed 0118 and 0119. Drizzle applies in journal order so the gap is
+  cosmetic; a collision would not have been. Worth knowing whenever two
+  accounting PRs are in flight.
+- `audit_log` is member-READABLE by policy (`drizzle/0001`), which is what makes
+  this a plain read under the caller's own RLS rather than needing `withSystem`.
+- **Not built:** history on journal entries, customers and vendors — the query
+  is target-agnostic, so each is a one-line addition when wanted.
+
 ### 2026-08-12 — Recurring journals and bills (branch `claude/accounting-recurring-journals`)
 
 The benchmark QuickBooks file runs a monthly depreciation JOURNAL, which this
@@ -582,6 +623,7 @@ compiled-and-tested, not seen.
 - **General Ledger and Transaction Detail by Account are DONE** (2026-08-11) — one report with an account filter, so seven reports now. See the build log for the accrual-only decision
 - **P&L by Month is DONE** (2026-08-12) — the by-dimension column spread generalized to time. What is NOT built: quarter and year columns, which the same `periods` seam would carry with a different bucketer
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
+- **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - **Recurring journals and bills are DONE** (2026-08-12). Still open from the same thread: **folding `recurring_invoices` into `recurring_entries`**, so the module has one recurrence mechanism rather than two
-- From the 2026-08-10 QuickBooks review, the rest in rough value order: a per-record History panel; **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists
+- **The last item from the 2026-08-10 QuickBooks review**: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built

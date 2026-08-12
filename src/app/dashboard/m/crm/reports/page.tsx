@@ -1,5 +1,8 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { Panel } from "@/components/app/panel";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -43,45 +46,41 @@ export default async function ReportsPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" />
-        All records
-      </Link>
+      <PageHeader
+        title="Reports"
+        description={`Questions about ${ctx.tenant.name}, answered from the records you can see.`}
+      />
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
-        <p className="text-sm text-muted-foreground">
-          Questions about {ctx.tenant.name}, answered from the records you can
-          see.
-        </p>
-      </div>
+      <CrmNav />
 
-      <ul className="divide-y rounded-md border">
-        {BUILT_IN_REPORTS.map((report) => (
-          <li key={report.id}>
-            <Link
-              href={`${BASE}/reports/${encodeURIComponent(report.id)}`}
-              className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-accent/40"
-            >
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">{report.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {describeReport(report.definition)}
+      <Panel>
+        <ul className="divide-y divide-divider">
+          {BUILT_IN_REPORTS.map((report) => (
+            <li key={report.id}>
+              <Link
+                href={`${BASE}/reports/${encodeURIComponent(report.id)}`}
+                className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/60"
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">
+                    {report.name}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {describeReport(report.definition)}
+                  </span>
                 </span>
-              </span>
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-            </Link>
-          </li>
-        ))}
-      </ul>
+                <ChevronRight className="size-4 shrink-0 text-subtle-foreground" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </Panel>
 
       {saved.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-sm font-medium">Saved</h2>
-          <ul className="divide-y rounded-md border">
+          <Panel>
+          <ul className="divide-y divide-divider">
             {saved.map((report) => (
               <li key={report.id}>
                 <Link
@@ -110,6 +109,7 @@ export default async function ReportsPage() {
               </li>
             ))}
           </ul>
+          </Panel>
         </div>
       )}
 
@@ -118,24 +118,28 @@ export default async function ReportsPage() {
         <p className="text-xs text-muted-foreground">
           Pick what you want to count. You can group and filter it once it opens.
         </p>
-        <ul className="divide-y rounded-md border">
-          {REPORT_TYPES.map((type) => (
-            <li key={type.id}>
-              <Link
-                href={`${BASE}/reports/new?type=${type.id}`}
-                className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-accent/40"
-              >
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">{type.name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {type.question}
+        <Panel>
+          <ul className="divide-y divide-divider">
+            {REPORT_TYPES.map((type) => (
+              <li key={type.id}>
+                <Link
+                  href={`${BASE}/reports/new?type=${type.id}`}
+                  className="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/60"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium">
+                      {type.name}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {type.question}
+                    </span>
                   </span>
-                </span>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              </Link>
-            </li>
-          ))}
-        </ul>
+                  <ChevronRight className="size-4 shrink-0 text-subtle-foreground" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Panel>
       </div>
     </div>
   );

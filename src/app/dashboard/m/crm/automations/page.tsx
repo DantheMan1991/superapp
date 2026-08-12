@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { PageHeader } from "@/components/app/page-header";
+import { CrmNav } from "@/modules/crm/components/crm-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -9,8 +9,6 @@ import { listRules } from "@/modules/crm/automation-ops";
 import { AutomationManager } from "@/modules/crm/components/automation-manager";
 
 export const dynamic = "force-dynamic";
-
-const BASE = "/dashboard/m/crm";
 
 /**
  * The automation rules.
@@ -53,21 +51,14 @@ export default async function AutomationsPage() {
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="size-4" />
-        All records
-      </Link>
+      <PageHeader
+        title="Automations"
+        description="Things that happen on their own. Each one runs as whoever triggered it, so a rule can only change what that person could change themselves."
+      />
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Automations</h1>
-        <p className="text-sm text-muted-foreground">
-          Things that happen on their own. Each one runs as whoever triggered it,
-          so a rule can only change what that person could change themselves.
-        </p>
-      </div>
+      {/* Replaces a lone "All records" back link — the strip goes everywhere the
+          other modules' strips do, so no CRM page is a dead end. */}
+      <CrmNav />
 
       {!isOwner && rules.length > 0 && (
         <p className="rounded-md border px-4 py-3 text-sm text-muted-foreground">

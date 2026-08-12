@@ -14,6 +14,35 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-10 — UI: CRM gets a sub-nav it never had (branch `claude/ui-crm`)
+
+Presentation and IA — no query, action, schema or policy changed. Vocabulary in
+[design-system.md](design-system.md);
+[ADR 0008](../decisions/0008-warm-neutrals-and-layered-elevation.md) has the why.
+
+- **`CrmNav` is new** (`components/crm-nav.tsx`), a `CategoryStrip` over the
+  module's sections. This module had **no sub-nav at all**: the hub carried
+  **six outline buttons** — Follow-ups, Board, Fields, Reports, Automations,
+  Duplicates — sitting where a page's actions go, so navigation was dressed as
+  actions and the one real action (Add a record) was the seventh button in the
+  row. And no sub-page carried anything, so once you were on Duplicates the only
+  way back was the browser's back button. This is therefore an **IA change**, not
+  only a restyle.
+- **Follow-ups is deliberately absent from the strip.** `/dashboard/m/crm/tasks`
+  is a redirect into Work (slice 5b) and its own header says the route survives
+  "in the CRM nav until every link is chased down" — this is that link, chased
+  down. A strip tab that lands you in another module, with the strip gone and no
+  active state to match, is worse than no tab; Work is already its own row in the
+  rail.
+- Converted so far: the hub (`CrmModule.tsx`), duplicates, automations, fields,
+  reports. Record rows and report lists moved onto `Panel` + `--divider`, and the
+  person/company glyphs onto the violet `--module-accent`.
+
+**Not yet converted** (same mechanical pattern, next slice): `deals`,
+`deals/[dealId]`, `pipelines`, `records/new`, `records/[partyId]`,
+`records/[partyId]/deals/new`, `reports/[reportId]`. Those still hand-roll their
+headers and still use ad-hoc back links rather than the strip.
+
 ### 2026-08-10 — `crm_tasks` dropped (branch `claude/work-slice-5c`)
 
 The table is gone (`drizzle/0110`). Its rows were copied into `work_items` by

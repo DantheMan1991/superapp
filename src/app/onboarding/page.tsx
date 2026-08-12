@@ -40,7 +40,10 @@ export default async function OnboardingPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-muted/40 p-6">
       <div className="max-w-md text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        {/* Not `PageHeader`: that is a left-aligned title/description/actions
+            row for a dashboard page, and this is a centred single-purpose
+            screen. It takes the heading type and nothing else. */}
+        <h1 className="font-heading text-2xl font-semibold tracking-heading">
           Set up your business
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">

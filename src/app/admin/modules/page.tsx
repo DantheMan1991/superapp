@@ -5,6 +5,7 @@ import { withSystem, schema } from "@/db";
 import { moduleRegistry } from "@/modules";
 import { listModuleDocs } from "@/lib/build-docs";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/app/page-header";
 import {
   Card,
   CardContent,
@@ -65,15 +66,15 @@ export default async function AdminModulesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Module registry
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          What the platform can sell. &ldquo;Coming soon&rdquo; entries are
-          designed seams — they get built when a paying client pulls them in.
-        </p>
-      </div>
+      <PageHeader
+        title="Module registry"
+        description={
+          <>
+            What the platform can sell. &ldquo;Coming soon&rdquo; entries are
+            designed seams — they get built when a paying client pulls them in.
+          </>
+        }
+      />
 
       <Card>
         <CardHeader className="pb-3">

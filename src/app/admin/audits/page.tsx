@@ -5,6 +5,7 @@ import { withSystem, schema } from "@/db";
 import type { AuditMessage } from "@/db/schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/app/page-header";
 import {
   Card,
   CardContent,
@@ -39,20 +40,22 @@ export default async function AuditsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Discovery</h1>
-          <p className="text-sm text-muted-foreground">
-            Tier 0 audits — learn a prospect&apos;s business with an AI
-            copilot, then generate the health check and build spec.
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/admin/audits/new">
-            <Plus className="size-4" /> New audit
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="Discovery"
+        description={
+          <>
+            Tier 0 audits — learn a prospect&apos;s business with an AI copilot,
+            then generate the health check and build spec.
+          </>
+        }
+        actions={
+          <Button asChild size="sm">
+            <Link href="/admin/audits/new">
+              <Plus className="size-4" /> New audit
+            </Link>
+          </Button>
+        }
+      />
 
       <Card>
         <CardHeader className="pb-3">

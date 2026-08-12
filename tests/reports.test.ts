@@ -5,9 +5,12 @@ import type { Account } from "../src/db/schema";
 import { withTenant, withSystem, schema } from "../src/db";
 import type { BalanceRow } from "../src/modules/accounting/core/balances";
 import {
+  displayCents,
   getBalanceSheet,
   getCashActivity,
+  getGeneralLedger,
   getProfitAndLoss,
+  getTrialBalance,
   postEntry,
   upsertDimensionMember,
   voidEntry,
@@ -16,8 +19,10 @@ import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
   buildBalanceSheet,
   buildCashActivity,
+  buildGeneralLedger,
   buildProfitAndLoss,
   pnlSectionFor,
+  type GeneralLedgerInputLine,
 } from "../src/modules/accounting/core/report-builders";
 import {
   addDaysIso,
@@ -31,7 +36,7 @@ import {
   centsToCsvAmount,
   formatCentsSigned,
 } from "../src/modules/accounting/lib/money";
-import { toCsv } from "../src/modules/accounting/lib/csv";
+import { generalLedgerToCsvRows, toCsv } from "../src/modules/accounting/lib/csv";
 
 /**
  * Session 2 certification. Part A: pure builders and helpers — runs with
@@ -479,6 +484,152 @@ describe("Cash activity builder", () => {
   });
 });
 
+describe("General ledger builder", () => {
+  const accounts = [
+    mkAccount({ id: "cash", code: "1000", name: "Checking", accountType: "asset", subtype: "bank" }),
+    mkAccount({ id: "ar", code: "1200", name: "A/R", accountType: "asset" }),
+    mkAccount({ id: "sales", code: "4000", name: "Sales", accountType: "income" }),
+    mkAccount({ id: "rent", code: "6000", name: "Rent", accountType: "expense" }),
+    mkAccount({ id: "quiet", code: "6100", name: "Never Used", accountType: "expense" }),
+  ];
+
+  const line = (
+    accountId: string,
+    entryDate: string,
+    amountCents: number,
+    over: Partial<GeneralLedgerInputLine> = {},
+  ): GeneralLedgerInputLine => ({
+    accountId,
+    entryId: `e-${entryDate}`,
+    entryDate,
+    source: "manual",
+    entryMemo: "",
+    lineMemo: "",
+    amountCents,
+    lineNo: 1,
+    ...over,
+  });
+
+  const PERIOD = { from: "2026-06-01", to: "2026-06-30" };
+
+  it("runs a balance down a debit-normal account from its opening", () => {
+    const report = buildGeneralLedger(
+      accounts,
+      [mkRow("cash", 50_000)],
+      [line("cash", "2026-06-05", 12_000), line("cash", "2026-06-09", -7_000)],
+      PERIOD,
+    );
+    const cash = report.accounts.find((a) => a.accountId === "cash")!;
+    expect(cash.openingCents).toBe(50_000);
+    expect(cash.lines.map((l) => l.runningCents)).toEqual([62_000, 55_000]);
+    expect(cash.closingCents).toBe(55_000);
+    expect(cash.debitTotalCents).toBe(12_000);
+    expect(cash.creditTotalCents).toBe(7_000);
+  });
+
+  it("runs a credit-normal account on ITS natural side (P6)", () => {
+    // Income is credited, so a credit must make the balance climb — not fall.
+    const report = buildGeneralLedger(
+      accounts,
+      [mkRow("sales", -10_000)],
+      [line("sales", "2026-06-05", -4_000), line("sales", "2026-06-06", 1_000)],
+      PERIOD,
+    );
+    const sales = report.accounts.find((a) => a.accountId === "sales")!;
+    expect(sales.openingCents).toBe(10_000);
+    expect(sales.lines.map((l) => l.runningCents)).toEqual([14_000, 13_000]);
+    expect(sales.closingCents).toBe(13_000);
+    // The debit/credit columns stay ledger-side and positive regardless.
+    expect(sales.lines[0]).toMatchObject({ debitCents: 0, creditCents: 4_000 });
+    expect(sales.lines[1]).toMatchObject({ debitCents: 1_000, creditCents: 0 });
+  });
+
+  it("orders by (date, entry, lineNo) whatever order the rows arrive in", () => {
+    // A running balance whose order can shift between two runs of the same
+    // report is worse than none, so the builder sorts rather than trusting
+    // the query plan.
+    const shuffled = [
+      line("rent", "2026-06-20", 300, { entryId: "e-b", lineNo: 2 }),
+      line("rent", "2026-06-02", 100, { entryId: "e-a", lineNo: 1 }),
+      line("rent", "2026-06-20", 200, { entryId: "e-b", lineNo: 1 }),
+    ];
+    const report = buildGeneralLedger(accounts, [], shuffled, PERIOD);
+    const rent = report.accounts.find((a) => a.accountId === "rent")!;
+    expect(rent.lines.map((l) => l.debitCents)).toEqual([100, 200, 300]);
+    expect(rent.lines.map((l) => l.runningCents)).toEqual([100, 300, 600]);
+  });
+
+  it("keeps an account that has an opening balance but no movement", () => {
+    // This is what makes the closing balances reconcile to the trial balance;
+    // dropping these rows would leave a difference somebody has to chase.
+    const report = buildGeneralLedger(accounts, [mkRow("ar", 25_000)], [], PERIOD);
+    const ar = report.accounts.find((a) => a.accountId === "ar")!;
+    expect(ar.lines).toHaveLength(0);
+    expect(ar.openingCents).toBe(25_000);
+    expect(ar.closingCents).toBe(25_000);
+  });
+
+  it("drops an account with neither an opening balance nor movement", () => {
+    const report = buildGeneralLedger(accounts, [], [], PERIOD);
+    expect(report.accounts).toHaveLength(0);
+  });
+
+  it("sorts accounts by code and totals both columns", () => {
+    const report = buildGeneralLedger(
+      accounts,
+      [],
+      [
+        line("rent", "2026-06-03", 5_000),
+        line("cash", "2026-06-03", -5_000),
+        line("sales", "2026-06-04", -2_000),
+        line("ar", "2026-06-04", 2_000),
+      ],
+      PERIOD,
+    );
+    expect(report.accounts.map((a) => a.code)).toEqual([
+      "1000",
+      "1200",
+      "4000",
+      "6000",
+    ]);
+    expect(report.totalDebitCents).toBe(7_000);
+    expect(report.totalCreditCents).toBe(7_000);
+    expect(report.lineCount).toBe(4);
+    expect(report.truncated).toBe(false);
+  });
+
+  it("says so when the period was capped", () => {
+    // No silent caps: a ledger that quietly shows part of a period reads as
+    // a complete one.
+    const report = buildGeneralLedger(
+      accounts,
+      [],
+      [line("rent", "2026-06-03", 5_000)],
+      { ...PERIOD, matchedLineCount: 900 },
+    );
+    expect(report.truncated).toBe(true);
+    expect(report.lineCount).toBe(1);
+    expect(report.matchedLineCount).toBe(900);
+    // ...and the CSV carries that warning in the file, not just on screen.
+    expect(generalLedgerToCsvRows(report)[0][0]).toMatch(/^INCOMPLETE/);
+  });
+
+  it("exports one CSV row per line, between opening and closing rows", () => {
+    const report = buildGeneralLedger(
+      accounts,
+      [mkRow("cash", 1_000)],
+      [line("cash", "2026-06-05", 500)],
+      PERIOD,
+    );
+    const rows = generalLedgerToCsvRows(report);
+    expect(rows[0][0]).toBe("Account");
+    expect(rows[1]).toEqual(["1000 Checking", "", "", "", "Opening balance", "", "", "10.00"]);
+    expect(rows[2][7]).toBe("15.00");
+    expect(rows[3][4]).toBe("Closing balance");
+    expect(rows[3][7]).toBe("15.00");
+  });
+});
+
 describe("CSV (RFC 4180)", () => {
   it("quotes commas, quotes, and newlines", () => {
     const csv = toCsv([
@@ -659,5 +810,111 @@ d("reports integration (DB)", () => {
       getProfitAndLoss(tx, tenantId, { from: "2026-01-01", to: "2026-06-30" }),
     );
     expect(before.netIncomeCents - after.netIncomeCents).toBe(-9_999);
+  });
+
+  /**
+   * THE PROPERTY THAT MAKES THE GENERAL LEDGER TRUSTWORTHY.
+   *
+   * An accountant's first move with a new ledger is to tie it back to the
+   * trial balance. If those two disagree the report is not "slightly off", it
+   * is unusable — so this is the test that matters most about it, and it is
+   * the reason accounts with an opening balance and no movement are kept.
+   */
+  it("closing balances tie out to the trial balance at the same date", async () => {
+    const asOf = "2026-12-31";
+    const [gl, tb] = await withTenant(tenantId, async (tx) => [
+      await getGeneralLedger(tx, tenantId, { from: "2000-01-01", to: asOf }),
+      await getTrialBalance(tx, tenantId, asOf),
+    ]);
+    expect(gl.truncated).toBe(false);
+
+    const closingByAccount = new Map(
+      gl.accounts.map((a) => [a.accountId, a.closingCents]),
+    );
+    expect(tb.rows.length).toBeGreaterThan(0);
+    for (const row of tb.rows) {
+      // Trial balance carries signed net (positive = debit); the ledger shows
+      // each account on its natural side (P6). Convert, then compare.
+      expect(closingByAccount.get(row.account.id) ?? 0).toBe(
+        displayCents(row.account.accountType, row.netCents),
+      );
+    }
+
+    // ...and the ledger's own columns balance, because every entry does.
+    expect(gl.totalDebitCents).toBe(gl.totalCreditCents);
+  });
+
+  it("ignores drafts and voided entries, like every other report", async () => {
+    const bank = await accountId("1000");
+    const repairs = await accountId("6200");
+    const period = { from: "2026-09-01", to: "2026-09-30" };
+
+    const linesIn = async () =>
+      (await withTenant(tenantId, (tx) => getGeneralLedger(tx, tenantId, period)))
+        .lineCount;
+    const before = await linesIn();
+
+    await withTenant(tenantId, (tx) =>
+      postEntry(tx, owner, {
+        status: "draft",
+        entryDate: "2026-09-10",
+        lines: [
+          { accountId: repairs, amountCents: 4_000 },
+          { accountId: bank, amountCents: -4_000 },
+        ],
+      }),
+    );
+    expect(await linesIn()).toBe(before);
+
+    const { entry } = await withTenant(tenantId, (tx) =>
+      postEntry(tx, owner, {
+        status: "posted",
+        entryDate: "2026-09-11",
+        lines: [
+          { accountId: repairs, amountCents: 6_000 },
+          { accountId: bank, amountCents: -6_000 },
+        ],
+      }),
+    );
+    expect(await linesIn()).toBe(before + 2);
+
+    await withTenant(tenantId, (tx) =>
+      voidEntry(tx, owner, { entryId: entry.id, expectedVersion: entry.version }),
+    );
+    // Voiding posts a reversal rather than deleting, so the original AND its
+    // reversal both stand in the ledger — which is the point of an audit
+    // trail. What must be true is that they cancel.
+    const after = await withTenant(tenantId, (tx) =>
+      getGeneralLedger(tx, tenantId, period),
+    );
+    const repairsRow = after.accounts.find((a) => a.accountId === repairs);
+    expect(repairsRow?.closingCents ?? 0).toBe(0);
+  });
+
+  it("narrows to one account, which is the transaction-detail report", async () => {
+    const bank = await accountId("1000");
+    const gl = await withTenant(tenantId, (tx) =>
+      getGeneralLedger(tx, tenantId, {
+        from: "2000-01-01",
+        to: "2026-12-31",
+        accountIds: [bank],
+      }),
+    );
+    expect(gl.accounts).toHaveLength(1);
+    expect(gl.accounts[0].accountId).toBe(bank);
+    expect(gl.accounts[0].lines.length).toBeGreaterThan(0);
+  });
+
+  it("flags truncation instead of quietly showing a prefix", async () => {
+    const gl = await withTenant(tenantId, (tx) =>
+      getGeneralLedger(tx, tenantId, {
+        from: "2000-01-01",
+        to: "2026-12-31",
+        limit: 2,
+      }),
+    );
+    expect(gl.lineCount).toBe(2);
+    expect(gl.truncated).toBe(true);
+    expect(gl.matchedLineCount).toBeGreaterThan(2);
   });
 });

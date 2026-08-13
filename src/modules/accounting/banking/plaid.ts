@@ -169,7 +169,15 @@ export async function syncPlaidItem(
       ),
     }),
   );
-  const byPlaidAccount = new Map(linked.map((b) => [b.plaidAccountId!, b]));
+  /**
+   * ACTIVE registers only. A Plaid item usually covers several accounts, so
+   * closing one must not stop the others syncing — its rows fall into
+   * `skippedUnlinked`, which is the count already surfaced for an account the
+   * feed knows about but the books do not.
+   */
+  const byPlaidAccount = new Map(
+    linked.filter((b) => b.isActive).map((b) => [b.plaidAccountId!, b]),
+  );
   const accessToken = decryptSecret(item.accessTokenEnc);
 
   const result: SyncResult = {

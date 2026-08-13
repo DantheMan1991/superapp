@@ -19,6 +19,7 @@ import {
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
   createBankAccount,
+  setBankAccountActive,
   suggestBankAccountCode,
 } from "../src/modules/accounting/banking/accounts";
 import {
@@ -531,6 +532,107 @@ d("banking (DB)", () => {
     await withTenant(tenantId, (tx) =>
       setTransactionExcluded(tx, owner, { transactionId: txn.id, excluded: false }),
     );
+  });
+
+  it("a CLOSED register refuses everything that would post to it", async () => {
+    // `is_active` was reachable and had no way back: nothing in the UI ever
+    // called setBankAccountActive, and startReconciliation reported a closed
+    // account as "no longer exists" while the reader was looking at it.
+    const bankAccountId = acct["__bankAccount"];
+    const repairs = await accountId("6400");
+    const [txn] = await withTenant(tenantId, (tx) =>
+      tx.query.bankTransactions.findMany({
+        where: and(
+          eq(schema.bankTransactions.tenantId, tenantId),
+          eq(schema.bankTransactions.bankAccountId, bankAccountId),
+          eq(schema.bankTransactions.status, "unreviewed"),
+        ),
+        limit: 1,
+      }),
+    );
+    const before = await withTenant(tenantId, (tx) =>
+      tx.query.bankAccounts.findFirst({
+        where: eq(schema.bankAccounts.id, bankAccountId),
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      setBankAccountActive(tx, owner, {
+        bankAccountId,
+        expectedVersion: before!.version,
+        active: false,
+      }),
+    );
+
+    // Posting one.
+    await expect(
+      withTenant(tenantId, (tx) =>
+        categorizeTransaction(tx, owner, {
+          transactionId: txn.id,
+          accountId: repairs,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "BANK_ACCOUNT_INACTIVE" });
+
+    // Importing more.
+    await expect(
+      withTenant(tenantId, (tx) =>
+        importTransactions(tx, owner, {
+          bankAccountId,
+          txns: [
+            {
+              txnDate: "2026-07-01",
+              description: "AFTER CLOSE",
+              amountCents: -1_000,
+              raw: [],
+              dupIndex: 0,
+            },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "BANK_ACCOUNT_INACTIVE" });
+
+    // Reconciling it — the one that used to say "no longer exists".
+    await expect(
+      withTenant(tenantId, (tx) =>
+        startReconciliation(tx, owner, {
+          bankAccountId,
+          statementEndDate: "2026-07-31",
+          statementEndBalanceCents: 0,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "BANK_ACCOUNT_INACTIVE" });
+
+    // BUT the review queue still tidies, which is the whole point: a closed
+    // account with rows stuck in "to review" and no way to clear them is the
+    // trap this change removes.
+    const excluded = await withTenant(tenantId, (tx) =>
+      setTransactionExcluded(tx, owner, { transactionId: txn.id, excluded: true }),
+    );
+    expect(excluded.status).toBe("excluded");
+    await withTenant(tenantId, (tx) =>
+      setTransactionExcluded(tx, owner, { transactionId: txn.id, excluded: false }),
+    );
+
+    // And reopening restores every one of them.
+    const closed = await withTenant(tenantId, (tx) =>
+      tx.query.bankAccounts.findFirst({
+        where: eq(schema.bankAccounts.id, bankAccountId),
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      setBankAccountActive(tx, owner, {
+        bankAccountId,
+        expectedVersion: closed!.version,
+        active: true,
+      }),
+    );
+    const entry = await withTenant(tenantId, (tx) =>
+      categorizeTransaction(tx, owner, {
+        transactionId: txn.id,
+        accountId: repairs,
+      }),
+    );
+    expect(entry.entry.status).toBe("posted");
   });
 
   it("AI: persistence + cooldown via injected model, no network", async () => {

@@ -20,6 +20,8 @@ import {
   setProductActive,
   updateProduct,
 } from "./catalogue";
+import { provisionCatalogue } from "../templates/catalogue";
+import { requireOwnerRole } from "../core";
 
 /**
  * Owner settings for the three reference lists.
@@ -156,6 +158,45 @@ const termSchema = z.object({
   name: z.string().trim().min(1).max(100),
   dueInDays: z.number().int().min(0).max(MAX_DUE_IN_DAYS),
 });
+
+/**
+ * Put the standard terms and methods back.
+ *
+ * `provisionCatalogue` runs from ONE place — a superadmin switching the
+ * accounting module on — so every tenant whose accounting was already on when
+ * these lists shipped got nothing, and had no way to ask for them. All seven
+ * live tenants were in that state, which made "pick a payment term" a control
+ * with nothing behind it.
+ *
+ * Exposing the same function the provisioner calls, rather than a second copy
+ * of the defaults, is what keeps this from drifting. It is idempotent and
+ * additive: a name or code you already have is left alone, and it never
+ * demotes a default you chose.
+ */
+export async function restoreCatalogueDefaultsAction(): Promise<
+  ActionResult<{ termsCreated: number; methodsCreated: number }>
+> {
+  const ctx = await gate();
+  try {
+    requireOwnerRole(ctx);
+    const created = await withTenant(ctx.tenantId, async (tx) => {
+      const counts = await provisionCatalogue(tx, ctx.tenantId);
+      await logAuditInTx(tx, {
+        action: "catalogue.defaults_restored",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "tenant",
+        targetId: ctx.tenantId,
+        meta: counts,
+      });
+      return counts;
+    });
+    revalidateCatalogue();
+    return { ok: true, data: created };
+  } catch (err) {
+    return fail(err);
+  }
+}
 
 export async function createPaymentTermAction(
   input: z.infer<typeof termSchema>,

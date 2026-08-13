@@ -576,6 +576,48 @@ d("invoicing (DB)", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("an UNATTENDED run credits the schedule's author, not the caller", async () => {
+    // The nightly sweep has nobody at the keyboard, and
+    // `created_by_clerk_user_id` is NOT NULL — so it needs a real id rather
+    // than a sentinel. Whoever wrote the schedule down is the truthful answer
+    // and the only person who ever decided any of this; it also means the
+    // History panel names somebody who can explain the row.
+    const sales = await accountId("4000");
+    const template = await withTenant(tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(schema.recurringEntries)
+        .values({
+          tenantId,
+          kind: "invoice",
+          name: "Attribution — Test",
+          customerId,
+          dayOfMonth: 2,
+          nextRunDate: "2026-07-02",
+          template: { kind: "invoice", lines: [line(9_900, sales)], dueInDays: 7 },
+          createdByClerkUserId: "user-who-wrote-the-schedule",
+        })
+        .returning();
+      return row;
+    });
+    await generateRecurringEntries(
+      // A caller id that must NOT end up on the records.
+      { ...owner, userId: "cron-has-no-user" },
+      { unattended: true },
+    );
+    const drafts = await withTenant(tenantId, (tx) =>
+      tx.query.invoices.findMany({
+        where: and(
+          eq(schema.invoices.tenantId, tenantId),
+          eq(schema.invoices.recurringEntryId, template.id),
+        ),
+      }),
+    );
+    expect(drafts.length).toBeGreaterThan(0);
+    expect(
+      drafts.every((i) => i.createdByClerkUserId === "user-who-wrote-the-schedule"),
+    ).toBe(true);
+  });
+
   it("recurring invoice: catch-up drafts with period dates, cap, CAS (T-D10)", async () => {
     // Recurring invoices moved from their own table into `recurring_entries`
     // alongside journals and bills. Same guarantees, one engine: this test

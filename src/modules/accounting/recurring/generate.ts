@@ -111,6 +111,7 @@ async function assertTemplateReferences(
  */
 export async function generateRecurringEntries(
   ctx: LedgerCtx,
+  options: { unattended?: boolean } = {},
 ): Promise<RecurringEntryResult> {
   requireOwnerRole(ctx);
 
@@ -136,6 +137,20 @@ export async function generateRecurringEntries(
   };
 
   for (const entry of due) {
+    /**
+     * WHO the generated records belong to.
+     *
+     * When somebody presses Generate now, it is them. On the nightly sweep
+     * there is nobody at the keyboard, so the records are attributed to
+     * whoever WROTE THE SCHEDULE DOWN — which is the truthful answer, and the
+     * only person who ever decided any of this. `created_by_clerk_user_id` is
+     * NOT NULL on all three targets, so it needs a real id rather than a
+     * sentinel; using the template's author also means the History panel names
+     * a person who can explain the row, instead of "A teammate".
+     */
+    const actor: LedgerCtx = options.unattended
+      ? { ...ctx, userId: entry.createdByClerkUserId }
+      : ctx;
     try {
       const outcome = await withTenant(ctx.tenantId, async (tx) => {
         const template = parseRecurringEntryTemplate(entry.template);
@@ -172,7 +187,7 @@ export async function generateRecurringEntries(
             const status = wantsPost && !inClosedPeriod ? "posted" : "draft";
             if (wantsPost && inClosedPeriod) deferred += 1;
 
-            await postEntry(tx, ctx, {
+            await postEntry(tx, actor, {
               status,
               entryDate: next,
               memo: template.memo ?? entry.name,
@@ -194,7 +209,7 @@ export async function generateRecurringEntries(
             // before AR posts, and generation never touches the ledger, which
             // is what makes it immune to PERIOD_CLOSED. That rule came with
             // `recurring_invoices` and survives the move unchanged.
-            await createInvoiceDraft(tx, ctx, {
+            await createInvoiceDraft(tx, actor, {
               customerId: entry.customerId!,
               issueDate: next,
               dueDate: addDaysIso(next, template.dueInDays),
@@ -206,7 +221,7 @@ export async function generateRecurringEntries(
             // Bills are ALWAYS drafts. Approving a bill is what posts it, and
             // that approval is the control an owner already exercises over
             // money going out — generating an approved bill would remove it.
-            await createBillDraft(tx, ctx, {
+            await createBillDraft(tx, actor, {
               vendorId: entry.vendorId!,
               billDate: next,
               dueDate: addDaysIso(next, template.dueInDays),

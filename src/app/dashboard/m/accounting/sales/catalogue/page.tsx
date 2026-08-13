@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import { Package } from "lucide-react";
+import { CalendarClock, Package, Wallet } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant, schema } from "@/db";
@@ -20,6 +20,7 @@ import {
   AddMethodButton,
   AddProductButton,
   AddTermButton,
+  RestoreDefaultsButton,
   DefaultBadge,
   MakeDefaultButton,
 } from "./catalogue-controls";
@@ -127,7 +128,17 @@ export default async function CataloguePage() {
           <h2 className="text-sm font-medium tracking-heading">Payment terms</h2>
           {isOwner && <AddTermButton />}
         </div>
-        <Panel>
+        <Panel
+          isEmpty={data.terms.length === 0}
+          empty={
+            <EmptyState
+              icon={<CalendarClock />}
+              title="No payment terms yet"
+              description="Terms set an invoice's due date from its issue date — Net 30, Due on receipt, and so on. The standard set covers most businesses."
+              action={isOwner ? <RestoreDefaultsButton what="terms" /> : undefined}
+            />
+          }
+        >
           <ul className="divide-y divide-divider">
             {data.terms.map((t) => (
               <li
@@ -173,7 +184,19 @@ export default async function CataloguePage() {
           </h2>
           {isOwner && <AddMethodButton />}
         </div>
-        <Panel>
+        <Panel
+          isEmpty={data.methods.length === 0}
+          empty={
+            <EmptyState
+              icon={<Wallet />}
+              title="No payment methods yet"
+              description="How the money arrived — cheque, card, bank transfer. Recording a payment asks for one, so this list needs at least a row in it."
+              action={
+                isOwner ? <RestoreDefaultsButton what="methods" /> : undefined
+              }
+            />
+          }
+        >
           <ul className="divide-y divide-divider">
             {data.methods.map((m) => (
               <li

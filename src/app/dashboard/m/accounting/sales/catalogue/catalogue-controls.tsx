@@ -26,6 +26,7 @@ import {
   createPaymentMethodAction,
   createPaymentTermAction,
   createProductAction,
+  restoreCatalogueDefaultsAction,
   setDefaultPaymentTermAction,
   setPaymentMethodActiveAction,
   setPaymentTermActiveAction,
@@ -41,6 +42,45 @@ import { MAX_DUE_IN_DAYS } from "@/modules/accounting/invoicing/terms";
  * saved item or a term may be named on records that already exist, and
  * removing the row would rewrite what those records meant.
  */
+
+/**
+ * The way out of an empty terms or methods list.
+ *
+ * These lists arrive with the chart of accounts, so an empty one means the
+ * tenant predates them rather than that somebody cleared it out — you cannot
+ * delete a term or a method, only deactivate it. One button beats typing
+ * "Net 30, Net 15, Due on receipt, Net 60" from memory.
+ */
+export function RestoreDefaultsButton({ what }: { what: "terms" | "methods" }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const result = await restoreCatalogueDefaultsAction();
+          if ("error" in result) {
+            toast.error(result.error);
+            return;
+          }
+          const { termsCreated, methodsCreated } = result.data!;
+          const n = what === "terms" ? termsCreated : methodsCreated;
+          toast.success(
+            n > 0
+              ? `Added ${n} standard ${what === "terms" ? "term" : "method"}${n === 1 ? "" : "s"}`
+              : "Nothing to add — you already have them",
+          );
+          router.refresh();
+        })
+      }
+    >
+      {pending ? "Adding…" : "Add the standard set"}
+    </Button>
+  );
+}
 
 /* -- products ------------------------------------------------------------- */
 

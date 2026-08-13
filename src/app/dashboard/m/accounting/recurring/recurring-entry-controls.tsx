@@ -161,12 +161,19 @@ export function RecurringEntryToggle({
  * number that is visibly not zero.
  */
 export function AddRecurringEntryButton({
-  accounts,
+  journalAccounts,
+  incomeAccounts,
+  codableAccounts,
   vendors,
   customers,
   today,
 }: {
-  accounts: AccountOption[];
+  /** A journal may touch anything. */
+  journalAccounts: AccountOption[];
+  /** An invoice line posts revenue, so income only — same as the builder. */
+  incomeAccounts: AccountOption[];
+  /** A bill line: no bank register, no opening balance, no system AR/AP. */
+  codableAccounts: AccountOption[];
   vendors: PartyOption[];
   customers: PartyOption[];
   today: string;
@@ -183,8 +190,8 @@ export function AddRecurringEntryButton({
   const [customerId, setCustomerId] = useState(customers[0]?.id ?? "");
   const [dueInDays, setDueInDays] = useState("30");
   const [rows, setRows] = useState<JournalRow[]>([
-    emptyRow(accounts[0]?.id ?? ""),
-    emptyRow(accounts[0]?.id ?? ""),
+    emptyRow(journalAccounts[0]?.id ?? ""),
+    emptyRow(journalAccounts[0]?.id ?? ""),
   ]);
   const [billDesc, setBillDesc] = useState("");
   const [billAmount, setBillAmount] = useState("");
@@ -400,7 +407,7 @@ export function AddRecurringEntryButton({
                           <SelectValue placeholder="Account" />
                         </SelectTrigger>
                         <SelectContent>
-                          {accounts.map((a) => (
+                          {journalAccounts.map((a) => (
                             <SelectItem key={a.id} value={a.id}>
                               {a.code} · {a.name}
                             </SelectItem>
@@ -449,7 +456,7 @@ export function AddRecurringEntryButton({
                   variant="outline"
                   size="sm"
                   onClick={() =>
-                    setRows([...rows, emptyRow(accounts[0]?.id ?? "")])
+                    setRows([...rows, emptyRow(journalAccounts[0]?.id ?? "")])
                   }
                 >
                   <Plus className="mr-1.5 size-4" /> Add line
@@ -541,7 +548,7 @@ export function AddRecurringEntryButton({
                             <SelectValue placeholder="Income account" />
                           </SelectTrigger>
                           <SelectContent>
-                            {accounts.map((a) => (
+                            {incomeAccounts.map((a) => (
                               <SelectItem key={a.id} value={a.id}>
                                 {a.code} · {a.name}
                               </SelectItem>
@@ -622,7 +629,7 @@ export function AddRecurringEntryButton({
                       <SelectValue placeholder="Leave uncoded — AI can code it later" />
                     </SelectTrigger>
                     <SelectContent>
-                      {accounts.map((a) => (
+                      {codableAccounts.map((a) => (
                         <SelectItem key={a.id} value={a.id}>
                           {a.code} · {a.name}
                         </SelectItem>

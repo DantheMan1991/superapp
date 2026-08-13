@@ -13,6 +13,27 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — A recurring invoice could be coded to Checking (branch `claude/accounting-recurring-account-filters`)
+
+Found by clicking it. The unified Add-recurring dialog was handed ONE list of
+every active account and gave it to all three kinds, so the field labelled
+"Income account" on a recurring invoice line offered Checking, Accounts
+Payable, Retained Earnings and Cost of Goods Sold — and the bill "Category"
+picker offered bank registers.
+
+- **Three lists now, each mirroring the one-off builder for that kind**, so a
+  template and a hand-keyed document offer the same choices: invoice lines →
+  `accountType = 'income'` (`sales/invoices/new`); bill lines → codable, which
+  is active minus bank registers, opening balance and system AR/AP
+  (`purchases/bills/new`); journal lines → everything, which is what a journal
+  is for.
+- **The filter is still only in the UI**, here and in both one-off builders:
+  neither `createInvoiceDraft` nor the recurring create action checks the
+  account TYPE server-side. This change reaches parity rather than fixing that,
+  and the gap is in Open items now rather than implied.
+- Regression risk it removes: a rent template coded to Checking generates a
+  wrong draft every month until somebody notices, and each one posts on issue.
+
 ### 2026-08-12 — `recurring_invoices` folds into `recurring_entries` (branch `claude/accounting-recurring-converge`)
 
 The module had two recurrence mechanisms. It now has one. The stated limit from
@@ -768,6 +789,7 @@ compiled-and-tested, not seen.
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations, and **proven against the real API** (see the build log; `RUN_LIVE_THREAD_DRAFT=1`). Now worth doing: the drafter sets no due date because it does not know `payment_terms` exists — resolving the customer's default term in the accept path would close that. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
+- **Line account pickers are filtered in the UI ONLY.** `createInvoiceDraft`, `createBillDraft` and the recurring create action all accept whatever account id they are given, so nothing but the dropdown stops an invoice line posting revenue to Checking. Worth a server-side type check on all three paths, in one change rather than three
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **Still to do: `drizzle/0123` dropping `recurring_invoices` and `invoices.recurring_invoice_id`, which must land in a PR AFTER the fold has deployed.** What is not built for any kind: editing a template, and any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
 - ~~The last item from that review~~: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built

@@ -1,6 +1,6 @@
 {
-  "id": "a894bb07-55c2-4ce0-81b9-4c16e3972dd4",
-  "prevId": "688e4c4c-10bc-42a7-9816-4b7ba183c899",
+  "id": "dfdbd957-9345-4883-ac3c-7d07e4103a9a",
+  "prevId": "576e22bf-11f8-4290-9c1d-feffe4404604",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -126,9 +126,9 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
+          "with": {},
           "method": "btree",
-          "with": {}
+          "concurrently": false
         }
       },
       "foreignKeys": {
@@ -3354,6 +3354,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "recurring_entry_id": {
+          "name": "recurring_entry_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by_clerk_user_id": {
           "name": "created_by_clerk_user_id",
           "type": "text",
@@ -3542,6 +3548,21 @@
             "recurring_invoice_id"
           ],
           "tableTo": "recurring_invoices",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "invoices_recurring_entry_fk": {
+          "name": "invoices_recurring_entry_fk",
+          "tableFrom": "invoices",
+          "columnsFrom": [
+            "tenant_id",
+            "recurring_entry_id"
+          ],
+          "tableTo": "recurring_entries",
           "columnsTo": [
             "tenant_id",
             "id"
@@ -4292,6 +4313,223 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.recurring_entries": {
+      "name": "recurring_entries",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "recurring_entry_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vendor_id": {
+          "name": "vendor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "template": {
+          "name": "template",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "day_of_month": {
+          "name": "day_of_month",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "next_run_date": {
+          "name": "next_run_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "auto_post": {
+          "name": "auto_post",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "last_generated_at": {
+          "name": "last_generated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_clerk_user_id": {
+          "name": "created_by_clerk_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "recurring_entries_tenant_id_id_idx": {
+          "name": "recurring_entries_tenant_id_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "recurring_entries_tenant_next_idx": {
+          "name": "recurring_entries_tenant_next_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_run_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "where": "\"recurring_entries\".\"is_active\" = true",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "recurring_entries_tenant_id_tenants_id_fk": {
+          "name": "recurring_entries_tenant_id_tenants_id_fk",
+          "tableFrom": "recurring_entries",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "tableTo": "tenants",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "cascade"
+        },
+        "recurring_entries_vendor_fk": {
+          "name": "recurring_entries_vendor_fk",
+          "tableFrom": "recurring_entries",
+          "columnsFrom": [
+            "tenant_id",
+            "vendor_id"
+          ],
+          "tableTo": "vendors",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "recurring_entries_customer_fk": {
+          "name": "recurring_entries_customer_fk",
+          "tableFrom": "recurring_entries",
+          "columnsFrom": [
+            "tenant_id",
+            "customer_id"
+          ],
+          "tableTo": "customers",
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "recurring_entries_day_of_month": {
+          "name": "recurring_entries_day_of_month",
+          "value": "\"recurring_entries\".\"day_of_month\" between 1 and 28"
+        },
+        "recurring_entries_party_shape": {
+          "name": "recurring_entries_party_shape",
+          "value": "(\"recurring_entries\".\"kind\"::text = 'bill' and \"recurring_entries\".\"vendor_id\" is not null and \"recurring_entries\".\"customer_id\" is null)\n       or (\"recurring_entries\".\"kind\"::text = 'invoice' and \"recurring_entries\".\"customer_id\" is not null and \"recurring_entries\".\"vendor_id\" is null)\n       or (\"recurring_entries\".\"kind\"::text = 'journal' and \"recurring_entries\".\"vendor_id\" is null and \"recurring_entries\".\"customer_id\" is null)"
+        },
+        "recurring_entries_auto_post_shape": {
+          "name": "recurring_entries_auto_post_shape",
+          "value": "\"recurring_entries\".\"auto_post\" = false or \"recurring_entries\".\"kind\" = 'journal'"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.recurring_invoices": {
@@ -12200,202 +12438,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.recurring_entries": {
-      "name": "recurring_entries",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "recurring_entry_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "vendor_id": {
-          "name": "vendor_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "template": {
-          "name": "template",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "day_of_month": {
-          "name": "day_of_month",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "next_run_date": {
-          "name": "next_run_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "auto_post": {
-          "name": "auto_post",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "last_generated_at": {
-          "name": "last_generated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by_clerk_user_id": {
-          "name": "created_by_clerk_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "recurring_entries_tenant_id_id_idx": {
-          "name": "recurring_entries_tenant_id_id_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "recurring_entries_tenant_next_idx": {
-          "name": "recurring_entries_tenant_next_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "next_run_date",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "where": "\"recurring_entries\".\"is_active\" = true",
-          "concurrently": false
-        }
-      },
-      "foreignKeys": {
-        "recurring_entries_tenant_id_tenants_id_fk": {
-          "name": "recurring_entries_tenant_id_tenants_id_fk",
-          "tableFrom": "recurring_entries",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "tableTo": "tenants",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "recurring_entries_vendor_fk": {
-          "name": "recurring_entries_vendor_fk",
-          "tableFrom": "recurring_entries",
-          "columnsFrom": [
-            "tenant_id",
-            "vendor_id"
-          ],
-          "tableTo": "vendors",
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "recurring_entries_day_of_month": {
-          "name": "recurring_entries_day_of_month",
-          "value": "\"recurring_entries\".\"day_of_month\" between 1 and 28"
-        },
-        "recurring_entries_vendor_shape": {
-          "name": "recurring_entries_vendor_shape",
-          "value": "(\"recurring_entries\".\"kind\" = 'bill' and \"recurring_entries\".\"vendor_id\" is not null)\n       or (\"recurring_entries\".\"kind\" = 'journal' and \"recurring_entries\".\"vendor_id\" is null)"
-        },
-        "recurring_entries_auto_post_shape": {
-          "name": "recurring_entries_auto_post_shape",
-          "value": "\"recurring_entries\".\"auto_post\" = false or \"recurring_entries\".\"kind\" = 'journal'"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.vendors": {
       "name": "vendors",
       "schema": "",
@@ -18226,6 +18268,15 @@
         "product"
       ]
     },
+    "public.recurring_entry_kind": {
+      "name": "recurring_entry_kind",
+      "schema": "public",
+      "values": [
+        "journal",
+        "bill",
+        "invoice"
+      ]
+    },
     "public.recurring_frequency": {
       "name": "recurring_frequency",
       "schema": "public",
@@ -18330,14 +18381,6 @@
         "partial",
         "paid",
         "void"
-      ]
-    },
-    "public.recurring_entry_kind": {
-      "name": "recurring_entry_kind",
-      "schema": "public",
-      "values": [
-        "journal",
-        "bill"
       ]
     },
     "public.period_close_status": {

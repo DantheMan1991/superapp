@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { MAX_AMOUNT_CENTS } from "../lib/money";
 import { billLineSchema } from "../payables/lines";
+import { invoiceLineSchema } from "../invoicing/lines";
 
 /**
  * What a recurring journal or bill template holds — pure, no `server-only`.
@@ -44,13 +45,32 @@ export const recurringBillTemplateSchema = z.object({
   dueInDays: z.number().int().min(0).max(365),
 });
 
+/**
+ * What `recurring_invoices.template` held, with a discriminator added.
+ *
+ * The old shape was `{lines, memo, dueInDays}` and carried no `kind` — the
+ * table it lived in was the discriminator. Folding the two tables together
+ * means the tag moves into the payload, which is what migration `0122` adds on
+ * the way across.
+ */
+export const recurringInvoiceTemplateSchema = z.object({
+  kind: z.literal("invoice"),
+  lines: z.array(invoiceLineSchema).min(1).max(100),
+  memo: z.string().trim().max(2000).optional(),
+  dueInDays: z.number().int().min(0).max(365),
+});
+
 export const recurringEntryTemplateSchema = z.discriminatedUnion("kind", [
   recurringJournalTemplateSchema,
   recurringBillTemplateSchema,
+  recurringInvoiceTemplateSchema,
 ]);
 
 export type RecurringJournalTemplate = z.infer<typeof recurringJournalTemplateSchema>;
 export type RecurringBillTemplate = z.infer<typeof recurringBillTemplateSchema>;
+export type RecurringInvoiceTemplate = z.infer<
+  typeof recurringInvoiceTemplateSchema
+>;
 export type RecurringEntryTemplate = z.infer<typeof recurringEntryTemplateSchema>;
 
 /**

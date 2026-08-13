@@ -21,6 +21,12 @@ interface PayFixture {
   accountId: string;
   entryId: string;
   documentId: string;
+  /**
+   * A customer too, because `recurring_entries` grew a `customer_id` when
+   * recurring invoices folded into it — and the smuggle matrix has to cover
+   * BOTH party columns, not just the one this file was written for.
+   */
+  customerId: string;
 }
 
 d("payables isolation (RLS + composite tenant FKs)", () => {
@@ -51,6 +57,11 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.billLines)
         .values({ tenantId, billId: bill.id, lineNo: 1, description: `line ${tag}`, amountCents: 1000, accountId: expense.id })
         .returning();
+      const customerPartyId = await seedParty(tx, tenantId, `Customer ${tag}`);
+      const [customer] = await tx
+        .insert(schema.customers)
+        .values({ tenantId, partyId: customerPartyId, name: `Customer ${tag}` })
+        .returning();
       const [doc] = await tx
         .insert(schema.documents)
         .values({ tenantId, origin: "accounting", blobPathname: `acct/${tenantId}/receipts/pay-${tag}.pdf`, fileName: `${tag}.pdf`, mimeType: "application/pdf", sizeBytes: 10, sha256: `pay-${tag}` })
@@ -63,6 +74,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         accountId: expense.id,
         entryId: entry.id,
         documentId: doc.id,
+        customerId: customer.id,
       };
     });
   }
@@ -343,6 +355,36 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
             kind: "bill",
             dueInDays: 30,
             lines: [{ description: "rent", amountCents: 1, accountId: null }],
+          },
+          dayOfMonth: 1,
+          nextRunDate: "2026-09-01",
+          createdByClerkUserId: "user-a",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: a recurring invoice cannot name the OTHER tenant's customer", async () => {
+    // The vendor column has been covered since recurring bills landed; this is
+    // the same hole on the column that arrived with the fold.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.recurringEntries).values({
+          tenantId: tenantA,
+          kind: "invoice",
+          name: "cross-tenant rent charged out",
+          customerId: fx.b.customerId,
+          template: {
+            kind: "invoice",
+            dueInDays: 30,
+            lines: [
+              {
+                description: "rent",
+                quantity: "1",
+                unitPriceCents: 1,
+                incomeAccountId: fx.a.accountId,
+              },
+            ],
           },
           dayOfMonth: 1,
           nextRunDate: "2026-09-01",

@@ -38,13 +38,6 @@ import {
   MAX_OFFSETS,
   MIN_OFFSET,
 } from "./reminder-schedule";
-import {
-  createRecurringInvoice,
-  generateRecurringInvoices,
-  recurringTemplateSchema,
-  setRecurringActive,
-  updateRecurringInvoice,
-} from "./recurring";
 
 const BASE = "/dashboard/m/accounting";
 
@@ -71,7 +64,6 @@ function revalidateSales(invoiceId?: string): void {
   revalidatePath(`${BASE}/sales/invoices`);
   if (invoiceId) revalidatePath(`${BASE}/sales/invoices/${invoiceId}`);
   revalidatePath(`${BASE}/sales/customers`);
-  revalidatePath(`${BASE}/sales/recurring`);
   revalidatePath(`${BASE}/reports/ar-aging`);
   revalidatePath(`${BASE}/journal`);
   revalidatePath(`${BASE}/trial-balance`);
@@ -480,140 +472,6 @@ export async function unapplyInvoicePaymentAction(
     revalidateSales();
     revalidatePath(`${BASE}/banking`);
     return { ok: true };
-  } catch (err) {
-    return fail(err);
-  }
-}
-
-// -------------------------------------------------------------- recurring
-
-const createRecurringSchema = z.object({
-  customerId: z.string().uuid(),
-  name: z.string().trim().min(1).max(120),
-  dayOfMonth: z.number().int().min(1).max(28),
-  nextRunDate: dateStr,
-  template: recurringTemplateSchema,
-});
-
-export async function createRecurringInvoiceAction(
-  input: z.infer<typeof createRecurringSchema>,
-): Promise<ActionResult> {
-  const ctx = await gate();
-  const parsed = createRecurringSchema.safeParse(input);
-  if (!parsed.success) return { error: "Invalid input" };
-  try {
-    await withTenant(ctx.tenantId, async (tx) => {
-      const r = await createRecurringInvoice(tx, ctx, parsed.data);
-      await logAuditInTx(tx, {
-        action: "invoice.recurring_created",
-        tenantId: ctx.tenantId,
-        actorClerkUserId: ctx.userId,
-        targetType: "recurring_invoice",
-        targetId: r.id,
-        meta: { name: r.name },
-      });
-    });
-    revalidateSales();
-    return { ok: true };
-  } catch (err) {
-    return fail(err);
-  }
-}
-
-const updateRecurringSchema = z.object({
-  recurringInvoiceId: z.string().uuid(),
-  expectedVersion: z.number().int().min(1),
-  patch: z.object({
-    name: z.string().trim().min(1).max(120).optional(),
-    dayOfMonth: z.number().int().min(1).max(28).optional(),
-    nextRunDate: dateStr.optional(),
-    template: recurringTemplateSchema.optional(),
-  }),
-});
-
-export async function updateRecurringInvoiceAction(
-  input: z.infer<typeof updateRecurringSchema>,
-): Promise<ActionResult> {
-  const ctx = await gate();
-  const parsed = updateRecurringSchema.safeParse(input);
-  if (!parsed.success) return { error: "Invalid input" };
-  try {
-    await withTenant(ctx.tenantId, async (tx) => {
-      const r = await updateRecurringInvoice(tx, ctx, parsed.data);
-      await logAuditInTx(tx, {
-        action: "invoice.recurring_updated",
-        tenantId: ctx.tenantId,
-        actorClerkUserId: ctx.userId,
-        targetType: "recurring_invoice",
-        targetId: r.id,
-      });
-    });
-    revalidateSales();
-    return { ok: true };
-  } catch (err) {
-    return fail(err);
-  }
-}
-
-const setRecurringActiveSchema = z.object({
-  recurringInvoiceId: z.string().uuid(),
-  expectedVersion: z.number().int().min(1),
-  active: z.boolean(),
-});
-
-export async function setRecurringActiveAction(
-  input: z.infer<typeof setRecurringActiveSchema>,
-): Promise<ActionResult> {
-  const ctx = await gate();
-  const parsed = setRecurringActiveSchema.safeParse(input);
-  if (!parsed.success) return { error: "Invalid input" };
-  try {
-    await withTenant(ctx.tenantId, async (tx) => {
-      const r = await setRecurringActive(tx, ctx, parsed.data);
-      await logAuditInTx(tx, {
-        action: parsed.data.active
-          ? "invoice.recurring_reactivated"
-          : "invoice.recurring_deactivated",
-        tenantId: ctx.tenantId,
-        actorClerkUserId: ctx.userId,
-        targetType: "recurring_invoice",
-        targetId: r.id,
-      });
-    });
-    revalidateSales();
-    return { ok: true };
-  } catch (err) {
-    return fail(err);
-  }
-}
-
-export async function generateRecurringInvoicesAction(): Promise<
-  ActionResult<{ created: number; templatesRun: number; errors: Array<{ name: string; error: string }> }>
-> {
-  const ctx = await gate();
-  try {
-    const result = await generateRecurringInvoices(ctx);
-    await withTenant(ctx.tenantId, (tx) =>
-      logAuditInTx(tx, {
-        action: "invoice.recurring_generated",
-        tenantId: ctx.tenantId,
-        actorClerkUserId: ctx.userId,
-        meta: {
-          created: result.created,
-          templatesRun: result.templatesRun,
-          errors: result.errors.length,
-        },
-      }),
-    );
-    revalidateSales();
-    return {
-      ok: true,
-      data: {
-        created: result.created,
-        templatesRun: result.templatesRun,
-        errors: result.errors.map((e) => ({ name: e.name, error: e.error })),
-      },
-    };
   } catch (err) {
     return fail(err);
   }

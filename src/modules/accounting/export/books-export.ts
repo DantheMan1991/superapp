@@ -114,8 +114,8 @@ export async function gatherBooksExport(
     invoicePayments: await tx.query.invoicePayments.findMany({
       where: eq(schema.invoicePayments.tenantId, tid),
     }),
-    recurringInvoices: await tx.query.recurringInvoices.findMany({
-      where: eq(schema.recurringInvoices.tenantId, tid),
+    recurringEntries: await tx.query.recurringEntries.findMany({
+      where: eq(schema.recurringEntries.tenantId, tid),
     }),
     vendors: await tx.query.vendors.findMany({
       where: eq(schema.vendors.tenantId, tid),

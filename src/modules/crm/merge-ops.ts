@@ -29,8 +29,8 @@ import type { CustomValue } from "./core/custom-fields";
  * that falls out of the transaction rather than out of a predicate here.
  *
  * THE ONE PLACE IN CRM THAT WRITES ACCOUNTING'S TABLES. `absorbRole` re-points
- * `invoices.customer_id`, `recurring_invoices.customer_id` and
- * `bills.vendor_id` when both records hold the same role. That is not a
+ * `invoices.customer_id`, `bills.vendor_id` and both party columns of
+ * `recurring_entries` when both records hold the same role. That is not a
  * boundary violation by accident — it is the operation the founder authorised
  * on 2026-08-04, and the alternative was a merge tool that cannot fix the most
  * common duplicate there is. Two facts make it safe to state plainly:
@@ -352,14 +352,20 @@ async function countMoves(
   const absorbsCustomer = survivor.customerId !== null && loser.customerId !== null;
   const absorbsVendor = survivor.vendorId !== null && loser.vendorId !== null;
 
-  const [invoices, recurringInvoices, bills] = await Promise.all([
+  const [invoices, recurringEntries, bills] = await Promise.all([
     absorbsCustomer
       ? countRows(tx, sql`select count(*)::int as n from invoices
           where tenant_id = ${tenantId} and customer_id = ${loser.customerId}`)
       : Promise.resolve(0),
-    absorbsCustomer
-      ? countRows(tx, sql`select count(*)::int as n from recurring_invoices
-          where tenant_id = ${tenantId} and customer_id = ${loser.customerId}`)
+    // One count for both sides: a merge absorbs at most one role at a time in
+    // practice, and a schedule attached to either is a schedule that moves.
+    absorbsCustomer || absorbsVendor
+      ? countRows(tx, sql`select count(*)::int as n from recurring_entries
+          where tenant_id = ${tenantId}
+            and (
+              (${absorbsCustomer} and customer_id = ${loser.customerId})
+              or (${absorbsVendor} and vendor_id = ${loser.vendorId})
+            )`)
       : Promise.resolve(0),
     absorbsVendor
       ? countRows(tx, sql`select count(*)::int as n from bills
@@ -373,7 +379,7 @@ async function countMoves(
     activities,
     tasks,
     invoices,
-    recurringInvoices,
+    recurringEntries,
     bills,
   };
 }
@@ -686,12 +692,12 @@ async function applyRole(
         ),
       );
     await tx
-      .update(schema.recurringInvoices)
+      .update(schema.recurringEntries)
       .set({ customerId: survivingRoleId, updatedAt: new Date() })
       .where(
         and(
-          eq(schema.recurringInvoices.tenantId, tenantId),
-          eq(schema.recurringInvoices.customerId, losingRoleId),
+          eq(schema.recurringEntries.tenantId, tenantId),
+          eq(schema.recurringEntries.customerId, losingRoleId),
         ),
       );
     await tx
@@ -710,6 +716,15 @@ async function applyRole(
         and(
           eq(schema.bills.tenantId, tenantId),
           eq(schema.bills.vendorId, losingRoleId),
+        ),
+      );
+    await tx
+      .update(schema.recurringEntries)
+      .set({ vendorId: survivingRoleId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.recurringEntries.tenantId, tenantId),
+          eq(schema.recurringEntries.vendorId, losingRoleId),
         ),
       );
     await tx

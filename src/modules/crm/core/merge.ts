@@ -234,7 +234,7 @@ export interface MergePlan {
     activities: number;
     tasks: number;
     invoices: number;
-    recurringInvoices: number;
+    recurringEntries: number;
     bills: number;
   };
 }
@@ -592,7 +592,7 @@ export function planAffiliations(
 export function touchesLedger(plan: MergePlan): boolean {
   return (
     plan.moves.invoices > 0 ||
-    plan.moves.recurringInvoices > 0 ||
+    plan.moves.recurringEntries > 0 ||
     plan.moves.bills > 0
   );
 }

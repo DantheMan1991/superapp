@@ -14,6 +14,22 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-12 — Merge follows the recurrence tables (branch `claude/accounting-recurring-converge`)
+
+Accounting folded `recurring_invoices` into `recurring_entries`, and
+`merge-ops.ts` is the one place in CRM that writes accounting's tables, so it
+had to move with them.
+
+- **A vendor merge would have FAILED on a recurring bill.** `absorbRole`
+  re-pointed `invoices`, `recurring_invoices` and `bills`, then deleted the
+  losing role row — but recurring bills arrived after that was written, and
+  `recurring_entries_vendor_fk` is `NO ACTION`. Two vendors that both had one
+  would have hit a foreign-key violation on the delete. Both party columns are
+  re-pointed now.
+- The preview counter is `recurringEntries`, one query covering whichever side
+  is being absorbed. `touchesLedger` still reads it, so the accounting-writes
+  warning appears for a schedule exactly as it does for a posted invoice.
+
 ### 2026-08-10 — UI: CRM gets a sub-nav it never had (branch `claude/ui-crm`)
 
 Presentation and IA — no query, action, schema or policy changed. Vocabulary in
@@ -496,9 +512,9 @@ exists to refuse, and the same probe the mail template values are designed
 against.
 
 **A MERGE RE-POINTS POSTED INVOICES, AND THE LEDGER IS UNTOUCHED BY IT.** When
-both records hold the same role, `invoices.customer_id`,
-`recurring_invoices.customer_id` and `bills.vendor_id` move onto the surviving
-role row and the emptied one is deleted. That is CRM writing accounting's
+both records hold the same role, `invoices.customer_id`, `bills.vendor_id` and
+**both** party columns of `recurring_entries` move onto the surviving role row
+and the emptied one is deleted. That is CRM writing accounting's
 tables, decided by the founder on 2026-08-04 over the alternative of a merge
 tool that cannot fix the commonest duplicate there is — the one 0062's backfill
 guaranteed exists in every tenant. Two facts make it defensible and both are

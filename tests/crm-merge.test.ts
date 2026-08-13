@@ -396,7 +396,7 @@ describe("the whole plan", () => {
     activities: 0,
     tasks: 0,
     invoices: 0,
-    recurringInvoices: 0,
+    recurringEntries: 0,
     bills: 0,
   };
 

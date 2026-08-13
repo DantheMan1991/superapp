@@ -13,6 +13,63 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — `recurring_invoices` folds into `recurring_entries` (branch `claude/accounting-recurring-converge`)
+
+The module had two recurrence mechanisms. It now has one. The stated limit from
+the recurring-journals entry below — *"`kind` has room for `'invoice'` when that
+is worth doing"* — is closed. Migrations `0121` (schema) and `0122` (backfill),
+both applied to dev AND production before the PR opened.
+
+- **EXPAND half of an expand/contract, and the contract half is a SEPARATE PR
+  that must land after this deploy.** `recurring_invoices` and
+  `invoices.recurring_invoice_id` both survive this change untouched; the running
+  deploy still selects them, and a DROP that precedes the deploy which stops
+  reading a column is the outage `drizzle/0075` taught. Nothing here is
+  destructive, which is why it could go to production before the merge.
+- **Ids are PRESERVED across the fold.** A template's id is already recorded on
+  invoices it generated, so reusing it keeps those links meaningful and makes
+  backfilling `invoices.recurring_entry_id` a straight copy rather than a lookup
+  through a mapping table. Both statements in `0122` are guarded, so the
+  migration is idempotent.
+- **The enum is RECREATED, not extended, and that is forced.** Drizzle's
+  migrator runs every pending migration in ONE transaction, so
+  `ALTER TYPE ... ADD VALUE 'invoice'` followed by `0122` inserting that value
+  trips Postgres' `check_safe_enum_use` — *"New enum values must be committed
+  before they can be used."* Splitting the migrations does not help; they still
+  share a transaction, and a fresh database (CI, a new environment) hits it on
+  its first run. A type CREATED in the current transaction is the documented
+  exception, so `0121` builds the type new, moves the column across through
+  `text`, drops the old one and renames. **Both CHECKs that mention `kind` come
+  off first and go back on after** — a CHECK is re-parsed against the new column
+  type, and one left in place fails with `operator does not exist:
+  recurring_entry_kind_new = recurring_entry_kind`.
+- **Caught by applying to dev first, twice.** The `::text` comparison in the new
+  CHECK was the first catch; the single-transaction batching was the second, and
+  it only appeared on production because dev had taken the two migrations in
+  separate runs. Dev was rolled back to pre-`0121` and re-migrated from scratch
+  so the path CI and production take is the path that was proved.
+- **`recurring_entries_party_shape` replaces `recurring_entries_vendor_shape`**:
+  a bill has a vendor and no customer, an invoice has a customer and no vendor,
+  a journal has neither. One CHECK for the whole matrix, so no kind can acquire
+  the wrong party. Isolation covers both columns now — the vendor smuggle test
+  had a customer-shaped twin missing.
+- **One list, one Generate button, one engine.** `/sales/recurring` is gone from
+  the Sales nav and left behind as a redirect, because bookmarks and browser
+  history do not update themselves and a 404 is a worse answer than the list
+  they wanted. `invoicing/recurring.ts` and its four actions are deleted;
+  `advanceMonthly` moved to `recurring/schedule.ts` rather than being deleted
+  with them.
+- **A vendor merge could not have absorbed a recurring bill.** `merge-ops.ts`
+  re-pointed `invoices`, `recurring_invoices` and `bills`, but recurring bills
+  arrived after it was written and their vendor FK is `NO ACTION` — so absorbing
+  two vendors that both had one would have failed on the FK. Fixed in passing,
+  since the same edit had to touch the customer side anyway.
+- **The books export gains `ledger/recurring_entries.csv`** and loses
+  `sales/recurring_invoices.csv`. Recurring journals and bills were never
+  exported at all, so "take your books and go" was quietly incomplete for a day.
+- **Not built:** editing a template, still — pause/resume and re-create only,
+  for all three kinds.
+
 ### 2026-08-12 — The thread drafter has a live test, and it passes (branch `claude/live-thread-draft-test`)
 
 The drafter shipped as the only AI engine in the module WITHOUT a gated live
@@ -151,7 +208,7 @@ applied to dev AND production before the PR opened.
   active flag. `template` is jsonb, zod-validated at write AND re-validated at
   generation, the same contract `recurring_invoices.template` keeps.
 - **`recurring_invoices` is NOT folded in, and that is a stated limit rather
-  than an oversight.** It is live, has rows, has its own UI and a customer FK,
+  than an oversight.** *(Closed 2026-08-12 — see the top of this log.)* It is live, has rows, has its own UI and a customer FK,
   so absorbing it means a data migration and a rewrite this change did not
   need. `kind` has room for `'invoice'` when that is worth doing. **Until then
   the module has two recurrence mechanisms** — the schema comment says so, and
@@ -172,7 +229,8 @@ applied to dev AND production before the PR opened.
   create action refuses on it, and the dialog shows a running imbalance as you
   type.
 - **`advanceMonthly` is imported from `invoicing/recurring.ts`, not copied**, so
-  the two mechanisms cannot drift on month arithmetic. Catch-up is capped at 12
+  the two mechanisms cannot drift on month arithmetic. *(It moved to
+  `recurring/schedule.ts` when the two mechanisms became one.)* Catch-up is capped at 12
   and dates each entry to the month it was FOR, never to today.
 - **Idempotency key `recurring:<templateId>:<date>`** on posted journals, so a
   re-run cannot double-post a month even if the version CAS is beaten.
@@ -595,7 +653,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 - Soft-delete only, linked docs can't be trashed; unlink-first coordination on all hard-delete paths (P21)
 
 ### 2026-07-21 — Session 4: Invoicing / AR (`e86e7f3`, PR #3)
-- `customers`, `invoices` (state machine; partial/paid DERIVED from payments, never client-set; race-safe INV-#### numbering), `invoice_lines` (signed unit prices for discounts, integer-math amounts), `invoice_payments` (born atomically with their Dr deposit / Cr AR entry), `recurring_invoices` (monthly templates generate DRAFTS — human approves before AR posts)
+- `customers`, `invoices` (state machine; partial/paid DERIVED from payments, never client-set; race-safe INV-#### numbering), `invoice_lines` (signed unit prices for discounts, integer-math amounts), `invoice_payments` (born atomically with their Dr deposit / Cr AR entry), `recurring_invoices` (monthly templates generate DRAFTS — human approves before AR posts; folded into `recurring_entries` on 2026-08-12)
 - Bank-feed matching closes the double-count trap: staged deposits matching recorded payments get labeled candidates; Match links the feed row to the EXISTING entry, posting nothing
 - Voiding any matched entry sends its feed row back to review (P13, shared `resetBankLinkForEntry`)
 - A/R aging report; issued invoices freeze lines; unapply blocked when the deposit line is reconciled
@@ -630,11 +688,11 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
-| `customers`, `invoices`, `invoice_lines`, `invoice_payments`, `recurring_invoices` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing |
+| `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and awaits its DROP |
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
 | `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
 | `period_closes`, `close_notes` | S7 | Month-end close |
-| `recurring_entries` | 2026-08-12 | Recurring journals and bills. `kind` discriminates the jsonb `template`; two CHECKs pin the shape (a bill has a vendor, a journal has none; only a journal may `auto_post`). Separate from `recurring_invoices`, deliberately and temporarily — see the build log |
+| `recurring_entries` | 2026-08-12 | **The** recurrence table: invoices, bills and journals. `kind` discriminates the jsonb `template`; two CHECKs pin the shape (`party_shape` — a bill has a vendor, an invoice a customer, a journal neither; and `auto_post_shape` — only a journal may post itself). `invoices.recurring_entry_id` records which template made a row |
 | `products`, `payment_terms`, `payment_methods` | 2026-08-12 | The catalogue: saved invoice lines, named terms (`due_in_days`, one default per tenant by partial unique index), and the tenant-owned payment-method list. `invoice_payments.method` stores a method's CODE with **no FK** — deactivating a method must never rewrite a posted payment. `customers.payment_terms_id` (nullable = use the default) |
 
 All tables: `tenant_id`, FORCE RLS. Isolation coverage is split by area, one file
@@ -710,6 +768,6 @@ compiled-and-tested, not seen.
 - **Drafting from an email thread is DONE** (2026-08-12) — both directions, with verified citations, and **proven against the real API** (see the build log; `RUN_LIVE_THREAD_DRAFT=1`). Now worth doing: the drafter sets no due date because it does not know `payment_terms` exists — resolving the customer's default term in the accept path would close that. What is NOT built: auto-linking the accepted draft back to the thread (deliberate, see the build log), and drafting from a thread the *reader does not own*, which RLS forbids by design
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
-- **Recurring journals and bills are DONE** (2026-08-12). Still open from the same thread: **folding `recurring_invoices` into `recurring_entries`**, so the module has one recurrence mechanism rather than two
+- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **Still to do: `drizzle/0123` dropping `recurring_invoices` and `invoices.recurring_invoice_id`, which must land in a PR AFTER the fold has deployed.** What is not built for any kind: editing a template, and any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
 - ~~The last item from that review~~: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built

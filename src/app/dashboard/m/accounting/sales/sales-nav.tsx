@@ -15,11 +15,6 @@ const TABS: FilterPill[] = [
     href: "/dashboard/m/accounting/sales/customers",
   },
   {
-    key: "recurring",
-    label: "Recurring",
-    href: "/dashboard/m/accounting/sales/recurring",
-  },
-  {
     key: "reminders",
     label: "Reminders",
     href: "/dashboard/m/accounting/sales/reminders",

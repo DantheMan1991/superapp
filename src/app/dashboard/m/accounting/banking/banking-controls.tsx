@@ -41,6 +41,7 @@ import {
   syncPlaidItemAction,
 } from "@/modules/accounting/banking/actions";
 import { parseMoneyToCents } from "@/modules/accounting/lib/money";
+import { useConfirm } from "@/components/app/use-confirm";
 
 interface BankAccountOption {
   id: string;
@@ -563,6 +564,7 @@ export function PlaidConnectionCard({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
 
   function sync() {
@@ -577,10 +579,15 @@ export function PlaidConnectionCard({
     });
   }
 
-  function disconnect() {
-    if (!window.confirm(`Disconnect ${item.institutionName}? History stays; the feed stops.`)) {
-      return;
-    }
+  async function disconnect() {
+    const asked = await confirm({
+      title: `Disconnect ${item.institutionName}?`,
+      description:
+        "Everything already imported stays in your books, reconciled or not — only the feed stops, so new transactions will not arrive on their own.",
+      confirmLabel: "Disconnect",
+      destructive: true,
+    });
+    if (!asked) return;
     startTransition(async () => {
       const result = await disconnectPlaidItemAction({ plaidItemId: item.plaidItemId });
       if ("error" in result) toast.error(result.error);
@@ -624,6 +631,7 @@ export function PlaidConnectionCard({
           </Button>
         </CardContent>
       )}
+      {confirmDialog}
     </Card>
   );
 }

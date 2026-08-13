@@ -33,6 +33,7 @@ import {
   formatCentsSigned,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
+import { useConfirm } from "@/components/app/use-confirm";
 
 export function StartReconciliationForm({
   bankAccountId,
@@ -136,6 +137,7 @@ interface WorkbenchView {
 
 export function ReconcileWorkbench({ view }: { view: WorkbenchView }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
   const [busyLine, setBusyLine] = useState<string | null>(null);
 
@@ -167,8 +169,16 @@ export function ReconcileWorkbench({ view }: { view: WorkbenchView }) {
     });
   }
 
-  function cancel() {
-    if (!window.confirm("Cancel this reconciliation? Checked lines are released.")) return;
+  async function cancel() {
+    const asked = await confirm({
+      title: "Cancel this reconciliation?",
+      description:
+        "Every line you have ticked is released and the statement figures are discarded. The transactions themselves are untouched, so you can start the reconciliation again.",
+      confirmLabel: "Cancel reconciliation",
+      cancelLabel: "Keep working",
+      destructive: true,
+    });
+    if (!asked) return;
     startTransition(async () => {
       const result = await cancelReconciliationAction({
         reconciliationId: view.reconciliationId,
@@ -270,6 +280,7 @@ export function ReconcileWorkbench({ view }: { view: WorkbenchView }) {
           )}
         </CardContent>
       </Card>
+      {confirmDialog}
     </div>
   );
 }
@@ -284,12 +295,17 @@ export function ReconciliationHistory({
   canReopen: boolean;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
 
-  function reopen() {
-    if (!window.confirm("Reopen this reconciliation? Its cleared lines stay checked until you uncheck them.")) {
-      return;
-    }
+  async function reopen() {
+    const asked = await confirm({
+      title: "Reopen this reconciliation?",
+      description:
+        "Its cleared lines stay ticked until you untick them, so nothing is lost — but the period stops counting as reconciled, and entries it was protecting become editable again.",
+      confirmLabel: "Reopen",
+    });
+    if (!asked) return;
     startTransition(async () => {
       const result = await reopenReconciliationAction({
         reconciliationId,
@@ -302,8 +318,11 @@ export function ReconciliationHistory({
 
   if (!canReopen) return <Badge variant="secondary">completed</Badge>;
   return (
-    <Button size="sm" variant="outline" onClick={reopen} disabled={pending}>
-      {pending ? "Reopening…" : "Reopen"}
-    </Button>
+    <>
+      <Button size="sm" variant="outline" onClick={reopen} disabled={pending}>
+        {pending ? "Reopening…" : "Reopen"}
+      </Button>
+      {confirmDialog}
+    </>
   );
 }

@@ -13,6 +13,38 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-12 — Every confirmation is a real dialog now (branch `claude/accounting-confirm-dialogs`)
+
+Accounting held the only five `window.confirm` calls in the codebase, and they
+guarded Issue, Void, Delete draft, Unapply payment, Disconnect bank and
+Cancel/Reopen reconciliation — which is to say every irreversible action in the
+module.
+
+- **A suppressed confirm returns FALSE, so the button silently does nothing.**
+  Embedded browsers and webviews suppress native dialogs; that is how this was
+  found, clicking Issue in an in-app browser and getting no toast, no error and
+  no network request. Unstyled is the smaller half of the problem — undebuggable
+  from a support ticket is the larger one.
+- **`useConfirm` is promise-shaped on purpose** (`components/app/use-confirm.tsx`).
+  The declarative form the rest of the app writes by hand — hold "what am I
+  confirming" in state, wire the dialog's button to the action — turns every
+  call site inside out: a guard clause at the top of a handler becomes a
+  callback somewhere else. Here `if (!(await confirm({...}))) return;` sits on
+  the line `window.confirm` occupied, so a reviewer checks the MESSAGE rather
+  than re-checking the control flow.
+- **The resolver is a ref, not state.** Resolving must not wait for a render,
+  and a second question supersedes the first by answering it `false` rather
+  than leaving a promise — and the caller's `await` — hanging forever.
+- **Escape, the overlay and the close button all resolve `false`** through one
+  `onOpenChange`, so there is no route out that leaves the action ambiguous.
+- **The messages got longer, because there was finally room for them.**
+  "Void INV-0007? Its ledger effect is removed." became a title and a sentence
+  saying the invoice stops counting towards what you are owed and the number is
+  never reused. Destructive actions get the red button; Reopen does not, since
+  it is reversible.
+- Nothing about the actions themselves changed — same server actions, same
+  version CAS, same guards. This is the layer in front of them.
+
 ### 2026-08-12 — A recurring invoice could be coded to Checking (branch `claude/accounting-recurring-account-filters`)
 
 Found by clicking it. The unified Add-recurring dialog was handed ONE list of

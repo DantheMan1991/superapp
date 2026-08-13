@@ -34,6 +34,7 @@ import {
   formatCentsSigned,
   parseMoneyToCents,
 } from "@/modules/accounting/lib/money";
+import { useConfirm } from "@/components/app/use-confirm";
 
 interface InvoiceRef {
   id: string;
@@ -58,6 +59,7 @@ export function InvoiceActions({
   paymentMethods: Array<{ code: string; name: string }>;
 }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
   const [payOpen, setPayOpen] = useState(false);
   const [pay, setPay] = useState({
@@ -70,14 +72,31 @@ export function InvoiceActions({
     memo: "",
   });
 
-  function run(kind: "issue" | "void" | "delete") {
-    const confirmText =
+  async function run(kind: "issue" | "void" | "delete") {
+    const asked =
       kind === "issue"
-        ? `Issue ${invoice.number}? This posts it to the books.`
+        ? await confirm({
+            title: `Issue ${invoice.number}?`,
+            description:
+              "This posts it to the books and starts the clock on getting paid. Its lines are frozen from then on.",
+            confirmLabel: "Issue invoice",
+          })
         : kind === "void"
-          ? `Void ${invoice.number}? Its ledger effect is removed.`
-          : `Delete this draft? This cannot be undone.`;
-    if (!window.confirm(confirmText)) return;
+          ? await confirm({
+              title: `Void ${invoice.number}?`,
+              description:
+                "Its ledger effect is removed and the invoice stops counting towards what you are owed. The record stays, so the number is never reused.",
+              confirmLabel: "Void invoice",
+              destructive: true,
+            })
+          : await confirm({
+              title: "Delete this draft?",
+              description:
+                "Nothing was posted, so nothing is reversed — but the draft and its lines are gone for good.",
+              confirmLabel: "Delete draft",
+              destructive: true,
+            });
+    if (!asked) return;
     startTransition(async () => {
       const args = { invoiceId: invoice.id, expectedVersion: invoice.version };
       const result =
@@ -255,15 +274,27 @@ export function InvoiceActions({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {confirmDialog}
     </div>
   );
 }
 
 function UnapplyButton({ paymentId, version }: { paymentId: string; version: number }) {
   const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
-  function unapply() {
-    if (!window.confirm("Unapply this payment? Its ledger entry is voided.")) return;
+  async function unapply() {
+    if (
+      !(await confirm({
+        title: "Unapply this payment?",
+        description:
+          "The deposit entry is voided and the invoice goes back to owing this much. A reconciled deposit cannot be unapplied at all.",
+        confirmLabel: "Unapply payment",
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
     startTransition(async () => {
       const result = await unapplyInvoicePaymentAction({
         paymentId,
@@ -277,9 +308,12 @@ function UnapplyButton({ paymentId, version }: { paymentId: string; version: num
     });
   }
   return (
-    <Button size="sm" variant="ghost" className="h-7" onClick={unapply} disabled={pending}>
-      Unapply
-    </Button>
+    <>
+      <Button size="sm" variant="ghost" className="h-7" onClick={unapply} disabled={pending}>
+        Unapply
+      </Button>
+      {confirmDialog}
+    </>
   );
 }
 

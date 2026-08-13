@@ -23,12 +23,18 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const accountOption = (a: { id: string; code: string; name: string }) => ({
+  id: a.id,
+  code: a.code,
+  name: a.name,
+});
+
 export default async function RecurringEntriesPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
-    const [entries, accounts, vendors, customers] = await Promise.all([
+    const [entries, accounts, registers, vendors, customers] = await Promise.all([
       listRecurringEntries(tx, ctx.tenant.id),
       tx.query.accounts.findMany({
         where: and(
@@ -36,6 +42,9 @@ export default async function RecurringEntriesPage() {
           eq(schema.accounts.isActive, true),
         ),
         orderBy: asc(schema.accounts.code),
+      }),
+      tx.query.bankAccounts.findMany({
+        where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
       }),
       tx.query.vendors.findMany({
         where: and(
@@ -52,7 +61,35 @@ export default async function RecurringEntriesPage() {
         orderBy: asc(schema.customers.name),
       }),
     ]);
-    return { entries, accounts, vendors, customers };
+
+    /**
+     * THREE lists, because the three kinds may not post to the same places and
+     * the one-list version let a rent invoice be coded to Checking.
+     *
+     * Each mirrors the one-off builder for that kind, so a template and a
+     * hand-keyed document offer the same choices:
+     *   - invoice lines → income only (`sales/invoices/new`)
+     *   - bill lines    → codable: no bank register, no opening balance, no
+     *                     system AR/AP (`purchases/bills/new`)
+     *   - journal lines → everything, which is what a journal is for
+     */
+    const registerIds = new Set(registers.map((r) => r.accountId));
+    return {
+      entries,
+      vendors,
+      customers,
+      journalAccounts: accounts,
+      incomeAccounts: accounts.filter((a) => a.accountType === "income"),
+      codableAccounts: accounts.filter(
+        (a) =>
+          !registerIds.has(a.id) &&
+          a.subtype !== "opening_balance" &&
+          !(
+            a.isSystem &&
+            ["accounts_receivable", "accounts_payable"].includes(a.subtype)
+          ),
+      ),
+    };
   });
 
   const isOwner = ctx.role === "owner";
@@ -96,11 +133,9 @@ export default async function RecurringEntriesPage() {
             <>
               <GenerateRecurringEntriesButton />
               <AddRecurringEntryButton
-                accounts={data.accounts.map((a) => ({
-                  id: a.id,
-                  code: a.code,
-                  name: a.name,
-                }))}
+                journalAccounts={data.journalAccounts.map(accountOption)}
+                incomeAccounts={data.incomeAccounts.map(accountOption)}
+                codableAccounts={data.codableAccounts.map(accountOption)}
                 vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
                 customers={data.customers.map((c) => ({ id: c.id, name: c.name }))}
                 today={today}

@@ -76,7 +76,9 @@ export async function startReconciliation(
   requireOwnerRole(ctx);
   const bankAccount = await loadBankAccount(tx, ctx.tenantId, args.bankAccountId);
   if (!bankAccount.isActive) {
-    throw new LedgerError("BANK_ACCOUNT_NOT_FOUND", "bank account inactive");
+    // Was BANK_ACCOUNT_NOT_FOUND, which told the reader the account was gone
+    // while they were looking straight at it.
+    throw new LedgerError("BANK_ACCOUNT_INACTIVE", "bank account is closed");
   }
   const rows = await tx
     .insert(schema.reconciliations)

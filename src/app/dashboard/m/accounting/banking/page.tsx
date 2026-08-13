@@ -168,7 +168,7 @@ export default async function BankingPage() {
                         {b.name}
                       </p>
                     </div>
-                    {!b.isActive && <Badge variant="outline">inactive</Badge>}
+                    {!b.isActive && <Badge variant="outline">closed</Badge>}
                   </div>
                   <p className="mt-1.5 text-sm text-muted-foreground">
                     {b.kind.replaceAll("_", " ")}

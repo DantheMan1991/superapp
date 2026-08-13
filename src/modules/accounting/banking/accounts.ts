@@ -52,6 +52,33 @@ export async function loadBankAccount(
 }
 
 /**
+ * The same load, refusing a CLOSED register.
+ *
+ * "Closed" means no new financial effect on this account — not read-only, and
+ * not deleted. So this guards the paths that create something: posting a
+ * categorised transaction, accepting suggestions, quick-adding, importing a
+ * CSV, pulling a Plaid sync, starting a reconciliation.
+ *
+ * It deliberately does NOT guard excluding or restoring a transaction, which
+ * is queue housekeeping with no ledger effect — a closed account with four
+ * rows stuck in "to review" and no way to clear them is the trap this whole
+ * change exists to remove. Nor does it guard corrections to things already
+ * posted (unmatch, void, cancel a reconciliation): closing an account must
+ * never strand a mistake made before it closed.
+ */
+export async function loadWritableBankAccount(
+  tx: Tx,
+  tenantId: string,
+  bankAccountId: string,
+): Promise<BankAccount> {
+  const row = await loadBankAccount(tx, tenantId, bankAccountId);
+  if (!row.isActive) {
+    throw new LedgerError("BANK_ACCOUNT_INACTIVE", `bank account ${bankAccountId} is closed`);
+  }
+  return row;
+}
+
+/**
  * Create a register + its ledger account in one transaction; optionally
  * post the opening balance against Opening Balance Equity (idempotent via
  * `obal:{bankAccountId}`).

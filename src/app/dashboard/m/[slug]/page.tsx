@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { getModuleDefinition } from "@/modules";
+import { getRenderableFeature } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,7 @@ export default async function ModulePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
-  const def = getModuleDefinition(slug);
+  const def = getRenderableFeature(slug);
   if (!def) notFound();
 
   const ctx = await requireTenant();

@@ -4,7 +4,7 @@ import { Boxes } from "lucide-react";
 import { withTenant, schema } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { getActiveModules } from "@/lib/modules";
-import { moduleRegistry } from "@/modules";
+import { getRenderableFeature, isRenderable } from "@/lib/features";
 import { PageHeader } from "@/components/app/page-header";
 import { StatCard } from "@/components/app/stat-card";
 import { EmptyState } from "@/components/app/empty-state";
@@ -28,7 +28,7 @@ export default async function DashboardPage() {
     withTenant(ctx.tenant.id, (tx) => loadRetainerView(tx, ctx.tenant.id)),
   ]);
 
-  const renderable = active.filter(({ module }) => moduleRegistry[module.id]);
+  const renderable = active.filter(({ module }) => isRenderable(module.id));
   const usage = retainerView.usage;
 
   return (
@@ -91,7 +91,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {renderable.map(({ module }) => {
-              const Icon = getIcon(moduleRegistry[module.id]?.icon);
+              const Icon = getIcon(getRenderableFeature(module.id)?.icon);
               return (
                 <Link
                   key={module.id}

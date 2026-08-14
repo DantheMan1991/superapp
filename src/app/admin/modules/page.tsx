@@ -2,7 +2,7 @@ import Link from "next/link";
 import { asc, isNotNull, sql as dsql } from "drizzle-orm";
 import { BookOpen } from "lucide-react";
 import { withSystem, schema } from "@/db";
-import { moduleRegistry } from "@/modules";
+import { isRenderable } from "@/lib/features";
 import { listModuleDocs } from "@/lib/build-docs";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/app/page-header";
@@ -130,7 +130,7 @@ export default async function AdminModulesPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {moduleRegistry[mod.id] ? (
+                    {isRenderable(mod.id) ? (
                       <Badge variant="secondary">yes</Badge>
                     ) : (
                       <span className="text-xs text-muted-foreground">

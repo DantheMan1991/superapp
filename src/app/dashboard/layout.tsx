@@ -8,7 +8,8 @@ import {
 import { requireTenant, isSuperAdmin } from "@/lib/auth";
 import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
-import { moduleRegistry } from "@/modules";
+import { getRenderableFeature } from "@/lib/features";
+import { getIndustryProfile } from "@/industries";
 
 export const dynamic = "force-dynamic";
 
@@ -26,18 +27,35 @@ export default async function DashboardLayout({
     getMailBadge(ctx.tenant.id, ctx.userId, ctx.role),
   ]);
 
-  // Only modules that are both switched on AND implemented appear in nav.
-  const moduleItems: NavItem[] = active
-    .filter(({ module }) => moduleRegistry[module.id])
-    .map(({ module }) => ({
-      href: `/dashboard/m/${module.id}`,
-      label: module.name,
-      icon: moduleRegistry[module.id]?.icon ?? "boxes",
-      // The slug doubles as the accent name: `--accent-accounting` and friends
-      // are declared in globals.css, so adding a module means adding one token,
-      // not editing the shell.
-      accent: module.id,
-    }));
+  // Only features that are both switched on AND renderable appear in nav. A
+  // capability pack can be declared, installed by a profile and switched on
+  // while still having no `Component` — that is the empty-slot state, and it
+  // must never reach the rail.
+  const renderable = active.filter(({ module }) => getRenderableFeature(module.id));
+  const toNavItem = ({ module }: (typeof renderable)[number]): NavItem => ({
+    href: `/dashboard/m/${module.id}`,
+    label: module.name,
+    icon: getRenderableFeature(module.id)?.icon ?? "boxes",
+    // The slug doubles as the accent name: `--accent-accounting` and friends
+    // are declared in globals.css, so adding a module means adding one token,
+    // not editing the shell.
+    accent: module.id,
+  });
+
+  // Core tools and capability packs are grouped separately (ADR 0009). Seven
+  // packs beside six core modules is a thirteen-item flat list, and the rail
+  // gets worse the moment a profile installs — so `category` carries the split.
+  const coreItems = renderable
+    .filter(({ module }) => module.category !== "pack")
+    .map(toNavItem);
+  const packItems = renderable
+    .filter(({ module }) => module.category === "pack")
+    .map(toNavItem);
+
+  // The installed profile names its own group. `tenants.industry` defaults to
+  // `general`, which is the absence of a profile rather than one of them, so
+  // the lookup returning null is the ordinary case and not an error.
+  const profile = getIndustryProfile(ctx.tenant.industry);
 
   const navGroups: NavGroup[] = [
     {
@@ -51,8 +69,9 @@ export default async function DashboardLayout({
       ],
     },
     // A tenant with nothing switched on should not see an empty caption.
-    ...(moduleItems.length > 0
-      ? [{ label: "Modules", items: moduleItems }]
+    ...(coreItems.length > 0 ? [{ label: "Modules", items: coreItems }] : []),
+    ...(packItems.length > 0
+      ? [{ label: profile?.name ?? "Add-ons", items: packItems }]
       : []),
     {
       label: "Business",
@@ -81,9 +100,7 @@ export default async function DashboardLayout({
     });
   }
 
-  const mailNav = moduleItems.find(
-    (item) => item.href === "/dashboard/m/email",
-  );
+  const mailNav = coreItems.find((item) => item.href === "/dashboard/m/email");
   if (mailNav) {
     // The dot wins over the count: a mailbox that needs reconnecting has an
     // unknown amount of mail behind it, so a number there would be a guess.
@@ -93,8 +110,8 @@ export default async function DashboardLayout({
 
   // Modules that asked for the whole viewport. Only enabled ones are listed,
   // so a switched-off module can never widen the shell.
-  const fullWidthPathPrefixes = active
-    .filter(({ module }) => moduleRegistry[module.id]?.layout === "full")
+  const fullWidthPathPrefixes = renderable
+    .filter(({ module }) => getRenderableFeature(module.id)?.layout === "full")
     .map(({ module }) => `/dashboard/m/${module.id}`);
 
   return (

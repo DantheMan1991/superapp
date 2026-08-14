@@ -50,6 +50,12 @@ registry is a passive record with no outbound reporting. Feed is **bagged**.
 **No scale for large animals** — cattle and pig weights come from tape or eye;
 chickens *are* weighed. Layers are **one flock**.
 
+**Selling:** beef is sold **both as halves and as individual cuts at market**;
+**eggs are sold at market**; **all sales are direct-to-consumer for now** (no
+wholesale or restaurant). Cold storage is **3 chest freezers in the garage plus
+a walk-in refrigerator in the barn** — four locations across two buildings.
+Reporting basis: **both cash and accrual must be supported**, tenant's choice.
+
 > **The founder records nothing today.** No notebook, no spreadsheet, no phone
 > notes. This is the single most consequential fact in this dossier and it is
 > a design constraint, not a footnote — see *Cold start* under the Livestock
@@ -86,6 +92,29 @@ What it **does** break:
   below — this is the single largest consequence of the 10× target.
 
 ## Build log
+
+### 2026-08-13 — Inventory brainstormed to a design (`claude/packs-and-profiles-design`)
+- Third category to a design. Write-up under
+  [Category design — Inventory](#category-design--inventory-brainstormed-2026-08-13).
+- **Market livestock *is* inventory** — the capital-asset distinction settled in
+  the Livestock design answers the structural question. `inventory` owns the lot
+  spine, `livestock` declares it in `requires`, breeding stock stays a fixed
+  asset, and head is just a unit of measure.
+- **Live-to-hanging is a yield, not a unit conversion.** The trap that would have
+  baked an unauditable fudge into every carcass. Conversions are exact or
+  item-specific; measured outputs belong to `production`.
+- **Corrected mid-session:** "valuation optional" was wrong for this codebase.
+  ADR 0007 already derives cash basis at read time and rejected a second stored
+  ledger, so inventory valuation follows — quantities and costs always, financial
+  presentation basis-dependent. The pilot needs both bases and already has them.
+- **A pre-sold half is never inventory** — it is a commitment on the livestock
+  lot, delivered without ever sitting on a shelf. One animal, two cut sheets,
+  two output paths.
+- **Selling halves is how the unpopular cuts move**, so the halves/cuts mix is a
+  calculation over what the market actually buys, not a preference.
+- **Locations are assets with a type, and their capacity constrains the kill
+  schedule** — three freezers is three or four half-carcasses, which feeds back
+  into slaughter-date booking.
 
 ### 2026-08-13 — Livestock brainstormed to a design (`claude/packs-and-profiles-design`)
 - Second category taken to a design. Write-up under
@@ -188,7 +217,7 @@ own words condensed, not reinterpreted.
 | Gardens/crops | `crops` pack | **yes** | first pass |
 | Butchering | `production` pack | no | **partial** — external-conversion shape settled, nothing else |
 | Baking | `production` pack — same tables | no | not yet |
-| Retail | `inventory` + `retail` packs | no | first pass |
+| Retail | `inventory` + `retail` packs | no | `inventory` **done** ([design](#category-design--inventory-brainstormed-2026-08-13)); `retail` first pass |
 | Marketing | core CRM + email; thin pack at most | no | first pass |
 | Accounting | **core module, already built** — seed + config | — | first pass |
 | Communication | **core email + CRM, already built** | — | not yet |
@@ -854,6 +883,199 @@ this is used daily or abandoned in March.
 
 Images ride along with slice 0 — cheap, and high satisfaction early.
 
+## Category design — Inventory (brainstormed 2026-08-13)
+
+The pack everything else lands in: feed, eggs, meat, produce, baked goods and
+supplies. Designed third, deliberately, because its shape is constrained by
+decisions already made in `land` and `livestock` and those constraints were
+still fresh.
+
+### Market livestock *is* inventory — the accounting already said so
+
+The structural question was whether a livestock lot and an inventory lot are the
+same mechanism. The answer falls out of the capital-asset distinction settled in
+the Livestock design:
+
+- **Market lots** (steers, broilers, feeder pigs) **are inventory lots**, with a
+  livestock extension carrying the biology — age, health, occupancy, withdrawal.
+- **Breeding stock** (the bull, retained cows) **is not inventory at all.** It is
+  a capital asset, tracked by `livestock`, living on the other side of the
+  balance sheet.
+
+So **`inventory` owns the lot spine and `livestock` declares it in `requires`.**
+And the breeding-herd/market-herd transfer becomes literally what it is in the
+books: **a movement between inventory and fixed assets.** The model and the
+accounting agree rather than approximating each other.
+
+**Head is just a unit of measure.** "70 head" is a quantity exactly as "500 lb"
+is. The head ledger and the inventory ledger were always the same ledger.
+
+### Units: three kinds of conversion, and one of them is a trap
+
+| Kind | Example | Where it lives |
+| --- | --- | --- |
+| Fixed and exact | 12 each = 1 dozen; 2,000 lb = 1 ton | Global, per dimension |
+| Fixed but item-specific | A 50 lb bag of feed; a flat of eggs is **30**, not 12 | **On the item** — "1 bag" means nothing in general |
+| **Measured per lot** | A steer goes in at 1,150 lb live, hangs at 690 | **Not a conversion at all** |
+
+**Live-to-hanging is a production yield, not a unit conversion.** Modelling it as
+a factor bakes a permanent fudge into the books that nobody can audit, and every
+carcass is quietly wrong. You do not convert a live steer — you record what came
+off the rail. **That belongs to `production`; inventory must have no opinion on
+it.** Hay has a milder version: a small square is 40–50 lb and a round is
+800–1,200, so bale-to-lb is item-specific *and* approximate.
+
+> **Every item has exactly one stocking unit and its balance is kept only in
+> that unit.** Buy feed in bags, keep the balance in pounds. This kills the "is
+> my number in bags or pounds" class of bug before it starts. Where a conversion
+> is approximate, the balance inherits that softness — the provenance rule from
+> the Livestock design applies here too.
+
+### Cost has three flavours, only one of them easy
+
+| Flavour | Example | Costing |
+| --- | --- | --- |
+| Fungible purchased | Feed, seed, cartons | Average cost is fine |
+| Specific identity | Meat from animal #47 | Must know which — traceability forbids averaging |
+| **Raised, no purchase basis** | Eggs, produce, a calf you bred | Only accumulated production cost, partly allocated |
+
+### Quantities, costs, presentation — three layers, and the third is already built
+
+**Corrected during the session.** The first proposal was "quantities always,
+valuation optionally". That is wrong for this codebase, because
+[ADR 0007](../decisions/0007-cash-basis-reporting.md) already established the
+better pattern and explicitly rejected the alternative: *"two ledgers that must
+agree forever. This is accounting software's worst bug class."* Inventory
+valuation is the same problem and gets the same answer.
+
+| Layer | Always on? |
+| --- | --- |
+| **Quantities** — what is on hand, where | Always. Operational truth |
+| **Cost accumulation** — what this animal cost | Always. Cost per finished hog is wanted regardless of tax basis |
+| **Financial presentation** — inventory as an asset with COGS at sale, versus inputs expensed when paid | **Basis-dependent, derived at read time** |
+
+The pilot requires **both cash and accrual**, and that is already
+architecturally solved — `getBalances` takes a `basis` parameter today, and
+inventory extends the same lens instead of inventing a second one.
+
+**Boundary already drawn in core:** the accounting catalogue explicitly says it
+is *not* inventory — *"Real inventory is a different feature with a different
+data model"* ([invoicing.ts:52](../../src/db/schema/invoicing.ts:52)). The two
+**link, never merge**: the catalogue is a price list, inventory is quantity on
+hand. `1300 Inventory` and `5000 Cost of Goods Sold` already exist in the
+general chart of accounts, so the posting targets are present.
+
+### Locations are assets, carry a type, and their capacity is a constraint
+
+The pilot has **3 chest freezers in the garage and a walk-in refrigerator in the
+barn**. The chain resolves entirely through packs already designed: a location
+is an **asset**, in a **building**, on a **parcel**. Nothing new is invented.
+
+- **A location has a type** — frozen, refrigerated, dry, ambient. The walk-in is
+  not a cold freezer; it holds eggs, aging and fresh product with entirely
+  different shelf life. Items carry storage requirements and a mismatch is
+  catchable.
+- **Capacity is a planning constraint, not a display field.** A chest freezer
+  holds roughly 350–450 lb of packaged meat, so three is near 1,200 lb — three
+  or four half-carcasses of retained beef. **Freezer space therefore limits how
+  many animals can be processed at once**, which feeds straight back into
+  slaughter-date booking: *"you have booked four steers for October; after
+  existing stock there is room for two."* At 10× this stops being a warning and
+  becomes the wall that sets the kill schedule.
+
+### Halves and cuts: a pre-sold half is never inventory
+
+The pilot sells **both**, which is the hard case. The timeline resolves it:
+
+1. Customer commits to a half and pays a deposit — **before slaughter**
+2. Slaughter — hanging weight finally exists
+3. Final invoice = hanging weight × $/lb, less deposit
+4. Their cut sheet turns their half into their boxes
+5. Collection
+
+**At no point does that half sit on a shelf.** It goes from *commitment against
+a live animal* to *delivered*. So a pre-sold half is a **commitment on the
+livestock lot**, not an inventory item, and only the retained portion becomes
+stocked SKUs. One animal therefore carries **two cut sheets** and a single
+production run has two output paths.
+
+This yields a number the pilot does not have: **how much of the future beef is
+already sold**, which is what should drive how many animals to raise and how
+many dates to book.
+
+**The cut-balance problem, and why the halves/cuts mix is a calculation:**
+selling cuts earns several times more per pound than hanging-weight halves, but
+costs market days and freezer space, and leaves the seller with what nobody
+asks for —
+
+> Ground beef and steaks sell out; shanks, roasts and organ meat accumulate.
+
+**Selling halves is how the unpopular cuts move**, because the customer takes a
+balanced carcass. So the right mix is determined by what the market actually
+buys, and inventory knows which cuts move and which pile up. Likely the single
+most valuable report in the retail direction.
+
+### Eggs run the opposite rhythm to meat
+
+**Continuous production, batch sale** — collected daily, sold on market day, so
+inventory builds through the week and empties on Saturday. Meat is the reverse:
+batch production, continuous sale. The same model absorbing both opposite
+rhythms is good evidence it is the right model.
+
+Cartons are a **consumable supply**, and supplies are where reorder points
+actually matter — running out of cartons on market morning is a real failure,
+while running out of ribeye is merely disappointing. Note that reusing cartons
+carrying another producer's brand or grade marks is generally not permitted;
+the app should not encourage it.
+
+### Adjustments, counts, expiry
+
+- **Adjustments carry a reason**, and reasons are a diagnostic rather than a
+  correction: sustained feed shrinkage is not an accounting problem, it is a
+  rodent problem.
+- **A physical count reconciles to actual and posts the variance.** The record
+  and reality will disagree; counting is how that is discovered.
+- **FEFO, not FIFO.** For perishables the useful order is *first expired, first
+  out*. Meat has a practical freezer life, eggs a sell-by, feed goes mouldy in
+  humidity, vaccines expire outright. "Oldest first" and "expiring soon" are the
+  two views that prevent loss.
+
+### Traceability has an honest limit
+
+The chain runs animal → production run → output lots → sale, and lineage carries
+all of it. But at a cash market stall the buyer is unknown. So **traceability is
+complete up to the point of sale, and beyond it only for named customers** —
+CSA, online orders, wholesale. That matches what is generally expected of a
+producer at this scale (one step forward, one step back), and the product should
+state the limit rather than imply more.
+
+### Channels: build the seam, not the feature
+
+All pilot sales are **direct-to-consumer for now**, and "for now" is load-bearing
+— inspected meat permits wholesale and that is the obvious 10× growth path. So
+**price is per item per channel from day one**, even with a single channel,
+because retrofitting a price list into a single-price model is painful. Nothing
+else about wholesale gets built until someone sells that way.
+
+### Day one, with no history
+
+**"Which freezer has the ribeyes."** The pilot tracks nothing and finds out by
+opening the lid. That answer needs no history, is useful from the first count,
+and is the first screen.
+
+### Slice order
+
+| # | Slice | Why here |
+| --- | --- | --- |
+| 0 | Items + units + locations + on-hand ledger | The day-one wedge: what do I have and where |
+| 1 | Receipts and issues | Feed in, feed out to lots — closes the `livestock` costing loop |
+| 2 | Adjustments, physical counts, expiry/FEFO | Makes the balance trustworthy |
+| 3 | Valuation + COGS posting, basis-aware | Rides the existing ADR 0007 lens |
+| 4 | Commitments (pre-sold halves) | Needs `production` and `retail` to be useful |
+| 5 | Reorder points, capacity warnings | Needs history |
+
+Production outputs land in inventory but are blocked on the `production` pack.
+
 ## Open questions
 
 - **Is the baking under cottage food law?** Caps what `retail` may legally list
@@ -868,8 +1090,9 @@ Images ride along with slice 0 — cheap, and high satisfaction early.
   the obvious default, but whether the pilot can measure bin draw per delivery
   decides how coarse the allocation has to be, and that decides how much the
   per-pen cost figure can be trusted.
-- **Units of measure** — head, lb, bushel, dozen, bale, ton, gallon, acre. A
-  day-one decision for `inventory`, a rewrite if deferred.
+- ~~Units of measure~~ — **settled 2026-08-13.** One stocking unit per item;
+  conversions are exact or item-specific; measured outputs (live→hanging) are
+  yields owned by `production`, not conversions. See the Inventory design.
 - ~~PostGIS or GeoJSON-in-jsonb~~ — **settled 2026-08-13: GeoJSON in jsonb,
   containment and area in JS.** See the Land category design.
 - **Raised-livestock inventory accounting** is genuinely gnarly — raised animals

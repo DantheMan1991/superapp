@@ -36,6 +36,12 @@ inspection *sometimes* and sent to a butcher *other times*, and there are
 **multiple butchers**. The 1,000 broilers are **batched through the season**,
 not raised concurrently.
 
+**Grazing:** 20 paddocks, **polywire only** (no fixed subdivision), ~1 day per
+paddock, 21-day rest target. Water is **hauled daily** — there is no water
+infrastructure. The cattle **migrate by trailer between two parcels**: wintered
+on one, grazed there in spring, hauled to the summer parcel, hauled back in
+fall. Rents no ground, but renters must be supported. US-only geodata is fine.
+
 ### Design target: this farm and one 10× its size
 
 > Stated by the founder 2026-08-13: *"I want this application built for farms my
@@ -67,6 +73,26 @@ What it **does** break:
   below — this is the single largest consequence of the 10× target.
 
 ## Build log
+
+### 2026-08-13 — Land brainstormed to a design (`claude/packs-and-profiles-design`)
+- First category taken past a first pass. Full write-up under
+  [Category design — Land](#category-design--land-brainstormed-2026-08-13).
+- **Two levels of place, not three.** A polywire strip is an *area on the
+  grazing event*, not a geometry — which lets one model serve strip grazers and
+  fixed-paddock users with no branch, as ADR 0004 requires.
+- **Rest is an outcome, not a setting**, and it is discontinuous across a
+  seasonal parcel migration, so a single farm-wide target is wrong.
+- Ran the pilot's own numbers through `paddocks = (rest ÷ graze) + 1` and found
+  the 21-day target is **arithmetically unreachable** on a 12-paddock summer
+  loop at a day per paddock. The finding came from data the app would already
+  hold, which is the argument for the whole category.
+- **Settled geometry: GeoJSON in jsonb, math in JS** — no PostGIS. Land carries
+  points and lines (troughs, fences) as well as polygons.
+- **GDD from free weather data replaces pasture measurement** as the growth
+  signal, and outranks the grazing wedge for the pilot because it needs no
+  discipline to sustain.
+- Established the planning-tool doctrine: they end in dollars, they come after
+  operations, and **no `planning` pack until three examples exist**.
 
 ### 2026-08-13 — Categories captured, pack roster mapped (`claude/packs-and-profiles-design`)
 - Founder walked through twelve operational categories (below, as given).
@@ -117,7 +143,7 @@ own words condensed, not reinterpreted.
 
 | Category | Lands in | Farm-specific? | Brainstormed? |
 | --- | --- | :---: | :---: |
-| Land | `land` pack — parcels, zones, geometry, area | no | first pass |
+| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | first pass |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | first pass |
 | Livestock | `livestock` pack | **yes** | **partial** — lot model + pen settled; health, breeding, feed, water, rotation still open |
@@ -292,6 +318,228 @@ design calls and the ones most likely to be got wrong twice:
   enterprise looks profitable. Hours need an imputed rate; the retainer-hours
   machinery may be reusable.
 
+## Category design — Land (brainstormed 2026-08-13)
+
+The first category taken past a first pass. Everything here is settled unless
+marked open. Pilot facts that drove it: **20 paddocks, ~1 day per paddock,
+polywire only, water hauled daily, 21-day rest target, and a seasonal migration
+by trailer between a wintering parcel and a summer parcel.**
+
+### Two levels of place, not three
+
+- **Parcel** — the legal/tenure unit (deed or lease). Also the unit you *haul
+  between*. Changes over years.
+- **Zone** — the management unit ("North Pasture", "Bed 4"). Changes seasonally.
+- ~~Strip~~ — **not a place.** A polywire strip has no persistent identity; the
+  wire lands somewhere different every time. What persists is the paddock.
+
+**A strip is an area on the grazing event, not a geometry.** This is what lets
+one model serve both grazing styles with no branch, which
+[ADR 0004](../decisions/0004-capability-packs-and-industry-profiles.md) requires:
+
+| | Event record |
+| --- | --- |
+| Strip grazer (pilot) | lot 3, North Pasture, Aug 13, **0.4 of 10 acres** |
+| Fixed-paddock user | lot 3, North Pasture, Aug 13–17, **10 of 10 acres** |
+
+Rest follows one rule for both: **the zone's rest clock starts at the end of the
+last grazing event in it.** Area grazed is the load-bearing field — it drives
+stocking density and days-of-feed-remaining, the numbers a strip grazer manages
+to.
+
+### Intent and fact are separate
+
+Both look like "zone use", and conflating them is why most farm software does
+one of them badly.
+
+- **Intent** — "North Pasture is hay ground this year." A dated plan on the
+  zone. Exists *before* anything happens; it is what you budget against.
+- **Fact** — occupancy. And **fact does not belong to `land`** — it comes from
+  `livestock` and `crops`. Land owns the place; other packs point at it.
+
+### Rest is an outcome, never a setting
+
+Do not ask for a rest period and then nag against it. Measure what each paddock
+actually got, show it against the target, flag early returns. **Free from
+occupancy data, zero additional entry.**
+
+The rest clock is **discontinuous** and a single farm-wide target is wrong: the
+wintering parcel's paddocks rest 100+ days over summer while the summer parcel
+runs an 11–19 day cycle. Flagging every over-rested winter paddock trains the
+user to ignore alerts within a fortnight.
+
+**The arithmetic the app should surface, from the standard formula
+`paddocks = (rest ÷ graze) + 1`:** at ~1 day per paddock, a 21-day target needs
+22 paddocks. The pilot has 20 *split across two parcels*, so the summer rotation
+runs over a subset — 12 paddocks yields 11 days of rest. The stated difficulty
+hitting 3 weeks is therefore **arithmetically unavoidable, not a management
+failure**, and the app would have said so from data entered anyway. Three fixes,
+all priceable: more subdivisions (cheapest — polywire), slower rotation (needs
+grass), or reaching ground currently unusable (needs water).
+
+### Movement: one model, walks and hauls
+
+A move between adjacent paddocks is a walk — daily, free. A move between parcels
+is a **haul** — fuel, labour, trailer time, posting to the ledger against the
+cattle enterprise. **One movement event with a method and optional cost**, not
+two models.
+
+- **Haul cost scales in trailer-loads, not smoothly.** 10 cows is one trip; 100
+  is 5–7 trips each way, twice a year. At 10× it becomes a capital question
+  (bigger trailer vs hired hauler), the same shape as well-vs-pond.
+- **Shrink will lie to weight data.** Cattle drop 3–5% when hauled and take days
+  to recover. Growth and cost-per-pound metrics must not read a haul as a loss.
+- **Seasonal parcel migration is the market norm**, not a pilot quirk — land
+  becomes available in pieces and rarely contiguous.
+
+### Geometry — settled: GeoJSON in jsonb, math in JS
+
+Ranked by what it actually buys:
+
+1. **Point-in-polygon on mobile** — standing in a field, the app knows the zone
+   and pre-fills it. This is the 10× data-entry reduction, and the least obvious
+   item on the list.
+2. **The map** — how a farmer verifies the data matches reality.
+3. **Computed acreage** — modest; the county already told you.
+4. **Adjacency** for rotation planning — later.
+
+None needs PostGIS. Ray-casting containment is trivial for a few hundred
+polygons and 10× is still a few hundred. **Closes the PostGIS open question.**
+
+**Land is not only polygons.** Zones are polygons, fences and lanes and water
+lines are **lines**, troughs and hydrants and wells are **points**. GeoJSON
+handles all three natively, so it is free now and painful to retrofit. At 10×,
+**water is the binding constraint on rotation** — "which paddocks have water" is
+a real planning question once points exist. This is also where `land` meets
+`assets`: a fence has geometry from one and a cost, life and maintenance
+schedule from the other (fence is typically 7-year property), which is exactly
+the founder's weed-whacking example.
+
+**Base imagery: US-only confirmed acceptable.** NAIP aerial imagery is free and
+public domain; USGS 3DEP elevation is free. Elevation is core rather than
+enrichment because the pilot has *no* water infrastructure — the planner designs
+from scratch and gravity is the biggest lever on cost.
+
+### Grass growth: build the free version first
+
+Measuring dry matter means walking every paddock weekly with a plate meter.
+Most people do not sustain it, and the grazing wedge is a beautiful feature that
+frequently sits empty. Two of the three useful numbers are free:
+
+| Number | Cost to obtain |
+| --- | --- |
+| Rest days since last grazed | **free** — computed from occupancy |
+| Grazing days achieved per zone | **free** — computed from occupancy |
+| Dry matter per acre | requires measurement |
+
+**GDD answers "it depends on grass growth" without any measurement.** Growing
+degree days plus rainfall proxy regrowth rate, both free from Open-Meteo by
+parcel centroid: *"GDD is 30% below the five-year average; at your current pace
+you return to Paddock 4 in 16 days, not 21."* Ranked **above** the grazing wedge
+for the pilot precisely because the wedge needs discipline and this needs none.
+
+> **The pack-wide rule this generalises to: anything derivable from a record
+> already being made must never become a second data entry.** At 10× that is the
+> difference between a system used and a system abandoned.
+
+### Profit per acre is downstream of allocation
+
+Not a Land feature. A cow grazes five paddocks and becomes beef — attributing
+that revenue to an acre requires allocating it back across paddocks by head ×
+days, which is the **same allocation engine as feed**. Two distinct questions
+hide in the phrase:
+
+- **Enterprise analysis** — is the cattle operation profitable?
+- **Land analysis** — is this parcel earning its keep?
+
+Land's contribution is narrow: **supply the acreage and the occupancy record
+that drives the allocation.** Reporting is core dimensions. Profit-per-acre
+therefore cannot ship before allocation exists.
+
+**Non-productive zones need marking** — woodlot, house site, yard, lanes carry
+tax and interest and earn nothing. Including them makes every farm look broken.
+
+### Rented ground: schema now, screens later
+
+The pilot rents nothing but the founder wants renters supported.
+
+- **Tenure on the parcel** (owned / leased / crop-share) goes in the model
+  **now** — profit-per-acre computes differently on rented ground and
+  retrofitting means rewriting the report.
+- **Lease management** — terms, renewals, rent invoices — is deferred until a
+  tenant actually rents, then built against a real lease.
+- **Crop share is a revenue split, not an expense.** Landlord takes a third of
+  the crop instead of cash; it books completely differently.
+- **The improvement-payback warning** is decision support nothing else offers:
+  *"you are about to spend $4,000 liming ground with 2 years left on the lease."*
+
+**Honest cost:** unexercised code paths rot unnoticed. The first renting tenant
+will find bugs in whatever is built blind. Accepted deliberately.
+
+### Weather: log from day one, insight in year three
+
+Rainfall-to-yield correlation needs years and is badly confounded. Actionable
+immediately: **is the ground workable** (recent rain blocks haying and tillage),
+**GDD → maturity prediction**, and drought triggers for destocking. The
+correlation pays off in year three but collection must start in slice one, and
+it is free.
+
+### Planning tools
+
+> **A farm planning tool that doesn't end in dollars is a toy.** Every planning
+> question the founder named is a capital allocation question, and the books are
+> already here. This is the platform's edge: everyone else building farm software
+> is a farmer or a developer.
+
+**Water system planning** is the pilot's stated ask and its biggest pain — water
+is hauled daily, which means **the rotation is constrained by truck access, not
+by grass.** That reframes it: the water system is not an efficiency project, it
+is what would let rest drive the rotation. Its ROI is unusually clean (labour
+hours saved, daily, forever), and it is a **hard gate on 10×** — nobody hauls
+water to 200 paddocks.
+
+What is genuinely computable from data already held: demand (≈1–2 gal per 100 lb
+per day × known lots and weights), coverage against zone polygons, layout via
+minimum spanning tree over hydrant points, and gravity-vs-pumped from elevation.
+**Where to stop: this is planning support, not engineering.** Pipe sizing,
+friction loss and pump selection are somebody's stamped design and the liability
+is not ours to carry.
+
+**The planner works per-parcel, not per-farm** — you generally cannot run pipe
+across ground you do not control, so non-contiguous parcels may need independent
+sources. The summer parcel pays back first.
+
+Others worth building, ranked:
+
+| Tool | Why it earns its place |
+| --- | --- |
+| **Winter feed budget** | Highest-anxiety question a grazier has, simplest math, currently done on a napkin |
+| **Carrying capacity** | Decides everything downstream |
+| **Paddock count for target rest** | Turns "how much polywire do I buy" into arithmetic. Would have caught the pilot's shortfall on day one |
+| **Water layout + source** | Above |
+| **Enterprise add/drop** | Pure accounting; the one nobody else can build |
+| **Break-even pricing** | What must I charge per lb to hit target margin |
+| **Buy vs custom-hire equipment** | Same shape as well-vs-pond |
+
+Lower: lane/access planning, shade placement, manure capacity, rotation with
+nitrogen credits, succession scheduling.
+
+**Two warnings.** Planning tools are where farm software goes to die — they demo
+beautifully and get abandoned, because a planner is only as good as the
+operational record beneath it. Build operations first, planning second, but
+design the operational model *knowing* they are coming. And **do not create a
+`planning` pack yet**: each planner attaches to the pack owning its physical
+model (water → `land`, feed budget → `livestock`). Extract the shared
+capital-comparison shape when there are three examples, not one.
+
+### UI scale
+
+20 paddocks now, ~200 at 10×. **List-first with a map view.** The map is genuinely
+useful for a strip grazer thinking about where the herd goes next, but it is not
+primary navigation until the count is in the hundreds — **do not gate the pack on
+the map being finished.** Water points start empty, so the constraint model must
+handle "no infrastructure anywhere" gracefully rather than assuming otherwise.
+
 ## Open questions
 
 - **Is the baking under cottage food law?** Caps what `retail` may legally list
@@ -308,9 +556,8 @@ design calls and the ones most likely to be got wrong twice:
   per-pen cost figure can be trusted.
 - **Units of measure** — head, lb, bushel, dozen, bale, ton, gallon, acre. A
   day-one decision for `inventory`, a rewrite if deferred.
-- **PostGIS or GeoJSON-in-jsonb** for zone geometry. jsonb plus a spherical area
-  formula gets ~95% of the value with no Neon extension risk; PostGIS is only
-  needed for "which zone contains this point".
+- ~~PostGIS or GeoJSON-in-jsonb~~ — **settled 2026-08-13: GeoJSON in jsonb,
+  containment and area in JS.** See the Land category design.
 - **Raised-livestock inventory accounting** is genuinely gnarly — raised animals
   have no purchase basis, and cash-basis farm accounting is unusually permissive.
   Deserves its own session, probably its own ADR.

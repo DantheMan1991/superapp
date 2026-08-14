@@ -45,6 +45,9 @@ export type LedgerErrorCode =
   | "TERM_NOT_FOUND"
   | "PAYMENT_METHOD_INVALID"
   | "PAYMENT_METHOD_TAKEN"
+  | "TAX_RATE_NAME_TAKEN"
+  | "TAX_RATE_NOT_FOUND"
+  | "TAX_RATE_INVALID"
   | "REMINDER_OFFSETS_INVALID"
   | "REMINDER_SCHEDULE_EMPTY"
   | "REMINDER_NOT_TESTABLE"
@@ -155,6 +158,10 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   TERM_NOT_FOUND: "That payment term no longer exists.",
   PAYMENT_METHOD_INVALID: "Give the payment method a name.",
   PAYMENT_METHOD_TAKEN: "That payment method already exists.",
+  TAX_RATE_NAME_TAKEN: "A tax rate already has that name.",
+  TAX_RATE_NOT_FOUND: "That tax rate no longer exists.",
+  TAX_RATE_INVALID:
+    "That tax rate is inactive or no longer exists — pick another one.",
   REMINDER_OFFSETS_INVALID:
     "That reminder schedule isn't valid — each entry is a whole number of days near the due date.",
   REMINDER_SCHEDULE_EMPTY:

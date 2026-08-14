@@ -72,7 +72,15 @@ export {
   getCashActivity,
   getGeneralLedger,
   getProfitAndLoss,
+  getTaxSummary,
 } from "./reports";
+export {
+  buildTaxSummary,
+  type TaxRateName,
+  type TaxSummaryInvoice,
+  type TaxSummaryRateRow,
+  type TaxSummaryReport,
+} from "./tax-summary";
 export {
   BS_GROUP_BY_SUBTYPE,
   PNL_SECTION_BY_SUBTYPE,

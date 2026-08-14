@@ -43,6 +43,13 @@ export const invoiceLineSchema = z.object({
     .int()
     .refine((n) => Math.abs(n) <= MAX_AMOUNT_CENTS),
   incomeAccountId: z.string().uuid(),
+  /**
+   * Whether the invoice's rate applies to this line. Optional so every
+   * existing caller — and every `recurring_entries.template` written before
+   * tax existed — still validates; absent means untaxed, which is what those
+   * invoices charged.
+   */
+  isTaxable: z.boolean().optional(),
   dimensionMemberIds: z.array(z.string().uuid()).max(10).optional(),
 });
 
@@ -50,17 +57,28 @@ export type InvoiceLineInput = z.infer<typeof invoiceLineSchema>;
 
 export function computeLineAmounts(
   lines: InvoiceLineInput[],
-): Array<InvoiceLineInput & { amountCents: number }> {
+): Array<InvoiceLineInput & { amountCents: number; isTaxable: boolean }> {
   return lines.map((l) => ({
     ...l,
     amountCents: lineAmountCents(
       parseQuantityHundredths(l.quantity)!,
       l.unitPriceCents,
     ),
+    // Normalized here so nothing downstream has to decide what `undefined`
+    // means about a line's taxability.
+    isTaxable: l.isTaxable === true,
   }));
 }
 
-export function invoiceTotalCents(lines: Array<{ amountCents: number }>): number {
+/**
+ * Σ line amounts — the invoice SUBTOTAL, before tax.
+ *
+ * Renamed from `invoiceTotalCents` on 2026-08-13: the name stopped being true
+ * the moment an invoice could carry tax, and a helper called "total" returning
+ * the pre-tax figure is exactly the kind of thing a later change reads wrong.
+ * The gross total is `invoiceTaxTotals(...).totalCents` in `tax.ts`.
+ */
+export function invoiceSubtotalCents(lines: Array<{ amountCents: number }>): number {
   return lines.reduce((s, l) => s + l.amountCents, 0);
 }
 

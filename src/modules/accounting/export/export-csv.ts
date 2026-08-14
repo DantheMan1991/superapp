@@ -25,9 +25,11 @@ import type {
   Reconciliation,
   ReconciliationLine,
   RecurringEntry,
+  SalesTaxRate,
   Vendor,
 } from "@/db/schema";
 import { preferredContactValue } from "@/lib/parties/contact-values";
+import { formatRatePpm } from "../invoicing/tax";
 
 /**
  * Full-books export: pure per-table CSV builders (the testable seam).
@@ -70,6 +72,7 @@ export interface BooksData {
   invoices: Invoice[];
   invoiceLines: InvoiceLine[];
   invoicePayments: InvoicePayment[];
+  salesTaxRates: SalesTaxRate[];
   recurringEntries: RecurringEntry[];
   vendors: Vendor[];
   bills: Bill[];
@@ -281,15 +284,25 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     ),
   );
 
+  const taxRateName = (id: string | null) =>
+    id ? (data.salesTaxRates.find((r) => r.id === id)?.name ?? id) : "";
+
   files.push(
     file(
       "sales/invoices.csv",
       "Invoices",
-      ["id", "invoice_number", "customer", "status", "issue_date", "due_date", "memo", "total", "journal_entry_id"],
+      // `total` stays where it was and still means what the customer owes;
+      // `subtotal` and `sales_tax` are appended, so a process that reads this
+      // file by position is unaffected. `tax_rate_percent` is the rate AS
+      // CHARGED, from the invoice rather than from the rate list, so an
+      // exported invoice states its own arithmetic.
+      ["id", "invoice_number", "customer", "status", "issue_date", "due_date", "memo", "total", "journal_entry_id", "subtotal", "sales_tax", "tax_rate", "tax_rate_percent"],
       data.invoices.map((i) => [
         i.id, i.invoiceNumber, custName(i.customerId), i.status,
         i.issueDate, i.dueDate ?? "", i.memo, money(i.totalCents),
         i.journalEntryId ?? "",
+        money(i.subtotalCents), money(i.taxCents),
+        taxRateName(i.taxRateId), i.taxRateId ? formatRatePpm(i.taxRatePpm) : "",
       ]),
     ),
   );
@@ -298,11 +311,23 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "sales/invoice_lines.csv",
       "Invoice lines",
-      ["id", "invoice_number", "line_no", "description", "quantity", "unit_price", "amount", "income_account_code"],
+      ["id", "invoice_number", "line_no", "description", "quantity", "unit_price", "amount", "income_account_code", "taxable"],
       data.invoiceLines.map((l) => [
         l.id, invoiceById.get(l.invoiceId)?.invoiceNumber ?? l.invoiceId,
         String(l.lineNo), l.description, l.quantity, money(l.unitPriceCents),
-        money(l.amountCents), acctCode(l.incomeAccountId),
+        money(l.amountCents), acctCode(l.incomeAccountId), String(l.isTaxable),
+      ]),
+    ),
+  );
+
+  files.push(
+    file(
+      "sales/sales_tax_rates.csv",
+      "Sales tax rates",
+      ["id", "name", "rate_percent", "is_default", "active"],
+      data.salesTaxRates.map((r) => [
+        r.id, r.name, formatRatePpm(r.ratePpm), String(r.isDefault),
+        String(r.isActive),
       ]),
     ),
   );

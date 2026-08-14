@@ -26,20 +26,25 @@ import {
   createPaymentMethodAction,
   createPaymentTermAction,
   createProductAction,
+  createSalesTaxRateAction,
   restoreCatalogueDefaultsAction,
   setDefaultPaymentTermAction,
+  setDefaultSalesTaxRateAction,
   setPaymentMethodActiveAction,
   setPaymentTermActiveAction,
   setProductActiveAction,
+  setSalesTaxRateActiveAction,
+  updateSalesTaxRateAction,
 } from "@/modules/accounting/invoicing/catalogue-actions";
 import { parseMoneyToCents } from "@/modules/accounting/lib/money";
 import { MAX_DUE_IN_DAYS } from "@/modules/accounting/invoicing/terms";
+import { parseRatePercentToPpm, formatRatePpm } from "@/modules/accounting/invoicing/tax";
 
 /**
- * Editing the three reference lists.
+ * Editing the four reference lists.
  *
  * Deactivate rather than delete throughout, and the reason is on the page: a
- * saved item or a term may be named on records that already exist, and
+ * saved item, a term or a rate may be named on records that already exist, and
  * removing the row would rewrite what those records meant.
  */
 
@@ -209,7 +214,7 @@ export function ActiveToggle({
   id: string;
   version: number;
   active: boolean;
-  kind: "product" | "term" | "method";
+  kind: "product" | "term" | "method" | "taxRate";
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -222,7 +227,9 @@ export function ActiveToggle({
           ? await setProductActiveAction(args)
           : kind === "term"
             ? await setPaymentTermActiveAction(args)
-            : await setPaymentMethodActiveAction(args);
+            : kind === "taxRate"
+              ? await setSalesTaxRateActiveAction(args)
+              : await setPaymentMethodActiveAction(args);
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -391,4 +398,134 @@ export function AddMethodButton() {
 
 export function DefaultBadge() {
   return <Badge variant="outline">default</Badge>;
+}
+
+/* -- sales tax rates ------------------------------------------------------ */
+
+export function MakeDefaultRateButton({ rateId }: { rateId: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const result = await setDefaultSalesTaxRateAction({ rateId });
+          if ("error" in result) {
+            toast.error(result.error);
+            return;
+          }
+          toast.success("Default tax rate updated");
+          router.refresh();
+        })
+      }
+    >
+      <Star className="mr-1 size-3.5" /> Make default
+    </Button>
+  );
+}
+
+/**
+ * Add or edit a rate. One dialog for both, because the fields are identical
+ * and the only difference is which action it calls.
+ */
+export function TaxRateDialogButton({
+  rate,
+}: {
+  /** Absent = adding. Present = editing that rate. */
+  rate?: { id: string; name: string; ratePpm: number; version: number };
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [form, setForm] = useState({
+    name: rate?.name ?? "",
+    percent: rate ? formatRatePpm(rate.ratePpm) : "",
+  });
+
+  function submit() {
+    const ppm = parseRatePercentToPpm(form.percent);
+    if (ppm === null) {
+      toast.error("Enter a percentage from 0 to 100, up to four decimals");
+      return;
+    }
+    startTransition(async () => {
+      const payload = { name: form.name.trim(), ratePpm: ppm };
+      const result = rate
+        ? await updateSalesTaxRateAction({
+            rateId: rate.id,
+            expectedVersion: rate.version,
+            patch: payload,
+          })
+        : await createSalesTaxRateAction(payload);
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(rate ? "Tax rate updated" : "Tax rate added");
+      setOpen(false);
+      if (!rate) setForm({ name: "", percent: "" });
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant={rate ? "ghost" : "outline"}
+        onClick={() => setOpen(true)}
+      >
+        {rate ? (
+          "Edit"
+        ) : (
+          <>
+            <Plus className="mr-1.5 size-4" /> Add tax rate
+          </>
+        )}
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {rate ? "Edit tax rate" : "Add a sales tax rate"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="rate-name">Name</Label>
+              <Input
+                id="rate-name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Ohio state and county"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rate-percent">Rate %</Label>
+              <Input
+                id="rate-percent"
+                value={form.percent}
+                onChange={(e) => setForm({ ...form, percent: e.target.value })}
+                inputMode="decimal"
+                placeholder="7.25"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {rate
+              ? "Changing the rate applies to invoices written from now on. Invoices already issued keep the rate they charged."
+              : "Combine state, county and city into one rate if you remit them together. Up to four decimal places."}
+          </p>
+          <DialogFooter>
+            <Button onClick={submit} disabled={pending || !form.name.trim()}>
+              {pending ? "Saving…" : rate ? "Save rate" : "Add tax rate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }

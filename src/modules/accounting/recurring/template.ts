@@ -58,6 +58,18 @@ export const recurringInvoiceTemplateSchema = z.object({
   lines: z.array(invoiceLineSchema).min(1).max(100),
   memo: z.string().trim().max(2000).optional(),
   dueInDays: z.number().int().min(0).max(365),
+  /**
+   * The tax rate generated invoices carry. OPTIONAL, so every template written
+   * before sales tax existed still validates — a template that stopped parsing
+   * would silently stop generating, which is the worst available failure for a
+   * monthly invoice.
+   *
+   * The rate ID is stored, not the ppm: a template is a standing instruction
+   * ("bill this at the state rate"), so a rate correction SHOULD reach next
+   * month's invoice. That is the opposite of an issued invoice, which freezes.
+   * The generated invoice then freezes it, as any other invoice does.
+   */
+  taxRateId: z.string().uuid().nullable().optional(),
 });
 
 export const recurringEntryTemplateSchema = z.discriminatedUnion("kind", [

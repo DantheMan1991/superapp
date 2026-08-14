@@ -1,17 +1,22 @@
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { PaymentMethod, PaymentTerm, Product } from "@/db/schema";
+import type {
+  PaymentMethod,
+  PaymentTerm,
+  Product,
+  SalesTaxRate,
+} from "@/db/schema";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { codeFromName } from "./payment-method-code";
 
 /**
- * The three reference lists: what the business sells, when it expects to be
- * paid, and how the money arrived.
+ * The four reference lists: what the business sells, when it expects to be
+ * paid, how the money arrived, and what tax it charges.
  *
- * All three follow the `customers.ts` shape — owner-gated writes, optimistic
+ * All four follow the `customers.ts` shape — owner-gated writes, optimistic
  * `version` compare-and-increment, deactivate rather than delete. Deactivation
- * matters more here than elsewhere: a product or a term may be named on
+ * matters more here than elsewhere: a product, a term or a rate may be named on
  * historic records, and removing the row would rewrite what those records
  * meant.
  */
@@ -325,6 +330,151 @@ export async function setPaymentMethodActive(
     .returning();
   if (rows.length === 0) {
     throw new LedgerError("STALE_VERSION", "payment method changed since loaded");
+  }
+  return rows[0];
+}
+
+/* -- sales tax rates ------------------------------------------------------ */
+
+export async function listSalesTaxRates(
+  tx: Tx,
+  tenantId: string,
+  opts: { activeOnly?: boolean } = {},
+): Promise<SalesTaxRate[]> {
+  return tx.query.salesTaxRates.findMany({
+    where: opts.activeOnly
+      ? and(
+          eq(schema.salesTaxRates.tenantId, tenantId),
+          eq(schema.salesTaxRates.isActive, true),
+        )
+      : eq(schema.salesTaxRates.tenantId, tenantId),
+    orderBy: asc(schema.salesTaxRates.name),
+  });
+}
+
+export async function createSalesTaxRate(
+  tx: Tx,
+  ctx: LedgerCtx,
+  input: { name: string; ratePpm: number },
+): Promise<SalesTaxRate> {
+  requireOwnerRole(ctx);
+  const existing = await listSalesTaxRates(tx, ctx.tenantId);
+  const rows = await tx
+    .insert(schema.salesTaxRates)
+    .values({
+      tenantId: ctx.tenantId,
+      name: input.name,
+      ratePpm: input.ratePpm,
+      // The first rate a tenant creates becomes the default, because a list of
+      // one with nothing selected is a control that does nothing. Later ones
+      // do not, so adding a second rate never silently re-points the first.
+      isDefault: existing.length === 0,
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (rows.length === 0) {
+    throw new LedgerError("TAX_RATE_NAME_TAKEN", "a tax rate already has that name");
+  }
+  return rows[0];
+}
+
+/**
+ * Rename a rate, or correct its number.
+ *
+ * CHANGING THE RATE DOES NOT TOUCH ANY EXISTING INVOICE. `invoices.tax_rate_ppm`
+ * is a copy taken at write time, so a rate that goes from 7% to 7.25% applies
+ * to what is written next and leaves every issued document — and every entry
+ * posted from one — exactly as it was.
+ */
+export async function updateSalesTaxRate(
+  tx: Tx,
+  ctx: LedgerCtx,
+  args: {
+    rateId: string;
+    expectedVersion: number;
+    patch: { name: string; ratePpm: number };
+  },
+): Promise<SalesTaxRate> {
+  requireOwnerRole(ctx);
+  const rows = await tx
+    .update(schema.salesTaxRates)
+    .set({
+      name: args.patch.name,
+      ratePpm: args.patch.ratePpm,
+      version: args.expectedVersion + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.salesTaxRates.tenantId, ctx.tenantId),
+        eq(schema.salesTaxRates.id, args.rateId),
+        eq(schema.salesTaxRates.version, args.expectedVersion),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) {
+    throw new LedgerError("STALE_VERSION", "tax rate changed since loaded");
+  }
+  return rows[0];
+}
+
+/** Clear-then-set in the caller's tx — the partial unique needs that order. */
+export async function setDefaultSalesTaxRate(
+  tx: Tx,
+  ctx: LedgerCtx,
+  args: { rateId: string },
+): Promise<void> {
+  requireOwnerRole(ctx);
+  await tx
+    .update(schema.salesTaxRates)
+    .set({ isDefault: false, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.salesTaxRates.tenantId, ctx.tenantId),
+        eq(schema.salesTaxRates.isDefault, true),
+      ),
+    );
+  const rows = await tx
+    .update(schema.salesTaxRates)
+    .set({ isDefault: true, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.salesTaxRates.tenantId, ctx.tenantId),
+        eq(schema.salesTaxRates.id, args.rateId),
+      ),
+    )
+    .returning({ id: schema.salesTaxRates.id });
+  if (rows.length === 0) {
+    throw new LedgerError("TAX_RATE_NOT_FOUND", "no such tax rate");
+  }
+}
+
+export async function setSalesTaxRateActive(
+  tx: Tx,
+  ctx: LedgerCtx,
+  args: { rateId: string; expectedVersion: number; active: boolean },
+): Promise<SalesTaxRate> {
+  requireOwnerRole(ctx);
+  const rows = await tx
+    .update(schema.salesTaxRates)
+    .set({
+      isActive: args.active,
+      // Same reason as a payment term: a deactivated default would leave the
+      // invoice form offering a rate the owner has retired.
+      ...(args.active ? {} : { isDefault: false }),
+      version: args.expectedVersion + 1,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.salesTaxRates.tenantId, ctx.tenantId),
+        eq(schema.salesTaxRates.id, args.rateId),
+        eq(schema.salesTaxRates.version, args.expectedVersion),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) {
+    throw new LedgerError("STALE_VERSION", "tax rate changed since loaded");
   }
   return rows[0];
 }

@@ -174,6 +174,66 @@ export const paymentMethods = pgTable(
   ],
 );
 
+/**
+ * A sales tax rate the business charges, as a list the tenant owns.
+ *
+ * Deliberately FLAT — a named rate and a number, no jurisdictions and no nexus
+ * rules. Resolving a rate from a delivery address is an address-resolution
+ * product (a rate service, an agency registry, a filing calendar, economic
+ * nexus thresholds); this is the list a small business keeps in its head. When
+ * a combined rate needs splitting for a return, that is a
+ * `sales_tax_rate_components` child table and per-component tax lines, both
+ * additive to this shape.
+ *
+ * UNLIKE `payment_terms` AND `payment_methods`, NOTHING IS SEEDED. "Net 30" is
+ * a sensible default everywhere; there is no tax rate that is right anywhere,
+ * and a seeded 0% or 7% is a wrong number on somebody's invoice. A tenant with
+ * no rates simply has no tax controls, which is the correct state for most of
+ * them — so `provisionCatalogue` does not touch this table and the "Add the
+ * standard set" restore does not apply to it.
+ */
+export const salesTaxRates = pgTable(
+  "sales_tax_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /**
+     * The rate in PARTS PER MILLION of the taxable amount: 7.25% → 72_500.
+     *
+     * Basis points are not enough and that is arithmetic, not fussiness —
+     * 8.875% (New York City) is 887.5 basis points, which is not an integer.
+     * Percent × 10,000 carries four decimal places of percent, which covers
+     * every real US rate. Integer because every other number in this module is.
+     */
+    ratePpm: integer("rate_ppm").notNull(),
+    /** The one offered first on a new invoice. At most one per tenant. */
+    isDefault: boolean("is_default").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sales_tax_rates_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("sales_tax_rates_tenant_name_idx").on(t.tenantId, t.name),
+    // At most one default, enforced by the database rather than by care —
+    // the same partial unique `payment_terms` uses.
+    uniqueIndex("sales_tax_rates_tenant_default_idx")
+      .on(t.tenantId)
+      .where(sql`${t.isDefault} = true`),
+    // 0% is legitimate (a zero-rated category still wants naming); over 100%
+    // is somebody typing 725 for 7.25%.
+    check("sales_tax_rates_rate_ppm", sql`${t.ratePpm} between 0 and 1000000`),
+  ],
+);
+
 export const customers = pgTable(
   "customers",
   {
@@ -444,7 +504,42 @@ export const invoices = pgTable(
     /** Stop chasing this one invoice — a dispute, or a payment plan agreed by
      * phone. Distinct from muting the customer, which is standing. */
     remindersMuted: boolean("reminders_muted").notNull().default(false),
-    /** Denormalized Σ line amounts; recomputed in the same tx as line writes. */
+    /* ----------------------------------------------------------------------
+     * Sales tax (2026-08-13). The three columns below are FROZEN at write:
+     * they record the tax this invoice charges, not a live view of the rate.
+     * Editing or deactivating a rate afterwards must never re-price a document
+     * somebody has already been sent, and must never make the invoice on
+     * screen disagree with the entry in the ledger.
+     * -------------------------------------------------------------------- */
+    /** Which rate was chosen. Null = no tax on this invoice. */
+    taxRateId: uuid("tax_rate_id"),
+    /**
+     * The rate AS APPLIED, copied rather than referenced. This is the freeze:
+     * `sales_tax_rates.rate_ppm` may change tomorrow, and this invoice still
+     * means what it meant. See salesTaxRates for what ppm is.
+     */
+    taxRatePpm: integer("tax_rate_ppm").notNull().default(0),
+    /** Σ taxable line amounts × the rate, rounded ONCE (invoicing/tax.ts). */
+    taxCents: bigint("tax_cents", { mode: "number" }).notNull().default(0),
+    /** Σ line amounts, before tax. */
+    subtotalCents: bigint("subtotal_cents", { mode: "number" })
+      .notNull()
+      .default(0),
+    /**
+     * What the customer owes: `subtotal_cents + tax_cents`.
+     *
+     * The MEANING has not changed since session 4 — it has always been the
+     * amount owed — which is why the overpayment guard, aging, the MoneyBar,
+     * reminders, the PDF balance and bank matching all keep working with tax
+     * switched on. Only the value moved.
+     *
+     * There is deliberately no `total = subtotal + tax` CHECK yet. A migration
+     * goes out AHEAD of the deploy (docs/conventions.md 4), and the previous
+     * deployment's `updateInvoiceDraft` writes `total_cents` without touching
+     * `subtotal_cents` — the constraint would reject every draft edit during
+     * the window. It lands in the follow-up migration, with the
+     * `recurring_invoices` DROP. Until then `tests/sales-tax.test.ts` pins it.
+     */
     totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
     /** The issuance entry. Null while draft; survives void (audit trail). */
     journalEntryId: uuid("journal_entry_id"),
@@ -495,7 +590,18 @@ export const invoices = pgTable(
       columns: [t.tenantId, t.recurringEntryId],
       foreignColumns: [recurringEntries.tenantId, recurringEntries.id],
     }),
+    // NO ACTION, like every other reference-list FK here: a rate named on an
+    // issued invoice may not be deleted out from under it.
+    foreignKey({
+      name: "invoices_tax_rate_fk",
+      columns: [t.tenantId, t.taxRateId],
+      foreignColumns: [salesTaxRates.tenantId, salesTaxRates.id],
+    }),
     check("invoices_total_nonnegative", sql`${t.totalCents} >= 0`),
+    // Safe in the same migration as the column: the previous deployment never
+    // writes this, and its DEFAULT 0 satisfies the constraint. The
+    // total = subtotal + tax CHECK is not, and waits for the follow-up.
+    check("invoices_tax_nonnegative", sql`${t.taxCents} >= 0`),
   ],
 );
 
@@ -517,6 +623,19 @@ export const invoiceLines = pgTable(
     unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
     /** App-computed round(quantity × unitPrice); 0 = posts nothing. */
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    /**
+     * Whether the invoice's tax rate applies to THIS line.
+     *
+     * One rate per invoice, taxability per line — the split that lets a trade
+     * bill exempt labour and taxed materials on one document, which is the
+     * common case wherever services are exempt and goods are not. It is a
+     * boolean rather than a second rate on purpose: two rates on one invoice is
+     * a different feature (per-component tax lines) and this is not half of it.
+     *
+     * DEFAULT false so every line that existed before tax did reads as
+     * untaxed, which is what those invoices charged.
+     */
+    isTaxable: boolean("is_taxable").notNull().default(false),
     incomeAccountId: uuid("income_account_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -773,3 +892,5 @@ export type Product = typeof products.$inferSelect;
 export type PaymentTerm = typeof paymentTerms.$inferSelect;
 
 export type PaymentMethod = typeof paymentMethods.$inferSelect;
+
+export type SalesTaxRate = typeof salesTaxRates.$inferSelect;

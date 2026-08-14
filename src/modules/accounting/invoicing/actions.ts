@@ -181,6 +181,10 @@ const draftInputSchema = z.object({
   issueDate: dateStr,
   dueDate: dateStr.nullable().optional(),
   memo: z.string().trim().max(2000).optional(),
+  /** Null = no tax. The rate itself is validated against the tenant's own
+   * list inside the transaction, so one deactivated mid-flight cannot slip
+   * between the check and the write. */
+  taxRateId: z.string().uuid().nullable().optional(),
   lines: z.array(invoiceLineSchema).min(1).max(100),
 });
 

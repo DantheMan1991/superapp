@@ -20,7 +20,17 @@ export interface InvoicePdfInput {
   issueDate: string;
   dueDate: string | null;
   memo: string;
+  /** Gross: subtotal + tax. What the customer owes. */
   totalCents: number;
+  /**
+   * Σ line amounts, before tax. Optional so the many fixtures and callers
+   * predating sales tax still typecheck; absent means "no tax on this
+   * invoice", which is what those invoices charged.
+   */
+  subtotalCents?: number;
+  taxCents?: number;
+  /** "Sales Tax (7.25%)" — built by the caller from the FROZEN rate. */
+  taxLabel?: string;
   paidCents: number;
   customerName: string;
   /** Free-text postal address as captured on the customer. */
@@ -50,6 +60,18 @@ export interface InvoicePdfModel {
   dueDate: string | null;
   billTo: string[];
   rows: InvoicePdfRow[];
+  subtotal: string;
+  tax: string;
+  taxLabel: string;
+  /**
+   * Whether the subtotal/tax pair is printed at all.
+   *
+   * Most US states REQUIRE sales tax to be stated separately on the document,
+   * so this is not decoration — an invoice that folds tax into one total is
+   * the wrong document. Equally, printing "Tax 0.00" on an untaxed invoice
+   * implies a taxed sale that came to nothing.
+   */
+  showTax: boolean;
   total: string;
   paid: string;
   balance: string;
@@ -78,6 +100,10 @@ export function buildInvoicePdfModel(input: InvoicePdfInput): InvoicePdfModel {
     .filter((part) => part !== "");
 
   const balanceCents = input.totalCents - input.paidCents;
+  const taxCents = input.taxCents ?? 0;
+  // Falls back to the total rather than to zero: an invoice with no tax has a
+  // subtotal, and it is its total.
+  const subtotalCents = input.subtotalCents ?? input.totalCents;
 
   return {
     businessName: input.businessName,
@@ -97,6 +123,10 @@ export function buildInvoicePdfModel(input: InvoicePdfInput): InvoicePdfModel {
         unitPrice: formatCents(l.unitPriceCents),
         amount: formatCents(l.amountCents),
       })),
+    subtotal: formatCents(subtotalCents),
+    tax: formatCents(taxCents),
+    taxLabel: input.taxLabel ?? "Sales Tax",
+    showTax: taxCents !== 0,
     total: formatCents(input.totalCents),
     paid: formatCents(input.paidCents),
     balance: formatCents(balanceCents),

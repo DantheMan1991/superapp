@@ -11,6 +11,7 @@ import {
   sentOffsetsFromKeys,
 } from "./reminder-email";
 import { renderReminderMessage } from "./reminder-render";
+import { invoiceTaxFields } from "./invoices";
 import {
   dueReminderOffset,
   parseOffsets,
@@ -307,11 +308,26 @@ export async function runInvoiceReminders(
               ),
               orderBy: (l, { asc }) => [asc(l.lineNo)],
             });
+            const invoiceRow = await tx.query.invoices.findFirst({
+              where: and(
+                eq(schema.invoices.tenantId, tenant.id),
+                eq(schema.invoices.id, d.invoiceId),
+              ),
+              columns: {
+                taxRateId: true,
+                taxRatePpm: true,
+                taxCents: true,
+                subtotalCents: true,
+              },
+            });
             return {
               due: d,
               to: preferredContactValue(contacts, "email") ?? "",
               customerAddress: customer?.address ?? "",
               customerEmail: preferredContactValue(contacts, "email") ?? "",
+              tax: invoiceRow
+                ? await invoiceTaxFields(tx, tenant.id, invoiceRow)
+                : { subtotalCents: d.totalCents, taxCents: 0, taxLabel: "Sales Tax" },
               lines: lines.map((l) => ({
                 description: l.description,
                 quantity: l.quantity,
@@ -345,6 +361,7 @@ export async function runInvoiceReminders(
             businessName: work.businessName,
             customerAddress: item.customerAddress,
             customerEmail: item.customerEmail,
+            tax: item.tax,
             lines: item.lines,
           });
 

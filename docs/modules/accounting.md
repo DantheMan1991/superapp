@@ -13,6 +13,161 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-13 — Sales tax (branch `claude/accounting-sales-tax`)
+
+The largest remaining gap from the 2026-08-10 QuickBooks review, and greenfield
+inside a mature module — `grep salesTax` returned nothing before this. Migrations
+`0123` (table + columns + backfill) and `0124` (RLS), both applied to dev AND
+production, and both verified with `verify-rls.ts` plus a column/constraint dump,
+before the PR opened.
+
+- **A FLAT tenant-owned rate list, `payment_terms`' fourth sibling.** No
+  jurisdictions and no nexus rules: resolving a rate from a delivery address is
+  an address-resolution product — a rate service, an agency registry, a filing
+  calendar, economic-nexus thresholds — and Simple Start, the benchmark, does not
+  give the founder's own file much of it. The upgrade path if it ever matters is
+  a `sales_tax_rate_components` child table plus per-component tax lines, both
+  additive to this shape.
+- **NOTHING IS SEEDED, unlike the other three lists.** "Net 30" is a sensible
+  default everywhere; there is no tax rate that is right anywhere, and a seeded
+  0% or 7% is a wrong number on somebody's invoice. `provisionCatalogue` does not
+  touch the table and the "Add the standard set" restore does not apply to it. A
+  tenant with no rates simply has no tax controls, which is the correct state for
+  most of them. The FIRST rate a tenant creates becomes the default, because a
+  list of one with nothing selected is a control that does nothing.
+- **`rate_ppm`, not basis points, and that is arithmetic rather than fussiness.**
+  8.875% (New York City) is 887.5 basis points, which is not an integer. Percent
+  × 10,000 carries four decimal places of percent and covers every real US rate.
+- **ONE RATE PER INVOICE, TAXABILITY PER LINE.** `invoice_lines.is_taxable` is
+  the split that lets a trade bill exempt labour and taxed materials on one
+  document — the common case wherever services are exempt and goods are not. A
+  boolean rather than a second rate on purpose: two rates on one invoice is a
+  different feature and this is not half of it.
+- **The tax block on the invoice is FROZEN at write.** `tax_rate_ppm` is a COPY
+  of the rate, not a reference, so editing a rate tomorrow cannot re-price a
+  document already sent and cannot make the invoice disagree with the entry
+  posted from it. Pinned by a DB test that moves a rate from 7.25% to 10% and
+  asserts the issued invoice, its stored tax and its ledger balance are all
+  unchanged. Derived-at-read was never a candidate for exactly this reason.
+- **`total_cents` becomes the GROSS, and that is the point.** It has always meant
+  "what the customer owes" — tax changes the value, not the meaning. That is what
+  makes ~45 call sites correct with no edit: the overpayment guard, aging, the
+  MoneyBar, reminders, the PDF balance, bank matching. Its `>= 0` CHECK is
+  untouched. A test pays the subtotal of a taxed invoice and confirms it does
+  *not* settle, and that paying the gross does.
+- **The `total = subtotal + tax` CHECK is DELIBERATELY NOT in `0123`.** Migrations
+  go out ahead of the deploy, and the running `updateInvoiceDraft` writes
+  `total_cents` without touching `subtotal_cents` — the constraint would reject
+  every draft edit in the window. It belongs with the follow-up migration
+  alongside the `recurring_invoices` DROP. Until then `tests/sales-tax-db.test.ts`
+  asserts the invariant over every stored invoice. `tax_cents >= 0` IS safe in
+  `0123`, because nothing before this deploy writes the column and its default
+  satisfies it.
+- **`subtotal_cents` is backfilled in `0123`, not left on its DEFAULT 0.** Every
+  invoice that exists charges no tax, so its subtotal is its total; a column that
+  reads as a real figure and is wrong is worse than one that is absent. Guarded
+  by `tax_cents = 0`, so a re-run is a no-op. Verified on production: 4 invoices,
+  4 with subtotal = total, zero rows where subtotal + tax ≠ total.
+- **Issuing adds ONE credit line, found by SUBTYPE `sales_tax`** — never by the
+  2200 the template happens to use, since a tenant may have renumbered. Looked up
+  only when tax ≠ 0, so a tenant who removed the account and never charges tax is
+  unaffected. The tax figure is RECOMPUTED at issue from the frozen lines and the
+  frozen rate rather than read off the column, so the entry and the document
+  cannot disagree, and the recomputed value is written back — issuance is
+  self-healing for any row a write path left stale.
+- **The tax line carries NO DIMENSION**, deliberately. A dimension answers "which
+  part of the business earned this", and this line is not earnings.
+- **Partial payment and void needed no code at all.** Accrual puts the whole
+  liability in 2200 at issue, so a payment stays Dr deposit / Cr AR; `voidInvoice`
+  already reverses the entire issuance entry. Both are pinned by tests rather
+  than assumed.
+- **Cash basis came free, and that is worth knowing before somebody "fixes" it.**
+  `cashBasisAdjustment` excludes only the AR/AP control leg and pro-rata-recognises
+  every *other* line of the document — the tax credit is one of those — so on a
+  cash-basis report the liability lands proportionally as payments arrive.
+  `cash-basis-allocate.ts` needed no change.
+- **ROUNDING HAPPENS ONCE, ON THE SUMMED TAXABLE BASE.** Per-line rounding
+  accumulates and produces a tax figure that does not equal rate × base, which is
+  both the number a customer checks with a calculator and the number a return
+  asks for. Three lines of $0.10 at 5% is 2 cents here and 3 cents per-line; a
+  test asserts the difference rather than describing it.
+- **BigInt intermediates, forced not stylistic.** `MAX_AMOUNT_CENTS` is 1e13 and
+  the scale is 1e6, so the product reaches 1e19, past `Number.MAX_SAFE_INTEGER`
+  — where the answer would be quietly wrong rather than loudly. Second place in
+  the module to need it after `cash-basis-allocate.ts`, and it hit the same trap:
+  BigInt LITERALS (`2n`) need an ES2020 target and this tsconfig is lower, so it
+  is `BigInt(2)`.
+- **`invoicing/tax.ts` is pure, no `server-only`**, for the reason `terms.ts` is:
+  the builder computes the tax in the browser as you type and the server
+  recomputes it on save, and two implementations of one rule is how those come to
+  disagree. 34 table tests, no database.
+- **`invoiceTotalCents` → `invoiceSubtotalCents`.** The name stopped being true
+  the moment an invoice could carry tax, and a helper called "total" returning the
+  pre-tax figure is what a later change reads wrong. Same move as
+  `perMemberCents` → `perColumnCents`.
+- **The P&L exclusion was already free — WHICH IS WHY IT IS NOW PINNED.**
+  `sales_tax` is absent from `PNL_SECTION_BY_SUBTYPE` and a liability matches
+  neither fallthrough branch, so `pnlSectionFor` returns null. Nothing would have
+  noticed somebody adding a line to that map. Three tests: the account maps to no
+  P&L section at any code or name, and end to end a 157,250 invoice shows 150,000
+  of income and a net profit of 150,000 with no tax row anywhere on the statement.
+- **The tax summary is the eighth report and the only one built from DOCUMENTS.**
+  The ledger knows what you owe and ties to the balance sheet; the invoices know
+  the taxable base a return asks for. Neither is honest alone, so it carries both
+  and **states the difference**. A non-zero difference is NORMAL — earlier
+  periods' unremitted tax sits in the balance — and the page says so, because the
+  alternative is a reader treating it as a fault. **Accrual only**, stamped on the
+  report: a cash-basis version means pro-rating each invoice's tax across its
+  payments per rate, which is a feature rather than a toggle, and a return
+  computed on the wrong basis is not slightly wrong. Third report to refuse a
+  basis control, third distinct reason.
+- **No division in the report (P5).** The first cut recovered the taxable base by
+  dividing tax by rate; it was approximate wherever the tax had been rounded,
+  which is the wrong trade when the exact figure is one `filter (where is_taxable)`
+  sum away. The tax is the authority, the base is summed from the frozen lines.
+- **`ReminderRenderContext.tax` is REQUIRED, not optional.** An optional field is
+  one a caller can forget, and the symptom would be a chasing letter whose
+  attached invoice omits the tax being chased for. `invoiceTaxFields` is the one
+  resolver the PDF route, the send path and both reminder paths call — the same
+  rule `reminder-render.ts` itself exists for.
+- **Subtotal and tax on the PDF are not decoration.** Most US states require sales
+  tax stated separately on the document, so an invoice folding it into one total
+  is the wrong document. They appear only when there IS tax; "Tax 0.00" implies a
+  taxed sale that came to nothing.
+- **Recurring invoice templates store the rate ID, not the ppm**, and that
+  inverts the invoice's freeze on purpose: a template is a standing instruction
+  ("bill this at the state rate"), so a rate correction *should* reach next
+  month's invoice — which then freezes it like any other. Optional in the schema,
+  so every template written before today still validates; one that stopped
+  parsing would silently stop generating.
+- **The books export gains `sales/sales_tax_rates.csv`**, four columns on
+  `invoices.csv` and `taxable` on `invoice_lines.csv`. The new invoice columns are
+  APPENDED, so a process reading that file by position is unaffected.
+- Isolation gains four cases: the unscoped select, an insert attributed to the
+  other tenant, an UPDATE of the other tenant's rate (the write half — one tenant
+  must not be able to change what another charges), and the composite FK refusing
+  an invoice that names the other tenant's rate.
+- **Not built, all deliberate:** tax on BILLS (tax paid a vendor is part of the
+  expense in the US; the regime where it matters is VAT/GST, which is a different
+  posting model and half of it would be worse than none — note
+  `ai/extract-validate.ts` has pulled `taxCents` off receipts since session 5 and
+  nothing has ever needed it); a customer-level default rate and a tax-exempt
+  flag; a one-click "record a tax payment" against 2200 (remit with a journal or
+  a bill, both of which already work, and the summary shows the balance); and
+  cash-basis tax.
+- **Turning tax ON ticks every line; turning it off leaves the flags alone.**
+  Found by reasoning through the empty-default case rather than by a test:
+  a tenant with rates but no *default* picks one and would have watched the tax
+  read 0.00 with every line unticked — the control appearing to do nothing.
+  Choosing a rate means "tax this invoice"; the per-line flag is for the
+  exceptions. The asymmetry on the way back is what makes switching to a rate
+  and back non-destructive.
+- **Nobody has clicked any of this.** Compiled, built, and proven against a real
+  database — 15 DB cases and 34 pure ones. The routes were driven far enough to
+  confirm they resolve (`/reports/sales-tax` answers 307 to `/sign-in`), which is
+  as far as an agent session gets: the page bodies execute only behind a Clerk
+  session. Compiled-and-tested, not seen, per the standing note in Open items.
+
 ### 2026-08-12 — Every confirmation is a real dialog now (branch `claude/accounting-confirm-dialogs`)
 
 Accounting held the only five `window.confirm` calls in the codebase, and they
@@ -747,6 +902,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `period_closes`, `close_notes` | S7 | Month-end close |
 | `recurring_entries` | 2026-08-12 | **The** recurrence table: invoices, bills and journals. `kind` discriminates the jsonb `template`; two CHECKs pin the shape (`party_shape` — a bill has a vendor, an invoice a customer, a journal neither; and `auto_post_shape` — only a journal may post itself). `invoices.recurring_entry_id` records which template made a row |
 | `products`, `payment_terms`, `payment_methods` | 2026-08-12 | The catalogue: saved invoice lines, named terms (`due_in_days`, one default per tenant by partial unique index), and the tenant-owned payment-method list. `invoice_payments.method` stores a method's CODE with **no FK** — deactivating a method must never rewrite a posted payment. `customers.payment_terms_id` (nullable = use the default) |
+| `sales_tax_rates` | 2026-08-13 | The fourth reference list, and the only one **not seeded** — there is no rate that is right anywhere. `rate_ppm` is percent × 10,000 (8.875% = 88,750), because basis points cannot express a real US rate. One default per tenant by partial unique index. `invoices` gained `tax_rate_id` (composite FK, NO ACTION), `tax_rate_ppm` (**a frozen copy**, so a rate change never re-prices an issued invoice), `tax_cents` and `subtotal_cents`; `invoice_lines` gained `is_taxable`. `total_cents` is now the GROSS and still means what it always did — what the customer owes. The `total = subtotal + tax` CHECK waits for the follow-up migration (`0123`'s header says why) |
 
 All tables: `tenant_id`, FORCE RLS. Isolation coverage is split by area, one file
 per area under `tests/isolation/` — `accounting.test.ts` (core ledger),
@@ -761,6 +917,15 @@ sentence rather than leaving it aspirational.
 - `src/modules/accounting/` — `core/` (posting engine, reports, reconciliation), `banking/`, `invoicing/`, `documents/`, `payables/`, `close/`, `export/`, `ai/` (shared engine pattern), `templates/` (COA)
 - `invoicing/reminder-render.ts` is the single place a reminder message is built — the sweep and the owner's test send both go through it, deliberately
 - `invoicing/reminder-schedule.ts` and `invoicing/reminder-email.ts` are **pure** for the same reason, and it matters most here: this is the one path that emails somebody nobody on our side chose, so proving its behaviour on a table of cases is the control. `reminder-run.ts` (the sweep) only finds rows and sends; it decides nothing
+- `invoicing/tax.ts` is **pure**, and everything that decides a tax figure is in
+  it — the rounding, the parse, the format, the taxable/exempt split. The invoice
+  builder calls it in the browser as you type and the server calls it again on
+  save, which is the same reason `terms.ts` is pure and the reason it matters
+  more here. `core/tax-summary.ts` is its report-side twin, and neither divides
+- `invoicing/invoices.ts` exports `invoiceTaxFields`, the ONE resolver for the
+  subtotal/tax/label a rendered invoice needs. The PDF route, the send path and
+  both reminder paths call it; `ReminderRenderContext.tax` is required rather
+  than optional so none of them can quietly omit the tax
 - `banking/rules-match.ts` and `banking/rules-learn.ts` are **pure** (no `server-only`) — all the deciding lives there and is table-tested without a database, exactly as `ai/*-validate.ts` is split from `ai/*-code.ts`. The rules form imports `ruleConditionsSchema` from the matcher so the client validates against the same schema the action re-validates against
 - Tenant UI under `src/app/dashboard/m/accounting/`
 - **Reports are all the same two pieces**: a pure builder in `core/report-builders.ts` (fixture-testable, no database, no division) and a thin fetch wrapper in `core/reports.ts`. `getBalances` is the one aggregate engine they share; the General Ledger is the only one that also runs its own line-level query, because it lists rather than sums
@@ -785,6 +950,10 @@ sentence rather than leaving it aspirational.
 - **A recurring template may post; an AI suggestion never may.** Same line bank rules drew: a schedule the owner wrote down and can read back is a decision, replayed. It is off by default, journals only, and it still yields to the period lock — a closed month leaves a draft and says so.
 - **Lifecycle status is stored; obligation language is rendered.** `obligationFor` is never persisted and never checked by a guard — every rule in the module still reads `status`. A derived label that started being written back would be a second source of truth for whether an invoice is paid.
 - **Reference data deactivates, never deletes, and never rewrites history.** A saved item or term may be named on records that already exist. The payment-method list goes further: it has no foreign key from `invoice_payments`, so renaming a method changes the label and nothing else — the code a payment recorded is what it recorded.
+- **A DOCUMENT freezes its rate; a TEMPLATE resolves one.** `invoices.tax_rate_ppm` is a copy taken at write, so correcting a rate leaves every issued invoice and every entry posted from one exactly as they were. A recurring template stores the rate ID instead, and re-resolves it every month, because a template is a standing instruction rather than a record of what was charged. The two are opposite on purpose; do not "make them consistent".
+- **Tax collected is never income.** It lands in the `sales_tax` account — found by SUBTYPE, never by code — and a liability reaches no P&L section, so the exclusion is structural rather than a filter somebody has to remember. It is pinned by a test anyway, because the thing that would break it is a one-line addition to `PNL_SECTION_BY_SUBTYPE` that looks harmless.
+- **Tax rounds ONCE, on the summed taxable base**, never per line. Per-line rounding produces a total that does not equal rate × base, which is the arithmetic both the customer and the return do.
+- **The tax summary reads two sources and shows the gap.** Per-rate figures come from invoices (a return's boxes), the amount owed comes from the ledger (ties to the balance sheet), and the difference is stated rather than reconciled away — it is normally non-zero, because earlier periods' unremitted tax is still in the account. Any future report combining a document view with a ledger view owes the reader the same.
 - **An AI claim about a source is checked against the source.** The thread drafter verifies every quote appears in the message it cites; an unverifiable one is shown flagged and unticked, never dropped and never presented as fact. Any future "the assistant found this in X" owes the reader the same check — a citation nobody verifies is worse than no citation, because it is believed.
 - **Anything that previews an outbound message must share the renderer that sends it.** `reminder-render.ts` exists so the test button and the nightly sweep cannot drift; a preview built by its own code path is worse than none, because it is believed. Apply the same rule to any future preview (invoice, statement, digest).
 - **Reminders overtake, they do not queue.** Only the latest applicable offset can fire, so enabling the feature over an old book sends one email per invoice rather than one per missed offset. Nothing else in the module needs this rule; it exists because the alternative loses a client on the first morning.
@@ -825,4 +994,6 @@ compiled-and-tested, not seen.
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else
 - **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **Still to do: `drizzle/0123` dropping `recurring_invoices` and `invoices.recurring_invoice_id`, which must land in a PR AFTER the fold has deployed.** What is not built for any kind: editing a template, and any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
+- **Sales tax is DONE** (2026-08-13) — a tenant-owned rate list, per-line taxability, one frozen tax block on the invoice, one Cr to the `sales_tax` account at issue, and a per-rate summary that reconciles against the ledger. Deliberately NOT built, each for a reason in the build log: **tax on bills** (US purchase tax is part of the expense; the regime where it matters is VAT/GST, a different posting model), a **customer-level default rate and tax-exempt flag** (the invoice-level control is live; this is the `resolveTaxRate` signature's obvious next argument, ~30 lines), a **one-click remittance** debiting the tax account (a journal or a bill does it today, and the summary shows the balance to remit), **cash-basis tax**, and **splitting a combined rate into components** for a return that wants state and county separately
+- **`drizzle/0125` is owed**, after this deploy: the CHECK `total_cents = subtotal_cents + tax_cents`, which could not ship in `0123` because the previously deployed `updateInvoiceDraft` writes `total_cents` without `subtotal_cents`. Natural companion to the `recurring_invoices` DROP already queued above — one contract migration, both jobs
 - ~~The last item from that review~~: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built

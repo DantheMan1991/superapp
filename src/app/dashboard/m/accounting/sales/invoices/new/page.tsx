@@ -7,6 +7,7 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
   listPaymentTerms,
   listProducts,
+  listSalesTaxRates,
 } from "@/modules/accounting/invoicing/catalogue";
 import { suggestInvoiceNumber } from "@/modules/accounting/invoicing/numbering";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
@@ -36,9 +37,12 @@ export default async function NewInvoicePage() {
       orderBy: asc(schema.accounts.code),
     });
     const suggestedNumber = await suggestInvoiceNumber(tx, ctx.tenant.id);
-    const [productRows, termRows] = await Promise.all([
+    const [productRows, termRows, taxRateRows] = await Promise.all([
       listProducts(tx, ctx.tenant.id, { activeOnly: true }),
       listPaymentTerms(tx, ctx.tenant.id, { activeOnly: true }),
+      // ACTIVE only: a retired rate must not be offered, and the server
+      // refuses one anyway (TAX_RATE_INVALID).
+      listSalesTaxRates(tx, ctx.tenant.id, { activeOnly: true }),
     ]);
     const products = productRows.map((p) => ({
       id: p.id,
@@ -53,6 +57,12 @@ export default async function NewInvoicePage() {
       dueInDays: t.dueInDays,
     }));
     const defaultTermId = termRows.find((t) => t.isDefault)?.id ?? null;
+    const taxRates = taxRateRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      ratePpm: r.ratePpm,
+    }));
+    const defaultTaxRateId = taxRateRows.find((r) => r.isDefault)?.id ?? null;
     return {
       customers,
       incomeAccounts,
@@ -60,6 +70,8 @@ export default async function NewInvoicePage() {
       products,
       terms,
       defaultTermId,
+      taxRates,
+      defaultTaxRateId,
       today: todayInTimezone(ctx.tenant.timezone),
     };
   });
@@ -89,6 +101,8 @@ export default async function NewInvoicePage() {
           products={data.products}
           terms={data.terms}
           defaultTermId={data.defaultTermId}
+          taxRates={data.taxRates}
+          defaultTaxRateId={data.defaultTaxRateId}
         />
       )}
     </div>

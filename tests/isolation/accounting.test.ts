@@ -22,6 +22,7 @@ interface AccFixture {
   invoiceId: string;
   termId: string;
   productId: string;
+  taxRateId: string;
 }
 
 d("accounting isolation (RLS + composite tenant FKs)", () => {
@@ -85,10 +86,19 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         dimensionType: "property",
         memberId: member.id,
       });
-      // The catalogue: three reference lists, one of each per tenant.
+      // The catalogue: four reference lists, one of each per tenant.
       const [term] = await tx
         .insert(schema.paymentTerms)
         .values({ tenantId, name: `Net 30 ${tag}`, dueInDays: 30, isDefault: true })
+        .returning();
+      const [taxRate] = await tx
+        .insert(schema.salesTaxRates)
+        .values({
+          tenantId,
+          name: `State ${tag}`,
+          ratePpm: 72_500,
+          isDefault: true,
+        })
         .returning();
       await tx.insert(schema.paymentMethods).values({
         tenantId,
@@ -125,7 +135,11 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
           status: "issued",
           issueDate: "2026-07-01",
           dueDate: "2026-07-15",
-          totalCents: 50_000,
+          taxRateId: taxRate.id,
+          taxRatePpm: 72_500,
+          subtotalCents: 50_000,
+          taxCents: 3_625,
+          totalCents: 53_625,
           createdByClerkUserId: `user-${tag}`,
         })
         .returning();
@@ -138,6 +152,7 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         invoiceId: invoice.id,
         termId: term.id,
         productId: product.id,
+        taxRateId: taxRate.id,
       };
     });
   }
@@ -186,6 +201,9 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
       expect(terms.every((r) => r.tenantId === tenantA)).toBe(true);
       const methods = await tx.select().from(schema.paymentMethods);
       expect(methods.every((r) => r.tenantId === tenantA)).toBe(true);
+      const taxRates = await tx.select().from(schema.salesTaxRates);
+      expect(taxRates.length).toBeGreaterThan(0);
+      expect(taxRates.every((r) => r.tenantId === tenantA)).toBe(true);
     });
   });
 
@@ -384,6 +402,51 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
     ).rejects.toThrow();
   });
 
+  it("cannot INSERT a tax rate attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.salesTaxRates).values({
+          tenantId: tenantB,
+          name: "Smuggled rate",
+          ratePpm: 10_000,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot UPDATE the other tenant's tax rate", async () => {
+    // The write half of the certification: A's context must not be able to
+    // change what B charges its customers.
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.salesTaxRates)
+        .set({ ratePpm: 1 })
+        .where(eq(schema.salesTaxRates.id, fx.b.taxRateId))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const untouched = await withTenant(tenantB, (tx) =>
+      tx.query.salesTaxRates.findFirst({
+        where: eq(schema.salesTaxRates.id, fx.b.taxRateId),
+      }),
+    );
+    expect(untouched!.ratePpm).toBe(72_500);
+  });
+
+  it("composite FK: an invoice cannot take the OTHER tenant's tax rate", async () => {
+    // tenant_id passes RLS (it is A's own), but (tenant_id, tax_rate_id) does
+    // not exist as a pair — the FK must reject it. Without this, one tenant's
+    // rate could decide another's tax.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx
+          .update(schema.invoices)
+          .set({ taxRateId: fx.b.taxRateId })
+          .where(eq(schema.invoices.id, fx.a.invoiceId)),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("no context → default deny on all accounting tables", async () => {
     const counts = await withSystem(async (tx) => {
       await tx.execute(sql`select set_config('app.role', '', true)`);
@@ -398,6 +461,7 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         tx.select().from(schema.products),
         tx.select().from(schema.paymentTerms),
         tx.select().from(schema.paymentMethods),
+        tx.select().from(schema.salesTaxRates),
       ]);
     });
     for (const rows of counts) expect(rows).toHaveLength(0);

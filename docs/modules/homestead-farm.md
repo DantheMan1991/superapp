@@ -42,6 +42,19 @@ infrastructure. The cattle **migrate by trailer between two parcels**: wintered
 on one, grazed there in spring, hauled to the summer parcel, hauled back in
 fall. Rents no ground, but renters must be supported. US-only geodata is fine.
 
+**Herd management:** pigs are **feeders bought in** (no sow, no farrowing — the
+reproductive cycle is cattle-only). **Own bull**, replaced every ~2 years to
+avoid inbreeding; **replacement heifers are kept**, not bought. **Some cattle
+are registered**, but none are in an association performance program, so
+registry is a passive record with no outbound reporting. Feed is **bagged**.
+**No scale for large animals** — cattle and pig weights come from tape or eye;
+chickens *are* weighed. Layers are **one flock**.
+
+> **The founder records nothing today.** No notebook, no spreadsheet, no phone
+> notes. This is the single most consequential fact in this dossier and it is
+> a design constraint, not a footnote — see *Cold start* under the Livestock
+> design.
+
 ### Design target: this farm and one 10× its size
 
 > Stated by the founder 2026-08-13: *"I want this application built for farms my
@@ -73,6 +86,31 @@ What it **does** break:
   below — this is the single largest consequence of the 10× target.
 
 ## Build log
+
+### 2026-08-13 — Livestock brainstormed to a design (`claude/packs-and-profiles-design`)
+- Second category taken to a design. Write-up under
+  [Category design — Livestock](#category-design--livestock-brainstormed-2026-08-13).
+- **A lot is a ledger of head, not a counter.** Head movements are events and
+  the count is their balance, so it reconciles, split/merge stop being special,
+  and the traceability trail *is* the model rather than an addition to it.
+- **The allocation runs both directions**, which is what joins `land` to
+  `livestock`: zone costs flow to the lots that grazed, animal revenue flows
+  back to the paddocks that fed it. Forage never has to be priced.
+- **Breeding herd vs market herd is an accounting event, not a checkbox** — the
+  same animal is inventory or a capital asset depending on purpose, and moving
+  between them must post. This is where the pack stops being a tracking app.
+- Genetics taken properly after the founder flagged it was thin: breed
+  composition as **fractions**, inbreeding with a specific warning (a heifer's
+  own sire is likely still present on a 2-year bull rotation), sire performance
+  across bulls, scored traits, passive registry.
+- **The AI position was corrected mid-session.** The founder pushed back on an
+  over-restrictive first take and was right: the line is not feed-versus-not, it
+  is **ask-and-orient vs compute-and-commit**. Being 10% off on "what does a pig
+  eat" costs nothing; dose and withdrawal are where precision matters.
+- **Cold start named as the constraint outranking the schema.** The founder
+  records nothing today and there is no history, so a tool valuable only in year
+  two never reaches year two. Day-one wedge chosen as *ask it things, tell it
+  things*.
 
 ### 2026-08-13 — Land brainstormed to a design (`claude/packs-and-profiles-design`)
 - First category taken past a first pass. Full write-up under
@@ -146,7 +184,7 @@ own words condensed, not reinterpreted.
 | Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | first pass |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | first pass |
-| Livestock | `livestock` pack | **yes** | **partial** — lot model + pen settled; health, breeding, feed, water, rotation still open |
+| Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) |
 | Gardens/crops | `crops` pack | **yes** | first pass |
 | Butchering | `production` pack | no | **partial** — external-conversion shape settled, nothing else |
 | Baking | `production` pack — same tables | no | not yet |
@@ -539,6 +577,282 @@ useful for a strip grazer thinking about where the herd goes next, but it is not
 primary navigation until the count is in the hundreds — **do not gate the pack on
 the map being finished.** Water points start empty, so the constraint model must
 handle "no infrastructure anywhere" gracefully rather than assuming otherwise.
+
+## Category design — Livestock (brainstormed 2026-08-13)
+
+The largest pack, and the one the pilot operation actually lives in. Earlier
+rounds already settled lots-with-lineage, the pen as cost object, the two
+processing paths and withdrawal as a legal constraint; this is the rest.
+
+### A lot is a ledger of head, not a counter
+
+Nothing writes to a `count` column. **Head movements are events and the count is
+their balance** — the ledger pattern, applied to animals.
+
+| Event | Head |
+| --- | ---: |
+| Placed (hatched / bought / born) | +70 |
+| Died | −4 |
+| Culled or sold live | −2 |
+| Transferred to another lot | −64 |
+| **Balance** | **0** |
+
+What it buys, and why it is not merely tidy:
+
+- **It reconciles.** The count can never silently disagree with its own history
+  — which is exactly the property needed when a processor's paperwork has to
+  match the farm's records for inspected meat.
+- **Split and merge stop being special.** A split is a transfer out of one lot
+  and into another, and it balances. The "promote the pigs to individuals"
+  operation falls out instead of being bespoke.
+- **Mortality rate is a query**, not a stored field: deaths ÷ placed, per lot,
+  per batch, per season.
+- **The audit trail is the model**, not something added for traceability.
+
+A materialised current count still exists for fast reads. It is derived, the way
+a balance is.
+
+### Identity: many identifiers, not one column
+
+An animal carries a visual tag, possibly an EID/RFID button, possibly an
+official metal tag. **Tags are lost and replaced while the official ID must
+persist**, and electronic-ID requirements for interstate movement have been
+tightening. So: many identifiers per animal, each typed and date-ranged. The
+official one carries the traceability chain onto processor paperwork.
+
+### The allocation runs both directions
+
+The unification between `land` and `livestock`, and the reason they were
+designed together. **Grazed forage is never priced.** Instead:
+
+1. A **zone accumulates its own costs** — rent or tax, fence maintenance,
+   mowing, seed, water infrastructure.
+2. **Grazing occupancy allocates those costs to the lots that grazed it**, by
+   head × days.
+3. **The animal's revenue allocates back across the paddocks that fed it**, by
+   the same basis.
+
+One engine, run two directions, producing both requested reports: cost per
+animal and profit per acre. No forage price ever has to be guessed, because the
+cost is measured on the land side and simply flows. If only purchased feed were
+counted, pastured beef would look impossibly cheap.
+
+### Weights are observations carrying a method
+
+| Method | Applies to | Pilot has it? |
+| --- | --- | --- |
+| Scale | Individual cattle through a chute | **no** |
+| **Sample** (weigh 10, average, × head) | Broilers | **yes** |
+| **Tape** (heart girth; pigs ≈ girth² × length ÷ 400) | Cattle, pigs | the only option |
+| Visual estimate | Anything | low confidence |
+| Body condition score (1–9) | Cattle | not weight, but the decision input |
+
+Sample size is recorded so the system knows how far to trust the number. **A
+haul distorts weights** — cattle shrink 3–5% and take days to recover, so a
+weight taken near a trailer move must not read as loss.
+
+> **Every derived cost should carry its provenance.** Broiler FCR from bagged
+> feed against sampled weights is *measured* and can be acted on. Cattle gain
+> from tape against allocated pasture cost is *estimated* and is a trend to
+> watch. Same report, different confidence — and at 10× the bagged number
+> becomes an allocated one, so the distinction is permanent, not transitional.
+
+### Health and the withdrawal guardrail
+
+A treatment records product, dose, route, date and who administered it. Its
+value is the **withdrawal clock**: the lot cannot be processed, and milk cannot
+be sold, until it clears.
+
+- **Meat and milk withdrawals differ for the same product** — two clocks.
+- Periods vary by dose, route and species, and extra-label use extends them.
+  The app carries **a default the user can override and must never present a
+  number as authoritative.** Being confidently wrong here is worse than having
+  no feature.
+- **Group treatments put the whole lot under withdrawal** — the normal case in
+  poultry, where it goes in the water.
+- Treatments allocate as cost to the lot, so a sick pen carries its own expense.
+
+### Breeding: a bull means windows, not dates
+
+With a bull running with the cows there is no known service date. The model is
+**bull exposure period → calving window**: in May 1, out Aug 1 means calves
+arrive roughly Feb 7 – May 10. Individual dates are then *refined backward* as
+evidence arrives — a preg check narrows it, the actual calving fixes it
+(conception = calving − 283).
+
+- **Where a cow calves within the window is a cull signal.** Late means she bred
+  late, and she will be later again until she is open. Free from the calving
+  record.
+- **Births create lots, parented by the dam.** Cattle create a lot of 1; a
+  farrowing would create a lot of 10. Same mechanism — the third time the lot
+  model absorbed something expected to need its own shape.
+
+### Breeding herd vs market herd is an accounting distinction
+
+**The same animal is inventory or a capital asset depending on its purpose.** A
+heifer raised for beef is inventory; kept for breeding she becomes a capital
+asset — depreciable if purchased, no basis if raised, and entirely different
+treatment on sale. The bull is a capital asset; the steers are not.
+
+**Moving an animal from the market herd to the breeding herd is therefore an
+accounting event that must post**, not a status checkbox. Most farm software
+treats it as a flag and quietly makes the books wrong. Getting this right is a
+large part of what distinguishes this pack from a tracking app.
+
+### Genetics
+
+Not genomics. Five concrete things, all of which the pilot wants tracked:
+
+- **Pedigree with multi-generation traversal** — free from birth events creating
+  parented lots.
+- **Breed composition as fractions, never a string.** Homestead cattle are
+  deliberately crossbred for hybrid vigour; "½ Angus, ¼ Hereford, ¼ Simmental"
+  is the real answer and computes automatically from the parents. A single
+  `breed` text column throws this away irrecoverably.
+- **Inbreeding coefficient** (Wright's), computed from the pedigree. **The
+  specific collision to warn on:** a heifer born this spring breeds at ~15
+  months — two summers out — and on a **2-year bull rotation her own sire is
+  likely still standing there.** That is the one that slips past, because the
+  thinking is herd-level while the risk is per-heifer. The warning must fire
+  **when the bull is turned in with the replacements**, not in a report.
+- **Sire performance across years.** One bull cannot be compared within a
+  season, but can be across them: *"Bull #2's calves weaned 40 lb heavier."* On
+  ten cows that decides whether he stays, and the bull is half the genetics of
+  every calf on the place.
+- **Trait observations, scored 1–5** — calving ease, temperament, mothering,
+  udder, feet and legs. Heritable, and what culling actually runs on. "This cow
+  always has trouble calving" *is* genetics data.
+
+**Registry** (some pilot cattle are registered, none in a performance program):
+registration number, association, registered name, papers stored in Documents.
+Selling a registered animal is a **transfer of papers** — a real workflow. Higher
+value also sharpens the capital-asset distinction above.
+
+Breed matters beyond cattle: Cornish Cross vs a slower-growing broiler is a
+completely different FCR and time to market.
+
+### Feed
+
+Largest cash cost, and **feed conversion ratio** decides the broiler enterprise.
+
+- Pilot uses **bagged** feed, so feed-per-pen is *measured* today. At 10× it
+  arrives by the ton into a bin serving many pens and becomes *allocated* by
+  head × days. Both paths must exist, and the provenance rule above says which
+  one produced a number.
+- **Waste streams are real feed** — spent grain, surplus milk, garden culls,
+  expired bakery. Near-zero or odd cost basis. A model that insists every input
+  has a purchase price will be lied to.
+
+### Recurring yield: layers are structurally different
+
+Eggs arrive daily rather than once, so the flock has a **production curve and an
+economic life**: pullets start ~18–20 weeks, peak ~30, decline after, with a
+molt that stops production and a winter drop without supplemental light.
+
+The cull decision is therefore **economic, not health** — feed cost per dozen
+rises until it crosses the value of the eggs. That is a report the app can
+make, and it is the decision people get wrong by keeping hens two years too long.
+Daily collection must be one number, one tap.
+
+### Mortality is a diagnostic
+
+Expected broiler mortality is a few percent; the system should know the expected
+rate and flag deviation while it can still be acted on. **Timing implies cause**
+— first-week losses point at chick quality or brooding, late losses at heat or
+the leg and heart problems of fast growth.
+
+**Carcasses can be condemned at the plant**, so delivered head ≠ sellable
+carcasses and the loss lands after the animal left the farm's control. Yields
+will not reconcile without somewhere to put it.
+
+### Images
+
+File storage is free — Documents already holds files with metadata and the open
+entity-link pattern attaches them to a lot with no core change. What matters is
+what photos are *for*: identification (markings, when tags are unreadable across
+a field), **a condition series** (the same animal over time reveals gradual loss
+invisible day to day), health documentation for the vet, sales listings, and
+loss documentation for insurance or predator claims. A field photo attaches in
+one tap and inherits its zone from Land's point-in-polygon.
+
+### AI: where it belongs
+
+Corrected during the session after the founder pushed back on an
+over-restrictive first position. The line is **not** feed-versus-not; it is
+**consequence and reversibility**:
+
+| | Treatment |
+| --- | --- |
+| **Ask and orient** — what does a 3-month pig eat, when do I wean, is this gain normal, what's typical mortality | AI, approximate, no gate. The value *is* that anything can be asked; a hardcoded table answers only what someone anticipated |
+| **Compute and commit** — becomes a purchase order, a ledger cost, a medication dose, a withdrawal date, a slaughter booking | Deterministic, or AI-drafted with a human confirming before it lands |
+
+Being 10% off on "roughly what does a pig eat" costs nothing, because the
+answer is a starting point and the pig is observed and adjusted daily. Precision
+matters for **dose and withdrawal**, not feed.
+
+**The version better than either a table or a chatbot:** the reference answer
+anchored to the farm's own history. *"Roughly 5 lb/day at that weight. Last
+year's batch averaged 5.4 and finished at 250 lb in four months, at $X of feed
+per pig."* Only this app can answer that, because only it has both.
+
+Best AI uses, ranked: **natural-language daily log** (a voice memo from the
+tractor into structured events — this attacks the thirty-taps-a-day problem
+directly), cross-module synthesis (detection is a rule, the explanation is AI),
+paperwork extraction (feed tickets, vet bills, processor kill sheets — the
+accounting bill-prompt pattern already exists), and photo assistance (assistive,
+never a diagnosis; body-condition scoring from a photo is not reliable).
+
+**The line held everywhere: AI never produces a number that enters the books or
+an animal without a human seeing it first.** This mirrors the accounting
+module's own lesson that rules beat AI for anything that must be correct.
+
+### Cold start — the constraint that outranks the schema
+
+**The founder records nothing today.** No spreadsheet to replace, no habit to
+attach to. Two consequences:
+
+1. Creating a recording habit from zero is harder than replacing one, and it is
+   why most farm software dies in its first season.
+2. **There is no history.** FCR trends, sire comparison, rest analysis and
+   profit per acre all produce *nothing* on day one. **If the tool is only
+   valuable in year two, nobody reaches year two.**
+
+What is valuable on day one with no history: the **advisory layer** (needs no
+data at all), the paddock arithmetic (needs a count), the calving window (needs
+one date), the withdrawal clock (useful at the first treatment), and the
+inbreeding check (needs a pedigree entered once).
+
+> **Day-one wedge: ask it things, tell it things.** The advisory layer solves
+> the cold start; the natural-language daily log makes entry cheap enough that
+> the habit can form. Everything else in this design is a report over data the
+> log collects. Chosen deliberately when the founder said "build the whole
+> tool" and had no single must-have — the risk is not that the tool is too
+> small, it is that it is complete and unused.
+
+### The daily entry principle
+
+At 10× there are ~30 broiler pens and nobody opens thirty records to type zeros.
+**Most days nothing happens**, so: **one tap confirms "all normal" across the
+whole farm**, and only exceptions are entered individually. Explicit zeros still
+result — and they are needed, because "zero died" and "didn't check" are
+different facts that FCR depends on distinguishing.
+
+That, plus Land's rule that nothing derivable is ever re-entered, decides whether
+this is used daily or abandoned in March.
+
+### Slice order
+
+| # | Slice | Why here |
+| --- | --- | --- |
+| 0 | Lots + head ledger + occupancy (shared with `land`) | The spine. Nothing works without it, and seeing your animals on paddocks already beats nothing |
+| 1 | **Daily log + advisory layer** | The day-one wedge. Habit and cold start |
+| 2 | Feed + FCR (direct issue now, allocation seam for 10×) | Largest cash cost, and the broiler enterprise's verdict |
+| 3 | Health + withdrawal clock | Legal guardrail; useful at first use |
+| 4 | Breeding + genetics + registry | Needs a season of calving to pay off |
+| 5 | Weights (tape formulas, sampling) | Sharpens everything above |
+| 6 | Processing handoff → `production` | Blocked on that pack |
+
+Images ride along with slice 0 — cheap, and high satisfaction early.
 
 ## Open questions
 

@@ -63,6 +63,14 @@ wholesale or restaurant). Cold storage is **3 chest freezers in the garage plus
 a walk-in refrigerator in the barn** — four locations across two buildings.
 Reporting basis: **both cash and accrual must be supported**, tenant's choice.
 
+**Channels & payment:** **one farmers market today, more soon.** Farm store runs
+**both attended and honour-system**. **No shipping yet, but coming soon.**
+Payment is **Square plus cash today**, with other providers required as options
+and a stated goal of completing the whole transaction inside this app. On a
+half, the processing fee is charged **both ways** (bundled into the price, or
+paid by the customer directly to the plant), and the customer collects **either
+at the plant or from the farm** — both per order.
+
 > **The founder records nothing today.** No notebook, no spreadsheet, no phone
 > notes. This is the single most consequential fact in this dossier and it is
 > a design constraint, not a footnote — see *Cold start* under the Livestock
@@ -99,6 +107,31 @@ What it **does** break:
   below — this is the single largest consequence of the 10× target.
 
 ## Build log
+
+### 2026-08-13 — Retail brainstormed to a design (`claude/packs-and-profiles-design`)
+- Fifth category to a design. Write-up under
+  [Category design — Retail](#category-design--retail-brainstormed-2026-08-13).
+- **The offline problem at market was already solved** by the Inventory
+  decision that the truck is a mobile location — sales draw down the truck, not
+  the farm, so there is no shared state to conflict over.
+- **Stockouts are invisible unless recorded.** Selling out looks like a perfect
+  day in the sales data and is actually lost revenue; "sold out of X at Y"
+  is the only way that signal ever enters the system.
+- **A deposit is a liability, not revenue** — the case where the pilot's two
+  required reporting bases disagree on real money for months.
+- **Fulfilment point is per commitment** (plant or farm), and a half that comes
+  home occupies freezer space, so the capacity headroom must count transiting
+  commitments and not just retained stock.
+- **The processing fee charged both ways is a comparability trap** — same
+  margin, very different $/lb — so the arrangement is captured per order.
+- **Payments: an adapter seam, staged read-then-write.** A web app cannot talk
+  to a card reader, so the Terminal API is the route that makes this app the
+  point of sale. Stage 1 (pull settlements and fees into the books) carries most
+  of the accounting value with no hardware dependency. Honest limit recorded:
+  card authorisation needs connectivity, so cards cannot go fully offline.
+- **The honour-system store derives sales from counts**, making shrinkage and
+  revenue indistinguishable without count discipline — the one channel with no
+  transaction record.
 
 ### 2026-08-13 — Production brainstormed to a design (`claude/packs-and-profiles-design`)
 - Fourth category to a design, covering **butchering and baking together**.
@@ -251,7 +284,7 @@ own words condensed, not reinterpreted.
 | Gardens/crops | `crops` pack | **yes** | first pass |
 | Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
 | Baking | `production` pack — shared run, separate template | no | **done** — same design |
-| Retail | `inventory` + `retail` packs | no | `inventory` **done** ([design](#category-design--inventory-brainstormed-2026-08-13)); `retail` first pass |
+| Retail | `inventory` + `retail` packs | no | **done** — [inventory](#category-design--inventory-brainstormed-2026-08-13) · [retail](#category-design--retail-brainstormed-2026-08-13) |
 | Marketing | core CRM + email; thin pack at most | no | first pass |
 | Accounting | **core module, already built** — seed + config | — | first pass |
 | Communication | **core email + CRM, already built** | — | not yet |
@@ -1306,6 +1339,186 @@ clock**, which the health model already anticipates as a second clock.
 
 Commitments (pre-sold halves, pre-ordered fresh birds) are shared with `retail`
 and slice with it.
+
+## Category design — Retail (brainstormed 2026-08-13)
+
+Where four parked items land: commitments, the hanging-weight invoice, channel
+eligibility enforcement, and market-truck reconciliation.
+
+### The offline problem was already solved in `inventory`
+
+Markets often have no signal and a customer is standing there with cash, so this
+was flagged early as the constraint easiest to design past. The usual answer is
+a distributed-inventory problem. There isn't one, because **the market truck is
+a mobile location** (Inventory design):
+
+1. Loading the truck is a **transfer** — the app knows exactly what left
+2. Sales at market draw down **the truck's own inventory**
+3. Unsold stock transfers back on return
+
+**No shared state, so nothing to conflict over.** The truck holds what the truck
+holds. Build the market screen offline-first, but the data-model problem is gone.
+
+### A market day is a run-like event, and it should be profitable
+
+Date, location, stall fee, hours, staff, weather, stock taken, sold, returned,
+cash counted. Record it and **profit per market day** falls out, net of stall
+fee, travel and the hours actually stood there.
+
+With two or three markets a week, **one is usually a dud attended out of habit**,
+and two seasons of this data ends that argument. At 10×, with paid staff working
+stalls, it stops being interesting and becomes necessary.
+
+### Stockouts are invisible unless recorded
+
+> Bring 30 dozen eggs, sell 30 dozen. In the sales data that is a perfect day.
+> **It is a lost-revenue event** — nobody knows how many people wanted eggs at
+> noon and found none.
+
+So the market day record needs **"sold out of X at time Y"**. One tap, and the
+only route by which that signal ever enters the system. It answers "how much
+should I bring" and feeds the cut-balance report from the Inventory design.
+
+### The hanging-weight invoice, and where the two bases genuinely disagree
+
+Reservation + deposit → slaughter → hanging weight known → final price = weight ×
+$/lb → balance due less deposit.
+
+**A deposit is a liability, not revenue** — a half a steer is owed until
+delivery. On accrual it sits in unearned revenue until pickup; on cash basis it
+is income the day it banks. **This is the case where the pilot's two required
+bases disagree on real money for months.** Farm software routinely books the
+deposit as a sale and overstates the year.
+
+**Fulfilment point is an attribute of the commitment** — the customer collects
+**either at the plant or from the farm**, both per order:
+
+| Fulfilment | Path |
+| --- | --- |
+| At the plant | WIP → **delivered**. Never enters possession, never a location, never inventory |
+| From the farm | WIP → **inventory at a location** → delivered |
+
+**Consequence for capacity:** a half that comes home occupies freezer space while
+it waits. Since one processing day roughly fills the pilot's cold storage, the
+headroom calculation must count **transiting commitments**, not just retained
+stock, or it is wrong exactly when it matters. Plant pickup has its own failure
+mode — an uncollected half accrues storage charges billed to the farm — so
+pending pickup is a state that should age visibly.
+
+**The processing fee is charged both ways, and it is a comparability trap:**
+
+- **Bundled** — the farm pays the plant (expense) and charges more (revenue).
+  $/lb looks high.
+- **Customer pays the plant** — that money never touches the books. $/lb looks
+  low.
+
+**Same margin, very different headline numbers.** Any report comparing price per
+pound across years or against other farms is meaningless unless the arrangement
+is captured per order and normalised.
+
+### Channel eligibility is the guardrail
+
+A sale line **validates the lot's eligibility against the channel** and refuses a
+mismatch. The stamp already comes off the production run, so this is nearly free.
+
+Today, all direct-to-consumer, it rarely fires. **At 10× with wholesale it is
+what stands between the farm and an enterprise-ending mistake** — which is the
+real argument for building the wholesale seam before wholesale exists.
+
+### Customers are the existing party spine
+
+Half-beef buyers and online orders are named parties; market cash customers are
+anonymous (the traceability limit from the Inventory design). No new customer
+model — the CRM party spine already carries it.
+
+> **The customer who buys a half every year is the most valuable relationship on
+> the farm.** No marketing cost, commits before the animal is processed, and
+> takes a *balanced carcass* including the cuts nobody asks for at market.
+> Prompting last year's buyers for this year's booking is ordinary CRM work with
+> a direct line to revenue, and it never happens without a system.
+
+### Payments: a provider seam, staged read-then-write
+
+Pilot uses **Square and cash**, wants other providers as options, and wants the
+whole transaction completed in this app.
+
+**The constraint that decides the architecture:** taking a tap/dip card payment
+needs either the provider's hardware or a **native** mobile app — a web app
+cannot talk to a card reader, which is an OS-level fact rather than a Square
+limitation. **The Terminal API sidesteps it**: the server sends a checkout
+request to a physical terminal, the customer pays on the device, a webhook comes
+back. **The app is the point of sale; the terminal is a card-handling
+peripheral.** Card-not-present (online orders) uses the hosted web flow.
+
+Two rules regardless of provider:
+
+- **Card data never touches this server** — already this codebase's rule for
+  Stripe. Use the provider's terminal or hosted flow, never handle the number.
+  It is also what keeps the product out of PCI scope.
+- **Payment API specifics move.** The shape above is stable; exact SDKs and
+  endpoints deprecate regularly, so treat them as build-time verification rather
+  than design-time memory.
+
+**Build an adapter seam with Square as the first implementation, not three
+integrations.** Stripe is the cheapest second provider — this codebase already
+has a Stripe client, signature-verified webhooks and a server→Stripe reconcile
+in `billing-sync.ts`, and Stripe has a Terminal product.
+
+| Stage | What | Value |
+| --- | --- | --- |
+| **1. Read** | Pull transactions and settlements in, match to market days, post to books | High, low risk, **no hardware dependency** |
+| **2. Write** | Drive the terminal so the sale starts in this app | The stated goal |
+
+Stage 1 delivers most of the accounting value while cards are still tapped in
+Square's own app, and it solves a chore that exists today: **settlements arrive
+batched and net of fees.** A $500 market day lands as roughly $484 — the books
+need revenue $500, a fee expense, and cash $484. The API supplies the fee
+breakdown and the banking module already does the matching.
+
+**Honest limit: cards and offline conflict.** Authorisation must reach the
+network, so server-driven terminal payments simply cannot happen at a dead-signal
+market. The design is: offline for inventory and cash, cards degrade gracefully,
+and a dead market falls back to the provider's own app with reconciliation after.
+Better stated in the design than discovered at a stall.
+
+### The honor-system store derives sales from counts
+
+Unattended breaks an assumption every other channel makes: **there is no
+transaction record.** What sold is discovered by counting what is gone.
+
+So that channel posts **revenue and variance from a periodic count**, and it is
+the one place where **shrinkage and revenue are indistinguishable** without count
+discipline. A self-checkout tablet closes the gap, but not before theft is known
+to be material.
+
+### Multi-market now, shipping as a costed seam
+
+One market today with more soon, so build the list from day one — it costs
+nothing. **Shipping frozen meat is a different operation**: insulated boxes, gel
+packs or dry ice, overnight or two-day service, at a per-box cost high enough to
+eat the margin outright if not priced deliberately. A designed-for seam with its
+own costing, not a checkbox on the order.
+
+### At 10× the bottleneck moves
+
+Everything produced can currently be sold. At 10× the farm needs buyers for
+something like 40,000 lb of chicken a year and markets do not absorb that.
+**Production stops being the constraint and sales becomes it** — which is the
+growth path that runs through wholesale, and why the eligibility machinery has to
+be right before the first pallet leaves.
+
+### Slice order
+
+| # | Slice | Why here |
+| --- | --- | --- |
+| 0 | Channels + per-item-per-channel price lists + the market day record | Foundation; multi-market from the start |
+| 1 | Market POS: offline-first, cash, draw from the truck location, sold-out capture, day-end reconciliation | The pilot's only channel today |
+| 2 | **Payment adapter — read** (settlements, fees → books) | Most accounting value, no hardware dependency |
+| 3 | Commitments: reservations, deposits, hanging-weight final invoice, fulfilment point | Needs `production`; unblocks the halves business |
+| 4 | Farm store, attended and count-derived | Second channel |
+| 5 | Payment adapter — write (drive the terminal) | The stated goal, once the seam is proven |
+| 6 | Online orders + pickup windows | "Coming soon" |
+| 7 | Shipping (costed), then wholesale (eligibility becomes load-bearing) | Both flagged as coming; neither exists yet |
 
 ## Open questions
 

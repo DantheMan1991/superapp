@@ -63,6 +63,14 @@ wholesale or restaurant). Cold storage is **3 chest freezers in the garage plus
 a walk-in refrigerator in the barn** — four locations across two buildings.
 Reporting basis: **both cash and accrual must be supported**, tenant's choice.
 
+**Assets & garden:** equipment is a **tractor, tiller, 4-wheeler** and similar.
+Structures are a **cow shelter, chicken tractors, and an egg layer coop built on
+a wagon frame** — meaning **almost everything animal-related is mobile**; only
+the garage and barn are fixed. **The eggmobile follows the cattle**, so the layer
+flock's rotation is derived from the herd's, not independent. Hay is **bought
+today, with haymaking planned soon**. The garden serves **both family and
+market**.
+
 **Channels & payment:** **one farmers market today, more soon.** Farm store runs
 **both attended and honour-system**. **No shipping yet, but coming soon.**
 Payment is **Square plus cash today**, with other providers required as options
@@ -107,6 +115,32 @@ What it **does** break:
   below — this is the single largest consequence of the 10× target.
 
 ## Build log
+
+### 2026-08-13 — Assets & Crops designed; every category now has one (`claude/packs-and-profiles-design`)
+- Final two categories, taken together because both were confirmations rather
+  than discoveries. Write-ups:
+  [Assets](#category-design--assets-brainstormed-2026-08-13) ·
+  [Crops & garden](#category-design--crops--garden-brainstormed-2026-08-13).
+- **Almost every structure on this farm is mobile** — chicken tractors and an egg
+  coop on a wagon frame. So **asset location is a time series, not a field**, and
+  mobile assets reuse `livestock`'s occupancy model rather than getting their
+  own. The layers rotate too, which an earlier session had wrong.
+- **Occupancy can be scheduled relative to another lot's, with a lag.** The
+  eggmobile follows the cattle, so the layer flock has a *derived* rotation, can
+  never overtake the herd, and the relationship suspends at the seasonal haul.
+- **Reversed an earlier judgement on crop planning.** "Crowded space, build the
+  minimum" was right about a standalone planner and wrong here — the same
+  structural reason the AI feed position was wrong. Rotation by family is the
+  real agronomy and it needs bed history, which Land already supplies.
+- **Named the product's AI thesis** after rediscovering it three times: every AI
+  feature here beats its standalone equivalent because of the context around it.
+  The anchoring is the differentiation, not the model.
+- **Found a gap spanning the whole profile: personal-use draw.** Household
+  consumption is not a sale, and without it every enterprise that feeds the
+  family looks worse than it is.
+- **Haymaking needs no model change** — bought hay has a purchase basis, made hay
+  has accumulated production cost, and Inventory's third cost flavour already
+  carries both.
 
 ### 2026-08-13 — Retail brainstormed to a design (`claude/packs-and-profiles-design`)
 - Fifth category to a design. Write-up under
@@ -278,10 +312,10 @@ own words condensed, not reinterpreted.
 | Category | Lands in | Farm-specific? | Brainstormed? |
 | --- | --- | :---: | :---: |
 | Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) |
-| Buildings | `assets` pack, `asset_kind = 'building'` | no | first pass |
-| Equipment | `assets` pack, `asset_kind = 'equipment'` | no | first pass |
+| Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
+| Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) |
-| Gardens/crops | `crops` pack | **yes** | first pass |
+| Gardens/crops | `crops` pack | **yes** | **done** — [category design](#category-design--crops--garden-brainstormed-2026-08-13) |
 | Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
 | Baking | `production` pack — shared run, separate template | no | **done** — same design |
 | Retail | `inventory` + `retail` packs | no | **done** — [inventory](#category-design--inventory-brainstormed-2026-08-13) · [retail](#category-design--retail-brainstormed-2026-08-13) |
@@ -335,11 +369,22 @@ paddock. The whole reason this profile is worth building is the join.
 The agreed rhythm: **brainstorm a category → capture it here → slice it →
 build → update this log.** No category gets sliced off a first pass alone.
 
-- **First pass done** (recorded in session 2026-08-13, needs a real brainstorm
-  before slicing): land, buildings, equipment, livestock, gardens/crops, retail,
-  marketing, accounting.
-- **Not yet described** by the founder: communication, butchering, scheduling
-  suppliers/vendors, baking.
+**Status as of 2026-08-13: every category has a design.** All seven packs were
+brainstormed against the pilot farm in one sequence — `land`, `livestock`,
+`inventory`, `production`, `retail`, then `assets` and `crops` together. Each has
+a category-design section below and a slice order.
+
+- **Designed:** land · livestock · inventory · production · retail · assets ·
+  crops.
+- **Mapped to existing core, no pack needed:** accounting (seed + config),
+  communication (email + CRM), vendor scheduling (scheduling + party spine).
+- **Explicitly deferred as code:** marketing — see *Explicitly deferred*.
+
+**Nothing is built.** Seven designs, zero lines of code. The designs are the
+asset; the risk from here is that designing stays comfortable while building does
+not. The Layer 2 machinery ([packs-and-profiles.md](packs-and-profiles.md)) has
+been unblocked since the first commit of this branch and needs no further
+brainstorming.
 
 Notes worth keeping from the first pass, because they are the load-bearing
 design calls and the ones most likely to be got wrong twice:
@@ -1520,6 +1565,210 @@ be right before the first pallet leaves.
 | 6 | Online orders + pickup windows | "Coming soon" |
 | 7 | Shipping (costed), then wholesale (eligibility becomes load-bearing) | Both flagged as coming; neither exists yet |
 
+## Category design — Assets (brainstormed 2026-08-13)
+
+Buildings and equipment, which were always one shape. Short session by design:
+this pack was *confirmed* rather than discovered, because Land, Inventory and
+Production had each already needed it.
+
+### The shape, already established three times
+
+An asset is **a thing owned, with an acquisition cost, a depreciation life, a
+location, an upkeep cost and a service schedule.** Land needed it for fences,
+Inventory for freezers, Production for processing equipment. `asset_kind` is an
+**open taxonomy (P1)** — building, equipment, vehicle, infrastructure, fixture —
+so core stores the column and the profile supplies the values.
+
+### Almost everything on this farm is mobile
+
+The finding that made this session worth having. Pilot structures are a cow
+shelter, **chicken tractors**, and an **egg layer coop on a wagon frame**. Only
+the garage and barn are fixed.
+
+> **Asset location is a time series, not a field.** "Where is the eggmobile" has
+> a history exactly as a livestock lot's occupancy does — so **mobile assets
+> reuse the occupancy model from `livestock`** rather than getting their own.
+> Fixed assets simply have a static location.
+
+Two consequences:
+
+- **The layers rotate too.** An earlier assumption of a static henhouse was
+  wrong. The flock has zone occupancy like the cattle and broilers, and
+  contributes fertility as it moves — so the manure transfer priced in the
+  Livestock design applies to eggs as well.
+- **Occupancy can be scheduled *relative to another lot's*, with a lag.** The
+  eggmobile **follows the cattle** (hens scratch through manure a few days
+  behind, breaking the fly and parasite cycle). So the layer flock has no
+  independent rotation — it has a derived one. If the cattle slow because grass
+  is behind, the hens slow with them, and **the hens can never get ahead**, which
+  makes it a constraint rather than a convenience. **It suspends at the seasonal
+  haul** — a wagon coop does not casually trailer to the summer parcel — so the
+  relationship holds within a parcel and breaks across the migration.
+
+### Maintenance: two flavours, and it emits work items
+
+- **Calendar** — annual service, seasonal checks.
+- **Meter** — tractor and 4-wheeler hours. A meter reading is a recorded
+  observation, and the same usage log allocates machine cost across zones.
+
+> **Maintenance emits work items into the existing Work module rather than
+> owning a task engine.** The single biggest reuse available in this profile;
+> hold the line on it.
+
+**Implements are separate assets, optionally linked.** The tiller attaches to the
+tractor but has no hours of its own. Do not build a prime-mover/implement
+hierarchy for one relationship.
+
+### Assets contain things
+
+Assets are also **locations for other things**: freezers hold inventory,
+buildings hold assets, pens hold livestock lots. So containment is part of this
+pack, and it is what makes the Inventory location chain resolve
+(location → asset → building → parcel).
+
+### The ledger side
+
+- **Depreciation posts to the ledger.** Section 179 and bonus depreciation matter
+  disproportionately to farms.
+- **`livestock` also feeds the fixed-asset register** — purchased breeding stock
+  is depreciable, raised breeding stock has no basis but is still a capital
+  asset. The breeding-vs-market distinction from the Livestock design lands here.
+- **Assets can be justified by measured outcomes.** From the Production design: a
+  better plucker measurably improves birds per person-hour, and this pack holds
+  both the asset cost and the labour hours. Equipment ROI proved rather than felt.
+
+### Planning
+
+Per the doctrine established in Land — planning ends in dollars, comes after
+operations, and gets no `planning` pack until three examples share a shape:
+
+- **Buy vs custom-hire**, which the pilot is about to face on **haymaking
+  equipment** specifically (see Crops).
+- **Repair vs replace**, from accumulated upkeep cost against the asset's value.
+
+## Category design — Crops & garden (brainstormed 2026-08-13)
+
+Mostly falls out of Land's zones and Inventory's harvest path — with one part
+that does not, because the founder asked for a garden planner and was right to.
+
+### Planting is the unit, not "crop"
+
+A planting is **a variety, in a bed, on a date, with days to maturity, producing
+harvests.** Beds are land zones, so the spatial half is free. Successions are
+repeated plantings on an interval.
+
+**Harvest feeds inventory** — that is the seam, and it is where the garden stops
+being a hobby record and starts being an enterprise.
+
+### The garden planner — a reversed judgement
+
+An earlier session said crop planning was a crowded, low-willingness-to-pay space
+and to build only what feeds costing. **That was a fair argument about a
+standalone planner and the wrong argument here**, for the same structural reason
+the AI feed position was wrong:
+
+> A companion-planting chart is free on the internet. *"Here is what to plant in
+> Bed 4 given what was there last year, your soil test and your frost dates"* is
+> not.
+
+The caution that survives is narrower: **the planner is downstream of the
+operational record.** It is only good once beds and history exist, so it is not a
+slice-one feature — but it is a feature.
+
+**What is real agronomy and what is folklore.** Classic companion planting mixes
+solid practice with thin evidence, and the app should not dress tradition up as
+science. The load-bearing part:
+
+- **Rotation by plant family** — the highest-value rule there is (disease cycles,
+  pest cycles, nutrient depletion). **It needs bed history, which the dated
+  zone-use decision in Land already provides.**
+- Legumes ahead of heavy feeders; a few well-supported antagonists; shading from
+  tall crops.
+
+Encode the folk layer as *common practice*, and let rotation carry the weight.
+
+**Planting dates are arithmetic, not AI.** Frost dates for the location + days to
+maturity + direct-seed-or-transplant gives start-indoors, set-out and harvest
+windows; fall planting works backward from first frost. **GDD refines all of it**
+— the calendar says one thing, accumulated heat says another, and the second is
+right.
+
+### Photo diagnosis: assistive, and the loop closes
+
+Plant disease is among the better-suited vision tasks — blights, mildews,
+mosaics and deficiencies have distinctive symptoms. It is also genuinely
+error-prone, because fungal, bacterial, nutrient and herbicide-drift damage can
+look alike while their treatments differ completely.
+
+So: **ranked possibilities with confidence and what to check to confirm** —
+never a flat diagnosis. What makes it better than a plant-ID app is anchoring: it
+knows what is in that bed, what was there last season, what has been sprayed, and
+what the weather has been (humidity and rainfall drive most fungal disease).
+
+**And the loop closes on machinery already built** — suspected issue → treatment
+options → **the treatment starts a pre-harvest interval clock**, which is the
+withdrawal mechanism from Livestock under another name.
+
+### Soil and fertility
+
+- **Soil tests over time per bed** with amendments applied — a tiny table with
+  the longest-horizon value in the pack.
+- **Fertility arrives from livestock.** Grazing and the eggmobile deposit real
+  value on a zone, and the Livestock allocation already prices it. So crops
+  *receive* an allocated input rather than starting from zero — which is the
+  clearest single demonstration of the two-way allocation working.
+
+### Hay: bought now, made soon
+
+Bought hay is a vendor purchase into feed inventory. Made hay is the
+crop → harvest → feed-inventory loop with **accumulated production cost instead
+of a purchase price** — the third cost flavour the Inventory design already
+carries. **So starting to make hay requires no model change, only the crop side.**
+
+It also hands the pilot a decision it is about to face: **is making hay cheaper
+than buying it?** Equipment, fuel, labour and the real risk of weather ruining a
+cutting, against a known purchase price. Small farms routinely find that owning
+haymaking equipment for few acres loses to custom hire or buying. With both data
+points recorded it is answerable rather than argued.
+
+## Cross-cutting items from the Assets & Crops session
+
+Three things that are not confined to one pack.
+
+### Personal-use draw — a gap across the whole profile
+
+The garden serves family *and* market, which surfaces something missing
+everywhere until now: **household consumption is not a sale.** Own eggs, own
+beef, own vegetables leave inventory with **no revenue against them**, so every
+enterprise that feeds the family looks worse than it is — and the books are wrong
+in a way that matters, since personally-consumed product should not sit in
+business cost of goods.
+
+> **Personal-use draw must be a first-class inventory movement, valued at cost**,
+> and it applies to eggs, meat and produce alike — not just the garden.
+
+### Sequenced occupancy belongs to `livestock`
+
+The eggmobile-follows-cattle relationship is an addition to the **occupancy
+model**, not to assets: a lot's occupancy may be scheduled **relative to another
+lot's, with a lag**, and the follower cannot overtake the leader. Recorded in
+full under the Assets design above; the implementation lands in `livestock`.
+
+### The product's AI thesis, named
+
+It has now been rediscovered three times — feed advice, batch results, plant
+disease — so it is written down once:
+
+> **Every AI feature in this product beats its standalone equivalent because of
+> the context around it.** The answer is anchored to the tenant's own data — its
+> animals, beds, weather, history and books. A generic tool cannot do that, and a
+> general-purpose model has none of it. **That anchoring is the differentiation**,
+> not the model.
+
+It composes with the doctrine from the Livestock design (*ask-and-orient* is
+ungated; *compute-and-commit* is deterministic or human-confirmed) rather than
+replacing it.
+
 ## Open questions
 
 - ~~Is the baking under cottage food law?~~ — **settled 2026-08-13: yes, home
@@ -1550,7 +1799,10 @@ be right before the first pallet leaves.
 - `marketing` as code. Branding, website and social are either core CRM/email
   or they are services delivered, not software built. A market-day calendar is
   core scheduling.
-- Crop *planning* features beyond what feeds inventory and costing. Crowded
-  space, low willingness to pay.
+- ~~Crop *planning* features beyond what feeds inventory and costing~~ —
+  **reversed 2026-08-13.** That judgement was about a standalone planner; a
+  planner anchored to the tenant's own beds, history, soil tests and frost dates
+  is a different product. See the Crops design. It remains *downstream of the
+  operational record*, so it is not an early slice.
 - EPD-style breeding value calculations. Rabbit hole.
 - CSA share management. Real, but its own pack, after `retail`.

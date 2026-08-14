@@ -165,6 +165,13 @@ tables directly.
 
 Not yet implemented. Recorded here so the first pack does not improvise.
 
+> **Since 2026-08-13 there is a concrete plan.** The mechanism — how a pack is
+> registered and switched on, how a profile installs one — is settled in
+> [ADR 0009](decisions/0009-packs-are-modules-profiles-install-them.md) and
+> written up in [modules/packs-and-profiles.md](modules/packs-and-profiles.md).
+> The first profile is [modules/homestead-farm.md](modules/homestead-farm.md).
+> This section stays as the statement of intent; those are the build record.
+
 ```
 src/modules/      Layer 1 — core tools. Industry-blind.
 src/packs/        Layer 2a — capability packs. Also industry-blind.

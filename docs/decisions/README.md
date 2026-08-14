@@ -43,3 +43,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0006](0006-agents-act-by-delegation.md) | An agent is a delegation from a person, not a principal | 2026-08-06 | Proposed |
 | [0007](0007-cash-basis-reporting.md) | Cash-basis reporting, derived at read time | 2026-08-10 | Accepted |
 | [0008](0008-warm-neutrals-and-layered-elevation.md) | Warm neutrals, layered elevation, and the navy rail stays | 2026-08-10 | Accepted |
+| [0009](0009-packs-are-modules-profiles-install-them.md) | A pack is a module row; a profile installs, it does not bind | 2026-08-13 | Accepted |

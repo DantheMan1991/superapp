@@ -50,6 +50,13 @@ registry is a passive record with no outbound reporting. Feed is **bagged**.
 **No scale for large animals** — cattle and pig weights come from tape or eye;
 chickens *are* weighed. Layers are **one flock**.
 
+**Processing & baking:** chickens are processed on-farm at **200–300 birds a day
+with 2–3 people**, and the birds go out **both fresh and frozen**. Baking is in a
+**home kitchen** under cottage food rules today, with a **commercial kitchen a
+real possibility** — design for both. Own eggs, lard and milk are used in the
+baking. Kill sheets arrive **both on paper and digitally**. Recipe management is
+to be **a real workspace**, not a list. **No milk cow now, but eventually.**
+
 **Selling:** beef is sold **both as halves and as individual cuts at market**;
 **eggs are sold at market**; **all sales are direct-to-consumer for now** (no
 wholesale or restaurant). Cold storage is **3 chest freezers in the garage plus
@@ -92,6 +99,33 @@ What it **does** break:
   below — this is the single largest consequence of the 10× target.
 
 ## Build log
+
+### 2026-08-13 — Production brainstormed to a design (`claude/packs-and-profiles-design`)
+- Fourth category to a design, covering **butchering and baking together**.
+  Write-up under [Category design — Production](#category-design--production-brainstormed-2026-08-13).
+- **One run, two planning directions.** Butchering is forward (known input,
+  discovered outputs); baking is backward (known output, derived inputs). Shared
+  run model, **separate templates** — a cut sheet specifies treatment, a recipe
+  specifies quantities, and forcing them into one table because they rhyme would
+  be wrong.
+- **Outputs either fulfil a commitment or enter stock** — pre-sold halves and
+  pre-ordered fresh birds behave identically, so fresh-vs-frozen is not a
+  species branch. Yields the planning number *pre-orders + freezer headroom*.
+- **WIP is the third inventory state.** An animal at the processor is off the
+  farm but still owned; every accounting system models this and no farm app does.
+- **Facility status → product eligibility → channel eligibility** is one
+  mechanism serving both inspected-vs-exempt meat and commercial-vs-cottage
+  kitchen, which makes designing for the possible commercial kitchen nearly free.
+  **Exemption counters generalised** — the bird cap and the cottage food revenue
+  cap are the same shape.
+- **Results feedback turned out to be yield analysis.** The recipe is a
+  hypothesis, the batch is the experiment, the variance is the learning — which
+  is exactly dressing percentage under another name.
+- Recipes specified as a real workspace: baker's percentages, **version pinning
+  per batch** (without which the requested feedback is noise), sub-recipes both
+  inline and batched, and **the label as a generated legal artifact**.
+- Dairy recorded as a designed-for seam, not built, with raw-milk sale flagged
+  as the most legally fraught activity on the farm.
 
 ### 2026-08-13 — Inventory brainstormed to a design (`claude/packs-and-profiles-design`)
 - Third category to a design. Write-up under
@@ -215,8 +249,8 @@ own words condensed, not reinterpreted.
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | first pass |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) |
 | Gardens/crops | `crops` pack | **yes** | first pass |
-| Butchering | `production` pack | no | **partial** — external-conversion shape settled, nothing else |
-| Baking | `production` pack — same tables | no | not yet |
+| Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
+| Baking | `production` pack — shared run, separate template | no | **done** — same design |
 | Retail | `inventory` + `retail` packs | no | `inventory` **done** ([design](#category-design--inventory-brainstormed-2026-08-13)); `retail` first pass |
 | Marketing | core CRM + email; thin pack at most | no | first pass |
 | Accounting | **core module, already built** — seed + config | — | first pass |
@@ -1076,11 +1110,209 @@ and is the first screen.
 
 Production outputs land in inventory but are blocked on the `production` pack.
 
+## Category design — Production (brainstormed 2026-08-13)
+
+The pack that joins `livestock` to `inventory`: a lot goes in, inventory lots
+come out. It is also where three items parked in earlier sessions land — the
+hanging-weight yield, the two cut sheets from one animal, and the pre-sold half.
+
+### One run, two planning directions
+
+A run is **inputs consumed + labour → outputs produced, at a yield, with cost
+rolled through.** That much really is shared. But butchering and baking differ
+in a way that matters, and the earlier "they are the same build" framing was too
+strong:
+
+- **Butchering is forward.** The input is known — one steer. The outputs are
+  *discovered*. You cannot order 40 lb of ribeye; you get what the animal had.
+- **Baking is backward.** The output is known — 60 loaves. The recipe *derives*
+  the inputs, and it scales.
+
+| | Artifact | Semantics |
+| --- | --- | --- |
+| Baking | **Recipe / BOM** | Fixed input ratios → predictable output count. Scalable |
+| Meat | **Cut sheet** | Transformation instructions on a variable input. Not scalable |
+
+A cut sheet is not a recipe in reverse — it specifies *treatment* ("ribeyes at
+one inch, grind the chuck"), not quantities. So: **the run is one shared model;
+the templates that seed it stay separate.** Do not force a recipe and a cut
+sheet into one table because they rhyme.
+
+### Outputs either fulfil a commitment or enter stock
+
+The unification the pilot's answers produced. Both meat paths do the same thing:
+
+| | Fulfils a commitment | Enters stock |
+| --- | --- | --- |
+| **Beef** | Pre-sold half, delivered | Retained cuts → freezer |
+| **Chicken** | Pre-ordered fresh, collected | Retained birds → freezer |
+
+**One mechanism, no species branch.** A pre-sold half and a pre-ordered fresh
+bird both go from *commitment against a live animal* to *delivered* without ever
+sitting on a shelf (established in the Inventory design).
+
+**And the planning number falls out:** how many to process = **pre-orders +
+freezer headroom**. *"80 birds pre-ordered, room for 180 more after existing
+stock — process 260."* Both halves of that are already modelled.
+
+### WIP is the third inventory state
+
+When an animal goes to the processor it is off the farm but still owned. Not on
+hand, so not inventory; not gone either. That is **work in progress** — the
+animal's accumulated cost sits there, the processing fee accrues into it, and
+the whole thing releases into finished inventory when the boxes come home.
+
+Every accounting system models this; **no farm app does.** It also answers a
+practical question asked four times a year: *where is my steer and when is it
+back.*
+
+### Facility status → product eligibility → channel eligibility
+
+**One mechanism serving both meat and baking**, which is why designing for the
+possible commercial kitchen costs almost nothing:
+
+| Facility | Restricts |
+| --- | --- |
+| On-farm exempt poultry vs inspected plant | What the meat may be sold into |
+| Cottage (home) kitchen vs commercial kitchen | Shelf-stable products only, capped revenue, restricted channels, disclosure label |
+
+**Exemption counters are a general pattern, not a poultry quirk.** The on-farm
+bird cap and the cottage food revenue cap are the same shape — a countable
+annual limit that gates eligibility — and get built once.
+
+**Home vs commercial is a computable crossover**: home is free but capped and
+restricted; a shared commercial kitchen rents by the hour plus travel and
+scheduling, but unlocks wholesale and refrigerated products. Larger batches
+amortise the rental, so there is a crossover volume. Same planning shape as
+well-vs-pond.
+
+### The processing day
+
+Pilot: **200–300 birds, 2–3 people** — roughly 8–12 birds per person-hour.
+
+- **Labour is recorded per day, not per bird.** Crew and hours go on the run and
+  the allocator spreads them across the birds. Third use of the same allocator.
+- **Throughput becomes an asset ROI metric.** Birds per person-hour is
+  measurable, so a better plucker can be *proved* to have paid — the app holds
+  both the asset cost and the labour hours. Rare, and worth surfacing.
+- **The on-farm vs processor comparison**: on-farm cost per bird (labour,
+  supplies, equipment depreciation) against the processor's fee. Runs straight
+  into the unpaid-labour problem — if own hours count as zero, on-farm
+  processing always wins on paper and never on Sunday evening.
+- **10× is a different operation, not a bigger one.** 10,000 birds at 250/day is
+  30–40 processing days with 2–3 people. The answer is a hired crew, much better
+  equipment, or sending them out. **The app should show that wall coming**
+  rather than let it be discovered in July.
+
+### Yields, and the report only this product can produce
+
+Live, hanging and packaged weights give dressing percentage, cutting yield and
+overall yield. These vary by animal, breed, finish — **and by processor**.
+
+> The pilot already uses **multiple butchers**. Same kind of animal, different
+> plant, different pounds in the freezer. That difference is real money and
+> essentially nobody measures it.
+
+**Processor yield comparison** is the differentiated report. Honest caveat: yield
+varies by animal too, so separating processor effect from animal effect needs
+several runs, and at 2–4 beeves a year that is a multi-year answer. Collection
+starts with the first kill sheet and is free thereafter.
+
+**Kill sheets arrive both on paper and digitally.** Extraction is the
+"compute and commit" case from the Livestock AI doctrine — AI extracts, human
+confirms, then it posts — and it is a **port of an existing pattern**, since
+accounting already does this with bills and Documents already does text
+extraction. Paper means a phone camera, so OCR quality varies and the
+confirmation step matters more than the extraction.
+
+### Byproducts and internal transfers
+
+A run produces more than one thing: bones, tallow, organ meat, lard. Some sells,
+some is waste, and **some returns to the farm** — lard into the baking being the
+obvious loop. Standard treatment: **credit byproducts at net realisable value**
+and let the remainder fall to the main products. "What did a pound of pork chop
+cost" moves materially depending on whether the lard was free.
+
+**Internal transfers are costed, and this is a day-one decision.** The pilot uses
+its own eggs, lard and milk in the baking. If those arrive at zero cost the
+bakery looks wonderful and the layers look terrible, and neither is true.
+Retrofitting means every historical enterprise P&L was wrong. Same applies to
+culls fed to pigs, bedding from the woodlot, manure to the garden.
+
+### Recipes — a real workspace, not a list
+
+Explicitly requested as a workspace. What that means:
+
+- **Baker's percentages** — every ingredient as a percentage of flour weight.
+  How professional recipes are actually written, and it makes scaling correct
+  rather than approximately correct.
+- **Versioned, with each batch pinned to a version.** Non-negotiable given the
+  results feedback below: tweak a recipe without version pinning and the batch
+  history becomes noise instead of learning.
+- **Sub-recipes, supported both ways** — a levain used inline is *an ingredient
+  that happens to have a recipe*, cost rolling through with no separate run; a
+  levain made in a batch and stored is an ordinary run producing a stocked item.
+  Both genuinely happen; allowing both is simpler than choosing.
+- **The label is a generated artifact.** Cottage food rules generally require
+  ingredients in descending weight order, allergen declaration, net weight and
+  the home-kitchen disclosure — **all computable from the recipe.** A legal
+  deliverable falling out of data already held, and when the commercial kitchen
+  arrives the disclosure line drops and nothing else changes.
+- Plus: scaling to batch size or to available ingredient, live cost per unit from
+  current lot costs, method steps, tags, result photos.
+
+### Results feedback is the same mechanism as yield analysis
+
+Requested for baking, and it turns out not to be a baking feature.
+
+> **The recipe is a hypothesis. The batch is the experiment. The variance is the
+> learning.**
+
+A batch records actual yield against expected (57 loaves, not 60), quality,
+failures, and the conditions behind them — flour lot, humidity, yeast age, proof
+time. Over enough batches: this recipe really yields 57, this flour performs
+better, humid days want less water.
+
+**That is identical to meat yield analysis** — expected vs actual with the gap as
+the signal. Baking calls it batch results, meat calls it dressing percentage.
+**One mechanism, two names**, and the fifth thing the shared run model absorbed.
+
+Natural fit for the agreed AI split: detection is a rule ("this batch
+underyielded 5%"), pattern across batches is where AI earns its place ("your last
+four batches with this flour all came in low").
+
+### Dairy: designed for, not built
+
+No milk cow now, **eventually yes.** The recurring-yield shape from the layers
+already accommodates it — continuous production from a live animal into
+inventory. Additions when it arrives: lactation cycles, and a **milk withdrawal
+clock**, which the health model already anticipates as a second clock.
+
+> **Flag, not a design: selling raw milk is the most legally fraught activity on
+> this farm.** Banned outright or heavily restricted in most states, with
+> herd-share arrangements the common workaround where permitted. Using it in
+> one's own baking is a different and far simpler matter.
+
+### Slice order
+
+| # | Slice | Why here |
+| --- | --- | --- |
+| 0 | Run model + outputs landing in `inventory` | The spine; unblocks the meat path |
+| 1 | Meat runs: both paths, eligibility stamping, exemption counter, kill-sheet capture | The pilot's largest enterprise, and the legal machinery |
+| 2 | Recipes + bake batches + results feedback | The requested workspace |
+| 3 | Cost roll, byproducts at NRV, costed internal transfers | Makes enterprise P&L honest |
+| 4 | Label generation | Legal deliverable, cheap once recipes exist |
+| 5 | Processor comparison, throughput analysis | Needs history |
+
+Commitments (pre-sold halves, pre-ordered fresh birds) are shared with `retail`
+and slice with it.
+
 ## Open questions
 
-- **Is the baking under cottage food law?** Caps what `retail` may legally list
-  and by which channel. The meat half of this question is settled (both paths in
-  use), the baking half is not.
+- ~~Is the baking under cottage food law?~~ — **settled 2026-08-13: yes, home
+  kitchen today, commercial kitchen a real possibility.** Both are designed for
+  via facility status → product eligibility → channel eligibility. See the
+  Production design.
 - **Which state's rules apply**, for the on-farm poultry exemption cap and the
   channel restrictions on uninspected product. The *mechanism* is
   state-independent — a countable annual cap and an eligibility flag on finished

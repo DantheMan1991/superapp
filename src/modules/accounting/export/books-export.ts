@@ -114,6 +114,12 @@ export async function gatherBooksExport(
     invoicePayments: await tx.query.invoicePayments.findMany({
       where: eq(schema.invoicePayments.tenantId, tid),
     }),
+    // Without these, `tax_rate` on an invoice row is a uuid nobody can read
+    // and the tax columns cannot be checked against anything.
+    salesTaxRates: await tx.query.salesTaxRates.findMany({
+      where: eq(schema.salesTaxRates.tenantId, tid),
+      orderBy: asc(schema.salesTaxRates.name),
+    }),
     recurringEntries: await tx.query.recurringEntries.findMany({
       where: eq(schema.recurringEntries.tenantId, tid),
     }),

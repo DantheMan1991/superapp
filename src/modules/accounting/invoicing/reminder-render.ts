@@ -19,6 +19,13 @@ export interface ReminderRenderContext {
   businessName: string;
   customerAddress: string;
   customerEmail: string;
+  /**
+   * From `invoiceTaxFields`. REQUIRED rather than optional, deliberately: an
+   * optional field is one a caller can forget, and the symptom would be a
+   * chasing letter whose attached invoice omits the tax the customer is being
+   * chased for. Both callers have a `tx` where they build this.
+   */
+  tax: { subtotalCents: number; taxCents: number; taxLabel: string };
   lines: ReadonlyArray<{
     description: string;
     /** A decimal string, not a number — see `lines.ts` (P15/P16). */
@@ -54,6 +61,7 @@ export async function renderReminderMessage(
     dueDate: due.dueDate,
     memo: due.memo,
     totalCents: due.totalCents,
+    ...ctx.tax,
     paidCents: due.paidCents,
     customerName: due.customerName,
     customerAddress: ctx.customerAddress,

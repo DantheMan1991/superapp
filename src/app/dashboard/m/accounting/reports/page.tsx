@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { BarChart3, BookOpen, Hourglass, Landmark, Wallet } from "lucide-react";
+import {
+  BarChart3,
+  BookOpen,
+  Hourglass,
+  Landmark,
+  Percent,
+  Wallet,
+} from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { PageHeader } from "@/components/app/page-header";
@@ -49,6 +56,13 @@ const REPORTS = [
     title: "A/P Aging",
     description:
       "What the business owes vendors — open bill balances bucketed by days past due.",
+  },
+  {
+    href: "/dashboard/m/accounting/reports/sales-tax",
+    icon: Percent,
+    title: "Sales Tax Summary",
+    description:
+      "Taxable and non-taxable sales by rate, and what you have collected but not yet remitted.",
   },
 ];
 

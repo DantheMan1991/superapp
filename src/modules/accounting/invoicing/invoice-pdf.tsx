@@ -124,14 +124,34 @@ export async function renderInvoicePdf(input: InvoicePdfInput): Promise<Uint8Arr
     ),
   );
 
-  const totalRows = [
+  const totalRows: ReactElement[] = [];
+  // Subtotal and tax lead the block when there is tax. Stating tax separately
+  // on the document is a legal requirement in most US states, not a layout
+  // preference — see the model.
+  if (m.showTax) {
+    totalRows.push(
+      createElement(
+        View,
+        { key: "sub", style: styles.totalRow },
+        createElement(Text, null, "Subtotal"),
+        createElement(Text, null, m.subtotal),
+      ),
+      createElement(
+        View,
+        { key: "tax", style: styles.totalRow },
+        createElement(Text, null, m.taxLabel),
+        createElement(Text, null, m.tax),
+      ),
+    );
+  }
+  totalRows.push(
     createElement(
       View,
       { key: "t", style: styles.totalRow },
       createElement(Text, null, "Total"),
       createElement(Text, null, m.total),
     ),
-  ];
+  );
   if (m.showPayments) {
     totalRows.push(
       createElement(

@@ -215,6 +215,14 @@ export async function generateRecurringEntries(
               dueDate: addDaysIso(next, template.dueInDays),
               memo: template.memo ?? entry.name,
               lines: template.lines,
+              // Re-resolved against the live rate every month by
+              // `createInvoiceDraft`, which is the point: a template says
+              // "charge the state rate", and a rate correction should reach
+              // the invoice it has not generated yet. A rate deactivated since
+              // the template was written throws TAX_RATE_INVALID, which the
+              // loop reports against this template and carries on — the same
+              // treatment an inactive account already gets.
+              taxRateId: template.taxRateId ?? null,
               recurringEntryId: entry.id,
             });
           } else {

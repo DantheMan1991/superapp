@@ -20,12 +20,18 @@ import {
   buildCashActivity,
   buildGeneralLedger,
   buildProfitAndLoss,
+  displayCents,
   type BalanceSheetReport,
   type CashActivityReport,
   type GeneralLedgerInputLine,
   type GeneralLedgerReport,
   type ProfitAndLossReport,
 } from "./report-builders";
+import {
+  buildTaxSummary,
+  type TaxSummaryInvoice,
+  type TaxSummaryReport,
+} from "./tax-summary";
 
 /**
  * Thin fetch wrappers: listAccounts + 1–4 getBalances calls + a pure
@@ -307,5 +313,109 @@ export async function getGeneralLedger(
     from: opts.from,
     to: opts.to,
     matchedLineCount: toSafeCents(countRows[0]?.n ?? 0),
+  });
+}
+
+/**
+ * Sales tax collected, by rate, for a period — plus what the ledger says is
+ * owed. The reasoning for reading BOTH sources is in `tax-summary.ts`.
+ *
+ * NO `basis` PARAMETER, and it is the third report to refuse one for its own
+ * reason (Cash Activity: the adjustment cannot touch registers; the General
+ * Ledger: cash basis produces adjustments, not lines). Here it is that a
+ * cash-basis tax summary means pro-rating each invoice's tax across its
+ * payments PER RATE, which is a real feature rather than a toggle — and a tax
+ * return computed on the wrong basis is not slightly wrong.
+ *
+ * Invoices are selected by ISSUE DATE, which is when the liability arises.
+ */
+export async function getTaxSummary(
+  tx: Tx,
+  tenantId: string,
+  opts: { from: string; to: string },
+): Promise<TaxSummaryReport> {
+  const inv = schema.invoices;
+  const il = schema.invoiceLines;
+
+  // The taxable base is SUMMED from the frozen lines rather than derived from
+  // the tax — exact, and no division (P5). Grouped in the database because an
+  // invoice can have a hundred lines and this report can span a year.
+  const lineTotals = await tx
+    .select({
+      invoiceId: il.invoiceId,
+      taxable: sql<string>`coalesce(sum(${il.amountCents}) filter (where ${il.isTaxable}), 0)`,
+      exempt: sql<string>`coalesce(sum(${il.amountCents}) filter (where not ${il.isTaxable}), 0)`,
+    })
+    .from(il)
+    .innerJoin(inv, and(eq(inv.tenantId, il.tenantId), eq(inv.id, il.invoiceId)))
+    .where(
+      and(
+        eq(il.tenantId, tenantId),
+        gte(inv.issueDate, opts.from),
+        lte(inv.issueDate, opts.to),
+      ),
+    )
+    .groupBy(il.invoiceId);
+  const basesOf = new Map(lineTotals.map((r) => [r.invoiceId, r]));
+
+  const invoiceRows = await tx
+    .select({
+      id: inv.id,
+      taxRateId: inv.taxRateId,
+      taxRatePpm: inv.taxRatePpm,
+      taxCents: inv.taxCents,
+      status: inv.status,
+    })
+    .from(inv)
+    .where(
+      and(
+        eq(inv.tenantId, tenantId),
+        gte(inv.issueDate, opts.from),
+        lte(inv.issueDate, opts.to),
+      ),
+    );
+
+  const invoices: TaxSummaryInvoice[] = invoiceRows.map((r) => {
+    const base = basesOf.get(r.id);
+    return {
+      taxRateId: r.taxRateId,
+      taxRatePpm: r.taxRatePpm,
+      taxableCents: toSafeCents(base?.taxable ?? 0),
+      exemptCents: toSafeCents(base?.exempt ?? 0),
+      taxCents: r.taxCents,
+      status: r.status,
+    };
+  });
+
+  const rateNames = await tx
+    .select({ id: schema.salesTaxRates.id, name: schema.salesTaxRates.name })
+    .from(schema.salesTaxRates)
+    .where(eq(schema.salesTaxRates.tenantId, tenantId));
+
+  // BY SUBTYPE, never by code — a tenant may have renumbered. Null when there
+  // is no such account, which the report renders as "no comparison available"
+  // rather than as a zero balance.
+  const accounts = await listAccounts(tx, tenantId);
+  const taxAccount = accounts.find((a) => a.subtype === "sales_tax");
+  let liabilityCents: number | null = null;
+  if (taxAccount) {
+    const balances = await getBalances(tx, tenantId, {
+      asOf: opts.to,
+      accountIds: [taxAccount.id],
+    });
+    // Natural side (P6): `displayCents` already flips a credit-normal account,
+    // so tax collected and not yet remitted comes out POSITIVE. Do not negate
+    // it again — that reads correct on an empty account and inverts on a real
+    // one.
+    liabilityCents = displayCents(
+      taxAccount.accountType,
+      balances.find((b) => b.accountId === taxAccount.id)?.netCents ?? 0,
+    );
+  }
+
+  return buildTaxSummary(invoices, rateNames, {
+    from: opts.from,
+    to: opts.to,
+    liabilityCents,
   });
 }

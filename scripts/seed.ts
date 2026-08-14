@@ -136,6 +136,90 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     status: "available",
     sortOrder: 70,
   },
+
+  // ---------------------------------------------------------------------
+  // Layer 2a — capability packs. Same table, `category = 'pack'`
+  // (ADR 0009), so enablement, nav, routing and the guard all work through
+  // machinery that already exists.
+  //
+  // NONE OF THESE ARE SOLD INDIVIDUALLY. The SKU is the profile — a tenant
+  // buys "Homestead Farm", not seven line items — so packs must never reach
+  // a client-facing catalogue. There is no such page today, and if one is
+  // ever built it filters on `category = 'core'`.
+  //
+  // All `coming_soon`: declared seams with a real dependency graph in
+  // `src/packs/index.ts` and no renderer yet, exactly how `scheduling` and
+  // `work` were carried before they shipped. Each flips to `available` when
+  // its pack is built.
+  //
+  // Descriptions describe the CAPABILITY, never an industry — a pack that
+  // names one has the boundary wrong. "Land", "Livestock" and "Crops" are
+  // narrow capabilities, not industries: a cattle ranch, a market garden and
+  // a vineyard compose different subsets of the same list.
+  // ---------------------------------------------------------------------
+  {
+    id: "land",
+    name: "Land",
+    description:
+      "Parcels and the zones inside them — what each area is for, what it costs, and what has been on it.",
+    category: "pack",
+    status: "coming_soon",
+    sortOrder: 200,
+  },
+  {
+    id: "assets",
+    name: "Assets",
+    description:
+      "Anything owned with a cost, a working life, a place it lives and a service schedule.",
+    category: "pack",
+    status: "coming_soon",
+    sortOrder: 210,
+  },
+  {
+    id: "inventory",
+    name: "Inventory",
+    description:
+      "Quantities on hand, where they are, what they cost, and the lot each one came from.",
+    category: "pack",
+    status: "coming_soon",
+    sortOrder: 220,
+  },
+  {
+    id: "livestock",
+    name: "Livestock",
+    description:
+      "Animals tracked as lots — health, movement, breeding and what each one has cost.",
+    category: "pack",
+    status: "coming_soon",
+    sortOrder: 230,
+  },
+  {
+    id: "crops",
+    name: "Crops",
+    description:
+      "Plantings in beds — what went in when, how it is doing, and what came off it.",
+    category: "pack",
+    status: "coming_soon",
+    sortOrder: 240,
+  },
+  {
+    id: "production",
+    name: "Production",
+    description:
+      "Turning inputs into outputs at a yield, with the cost carried through to what comes out.",
+    category: "pack",
+    status: "coming_soon",
+    sortOrder: 250,
+  },
+  {
+    id: "retail",
+    name: "Retail",
+    description:
+      "Selling what you have — channels, price lists, orders and what actually moved.",
+    category: "pack",
+    status: "coming_soon",
+    sortOrder: 260,
+  },
 ];
 
 /**

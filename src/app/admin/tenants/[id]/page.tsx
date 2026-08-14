@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { withSystem, schema } from "@/db";
-import { moduleRegistry } from "@/modules";
+import { isRenderable } from "@/lib/features";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -225,7 +225,7 @@ export default async function TenantDetailPage({
                  * (docs/architecture.md), and this page is the superadmin
                  * console; it was never the thing that rule protected.
                  */
-                const implemented = !!moduleRegistry[mod.id];
+                const implemented = isRenderable(mod.id);
                 const sellable = mod.status === "available";
                 return (
                   <div

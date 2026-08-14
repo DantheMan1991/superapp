@@ -5,11 +5,43 @@
 > installs a set of them, and where vocabulary comes from. This is the plumbing
 > under [extension-model.md](../extension-model.md) — read that first for *why*,
 > read this for *how*.
-> Status: `coming_soon` · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> Status: partial — registry, dependency enforcement and profile install are built; seed application is not · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
 
 ## Build log
 
 Newest first. One entry per session/PR that touched this area.
+
+### 2026-08-14 — Layer 2 exists: registry, dependencies, profile install (`claude/layer2-pack-machinery`)
+- **`src/packs/` and `src/industries/` now exist.** Seven capability packs are
+  declared with a real dependency graph, and `homestead-farm` is the first
+  profile manifest. **Zero new tables**, as ADR 0009 predicted.
+- **A declared pack is not a placeholder.** `PackDefinition.Component` is
+  optional, so a pack participates fully in dependency resolution and profile
+  installs while having no renderer — the same arrangement `scheduling` and
+  `work` used before they shipped. All seven are in that state today.
+- **One registry at runtime, two source trees.** `src/lib/features.ts` merges
+  core and packs at Layer 0; neither `src/modules/index.ts` nor
+  `src/packs/index.ts` imports the other. A slug registered in both throws at
+  module load rather than silently shadowing.
+- **Dependency enforcement lives in `toggleModule`**, before provisioning, so a
+  refused toggle leaves no trace. Enabling checks requirements; disabling checks
+  dependents. Never checked at runtime — a request that has reached a pack's
+  page is too late.
+- **`installProfile` is additive and re-runnable.** It enables packs in
+  topological order inside one transaction and stamps `tenants.industry`. It
+  never switches anything off: a pack the tenant disabled is a decision, not
+  drift.
+- **Nav groups by `category`**, with the pack group taking the installed
+  profile's name. Nothing changes for a tenant with no profile.
+- **Extracted `enableRow`** from `toggleModule` so the action and the installer
+  share one upsert. Its `enabledAt` restamping behaviour is deliberately
+  unchanged — the admin matrix renders that value.
+- 39 pure tests in `tests/packs.test.ts` covering the resolver, plus invariants
+  over the real registries (no cycles, no unregistered requirements, no profile
+  missing a transitive dependency, no industry noun in a pack name).
+- **Not done: seed application.** `IndustryProfile.seed` is declared and unused;
+  it needs a farm chart of accounts written first. Shipped in two steps rather
+  than half-seeding.
 
 ### 2026-08-13 — Design settled, no code yet (`claude/packs-and-profiles-design`)
 - Answered the two mechanism questions ADR 0004 left open, as
@@ -50,19 +82,21 @@ cost dimensions all land in tables that already exist and already have RLS.
 
 ## What has to be built
 
-| # | Thing | Why it's needed |
+| # | Thing | Status |
 | --- | --- | --- |
-| 1 | `src/packs/` + merged runtime registry | Separate tree so packs don't drift into core; one registry so nav/routing/guards never fork. |
-| 2 | `src/industries/<slug>.ts` manifests | Turns N toggles and a chart of accounts into one decision. |
-| 3 | Dependency declaration + enforcement | `production` without `inventory` is a runtime failure today; it should be a refusal at enable time. |
-| 4 | The install action | Enable packs, seed accounts/folders/doc kinds, stamp `tenants.industry` — one transaction, audited. |
-| 5 | Label resolution | Reads the manifest live, overridden by `tenant_modules.config`, degrading to the default. |
-| 6 | Nav grouping by `category` | Seven packs beside six core modules is a 13-item flat list. |
-| 7 | **P5 extension points** | ADR 0004 predicted nav contribution and entity-type registration would force this first. They do. |
+| 1 | `src/packs/` + merged runtime registry | **built** — `src/packs/index.ts`, merged in `src/lib/features.ts` |
+| 2 | `src/industries/<slug>.ts` manifests | **built** — `homestead-farm` is the first |
+| 3 | Dependency declaration + enforcement | **built** — declared in `PackDefinition.requires`, enforced in `toggleModule` |
+| 4 | The install action | **partly** — `installProfile` enables packs and stamps `tenants.industry`. **Seed application is not built** |
+| 5 | Label resolution | **built** — `resolveLabels` / `labelFor` in `src/lib/packs/resolve.ts`. *No caller yet: no pack renders* |
+| 6 | Nav grouping by `category` | **built** — the pack group takes the installed profile's name |
+| 7 | **P5 extension points** | **not built.** No pack contributes nav or registers an entity type yet, so nothing has forced it. It will be forced by the first pack that ships |
 
 ## The shapes
 
-Planned, not yet written. Recorded so the first pack doesn't improvise.
+Built as described below. The original planning note read *"not yet written,
+recorded so the first pack doesn't improvise"* — it is kept in this shape
+because it is still the contract a new pack is written against.
 
 ```
 src/modules/      Layer 1 — core tools. Industry-blind.
@@ -161,10 +195,25 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
 
 ## Open items
 
+- **Seed application is not built.** `IndustryProfile.seed` is declared and
+  unread, so `installProfile` enables packs and stamps the profile but ships no
+  chart of accounts, folders or doc kinds. Needs a farm chart of accounts
+  written first. **This is the largest gap in the installer.**
 - **P5 extension points** (#7 above) — the primitive ADR 0004 named and nobody
-  has built. Nav contribution and entity-type registration force it.
-- **Dependency enforcement** — declared in `PackDefinition.requires`, not yet
-  checked anywhere.
+  has built. Nothing has forced it yet because no pack renders; the first pack
+  that ships will.
+- **Nothing asserts a pack in code has a seed row in `scripts/seed.ts`.** That
+  file calls `main()` at module load, so a test cannot import its catalogue
+  without opening a database connection. The backstop is the
+  `tenant_modules.module_id` foreign key, which fails loudly at install rather
+  than silently — acceptable, but it fails at the worst moment. The fix, when it
+  is worth doing, is extracting the `MODULES` array into an importable module.
+- **`resolveLabels` has no caller.** Vocabulary resolution is built and tested
+  but nothing reads it, because no pack renders a label yet. It is wired the
+  moment the first pack has a surface.
+- **No UI for `installProfile`.** The action exists, is superadmin-guarded and
+  audited, but no admin page calls it — a profile is installed by invoking the
+  action directly. The tenant detail page is the obvious home.
 - **Re-apply and drift** — a profile edit does not reach installed tenants. No
   action to re-run an installer, and no report of how a tenant differs from its
   manifest. Accepted cost in ADR 0009; revisit when it bites.

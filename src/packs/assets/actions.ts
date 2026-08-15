@@ -16,7 +16,11 @@ import {
   updateAsset,
   type AssetCtx,
 } from "./ops";
-import { postAllDepreciation, postDepreciation } from "./depreciation-ops";
+import {
+  postAllDepreciation,
+  postDepreciation,
+  postDisposal,
+} from "./depreciation-ops";
 
 /**
  * This pack's Layer 3 tailoring, from `tenant_modules.config`.
@@ -300,6 +304,8 @@ export async function postAllDepreciationAction(input: unknown) {
 const disposeSchema = z.object({
   id: z.string().uuid(),
   disposedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  proceedsCents: z.number().int().min(0).default(0),
+  proceedsAccountId: z.string().uuid().nullable().optional(),
 });
 
 export async function disposeAssetAction(input: unknown) {
@@ -315,22 +321,53 @@ export async function disposeAssetAction(input: unknown) {
   };
 
   try {
-    await withTenant(
+    // The status change and the journal entry are ONE transaction. A disposed
+    // asset whose cost is still on the balance sheet, or a settled balance
+    // sheet with an asset still marked active, are both states nobody can
+    // reason about — and the second is the one that gets found in an audit.
+    const posting = await withTenant(
       ctx.tenant.id,
-      (tx) => disposeAsset(tx, assetCtx, parsed.data.id, parsed.data.disposedOn),
+      async (tx) => {
+        const asset = await getAsset(tx, ctx.tenant.id, parsed.data.id);
+        if (!asset) throw new AssetError("NOT_FOUND", "asset not found");
+        const config = await readPackConfig(tx, ctx.tenant.id);
+        const result = await postDisposal(
+          tx,
+          assetCtx,
+          asset,
+          {
+            disposedOn: parsed.data.disposedOn,
+            proceedsCents: parsed.data.proceedsCents,
+            proceedsAccountId: parsed.data.proceedsAccountId ?? null,
+          },
+          config,
+        );
+        await disposeAsset(tx, assetCtx, parsed.data.id, parsed.data.disposedOn);
+        return result;
+      },
       { role: ctx.role },
     );
+
     await logAudit({
       action: "asset.disposed",
       tenantId: ctx.tenant.id,
       actorClerkUserId: ctx.userId,
       targetType: "asset",
       targetId: parsed.data.id,
-      meta: { disposedOn: parsed.data.disposedOn },
+      meta: {
+        disposedOn: parsed.data.disposedOn,
+        proceedsCents: parsed.data.proceedsCents,
+        settled: posting.posted,
+        ...(posting.posted
+          ? { gainCents: posting.gainCents }
+          : { notSettled: posting.reason }),
+      },
     });
+    revalidatePath(`/dashboard/m/assets/${parsed.data.id}`);
     revalidatePath("/dashboard/m/assets");
-    return { ok: true };
+    return { ok: true, ...posting };
   } catch (err) {
+    if (err instanceof LedgerError) return { error: friendlyMessage(err) };
     return toResult(err);
   }
 }

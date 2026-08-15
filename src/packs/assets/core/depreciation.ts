@@ -46,6 +46,50 @@ export interface DepreciationPeriod {
   bookValueCents: number;
 }
 
+/**
+ * What a disposal does to the books.
+ *
+ * Selling or scrapping an asset has to take three things off the balance sheet
+ * and recognise the difference:
+ *
+ *   Dr  Accumulated depreciation   everything written off so far
+ *   Dr  Proceeds account           whatever was received, if anything
+ *       Cr  Fixed asset account    the original cost
+ *   Dr/Cr Gain (Loss)              the plug
+ *
+ * The plug is `proceeds − net book value`. Positive is a gain and lands as a
+ * credit; negative is a loss and lands as a debit. Scrapping something with
+ * book value left is a loss of exactly that book value, which is correct and
+ * is the case people find surprising.
+ *
+ * Pure, integer cents, and it balances by construction — the gain is DEFINED as
+ * the residual, so the four legs always sum to zero. That is deliberate: a
+ * disposal that did not balance would be rejected by the ledger, and the useful
+ * failure is the one that says the cost is unknown, not one about arithmetic.
+ */
+export interface DisposalMaths {
+  costCents: number;
+  accumulatedCents: number;
+  proceedsCents: number;
+  /** cost − accumulated. What the books still carry it at. */
+  bookValueCents: number;
+  /** proceeds − book value. Positive is a gain, negative a loss. */
+  gainCents: number;
+}
+
+export function disposalMaths(input: {
+  costCents: number;
+  accumulatedCents: number;
+  proceedsCents: number;
+}): DisposalMaths {
+  const bookValueCents = input.costCents - input.accumulatedCents;
+  return {
+    ...input,
+    bookValueCents,
+    gainCents: input.proceedsCents - bookValueCents,
+  };
+}
+
 /** Depreciable base: what will be written off over the whole life. */
 export function depreciableBaseCents(input: {
   costCents: number;

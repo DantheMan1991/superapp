@@ -40,6 +40,26 @@ examples exist.
 
 ## Build log
 
+### 2026-08-15 — The use picker was defaulting to a house site (`claude/land-use-picker-default`)
+- **Found in the first minute of driving slice 0 on production**, and by nothing
+  else. "What is North Pasture for?" opened with **Building site** selected and
+  *Expected to earn* switched off — because the option list was sorted
+  alphabetically and `building_site` wins that race. Anyone pressing the obvious
+  button would have recorded their best ground as earning nothing, which is the
+  single worst value in the list and it was the default.
+- **Two fixes, and the second is the one that matters.** The list now renders in
+  its declared order (productive uses first), and a zone with no use declared
+  yet **pre-selects nothing at all** — the placeholder shows and *Record use* is
+  disabled until somebody answers the question. A dialog that asks a question
+  should not also supply the answer.
+- A zone that already has a use still pre-selects it, because that one is the
+  current answer rather than a guess.
+- The ordering is now a tested invariant (`tests/land.test.ts`): no productive
+  use may appear after a non-productive one, which is the property the picker
+  depends on.
+- **Nothing was wrong with the data model, the ops, or the 93 tests.** They all
+  passed, and would have gone on passing.
+
 ### 2026-08-15 — Slice 0: parcels, zones, and use as a dated fact (`claude/land-places`)
 - **The substrate now exists**, which is what `livestock` and `crops` were
   waiting for. Three tables under FORCE RLS, two dimension types, a list and a
@@ -172,12 +192,12 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
-- **The owner write path has never been exercised in a browser.** The 30 ops
-  tests cover it, but the Clerk dev session available while building this slice
-  is `org:member` on the Test org, and owner comes only from Clerk `org:admin` —
-  so every create, edit, retire and use dialog rendered for nobody. Given that
-  every real bug this week was found by driving the app, this is the first thing
-  to close, not a footnote.
+- ~~The owner write path has never been exercised in a browser~~ — **closed
+  2026-08-15.** Driven on production: create a parcel, add a zone, declare a
+  use, supersede it. The supersede showed *"Pasture (to 2026-06-14)"* against
+  hay starting 2026-06-15, which is the inclusive bound doing its job on real
+  data. It also immediately found the use-picker default above — the first
+  build-log entry of this pack that exists because somebody clicked something.
 - **A zone's dimension member is its bare name**, so two parcels with a "North
   Pasture" produce two identically-labelled columns in a P&L split by zone.
   Prefixing the parcel would make the headings unreadable; disambiguating only on

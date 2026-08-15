@@ -214,6 +214,25 @@ describe("zone use vocabulary", () => {
     expect(zoneUseLabel("hay")).toBe("Hay");
   });
 
+  it("lists productive uses first, and the picker must not sort them", () => {
+    // The order of this array is load-bearing for the use picker, which renders
+    // it as declared. Sorting it alphabetically put `building_site` at the top
+    // — the least likely answer for a paddock AND a non-productive one — so a
+    // hurried tap recorded good ground as earning nothing. Found by using it.
+    expect(SUGGESTED_ZONE_USES[0].use).toBe("pasture");
+    expect(SUGGESTED_ZONE_USES[0].productive).toBe(true);
+
+    // No productive use may appear after a non-productive one, which is the
+    // property the picker actually depends on.
+    const firstNonProductive = SUGGESTED_ZONE_USES.findIndex(
+      (u) => !u.productive,
+    );
+    const lastProductive = SUGGESTED_ZONE_USES.map((u) => u.productive).lastIndexOf(
+      true,
+    );
+    expect(lastProductive).toBeLessThan(firstNonProductive);
+  });
+
   it("knows which suggested uses earn nothing", () => {
     expect(defaultProductive("pasture")).toBe(true);
     expect(defaultProductive("lane")).toBe(false);

@@ -292,6 +292,48 @@ export async function listOpenTasks(
   return rows.map(toFollowUp);
 }
 
+/**
+ * Follow-ups attached to a CRM record, across every record.
+ *
+ * THE CRM-SCOPED VIEW, and the distinction from `listOpenTasks` above is the
+ * whole reason this exists. Slice 5b removed CRM's Follow-ups tab because a
+ * CRM-filtered list would silently drop unattached work — "ring the accountant
+ * back" had a home in `crm_tasks.party_id` being nullable, and a filtered page
+ * would have hidden exactly those.
+ *
+ * That argument is sound for WORK being the complete list. It does not follow
+ * that CRM may not have a view of its own work, and the two claims got thrown
+ * out together. This one says what it excludes rather than pretending to be
+ * everything: unattached follow-ups live in Work, and the page says so.
+ *
+ * Filtered in JS rather than SQL because `toFollowUp` already resolves the CRM
+ * link out of `row.links`, and duplicating that resolution as a join would give
+ * two definitions of "is this a CRM follow-up" to keep in step. Revisit if a
+ * tenant's open-work count ever makes the round trip worth it.
+ */
+export async function listOpenTasksOnRecords(
+  tx: Tx,
+  tenantId: string,
+  opts?: { assigneeClerkUserId?: string },
+): Promise<FollowUp[]> {
+  const rows = await listOpenWork(tx, { tenantId }, opts);
+  return rows
+    .map(toFollowUp)
+    .filter((t) => t.partyId !== null || t.dealId !== null);
+}
+
+/** The same scoping, for what was recently finished. */
+export async function listRecentlyCompletedTasksOnRecords(
+  tx: Tx,
+  tenantId: string,
+  limit = 20,
+): Promise<FollowUp[]> {
+  const rows = await listRecentlyClosedWork(tx, { tenantId }, limit);
+  return rows
+    .map(toFollowUp)
+    .filter((t) => t.partyId !== null || t.dealId !== null);
+}
+
 export async function listRecentlyCompletedTasks(
   tx: Tx,
   tenantId: string,

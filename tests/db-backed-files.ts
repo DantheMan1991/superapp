@@ -34,6 +34,7 @@ export const DB_BACKED_TESTS = [
   "tests/invoice-reminders-db.test.ts",
   "tests/invoicing.test.ts",
   "tests/assets-depreciation-posting.test.ts",
+  "tests/assets-maintenance-work.test.ts",
   "tests/assets-ops.test.ts",
   "tests/isolation/accounting.test.ts",
   "tests/isolation/assets.test.ts",

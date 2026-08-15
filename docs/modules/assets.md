@@ -15,6 +15,34 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-15 — Slice 2: maintenance, raised as work (`claude/assets-maintenance`)
+- **The pack has no task engine, and that was the point of the slice.** A due
+  service becomes an ordinary work item through the Layer 0 seam and is worked
+  with the shared `WorkItemRow` — the same component and verbs a CRM follow-up
+  gets ([extension-model.md §4b](../extension-model.md)). Nothing about work was
+  re-implemented here.
+- **Two link types per raised item.** The `asset` link puts it on the asset's
+  page; the `maintenance_schedule` link is what makes raising it **idempotent**.
+  Without the second, "has this service already been raised" could only be asked
+  by matching on the title — a string comparison pretending to be an identity.
+- **Never-done is `no_baseline`, not overdue.** Adding a schedule to a tractor
+  owned for years must not declare six services overdue and raise six work items.
+  The exception is a *calendar* schedule, which can honestly count from the
+  asset's in-service or acquisition date; a *meter* one cannot, because "how many
+  hours had it done when we bought it" is not something the asset knows.
+- Next-due is computed FROM events, never stored — so a backdated service
+  corrects the whole sequence instead of leaving a stale `next_due_on`. Same
+  reasoning as accumulated depreciation being read from the ledger.
+- **No cost on a maintenance event.** The repair bill is already in the books
+  tagged with the asset's dimension, so "what has this tractor cost in repairs"
+  is a P&L question. Recording money here too would be a second version of it —
+  the same reason the pack does not capitalise a purchase.
+- A meter service gets **no due date** on its work item. It falls due at a
+  reading, and inventing a date would put a fictional deadline on somebody's list.
+- Migration `0130` **hand-reordered again**, and the rule now generalises — see
+  Decisions.
+- 19 pure tests, 7 on the work-emission path, and 3 more isolation tests.
+
 ### 2026-08-15 — Disposal settles the books (`claude/assets-disposal-settles`)
 - **Found first: the pack was never capitalising anything.** On the live tenant
   `1700 Accumulated Depreciation` stood at −6,706.78 against `1600 Equipment` of
@@ -222,8 +250,12 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
 - **A composite FK cannot use `ON DELETE SET NULL`**, because that would null
   `tenant_id` too. So removing a container requires re-parenting its contents
   first, which is the honest order of operations anyway.
-- **Self-referential FKs need the unique index created first.** The generated
-  migration will get this wrong; check the statement order.
+- **drizzle-kit emits every FK before every index**, so a composite FK whose
+  target unique index is created in the SAME migration always fails with *"there
+  is no unique constraint matching given keys"*. Hit twice: `0125`
+  self-referentially, `0130` across two new tables. Cross-table FKs to a
+  PRE-EXISTING table are fine, which is why it only bites when the target is new
+  too. Reorder to: tables, unique indexes, foreign keys, everything else.
 - **Never interpolate a JS array into a raw `sql` fragment.**
   `` sql`x = any(${arr})` `` binds the whole array as ONE parameter and
   Postgres rejects it. Use `inArray`. This shipped, and it silently disabled the
@@ -280,9 +312,14 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
   Storage is free — Documents already holds files with metadata and the open
   entity-link pattern attaches them. What needs designing is the *primary*
   image, since a list thumbnail wants one canonical photo rather than the newest.
-- **Maintenance** (slice 2) — calendar and meter-based schedules, emitting work
-  items into the existing Work module rather than owning a task engine. Hold
-  that line; it is the biggest reuse available.
+- **Maintenance has no history view.** `listEvents` exists and nothing renders
+  it, so the service log is written and never read back. The panel shows what is
+  due, not what was done.
+- **Completing the work item does not record the service.** They are two acts
+  today: tick the work, then press "Mark done today". Closing the loop needs a
+  hook on work completion, which nothing in Work emits yet.
+- **Schedules cannot be edited or deactivated from the UI.**
+  `setScheduleActive` exists with no caller.
 - **Occupancy for mobile assets** (slice 3) — shared shape with livestock lots.
 - **Anything active is offered as a container**, so a freezer can be put inside
   a tractor. Arguably correct — a toolbox does live in a truck — but if only

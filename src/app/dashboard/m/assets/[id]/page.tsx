@@ -35,6 +35,17 @@ import {
   postedToDateCents,
 } from "@/packs/assets/depreciation-ops";
 import { periodOf } from "@/packs/assets/core/depreciation";
+import {
+  getScheduleStatuses,
+  latestMeter,
+  listMaintenanceWork,
+} from "@/packs/assets/maintenance-ops";
+import { dueSummary } from "@/packs/assets/core/maintenance";
+import {
+  MaintenancePanel,
+  type MaintenanceView,
+} from "@/packs/assets/components/maintenance-panel";
+import { listAssignableMembers, memberLabel } from "@/lib/team";
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +82,7 @@ export default async function AssetDetailPage({
     async (tx) => {
       const asset = await getAsset(tx, ctx.tenant.id, id);
       if (!asset) return null;
-      const [parent, children, containers, kinds, depreciation, accounts, accumulated] =
+      const [parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers] =
         await Promise.all([
           asset.parentId ? getAsset(tx, ctx.tenant.id, asset.parentId) : null,
           listChildren(tx, ctx.tenant.id, asset.id),
@@ -82,14 +93,18 @@ export default async function AssetDetailPage({
           getDepreciationStatus(tx, ctx.tenant.id, asset, currentPeriod),
           listAccounts(tx, ctx.tenant.id),
           postedToDateCents(tx, ctx.tenant.id, asset.id),
+          getScheduleStatuses(tx, ctx.tenant.id, asset, today),
+          listMaintenanceWork(tx, ctx.tenant.id, asset.id),
+          latestMeter(tx, ctx.tenant.id, asset.id),
+          listAssignableMembers(tx, ctx.tenant.id),
         ]);
-      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated };
+      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated } = data;
+  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers } = data;
   const isOwner = ctx.role === "owner";
 
   const dueTotal =
@@ -170,6 +185,32 @@ export default async function AssetDetailPage({
         ),
     )
     .map((a) => ({ id: a.id, label: `${a.code} ${a.name}` }));
+
+  const maintenanceView: MaintenanceView = {
+    schedules: schedules.map((s) => ({
+      id: s.schedule.id,
+      name: s.schedule.name,
+      summary: dueSummary(s.due, s.schedule.meterUnit),
+      status: s.due.status,
+      hasOpenWork: s.openWorkItemId !== null,
+    })),
+    work: maintWork.map((w) => ({
+      id: w.id,
+      title: w.title,
+      dueOn: w.dueOn,
+      assigneeClerkUserId: w.assigneeClerkUserId,
+      completedAt: w.completedAt,
+      version: w.version,
+    })),
+    currentMeter: meter?.reading ?? null,
+    meterUnit: meter?.unit ?? "hours",
+    // Only counts what has no work raised yet, so the button never offers to
+    // raise something that is already on somebody's list.
+    dueCount: schedules.filter(
+      (s) => s.due.status === "due" && s.openWorkItemId === null,
+    ).length,
+    today,
+  };
 
   return (
     <div className="space-y-6">
@@ -293,6 +334,16 @@ export default async function AssetDetailPage({
         <DepreciationPanel
           assetId={asset.id}
           view={depreciationView}
+          canEdit={isOwner}
+        />
+
+        <MaintenancePanel
+          assetId={asset.id}
+          view={maintenanceView}
+          members={teamMembers.map((m) => ({
+            clerkUserId: m.clerkUserId,
+            label: memberLabel(m),
+          }))}
           canEdit={isOwner}
         />
       </div>

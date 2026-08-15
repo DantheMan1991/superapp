@@ -21,6 +21,13 @@ import {
   postDepreciation,
   postDisposal,
 } from "./depreciation-ops";
+import { todayInTimezone } from "@/lib/timezone";
+import {
+  createSchedule,
+  raiseDueMaintenance,
+  recordMeterReading,
+  recordService,
+} from "./maintenance-ops";
 
 /**
  * This pack's Layer 3 tailoring, from `tenant_modules.config`.
@@ -368,6 +375,171 @@ export async function disposeAssetAction(input: unknown) {
     return { ok: true, ...posting };
   } catch (err) {
     if (err instanceof LedgerError) return { error: friendlyMessage(err) };
+    return toResult(err);
+  }
+}
+
+/* ------------------------------------------------------------------------
+ * Maintenance.
+ *
+ * Raising work is a BUTTON, not a cron — the same call depreciation makes and
+ * for a related reason: a work item lands on somebody's list, and putting one
+ * there on a schedule nobody triggered is how a to-do list stops being trusted.
+ * ---------------------------------------------------------------------- */
+
+const scheduleSchema = z.object({
+  assetId: z.string().uuid(),
+  name: z.string().min(1).max(200),
+  kind: z.enum(["calendar", "meter"]),
+  intervalMonths: z.number().int().min(1).max(600).nullable().optional(),
+  intervalMeter: z.number().int().min(1).max(1_000_000).nullable().optional(),
+  meterUnit: z.string().max(20).optional(),
+});
+
+export async function addMaintenanceScheduleAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = scheduleSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the schedule details." };
+  const { assetId, ...spec } = parsed.data;
+
+  const assetCtx: AssetCtx = {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+    role: ctx.role,
+  };
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => createSchedule(tx, assetCtx, assetId, spec),
+      { role: ctx.role },
+    );
+    revalidatePath(`/dashboard/m/assets/${assetId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const readingSchema = z.object({
+  assetId: z.string().uuid(),
+  readOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reading: z.number().int().min(0),
+  unit: z.string().max(20).optional(),
+});
+
+export async function recordMeterReadingAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = readingSchema.safeParse(input);
+  if (!parsed.success) return { error: "Enter a whole number." };
+
+  const assetCtx: AssetCtx = {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+    role: ctx.role,
+  };
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        recordMeterReading(tx, assetCtx, parsed.data.assetId, {
+          readOn: parsed.data.readOn,
+          reading: parsed.data.reading,
+          unit: parsed.data.unit,
+        }),
+      { role: ctx.role },
+    );
+    revalidatePath(`/dashboard/m/assets/${parsed.data.assetId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const serviceSchema = z.object({
+  assetId: z.string().uuid(),
+  scheduleId: z.string().uuid().nullable().optional(),
+  performedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  meterReading: z.number().int().min(0).nullable().optional(),
+  description: z.string().max(2000).optional(),
+});
+
+export async function recordServiceAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = serviceSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the service details." };
+
+  const assetCtx: AssetCtx = {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+    role: ctx.role,
+  };
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        recordService(tx, assetCtx, parsed.data.assetId, {
+          scheduleId: parsed.data.scheduleId ?? null,
+          performedOn: parsed.data.performedOn,
+          meterReading: parsed.data.meterReading ?? null,
+          description: parsed.data.description,
+        }),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "asset.service_recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "asset",
+      targetId: parsed.data.assetId,
+      meta: { performedOn: parsed.data.performedOn },
+    });
+    revalidatePath(`/dashboard/m/assets/${parsed.data.assetId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const raiseSchema = z.object({ assetId: z.string().uuid() });
+
+export async function raiseMaintenanceWorkAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = raiseSchema.safeParse(input);
+  if (!parsed.success) return { error: "Could not raise that." };
+
+  const assetCtx: AssetCtx = {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+    role: ctx.role,
+  };
+  const today = todayInTimezone(ctx.tenant.timezone);
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const asset = await getAsset(tx, ctx.tenant.id, parsed.data.assetId);
+        if (!asset) throw new AssetError("NOT_FOUND", "asset not found");
+        return raiseDueMaintenance(tx, assetCtx, asset, today);
+      },
+      { role: ctx.role },
+    );
+    if (result.raised.length > 0) {
+      await logAudit({
+        action: "asset.maintenance_raised",
+        tenantId: ctx.tenant.id,
+        actorClerkUserId: ctx.userId,
+        targetType: "asset",
+        targetId: parsed.data.assetId,
+        meta: { count: result.raised.length },
+      });
+    }
+    revalidatePath(`/dashboard/m/assets/${parsed.data.assetId}`);
+    return { ok: true, raised: result.raised.length };
+  } catch (err) {
     return toResult(err);
   }
 }

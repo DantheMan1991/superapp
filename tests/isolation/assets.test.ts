@@ -322,4 +322,87 @@ d("assets table (RLS)", () => {
       ),
     ).rejects.toThrow();
   });
+
+  it("maintenance tables are isolated like the asset they hang off", async () => {
+    // Three more pack-owned tables, and none of them is a new security
+    // category: tenant_id, FORCE RLS, no cross-tenant read.
+    const mine = await withSystem(async (tx) => {
+      const [sched] = await tx
+        .insert(schema.assetMaintenanceSchedules)
+        .values({
+          tenantId: tenantA,
+          assetId: barnA,
+          name: "Gutters",
+          kind: "calendar",
+          intervalMonths: 12,
+        })
+        .returning();
+      await tx.insert(schema.assetMeterReadings).values({
+        tenantId: tenantA,
+        assetId: barnA,
+        readOn: "2026-08-01",
+        reading: 10,
+      });
+      await tx.insert(schema.assetMaintenanceEvents).values({
+        tenantId: tenantA,
+        assetId: barnA,
+        scheduleId: sched.id,
+        performedOn: "2026-08-01",
+      });
+      return sched.id;
+    });
+
+    const theirSchedules = await asOtherTenant((tx) =>
+      tx.select().from(schema.assetMaintenanceSchedules),
+    );
+    expect(theirSchedules).toHaveLength(0);
+    const theirReadings = await asOtherTenant((tx) =>
+      tx.select().from(schema.assetMeterReadings),
+    );
+    expect(theirReadings).toHaveLength(0);
+    const theirEvents = await asOtherTenant((tx) =>
+      tx.select().from(schema.assetMaintenanceEvents),
+    );
+    expect(theirEvents).toHaveLength(0);
+
+    // And the owning tenant does see them.
+    const ours = await asOwner((tx) =>
+      tx.select().from(schema.assetMaintenanceSchedules),
+    );
+    expect(ours.map((r) => r.id)).toContain(mine);
+  });
+
+  it("a schedule cannot hang off another tenant's asset", async () => {
+    // The composite FK carries tenant_id on both sides, so this is
+    // unrepresentable rather than merely forbidden — it fails even under
+    // withSystem, where RLS is not watching.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.assetMaintenanceSchedules).values({
+          tenantId: tenantA,
+          assetId: tractorB,
+          name: "Cross-tenant",
+          kind: "calendar",
+          intervalMonths: 6,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a schedule carrying the wrong kind's interval", async () => {
+    // ams_interval_matches_kind: a calendar schedule with a meter interval is
+    // a half-edited row, not one that does both.
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.assetMaintenanceSchedules).values({
+          tenantId: tenantA,
+          assetId: barnA,
+          name: "Confused",
+          kind: "calendar",
+          intervalMonths: 6,
+          intervalMeter: 100,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
 });

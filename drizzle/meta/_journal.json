@@ -904,6 +904,13 @@
       "when": 1786759462002,
       "tag": "0128_thin_zombie",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1786792814771,
+      "tag": "0129_lumpy_dreadnoughts",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import {
   buildSchedule,
   catchUpKey,
   depreciableBaseCents,
+  disposalMaths,
   firstOpenPeriod,
   isDepreciationMethod,
   periodAmountCents,
@@ -331,5 +332,75 @@ describe("isDepreciationMethod", () => {
     // is added, both move together.
     expect(isDepreciationMethod("declining_balance")).toBe(false);
     expect(isDepreciationMethod("macrs")).toBe(false);
+  });
+});
+
+describe("disposalMaths", () => {
+  it("is a gain when the sale beats book value", () => {
+    const m = disposalMaths({
+      costCents: 100_000,
+      accumulatedCents: 60_000,
+      proceedsCents: 50_000,
+    });
+    expect(m.bookValueCents).toBe(40_000);
+    expect(m.gainCents).toBe(10_000);
+  });
+
+  it("is a loss when it does not", () => {
+    const m = disposalMaths({
+      costCents: 100_000,
+      accumulatedCents: 60_000,
+      proceedsCents: 25_000,
+    });
+    expect(m.gainCents).toBe(-15_000);
+  });
+
+  it("scrapping something with book value left is a loss of exactly that", () => {
+    // The case people find surprising, and the one that makes a balance sheet
+    // honest: giving away an asset still carrying value costs you that value.
+    const m = disposalMaths({
+      costCents: 100_000,
+      accumulatedCents: 30_000,
+      proceedsCents: 0,
+    });
+    expect(m.bookValueCents).toBe(70_000);
+    expect(m.gainCents).toBe(-70_000);
+  });
+
+  it("is neither when a fully depreciated asset is scrapped", () => {
+    const m = disposalMaths({
+      costCents: 100_000,
+      accumulatedCents: 100_000,
+      proceedsCents: 0,
+    });
+    expect(m.bookValueCents).toBe(0);
+    expect(m.gainCents).toBe(0);
+  });
+
+  it("is all gain when a fully depreciated asset sells", () => {
+    const m = disposalMaths({
+      costCents: 100_000,
+      accumulatedCents: 100_000,
+      proceedsCents: 15_000,
+    });
+    expect(m.gainCents).toBe(15_000);
+  });
+
+  it("balances by construction — the four legs always sum to zero", () => {
+    for (const [cost, accum, proceeds] of [
+      [100_000, 60_000, 50_000],
+      [1, 0, 0],
+      [999_999, 333_333, 111_111],
+      [50_000, 50_000, 0],
+    ]) {
+      const m = disposalMaths({
+        costCents: cost,
+        accumulatedCents: accum,
+        proceedsCents: proceeds,
+      });
+      // Dr accumulated + Dr proceeds − Cr cost − Cr gain === 0
+      const legs = m.accumulatedCents + m.proceedsCents - m.costCents - m.gainCents;
+      expect(legs, `cost=${cost} accum=${accum} proceeds=${proceeds}`).toBe(0);
+    }
   });
 });

@@ -28,6 +28,7 @@ import { SUGGESTED_ASSET_KINDS, assetKindLabel } from "../vocabulary";
 
 const NO_PARENT = "__none__";
 const CUSTOM_KIND = "__custom__";
+const NO_ACCOUNT = "__none__";
 
 export interface AssetDetailView {
   id: string;
@@ -41,6 +42,12 @@ export interface AssetDetailView {
   costInput: string;
   parentId: string | null;
   notes: string;
+  assetAccountId: string | null;
+  /** Pre-formatted on the server; this component never formats money. */
+  accumulatedLabel: string;
+  bookValueLabel: string;
+  /** Null when the books cannot be settled, with the reason. */
+  cannotSettle: "no_cost" | "no_asset_account" | null;
 }
 
 /**
@@ -54,11 +61,17 @@ export function AssetControls({
   asset,
   containers,
   kindsInUse,
+  assetAccounts,
+  proceedsAccounts,
   today,
 }: {
   asset: AssetDetailView;
   containers: { id: string; name: string }[];
   kindsInUse: string[];
+  /** Fixed-asset accounts — where an asset's cost sits. */
+  assetAccounts: { id: string; label: string }[];
+  /** Where sale proceeds could land: bank, cash, receivable. */
+  proceedsAccounts: { id: string; label: string }[];
   /** The tenant's today, resolved on the server — never the browser's. */
   today: string;
 }) {
@@ -74,6 +87,10 @@ export function AssetControls({
   const [kindChoice, setKindChoice] = useState(asset.kind);
   const [customKind, setCustomKind] = useState("");
   const [parentChoice, setParentChoice] = useState(asset.parentId ?? NO_PARENT);
+  const [accountChoice, setAccountChoice] = useState(
+    asset.assetAccountId ?? NO_ACCOUNT,
+  );
+  const [proceedsAccount, setProceedsAccount] = useState(NO_ACCOUNT);
 
   function save(formData: FormData) {
     const kind = kindChoice === CUSTOM_KIND ? customKind : kindChoice;
@@ -89,6 +106,7 @@ export function AssetControls({
         acquisitionCostCents: rawCost ? Math.round(Number(rawCost) * 100) : null,
         parentId: parentChoice === NO_PARENT ? null : parentChoice,
         notes: String(formData.get("notes") ?? ""),
+        assetAccountId: accountChoice === NO_ACCOUNT ? null : accountChoice,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -102,15 +120,26 @@ export function AssetControls({
 
   function dispose(formData: FormData) {
     startTransition(async () => {
+      const raw = String(formData.get("proceeds") ?? "").trim();
+      const proceedsCents = raw ? Math.round(Number(raw) * 100) : 0;
       const result = await disposeAssetAction({
         id: asset.id,
         disposedOn: String(formData.get("disposedOn") ?? ""),
+        proceedsCents,
+        proceedsAccountId:
+          proceedsCents > 0 && proceedsAccount !== NO_ACCOUNT
+            ? proceedsAccount
+            : null,
       });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success("Marked as disposed");
+      toast.success(
+        result.posted
+          ? "Disposed, and the books are settled"
+          : "Marked as disposed — nothing posted, see the note",
+      );
       setDisposeOpen(false);
       router.refresh();
     });
@@ -238,6 +267,28 @@ export function AssetControls({
               </div>
 
               <div className="grid gap-2">
+                <Label htmlFor="assetAccountId">Cost sits in</Label>
+                <Select value={accountChoice} onValueChange={setAccountChoice}>
+                  <SelectTrigger id="assetAccountId">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_ACCOUNT}>Not on the books</SelectItem>
+                    {assetAccounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Where this asset&rsquo;s cost was booked when you bought it.
+                  Yosher does not post it again — it needs to know where it
+                  already sits so a disposal can take it back off.
+                </p>
+              </div>
+
+              <div className="grid gap-2">
                 <Label htmlFor="notes">Notes</Label>
                 <Textarea
                   id="notes"
@@ -268,20 +319,71 @@ export function AssetControls({
               <DialogHeader>
                 <DialogTitle>Dispose of {asset.name}?</DialogTitle>
                 <DialogDescription>
-                  It stays on the books with everything it has cost — disposal
-                  is a date, not a deletion. It stops being taggable on new
-                  entries, and existing ones keep reporting.
+                  {asset.cannotSettle
+                    ? "The asset stays on record with its history. Nothing will be posted — see below."
+                    : `Its cost and ${asset.accumulatedLabel} of depreciation come off the balance sheet, and the difference against ${asset.bookValueLabel} book value is recorded as a gain or loss.`}
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-2 py-4">
-                <Label htmlFor="disposedOn">Date of disposal</Label>
-                <Input
-                  id="disposedOn"
-                  name="disposedOn"
-                  type="date"
-                  defaultValue={today}
-                  required
-                />
+
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="disposedOn">Date of disposal</Label>
+                  <Input
+                    id="disposedOn"
+                    name="disposedOn"
+                    type="date"
+                    defaultValue={today}
+                    required
+                  />
+                </div>
+
+                {!asset.cannotSettle && (
+                  <>
+                    <div className="grid gap-2">
+                      <Label htmlFor="proceeds">Sold for</Label>
+                      <Input
+                        id="proceeds"
+                        name="proceeds"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00 if scrapped or given away"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="proceedsAccount">Money went into</Label>
+                      <Select
+                        value={proceedsAccount}
+                        onValueChange={setProceedsAccount}
+                      >
+                        <SelectTrigger id="proceedsAccount">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NO_ACCOUNT}>
+                            Nothing received
+                          </SelectItem>
+                          {proceedsAccounts.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </>
+                )}
+
+                {asset.cannotSettle && (
+                  // Said plainly rather than failing quietly. An asset whose
+                  // cost is on no account has nothing to remove, and guessing
+                  // an account would put a real number in the wrong place.
+                  <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+                    {asset.cannotSettle === "no_cost"
+                      ? "This asset has no recorded cost, so there is nothing to take off the balance sheet. Add a cost first if you want the disposal to post."
+                      : "This asset's cost is not linked to an account, so Yosher does not know what to remove. Set “Cost sits in” under Edit first if you want the disposal to post."}
+                  </p>
+                )}
               </div>
               <DialogFooter>
                 <Button type="submit" disabled={pending}>

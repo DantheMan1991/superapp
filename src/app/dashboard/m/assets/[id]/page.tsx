@@ -21,6 +21,7 @@ import {
   listKindsInUse,
 } from "@/packs/assets/ops";
 import { assetKindLabel } from "@/packs/assets/vocabulary";
+import { listAccounts } from "@/modules/accounting/core";
 import {
   AssetControls,
   type AssetDetailView,
@@ -29,7 +30,10 @@ import {
   DepreciationPanel,
   type DepreciationView,
 } from "@/packs/assets/components/depreciation-panel";
-import { getDepreciationStatus } from "@/packs/assets/depreciation-ops";
+import {
+  getDepreciationStatus,
+  postedToDateCents,
+} from "@/packs/assets/depreciation-ops";
 import { periodOf } from "@/packs/assets/core/depreciation";
 
 export const dynamic = "force-dynamic";
@@ -67,7 +71,7 @@ export default async function AssetDetailPage({
     async (tx) => {
       const asset = await getAsset(tx, ctx.tenant.id, id);
       if (!asset) return null;
-      const [parent, children, containers, kinds, depreciation] =
+      const [parent, children, containers, kinds, depreciation, accounts, accumulated] =
         await Promise.all([
           asset.parentId ? getAsset(tx, ctx.tenant.id, asset.parentId) : null,
           listChildren(tx, ctx.tenant.id, asset.id),
@@ -76,14 +80,16 @@ export default async function AssetDetailPage({
           listContainerCandidates(tx, ctx.tenant.id, asset.id),
           listKindsInUse(tx, ctx.tenant.id),
           getDepreciationStatus(tx, ctx.tenant.id, asset, currentPeriod),
+          listAccounts(tx, ctx.tenant.id),
+          postedToDateCents(tx, ctx.tenant.id, asset.id),
         ]);
-      return { asset, parent, children, containers, kinds, depreciation };
+      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { asset, parent, children, containers, kinds, depreciation } = data;
+  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated } = data;
   const isOwner = ctx.role === "owner";
 
   const dueTotal =
@@ -134,7 +140,36 @@ export default async function AssetDetailPage({
         : (asset.acquisitionCostCents / 100).toFixed(2),
     parentId: asset.parentId,
     notes: asset.notes,
+    assetAccountId: asset.assetAccountId,
+    accumulatedLabel: formatCents(accumulated),
+    bookValueLabel: formatCents(
+      (asset.acquisitionCostCents ?? 0) - accumulated,
+    ),
+    // Mirrors postDisposal's own refusals, so the dialog can explain BEFORE
+    // the button is pressed rather than after.
+    cannotSettle:
+      asset.acquisitionCostCents === null
+        ? "no_cost"
+        : !asset.assetAccountId
+          ? "no_asset_account"
+          : null,
   };
+
+  // Fixed-asset accounts hold cost; bank, cash and receivable accounts are
+  // where sale proceeds could land. Filtering here keeps the pickers honest
+  // without the client needing to know the chart of accounts.
+  const assetAccounts = accounts
+    .filter((a) => a.isActive && a.subtype === "fixed_asset")
+    .map((a) => ({ id: a.id, label: `${a.code} ${a.name}` }));
+  const proceedsAccounts = accounts
+    .filter(
+      (a) =>
+        a.isActive &&
+        ["bank", "cash", "accounts_receivable", "other_current_asset"].includes(
+          a.subtype,
+        ),
+    )
+    .map((a) => ({ id: a.id, label: `${a.code} ${a.name}` }));
 
   return (
     <div className="space-y-6">
@@ -164,6 +199,8 @@ export default async function AssetDetailPage({
               asset={view}
               containers={containers.map((c) => ({ id: c.id, name: c.name }))}
               kindsInUse={kinds.map((k) => k.kind)}
+              assetAccounts={assetAccounts}
+              proceedsAccounts={proceedsAccounts}
               // The tenant's today, never the browser's, so two people in one
               // workspace agree what "today" means on a disposal.
               today={today}

@@ -45,6 +45,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
+import { accounts } from "./ledger";
 
 export const assets = pgTable(
   "assets",
@@ -111,6 +112,23 @@ export const assets = pgTable(
     /** What it is expected to be worth at the end. Depreciation stops here. */
     salvageValueCents: bigint("salvage_value_cents", { mode: "number" }),
     /**
+     * The fixed-asset account carrying this asset's cost — `1600 Equipment`,
+     * `1650 Vehicles`, and so on.
+     *
+     * THIS PACK DOES NOT CAPITALISE. Buying a tractor already hits the books
+     * once, through a bill or a bank transaction coded to a fixed-asset
+     * account; posting the cost again from here would double it. So the asset
+     * register LINKS to where the cost already lives rather than putting it
+     * there.
+     *
+     * Nullable, and its absence is a real state with a real consequence:
+     * without it a disposal cannot remove the cost, because nothing knows which
+     * account holds it. Found on the live tenant 2026-08-15 — an asset had
+     * 6,706.78 of accumulated depreciation against a cost that was on no
+     * account at all, which is a contra-asset with nothing behind it.
+     */
+    assetAccountId: uuid("asset_account_id"),
+    /**
      * Containment: a freezer sits in a garage, a garage sits on the property.
      * Composite FK, so a parent is always a same-tenant row.
      *
@@ -141,6 +159,12 @@ export const assets = pgTable(
       name: "assets_parent_fk",
       columns: [t.tenantId, t.parentId],
       foreignColumns: [t.tenantId, t.id],
+    }),
+    // Composite, so an asset can only point at an account in its own tenant.
+    foreignKey({
+      name: "assets_asset_account_fk",
+      columns: [t.tenantId, t.assetAccountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
     }),
     check(
       "assets_status_valid",

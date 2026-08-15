@@ -15,6 +15,30 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-15 — Disposal settles the books (`claude/assets-disposal-settles`)
+- **Found first: the pack was never capitalising anything.** On the live tenant
+  `1700 Accumulated Depreciation` stood at −6,706.78 against `1600 Equipment` of
+  **zero** — a contra-asset with no asset behind it. Depreciation had been
+  posting half an entry all along.
+- **The pack still does not capitalise, and should not.** Buying a tractor
+  already hits the books once, through a bill or a bank transaction coded to a
+  fixed-asset account; posting the cost again from here would double it. So
+  `assets.asset_account_id` **links** to where the cost already lives.
+- Disposal now posts: Dr accumulated, Dr proceeds, Cr cost, and the difference
+  to `4950 Gain (Loss) on Asset Disposal` — one account for both directions,
+  since the ledger's signed amounts carry a gain as a credit and a loss as a
+  debit.
+- **It posts nothing, and says why, when it cannot know what to remove.** No
+  cost, or a cost linked to no account, means there is no balance to clear —
+  and guessing an account would put a real number in the wrong place. The dialog
+  explains this *before* the button, not after.
+- The status change and the journal entry are **one transaction**: a disposed
+  asset still on the balance sheet, or a settled balance sheet with an active
+  asset, are both states nobody can reason about.
+- Idempotent on `disposal:<assetId>`, so disposing twice posts once.
+- 6 pure tests on the gain/loss maths (including that the four legs balance by
+  construction) and 9 db-backed on the posting.
+
 ### 2026-08-15 — Catch-up verified live, and posted-to-date now reads the ledger (`claude/assets-depreciation-ledger-truth`)
 - **Catch-up confirmed against the real tenant.** The Garage's in-service date
   was set back to its true 2019-06-01 with the books closed through
@@ -246,10 +270,12 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
   depreciation lands in a period a close can lock, and posting into someone's
   books on a schedule they did not trigger is a bad surprise for an accountant.
   Revisit only with an explicit opt-in.
-- **Disposal does not settle the books.** Marking an asset disposed stops it
-  being taggable but posts nothing — no removal of cost and accumulated
-  depreciation, no gain or loss on sale. That is the next accounting slice and
-  it is a real gap: the balance sheet still carries a tractor that has been sold.
+- **Existing assets have no `asset_account_id`.** The column is new and
+  nullable, so every asset created before 2026-08-15 has an unlinked cost and
+  will refuse to settle on disposal until someone sets *Cost sits in*. There is
+  no backfill, because only the tenant knows which account a given purchase was
+  coded to. A prompt on assets that depreciate but are unlinked would be worth
+  building.
 - **Images / a profile picture per asset** (founder's request, 2026-08-15).
   Storage is free — Documents already holds files with metadata and the open
   entity-link pattern attaches them. What needs designing is the *primary*

@@ -10,6 +10,7 @@ import {
   listPostedPeriods,
   postAllDepreciation,
   postDepreciation,
+  postDisposal,
   postedToDateCents,
   resolveDepreciationAccounts,
   scheduleInputFor,
@@ -470,4 +471,239 @@ d("depreciation posting", () => {
     });
     return fn(asset!);
   }
+});
+
+/**
+ * Disposal settling the books.
+ *
+ * Before this, marking an asset sold stopped it being taggable and posted
+ * nothing — the cost and its accumulated depreciation stayed on the balance
+ * sheet forever. These certify that the four legs come off and the difference
+ * lands as a gain or a loss.
+ */
+d("disposal settles the books", () => {
+  const STAMP = `disp-${process.pid}`;
+  const OWNER = `${STAMP}-owner`;
+
+  let tenantId: string;
+  let equipmentAccountId: string;
+  let bankAccountId: string;
+
+  const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantId, fn, { role: "owner", userId: OWNER });
+  const ctx = (): AssetCtx => ({ tenantId, userId: OWNER, role: "owner" });
+
+  beforeAll(async () => {
+    await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values({
+          clerkOrgId: `${STAMP}-org`,
+          name: "Disposal",
+          slug: `${STAMP}-slug`,
+        })
+        .returning();
+      tenantId = rows[0].id;
+    });
+    await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId), {
+      role: "owner",
+      userId: OWNER,
+    });
+    const accounts = await asOwner((tx) =>
+      tx.select().from(schema.accounts).where(eq(schema.accounts.tenantId, tenantId)),
+    );
+    equipmentAccountId = accounts.find((a) => a.code === "1600")!.id;
+    bankAccountId = accounts.find((a) => a.code === "1000")!.id;
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
+    });
+  });
+
+  async function makeAsset(name: string, costCents: number) {
+    return asOwner((tx) =>
+      createAsset(tx, ctx(), {
+        kind: "equipment",
+        name,
+        acquisitionCostCents: costCents,
+        assetAccountId: equipmentAccountId,
+        inServiceOn: "2026-01-01",
+        depreciationMethod: "straight_line",
+        usefulLifeMonths: 10,
+        salvageValueCents: 0,
+      }),
+    );
+  }
+
+  it("provisioning adds the gain/loss account", async () => {
+    const acct = await asOwner((tx) =>
+      tx.query.accounts.findFirst({
+        where: and(
+          eq(schema.accounts.tenantId, tenantId),
+          eq(schema.accounts.code, "4950"),
+        ),
+      }),
+    );
+    expect(acct?.name).toContain("Disposal");
+  });
+
+  it("posts a balanced entry that clears cost and accumulated", async () => {
+    const asset = await makeAsset("Sold mower", 100_000);
+    await asOwner((tx) => postDepreciation(tx, ctx(), asset, "2026-04"));
+    const accumulated = await asOwner((tx) =>
+      postedToDateCents(tx, tenantId, asset.id),
+    );
+    expect(accumulated).toBe(40_000); // 4 of 10 months at 10,000
+
+    const posting = await asOwner((tx) =>
+      postDisposal(tx, ctx(), asset, {
+        disposedOn: "2026-04-30",
+        proceedsCents: 75_000,
+        proceedsAccountId: bankAccountId,
+      }),
+    );
+    expect(posting.posted).toBe(true);
+    // Book value 60,000; sold for 75,000 → 15,000 gain.
+    expect(posting.bookValueCents).toBe(60_000);
+    expect(posting.gainCents).toBe(15_000);
+
+    const lines = await asOwner((tx) =>
+      tx
+        .select({
+          accountId: schema.journalLines.accountId,
+          amountCents: schema.journalLines.amountCents,
+        })
+        .from(schema.journalLines)
+        .innerJoin(
+          schema.journalEntries,
+          eq(schema.journalEntries.id, schema.journalLines.entryId),
+        )
+        .where(eq(schema.journalEntries.idempotencyKey, `disposal:${asset.id}`)),
+    );
+    expect(lines.reduce((s, l) => s + l.amountCents, 0)).toBe(0);
+    const byAccount = new Map(lines.map((l) => [l.accountId, l.amountCents]));
+    // The cost comes OFF the fixed-asset account.
+    expect(byAccount.get(equipmentAccountId)).toBe(-100_000);
+    // The proceeds land in the bank.
+    expect(byAccount.get(bankAccountId)).toBe(75_000);
+  });
+
+  it("records a loss when it sells for less than book value", async () => {
+    const asset = await makeAsset("Cheap trailer", 100_000);
+    const posting = await asOwner((tx) =>
+      postDisposal(tx, ctx(), asset, {
+        disposedOn: "2026-02-28",
+        proceedsCents: 10_000,
+        proceedsAccountId: bankAccountId,
+      }),
+    );
+    // Nothing depreciated, so book value is the full cost.
+    expect(posting.gainCents).toBe(-90_000);
+  });
+
+  it("scrapping something with book value left is a loss of exactly that", async () => {
+    const asset = await makeAsset("Scrapped tiller", 50_000);
+    const posting = await asOwner((tx) =>
+      postDisposal(tx, ctx(), asset, {
+        disposedOn: "2026-02-28",
+        proceedsCents: 0,
+      }),
+    );
+    expect(posting.gainCents).toBe(-50_000);
+
+    const lines = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.journalLines)
+        .innerJoin(
+          schema.journalEntries,
+          eq(schema.journalEntries.id, schema.journalLines.entryId),
+        )
+        .where(eq(schema.journalEntries.idempotencyKey, `disposal:${asset.id}`)),
+    );
+    // No proceeds line and no accumulated line — the ledger rejects zero
+    // amounts, so an entry simply has fewer legs.
+    expect(lines).toHaveLength(2);
+  });
+
+  it("posts nothing, and says why, when the cost is on no account", async () => {
+    const orphan = await asOwner((tx) =>
+      createAsset(tx, ctx(), {
+        kind: "equipment",
+        name: "Unlinked",
+        acquisitionCostCents: 10_000,
+      }),
+    );
+    const posting = await asOwner((tx) =>
+      postDisposal(tx, ctx(), orphan, {
+        disposedOn: "2026-02-28",
+        proceedsCents: 0,
+      }),
+    );
+    // Guessing an account would put a real number in the wrong place.
+    expect(posting.posted).toBe(false);
+    expect(posting.reason).toBe("no_asset_account");
+  });
+
+  it("posts nothing when there is no cost to remove", async () => {
+    const free = await asOwner((tx) =>
+      createAsset(tx, ctx(), {
+        kind: "fixture",
+        name: "Inherited bench",
+        assetAccountId: equipmentAccountId,
+      }),
+    );
+    const posting = await asOwner((tx) =>
+      postDisposal(tx, ctx(), free, {
+        disposedOn: "2026-02-28",
+        proceedsCents: 0,
+      }),
+    );
+    expect(posting.posted).toBe(false);
+    expect(posting.reason).toBe("no_cost");
+  });
+
+  it("is idempotent — disposing twice posts one entry", async () => {
+    const asset = await makeAsset("Twice", 20_000);
+    await asOwner((tx) =>
+      postDisposal(tx, ctx(), asset, {
+        disposedOn: "2026-02-28",
+        proceedsCents: 0,
+      }),
+    );
+    await asOwner((tx) =>
+      postDisposal(tx, ctx(), asset, {
+        disposedOn: "2026-02-28",
+        proceedsCents: 0,
+      }),
+    );
+    const entries = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.journalEntries)
+        .where(
+          and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.idempotencyKey, `disposal:${asset.id}`),
+          ),
+        ),
+    );
+    expect(entries).toHaveLength(1);
+  });
+
+  it("refuses a staff member", async () => {
+    const asset = await makeAsset("Not yours", 5_000);
+    await expect(
+      asOwner((tx) =>
+        postDisposal(
+          tx,
+          { tenantId, userId: OWNER, role: "staff" },
+          asset,
+          { disposedOn: "2026-02-28", proceedsCents: 0 },
+        ),
+      ),
+    ).rejects.toThrow();
+  });
 });

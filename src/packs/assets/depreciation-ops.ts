@@ -11,6 +11,7 @@ import { AssetError, ASSET_DIMENSION, type AssetCtx } from "./ops";
 import {
   buildSchedule,
   catchUpKey,
+  disposalMaths,
   periodEndDate,
   periodKey,
   periodOf,
@@ -394,6 +395,127 @@ export async function postDepreciation(
     postedPeriods: donePeriods,
     totalCents: total,
     caughtUpCount: stranded.length,
+  };
+}
+
+/** The account a gain or loss on disposal lands in. */
+async function resolveGainLossAccount(
+  tx: Tx,
+  tenantId: string,
+): Promise<string> {
+  const rows = await tx
+    .select({ id: schema.accounts.id })
+    .from(schema.accounts)
+    .where(
+      and(
+        eq(schema.accounts.tenantId, tenantId),
+        eq(schema.accounts.code, "4950"),
+        eq(schema.accounts.isActive, true),
+      ),
+    );
+  if (rows.length !== 1) {
+    throw new AssetError(
+      "DEPRECIATION_ACCOUNTS",
+      "Could not find a Gain (Loss) on Asset Disposal account (code 4950). Re-run accounting provisioning to add it.",
+    );
+  }
+  return rows[0].id;
+}
+
+export interface DisposalPosting {
+  posted: boolean;
+  /** Why nothing was posted, when nothing was. */
+  reason?: "no_cost" | "no_asset_account";
+  gainCents?: number;
+  bookValueCents?: number;
+}
+
+/**
+ * Take a disposed asset off the balance sheet.
+ *
+ * Removes the cost and the accumulated depreciation, records any proceeds, and
+ * recognises the difference as a gain or a loss. Without this a sold tractor
+ * stays on the books forever, which is the state this pack shipped in.
+ *
+ * POSTS NOTHING, AND SAYS SO, when it cannot know what to remove. An asset with
+ * no cost, or one whose cost was never linked to a fixed-asset account, has no
+ * balance to clear — and guessing an account would put a real number in the
+ * wrong place, which is worse than a disposal that is only a status. The caller
+ * surfaces `reason` rather than swallowing it.
+ */
+export async function postDisposal(
+  tx: Tx,
+  ctx: AssetCtx,
+  asset: Asset,
+  args: {
+    disposedOn: string;
+    proceedsCents: number;
+    /** Where the money landed. Required only when there are proceeds. */
+    proceedsAccountId?: string | null;
+  },
+  config?: unknown,
+): Promise<DisposalPosting> {
+  if (ctx.role !== "owner") {
+    throw new AssetError("FORBIDDEN", "owner role required");
+  }
+  if (asset.acquisitionCostCents === null) {
+    return { posted: false, reason: "no_cost" };
+  }
+  if (!asset.assetAccountId) {
+    return { posted: false, reason: "no_asset_account" };
+  }
+  if (args.proceedsCents > 0 && !args.proceedsAccountId) {
+    throw new AssetError(
+      "DEPRECIATION_ACCOUNTS",
+      "Choose the account the sale proceeds went into.",
+    );
+  }
+
+  const accounts = await resolveDepreciationAccounts(tx, ctx.tenantId, config);
+  const gainLossAccountId = await resolveGainLossAccount(tx, ctx.tenantId);
+  const accumulated = await postedToDateCents(tx, ctx.tenantId, asset.id);
+  const maths = disposalMaths({
+    costCents: asset.acquisitionCostCents,
+    accumulatedCents: accumulated,
+    proceedsCents: args.proceedsCents,
+  });
+
+  const members = await listDimensionMembers(tx, ctx.tenantId, ASSET_DIMENSION);
+  const member = members.find((m) => m.packEntityId === asset.id);
+  const dimensionMemberIds = member ? [member.id] : undefined;
+
+  // Signed cents: positive is a debit. Zero-amount lines are dropped because
+  // the ledger rejects them — an asset with no depreciation taken, or one given
+  // away for nothing, simply has fewer legs.
+  const lines = [
+    { accountId: accounts.accumulatedAccountId, amountCents: accumulated },
+    {
+      accountId: args.proceedsAccountId ?? "",
+      amountCents: args.proceedsCents,
+    },
+    {
+      accountId: asset.assetAccountId,
+      amountCents: -asset.acquisitionCostCents,
+    },
+    { accountId: gainLossAccountId, amountCents: -maths.gainCents },
+  ]
+    .filter((l) => l.amountCents !== 0 && l.accountId !== "")
+    .map((l) => ({ ...l, memo: asset.name, dimensionMemberIds }));
+
+  await postEntry(tx, ctx, {
+    status: "posted",
+    entryDate: args.disposedOn,
+    memo: `Disposal — ${asset.name}`,
+    source: "depreciation",
+    sourceId: asset.id,
+    idempotencyKey: `disposal:${asset.id}`,
+    lines,
+  });
+
+  return {
+    posted: true,
+    gainCents: maths.gainCents,
+    bookValueCents: maths.bookValueCents,
   };
 }
 

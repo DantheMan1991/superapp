@@ -205,6 +205,8 @@ export interface AssetInput {
    * asset that depreciates by nothing.
    */
   inServiceOn?: string | null;
+  /** Which fixed-asset account carries this asset's cost. */
+  assetAccountId?: string | null;
   depreciationMethod?: string;
   usefulLifeMonths?: number | null;
   salvageValueCents?: number | null;
@@ -235,6 +237,7 @@ export async function createAsset(
       acquiredOn: input.acquiredOn ?? null,
       acquisitionCostCents: input.acquisitionCostCents ?? null,
       inServiceOn: input.inServiceOn ?? null,
+      assetAccountId: input.assetAccountId ?? null,
       depreciationMethod: input.depreciationMethod ?? "none",
       usefulLifeMonths: input.usefulLifeMonths ?? null,
       salvageValueCents: input.salvageValueCents ?? null,
@@ -281,6 +284,9 @@ export async function updateAsset(
   }
   if (input.notes !== undefined) patch.notes = input.notes.trim();
   if (input.inServiceOn !== undefined) patch.inServiceOn = input.inServiceOn;
+  if (input.assetAccountId !== undefined) {
+    patch.assetAccountId = input.assetAccountId;
+  }
   if (input.depreciationMethod !== undefined) {
     patch.depreciationMethod = input.depreciationMethod;
   }

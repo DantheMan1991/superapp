@@ -56,6 +56,12 @@ export const GENERAL_COA: CoaTemplate = {
     { code: "4020", name: "Product Sales", type: "income", subtype: "operating_revenue", parentCode: "4000" },
     { code: "4100", name: "Discounts Given", type: "income", subtype: "contra_revenue" },
     { code: "4900", name: "Other Income", type: "income", subtype: "other_income" },
+    // ONE account for both directions. A disposal either makes money or loses
+    // it, and the ledger's signed amounts carry that without a second account:
+    // a credit here is a gain, a debit is a loss. Splitting it into separate
+    // gain and loss accounts is the other common convention and buys nothing
+    // when the report can show a negative.
+    { code: "4950", name: "Gain (Loss) on Asset Disposal", type: "income", subtype: "other_income" },
     // Cost of goods sold
     { code: "5000", name: "Cost of Goods Sold", type: "expense", subtype: "cogs" },
     { code: "5100", name: "Subcontractor Expense", type: "expense", subtype: "cogs" },

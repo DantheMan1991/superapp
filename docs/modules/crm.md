@@ -14,6 +14,23 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-15 — Follow-ups gain the shared work verbs (`claude/shared-entity-work`)
+- **The complaint that started it:** raising a follow-up on a record felt like
+  leaving CRM. Investigating showed the record page never navigates — the add
+  dialog is inline and the follow-up renders in the timeline. What was missing
+  were the VERBS: `TaskToggle` could tick and untick, and nothing else, so
+  reassigning one or moving its date meant opening Work.
+- `TaskToggle` is gone, replaced by the shared `WorkItemRow`
+  (`src/components/app/work-item-row.tsx`), which carries done, reopen,
+  reassign and re-due. The timeline keeps its own layout — it interleaves notes
+  and follow-ups, which is better for CRM than a generic panel — and shares only
+  the verbs.
+- **The optimistic `version` survived the move.** The shared action takes an
+  optional `expectedVersion` and the timeline passes it, so the concurrency
+  guarantee follow-ups have carried since slice 1 is unchanged.
+- The record page now passes the assignable members it already loaded for the
+  add dialog through to each row.
+
 ### 2026-08-12 — Merge follows the recurrence tables (branch `claude/accounting-recurring-converge`)
 
 Accounting folded `recurring_invoices` into `recurring_entries`, and

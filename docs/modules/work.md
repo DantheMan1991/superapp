@@ -10,6 +10,24 @@
 
 ## Build log
 
+### 2026-08-15 — Layer 0 gains work ACTIONS, not just a write path (`claude/shared-entity-work`)
+- `src/lib/work/actions.ts` — the entity-scoped verbs (add, done/reopen,
+  reassign, re-due) as `"use server"` at Layer 0, callable by any module or
+  pack.
+- **Why it was missing and why that mattered.** The write path has been shared
+  since slice 5a, but the only `"use server"` file was
+  `src/modules/work/actions.ts` — and a module may not import another module, so
+  every consumer wrapped its own subset. CRM wrapped two verbs; the assets pack
+  was about to wrap a different two. The divergence was invisible until there
+  were two consumers.
+- **The guard is the OWNING feature, not Work.** `extensionSlug` names the
+  module or pack the record belongs to, and that is what must be enabled. Work
+  being switched off does not stop a follow-up being raised — the item simply
+  has no second home to appear in.
+- `expectedVersion` is threaded through, enforced the way CRM does it: an empty
+  patch through `updateEntityWork` whose only job is to fail when the row moved.
+- Rule recorded in [extension-model.md §4b](../extension-model.md).
+
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 

@@ -155,15 +155,73 @@ jobs:
     if: >-
       github.event_name == 'push' ||
       contains(github.event.pull_request.labels.*.name, 'full-tests')
-    # ONE at a time across the whole repo. Every run shares the same Neon
-    # branch, and the suites stamp their tenants with `process.pid` — two
-    # runners can land on the same pid and collide on a tenant slug.
+    # NO `concurrency` GROUP ANY MORE, and its removal is half the point of the
+    # change below. The suite used to share ONE Neon branch with every other
+    # run, so it had to be serialised repo-wide and three PRs queued for
+    # thirty-six minutes. Every run now builds its own Postgres from scratch
+    # inside its own runner, so two runs cannot see each other at all — there
+    # is nothing left to serialise, and nothing left to leave behind when a run
+    # is cancelled.
+
+    # THE DATABASE, IN THE RUNNER.
     #
-    # cancel-in-progress is FALSE on purpose. These tests create tenants and
-    # delete them in afterAll; killing a run midway leaves the rows behind.
-    concurrency:
-      group: db-tests
-      cancel-in-progress: false
+    # The suite was never CPU-bound; it was waiting. 1465 of 1519 seconds were
+    # round trips to Neon, and the SAME suite cost 717s on one run and 1519s on
+    # the next because the wire got slower — every file scaling by the same
+    # ~2.2x. A latency-bound suite's runtime is a property of the network, not
+    # of the code. Here a round trip is sub-millisecond.
+    #
+    # Postgres 18 to match Neon (`select version()` on the Neon branch reports
+    # 18.4). The point of this suite is that it certifies what the DATABASE
+    # enforces, so running it on a different major version would be certifying
+    # something else.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci-owner-not-a-real-secret
+          POSTGRES_DB: superapp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      # THE DRIVER STAYS THE ONE PRODUCTION USES; only the transport changes.
+      #
+      # The app talks to Neon over a WebSocket, so a test run that swapped in
+      # `pg` would certify a driver that ships nowhere — and transaction
+      # handling and pooling are exactly what the isolation suite leans on.
+      # This proxy speaks that WebSocket protocol and forwards to plain
+      # Postgres, so nothing about the application code changes.
+      #
+      # APPEND_PORT fixes the target: service containers reach each other by
+      # service name, while the runner's own steps reach this one on localhost.
+      wsproxy:
+        image: ghcr.io/neondatabase/wsproxy:latest
+        env:
+          APPEND_PORT: "postgres:5432"
+          ALLOW_ADDR_REGEX: ".*"
+          LOG_TRAFFIC: "false"
+        ports:
+          - 5433:80
+
+    env:
+      # Read by scripts/lib/neon-local.ts, from BOTH the provisioning script and
+      # the test setup. Every path that does not set it is untouched, which is
+      # what keeps a developer's machine and any future real-database run safe.
+      NEON_LOCAL_PROXY: localhost:5433
+      # NOT SECRETS. This database is created empty, lives inside one runner,
+      # and is destroyed with it. Writing the values here rather than as repo
+      # secrets means there is nothing to rotate and nothing that could be
+      # pointed at something real by accident.
+      CI_POSTGRES_OWNER_URL: postgres://postgres:ci-owner-not-a-real-secret@localhost:5432/superapp_test
+      CI_APP_USER_PASSWORD: ci-app-user-not-a-real-secret
+      TEST_DATABASE_URL_OWNER: postgres://postgres:ci-owner-not-a-real-secret@localhost:5432/superapp_test
+      TEST_DATABASE_URL: postgres://app_user:ci-app-user-not-a-real-secret@localhost:5432/superapp_test
+
     steps:
       - uses: actions/checkout@v4
 
@@ -174,58 +232,44 @@ jobs:
 
       - run: npm ci
 
-      # THE IMPORTANT STEP.
+      # Builds the whole schema from zero — 136 migrations, 110 tables, 239 RLS
+      # policies and the `app_*` context functions the policies read.
       #
-      # tests/setup/database-guard.ts does not fail when TEST_DATABASE_URL is
-      # missing — it DELETES DATABASE_URL so the database suites skip, and
-      # writes a warning to stderr. That is right locally (a contributor without
-      # a test database still gets the pure tests) and wrong here: a missing or
-      # misnamed secret would produce a green tick over zero coverage.
-      #
-      # The guard's other protection cannot help either. It refuses when
-      # TEST_DATABASE_URL equals DATABASE_URL, but DATABASE_URL is never set in
-      # CI, so a production connection string pasted into the secret would be
-      # accepted and the suite would create and delete tenants in production.
-      # The separate Neon `ci` branch is what actually prevents that.
-      - name: Require the test database secrets
-        env:
-          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
-          TEST_DATABASE_URL_OWNER: ${{ secrets.TEST_DATABASE_URL_OWNER }}
-        run: |
-          missing=""
-          [ -z "$TEST_DATABASE_URL" ] && missing="$missing TEST_DATABASE_URL"
-          [ -z "$TEST_DATABASE_URL_OWNER" ] && missing="$missing TEST_DATABASE_URL_OWNER"
-          if [ -n "$missing" ]; then
-            echo "::error::Missing repository secret(s):$missing"
-            echo "Without them the database suites SKIP and this job would pass"
-            echo "while certifying nothing. Add them at Settings -> Secrets and"
-            echo "variables -> Actions, pointing at the Neon 'ci' branch."
-            exit 1
-          fi
-
-      # Applies any new migration to the CI branch before the suite runs, so it
-      # cannot drift behind main. `--dev` targets TEST_DATABASE_URL_OWNER, which
-      # here is the ci branch rather than the local dev one.
-      - name: Migrate the CI database
-        env:
-          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
-          TEST_DATABASE_URL_OWNER: ${{ secrets.TEST_DATABASE_URL_OWNER }}
+      # This is strictly BETTER than the Neon branch it replaces, and not only
+      # for speed: that branch was migrated forward run after run and could
+      # drift from what a fresh database produces. Building from empty every
+      # time means the migration chain itself is exercised on every run, which
+      # is the thing that would otherwise be discovered during a production
+      # migration. Verified to apply cleanly from zero before this was written.
+      - name: Build the schema from zero
         run: npm run db:migrate -- --dev
 
+      # `app_user` is created in SQL, and that is load-bearing rather than
+      # ceremonial. The isolation suite certifies that RLS stops one tenant
+      # reading another's rows, which is only a test at all if the connection
+      # CANNOT bypass RLS. The container's superuser can; so can any role a
+      # provider's API would mint. The script refuses to continue if the role it
+      # just made can bypass or is a superuser.
+      - name: Provision app_user, and prove it cannot bypass RLS
+        run: npx tsx scripts/ci-provision-db.ts
+
+      # Module rows, so anything reading `modules` or holding a
+      # `tenant_modules.module_id` foreign key has something to point at.
+      - name: Seed the module registry
+        env:
+          DATABASE_URL: postgres://postgres:ci-owner-not-a-real-secret@localhost:5432/superapp_test
+        run: npm run db:seed
+
       # The whole suite, including tests/isolation — the tenant-isolation
-      # certification that AGENTS.md requires before a deploy. It is NOT run
-      # again as a separate step: with TEST_DATABASE_URL present the guard
-      # points DATABASE_URL at it, so the database suites cannot skip, and the
-      # step above already fails when the secret is absent. Re-running the
-      # isolation files here would just repeat five minutes of work.
+      # certification AGENTS.md requires before a deploy.
       #
-      # (The guard's own "DATABASE TESTS SKIPPED" warning is not a usable
-      # signal here — it is only written when DATABASE_URL was already set,
-      # which never happens in CI.)
+      # The old "require the secrets" step is gone with the secrets themselves:
+      # the database is built by the two steps above, so it cannot be missing,
+      # and a suite that silently skipped would now fail at `db:migrate` long
+      # before it got here. `database-guard.ts` additionally refuses to run with
+      # NEON_LOCAL_PROXY set against any host that is not localhost.
       - name: Run the suite
         env:
-          TEST_DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
-          TEST_DATABASE_URL_OWNER: ${{ secrets.TEST_DATABASE_URL_OWNER }}
           # NOT SECRETS, and deliberately not repo secrets.
           #
           # These three are a key, a key and a salt. The suites that use them

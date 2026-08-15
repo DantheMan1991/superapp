@@ -31,6 +31,21 @@
 // there is nothing to protect, and the suite then loads production's URL
 // itself. Silent, and exactly the failure this file exists to prevent.
 import "dotenv/config";
+import { configureNeonForLocalProxy } from "../../scripts/lib/neon-local";
+
+/**
+ * A no-op unless `NEON_LOCAL_PROXY` is set, which only CI does. It points the
+ * Neon driver at a Postgres running in the same runner, through a WebSocket
+ * proxy — the suite is latency-bound, so this is most of its wall clock.
+ *
+ * The DRIVER stays the one production uses; only the transport changes. Running
+ * the isolation suite against a different driver would be certifying transaction
+ * and pooling behaviour that ships nowhere.
+ *
+ * Set before the guard below, and long before any suite imports `src/db`, so
+ * the first connection already knows where to go.
+ */
+const viaLocalProxy = configureNeonForLocalProxy();
 
 const testUrl = process.env.TEST_DATABASE_URL;
 const liveUrl = process.env.DATABASE_URL;
@@ -41,6 +56,21 @@ function hostOf(url: string | undefined): string {
     return new URL(url).host;
   } catch {
     return "(unparseable)";
+  }
+}
+
+if (viaLocalProxy) {
+  // The proxy rewrites where every connection goes, so pointing it at a real
+  // database would be both confusing and dangerous. It exists for the
+  // throwaway Postgres in a CI runner and nothing else.
+  const host = hostOf(testUrl);
+  const local = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+  if (!local) {
+    throw new Error(
+      `NEON_LOCAL_PROXY is set but TEST_DATABASE_URL points at ${host}.\n` +
+        "  The local proxy is only for the throwaway Postgres inside a CI\n" +
+        "  runner. Unset one of them.",
+    );
   }
 }
 

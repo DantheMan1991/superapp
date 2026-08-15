@@ -44,6 +44,9 @@ export interface DepreciationView {
   bookValueLabel: string | null;
   dueCount: number;
   dueTotalLabel: string | null;
+  /** Of `dueCount`, how many fall before the close and collapse into one entry. */
+  strandedCount: number;
+  catchUpPeriod: string | null;
   /** `YYYY-MM` the tenant is currently in. */
   currentPeriod: string;
   scheduleLength: number;
@@ -273,16 +276,29 @@ export function DepreciationPanel({
                     Up to date through {view.currentPeriod}.
                   </p>
                 ) : (
-                  <>
-                    <Button onClick={post} disabled={pending} size="sm">
-                      {pending
-                        ? "Posting…"
-                        : `Post ${view.dueCount} ${view.dueCount === 1 ? "month" : "months"}`}
-                    </Button>
-                    <span className="text-sm text-muted-foreground">
-                      {view.dueTotalLabel} due through {view.currentPeriod}
-                    </span>
-                  </>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <Button onClick={post} disabled={pending} size="sm">
+                        {pending
+                          ? "Posting…"
+                          : `Post ${view.dueCount} ${view.dueCount === 1 ? "month" : "months"}`}
+                      </Button>
+                      <span className="text-sm text-muted-foreground">
+                        {view.dueTotalLabel} due through {view.currentPeriod}
+                      </span>
+                    </div>
+                    {view.strandedCount > 0 && (
+                      // Said BEFORE the button is pressed. The first version of
+                      // this shipped without it, offered "Post 3 months", and
+                      // was refused by the ledger with a closed-period error.
+                      <p className="text-xs text-muted-foreground">
+                        {view.strandedCount}{" "}
+                        {view.strandedCount === 1 ? "month falls" : "months fall"}{" "}
+                        before your closing date and will be combined into one
+                        catch-up entry dated {view.catchUpPeriod}.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}

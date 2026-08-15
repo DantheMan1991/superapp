@@ -2,12 +2,20 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Asset } from "@/db/schema";
-import { listDimensionMembers, postEntry } from "@/modules/accounting/core";
+import {
+  getSettings,
+  listDimensionMembers,
+  postEntry,
+} from "@/modules/accounting/core";
 import { AssetError, ASSET_DIMENSION, type AssetCtx } from "./ops";
 import {
   buildSchedule,
+  catchUpKey,
   periodEndDate,
+  periodKey,
   periodOf,
+  periodsCoveredByKey,
+  splitAtClose,
   unpostedPeriods,
   type DepreciationInput,
   type DepreciationPeriod,
@@ -138,14 +146,25 @@ export function scheduleInputFor(asset: Asset): DepreciationInput | null {
   };
 }
 
-/** Periods already in the ledger for this asset, as `YYYY-MM`. */
+/**
+ * Periods already in the ledger for this asset, as `YYYY-MM`.
+ *
+ * Read from the IDEMPOTENCY KEY, not the entry date. A catch-up entry covers
+ * many periods under one date, so the date cannot say what was posted — the
+ * key can, and it is already stored and uniquely indexed. Reading dates here
+ * would make every caught-up period look unposted forever.
+ */
 export async function listPostedPeriods(
   tx: Tx,
   tenantId: string,
   assetId: string,
+  schedule: DepreciationPeriod[],
 ): Promise<string[]> {
   const rows = await tx
-    .select({ entryDate: schema.journalEntries.entryDate })
+    .select({
+      entryDate: schema.journalEntries.entryDate,
+      idempotencyKey: schema.journalEntries.idempotencyKey,
+    })
     .from(schema.journalEntries)
     .where(
       and(
@@ -154,7 +173,19 @@ export async function listPostedPeriods(
         eq(schema.journalEntries.sourceId, assetId),
       ),
     );
-  return rows.map((r) => periodOf(r.entryDate));
+  const periods = new Set<string>();
+  for (const row of rows) {
+    if (row.idempotencyKey) {
+      for (const p of periodsCoveredByKey(row.idempotencyKey, schedule)) {
+        periods.add(p);
+      }
+    } else {
+      // An entry with no key predates this scheme or was hand-made. Fall back
+      // to its date so it still counts as covering its own month.
+      periods.add(periodOf(row.entryDate));
+    }
+  }
+  return [...periods];
 }
 
 export interface DepreciationStatus {
@@ -165,6 +196,10 @@ export interface DepreciationStatus {
   /** cost − postedToDate. What the books say it is worth right now. */
   bookValueCents: number;
   due: DepreciationPeriod[];
+  /** Of `due`, the periods stranded behind a close — they collapse into one entry. */
+  strandedCount: number;
+  /** Where the catch-up entry will be dated, when there is one. */
+  catchUpPeriod: string | null;
 }
 
 /** Everything the detail page needs to describe where an asset stands. */
@@ -177,35 +212,52 @@ export async function getDepreciationStatus(
   const input = scheduleInputFor(asset);
   if (!input) return null;
   const schedule = buildSchedule(input);
-  const postedPeriods = await listPostedPeriods(tx, tenantId, asset.id);
+  const postedPeriods = await listPostedPeriods(tx, tenantId, asset.id, schedule);
   const posted = new Set(postedPeriods);
   const postedToDateCents = schedule
     .filter((r) => posted.has(r.period))
     .reduce((s, r) => s + r.amountCents, 0);
+  const due = unpostedPeriods(input, through, postedPeriods);
+
+  const settings = await getSettings(tx, tenantId);
+  const { stranded, open } = splitAtClose(due, settings.closedThrough);
   return {
     schedule,
     postedPeriods,
     postedToDateCents,
     bookValueCents: (asset.acquisitionCostCents ?? 0) - postedToDateCents,
-    due: unpostedPeriods(input, through, postedPeriods),
+    due,
+    strandedCount: stranded.length,
+    catchUpPeriod:
+      stranded.length > 0 ? (open[0]?.period ?? periodOf(through)) : null,
   };
 }
 
 export interface PostDepreciationResult {
   postedPeriods: string[];
   totalCents: number;
+  /** How many pre-close periods were rolled into a single catch-up entry. */
+  caughtUpCount: number;
 }
 
 /**
  * Post every period that is due, up to and including `through`.
  *
- * ONE ENTRY PER PERIOD, dated to that period's month end — never one lump for
- * a catch-up. A single combined entry would put six months of expense in one
- * month and quietly misstate every P&L in between, which is precisely the
- * report people run depreciation for.
+ * ONE ENTRY PER OPEN PERIOD, dated to that period's month end. A single lump
+ * for several open months would put their expense in one month and misstate
+ * every P&L in between, which is the report people run depreciation for.
  *
- * Idempotent per period via the entry's idempotency key, so a double-click, a
- * retry, or two people pressing the button at once post once.
+ * THE ONE EXCEPTION IS THE CLOSE. Periods whose month-end falls on or before
+ * `closedThrough` cannot be posted at all, and refusing the whole run because
+ * of them strands every open month behind them — which is what happens to any
+ * asset entered with a truthful backdated in-service date. So those periods
+ * are summed into a SINGLE catch-up entry dated in the first open period,
+ * which is what a bookkeeper does by hand: the expense is recognised, the
+ * accumulated balance ends up correct, and no closed period is reopened.
+ *
+ * Idempotent via the entry's idempotency key — per period for the ordinary
+ * ones, and `through:<period>` for the catch-up, which is also how
+ * `listPostedPeriods` knows what a catch-up covered.
  */
 export async function postDepreciation(
   tx: Tx,
@@ -226,9 +278,15 @@ export async function postDepreciation(
   }
 
   const accounts = await resolveDepreciationAccounts(tx, ctx.tenantId, config);
-  const posted = await listPostedPeriods(tx, ctx.tenantId, asset.id);
+  const schedule = buildSchedule(input);
+  const posted = await listPostedPeriods(tx, ctx.tenantId, asset.id, schedule);
   const due = unpostedPeriods(input, through, posted);
-  if (due.length === 0) return { postedPeriods: [], totalCents: 0 };
+  if (due.length === 0) {
+    return { postedPeriods: [], totalCents: 0, caughtUpCount: 0 };
+  }
+
+  const settings = await getSettings(tx, ctx.tenantId);
+  const { stranded, open } = splitAtClose(due, settings.closedThrough);
 
   const members = await listDimensionMembers(tx, ctx.tenantId, ASSET_DIMENSION);
   const member = members.find((m) => m.packEntityId === asset.id);
@@ -236,33 +294,117 @@ export async function postDepreciation(
   // tractor cost me" answerable from the P&L rather than from this pack.
   const dimensionMemberIds = member ? [member.id] : undefined;
 
+  const lines = (amountCents: number) => [
+    {
+      accountId: accounts.expenseAccountId,
+      amountCents,
+      memo: asset.name,
+      dimensionMemberIds,
+    },
+    {
+      accountId: accounts.accumulatedAccountId,
+      amountCents: -amountCents,
+      memo: asset.name,
+      dimensionMemberIds,
+    },
+  ];
+
   const donePeriods: string[] = [];
   let total = 0;
-  for (const row of due) {
+
+  if (stranded.length > 0) {
+    // Dated in the first open period. When every due period is stranded — an
+    // asset fully depreciated before the close — there is no open period to
+    // borrow, so fall back to the month being posted through.
+    const catchUpPeriod = open[0]?.period ?? periodOf(`${through}-01`);
+    const amount = stranded.reduce((s, r) => s + r.amountCents, 0);
+    const first = stranded[0].period;
+    const last = stranded.at(-1)!.period;
+    await postEntry(tx, ctx, {
+      status: "posted",
+      entryDate: periodEndDate(catchUpPeriod),
+      memo: `Depreciation catch-up — ${asset.name} (${first} to ${last}, ${stranded.length} months before close)`,
+      source: "depreciation",
+      sourceId: asset.id,
+      idempotencyKey: catchUpKey(asset.id, last),
+      lines: lines(amount),
+    });
+    donePeriods.push(...stranded.map((r) => r.period));
+    total += amount;
+  }
+
+  for (const row of open) {
     await postEntry(tx, ctx, {
       status: "posted",
       entryDate: periodEndDate(row.period),
       memo: `Depreciation — ${asset.name} (${row.period})`,
       source: "depreciation",
       sourceId: asset.id,
-      idempotencyKey: `depreciation:${asset.id}:${row.period}`,
-      lines: [
-        {
-          accountId: accounts.expenseAccountId,
-          amountCents: row.amountCents,
-          memo: asset.name,
-          dimensionMemberIds,
-        },
-        {
-          accountId: accounts.accumulatedAccountId,
-          amountCents: -row.amountCents,
-          memo: asset.name,
-          dimensionMemberIds,
-        },
-      ],
+      idempotencyKey: periodKey(asset.id, row.period),
+      lines: lines(row.amountCents),
     });
     donePeriods.push(row.period);
     total += row.amountCents;
   }
-  return { postedPeriods: donePeriods, totalCents: total };
+
+  return {
+    postedPeriods: donePeriods,
+    totalCents: total,
+    caughtUpCount: stranded.length,
+  };
+}
+
+export interface BulkDepreciationResult {
+  assetsPosted: number;
+  periodsPosted: number;
+  totalCents: number;
+  caughtUpCount: number;
+}
+
+/**
+ * Post depreciation for every depreciable asset, in one go.
+ *
+ * At three assets the per-asset button is fine. At a hundred it is not a
+ * feature, it is a chore — and month-end is exactly when nobody has an hour to
+ * spend clicking. This is the same posting path, looped.
+ *
+ * ONE TRANSACTION for the whole run, deliberately. A month-end close that
+ * half-posted would leave books nobody can reason about, and the caller has to
+ * be able to say "that did not happen" rather than "some of that happened".
+ * The catch-up collapsing above is what keeps the volume sane: without it a
+ * first run over 100 backdated assets would be thousands of entries.
+ */
+export async function postAllDepreciation(
+  tx: Tx,
+  ctx: AssetCtx,
+  through: string,
+  config?: unknown,
+): Promise<BulkDepreciationResult> {
+  if (ctx.role !== "owner") {
+    throw new AssetError("FORBIDDEN", "owner role required");
+  }
+  const assets = await tx.query.assets.findMany({
+    where: and(
+      eq(schema.assets.tenantId, ctx.tenantId),
+      eq(schema.assets.status, "active"),
+    ),
+    orderBy: (a, { asc }) => [asc(a.name)],
+  });
+
+  const result: BulkDepreciationResult = {
+    assetsPosted: 0,
+    periodsPosted: 0,
+    totalCents: 0,
+    caughtUpCount: 0,
+  };
+  for (const asset of assets) {
+    if (!scheduleInputFor(asset)) continue;
+    const one = await postDepreciation(tx, ctx, asset, through, config);
+    if (one.postedPeriods.length === 0) continue;
+    result.assetsPosted += 1;
+    result.periodsPosted += one.postedPeriods.length;
+    result.totalCents += one.totalCents;
+    result.caughtUpCount += one.caughtUpCount;
+  }
+  return result;
 }

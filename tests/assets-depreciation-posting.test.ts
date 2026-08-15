@@ -8,9 +8,12 @@ import { createAsset, type AssetCtx } from "../src/packs/assets/ops";
 import {
   getDepreciationStatus,
   listPostedPeriods,
+  postAllDepreciation,
   postDepreciation,
   resolveDepreciationAccounts,
+  scheduleInputFor,
 } from "../src/packs/assets/depreciation-ops";
+import { buildSchedule } from "../src/packs/assets/core/depreciation";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -186,7 +189,14 @@ d("depreciation posting", () => {
     expect(status!.due).toEqual([]);
 
     const periods = await asOwner((tx) =>
-      listPostedPeriods(tx, tenantId, assetId),
+      withAsset(tx, async (asset) =>
+        listPostedPeriods(
+          tx,
+          tenantId,
+          assetId,
+          buildSchedule(scheduleInputFor(asset)!),
+        ),
+      ),
     );
     expect(periods.sort()).toEqual([
       "2026-01",
@@ -279,6 +289,132 @@ d("depreciation posting", () => {
     await expect(
       asOwner((tx) => postDepreciation(tx, ctx(), land, "2026-06")),
     ).rejects.toThrow();
+  });
+
+  it("collapses periods stranded behind a close into ONE catch-up entry", async () => {
+    // The production bug, 2026-08-15: an asset whose schedule starts before the
+    // last close could never be depreciated at all, because the run is atomic
+    // and one closed month refused everything behind it.
+    await withSystem((tx) =>
+      tx
+        .update(schema.accountingSettings)
+        .set({ closedThrough: "2026-06-30" })
+        .where(eq(schema.accountingSettings.tenantId, tenantId)),
+    );
+
+    const backdated = await asOwner((tx) =>
+      createAsset(tx, ctx(), {
+        kind: "building",
+        name: "Old barn",
+        acquisitionCostCents: 240_000,
+        inServiceOn: "2026-01-01",
+        depreciationMethod: "straight_line",
+        usefulLifeMonths: 24,
+        salvageValueCents: 0,
+      }),
+    );
+
+    const result = await asOwner((tx) =>
+      postDepreciation(tx, ctx(), backdated, "2026-08"),
+    );
+    // Jan–Jun are stranded (6), Jul and Aug are open (2).
+    expect(result.caughtUpCount).toBe(6);
+    expect(result.postedPeriods).toHaveLength(8);
+    // 240,000 / 24 = 10,000 a month. Eight months.
+    expect(result.totalCents).toBe(80_000);
+
+    const entries = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.journalEntries)
+        .where(
+          and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.sourceId, backdated.id),
+          ),
+        ),
+    );
+    // Three entries, not eight: one catch-up plus July plus August.
+    expect(entries).toHaveLength(3);
+
+    const catchUp = entries.find((e) => e.memo.includes("catch-up"));
+    expect(catchUp).toBeDefined();
+    // Dated in the FIRST OPEN period, never inside the closed one.
+    expect(catchUp!.entryDate).toBe("2026-07-31");
+    expect(catchUp!.memo).toContain("2026-01 to 2026-06");
+  });
+
+  it("does not re-post a caught-up period, because the key carries the range", async () => {
+    const backdated = await asOwner((tx) =>
+      tx.query.assets.findFirst({
+        where: and(
+          eq(schema.assets.tenantId, tenantId),
+          eq(schema.assets.name, "Old barn"),
+        ),
+      }),
+    );
+    // The catch-up entry's date says only "2026-07". Reading dates would make
+    // January through June look unposted forever and re-post them every run.
+    const again = await asOwner((tx) =>
+      postDepreciation(tx, ctx(), backdated!, "2026-08"),
+    );
+    expect(again.postedPeriods).toEqual([]);
+
+    const status = await asOwner((tx) =>
+      getDepreciationStatus(tx, tenantId, backdated!, "2026-08"),
+    );
+    expect(status!.postedToDateCents).toBe(80_000);
+    expect(status!.due).toEqual([]);
+  });
+
+  it("posts every depreciable asset in one run, skipping the ones that are not", async () => {
+    const land = await asOwner((tx) =>
+      tx.query.assets.findFirst({
+        where: and(
+          eq(schema.assets.tenantId, tenantId),
+          eq(schema.assets.name, "Home place"),
+        ),
+      }),
+    );
+    expect(land?.depreciationMethod).toBe("none");
+
+    const before = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.journalEntries)
+        .where(
+          and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.source, "depreciation"),
+          ),
+        ),
+    );
+
+    // Everything is already up to date through 2026-08, so a bulk run for the
+    // same month must be a no-op rather than a second helping.
+    const noop = await asOwner((tx) => postAllDepreciation(tx, ctx(), "2026-08"));
+    expect(noop.assetsPosted).toBe(0);
+
+    // A later month has something to do for the one asset still in its life.
+    const next = await asOwner((tx) => postAllDepreciation(tx, ctx(), "2026-09"));
+    expect(next.assetsPosted).toBeGreaterThan(0);
+
+    const after = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.journalEntries)
+        .where(
+          and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.source, "depreciation"),
+          ),
+        ),
+    );
+    expect(after.length).toBe(before.length + next.periodsPosted);
+    // Land was never touched.
+    expect(
+      after.every((e) => e.sourceId !== land!.id),
+    ).toBe(true);
   });
 
   /** Re-read the asset inside the caller's transaction. */

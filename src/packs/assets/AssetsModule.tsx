@@ -14,9 +14,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { todayInTimezone } from "@/lib/timezone";
 import { listAssets, listContainerCandidates, listKindsInUse } from "./ops";
+import { getDepreciationStatus } from "./depreciation-ops";
+import { periodOf } from "./core/depreciation";
 import { assetKindLabel } from "./vocabulary";
 import { AssetForm } from "./components/asset-form";
+import { PostAllDepreciation } from "./components/post-all-depreciation";
 
 /**
  * The `assets` pack's home — THE FIRST CAPABILITY PACK TO RENDER.
@@ -42,10 +46,12 @@ export async function AssetsModule({
   const kind = typeof kindParam === "string" ? kindParam : undefined;
   const showDisposed = searchParams.disposed === "1";
 
-  const [rows, kinds, containers] = await withTenant(
+  const currentPeriod = periodOf(todayInTimezone(ctx.tenant.timezone));
+
+  const { rows, kinds, containers, due } = await withTenant(
     ctx.tenant.id,
-    async (tx) =>
-      Promise.all([
+    async (tx) => {
+      const [rows, kinds, containers] = await Promise.all([
         listAssets(tx, ctx.tenant.id, {
           kind,
           // Disposed assets stay in the books forever but are noise in the
@@ -54,7 +60,26 @@ export async function AssetsModule({
         }),
         listKindsInUse(tx, ctx.tenant.id),
         listContainerCandidates(tx, ctx.tenant.id),
-      ]),
+      ]);
+
+      // What month-end would post, so the button can say so before it is
+      // pressed. Only over what is on screen — a filtered list must not offer
+      // to post things it is not showing.
+      let assetsDue = 0;
+      let totalCents = 0;
+      for (const asset of rows) {
+        const status = await getDepreciationStatus(
+          tx,
+          ctx.tenant.id,
+          asset,
+          currentPeriod,
+        );
+        if (!status || status.due.length === 0) continue;
+        assetsDue += 1;
+        totalCents += status.due.reduce((s, r) => s + r.amountCents, 0);
+      }
+      return { rows, kinds, containers, due: { assetsDue, totalCents } };
+    },
     { role: ctx.role },
   );
 
@@ -68,10 +93,17 @@ export async function AssetsModule({
         description="What the business owns — what it cost, where it lives, and what is still in service."
         actions={
           isOwner ? (
-            <AssetForm
-              containers={containers.map((c) => ({ id: c.id, name: c.name }))}
-              kindsInUse={kinds.map((k) => k.kind)}
-            />
+            <div className="flex items-center gap-2">
+              <PostAllDepreciation
+                through={currentPeriod}
+                assetsDue={due.assetsDue}
+                totalLabel={formatCents(due.totalCents)}
+              />
+              <AssetForm
+                containers={containers.map((c) => ({ id: c.id, name: c.name }))}
+                kindsInUse={kinds.map((k) => k.kind)}
+              />
+            </div>
           ) : null
         }
       />

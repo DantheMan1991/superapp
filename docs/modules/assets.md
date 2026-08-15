@@ -15,6 +15,21 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-15 — Depreciation verified in production, and one gap found (`claude/assets-depreciation-close-gap`)
+- Ran the whole chain against the live Test tenant. **The P&L split by `asset`
+  renders a column headed "Garage"** — an asset created in this pack, synced as
+  a dimension member, computed by the schedule engine, posted through
+  `postEntry`, and discovered by the accounting report *with no change to
+  accounting code*. That is the pack model's thesis, working.
+- Schedule arithmetic confirmed against a real number: 18,500 over 240 months
+  showed **231.27** for three months — 3 × 77.09, the remainder-to-earliest-
+  periods rule visible rather than merely tested.
+- Entries landed as designed: one per period, dated `2026-07-31` and
+  `2026-08-31`, source `depreciation`, memo naming the asset and period.
+- **Found: a closed period blocks the whole catch-up, permanently.** Recorded in
+  Open items — it is a design decision, not a bug fix, and the first thing to
+  settle before anyone depreciates a real backdated asset.
+
 ### 2026-08-15 — Slice 1: depreciation, posted to the ledger (`claude/assets-depreciation`)
 - **This is the slice that makes the pack an accounting tool** rather than a
   register of serial numbers. Straight-line, monthly, posted as real journal
@@ -188,6 +203,26 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
   `tenant_modules.config.depreciation` — but **nothing writes that config yet**.
   A tenant whose chart differs gets a clear refusal and no way to fix it in the
   UI. The settings surface is the missing half.
+- **A closed period blocks the whole catch-up, permanently.** Found in
+  production on 2026-08-15, first time depreciation was run against a real
+  tenant. The Test tenant was closed through 2026-06-30; a schedule starting
+  2026-06 was refused with *"That date falls in a closed period"* and the entire
+  catch-up rolled back — including the July and August periods that were open.
+
+  What worked: the ledger's guard fired, the message surfaced in the ledger's
+  own words, and the transaction was atomic. **What is broken is the shape.**
+  Any asset entered with a truthful backdated in-service date — which is most of
+  them, since a business adopting this app already owns things — has periods
+  before its last close, and those periods can never be posted. One closed month
+  blocks every open month behind it.
+
+  Two legitimate accounting answers, and choosing is a decision rather than a
+  fix: **(a)** post only from the first open period and accept that pre-close
+  depreciation is simply absent from these books, or **(b)** roll every
+  pre-close period into a single catch-up entry dated in the first open period.
+  (b) is what a bookkeeper would usually do by hand. Either way the UI should
+  say so *before* the button is pressed — right now the panel offers "Post 3
+  months" with no idea the ledger will refuse.
 - **Nothing posts depreciation automatically.** It is a button, on purpose:
   depreciation lands in a period a close can lock, and posting into someone's
   books on a schedule they did not trigger is a bad surprise for an accountant.

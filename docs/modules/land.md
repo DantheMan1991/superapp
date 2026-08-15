@@ -22,7 +22,7 @@ the first act of building it. Agreed 2026-08-15:
 | # | Slice | State |
 | --- | --- | --- |
 | **0** | **Places** — parcels, zones, dated zone use | **shipped 2026-08-15** |
-| 1 | **Occupancy + rest** — `land_occupancy`, rest days, grazing days, the paddock-count arithmetic | next |
+| **1** | **Occupancy + rest** — `land_occupancy`, rest days, grazing days, the paddock-count arithmetic | **shipped 2026-08-15** |
 | 2a | **Geometry** — GeoJSON polygons, area, point-in-polygon, the map | |
 | 2b | **Features** — points and lines: troughs, hydrants, wells, fences, lanes. The `assets` seam | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
@@ -39,6 +39,45 @@ layout. Operations first, planning second — and no planner before three
 examples exist.
 
 ## Build log
+
+### 2026-08-15 — Slice 1: occupancy, and rest computed from it (`claude/land-occupancy-rest`)
+- **The pack stops being a register and starts answering a question.** One
+  table, `land_occupancy`, and every rest and rotation number on every screen is
+  derived from it. Nothing is stored twice and nothing is entered twice.
+- **`land` owns the table even though the fact is `livestock`'s.** Settled
+  before building: rest is computed FROM occupancy and a pack may not read
+  another pack's tables, so the record lands with the thing that reads it. The
+  occupant is **described, not joined** — `occupant_label` is a copy, exactly as
+  `dimension_members.display_name` is, so a rest report never needs a pack that
+  may not be installed.
+- **A manual form ships with it**, which is the point of the slice: the occupant
+  is a name a person types today, and `livestock` writes the same row with a
+  real lot id later. **A rest clock that only starts working after two more
+  packs ship is a rest clock nobody ever sees.**
+- **The strip decision is now real.** `area_acres` on the stay, null meaning the
+  whole zone. A strip grazer records 0.4 of a 10-acre paddock and no new place
+  is created; a fixed-paddock user leaves it blank. One model, no branch.
+- **Only an OPEN second stay is refused.** Two open stays would make "when did
+  rest start" unanswerable, which is the only reason the guard exists.
+  Overlapping *closed* stays are allowed, because the eggmobile following the
+  cattle is a real thing this farm does.
+- **`never_grazed` is not `resting`.** A paddock nobody has used and one resting
+  200 days are different facts; collapsing them would put every new zone at the
+  top of a "most rested" list on the day it was created.
+- **The rest target is a comparison line, not a setting** — nullable, on the
+  parcel, consulted by no write path. It sits on the parcel because the clock is
+  discontinuous across a seasonal move, and one farm-wide number would flag a
+  wintering parcel wrong all summer.
+- **The finding is on the page.** `rotationFinding` runs the standard formula
+  over the record and says, in a sentence, that 12 paddocks at a day each
+  deliver 11 days of rest against a 21-day target and 22 would be needed — from
+  numbers the app already held. It returns null rather than guessing below three
+  completed stays.
+- **Migration 0134 was NOT reordered**, and that is the rule working rather than
+  being forgotten: its composite FK targets `land_zones`, whose unique index has
+  existed since 0132. The trap only bites when the target table is new too.
+- Zone detail page added, which slice 0's open items called for.
+- 26 pure tests, 20 more ops tests, 6 more isolation tests.
 
 ### 2026-08-15 — The use picker was defaulting to a house site (`claude/land-use-picker-default`)
 - **Found in the first minute of driving slice 0 on production**, and by nothing
@@ -102,6 +141,7 @@ examples exist.
 | `land_parcels` | One row per deed or lease | `tenant_id`, FORCE RLS (`land_parcels_superadmin_all`, `land_parcels_member_all`). CHECKs: `tenure` in `owned\|leased\|crop_share`; `status` in `active\|retired`; name non-blank; area null or **> 0** |
 | `land_zones` | Management units inside a parcel | Composite FK `land_zones_parcel_fk` on `(tenant_id, parcel_id)` → `(tenant_id, id)`, **RESTRICT**, so cross-tenant nesting is unrepresentable and a parcel cannot be deleted out from under its zones |
 | `land_zone_uses` | What a zone is for, over a date range | Composite FK to the zone, **CASCADE**. `ended_on` is **INCLUSIVE**; null means current. CHECK `ended_on >= started_on`; `use` matches `^[a-z][a-z0-9_]{0,62}$` (**format only**) |
+| `land_occupancy` | What was actually ON a zone, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
 
 Mirrored into **`dimension_members`** with `dimension_type = 'parcel'` and
 `'zone'`, in the same transaction as the write. That is what makes ground a cost
@@ -121,6 +161,11 @@ rented ground, and retrofitting it means rewriting the report.
   owns the transaction; that is what keeps a write and its dimension sync atomic
 - `src/packs/land/core/area.ts` — pure. Unit conversion, formatting, totals that
   report their unknowns, and parcel-vs-zone coverage
+- `src/packs/land/core/rest.ts` — pure. Rest and grazing days from spans, the
+  `paddocks = (rest ÷ graze) + 1` formula both directions, and the rotation
+  finding. **The one file to read before changing anything about rest**
+- `src/app/dashboard/m/land/[id]/zones/[zoneId]/page.tsx` — the zone detail
+  route, nested under its parcel so the URL says where the zone lives
 - `src/packs/land/actions.ts` — `requireTenant` + `requireModuleEnabled` +
   `withTenant({ role })` on every action
 - `src/packs/land/vocabulary.ts` — no imports, no directive, so client
@@ -172,9 +217,22 @@ rented ground, and retrofitting it means rewriting the report.
 - **Zones do not have to tile a parcel.** Lanes, ditches and the bit behind the
   barn are real and frequently unmapped, so coverage is REPORTED and never
   enforced. A constraint here would make the honest state unrepresentable.
-- **drizzle-kit emits every FK before every index** — hit for the third time
-  (`0125`, `0130`, `0132`). Reorder to: tables, unique indexes, foreign keys,
-  everything else.
+- **Rest is an outcome and the code has to keep it that way.** `rest_target_days`
+  exists, and it would be easy to mistake for the thing the design forbids. The
+  line: nothing schedules against it, no write path consults it, and nothing is
+  refused for missing it. It is a number a report draws a line at. If anything
+  ever branches on it, that decision has been reversed by accident.
+- **Only an open second stay is refused.** The guard exists because `zoneRest`
+  reads an open stay as "occupied" and two of them make the rest clock
+  unanswerable — not because a zone can only hold one thing. Closed overlaps are
+  legitimate and the pilot has them.
+- **A day count is inclusive at both ends.** On Monday, off Monday is one day of
+  grazing. It feeds the paddock arithmetic, so an off-by-one there reaches every
+  rotation figure on the page.
+- **drizzle-kit emits every FK before every index** — hit three times (`0125`,
+  `0130`, `0132`) and NOT on `0134`. The rule is *check whether the FK's target
+  unique index is created in the same migration*, not *always reorder*: a
+  composite FK to a pre-existing table is fine as generated.
 - **`next dev` on a `.next` left by `next build` silently breaks nested
   routing.** Every route under `/dashboard/m/<static>/…` 404s with no compile
   line in the log — including long-shipped ones like
@@ -202,9 +260,23 @@ rented ground, and retrofitting it means rewriting the report.
   Pasture" produce two identically-labelled columns in a P&L split by zone.
   Prefixing the parcel would make the headings unreadable; disambiguating only on
   collision is the likely answer, and it needs deciding before there is data.
-- **No zone detail page.** Zone edits and the use timeline live in dialogs on the
-  parcel page, which is enough for slice 0 and will not be once occupancy,
-  rest days and geometry all want somewhere to render. Slice 1 builds it.
+- ~~No zone detail page~~ — **built in slice 1.**
+- **Nobody has driven slice 1 yet.** It was written, migrated against both
+  databases, and covered by 52 tests, but the local dev session is `org:member`
+  and the production deploy is what can actually be clicked. Slice 0 shipped a
+  bug that only clicking found; assume this one has too until somebody looks.
+- **Stocking density stops at area.** Land supplies the acreage a stay used;
+  head count belongs to `livestock`, so animal-units-per-acre cannot be computed
+  until that pack exists. Deliberate — a `head` column here would be this pack
+  growing an opinion about its neighbours.
+- **Moving a herd across ten paddocks is ten dialogs.** The design's *"move
+  every pen to the next paddock is one action"* is exactly what this does not do
+  yet, and it is the entry-cost problem the 10× target names. Purely additive.
+- **A stay cannot be edited**, only ended or removed. Fixing a wrong start date
+  means deleting and re-recording.
+- **The rotation finding is per parcel and needs three completed stays.** Below
+  that it says nothing, which is right, but it also means the pilot's most
+  interesting number does not appear until the habit has held for a week.
 - **Zone use suggestions are hardcoded** in `vocabulary.ts`, exactly as
   `assets`'s kinds are. They should come from profile `packConfig` once P5
   exists — and now two packs are waiting on it rather than one.

@@ -10,9 +10,12 @@ import {
   LandError,
   createParcel,
   createZone,
+  deleteOccupancy,
+  endOccupancy,
   endZoneUse,
   retireParcel,
   retireZone,
+  startOccupancy,
   startZoneUse,
   updateParcel,
   updateZone,
@@ -55,6 +58,14 @@ function toResult(err: unknown): { error: string } {
         return { error: "That parcel does not exist." };
       case "DATE_ORDER":
         return { error: err.message };
+      case "ALREADY_OCCUPIED":
+        // Names the occupant rather than saying "conflict", because the fix is
+        // to go and close that stay and the user needs to know which one.
+        return { error: `${err.message}. Move it off first.` };
+      case "INVALID_OCCUPANT":
+        return {
+          error: "An occupant kind must be lowercase letters and underscores.",
+        };
     }
   }
   console.error("land action failed", err);
@@ -95,6 +106,8 @@ const parcelSchema = z.object({
   areaAcres: acres,
   identifier: z.string().max(200).optional(),
   notes: z.string().max(5000).optional(),
+  // A year is the typo guard. Nobody rests a paddock for longer and means it.
+  restTargetDays: z.number().int().min(1).max(365).nullable().optional(),
 });
 
 export async function createParcelAction(input: unknown) {
@@ -319,6 +332,110 @@ export async function startZoneUseAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, id: use.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// -------------------------------------------------------------- occupancy ---
+
+const occupancySchema = z.object({
+  zoneId: z.string().uuid(),
+  occupantLabel: z.string().min(1).max(200),
+  startedOn: requiredDate,
+  endedOn: optionalDate.nullable(),
+  areaAcres: acres,
+  notes: z.string().max(5000).optional(),
+});
+
+export async function startOccupancyAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = occupancySchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const { zoneId, ...rest } = parsed.data;
+
+  try {
+    const stay = await withTenant(
+      ctx.tenant.id,
+      (tx) => startOccupancy(tx, landCtx(ctx), zoneId, rest),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.occupancy.started",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_zone",
+      targetId: zoneId,
+      // The label is the tenant's own words for an animal group, so only the
+      // shape of the record is logged — identifiers, never content.
+      meta: { startedOn: stay.startedOn, closed: stay.endedOn !== null },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, id: stay.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function endOccupancyAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ occupancyId: z.string().uuid(), endedOn: requiredDate })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        endOccupancy(
+          tx,
+          landCtx(ctx),
+          parsed.data.occupancyId,
+          parsed.data.endedOn,
+        ),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.occupancy.ended",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_occupancy",
+      targetId: parsed.data.occupancyId,
+      meta: { endedOn: parsed.data.endedOn },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteOccupancyAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ occupancyId: z.string().uuid() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => deleteOccupancy(tx, landCtx(ctx), parsed.data.occupancyId),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.occupancy.deleted",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_occupancy",
+      targetId: parsed.data.occupancyId,
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
   } catch (err) {
     return toResult(err);
   }

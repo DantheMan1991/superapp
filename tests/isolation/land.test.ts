@@ -300,6 +300,103 @@ d("land tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  // ---- occupancy -------------------------------------------------------
+
+  it("a tenant sees only its own occupancy", async () => {
+    await withSystem(async (tx) => {
+      await tx.insert(schema.landOccupancy).values([
+        {
+          tenantId: tenantA,
+          zoneId: northA,
+          occupantLabel: "Cow herd",
+          startedOn: "2026-08-01",
+        },
+        {
+          tenantId: tenantB,
+          zoneId: zoneB,
+          occupantLabel: "Their sheep",
+          startedOn: "2026-08-01",
+        },
+      ]);
+    });
+
+    const mine = await asOwner((tx) => tx.select().from(schema.landOccupancy));
+    expect(mine.map((o) => o.occupantLabel)).toEqual(["Cow herd"]);
+
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.landOccupancy),
+    );
+    expect(theirs.map((o) => o.occupantLabel)).toEqual(["Their sheep"]);
+  });
+
+  it("cannot put occupancy on another tenant's zone", async () => {
+    // The composite FK makes it unrepresentable, so it fails even here under
+    // withSystem where RLS is not watching.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landOccupancy).values({
+          tenantId: tenantA,
+          zoneId: zoneB,
+          occupantLabel: "Trespass",
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot write occupancy into another tenant", async () => {
+    await expect(
+      asOtherTenant((tx) =>
+        tx.insert(schema.landOccupancy).values({
+          tenantId: tenantA,
+          zoneId: northA,
+          occupantLabel: "Smuggled",
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an occupancy range that ends before it starts", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landOccupancy).values({
+          tenantId: tenantA,
+          zoneId: northA,
+          occupantLabel: "Backwards",
+          startedOn: "2026-08-10",
+          endedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a blank occupant label", async () => {
+    // The label is what a rest report renders, and it is a copy rather than a
+    // join — so a blank one is a row nobody can read.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landOccupancy).values({
+          tenantId: tenantA,
+          zoneId: northA,
+          occupantLabel: "   ",
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a rest target of zero", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.landParcels)
+          .set({ restTargetDays: 0 })
+          .where(eq(schema.landParcels.id, homeA)),
+      ),
+    ).rejects.toThrow();
+  });
+
   // ---- shared ----------------------------------------------------------
 
   it("staff see the same land as an owner — RLS is tenancy, not role", async () => {
@@ -332,6 +429,9 @@ d("land tables (RLS)", () => {
     ).toHaveLength(0);
     expect(
       await withTenant(nowhere, (tx) => tx.select().from(schema.landZoneUses)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.landOccupancy)),
     ).toHaveLength(0);
   });
 

@@ -37,6 +37,8 @@ export interface ParcelDetailView {
   status: string;
   /** How many active zones would be retired along with the parcel. */
   activeZones: number;
+  /** Comparison line for the rest report. Empty means none set. */
+  restTargetInput: string;
 }
 
 /**
@@ -63,6 +65,7 @@ export function ParcelControls({
 
   function saveEdit(formData: FormData) {
     const rawArea = String(formData.get("area") ?? "").trim();
+    const rawTarget = String(formData.get("restTarget") ?? "").trim();
     startTransition(async () => {
       const result = await updateParcelAction({
         id: parcel.id,
@@ -70,6 +73,7 @@ export function ParcelControls({
         tenure: String(formData.get("tenure") ?? parcel.tenure),
         areaAcres: rawArea ? toAcres(Number(rawArea), unit) : null,
         identifier: String(formData.get("identifier") ?? ""),
+        restTargetDays: rawTarget ? Math.round(Number(rawTarget)) : null,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -169,6 +173,31 @@ export function ParcelControls({
                   maxLength={200}
                   defaultValue={parcel.identifier}
                 />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-rest-target">Rest you are aiming for</Label>
+                <Input
+                  id="edit-rest-target"
+                  name="restTarget"
+                  type="number"
+                  min="1"
+                  max="365"
+                  step="1"
+                  placeholder="Days — leave blank if you have no target"
+                  defaultValue={parcel.restTargetInput}
+                />
+                {/* Rest is an outcome, never a setting. Nothing schedules
+                    against this and nothing is refused for missing it — it is a
+                    line to compare the measured rest against. It sits on the
+                    parcel because the clock is discontinuous across a seasonal
+                    move: a wintering parcel and a summer parcel cannot share a
+                    target without one of them looking wrong all year. */}
+                <p className="text-xs text-muted-foreground">
+                  Only used to compare against what each area actually got.
+                  Nothing is scheduled or refused because of it, and a parcel
+                  you graze differently should have its own number.
+                </p>
               </div>
 
               <div className="grid gap-2">

@@ -24,12 +24,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  completedStayDays,
   currentUses,
   getParcel,
   listUsesInUse,
   listZones,
+  restByZone,
   usesByZone,
 } from "@/packs/land/ops";
+import { formatDays, rotationFinding } from "@/packs/land/core/rest";
 import {
   TENURE_LABELS,
   isTenure,
@@ -89,19 +92,41 @@ export default async function ParcelDetailPage({
         status: "active",
       });
       const zoneIds = zones.map((z) => z.id);
-      const [current, history, usesInUse, pack] = await Promise.all([
-        currentUses(tx, ctx.tenant.id, zoneIds),
-        usesByZone(tx, ctx.tenant.id, zoneIds),
-        listUsesInUse(tx, ctx.tenant.id),
-        packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
-      ]);
-      return { parcel, zones, current, history, usesInUse, pack };
+      const [current, history, usesInUse, pack, rest, stayDays] =
+        await Promise.all([
+          currentUses(tx, ctx.tenant.id, zoneIds),
+          usesByZone(tx, ctx.tenant.id, zoneIds),
+          listUsesInUse(tx, ctx.tenant.id),
+          packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
+          restByZone(tx, ctx.tenant.id, zoneIds, today),
+          completedStayDays(tx, ctx.tenant.id, id),
+        ]);
+      return {
+        parcel,
+        zones,
+        current,
+        history,
+        usesInUse,
+        pack,
+        rest,
+        stayDays,
+      };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { parcel, zones, current, history, usesInUse, pack } = data;
+  const { parcel, zones, current, history, usesInUse, pack, rest, stayDays } =
+    data;
+
+  // The finding this whole category was argued for. Returns null rather than
+  // guessing when there is not enough history — a rotation figure computed
+  // from one stay is noise wearing a decimal point.
+  const rotation = rotationFinding({
+    paddocks: zones.length,
+    restTargetDays: parcel.restTargetDays,
+    staysDays: stayDays,
+  });
 
   const unit = areaUnitFrom(pack.config);
   const zoneWord = labelFor(pack.labels, "zone", "Zone");
@@ -126,6 +151,8 @@ export default async function ParcelDetailPage({
     notes: parcel.notes,
     status: parcel.status,
     activeZones: zones.length,
+    restTargetInput:
+      parcel.restTargetDays === null ? "" : String(parcel.restTargetDays),
   };
 
   // The chronological read across the whole parcel, derived from the same
@@ -229,6 +256,49 @@ export default async function ParcelDetailPage({
 
         <Card>
           <CardHeader className="pb-3">
+            <CardTitle className="text-base">Rotation</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {rotation === null ? (
+              <p className="text-sm text-muted-foreground">
+                {parcel.restTargetDays === null
+                  ? `Set a rest target on this parcel and record a few stays, and the arithmetic below fills itself in from what you have already entered.`
+                  : `Record a few more stays and this works out whether ${zones.length} ${zones.length === 1 ? zoneWord.toLowerCase() : `${zoneWord.toLowerCase()}s`} can actually deliver ${parcel.restTargetDays} days of rest.`}
+              </p>
+            ) : (
+              <div className="space-y-2 text-sm">
+                <p>
+                  {rotation.paddocks} {zoneWord.toLowerCase()}
+                  {rotation.paddocks === 1 ? "" : "s"} at{" "}
+                  {rotation.grazeDaysPerZone} days each delivers{" "}
+                  <span className="font-medium tabular-nums">
+                    {formatDays(rotation.achievableRestDays)}
+                  </span>{" "}
+                  of rest.
+                </p>
+                {rotation.shortfallPaddocks > 0 ? (
+                  // The finding, stated as arithmetic rather than as a
+                  // reprimand: the target is out of reach at this pace, and
+                  // that is a fact about the count, not about the grazier.
+                  <p className="text-muted-foreground">
+                    Your target is {rotation.restTargetDays} days, which needs{" "}
+                    {rotation.paddocksNeeded} at this pace — {""}
+                    {rotation.shortfallPaddocks} more. Hitting it is
+                    arithmetic, not effort: more subdivisions, slower moves, or
+                    ground you cannot currently reach.
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">
+                    That meets your {rotation.restTargetDays}-day target.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
             <CardTitle className="text-base">What changed</CardTitle>
           </CardHeader>
           <CardContent>
@@ -284,6 +354,7 @@ export default async function ParcelDetailPage({
               <TableRow>
                 <TableHead>{zoneWord}</TableHead>
                 <TableHead>Currently</TableHead>
+                <TableHead>Rested</TableHead>
                 <TableHead className="text-right">Area</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
@@ -291,9 +362,17 @@ export default async function ParcelDetailPage({
             <TableBody>
               {zones.map((zone) => {
                 const use = current.get(zone.id);
+                const zoneRestInfo = rest.get(zone.id);
                 return (
                   <TableRow key={zone.id}>
-                    <TableCell className="font-medium">{zone.name}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`${BASE}/${parcel.id}/zones/${zone.id}`}
+                        className="hover:underline"
+                      >
+                        {zone.name}
+                      </Link>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {use ? (
                         <span className="flex items-center gap-2">
@@ -305,6 +384,29 @@ export default async function ParcelDetailPage({
                         </span>
                       ) : (
                         "—"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {/* Computed from occupancy, never stored, and never
+                          entered a second time. "Never used" is not the same
+                          fact as "rested a long time". */}
+                      {zoneRestInfo?.status === "occupied" ? (
+                        <Badge variant="outline">occupied</Badge>
+                      ) : zoneRestInfo?.status === "never_grazed" ? (
+                        "—"
+                      ) : (
+                        <span className="tabular-nums">
+                          {formatDays(zoneRestInfo?.restDays ?? null)}
+                          {parcel.restTargetDays !== null &&
+                            zoneRestInfo?.restDays !== null &&
+                            zoneRestInfo !== undefined &&
+                            zoneRestInfo.restDays !== null &&
+                            zoneRestInfo.restDays < parcel.restTargetDays && (
+                              <span className="ml-2 text-xs">
+                                under target
+                              </span>
+                            )}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">

@@ -77,7 +77,11 @@ export function AssetForm({
         parentId: parentId === NO_PARENT ? null : parentId,
         notes: String(formData.get("notes") ?? ""),
       });
-      if (result.error) {
+      // `in` rather than `result.error`: the action returns a UNION, and a
+      // property access on the union does not narrow it. The same pattern is
+      // in health-check-chat.tsx and email-controls.tsx; the `res.error` form
+      // used elsewhere only compiles because those actions return one shape.
+      if ("error" in result) {
         toast.error(result.error);
         return;
       }

@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { neonConfig, Pool } from "@neondatabase/serverless";
+import { configureNeonForLocalProxy } from "./lib/neon-local";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { migrate } from "drizzle-orm/neon-serverless/migrator";
 import ws from "ws";
@@ -51,6 +52,13 @@ async function main() {
   }
   if (!globalThis.WebSocket) {
     neonConfig.webSocketConstructor = ws;
+  }
+  // A no-op unless NEON_LOCAL_PROXY is set, which only CI does. Without it this
+  // script tries to open a SECURE WebSocket to a plain Postgres container and
+  // fails with an ErrorEvent carrying no message at all — which is exactly how
+  // it failed the first time this ran.
+  if (configureNeonForLocalProxy()) {
+    console.log("Using the local WebSocket proxy.");
   }
   const pool = new Pool({ connectionString: target.url });
   const db = drizzle(pool);

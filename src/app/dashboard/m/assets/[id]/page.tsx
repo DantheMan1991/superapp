@@ -111,6 +111,8 @@ export default async function AssetDetailPage({
       : null,
     dueCount: depreciation?.due.length ?? 0,
     dueTotalLabel: depreciation ? formatCents(dueTotal) : null,
+    strandedCount: depreciation?.strandedCount ?? 0,
+    catchUpPeriod: depreciation?.catchUpPeriod ?? null,
     currentPeriod,
     scheduleLength: depreciation?.schedule.length ?? 0,
     postedCount: depreciation?.postedPeriods.length ?? 0,

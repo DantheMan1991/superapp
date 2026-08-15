@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSchedule,
+  catchUpKey,
   depreciableBaseCents,
+  firstOpenPeriod,
   isDepreciationMethod,
   periodAmountCents,
   periodEndDate,
+  periodKey,
   periodOf,
+  periodsCoveredByKey,
+  splitAtClose,
   unpostedPeriods,
   type DepreciationInput,
 } from "@/packs/assets/core/depreciation";
@@ -211,6 +216,107 @@ describe("periodOf / periodEndDate", () => {
 
   it("handles December without rolling the year", () => {
     expect(periodEndDate("2026-12")).toBe("2026-12-31");
+  });
+});
+
+describe("firstOpenPeriod", () => {
+  it("is null when nothing is closed", () => {
+    expect(firstOpenPeriod(null)).toBeNull();
+  });
+
+  it("is the month after a month-end close", () => {
+    expect(firstOpenPeriod("2026-06-30")).toBe("2026-07");
+  });
+
+  it("rolls the year", () => {
+    expect(firstOpenPeriod("2026-12-31")).toBe("2027-01");
+  });
+
+  it("keeps the same month when the close is mid-month", () => {
+    // Closing through the 15th still leaves the 30th postable, and entries are
+    // dated to month end.
+    expect(firstOpenPeriod("2026-06-15")).toBe("2026-06");
+  });
+});
+
+describe("splitAtClose", () => {
+  const due = buildSchedule(
+    base({ inServiceOn: "2026-01-01", usefulLifeMonths: 8, costCents: 800 }),
+  );
+
+  it("leaves everything open when nothing is closed", () => {
+    const { stranded, open } = splitAtClose(due, null);
+    expect(stranded).toEqual([]);
+    expect(open).toHaveLength(8);
+  });
+
+  it("strands the periods whose month-end is on or before the close", () => {
+    const { stranded, open } = splitAtClose(due, "2026-06-30");
+    expect(stranded.map((r) => r.period)).toEqual([
+      "2026-01",
+      "2026-02",
+      "2026-03",
+      "2026-04",
+      "2026-05",
+      "2026-06",
+    ]);
+    expect(open.map((r) => r.period)).toEqual(["2026-07", "2026-08"]);
+  });
+
+  it("strands everything when the close is past the whole schedule", () => {
+    const { stranded, open } = splitAtClose(due, "2030-12-31");
+    expect(stranded).toHaveLength(8);
+    expect(open).toEqual([]);
+  });
+
+  it("never loses or duplicates a period", () => {
+    const { stranded, open } = splitAtClose(due, "2026-04-30");
+    expect(stranded.length + open.length).toBe(due.length);
+    expect([...stranded, ...open].map((r) => r.period)).toEqual(
+      due.map((r) => r.period),
+    );
+  });
+});
+
+describe("periodsCoveredByKey", () => {
+  const schedule = buildSchedule(
+    base({ inServiceOn: "2026-01-01", usefulLifeMonths: 6, costCents: 600 }),
+  );
+
+  it("expands a per-period key to its one period", () => {
+    expect(periodsCoveredByKey(periodKey("abc", "2026-03"), schedule)).toEqual([
+      "2026-03",
+    ]);
+  });
+
+  it("expands a catch-up key to EVERY scheduled period through it", () => {
+    // This is what stops a caught-up range from looking unposted forever: the
+    // entry's date says only one month, the key says the range.
+    expect(periodsCoveredByKey(catchUpKey("abc", "2026-04"), schedule)).toEqual([
+      "2026-01",
+      "2026-02",
+      "2026-03",
+      "2026-04",
+    ]);
+  });
+
+  it("never runs past the end of the schedule", () => {
+    expect(periodsCoveredByKey(catchUpKey("abc", "2099-12"), schedule)).toEqual(
+      schedule.map((r) => r.period),
+    );
+  });
+
+  it("returns nothing for a key it does not recognise", () => {
+    expect(periodsCoveredByKey("invoice:123", schedule)).toEqual([]);
+  });
+
+  it("round-trips: a period key is never read as a catch-up", () => {
+    // `depreciation:<id>:2026-03` and `depreciation:<id>:through:2026-03` must
+    // not be confused, or one month would silently mark five as posted.
+    const single = periodsCoveredByKey(periodKey("x", "2026-03"), schedule);
+    const range = periodsCoveredByKey(catchUpKey("x", "2026-03"), schedule);
+    expect(single).toHaveLength(1);
+    expect(range.length).toBeGreaterThan(1);
   });
 });
 

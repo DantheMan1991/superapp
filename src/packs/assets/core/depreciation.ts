@@ -117,6 +117,39 @@ export function periodAmountCents(
 }
 
 /**
+ * Idempotency keys, which double as the record of WHICH periods an entry
+ * covers.
+ *
+ * A per-period entry covers one period and its date says which. A catch-up
+ * entry covers many periods and its date says none of them — so the range has
+ * to live somewhere, and the key is the one place it can live without a new
+ * table. `through:` means "every scheduled period up to and including this
+ * one". `listPostedPeriods` reads these back and expands them.
+ */
+export function periodKey(assetId: string, period: string): string {
+  return `depreciation:${assetId}:${period}`;
+}
+
+export function catchUpKey(assetId: string, throughPeriod: string): string {
+  return `depreciation:${assetId}:through:${throughPeriod}`;
+}
+
+/** The periods a stored key covers, given the asset's full schedule. */
+export function periodsCoveredByKey(
+  key: string,
+  schedule: DepreciationPeriod[],
+): string[] {
+  const through = /:through:(\d{4}-\d{2})$/.exec(key);
+  if (through) {
+    return schedule
+      .filter((r) => r.period <= through[1])
+      .map((r) => r.period);
+  }
+  const single = /:(\d{4}-\d{2})$/.exec(key);
+  return single ? [single[1]] : [];
+}
+
+/**
  * Every period from the start of the schedule up to and including `through`
  * that has not already been posted.
  *
@@ -139,6 +172,52 @@ export function unpostedPeriods(
 /** `YYYY-MM` for an ISO date. The period a date falls in. */
 export function periodOf(isoDate: string): string {
   return isoDate.slice(0, 7);
+}
+
+/**
+ * The earliest period this ledger will still accept an entry in.
+ *
+ * A period is postable when its month-end date falls after `closedThrough`,
+ * because that is the date depreciation entries carry. Returns null when
+ * nothing is closed, which is the common case and means every period is open.
+ */
+export function firstOpenPeriod(closedThrough: string | null): string | null {
+  if (!closedThrough) return null;
+  const candidate = periodOf(closedThrough);
+  // A close mid-month still leaves that month's END date open, so the month
+  // containing `closedThrough` is only closed when its month-end is covered.
+  return periodEndDate(candidate) > closedThrough
+    ? candidate
+    : addMonths(`${candidate}-01`, 1);
+}
+
+/**
+ * Split what is due into what the ledger will take now, and what is stranded
+ * behind a close.
+ *
+ * THE PROBLEM THIS SOLVES: any asset entered with a truthful backdated
+ * in-service date has periods before the last close — which is most assets,
+ * because a business adopting this app already owns things. Posting those
+ * individually is refused, and because the run is atomic, one closed month
+ * blocks every open month behind it. Found in production 2026-08-15.
+ *
+ * The stranded periods are not dropped. They are summed into ONE catch-up
+ * entry dated in the first open period, which is what a bookkeeper does by
+ * hand: the expense is recognised, the accumulated balance ends up correct,
+ * and no closed period is reopened to achieve it.
+ */
+export function splitAtClose(
+  due: DepreciationPeriod[],
+  closedThrough: string | null,
+): { stranded: DepreciationPeriod[]; open: DepreciationPeriod[] } {
+  if (!closedThrough) return { stranded: [], open: due };
+  const stranded: DepreciationPeriod[] = [];
+  const open: DepreciationPeriod[] = [];
+  for (const row of due) {
+    if (periodEndDate(row.period) <= closedThrough) stranded.push(row);
+    else open.push(row);
+  }
+  return { stranded, open };
 }
 
 /**

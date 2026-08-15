@@ -16,7 +16,7 @@ import {
   updateAsset,
   type AssetCtx,
 } from "./ops";
-import { postDepreciation } from "./depreciation-ops";
+import { postAllDepreciation, postDepreciation } from "./depreciation-ops";
 
 /**
  * This pack's Layer 3 tailoring, from `tenant_modules.config`.
@@ -237,6 +237,61 @@ export async function postDepreciationAction(input: unknown) {
   } catch (err) {
     // A closed period is a legitimate refusal from the ledger, not a bug —
     // say so in the ledger's own words rather than "something went wrong".
+    if (err instanceof LedgerError) return { error: friendlyMessage(err) };
+    return toResult(err);
+  }
+}
+
+const postAllSchema = z.object({
+  through: z.string().regex(/^\d{4}-\d{2}$/),
+});
+
+/**
+ * Post depreciation for every depreciable asset at once.
+ *
+ * At three assets the per-asset button is fine. At a hundred it is a chore, and
+ * month-end is exactly when nobody has an hour to spend clicking.
+ */
+export async function postAllDepreciationAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = postAllSchema.safeParse(input);
+  if (!parsed.success) return { error: "Pick a month to post through." };
+
+  const assetCtx: AssetCtx = {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+    role: ctx.role,
+  };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const config = await readPackConfig(tx, ctx.tenant.id);
+        return postAllDepreciation(tx, assetCtx, parsed.data.through, config);
+      },
+      { role: ctx.role },
+    );
+
+    if (result.assetsPosted > 0) {
+      await logAudit({
+        action: "asset.depreciation_posted_bulk",
+        tenantId: ctx.tenant.id,
+        actorClerkUserId: ctx.userId,
+        targetType: "asset",
+        targetId: parsed.data.through,
+        meta: {
+          assets: result.assetsPosted,
+          periods: result.periodsPosted,
+          totalCents: result.totalCents,
+          caughtUp: result.caughtUpCount,
+        },
+      });
+    }
+    revalidatePath("/dashboard/m/assets");
+    return { ok: true, ...result };
+  } catch (err) {
     if (err instanceof LedgerError) return { error: friendlyMessage(err) };
     return toResult(err);
   }

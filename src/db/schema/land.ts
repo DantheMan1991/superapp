@@ -43,6 +43,7 @@ import {
   date,
   foreignKey,
   index,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -106,6 +107,20 @@ export const landParcels = pgTable(
     /** Deed reference, lease number, county parcel ID. Free text — every county numbers differently. */
     identifier: text("identifier").notNull().default(""),
     /**
+     * How many days of rest this parcel's zones are AIMED at. Nullable, and
+     * null is the ordinary state.
+     *
+     * READ THIS BEFORE ASSUMING IT CONTRADICTS THE DESIGN. Rest is an outcome
+     * and is never configured: nothing schedules against this number, nothing
+     * nags, and no write path consults it. It exists only so a report can draw
+     * a line to compare the measured rest against — and it lives on the PARCEL
+     * rather than the tenant because the rest clock is discontinuous across a
+     * seasonal migration. A wintering parcel resting 100+ days and a summer
+     * parcel on an 11-day cycle are both correct, and a single farm-wide target
+     * would flag one of them wrong every time it was looked at.
+     */
+    restTargetDays: integer("rest_target_days"),
+    /**
      * `active` or `retired`. Sold, or a lease that ended.
      *
      * A status, never a delete — ground that carried cost and revenue for six
@@ -140,6 +155,10 @@ export const landParcels = pgTable(
     check(
       "land_parcels_area_positive",
       sql`${t.areaAcres} is null or ${t.areaAcres} > 0`,
+    ),
+    check(
+      "land_parcels_rest_target_positive",
+      sql`${t.restTargetDays} is null or ${t.restTargetDays} > 0`,
     ),
   ],
 );
@@ -266,8 +285,116 @@ export const landZoneUses = pgTable(
   ],
 );
 
+/**
+ * What was actually on a zone, and when. **Fact, as opposed to the intent in
+ * `land_zone_uses`.**
+ *
+ * WHY THIS TABLE IS IN `land` WHEN THE FACT BELONGS TO `livestock` AND `crops`.
+ * Those packs ORIGINATE the record — land has no idea what a lot is and must
+ * not grow one. But rest is computed FROM occupancy, and
+ * docs/extension-model.md §4 forbids a pack reading another pack's tables. So
+ * the table lives with the thing that reads it, and the packs that produce the
+ * facts write in through `src/packs/land/ops.ts`. Land owns the place and the
+ * clock; it stays ignorant of the occupant. Settled 2026-08-15.
+ *
+ * THE OCCUPANT IS DESCRIBED, NOT JOINED (primitive P3, the `work_item_links`
+ * shape). `occupant_label` is a COPY of whatever the owning pack calls it,
+ * exactly as `dimension_members.display_name` is a copy — because rendering a
+ * rest report must never require a join into a pack that may not be installed.
+ * An uninstalled pack's occupancy rows simply keep reporting.
+ *
+ * `area_acres` IS THE LOAD-BEARING FIELD, and it is what lets one model serve
+ * both grazing styles with no branch (ADR 0004). A strip grazer records 0.4 of
+ * a 10-acre paddock; a fixed-paddock user records the whole thing. A strip has
+ * no persistent identity, so it is an AREA ON THIS EVENT rather than a
+ * geometry. Null means the whole zone.
+ */
+export const landOccupancy = pgTable(
+  "land_occupancy",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    zoneId: uuid("zone_id").notNull(),
+    /**
+     * Which feature wrote this — `land` for a hand-entered record, `livestock`
+     * once that pack exists. Not a foreign key to anything: a pack can be
+     * switched off, and its history must not vanish when it is.
+     */
+    extensionSlug: text("extension_slug").notNull().default("land"),
+    /**
+     * Open taxonomy (P1): `manual`, `lot`, `planting`. FORMAT constrained,
+     * values never, so a new occupant kind needs no migration to core.
+     */
+    occupantType: text("occupant_type").notNull().default("manual"),
+    /** The owning pack's entity. Null for a hand-entered record, which is the day-one case. */
+    occupantId: uuid("occupant_id"),
+    /** What to call it on screen. A COPY — see the table comment. */
+    occupantLabel: text("occupant_label").notNull(),
+    startedOn: date("started_on").notNull(),
+    /**
+     * Inclusive last day, matching `land_zone_uses`. Null means STILL THERE,
+     * and that is what makes a zone read as occupied rather than resting.
+     *
+     * **The rest clock starts at this date**, which is the one rule that serves
+     * both grazing styles: rest is measured from the end of the last occupancy
+     * in the zone, whatever shape the occupancy had.
+     */
+    endedOn: date("ended_on"),
+    /** How much of the zone was used. Null means all of it. See the table comment. */
+    areaAcres: numeric("area_acres", {
+      precision: 12,
+      scale: 4,
+      mode: "number",
+    }),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("land_occupancy_tenant_id_id_idx").on(t.tenantId, t.id),
+    // Covers both reads that matter: a zone's history, and finding the most
+    // recent one to start the rest clock from.
+    index("land_occupancy_tenant_zone_idx").on(t.tenantId, t.zoneId, t.startedOn),
+    // How `livestock` will find its own rows without scanning the table.
+    index("land_occupancy_tenant_occupant_idx").on(
+      t.tenantId,
+      t.extensionSlug,
+      t.occupantId,
+    ),
+    foreignKey({
+      name: "land_occupancy_zone_fk",
+      columns: [t.tenantId, t.zoneId],
+      foreignColumns: [landZones.tenantId, landZones.id],
+    }).onDelete("cascade"),
+    check(
+      "land_occupancy_occupant_type_format",
+      sql`${t.occupantType} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "land_occupancy_label_present",
+      sql`length(btrim(${t.occupantLabel})) > 0`,
+    ),
+    check(
+      "land_occupancy_range_ordered",
+      sql`${t.endedOn} is null or ${t.endedOn} >= ${t.startedOn}`,
+    ),
+    check(
+      "land_occupancy_area_positive",
+      sql`${t.areaAcres} is null or ${t.areaAcres} > 0`,
+    ),
+  ],
+);
+
 export type LandParcel = typeof landParcels.$inferSelect;
 export type NewLandParcel = typeof landParcels.$inferInsert;
 export type LandZone = typeof landZones.$inferSelect;
 export type NewLandZone = typeof landZones.$inferInsert;
 export type LandZoneUse = typeof landZoneUses.$inferSelect;
+export type LandOccupancy = typeof landOccupancy.$inferSelect;
+export type NewLandOccupancy = typeof landOccupancy.$inferInsert;

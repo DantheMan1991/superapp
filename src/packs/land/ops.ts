@@ -1,13 +1,19 @@
 import "server-only";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import type { LandParcel, LandZone, LandZoneUse } from "@/db/schema";
+import type {
+  LandOccupancy,
+  LandParcel,
+  LandZone,
+  LandZoneUse,
+} from "@/db/schema";
 import {
   archiveDimensionMember,
   listDimensionMembers,
   upsertDimensionMember,
 } from "@/modules/accounting/core";
 import { defaultProductive, isTenure, isValidZoneUse } from "./vocabulary";
+import { zoneRest, daysOccupied, type ZoneRest } from "./core/rest";
 
 /**
  * Land operations. Every function takes a `Tx` so the caller owns the
@@ -40,7 +46,9 @@ export class LandError extends Error {
       | "INVALID_USE"
       | "INVALID_TENURE"
       | "PARCEL_INVALID"
-      | "DATE_ORDER",
+      | "DATE_ORDER"
+      | "ALREADY_OCCUPIED"
+      | "INVALID_OCCUPANT",
     message: string,
   ) {
     super(message);
@@ -104,6 +112,8 @@ export interface ParcelInput {
   areaAcres?: number | null;
   identifier?: string;
   notes?: string;
+  /** A comparison line for the rest report. Nothing schedules against it. */
+  restTargetDays?: number | null;
 }
 
 export async function createParcel(
@@ -125,6 +135,7 @@ export async function createParcel(
       tenure,
       areaAcres: input.areaAcres ?? null,
       identifier: input.identifier?.trim() ?? "",
+      restTargetDays: input.restTargetDays ?? null,
       notes: input.notes?.trim() ?? "",
     })
     .returning();
@@ -160,6 +171,9 @@ export async function updateParcel(
   }
   if (input.areaAcres !== undefined) patch.areaAcres = input.areaAcres;
   if (input.identifier !== undefined) patch.identifier = input.identifier.trim();
+  if (input.restTargetDays !== undefined) {
+    patch.restTargetDays = input.restTargetDays;
+  }
   if (input.notes !== undefined) patch.notes = input.notes.trim();
 
   const rows = await tx
@@ -590,6 +604,258 @@ export async function endZoneUse(
     )
     .returning();
   return rows[0];
+}
+
+// -------------------------------------------------------------- occupancy ---
+
+/**
+ * THE SEAM `livestock` AND `crops` WRITE THROUGH.
+ *
+ * They own the fact; `land` owns the place and the rest clock, and a pack may
+ * not read another pack's tables — so the record lands here and the occupant is
+ * DESCRIBED rather than joined. `occupantLabel` is a copy, like
+ * `dimension_members.display_name`, so a rest report never needs a pack that
+ * may not be installed.
+ *
+ * Hand-entered records default to `extensionSlug: 'land'` and
+ * `occupantType: 'manual'`, which is the day-one case and the reason this is
+ * usable before either of those packs exists.
+ */
+export interface OccupancyInput {
+  occupantLabel: string;
+  startedOn: string;
+  endedOn?: string | null;
+  /** How much of the zone. Null (the default) means all of it. */
+  areaAcres?: number | null;
+  notes?: string;
+  /** Defaults to the hand-entered shape. `livestock` passes its own. */
+  extensionSlug?: string;
+  occupantType?: string;
+  occupantId?: string | null;
+}
+
+export async function listOccupancy(
+  tx: Tx,
+  tenantId: string,
+  zoneId: string,
+): Promise<LandOccupancy[]> {
+  return tx.query.landOccupancy.findMany({
+    where: and(
+      eq(schema.landOccupancy.tenantId, tenantId),
+      eq(schema.landOccupancy.zoneId, zoneId),
+    ),
+    orderBy: (o, { desc: byDesc }) => [byDesc(o.startedOn), byDesc(o.createdAt)],
+  });
+}
+
+/** Every stay across a set of zones, keyed by zone. One query for a parcel. */
+export async function occupancyByZone(
+  tx: Tx,
+  tenantId: string,
+  zoneIds: string[],
+): Promise<Map<string, LandOccupancy[]>> {
+  const out = new Map<string, LandOccupancy[]>();
+  if (zoneIds.length === 0) return out;
+  const rows = await tx.query.landOccupancy.findMany({
+    where: and(
+      eq(schema.landOccupancy.tenantId, tenantId),
+      inArray(schema.landOccupancy.zoneId, zoneIds),
+    ),
+    orderBy: (o, { desc: byDesc }) => [byDesc(o.startedOn), byDesc(o.createdAt)],
+  });
+  for (const row of rows) {
+    const list = out.get(row.zoneId);
+    if (list) list.push(row);
+    else out.set(row.zoneId, [row]);
+  }
+  return out;
+}
+
+/**
+ * Record something arriving on a zone.
+ *
+ * **Two occupants at once is refused**, and this is the one guard the rest
+ * clock genuinely needs: `zoneRest` reads an open stay as "occupied", so two
+ * of them would make "when did rest start" unanswerable rather than merely
+ * wrong. Overlapping CLOSED stays are allowed — a paddock really can carry
+ * cattle and poultry in the same week, and the eggmobile following the herd is
+ * the pilot's own example.
+ */
+export async function startOccupancy(
+  tx: Tx,
+  ctx: LandCtx,
+  zoneId: string,
+  input: OccupancyInput,
+): Promise<LandOccupancy> {
+  requireOwner(ctx);
+  const zone = await getZone(tx, ctx.tenantId, zoneId);
+  if (!zone) throw new LandError("NOT_FOUND", `zone ${zoneId} not found`);
+
+  const occupantType = (input.occupantType ?? "manual").trim().toLowerCase();
+  if (!isValidZoneUse(occupantType)) {
+    throw new LandError(
+      "INVALID_OCCUPANT",
+      `invalid occupant type: ${input.occupantType}`,
+    );
+  }
+  if (input.endedOn && input.endedOn < input.startedOn) {
+    throw new LandError(
+      "DATE_ORDER",
+      "a stay cannot end before the day it started",
+    );
+  }
+
+  // Only an OPEN stay blocks another. A closed one is history.
+  if (!input.endedOn) {
+    const open = await tx.query.landOccupancy.findFirst({
+      where: and(
+        eq(schema.landOccupancy.tenantId, ctx.tenantId),
+        eq(schema.landOccupancy.zoneId, zoneId),
+        isNull(schema.landOccupancy.endedOn),
+      ),
+    });
+    if (open) {
+      throw new LandError(
+        "ALREADY_OCCUPIED",
+        `${open.occupantLabel} has not been moved off yet`,
+      );
+    }
+  }
+
+  const rows = await tx
+    .insert(schema.landOccupancy)
+    .values({
+      tenantId: ctx.tenantId,
+      zoneId,
+      extensionSlug: input.extensionSlug?.trim() || "land",
+      occupantType,
+      occupantId: input.occupantId ?? null,
+      occupantLabel: input.occupantLabel.trim(),
+      startedOn: input.startedOn,
+      endedOn: input.endedOn ?? null,
+      areaAcres: input.areaAcres ?? null,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Move something off. THIS is what starts the rest clock — the whole reason
+ * closing a stay matters, and why the UI has to make it a single obvious act
+ * rather than an edit buried in a form.
+ */
+export async function endOccupancy(
+  tx: Tx,
+  ctx: LandCtx,
+  occupancyId: string,
+  endedOn: string,
+): Promise<LandOccupancy> {
+  requireOwner(ctx);
+  const existing = await tx.query.landOccupancy.findFirst({
+    where: and(
+      eq(schema.landOccupancy.tenantId, ctx.tenantId),
+      eq(schema.landOccupancy.id, occupancyId),
+    ),
+  });
+  if (!existing) {
+    throw new LandError("NOT_FOUND", `occupancy ${occupancyId} not found`);
+  }
+  if (endedOn < existing.startedOn) {
+    throw new LandError(
+      "DATE_ORDER",
+      "a stay cannot end before the day it started",
+    );
+  }
+
+  const rows = await tx
+    .update(schema.landOccupancy)
+    .set({ endedOn, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landOccupancy.tenantId, ctx.tenantId),
+        eq(schema.landOccupancy.id, occupancyId),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/** Remove a stay entered by mistake. Correcting a record is not rewriting history. */
+export async function deleteOccupancy(
+  tx: Tx,
+  ctx: LandCtx,
+  occupancyId: string,
+): Promise<void> {
+  requireOwner(ctx);
+  const deleted = await tx
+    .delete(schema.landOccupancy)
+    .where(
+      and(
+        eq(schema.landOccupancy.tenantId, ctx.tenantId),
+        eq(schema.landOccupancy.id, occupancyId),
+      ),
+    )
+    .returning();
+  if (deleted.length === 0) {
+    throw new LandError("NOT_FOUND", `occupancy ${occupancyId} not found`);
+  }
+}
+
+/**
+ * Rest for each of these zones, as of the tenant's today.
+ *
+ * Computed, never stored — the same reasoning accumulated depreciation follows
+ * in `assets`. A `rest_days` column would be wrong the moment the clock ticked,
+ * and a backdated correction would leave it wrong forever.
+ */
+export async function restByZone(
+  tx: Tx,
+  tenantId: string,
+  zoneIds: string[],
+  today: string,
+): Promise<Map<string, ZoneRest>> {
+  const spans = await occupancyByZone(tx, tenantId, zoneIds);
+  const out = new Map<string, ZoneRest>();
+  for (const zoneId of zoneIds) {
+    out.set(zoneId, zoneRest(spans.get(zoneId) ?? [], today));
+  }
+  return out;
+}
+
+/**
+ * Completed stay lengths across a parcel, for the rotation finding.
+ *
+ * Open stays are excluded: a herd that moved on this morning has a length, and
+ * one still standing there does not yet.
+ */
+export async function completedStayDays(
+  tx: Tx,
+  tenantId: string,
+  parcelId: string,
+): Promise<number[]> {
+  const rows = await tx
+    .select({
+      startedOn: schema.landOccupancy.startedOn,
+      endedOn: schema.landOccupancy.endedOn,
+    })
+    .from(schema.landOccupancy)
+    .innerJoin(
+      schema.landZones,
+      and(
+        eq(schema.landZones.tenantId, schema.landOccupancy.tenantId),
+        eq(schema.landZones.id, schema.landOccupancy.zoneId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.landOccupancy.tenantId, tenantId),
+        eq(schema.landZones.parcelId, parcelId),
+      ),
+    );
+  return rows
+    .filter((r): r is { startedOn: string; endedOn: string } => !!r.endedOn)
+    .map((r) => daysOccupied(r.startedOn, r.endedOn));
 }
 
 // ----------------------------------------------------------------- shared ---

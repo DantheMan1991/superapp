@@ -6,10 +6,16 @@ import {
   LandError,
   PARCEL_DIMENSION,
   ZONE_DIMENSION,
+  completedStayDays,
   createParcel,
   createZone,
   currentUses,
+  deleteOccupancy,
+  endOccupancy,
   endZoneUse,
+  listOccupancy,
+  restByZone,
+  startOccupancy,
   getParcel,
   getZone,
   listParcels,
@@ -583,6 +589,315 @@ d("land ops", () => {
     const parcel = await newParcel("Unmeasured", null);
     const fetched = await asOwner((tx) => getParcel(tx, tenantId, parcel.id));
     expect(fetched?.areaAcres).toBeNull();
+  });
+
+  // ---- occupancy -------------------------------------------------------
+
+  it("records a stay a person typed, before any pack exists to write one", async () => {
+    // The day-one case, and the reason slice 1 is usable before `livestock`.
+    const parcel = await newParcel("Occupied");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Paddock 1" }),
+    );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-01",
+      }),
+    );
+    expect(stay.extensionSlug).toBe("land");
+    expect(stay.occupantType).toBe("manual");
+    expect(stay.occupantId).toBeNull();
+    expect(stay.endedOn).toBeNull();
+    // Null means the whole zone — the fixed-paddock case.
+    expect(stay.areaAcres).toBeNull();
+  });
+
+  it("takes the shape another pack will write", async () => {
+    // `livestock` passes its own slug, type and entity id through the same op.
+    // Land never learns what a lot is.
+    const parcel = await newParcel("Pack Written");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Paddock 2" }),
+    );
+    const lotId = "11111111-2222-3333-4444-555555555555";
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Lot 14 — 68 broilers",
+        startedOn: "2026-08-01",
+        extensionSlug: "livestock",
+        occupantType: "lot",
+        occupantId: lotId,
+      }),
+    );
+    expect(stay.extensionSlug).toBe("livestock");
+    expect(stay.occupantId).toBe(lotId);
+    // The label is a COPY, so a rest report never needs a join into a pack
+    // that may not be installed.
+    expect(stay.occupantLabel).toBe("Lot 14 — 68 broilers");
+  });
+
+  it("records a strip as an area on the stay, not as a place", async () => {
+    const parcel = await newParcel("Strip");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), {
+        parcelId: parcel.id,
+        name: "North",
+        areaAcres: 10,
+      }),
+    );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-01",
+        endedOn: "2026-08-01",
+        areaAcres: 0.4,
+      }),
+    );
+    expect(stay.areaAcres).toBe(0.4);
+    // No new zone was created for the strip. That is the whole point.
+    expect(
+      await asOwner((tx) => listZones(tx, tenantId, { parcelId: parcel.id })),
+    ).toHaveLength(1);
+  });
+
+  it("refuses a second open stay, because two would make rest unanswerable", async () => {
+    const parcel = await newParcel("Double Booked");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Busy" }),
+    );
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        startOccupancy(tx, ownerCtx(), zone.id, {
+          occupantLabel: "Layer flock",
+          startedOn: "2026-08-05",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "ALREADY_OCCUPIED" });
+  });
+
+  it("allows a CLOSED stay alongside an open one", async () => {
+    // A paddock really can carry two things in a week — the eggmobile
+    // following the herd is the pilot's own example. Only an OPEN second stay
+    // is refused, and only because the rest clock could not read it.
+    const parcel = await newParcel("Two Species");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Shared" }),
+    );
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-01",
+      }),
+    );
+    const second = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Layer flock",
+        startedOn: "2026-08-03",
+        endedOn: "2026-08-04",
+      }),
+    );
+    expect(second.endedOn).toBe("2026-08-04");
+  });
+
+  it("refuses a stay that ends before it starts", async () => {
+    const parcel = await newParcel("Backwards Stay");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
+    );
+    await expect(
+      asOwner((tx) =>
+        startOccupancy(tx, ownerCtx(), zone.id, {
+          occupantLabel: "Cow herd",
+          startedOn: "2026-08-10",
+          endedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "DATE_ORDER" });
+  });
+
+  it("moving off is what starts the rest clock", async () => {
+    const parcel = await newParcel("Rest Clock");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Rested" }),
+    );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-01",
+      }),
+    );
+
+    let rest = await asOwner((tx) =>
+      restByZone(tx, tenantId, [zone.id], "2026-08-15"),
+    );
+    expect(rest.get(zone.id)?.status).toBe("occupied");
+
+    await asOwner((tx) => endOccupancy(tx, ownerCtx(), stay.id, "2026-08-05"));
+
+    rest = await asOwner((tx) =>
+      restByZone(tx, tenantId, [zone.id], "2026-08-15"),
+    );
+    expect(rest.get(zone.id)?.status).toBe("resting");
+    expect(rest.get(zone.id)?.restDays).toBe(10);
+    expect(rest.get(zone.id)?.grazingDays).toBe(5);
+  });
+
+  it("reports a zone with no history as never grazed, not as rested", async () => {
+    const parcel = await newParcel("Untouched Ground");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Fresh" }),
+    );
+    const rest = await asOwner((tx) =>
+      restByZone(tx, tenantId, [zone.id], "2026-08-15"),
+    );
+    expect(rest.get(zone.id)?.status).toBe("never_grazed");
+    expect(rest.get(zone.id)?.restDays).toBeNull();
+  });
+
+  it("refuses to end a stay before it started", async () => {
+    const parcel = await newParcel("End Order");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
+    );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-10",
+      }),
+    );
+    await expect(
+      asOwner((tx) => endOccupancy(tx, ownerCtx(), stay.id, "2026-08-01")),
+    ).rejects.toMatchObject({ code: "DATE_ORDER" });
+  });
+
+  it("deletes a stay entered by mistake, and frees the zone", async () => {
+    const parcel = await newParcel("Mistake");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
+    );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Wrong herd",
+        startedOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) => deleteOccupancy(tx, ownerCtx(), stay.id));
+    expect(
+      await asOwner((tx) => listOccupancy(tx, tenantId, zone.id)),
+    ).toHaveLength(0);
+    // And the open-stay guard no longer fires.
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Right herd",
+        startedOn: "2026-08-01",
+      }),
+    );
+  });
+
+  it("refuses staff writes on occupancy too", async () => {
+    const parcel = await newParcel("Occupancy Role");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
+    );
+    await expect(
+      asOwner((tx) =>
+        startOccupancy(tx, staffCtx(), zone.id, {
+          occupantLabel: "Nope",
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow(LandError);
+  });
+
+  it("collects completed stay lengths per parcel, ignoring open ones", async () => {
+    const parcel = await newParcel("Stay Days");
+    const a = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "A" }),
+    );
+    const b = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "B" }),
+    );
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), a.id, {
+        occupantLabel: "Herd",
+        startedOn: "2026-08-01",
+        endedOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), b.id, {
+        occupantLabel: "Herd",
+        startedOn: "2026-08-02",
+        endedOn: "2026-08-03",
+      }),
+    );
+    // Still standing there: it has no length yet.
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), a.id, {
+        occupantLabel: "Herd",
+        startedOn: "2026-08-10",
+      }),
+    );
+
+    const days = await asOwner((tx) =>
+      completedStayDays(tx, tenantId, parcel.id),
+    );
+    expect(days.sort()).toEqual([1, 2]);
+  });
+
+  it("keeps the rest target as a plain number with no behaviour attached", async () => {
+    // It exists only so a report can draw a comparison line. Nothing in the
+    // write path consults it, which is what keeps "rest is an outcome" true.
+    const parcel = await asOwner((tx) =>
+      createParcel(tx, ownerCtx(), { name: "Targeted", restTargetDays: 21 }),
+    );
+    expect(parcel.restTargetDays).toBe(21);
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
+    );
+    // A stay far short of the target is accepted without complaint.
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Herd",
+        startedOn: "2026-08-01",
+        endedOn: "2026-08-02",
+      }),
+    );
+    expect(stay.id).toBeTruthy();
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Herd again, two days later",
+        startedOn: "2026-08-04",
+        endedOn: "2026-08-05",
+      }),
+    );
+  });
+
+  it("cascades occupancy when a zone is deleted, but retiring keeps it", async () => {
+    const parcel = await newParcel("Cascade");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
+    );
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Herd",
+        startedOn: "2026-08-01",
+        endedOn: "2026-08-02",
+      }),
+    );
+    // Retirement is a status, so the history survives it — which is what makes
+    // "every cost recorded against it keeps reporting" true.
+    await asOwner((tx) => retireZone(tx, ownerCtx(), zone.id));
+    expect(
+      await asOwner((tx) => listOccupancy(tx, tenantId, zone.id)),
+    ).toHaveLength(1);
   });
 
   it("stores area at the column's scale", async () => {

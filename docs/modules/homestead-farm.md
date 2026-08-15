@@ -116,6 +116,27 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-15 — Land slice 1: occupancy is the join, and it exists now (`claude/land-occupancy-rest`)
+- **The record that carries cost allocation in both directions is built**, which
+  is the thing the Livestock design named as what joins `land` to `livestock`. A
+  zone accumulates cost, occupancy allocates it to whatever grazed, and the
+  animal's revenue allocates back by the same basis. Forage never has to be
+  priced, and the table that makes that possible is in place before either pack
+  that will use it.
+- **`livestock` slice 0 is no longer blocked on anything in Land.** Its "lots +
+  head ledger + occupancy (shared with `land`)" line now has the land half done,
+  and the write path is an ordinary op call with `extensionSlug: 'livestock'`.
+- **The pilot's grazing shortfall is now computed on screen** rather than in a
+  dossier: 12 paddocks at a day each yield 11 days against a 21-day target, so
+  the target is arithmetically out of reach and the app says so from records
+  entered anyway. That was the argument for the whole category and it is now a
+  card on a page.
+- **The design's rule held under construction:** *anything derivable from a
+  record already being made must never become a second data entry.* Rest days,
+  grazing days, stay counts and the rotation finding are all derived. Nothing
+  new is typed.
+- Full build record in [land.md](land.md).
+
 ### 2026-08-15 — Land sliced and slice 0 built (`claude/land-places`)
 - **Land was the only category whose design carried no slice order**, so
   proposing one was the first act of building it. Agreed order and reasoning are

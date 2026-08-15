@@ -25,6 +25,12 @@ import {
   AssetControls,
   type AssetDetailView,
 } from "@/packs/assets/components/asset-controls";
+import {
+  DepreciationPanel,
+  type DepreciationView,
+} from "@/packs/assets/components/depreciation-panel";
+import { getDepreciationStatus } from "@/packs/assets/depreciation-ops";
+import { periodOf } from "@/packs/assets/core/depreciation";
 
 export const dynamic = "force-dynamic";
 
@@ -52,33 +58,70 @@ export default async function AssetDetailPage({
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "assets");
 
+  // The tenant's today decides which periods are due, never the server's.
+  const today = todayInTimezone(ctx.tenant.timezone);
+  const currentPeriod = periodOf(today);
+
   const data = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const asset = await getAsset(tx, ctx.tenant.id, id);
       if (!asset) return null;
-      const [parent, children, containers, kinds] = await Promise.all([
-        asset.parentId ? getAsset(tx, ctx.tenant.id, asset.parentId) : null,
-        listChildren(tx, ctx.tenant.id, asset.id),
-        // Excludes this asset AND its descendants, so the picker cannot offer
-        // a cycle. The refusal in ops.ts stays as the backstop.
-        listContainerCandidates(tx, ctx.tenant.id, asset.id),
-        listKindsInUse(tx, ctx.tenant.id),
-      ]);
-      return { asset, parent, children, containers, kinds };
+      const [parent, children, containers, kinds, depreciation] =
+        await Promise.all([
+          asset.parentId ? getAsset(tx, ctx.tenant.id, asset.parentId) : null,
+          listChildren(tx, ctx.tenant.id, asset.id),
+          // Excludes this asset AND its descendants, so the picker cannot offer
+          // a cycle. The refusal in ops.ts stays as the backstop.
+          listContainerCandidates(tx, ctx.tenant.id, asset.id),
+          listKindsInUse(tx, ctx.tenant.id),
+          getDepreciationStatus(tx, ctx.tenant.id, asset, currentPeriod),
+        ]);
+      return { asset, parent, children, containers, kinds, depreciation };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { asset, parent, children, containers, kinds } = data;
+  const { asset, parent, children, containers, kinds, depreciation } = data;
   const isOwner = ctx.role === "owner";
+
+  const dueTotal =
+    depreciation?.due.reduce((s, r) => s + r.amountCents, 0) ?? 0;
+
+  // Money is formatted HERE, on the server, so the client component never
+  // needs a currency helper and can stay a dumb renderer.
+  const depreciationView: DepreciationView = {
+    method: asset.depreciationMethod,
+    inServiceOn: asset.inServiceOn,
+    usefulLifeMonths: asset.usefulLifeMonths,
+    salvageInput:
+      asset.salvageValueCents === null
+        ? ""
+        : (asset.salvageValueCents / 100).toFixed(2),
+    costLabel:
+      asset.acquisitionCostCents === null
+        ? "not recorded"
+        : formatCents(asset.acquisitionCostCents),
+    postedToDateLabel: depreciation
+      ? formatCents(depreciation.postedToDateCents)
+      : null,
+    bookValueLabel: depreciation
+      ? formatCents(depreciation.bookValueCents)
+      : null,
+    dueCount: depreciation?.due.length ?? 0,
+    dueTotalLabel: depreciation ? formatCents(dueTotal) : null,
+    currentPeriod,
+    scheduleLength: depreciation?.schedule.length ?? 0,
+    postedCount: depreciation?.postedPeriods.length ?? 0,
+  };
 
   const view: AssetDetailView = {
     id: asset.id,
     name: asset.name,
     kind: asset.kind,
     identifier: asset.identifier,
+    model: asset.model,
     status: asset.status,
     acquiredOn: asset.acquiredOn,
     // Cents on the wire, dollars in the field. Empty string rather than "0"
@@ -121,7 +164,7 @@ export default async function AssetDetailPage({
               kindsInUse={kinds.map((k) => k.kind)}
               // The tenant's today, never the browser's, so two people in one
               // workspace agree what "today" means on a disposal.
-              today={todayInTimezone(ctx.tenant.timezone)}
+              today={today}
             />
           ) : null
         }
@@ -134,6 +177,9 @@ export default async function AssetDetailPage({
           </CardHeader>
           <CardContent>
             <dl className="grid grid-cols-[9rem_1fr] gap-y-3 text-sm">
+              <dt className="text-muted-foreground">Model</dt>
+              <dd>{asset.model || "—"}</dd>
+
               <dt className="text-muted-foreground">Serial or tag</dt>
               <dd>{asset.identifier || "—"}</dd>
 
@@ -204,6 +250,12 @@ export default async function AssetDetailPage({
             )}
           </CardContent>
         </Card>
+
+        <DepreciationPanel
+          assetId={asset.id}
+          view={depreciationView}
+          canEdit={isOwner}
+        />
       </div>
     </div>
   );

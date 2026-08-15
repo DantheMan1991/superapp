@@ -36,6 +36,7 @@ import {
   date,
   foreignKey,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -64,6 +65,14 @@ export const assets = pgTable(
     /** Serial, VIN, plate, asset tag. Free text — every kind numbers differently. */
     identifier: text("identifier").notNull().default(""),
     /**
+     * Manufacturer's model. Separate from `identifier` because they answer
+     * different questions: a model says what a thing IS and is shared by every
+     * unit of it (what fits, what the manual is, what it is worth); a serial
+     * says WHICH ONE and is unique. Collapsing them loses the ability to ask
+     * "what else do we own like this".
+     */
+    model: text("model").notNull().default(""),
+    /**
      * text + CHECK, never a pgEnum. documents.md paid for that lesson twice: a
      * new enum value needs its own migration file, alone, because it cannot be
      * used in the transaction that adds it.
@@ -78,6 +87,29 @@ export const assets = pgTable(
      */
     acquisitionCostCents: bigint("acquisition_cost_cents", { mode: "number" }),
     disposedOn: date("disposed_on"),
+    /**
+     * When depreciation starts, which is NOT `acquired_on`.
+     *
+     * A tractor bought in November and first used in March depreciates from
+     * March. Conflating the two is a common and consequential error — it moves
+     * expense into the wrong tax year — so the two dates are kept apart even
+     * though most of the time they match.
+     */
+    inServiceOn: date("in_service_on"),
+    /**
+     * text + CHECK, never a pgEnum — the same rule the rest of this schema
+     * follows, and the reason is one file over: adding a value to an enum needs
+     * its own migration, alone.
+     *
+     * `none` is not a placeholder. **Land does not depreciate**, and neither
+     * does anything held for resale, so "this asset is never written down" is a
+     * real and permanent answer rather than an unset field.
+     */
+    depreciationMethod: text("depreciation_method").notNull().default("none"),
+    /** Months, not years: a 7-year life is 84, and a 30-month lease is not 2.5. */
+    usefulLifeMonths: integer("useful_life_months"),
+    /** What it is expected to be worth at the end. Depreciation stops here. */
+    salvageValueCents: bigint("salvage_value_cents", { mode: "number" }),
     /**
      * Containment: a freezer sits in a garage, a garage sits on the property.
      * Composite FK, so a parent is always a same-tenant row.
@@ -124,6 +156,29 @@ export const assets = pgTable(
     // A row cannot contain itself. Deeper cycles are prevented in the pack's
     // write path, which walks the chain — a CHECK cannot see other rows.
     check("assets_parent_not_self", sql`${t.parentId} is null or ${t.parentId} <> ${t.id}`),
+    check(
+      "assets_depreciation_method_valid",
+      sql`${t.depreciationMethod} in ('none', 'straight_line')`,
+    ),
+    check(
+      "assets_useful_life_positive",
+      sql`${t.usefulLifeMonths} is null or ${t.usefulLifeMonths} > 0`,
+    ),
+    check(
+      "assets_salvage_nonnegative",
+      sql`${t.salvageValueCents} is null or ${t.salvageValueCents} >= 0`,
+    ),
+    // A schedule needs all three or none of them. Enforced here rather than
+    // only in the pack, because a half-configured asset would silently
+    // depreciate by nothing and look like a working one.
+    check(
+      "assets_depreciable_is_complete",
+      sql`${t.depreciationMethod} = 'none' or (
+        ${t.inServiceOn} is not null
+        and ${t.usefulLifeMonths} is not null
+        and ${t.acquisitionCostCents} is not null
+      )`,
+    ),
   ],
 );
 

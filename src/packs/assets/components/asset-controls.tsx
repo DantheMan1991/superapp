@@ -34,6 +34,7 @@ export interface AssetDetailView {
   name: string;
   kind: string;
   identifier: string;
+  model: string;
   status: string;
   acquiredOn: string | null;
   /** Dollars as a string for the number input; null when unknown. */
@@ -83,6 +84,7 @@ export function AssetControls({
         kind: kind.trim().toLowerCase().replace(/\s+/g, "_"),
         name: String(formData.get("name") ?? ""),
         identifier: String(formData.get("identifier") ?? ""),
+        model: String(formData.get("model") ?? ""),
         acquiredOn: String(formData.get("acquiredOn") ?? ""),
         acquisitionCostCents: rawCost ? Math.round(Number(rawCost) * 100) : null,
         parentId: parentChoice === NO_PARENT ? null : parentChoice,
@@ -192,14 +194,25 @@ export function AssetControls({
                 </div>
               </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="identifier">Serial or tag</Label>
-                <Input
-                  id="identifier"
-                  name="identifier"
-                  defaultValue={asset.identifier}
-                  maxLength={200}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="model">Model</Label>
+                  <Input
+                    id="model"
+                    name="model"
+                    defaultValue={asset.model}
+                    maxLength={200}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="identifier">Serial or tag</Label>
+                  <Input
+                    id="identifier"
+                    name="identifier"
+                    defaultValue={asset.identifier}
+                    maxLength={200}
+                  />
+                </div>
               </div>
 
               <div className="grid gap-2">

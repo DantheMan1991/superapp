@@ -15,6 +15,34 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-15 — Slice 1: depreciation, posted to the ledger (`claude/assets-depreciation`)
+- **This is the slice that makes the pack an accounting tool** rather than a
+  register of serial numbers. Straight-line, monthly, posted as real journal
+  entries tagged with the asset.
+- **Accumulated depreciation is NOT a column.** It is the sum of what has been
+  posted, read back from the ledger — the same reasoning `balances.ts` uses for
+  account balances and ADR 0007 uses for cash basis. A column would be a second
+  source of truth that has to agree with the ledger forever.
+- **One entry per period, dated to month end**, never one lump for a catch-up.
+  A combined entry would put six months of expense in one month and misstate
+  every P&L in between, which is the report people run depreciation for.
+  Idempotent per period via the entry's idempotency key.
+- **`none` is a real method, not an unset field** — land does not depreciate,
+  and neither does anything held for resale.
+- `in_service_on` is separate from `acquired_on`. A tractor bought in November
+  and first used in March depreciates from March, and conflating the two moves
+  expense into the wrong tax year.
+- **`journal_entry_source` gained `depreciation`, alone in migration 0127** —
+  an enum value cannot be used in the transaction that adds it. drizzle-kit then
+  emitted the same `ALTER TYPE` into 0128, which would have failed; that had to
+  be removed by hand.
+- **`model` added** alongside `identifier`, at the founder's request. They answer
+  different questions: a model says what a thing IS and is shared by every unit
+  of it; a serial says which one.
+- 28 pure schedule tests (exactness across awkward numbers) + 11 posting tests
+  against a real chart of accounts, including that the expense attributes to the
+  asset when the P&L is split by dimension.
+
 ### 2026-08-15 — Detail page: edit, dispose, re-parent (`claude/assets-detail-page`)
 - `/dashboard/m/assets/[id]` — the first **pack sub-route**. It lives in
   `src/app/`, not `src/packs/`, because Next resolves routes from the app
@@ -129,12 +157,49 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
 - **RLS is tenancy, not role.** Assets have no owners-only subset, so this table
   does not reach `app_tenant_role()` the way `document_folders` must. Who may
   write is an application concern.
+- **A schedule must sum to the depreciable base EXACTLY.** Not within a cent —
+  a schedule one cent short leaves a permanent orphan on the balance sheet that
+  no entry will clear. `core/depreciation.ts` is the second place in this
+  codebase allowed to divide money, and it follows the first
+  (`cash-basis-allocate.ts`) rather than inventing its own rounding. The
+  remainder goes to the EARLIEST periods so the final row is the plain
+  per-month figure, which is what makes a printed schedule look right.
+- **Never do month arithmetic through `Date`.** `new Date("2026-01-31")` plus a
+  month is the classic "March 3rd" bug. Periods are month buckets and the day
+  is parsed out and never allowed back in.
+- **An enum value needs its own migration, and the generator will not know it.**
+  drizzle-kit emitted `ALTER TYPE … ADD VALUE` into the *next* migration as well
+  as the custom one carrying it, which would have failed on "label already
+  exists". Check for the duplicate whenever an enum grows.
 
 ## Open items
 
-- **Depreciation** (slice 1) — methods, Section 179 and bonus, posting to the
-  ledger. The largest gap, and the thing that makes this pack an accounting tool
-  rather than an inventory of serial numbers.
+- **Tax methods: MACRS, Section 179, bonus depreciation.** What shipped is
+  **book** depreciation — straight-line, no convention. That is deliberately a
+  line rather than an omission: half-year, mid-quarter and mid-month
+  conventions, declining balance with the straight-line switch, and the §179
+  election are *tax* rules, and modelling them halfway would put confidently
+  wrong numbers in someone's books. **The decision to make first is whether this
+  keeps one basis or two** — most small farms file on tax basis, so book-only
+  straight-line will not match their return, and a tenant-level book/tax split
+  is a design conversation before it is code.
+- **Depreciation accounts are resolved by convention** (subtype
+  `accumulated_depreciation`, code `6900`), overridable via
+  `tenant_modules.config.depreciation` — but **nothing writes that config yet**.
+  A tenant whose chart differs gets a clear refusal and no way to fix it in the
+  UI. The settings surface is the missing half.
+- **Nothing posts depreciation automatically.** It is a button, on purpose:
+  depreciation lands in a period a close can lock, and posting into someone's
+  books on a schedule they did not trigger is a bad surprise for an accountant.
+  Revisit only with an explicit opt-in.
+- **Disposal does not settle the books.** Marking an asset disposed stops it
+  being taggable but posts nothing — no removal of cost and accumulated
+  depreciation, no gain or loss on sale. That is the next accounting slice and
+  it is a real gap: the balance sheet still carries a tractor that has been sold.
+- **Images / a profile picture per asset** (founder's request, 2026-08-15).
+  Storage is free — Documents already holds files with metadata and the open
+  entity-link pattern attaches them. What needs designing is the *primary*
+  image, since a list thumbnail wants one canonical photo rather than the newest.
 - **Maintenance** (slice 2) — calendar and meter-based schedules, emitting work
   items into the existing Work module rather than owning a task engine. Hold
   that line; it is the biggest reuse available.

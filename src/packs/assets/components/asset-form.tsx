@@ -67,6 +67,7 @@ export function AssetForm({
         kind: kind.trim().toLowerCase().replace(/\s+/g, "_"),
         name: String(formData.get("name") ?? ""),
         identifier: String(formData.get("identifier") ?? ""),
+        model: String(formData.get("model") ?? ""),
         acquiredOn: String(formData.get("acquiredOn") ?? ""),
         // Dollars in the field, cents on the wire. Rounding here rather than
         // trusting a float through the action keeps the ledger's integer-cents
@@ -156,9 +157,15 @@ export function AssetForm({
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="identifier">Serial or tag</Label>
-              <Input id="identifier" name="identifier" maxLength={200} />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="model">Model</Label>
+                <Input id="model" name="model" maxLength={200} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="identifier">Serial or tag</Label>
+                <Input id="identifier" name="identifier" maxLength={200} />
+              </div>
             </div>
 
             {containers.length > 0 && (

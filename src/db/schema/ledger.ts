@@ -46,6 +46,17 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
   "opening_balance",
   "recurring",
   "reversal",
+  /**
+   * Posted by the `assets` pack from a depreciation schedule. Added in
+   * drizzle/0127, alone in its own migration — an enum value cannot be used in
+   * the transaction that adds it.
+   *
+   * Deliberately NOT in MANAGED_SOURCES (core/guards.ts): invoice and bill
+   * entries are protected from journal-voiding because that would desync a
+   * document's status and aging, whereas a depreciation entry owns no document
+   * and reversing one is an ordinary correction.
+   */
+  "depreciation",
 ]);
 
 export const entryEditPolicy = pgEnum("entry_edit_policy", [

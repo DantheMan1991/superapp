@@ -31,7 +31,9 @@ export class AssetError extends Error {
       | "NOT_FOUND"
       | "INVALID_KIND"
       | "PARENT_INVALID"
-      | "PARENT_CYCLE",
+      | "PARENT_CYCLE"
+      | "NOT_DEPRECIABLE"
+      | "DEPRECIATION_ACCOUNTS",
     message: string,
   ) {
     super(message);
@@ -189,10 +191,23 @@ export interface AssetInput {
   kind: string;
   name: string;
   identifier?: string;
+  /** Manufacturer's model — what it IS, as opposed to which one it is. */
+  model?: string;
   acquiredOn?: string | null;
   acquisitionCostCents?: number | null;
   parentId?: string | null;
   notes?: string;
+  /**
+   * Depreciation settings. All four move together: the
+   * `assets_depreciable_is_complete` CHECK refuses a method other than `none`
+   * without an in-service date, a life and a cost, so a partial update that
+   * sets only the method is rejected by the database rather than producing an
+   * asset that depreciates by nothing.
+   */
+  inServiceOn?: string | null;
+  depreciationMethod?: string;
+  usefulLifeMonths?: number | null;
+  salvageValueCents?: number | null;
 }
 
 export async function createAsset(
@@ -216,8 +231,13 @@ export async function createAsset(
       kind,
       name: input.name.trim(),
       identifier: input.identifier?.trim() ?? "",
+      model: input.model?.trim() ?? "",
       acquiredOn: input.acquiredOn ?? null,
       acquisitionCostCents: input.acquisitionCostCents ?? null,
+      inServiceOn: input.inServiceOn ?? null,
+      depreciationMethod: input.depreciationMethod ?? "none",
+      usefulLifeMonths: input.usefulLifeMonths ?? null,
+      salvageValueCents: input.salvageValueCents ?? null,
       parentId: input.parentId ?? null,
       notes: input.notes?.trim() ?? "",
     })
@@ -254,11 +274,22 @@ export async function updateAsset(
   }
   if (input.name !== undefined) patch.name = input.name.trim();
   if (input.identifier !== undefined) patch.identifier = input.identifier.trim();
+  if (input.model !== undefined) patch.model = input.model.trim();
   if (input.acquiredOn !== undefined) patch.acquiredOn = input.acquiredOn;
   if (input.acquisitionCostCents !== undefined) {
     patch.acquisitionCostCents = input.acquisitionCostCents;
   }
   if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.inServiceOn !== undefined) patch.inServiceOn = input.inServiceOn;
+  if (input.depreciationMethod !== undefined) {
+    patch.depreciationMethod = input.depreciationMethod;
+  }
+  if (input.usefulLifeMonths !== undefined) {
+    patch.usefulLifeMonths = input.usefulLifeMonths;
+  }
+  if (input.salvageValueCents !== undefined) {
+    patch.salvageValueCents = input.salvageValueCents;
+  }
   if (input.parentId !== undefined) {
     if (input.parentId) {
       await assertParentUsable(tx, ctx.tenantId, input.parentId, id);

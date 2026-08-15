@@ -1,0 +1,27 @@
+-- ALONE IN ITS OWN MIGRATION, DELIBERATELY.
+--
+-- `ALTER TYPE ... ADD VALUE` cannot be used in the same transaction that adds
+-- it, so a migration that both adds an enum value AND writes a row using that
+-- value fails. This codebase paid for that lesson once already (0036 vs 0037),
+-- and every discriminator added since has been `text` + CHECK instead — see the
+-- header of src/db/schema/work.ts.
+--
+-- `journal_entries.source` is one of the few genuine enums left, and it predates
+-- that rule. Adding to it is therefore the exception that has to follow the
+-- original procedure: this file adds the value and nothing else, so the next
+-- migration and all runtime code can use it.
+--
+-- WHY A NEW SOURCE AT ALL, rather than posting depreciation as `manual`:
+-- `source` is what lets the ledger explain where an entry came from, and
+-- `source_id` points at the asset. Posting these as `manual` would make every
+-- depreciation entry indistinguishable from something a person typed, which
+-- costs the ability to find them, reconcile them against the schedule, or ever
+-- treat them specially. It would also simply be untrue.
+--
+-- Note what is NOT being done: `depreciation` is not added to MANAGED_SOURCES
+-- in core/guards.ts. Invoice and bill entries are protected from journal-voiding
+-- because voiding them would desync a document's status and aging; a
+-- depreciation entry owns no document and reversing one is a legitimate
+-- correction, so it stays reversible like any manual entry.
+
+ALTER TYPE "journal_entry_source" ADD VALUE IF NOT EXISTS 'depreciation';

@@ -11,6 +11,21 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-14 — First pack ships: `assets` (`claude/layer2-pack-machinery`)
+- **The machinery is now proved by something using it.** `assets` renders, owns
+  a table under FORCE RLS, and syncs cost objects — full dossier in
+  [assets.md](assets.md).
+- **`upsertDimensionMember` has its first caller**, three weeks after the seam
+  was opened. The pattern the next pack copies: the entity write and its
+  dimension sync share one transaction, so a cost object can never point at a
+  rolled-back row.
+- `Component` on a `PackDefinition` went from "all seven absent" to "one
+  present", exercising the empty-slot path and the renderable path at once.
+- **P5 is now genuinely blocked on something real:** the asset kind suggestions
+  are hardcoded in the pack, and they should come from profile `packConfig`.
+  That is the extension point ADR 0004 predicted, and it now has a caller
+  waiting for it rather than a hypothetical one.
+
 ### 2026-08-14 — Layer 2 exists: registry, dependencies, profile install (`claude/layer2-pack-machinery`)
 - **`src/packs/` and `src/industries/` now exist.** Seven capability packs are
   declared with a real dependency graph, and `homestead-farm` is the first

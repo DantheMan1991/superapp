@@ -1,4 +1,5 @@
 import type { PackDefinition } from "./types";
+import { AssetsModule } from "./assets/AssetsModule";
 
 /**
  * Layer 2a registry: slug → how the pack behaves.
@@ -30,14 +31,19 @@ export const packRegistry: Record<string, PackDefinition> = {
 
   /**
    * Anything owned with a cost, a life, a location and a service schedule.
-   * `asset_kind` is an open taxonomy — buildings, equipment and vehicles are
-   * values a profile supplies, not separate packs.
+   * `kind` is an open taxonomy — buildings, equipment and vehicles are values
+   * a profile supplies, not separate packs.
+   *
+   * THE FIRST PACK TO SHIP A RENDERER. It has no dependencies, which is why it
+   * went first: the machinery is proved by something using it, without a
+   * second pack having to exist at the same time.
    */
   assets: {
     slug: "assets",
     name: "Assets",
     icon: "wrench",
     requires: [],
+    Component: AssetsModule,
   },
 
   /**

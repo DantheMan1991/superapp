@@ -97,6 +97,12 @@ tree — a new file appears on the page with no code change):
 
 - `npm run db:migrate` / `db:seed` / `db:generate` — run as the owner URL
   (`DATABASE_URL_OWNER`).
+- `npm run db:backfill-coa` — adds chart-of-accounts template entries that
+  existing tenants are missing. `provisionAccounting` only runs when accounting
+  is switched ON, so a tenant provisioned before the template grew never gets
+  the new account. Idempotent; `--dry` reports without writing, `--dev` targets
+  the Neon dev branch. **Run it on both after adding an account to the
+  template**, the same rule migrations follow.
 - `npm run db:create-role` — creates/rotates the `app_user` role the app
   connects as. Required: Neon's owner role has BYPASSRLS, so the app must
   never run as it (`DATABASE_URL` = app_user).

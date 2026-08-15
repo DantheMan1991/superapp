@@ -876,6 +876,20 @@
       "when": 1786665388881,
       "tag": "0124_sales_tax_rates_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1786751646142,
+      "tag": "0125_empty_dark_beast",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1786751664671,
+      "tag": "0126_assets_rls",
+      "breakpoints": true
     }
   ]
 }

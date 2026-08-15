@@ -172,7 +172,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     description:
       "Anything owned with a cost, a working life, a place it lives and a service schedule.",
     category: "pack",
-    status: "coming_soon",
+    // `available` from the first pack slice (2026-08-14): it renders, writes to
+    // a pack-owned table under RLS, and syncs a cost object. Depreciation and
+    // maintenance follow and get added to the description as they do.
+    status: "available",
     sortOrder: 210,
   },
   {

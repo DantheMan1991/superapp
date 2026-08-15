@@ -161,6 +161,43 @@ tables directly.
 
 ---
 
+## 4b. Work is raised and worked where it lives
+
+Added 2026-08-15, after the founder spotted the pattern one slice before it
+would have been repeated.
+
+> **A pack never builds its own task engine, and never sends somebody to Work
+> to act on what it raised.** It calls the Layer 0 verbs and renders the shared
+> row.
+
+The data seam for this has existed since CRM slice 5b — `src/lib/work/
+entity-work.ts` and `items.ts` sit outside the Work module precisely so anything
+may write work. What did not exist was **actions**: the only `"use server"` file
+was `src/modules/work/actions.ts`, and a module may not import another module,
+so every consumer wrapped its own subset.
+
+The result was invisible until there were two consumers. CRM wrapped two verbs
+— tick and delete — so a follow-up on a record was something you had to leave
+CRM to reassign or re-date. The assets pack was about to wrap a different two,
+and the product would have grown a third inconsistent work surface.
+
+| Layer | What it provides |
+| --- | --- |
+| `src/lib/work/entity-work.ts`, `items.ts` | The write path. Since slice 5b |
+| `src/lib/work/actions.ts` | **The verbs.** Add, done/reopen, reassign, re-due |
+| `src/components/app/work-item-row.tsx` | **The affordances.** One row, one behaviour everywhere |
+
+**Share the verbs, not the container.** CRM's timeline interleaves notes and
+follow-ups and is better for CRM than a generic panel would be; the assets page
+wants a plain list. Forcing one layout would have made every surface look the
+same, which is a different and worse trade than making the same work *behave*
+the same.
+
+**The guard is the owning feature, not Work.** `extensionSlug` says which module
+or pack the record belongs to, and that is what must be switched on. Work being
+off does not stop a follow-up being raised; the item simply has no second home
+to appear in.
+
 ## 5. Shapes to build
 
 Not yet implemented. Recorded here so the first pack does not improvise.

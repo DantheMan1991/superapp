@@ -238,6 +238,14 @@ export default async function RecordPage({
               activities={activities}
               tasks={tasks}
               partyId={party.id}
+              // The same members the add dialog already offers, now also on
+              // each follow-up — so reassigning one no longer means opening
+              // Work.
+              members={record.members.map((m) => ({
+                clerkUserId: m.clerkUserId,
+                label: memberLabel(m),
+              }))}
+              revalidate={`/dashboard/m/crm/records/${party.id}`}
             />
           </section>
 

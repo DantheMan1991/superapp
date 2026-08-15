@@ -8,7 +8,8 @@ import {
 import type { CrmActivity } from "@/db/schema";
 import type { GroupableTask } from "../core/timeline";
 import type { TimelineItem, TimelineItemKind } from "../core/timeline";
-import { DeleteActivityButton, TaskToggle, DueBadge } from "./timeline-controls";
+import { DeleteActivityButton } from "./timeline-controls";
+import { WorkItemRow } from "@/components/app/work-item-row";
 
 /**
  * The timeline, rendered.
@@ -38,13 +39,22 @@ export function Timeline({
   activities,
   tasks,
   partyId,
+  members = [],
+  revalidate,
 }: {
   items: TimelineItem[];
   /** For the delete control — only activities carry one. */
   activities: CrmActivity[];
-  /** For the tick control — the stream carries no version. */
+  /** For the work controls — the stream carries no version. */
   tasks: GroupableTask[];
   partyId: string;
+  /**
+   * Who work can be given to. Passed through to the shared row so a follow-up
+   * can be REASSIGNED here rather than in Work — the point of adopting it.
+   */
+  members?: Array<{ clerkUserId: string; label: string }>;
+  /** The route the shared verbs refresh after a change. */
+  revalidate?: string;
 }) {
   if (items.length === 0) {
     return (
@@ -93,8 +103,24 @@ export function Timeline({
               </p>
             </div>
 
-            {task && !task.completedAt && <DueBadge dueOn={task.dueOn} />}
-            {task && <TaskToggle task={task} />}
+            {task && (
+              // THE SHARED ROW, not a CRM-only control. Done, reopen,
+              // reassign and re-due all happen here, in the timeline, so a
+              // follow-up raised on a record can be worked without leaving
+              // the record. See src/components/app/work-item-row.tsx.
+              <WorkItemRow
+                item={{
+                  id: task.id,
+                  title: task.title,
+                  dueOn: task.dueOn,
+                  assigneeClerkUserId: task.assigneeClerkUserId,
+                  completedAt: task.completedAt,
+                  version: task.version,
+                }}
+                members={members}
+                revalidate={revalidate}
+              />
+            )}
             {activity && (
               <DeleteActivityButton activityId={activity.id} partyId={partyId} />
             )}

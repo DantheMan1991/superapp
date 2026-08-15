@@ -1,5 +1,6 @@
 import type { PackDefinition } from "./types";
 import { AssetsModule } from "./assets/AssetsModule";
+import { LandModule } from "./land/LandModule";
 
 /**
  * Layer 2a registry: slug → how the pack behaves.
@@ -10,23 +11,31 @@ import { AssetsModule } from "./assets/AssetsModule";
  * happens at the shell layer in `src/lib/features.ts`, which is Layer 0 and is
  * allowed to know both exist.
  *
- * EVERY PACK BELOW IS DECLARED AND UNBUILT. That is not a placeholder state:
- * a declared pack has a real dependency graph, installs with a profile, and
- * shows as an empty slot in the admin registry — exactly how `scheduling` and
- * `work` were carried before they shipped. Each grows a `src/packs/<slug>/`
- * directory and a `Component` when it is built.
+ * `assets` and `land` are built; the other five are DECLARED AND UNBUILT. That
+ * is not a placeholder state: a declared pack has a real dependency graph,
+ * installs with a profile, and shows as an empty slot in the admin registry —
+ * exactly how `scheduling` and `work` were carried before they shipped. Each
+ * grows a `src/packs/<slug>/` directory and a `Component` when it is built.
  *
  * The designs these come from live in docs/modules/homestead-farm.md.
  */
 export const packRegistry: Record<string, PackDefinition> = {
   // ---- No dependencies: the substrate packs ----
 
-  /** Parcels, zones, geometry, area. Everything spatial references it. */
+  /**
+   * Parcels, zones, geometry, area. Everything spatial references it.
+   *
+   * Ships parcels, zones and dated zone use (slice 0). Occupancy and rest are
+   * slice 1 — `land` owns that table, because rest is computed from it and a
+   * pack may not read another pack's tables, but `livestock` and `crops` are
+   * what write into it. Geometry is slice 2 (GeoJSON in jsonb, no PostGIS).
+   */
   land: {
     slug: "land",
     name: "Land",
     icon: "map",
     requires: [],
+    Component: LandModule,
   },
 
   /**

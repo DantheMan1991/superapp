@@ -28,3 +28,4 @@ export * from "./work";
 // Layer 2a — pack-owned tables. Same rules as any domain above; the separation
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";
+export * from "./land";

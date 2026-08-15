@@ -11,6 +11,32 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-15 — Second pack ships, and vocabulary finally has a reader (`claude/land-places`)
+- **`land` slice 0** — parcels, zones and dated zone use, full dossier in
+  [land.md](land.md). The substrate `livestock` and `crops` declare in
+  `requires` now exists.
+- **`resolveLabels` has a caller**, three weeks after it was built and tested.
+  It stayed unread because `assets` had no word worth overriding; `land` does, so
+  the seam was wired the moment a pack had a surface that needed it. Verified
+  live: the same page renders "Paddocks" for a tenant with the override and
+  "Zones" for one with no profile at all.
+- **`packConfig` has its first real reader too** — `land.areaUnit` flips the
+  whole surface to hectares. That is half of what P5 is for, arriving through
+  configuration rather than a new primitive.
+- **New Layer 0 file: `src/lib/packs/tenant-context.ts`.** `packContext(tx,
+  tenantId, industry, slug)` returns `{ labels, config }`, merging profile
+  defaults with `tenant_modules.config`. It lives in Layer 0 rather than in the
+  pack because every later pack needs exactly this and none of them should
+  re-derive it. **Per-tenant labels live under a `labels` key on the pack's own
+  row**, so renaming a word for one pack does not silently rename it in another.
+- **`config` is typed `unknown` on the way out**, deliberately. A pack parses its
+  own key with its own tolerance for nonsense; typing it here would mean this
+  file knowing what every pack's settings look like, which is the coupling packs
+  exist to avoid.
+- **Two dimension types from one pack** for the first time (`parcel`, `zone`).
+  Nothing in core needed to change, which is the claim ADR 0004 makes and this is
+  the second independent test of it.
+
 ### 2026-08-14 — First pack ships: `assets` (`claude/layer2-pack-machinery`)
 - **The machinery is now proved by something using it.** `assets` renders, owns
   a table under FORCE RLS, and syncs cost objects — full dossier in
@@ -103,9 +129,9 @@ cost dimensions all land in tables that already exist and already have RLS.
 | 2 | `src/industries/<slug>.ts` manifests | **built** — `homestead-farm` is the first |
 | 3 | Dependency declaration + enforcement | **built** — declared in `PackDefinition.requires`, enforced in `toggleModule` |
 | 4 | The install action | **partly** — `installProfile` enables packs and stamps `tenants.industry`. **Seed application is not built** |
-| 5 | Label resolution | **built** — `resolveLabels` / `labelFor` in `src/lib/packs/resolve.ts`. *No caller yet: no pack renders* |
+| 5 | Label resolution | **built and in use** — `resolveLabels` / `labelFor` in `src/lib/packs/resolve.ts`, reached through `packContext` in `src/lib/packs/tenant-context.ts`. First caller: `land`, 2026-08-15 |
 | 6 | Nav grouping by `category` | **built** — the pack group takes the installed profile's name |
-| 7 | **P5 extension points** | **not built.** No pack contributes nav or registers an entity type yet, so nothing has forced it. It will be forced by the first pack that ships |
+| 7 | **P5 extension points** | **not built.** Two packs now hardcode a suggestion list that should come from profile `packConfig` (`assets.kind`, `land`'s zone uses). Config-shaped tailoring already works via `packContext`; what is still missing is a pack CONTRIBUTING nav or registering an entity type |
 
 ## The shapes
 
@@ -223,9 +249,9 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
   `tenant_modules.module_id` foreign key, which fails loudly at install rather
   than silently — acceptable, but it fails at the worst moment. The fix, when it
   is worth doing, is extracting the `MODULES` array into an importable module.
-- **`resolveLabels` has no caller.** Vocabulary resolution is built and tested
-  but nothing reads it, because no pack renders a label yet. It is wired the
-  moment the first pack has a surface.
+- ~~`resolveLabels` has no caller~~ — **closed 2026-08-15.** `land` reads it
+  through `packContext`. What remains open is that a per-tenant label override
+  has no UI: it is a jsonb edit on `tenant_modules.config`.
 - **No UI for `installProfile`.** The action exists, is superadmin-guarded and
   audited, but no admin page calls it — a profile is installed by invoking the
   action directly. The tenant detail page is the obvious home.

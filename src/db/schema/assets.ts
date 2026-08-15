@@ -35,6 +35,7 @@ import {
   check,
   date,
   foreignKey,
+  boolean,
   index,
   integer,
   jsonb,
@@ -208,3 +209,165 @@ export const assets = pgTable(
 
 export type Asset = typeof assets.$inferSelect;
 export type NewAsset = typeof assets.$inferInsert;
+
+/**
+ * A recurring service on an asset: "oil change every 100 hours", "annual
+ * inspection".
+ *
+ * NOTE WHAT IS NOT HERE: cost. A repair bill is already in the books as a bill
+ * or a bank transaction, tagged with the asset's dimension member, so "what has
+ * this tractor cost in repairs" is answerable from the P&L. Recording money
+ * here too would be a second version of it that has to agree forever — the same
+ * reason this pack does not capitalise an asset's purchase either. **The
+ * maintenance log records what was done and when; the ledger records what it
+ * cost.**
+ */
+export const assetMaintenanceSchedules = pgTable(
+  "asset_maintenance_schedules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    assetId: uuid("asset_id").notNull(),
+    /** "Oil change", "Grease fittings", "Chimney sweep". */
+    name: text("name").notNull(),
+    /**
+     * `calendar` counts months; `meter` counts whatever the machine counts.
+     * The two genuinely differ — a tractor that sat all winter does not need
+     * its 100-hour service, and a fire extinguisher needs its annual check
+     * whether or not anyone touched it.
+     */
+    kind: text("kind").notNull(),
+    /** Calendar schedules only. Months, so "annual" cannot drift by a day a year. */
+    intervalMonths: integer("interval_months"),
+    /** Meter schedules only: how many units between services. */
+    intervalMeter: integer("interval_meter"),
+    /** 'hours', 'miles', 'km'. On the schedule, so one machine can have both. */
+    meterUnit: text("meter_unit"),
+    isActive: boolean("is_active").notNull().default(true),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ams_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("ams_tenant_asset_idx").on(t.tenantId, t.assetId),
+    foreignKey({
+      name: "ams_asset_fk",
+      columns: [t.tenantId, t.assetId],
+      foreignColumns: [assets.tenantId, assets.id],
+    }).onDelete("cascade"),
+    check("ams_kind_valid", sql`${t.kind} in ('calendar', 'meter')`),
+    check("ams_name_present", sql`length(btrim(${t.name})) > 0`),
+    // Each kind carries its own interval and only its own. A calendar schedule
+    // with a meter interval is a half-edited row, not a schedule that does
+    // both — and one that does both is two schedules.
+    check(
+      "ams_interval_matches_kind",
+      sql`(${t.kind} = 'calendar' and ${t.intervalMonths} > 0 and ${t.intervalMeter} is null)
+       or (${t.kind} = 'meter' and ${t.intervalMeter} > 0 and ${t.intervalMonths} is null)`,
+    ),
+  ],
+);
+
+/**
+ * A meter reading. The usage log meter-based schedules run on.
+ *
+ * Kept as a LOG rather than a `current_meter` column on the asset, because the
+ * history is worth more than the latest value: it is what will later allocate a
+ * machine's cost across the zones it worked, and what makes "this tractor did
+ * 300 hours last season" answerable.
+ */
+export const assetMeterReadings = pgTable(
+  "asset_meter_readings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    assetId: uuid("asset_id").notNull(),
+    readOn: date("read_on").notNull(),
+    /** Whole units. Nobody records 412.7 engine hours to the tenth. */
+    reading: integer("reading").notNull(),
+    unit: text("unit").notNull().default("hours"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("amr_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("amr_tenant_asset_read_idx").on(t.tenantId, t.assetId, t.readOn),
+    foreignKey({
+      name: "amr_asset_fk",
+      columns: [t.tenantId, t.assetId],
+      foreignColumns: [assets.tenantId, assets.id],
+    }).onDelete("cascade"),
+    check("amr_reading_nonnegative", sql`${t.reading} >= 0`),
+  ],
+);
+
+/**
+ * A service that actually happened.
+ *
+ * `schedule_id` is NULLABLE on purpose: most maintenance is not scheduled. A
+ * broken belt replaced on a Tuesday is a real event with a real date, and a log
+ * that only accepted planned work would be a plan rather than a history.
+ *
+ * Next-due is computed FROM these, never stored on the schedule — the same
+ * reasoning accumulated depreciation follows. A `next_due_on` column would be a
+ * second source of truth that drifts the moment a service is backdated.
+ */
+export const assetMaintenanceEvents = pgTable(
+  "asset_maintenance_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    assetId: uuid("asset_id").notNull(),
+    scheduleId: uuid("schedule_id"),
+    performedOn: date("performed_on").notNull(),
+    /** The meter when it was done, for meter schedules. */
+    meterReading: integer("meter_reading"),
+    description: text("description").notNull().default(""),
+    /** The reminder this closed, when it came from one. */
+    workItemId: uuid("work_item_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ame_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("ame_tenant_asset_idx").on(t.tenantId, t.assetId, t.performedOn),
+    index("ame_tenant_schedule_idx").on(t.tenantId, t.scheduleId),
+    foreignKey({
+      name: "ame_asset_fk",
+      columns: [t.tenantId, t.assetId],
+      foreignColumns: [assets.tenantId, assets.id],
+    }).onDelete("cascade"),
+    // A schedule deleted mid-history must not take its events with it: what
+    // was done still happened. Set null rather than cascade.
+    foreignKey({
+      name: "ame_schedule_fk",
+      columns: [t.tenantId, t.scheduleId],
+      foreignColumns: [
+        assetMaintenanceSchedules.tenantId,
+        assetMaintenanceSchedules.id,
+      ],
+    }),
+    check(
+      "ame_meter_nonnegative",
+      sql`${t.meterReading} is null or ${t.meterReading} >= 0`,
+    ),
+  ],
+);
+
+export type AssetMaintenanceSchedule =
+  typeof assetMaintenanceSchedules.$inferSelect;
+export type AssetMeterReading = typeof assetMeterReadings.$inferSelect;
+export type AssetMaintenanceEvent = typeof assetMaintenanceEvents.$inferSelect;

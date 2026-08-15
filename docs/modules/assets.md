@@ -28,9 +28,25 @@ to be listed by a trades profile unchanged.
   had existed, audited and unreachable, since slice 0.
 - **The container picker cannot offer a cycle**: the server excludes the asset
   and its whole subtree, so `ops.ts`'s refusal is a backstop rather than the
-  thing the user meets. That path depends on `descendantIds`, fixed in the
-  ops-tests PR — **re-parenting is unverified until that lands.**
+  thing the user meets. That path runs through `descendantIds`, so it only
+  works at all because of the `inArray` fix in the entry below — the two
+  landed a day apart and this one was written against the broken version.
 - Disposal takes a date defaulted to **the tenant's today**, never the browser's.
+
+### 2026-08-15 — Ops tests, and the bug they found (`claude/assets-ops-tests`)
+- **`descendantIds` was broken in shipped code.** It bound a JS array into
+  `` sql`= any(${frontier})` ``, which Postgres rejects with *malformed array
+  literal* — so **every caller passing a `movingId` threw, and the containment
+  cycle guard had never once run.** Re-parenting an asset would always have
+  failed. Fixed with drizzle's `inArray`.
+- The bug was reachable only through `ops.ts`, and the isolation suite builds
+  its fixtures under `withSystem` **on purpose** — so nothing covered it. That
+  gap is the reason `tests/assets-ops.test.ts` exists: 16 tests over the ops,
+  including the pack's central claim, which had no coverage at all.
+- Now certified: creating an asset syncs a `dimension_member` **in the same
+  transaction**; a failed asset write **rolls the member back**; a rename
+  renames the member; disposal **archives rather than deletes** it; staff writes
+  are refused; two-step and three-step containment cycles are refused.
 
 ### 2026-08-14 — Slice 0: the pack renders, under RLS, as a cost object (`claude/layer2-pack-machinery`)
 - **The first pack-owned table** (`assets`), the first pack renderer, and the
@@ -102,6 +118,14 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
   first, which is the honest order of operations anyway.
 - **Self-referential FKs need the unique index created first.** The generated
   migration will get this wrong; check the statement order.
+- **Never interpolate a JS array into a raw `sql` fragment.**
+  `` sql`x = any(${arr})` `` binds the whole array as ONE parameter and
+  Postgres rejects it. Use `inArray`. This shipped, and it silently disabled the
+  containment cycle guard — the code path threw before ever reaching the check.
+- **An isolation test cannot cover a pack's ops**, by design: that suite builds
+  fixtures under `withSystem` so a bug in the ops cannot make it agree with
+  them. A pack therefore needs BOTH files, and the ops one is where the
+  dimension-sync guarantees live.
 - **RLS is tenancy, not role.** Assets have no owners-only subset, so this table
   does not reach `app_tenant_role()` the way `document_folders` must. Who may
   write is an application concern.

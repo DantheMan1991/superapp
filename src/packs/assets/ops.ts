@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Asset } from "@/db/schema";
 import { upsertDimensionMember, archiveDimensionMember } from "@/modules/accounting/core";
@@ -133,10 +133,16 @@ async function descendantIds(
   const seen = new Set<string>();
   let frontier = [rootId];
   while (frontier.length > 0) {
+    // `inArray`, NOT sql`= any(${frontier})`. Interpolating a JS array into a
+    // raw fragment binds it as ONE parameter, and Postgres rejects it with
+    // `malformed array literal`. It shipped that way and every caller that
+    // passes a `movingId` threw — which is to say the cycle guard below never
+    // ran once. Caught by tests/assets-ops.test.ts, which is the argument for
+    // that file existing.
     const children = await tx.query.assets.findMany({
       where: and(
         eq(schema.assets.tenantId, tenantId),
-        sql`${schema.assets.parentId} = any(${frontier})`,
+        inArray(schema.assets.parentId, frontier),
       ),
       columns: { id: true },
     });

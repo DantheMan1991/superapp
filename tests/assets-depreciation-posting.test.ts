@@ -1,0 +1,297 @@
+import "dotenv/config";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { withSystem, withTenant, schema, type Tx } from "../src/db";
+import { provisionAccounting } from "../src/modules/accounting/templates/apply";
+import { getBalances } from "../src/modules/accounting/core";
+import { createAsset, type AssetCtx } from "../src/packs/assets/ops";
+import {
+  getDepreciationStatus,
+  listPostedPeriods,
+  postDepreciation,
+  resolveDepreciationAccounts,
+} from "../src/packs/assets/depreciation-ops";
+
+const RUN = !!process.env.DATABASE_URL;
+const d = RUN ? describe : describe.skip;
+
+/**
+ * Depreciation, posted into the real ledger.
+ *
+ * The schedule maths is covered purely in `assets-depreciation.test.ts`. What
+ * can only be tested against a database is the part that matters to the books:
+ * that posting produces a BALANCED entry, tagged with the asset, idempotent per
+ * period, and that "posted to date" is read back out of the ledger rather than
+ * from a column the pack maintains.
+ */
+d("depreciation posting", () => {
+  const STAMP = `depr-${process.pid}`;
+  const OWNER = `${STAMP}-owner`;
+
+  let tenantId: string;
+  let assetId: string;
+
+  const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
+    withTenant(tenantId, fn, { role: "owner", userId: OWNER });
+  const ctx = (): AssetCtx => ({ tenantId, userId: OWNER, role: "owner" });
+
+  beforeAll(async () => {
+    await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.tenants)
+        .values({
+          clerkOrgId: `${STAMP}-org`,
+          name: "Depreciation",
+          slug: `${STAMP}-slug`,
+        })
+        .returning();
+      tenantId = rows[0].id;
+    });
+    // The pack posts into a real chart of accounts, so provision one.
+    await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId), {
+      role: "owner",
+      userId: OWNER,
+    });
+
+    const asset = await asOwner((tx) =>
+      createAsset(tx, ctx(), {
+        kind: "equipment",
+        name: "Baler",
+        // 1,200.00 over 12 months = 100.00 a month, so the arithmetic is
+        // checkable by eye in the assertions below.
+        acquisitionCostCents: 120_000,
+        acquiredOn: "2026-01-05",
+        inServiceOn: "2026-01-20",
+        depreciationMethod: "straight_line",
+        usefulLifeMonths: 12,
+        salvageValueCents: 0,
+      }),
+    );
+    assetId = asset.id;
+  });
+
+  afterAll(async () => {
+    await withSystem(async (tx) => {
+      await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
+    });
+  });
+
+  it("resolves the two accounts from a standard chart", async () => {
+    const accounts = await asOwner((tx) =>
+      resolveDepreciationAccounts(tx, tenantId),
+    );
+    expect(accounts.expenseAccountId).toBeTruthy();
+    expect(accounts.accumulatedAccountId).toBeTruthy();
+    expect(accounts.expenseAccountId).not.toBe(accounts.accumulatedAccountId);
+  });
+
+  it("posts one balanced entry per period, dated to month end", async () => {
+    const result = await asOwner((tx) =>
+      withAsset(tx, (asset) => postDepreciation(tx, ctx(), asset, "2026-03")),
+    );
+    expect(result.postedPeriods).toEqual(["2026-01", "2026-02", "2026-03"]);
+    expect(result.totalCents).toBe(30_000);
+
+    const entries = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.journalEntries)
+        .where(
+          and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.source, "depreciation"),
+          ),
+        ),
+    );
+    expect(entries).toHaveLength(3);
+    // ONE ENTRY PER PERIOD, month-end dated — not one lump for the catch-up.
+    // A combined entry would put three months of expense in March and misstate
+    // every P&L in between.
+    expect(entries.map((e) => e.entryDate).sort()).toEqual([
+      "2026-01-31",
+      "2026-02-28",
+      "2026-03-31",
+    ]);
+    expect(entries.every((e) => e.sourceId === assetId)).toBe(true);
+  });
+
+  it("balances — debits equal credits on every entry", async () => {
+    const lines = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.journalLines)
+        .where(eq(schema.journalLines.tenantId, tenantId)),
+    );
+    const sum = lines.reduce((s, l) => s + l.amountCents, 0);
+    expect(sum).toBe(0);
+  });
+
+  it("tags every line with the asset, which is what makes it reportable", async () => {
+    const members = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.dimensionMembers)
+        .where(eq(schema.dimensionMembers.packEntityId, assetId)),
+    );
+    expect(members).toHaveLength(1);
+
+    const tagged = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.lineDimensions)
+        .where(eq(schema.lineDimensions.memberId, members[0].id)),
+    );
+    // Two lines per entry, three entries.
+    expect(tagged).toHaveLength(6);
+  });
+
+  it("is idempotent per period — posting again posts nothing", async () => {
+    const again = await asOwner((tx) =>
+      withAsset(tx, (asset) => postDepreciation(tx, ctx(), asset, "2026-03")),
+    );
+    expect(again.postedPeriods).toEqual([]);
+    expect(again.totalCents).toBe(0);
+
+    const entries = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.journalEntries)
+        .where(
+          and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            eq(schema.journalEntries.source, "depreciation"),
+          ),
+        ),
+    );
+    expect(entries).toHaveLength(3);
+  });
+
+  it("catches up only the periods that are still due", async () => {
+    const more = await asOwner((tx) =>
+      withAsset(tx, (asset) => postDepreciation(tx, ctx(), asset, "2026-05")),
+    );
+    expect(more.postedPeriods).toEqual(["2026-04", "2026-05"]);
+  });
+
+  it("reads accumulated depreciation back out of the LEDGER, not a column", async () => {
+    const status = await asOwner((tx) =>
+      withAsset(tx, (asset) =>
+        getDepreciationStatus(tx, tenantId, asset, "2026-05"),
+      ),
+    );
+    expect(status).not.toBeNull();
+    expect(status!.postedToDateCents).toBe(50_000);
+    // Cost 1,200.00 less 500.00 posted.
+    expect(status!.bookValueCents).toBe(70_000);
+    expect(status!.due).toEqual([]);
+
+    const periods = await asOwner((tx) =>
+      listPostedPeriods(tx, tenantId, assetId),
+    );
+    expect(periods.sort()).toEqual([
+      "2026-01",
+      "2026-02",
+      "2026-03",
+      "2026-04",
+      "2026-05",
+    ]);
+  });
+
+  it("shows up on the P&L, attributed to the asset — the whole point", async () => {
+    const accounts = await asOwner((tx) =>
+      resolveDepreciationAccounts(tx, tenantId),
+    );
+
+    const balances = await asOwner((tx) =>
+      getBalances(tx, tenantId, { from: "2026-01-01", to: "2026-05-31" }),
+    );
+    const expense = balances.find(
+      (b) => b.accountId === accounts.expenseAccountId,
+    );
+    expect(expense?.netCents).toBe(50_000);
+    const accumulated = balances.find(
+      (b) => b.accountId === accounts.accumulatedAccountId,
+    );
+    // Contra-asset: a credit balance, negative in the ledger's signed convention.
+    expect(accumulated?.netCents).toBe(-50_000);
+
+    // And the part no other farm software can do: the SAME query, split by the
+    // asset dimension, attributes the expense to this specific machine.
+    const byAsset = await asOwner((tx) =>
+      getBalances(tx, tenantId, {
+        from: "2026-01-01",
+        to: "2026-05-31",
+        groupByDimensionType: "asset",
+        accountIds: [accounts.expenseAccountId],
+      }),
+    );
+    const members = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.dimensionMembers)
+        .where(eq(schema.dimensionMembers.packEntityId, assetId)),
+    );
+    const mine = byAsset.find((b) => b.memberId === members[0].id);
+    expect(mine?.netCents).toBe(50_000);
+    // Nothing landed untagged.
+    expect(byAsset.find((b) => b.memberId === null)).toBeUndefined();
+  });
+
+  it("never posts past the end of the life", async () => {
+    const all = await asOwner((tx) =>
+      withAsset(tx, (asset) => postDepreciation(tx, ctx(), asset, "2099-12")),
+    );
+    // Twelve months total, five already posted.
+    expect(all.postedPeriods).toHaveLength(7);
+
+    const status = await asOwner((tx) =>
+      withAsset(tx, (asset) =>
+        getDepreciationStatus(tx, tenantId, asset, "2099-12"),
+      ),
+    );
+    expect(status!.postedToDateCents).toBe(120_000);
+    expect(status!.bookValueCents).toBe(0);
+  });
+
+  it("refuses to post for a staff member", async () => {
+    await expect(
+      asOwner((tx) =>
+        withAsset(tx, (asset) =>
+          postDepreciation(
+            tx,
+            { tenantId, userId: OWNER, role: "staff" },
+            asset,
+            "2026-06",
+          ),
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an asset with no schedule", async () => {
+    const land = await asOwner((tx) =>
+      createAsset(tx, ctx(), {
+        kind: "land",
+        name: "Home place",
+        acquisitionCostCents: 5_000_000,
+      }),
+    );
+    await expect(
+      asOwner((tx) => postDepreciation(tx, ctx(), land, "2026-06")),
+    ).rejects.toThrow();
+  });
+
+  /** Re-read the asset inside the caller's transaction. */
+  async function withAsset<T>(
+    tx: Tx,
+    fn: (asset: typeof schema.assets.$inferSelect) => Promise<T>,
+  ): Promise<T> {
+    const asset = await tx.query.assets.findFirst({
+      where: and(
+        eq(schema.assets.tenantId, tenantId),
+        eq(schema.assets.id, assetId),
+      ),
+    });
+    return fn(asset!);
+  }
+});

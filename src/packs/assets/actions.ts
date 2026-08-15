@@ -2,17 +2,39 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { withTenant } from "@/db";
+import { and, eq } from "drizzle-orm";
+import { schema, withTenant, type Tx } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
+import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
 import {
   AssetError,
   createAsset,
   disposeAsset,
+  getAsset,
   updateAsset,
   type AssetCtx,
 } from "./ops";
+import { postDepreciation } from "./depreciation-ops";
+
+/**
+ * This pack's Layer 3 tailoring, from `tenant_modules.config`.
+ *
+ * Read under the tenant's own context like everything else here. Returns
+ * `undefined` rather than throwing when the row is missing — a tenant that has
+ * never configured anything is the ordinary case, not an error.
+ */
+async function readPackConfig(tx: Tx, tenantId: string): Promise<unknown> {
+  const row = await tx.query.tenantModules.findFirst({
+    where: and(
+      eq(schema.tenantModules.tenantId, tenantId),
+      eq(schema.tenantModules.moduleId, "assets"),
+    ),
+    columns: { config: true },
+  });
+  return row?.config;
+}
 
 /**
  * Asset write surface.
@@ -46,6 +68,10 @@ function toResult(err: unknown): { error: string } {
         return { error: "That container does not exist." };
       case "PARENT_CYCLE":
         return { error: err.message };
+      case "NOT_DEPRECIABLE":
+        return { error: "Set a method, in-service date, life and cost first." };
+      case "DEPRECIATION_ACCOUNTS":
+        return { error: err.message };
     }
   }
   console.error("assets action failed", err);
@@ -63,11 +89,18 @@ const createSchema = z.object({
   kind: z.string().min(1).max(63),
   name: z.string().min(1).max(200),
   identifier: z.string().max(200).optional(),
+  model: z.string().max(200).optional(),
   acquiredOn: optionalDate,
   // Cents, so the ledger and this agree without a float ever existing.
   acquisitionCostCents: z.number().int().min(0).nullable().optional(),
   parentId: z.string().uuid().nullable().optional(),
   notes: z.string().max(5000).optional(),
+  inServiceOn: optionalDate.nullable(),
+  depreciationMethod: z.enum(["none", "straight_line"]).optional(),
+  // 1 to 100 years. The upper bound is a typo guard, not a policy — nothing
+  // a small business owns is written down over more than a century.
+  usefulLifeMonths: z.number().int().min(1).max(1200).nullable().optional(),
+  salvageValueCents: z.number().int().min(0).nullable().optional(),
 });
 
 export async function createAssetAction(input: unknown) {
@@ -137,6 +170,74 @@ export async function updateAssetAction(input: unknown) {
     revalidatePath("/dashboard/m/assets");
     return { ok: true };
   } catch (err) {
+    return toResult(err);
+  }
+}
+
+const postDepreciationSchema = z.object({
+  id: z.string().uuid(),
+  /** `YYYY-MM`. Everything due up to and including this month gets posted. */
+  through: z.string().regex(/^\d{4}-\d{2}$/),
+});
+
+/**
+ * Post every depreciation period that is due, up to a month.
+ *
+ * Deliberately a manual action rather than a cron. Depreciation lands in a
+ * period that a close can lock, and posting into someone's books on a schedule
+ * they did not trigger is the kind of surprise an accountant should never get.
+ * `postEntry` refuses a closed period anyway, and that refusal is surfaced.
+ */
+export async function postDepreciationAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = postDepreciationSchema.safeParse(input);
+  if (!parsed.success) return { error: "Pick a month to post through." };
+
+  const assetCtx: AssetCtx = {
+    tenantId: ctx.tenant.id,
+    userId: ctx.userId,
+    role: ctx.role,
+  };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const asset = await getAsset(tx, ctx.tenant.id, parsed.data.id);
+        if (!asset) throw new AssetError("NOT_FOUND", "asset not found");
+        const config = await readPackConfig(tx, ctx.tenant.id);
+        return postDepreciation(
+          tx,
+          assetCtx,
+          asset,
+          parsed.data.through,
+          config,
+        );
+      },
+      { role: ctx.role },
+    );
+
+    if (result.postedPeriods.length > 0) {
+      await logAudit({
+        action: "asset.depreciation_posted",
+        tenantId: ctx.tenant.id,
+        actorClerkUserId: ctx.userId,
+        targetType: "asset",
+        targetId: parsed.data.id,
+        meta: {
+          periods: result.postedPeriods,
+          totalCents: result.totalCents,
+        },
+      });
+    }
+    revalidatePath(`/dashboard/m/assets/${parsed.data.id}`);
+    revalidatePath("/dashboard/m/assets");
+    return { ok: true, ...result };
+  } catch (err) {
+    // A closed period is a legitimate refusal from the ledger, not a bug —
+    // say so in the ledger's own words rather than "something went wrong".
+    if (err instanceof LedgerError) return { error: friendlyMessage(err) };
     return toResult(err);
   }
 }

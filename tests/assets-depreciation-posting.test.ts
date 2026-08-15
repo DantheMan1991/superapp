@@ -4,12 +4,13 @@ import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { getBalances } from "../src/modules/accounting/core";
-import { createAsset, type AssetCtx } from "../src/packs/assets/ops";
+import { createAsset, updateAsset, type AssetCtx } from "../src/packs/assets/ops";
 import {
   getDepreciationStatus,
   listPostedPeriods,
   postAllDepreciation,
   postDepreciation,
+  postedToDateCents,
   resolveDepreciationAccounts,
   scheduleInputFor,
 } from "../src/packs/assets/depreciation-ops";
@@ -365,6 +366,45 @@ d("depreciation posting", () => {
     );
     expect(status!.postedToDateCents).toBe(80_000);
     expect(status!.due).toEqual([]);
+  });
+
+  it("reports posted-to-date from the LEDGER even after the schedule changes", async () => {
+    // Found on the live tenant 2026-08-15. Editing an in-service date reshuffles
+    // which periods carry the remainder cent, so a posted-to-date recomputed
+    // from the schedule reports a number the books do not contain. The panel
+    // said 6,706.76 while the ledger held 6,706.78.
+    const barn = await asOwner((tx) =>
+      tx.query.assets.findFirst({
+        where: and(
+          eq(schema.assets.tenantId, tenantId),
+          eq(schema.assets.name, "Old barn"),
+        ),
+      }),
+    );
+
+    const ledgerTotal = await asOwner((tx) =>
+      postedToDateCents(tx, tenantId, barn!.id),
+    );
+    const status = await asOwner((tx) =>
+      getDepreciationStatus(tx, tenantId, barn!, "2026-08"),
+    );
+    expect(status!.postedToDateCents).toBe(ledgerTotal);
+
+    // Now move the in-service date, which reshuffles the remainder, and confirm
+    // posted-to-date still matches the ledger rather than the new schedule.
+    await asOwner((tx) =>
+      updateAsset(tx, ctx(), barn!.id, { inServiceOn: "2025-01-01" }),
+    );
+    const moved = await asOwner((tx) =>
+      tx.query.assets.findFirst({ where: eq(schema.assets.id, barn!.id) }),
+    );
+    const after = await asOwner((tx) =>
+      getDepreciationStatus(tx, tenantId, moved!, "2026-08"),
+    );
+    expect(after!.postedToDateCents).toBe(ledgerTotal);
+    expect(after!.bookValueCents).toBe(
+      (moved!.acquisitionCostCents ?? 0) - ledgerTotal,
+    );
   });
 
   it("posts every depreciable asset in one run, skipping the ones that are not", async () => {

@@ -79,15 +79,24 @@ export async function withTenant<T>(
   // what makes "no user was passed" mean no user.
   const clerkUserId = opts?.userId ?? "";
   return getDb().transaction(async (tx) => {
-    await tx.execute(sql`select set_config('app.role', 'member', true)`);
+    // ONE STATEMENT, NOT FOUR, and the reason is latency rather than tidiness.
+    //
+    // Every one of these was a separate round trip to Neon, so establishing
+    // tenant context cost four before the caller's own query had run — six with
+    // the BEGIN and COMMIT around them. `set_config` returns a value, so
+    // selecting all four in one row sets all four, with identical semantics:
+    // the third argument is `is_local`, which makes each one transaction-scoped
+    // exactly as before.
+    //
+    // Measured 2026-08-15 on the database suite, which is almost pure network
+    // wait: it is the difference between a round trip count of 6 per
+    // `withTenant` and 3. It matters just as much in production — every request
+    // that touches a tenant table opens one of these.
     await tx.execute(
-      sql`select set_config('app.tenant_id', ${tenantId}, true)`,
-    );
-    await tx.execute(
-      sql`select set_config('app.tenant_role', ${tenantRole}, true)`,
-    );
-    await tx.execute(
-      sql`select set_config('app.clerk_user_id', ${clerkUserId}, true)`,
+      sql`select set_config('app.role', 'member', true),
+                 set_config('app.tenant_id', ${tenantId}, true),
+                 set_config('app.tenant_role', ${tenantRole}, true),
+                 set_config('app.clerk_user_id', ${clerkUserId}, true)`,
     );
     return fn(tx);
   });

@@ -7,6 +7,53 @@
 
 ## Build log
 
+### 2026-08-15 — The suite was never CPU-bound; it was waiting (branch `claude/withtenant-one-roundtrip`)
+
+The founder again: *"every CI test is taking like 20 minutes… they never seem to
+find anything anyways."* Both halves were worth measuring rather than answering.
+
+**The suite is not slow. It is waiting.** 663 of 717 seconds is the `db` project,
+64 files strictly one at a time, and almost none of that is computation — it is
+round trips to Neon. The proof is a comparison nobody had run: the SAME suite
+took **717s on one run and 1519s on the next**, hours apart, with every single
+file scaling by roughly the same 2.2×. Nothing merged in between explains that.
+When per-round-trip latency doubles, a latency-bound suite doubles.
+
+**So the fix is to make fewer round trips, and the hottest one was free.**
+`withTenant` set its four RLS context variables with four separate
+`set_config` statements — four round trips before the caller's own query, six
+with `BEGIN` and `COMMIT`. They are now one statement.
+
+Measured properly, because latency drift is exactly the confounder: an
+interleaved A/B/A/B over a fixed four-file subset.
+
+| | Run 1 | Run 2 | Run 3 |
+| --- | ---: | ---: | ---: |
+| Four statements | 145.3s | 144.5s | 146.1s |
+| **One statement** | **102.8s** | **101.8s** | **101.8s** |
+
+**30% off, under 1% variance, 107/107 passing every time.** The same saving
+applies to every production request that touches a tenant table, which is the
+part that matters more than CI.
+
+`tests/isolation/core.test.ts` gained two tests: that all four settings actually
+land, and that the two opt-in ones still default DOWNWARD. A silent failure
+there would hide every owners-only folder and every mailbox without looking like
+an error.
+
+**On "they never find anything".** Mostly fair, and worth stating plainly rather
+than defending. The isolation half is insurance against a rare and catastrophic
+failure, and it should not be judged on its bug count. The ops half has earned
+its place once — `tests/assets-ops.test.ts` caught `descendantIds` binding a JS
+array into a raw `sql` fragment, in shipped code, where the containment cycle
+guard had never once run. Meanwhile both bugs found on 2026-08-15 came from
+driving the app, not from the suite.
+
+**Still open, and bigger than this:** the suite is latency-bound by design, so it
+remains hostage to whatever Neon's round trip costs that day. Sequential
+execution and a Postgres service container inside the runner are both recorded
+under Open items.
+
 ### 2026-08-09 — The database suite runs AFTER the merge, not before (branch `claude/ci-fast-gate`)
 
 The founder was waiting about fifteen minutes per merge, on every slice of a
@@ -174,13 +221,29 @@ None. No tables, no migrations.
 
 ## Open items
 
-- **Parallelising the `db` project** is where the remaining time is, but it
-  needs the tenant stamps to be unique per run rather than per pid, and a review
-  of the suites that assert what is *not* visible across tenants — those can be
-  broken by another file writing concurrently. Not attempted here.
+- **Parallelising the `db` project** is still where the remaining time is, and
+  the 2026-08-15 review found the stated blockers weaker than recorded. Every
+  `withSystem` call in the suite is a scoped INSERT of the file's own fixtures —
+  there is not one unscoped read anywhere — 60 of 64 files stamp their tenants
+  per pid, each with its own prefix, and vitest's default `forks` pool gives
+  concurrently-running files distinct pids. An attempt at
+  `--fileParallelism --maxWorkers=4` was started and **abandoned without a
+  result**: it ran longer than a sequential pass before being killed, which is
+  itself worth knowing. Contention on the shared Neon branch is the likeliest
+  explanation and it is untested. Do not enable this on the strength of the
+  reasoning alone — get a completed run first.
 - The parallel win may be **smaller on a GitHub runner** (2–4 cores) than on the
-  founder's machine. Worth re-measuring from a real CI run before quoting 17%
-  anywhere that matters.
+  founder's machine, and a latency-bound suite may not be CPU-limited at all.
+  Re-measure from a real CI run before quoting a number anywhere that matters.
+- **The suite is latency-bound by design**, which makes its runtime a property of
+  Neon's round trip cost that day rather than of the code. The 717s → 1519s
+  doubling is the evidence. The structural fix is a **Postgres service container
+  inside the runner**, where round trips are sub-millisecond: it would also
+  remove the repo-wide `db-tests` queue and the shared-branch collision risk,
+  since every run would get its own database. The honest cost is the driver —
+  the app talks to Neon over a WebSocket, so this needs either a driver swap in
+  tests (divergence from what production runs) or Neon's `wsproxy` container
+  alongside Postgres (keeps the driver identical, and is the version to want).
 - **`paths-ignore` and branch protection do not mix.** A run skipped by
   `paths-ignore` reports no status at all, so a REQUIRED check stays permanently
   "expected" and a docs-only PR could never merge. There is no branch protection

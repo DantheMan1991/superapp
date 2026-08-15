@@ -15,6 +15,24 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-15 — Detail page: edit, dispose, re-parent (`claude/assets-detail-page`)
+- `/dashboard/m/assets/[id]` — the first **pack sub-route**. It lives in
+  `src/app/`, not `src/packs/`, because Next resolves routes from the app
+  directory and nothing about a pack changes that. Same split core modules
+  already have: renderer in the pack, route file in `src/app/`. The file is a
+  thin guarded entry point and the pack still owns the work.
+- `requireModuleEnabled` on the route, not just the module shell — a route file
+  is reachable by URL whether or not the pack is switched on, so the guard is
+  what makes "switched off" mean anything.
+- Gives `updateAssetAction` and `disposeAssetAction` their first callers; both
+  had existed, audited and unreachable, since slice 0.
+- **The container picker cannot offer a cycle**: the server excludes the asset
+  and its whole subtree, so `ops.ts`'s refusal is a backstop rather than the
+  thing the user meets. That path runs through `descendantIds`, so it only
+  works at all because of the `inArray` fix in the entry below — the two
+  landed a day apart and this one was written against the broken version.
+- Disposal takes a date defaulted to **the tenant's today**, never the browser's.
+
 ### 2026-08-15 — Ops tests, and the bug they found (`claude/assets-ops-tests`)
 - **`descendantIds` was broken in shipped code.** It bound a JS array into
   `` sql`= any(${frontier})` ``, which Postgres rejects with *malformed array
@@ -80,6 +98,8 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
 - `src/packs/assets/vocabulary.ts` — no imports, no directive, so client
   components can read it without dragging drizzle into the bundle
 - `src/packs/assets/AssetsModule.tsx` — the renderer
+- `src/app/dashboard/m/assets/[id]/page.tsx` — the detail route. **A pack's
+  sub-routes live under `src/app/`**, guarded with `requireModuleEnabled`
 - `src/db/schema/assets.ts` · `drizzle/0125_*.sql` · `drizzle/0126_assets_rls.sql`
 - `tests/isolation/assets.test.ts`
 
@@ -119,8 +139,10 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
   items into the existing Work module rather than owning a task engine. Hold
   that line; it is the biggest reuse available.
 - **Occupancy for mobile assets** (slice 3) — shared shape with livestock lots.
-- **No detail view.** The list shows containment one level deep; there is no
-  per-asset page, so `updateAssetAction` and `disposeAssetAction` exist and are
-  audited but have no UI calling them yet.
+- **Anything active is offered as a container**, so a freezer can be put inside
+  a tractor. Arguably correct — a toolbox does live in a truck — but if only
+  some kinds should contain things, decide before there is data to migrate.
+- **No list-side edit.** Editing and disposal are on the detail page only, which
+  means changing ten assets is ten navigations.
 - **Kind suggestions are hardcoded** in `vocabulary.ts`. They should come from
   profile `packConfig` once P5 exists — which is what will force P5.

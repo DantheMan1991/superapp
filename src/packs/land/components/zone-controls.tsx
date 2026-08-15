@@ -43,6 +43,8 @@ import {
 import { AREA_UNIT_LABELS, toAcres, type AreaUnit } from "../core/area";
 
 const CUSTOM_USE = "__custom__";
+/** Nothing picked yet. The Select shows its placeholder and submit is refused. */
+const NO_USE = "";
 
 export interface ZoneUseRow {
   id: string;
@@ -95,31 +97,45 @@ export function ZoneControls({
   const [retiring, setRetiring] = useState(false);
   const [pending, startTransition] = useTransition();
 
+  // NOT SORTED, and that is the fix rather than an oversight.
+  // `SUGGESTED_ZONE_USES` is declared productive-uses-first; sorting threw that
+  // away and put `building_site` at the top — both the least likely answer for
+  // a paddock and a NON-PRODUCTIVE one, so a hurried tap recorded good ground
+  // as a house site that earns nothing. Found by using it, 2026-08-15.
+  // Tenant-invented uses are appended, sorted among themselves, so the pack's
+  // own order stays stable as they accumulate.
   const useOptions = [
-    ...new Set<string>([
-      ...SUGGESTED_ZONE_USES.map((u) => u.use),
-      ...usesInUse,
-    ]),
-  ].sort();
+    ...SUGGESTED_ZONE_USES.map((u) => u.use),
+    ...[...new Set(usesInUse)]
+      .filter((u) => !SUGGESTED_ZONE_USES.some((s) => s.use === u))
+      .sort(),
+  ];
 
   const current = zone.history.find((h) => h.endedOn === null) ?? null;
-  const [useChoice, setUseChoice] = useState(current?.use ?? useOptions[0] ?? "");
+  // NO PRESELECTION when the zone has nothing declared yet. The dialog asks a
+  // question, and the answer should come from the person rather than from
+  // whatever happens to be first in a list. A zone that already has a use
+  // pre-selects it, because that one IS the current answer.
+  const [useChoice, setUseChoice] = useState(current?.use ?? NO_USE);
   const [customUse, setCustomUse] = useState("");
-  const [productive, setProductive] = useState(
-    current?.isProductive ?? defaultProductive(useOptions[0] ?? ""),
-  );
+  const [productive, setProductive] = useState(current?.isProductive ?? true);
 
   function pickUse(value: string) {
     setUseChoice(value);
     if (value !== CUSTOM_USE) setProductive(defaultProductive(value));
   }
 
+  /** What would actually be recorded. Empty means nothing has been chosen. */
+  const chosenUse = useChoice === CUSTOM_USE ? customUse.trim() : useChoice;
+
   function saveUse(formData: FormData) {
-    const use = useChoice === CUSTOM_USE ? customUse : useChoice;
+    // The Select is not a native form control, so `required` cannot reach it.
+    // The button is disabled too; this is the guard that survives an Enter key.
+    if (!chosenUse) return;
     startTransition(async () => {
       const result = await startZoneUseAction({
         zoneId: zone.id,
-        use: use.trim().toLowerCase().replace(/\s+/g, "_"),
+        use: chosenUse.toLowerCase().replace(/\s+/g, "_"),
         startedOn: String(formData.get("startedOn") ?? today),
         isProductive: productive,
         notes: String(formData.get("useNotes") ?? ""),
@@ -286,7 +302,7 @@ export function ZoneControls({
             </div>
 
             <DialogFooter>
-              <Button type="submit" disabled={pending}>
+              <Button type="submit" disabled={pending || !chosenUse}>
                 {pending ? "Saving…" : "Record use"}
               </Button>
             </DialogFooter>

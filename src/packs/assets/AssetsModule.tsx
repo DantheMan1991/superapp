@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Wrench } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
@@ -102,7 +103,12 @@ export async function AssetsModule({
               <TableRow key={asset.id}>
                 <TableCell>
                   <div className="flex items-center gap-2 font-medium">
-                    {asset.name}
+                    <Link
+                      href={`/dashboard/m/assets/${asset.id}`}
+                      className="hover:underline"
+                    >
+                      {asset.name}
+                    </Link>
                     {asset.status === "disposed" && (
                       <Badge variant="outline">disposed</Badge>
                     )}

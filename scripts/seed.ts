@@ -163,7 +163,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     description:
       "Parcels and the zones inside them — what each area is for, what it costs, and what has been on it.",
     category: "pack",
-    status: "coming_soon",
+    // `available` from slice 0 (2026-08-15): parcels, zones and dated zone use,
+    // both levels synced as cost objects. Occupancy and rest follow in slice 1,
+    // geometry in slice 2, and the description grows as they do.
+    status: "available",
     sortOrder: 200,
   },
   {

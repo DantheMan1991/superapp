@@ -116,6 +116,27 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-15 — Land sliced and slice 0 built (`claude/land-places`)
+- **Land was the only category whose design carried no slice order**, so
+  proposing one was the first act of building it. Agreed order and reasoning are
+  in [land.md](land.md); the headline is that **occupancy comes second, before
+  geometry**, because it is what `livestock` is blocked on and it delivers rest
+  days for free, while the map blocks nothing.
+- **Slice 0 shipped**: parcels, zones, dated zone use, both levels synced as cost
+  objects. Full build record in [land.md](land.md).
+- **Settled where occupancy lives.** The design says occupancy is fact and comes
+  from `livestock` and `crops` — which is true about who ORIGINATES it, and left
+  open who owns the table. `land` owns it, because rest is computed from it and a
+  pack may not read another pack's tables; the other packs write in through
+  land's ops using the open `entity_type` pattern.
+- **Slice 1 will ship a manual occupancy form**, so the record can be made
+  months before `livestock` exists. That is the cold-start wedge applied to Land:
+  a rest clock that only starts working after two more packs ship is a rest clock
+  nobody ever sees.
+- **Weather is deliberately late and it costs nothing** — Open-Meteo serves
+  history by lat/long, so the "collection must start in slice one" worry in the
+  design does not survive contact with the API.
+
 ### 2026-08-13 — Assets & Crops designed; every category now has one (`claude/packs-and-profiles-design`)
 - Final two categories, taken together because both were confirmations rather
   than discoveries. Write-ups:
@@ -311,7 +332,7 @@ own words condensed, not reinterpreted.
 
 | Category | Lands in | Farm-specific? | Brainstormed? |
 | --- | --- | :---: | :---: |
-| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) |
+| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slice 0 built**, [land.md](land.md) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) |
@@ -380,11 +401,13 @@ a category-design section below and a slice order.
   communication (email + CRM), vendor scheduling (scheduling + party spine).
 - **Explicitly deferred as code:** marketing — see *Explicitly deferred*.
 
-**Nothing is built.** Seven designs, zero lines of code. The designs are the
-asset; the risk from here is that designing stays comfortable while building does
-not. The Layer 2 machinery ([packs-and-profiles.md](packs-and-profiles.md)) has
-been unblocked since the first commit of this branch and needs no further
-brainstorming.
+**Two of the seven are being built.** `assets` has shipped register,
+containment, depreciation, disposal and maintenance
+([assets.md](assets.md)); `land` has shipped slice 0
+([land.md](land.md)) and carries the slice order the design lacked. The other
+five are still designs. The risk the earlier version of this paragraph named —
+that designing stays comfortable while building does not — has not gone away, it
+has just moved down the list to `inventory`.
 
 Notes worth keeping from the first pass, because they are the load-bearing
 design calls and the ones most likely to be got wrong twice:
@@ -718,6 +741,21 @@ useful for a strip grazer thinking about where the herd goes next, but it is not
 primary navigation until the count is in the hundreds — **do not gate the pack on
 the map being finished.** Water points start empty, so the constraint model must
 handle "no infrastructure anywhere" gracefully rather than assuming otherwise.
+
+### Slice order
+
+Added 2026-08-15. This design shipped without one, alone among the seven — the
+order below was proposed and agreed before slice 0 was written, and the
+reasoning behind each position lives in [land.md](land.md).
+
+| # | Slice | Why here |
+| --- | --- | --- |
+| 0 | Parcels, zones, dated zone use | Everything spatial references it. Usable alone on day one |
+| 1 | Occupancy + rest | What `livestock` is blocked on, and the free feature this whole category was argued for |
+| 2a | Geometry — polygons, area, map | Nothing is blocked on it, and its best payoff needs field forms that do not exist |
+| 2b | Features — points and lines | The `assets` seam. Needs 2a's primitives |
+| 3 | Weather + GDD | Cheap, and **backfillable** — Open-Meteo serves history by lat/long, so being late costs nothing |
+| 4 | Lease screens, hauls, payback warning | Deferred by this design already |
 
 ## Category design — Livestock (brainstormed 2026-08-13)
 

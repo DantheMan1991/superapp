@@ -1,0 +1,348 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ChevronLeft } from "lucide-react";
+import { withTenant } from "@/db";
+import { requireTenant } from "@/lib/auth";
+import { requireModuleEnabled } from "@/lib/modules";
+import { todayInTimezone } from "@/lib/timezone";
+import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
+import { PageHeader } from "@/components/app/page-header";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  currentUses,
+  getParcel,
+  listUsesInUse,
+  listZones,
+  usesByZone,
+} from "@/packs/land/ops";
+import {
+  TENURE_LABELS,
+  isTenure,
+  zoneUseLabel,
+} from "@/packs/land/vocabulary";
+import {
+  areaUnitFrom,
+  formatArea,
+  formatAreaTotal,
+  fromAcres,
+  zoneCoverage,
+} from "@/packs/land/core/area";
+import {
+  ParcelControls,
+  type ParcelDetailView,
+} from "@/packs/land/components/parcel-controls";
+import { ZoneForm } from "@/packs/land/components/zone-form";
+import { ZoneControls } from "@/packs/land/components/zone-controls";
+
+export const dynamic = "force-dynamic";
+
+const BASE = "/dashboard/m/land";
+
+/**
+ * One parcel, and the zones inside it.
+ *
+ * A PACK'S SUB-ROUTE LIVES IN `src/app/`, not in `src/packs/` — same
+ * arrangement core modules have, because Next resolves routes from the app
+ * directory and nothing about a pack changes that. The pack still owns
+ * everything this page does; the file is a thin entry point that guards and
+ * delegates.
+ *
+ * `requireModuleEnabled` is not optional here. A route file is reachable by URL
+ * whether or not the pack is switched on for the tenant, so the guard is what
+ * makes "switched off" mean something.
+ */
+export default async function ParcelDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, "land");
+
+  // The tenant's today, never the server's or the browser's, so two people in
+  // one workspace agree what day a use started on.
+  const today = todayInTimezone(ctx.tenant.timezone);
+
+  const data = await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const parcel = await getParcel(tx, ctx.tenant.id, id);
+      if (!parcel) return null;
+      const zones = await listZones(tx, ctx.tenant.id, {
+        parcelId: id,
+        status: "active",
+      });
+      const zoneIds = zones.map((z) => z.id);
+      const [current, history, usesInUse, pack] = await Promise.all([
+        currentUses(tx, ctx.tenant.id, zoneIds),
+        usesByZone(tx, ctx.tenant.id, zoneIds),
+        listUsesInUse(tx, ctx.tenant.id),
+        packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
+      ]);
+      return { parcel, zones, current, history, usesInUse, pack };
+    },
+    { role: ctx.role },
+  );
+
+  if (!data) notFound();
+  const { parcel, zones, current, history, usesInUse, pack } = data;
+
+  const unit = areaUnitFrom(pack.config);
+  const zoneWord = labelFor(pack.labels, "zone", "Zone");
+  const isOwner = ctx.role === "owner";
+
+  const coverage = zoneCoverage(
+    parcel.areaAcres,
+    zones.map((z) => z.areaAcres),
+  );
+
+  const view: ParcelDetailView = {
+    id: parcel.id,
+    name: parcel.name,
+    tenure: parcel.tenure,
+    // Acres in the column, the tenant's unit in the field. Empty string rather
+    // than "0" when unknown — the two are different facts.
+    areaInput:
+      parcel.areaAcres === null
+        ? ""
+        : String(fromAcres(parcel.areaAcres, unit)),
+    identifier: parcel.identifier,
+    notes: parcel.notes,
+    status: parcel.status,
+    activeZones: zones.length,
+  };
+
+  // The chronological read across the whole parcel, derived from the same
+  // fetch the per-zone dialogs use rather than a second query.
+  const zoneNames = new Map(zones.map((z) => [z.id, z.name]));
+  const changes = [...history.values()]
+    .flat()
+    .sort((a, b) =>
+      a.startedOn === b.startedOn
+        ? b.createdAt.getTime() - a.createdAt.getTime()
+        : b.startedOn.localeCompare(a.startedOn),
+    )
+    .slice(0, 12);
+
+  return (
+    <div className="space-y-6">
+      <Link
+        href={BASE}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ChevronLeft className="h-4 w-4" />
+        All land
+      </Link>
+
+      <PageHeader
+        title={parcel.name}
+        description={
+          <span className="flex items-center gap-2">
+            {isTenure(parcel.tenure)
+              ? TENURE_LABELS[parcel.tenure]
+              : parcel.tenure}
+            {" · "}
+            {formatArea(parcel.areaAcres, unit)}
+            {parcel.status === "retired" && (
+              <Badge variant="outline">retired</Badge>
+            )}
+          </span>
+        }
+        actions={
+          isOwner ? (
+            <ParcelControls parcel={view} unit={unit} zoneWord={zoneWord} />
+          ) : null
+        }
+      />
+
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Details</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-[10rem_1fr] gap-y-3 text-sm">
+              <dt className="text-muted-foreground">Tenure</dt>
+              <dd>
+                {isTenure(parcel.tenure)
+                  ? TENURE_LABELS[parcel.tenure]
+                  : parcel.tenure}
+              </dd>
+
+              <dt className="text-muted-foreground">Deed or lease</dt>
+              <dd>{parcel.identifier || "—"}</dd>
+
+              <dt className="text-muted-foreground">Area</dt>
+              <dd className="tabular-nums">
+                {formatArea(parcel.areaAcres, unit)}
+              </dd>
+
+              <dt className="text-muted-foreground">
+                In {zoneWord.toLowerCase()}s
+              </dt>
+              <dd className="tabular-nums">
+                {formatAreaTotal(coverage.assigned, unit)}
+              </dd>
+
+              {/* Zones do not have to tile a parcel — lanes, ditches and the
+                  bit behind the barn are real and frequently unmapped — so
+                  this reports the difference and never enforces it. */}
+              {coverage.unassignedAcres !== null && (
+                <>
+                  <dt className="text-muted-foreground">
+                    {coverage.overAssigned ? "Over by" : "Not divided up"}
+                  </dt>
+                  <dd className="tabular-nums">
+                    {formatArea(
+                      Math.abs(coverage.unassignedAcres),
+                      unit,
+                    )}
+                  </dd>
+                </>
+              )}
+
+              {parcel.notes && (
+                <>
+                  <dt className="text-muted-foreground">Notes</dt>
+                  <dd className="whitespace-pre-wrap">{parcel.notes}</dd>
+                </>
+              )}
+            </dl>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">What changed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {changes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nothing has been declared yet. Setting what a{" "}
+                {zoneWord.toLowerCase()} is for, and from when, is what makes
+                rotation reportable later.
+              </p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {changes.map((change) => (
+                  <li key={change.id} className="flex items-baseline gap-2">
+                    <span className="tabular-nums text-muted-foreground">
+                      {change.startedOn}
+                    </span>
+                    <span className="font-medium">
+                      {zoneNames.get(change.zoneId) ?? "—"}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {zoneUseLabel(change.use)}
+                      {change.endedOn && ` (to ${change.endedOn})`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium">
+            {zoneWord}s {zones.length > 0 && `(${zones.length})`}
+          </h2>
+          {isOwner && parcel.status === "active" && (
+            <ZoneForm
+              parcelId={parcel.id}
+              unit={unit}
+              zoneWord={zoneWord}
+            />
+          )}
+        </div>
+
+        {zones.length === 0 ? (
+          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+            No {zoneWord.toLowerCase()}s on this parcel yet.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{zoneWord}</TableHead>
+                <TableHead>Currently</TableHead>
+                <TableHead className="text-right">Area</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {zones.map((zone) => {
+                const use = current.get(zone.id);
+                return (
+                  <TableRow key={zone.id}>
+                    <TableCell className="font-medium">{zone.name}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {use ? (
+                        <span className="flex items-center gap-2">
+                          {zoneUseLabel(use.use)}
+                          {!use.isProductive && (
+                            <Badge variant="outline">not productive</Badge>
+                          )}
+                          <span className="text-xs">since {use.startedOn}</span>
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatArea(zone.areaAcres, unit)}
+                    </TableCell>
+                    <TableCell>
+                      {isOwner && (
+                        <ZoneControls
+                          zone={{
+                            id: zone.id,
+                            name: zone.name,
+                            areaInput:
+                              zone.areaAcres === null
+                                ? ""
+                                : String(fromAcres(zone.areaAcres, unit)),
+                            notes: zone.notes,
+                            history: (history.get(zone.id) ?? []).map((h) => ({
+                              id: h.id,
+                              use: h.use,
+                              isProductive: h.isProductive,
+                              startedOn: h.startedOn,
+                              endedOn: h.endedOn,
+                            })),
+                          }}
+                          unit={unit}
+                          zoneWord={zoneWord}
+                          today={today}
+                          usesInUse={usesInUse.map((u) => u.use)}
+                        />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    </div>
+  );
+}

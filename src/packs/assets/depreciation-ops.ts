@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Asset } from "@/db/schema";
 import {
@@ -188,6 +188,51 @@ export async function listPostedPeriods(
   return [...periods];
 }
 
+/**
+ * What has ACTUALLY been posted for this asset, in cents.
+ *
+ * Summed from the journal lines rather than re-derived from the schedule, and
+ * the difference is not academic: **a schedule can change after posting**.
+ * Editing an in-service date reshuffles which periods carry the remainder cent,
+ * so recomputing would report a number the books do not contain. Found on the
+ * live tenant 2026-08-15 — the panel said 6,706.76 while the ledger held
+ * 6,706.78.
+ *
+ * This is the file header's own rule, applied the whole way: accumulated
+ * depreciation is what the ledger says, not what the schedule predicts.
+ *
+ * Only `posted` entries count. A voided depreciation entry is money that came
+ * back out of the books and must stop counting the moment it does.
+ */
+export async function postedToDateCents(
+  tx: Tx,
+  tenantId: string,
+  assetId: string,
+): Promise<number> {
+  const rows = await tx
+    .select({ total: sql<number>`coalesce(sum(${schema.journalLines.amountCents}), 0)::int` })
+    .from(schema.journalLines)
+    .innerJoin(
+      schema.journalEntries,
+      and(
+        eq(schema.journalEntries.tenantId, schema.journalLines.tenantId),
+        eq(schema.journalEntries.id, schema.journalLines.entryId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.journalLines.tenantId, tenantId),
+        eq(schema.journalEntries.source, "depreciation"),
+        eq(schema.journalEntries.sourceId, assetId),
+        eq(schema.journalEntries.status, "posted"),
+        // The debit half. Each entry is one debit to expense and one credit to
+        // accumulated, so the positives are the depreciation taken.
+        gt(schema.journalLines.amountCents, 0),
+      ),
+    );
+  return rows[0]?.total ?? 0;
+}
+
 export interface DepreciationStatus {
   schedule: DepreciationPeriod[];
   postedPeriods: string[];
@@ -213,10 +258,8 @@ export async function getDepreciationStatus(
   if (!input) return null;
   const schedule = buildSchedule(input);
   const postedPeriods = await listPostedPeriods(tx, tenantId, asset.id, schedule);
-  const posted = new Set(postedPeriods);
-  const postedToDateCents = schedule
-    .filter((r) => posted.has(r.period))
-    .reduce((s, r) => s + r.amountCents, 0);
+  // From the LEDGER, not the schedule — see postedToDateCents.
+  const posted = await postedToDateCents(tx, tenantId, asset.id);
   const due = unpostedPeriods(input, through, postedPeriods);
 
   const settings = await getSettings(tx, tenantId);
@@ -224,8 +267,8 @@ export async function getDepreciationStatus(
   return {
     schedule,
     postedPeriods,
-    postedToDateCents,
-    bookValueCents: (asset.acquisitionCostCents ?? 0) - postedToDateCents,
+    postedToDateCents: posted,
+    bookValueCents: (asset.acquisitionCostCents ?? 0) - posted,
     due,
     strandedCount: stranded.length,
     catchUpPeriod:

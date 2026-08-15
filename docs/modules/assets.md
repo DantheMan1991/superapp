@@ -15,6 +15,21 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-15 — Catch-up verified live, and posted-to-date now reads the ledger (`claude/assets-depreciation-ledger-truth`)
+- **Catch-up confirmed against the real tenant.** The Garage's in-service date
+  was set back to its true 2019-06-01 with the books closed through
+  2026-06-30. Result: **three entries, not 87** — one catch-up for 6,552.60
+  memo'd *"2019-06 to 2026-06, 85 months before close"* dated 2026-08-31, plus
+  the two monthly entries already posted, which were correctly skipped.
+- **Bug found and fixed in the same pass.** The panel showed 6,706.76 while the
+  ledger held 6,706.78. `getDepreciationStatus` read *which periods* were posted
+  from the ledger but recomputed *the amounts* from the schedule — a half
+  application of this pack's own rule. **A schedule can change after posting**:
+  moving the in-service date reshuffles which periods carry the remainder cent,
+  so the two posted months moved from schedule positions 1–2 (which carry it)
+  to 86–87 (which do not). Now summed from the journal lines, `posted` status
+  only, so a voided entry stops counting the moment it is voided.
+
 ### 2026-08-15 — Catch-up entries and bulk posting (`claude/assets-depreciation-close-gap`)
 - **Closes the gap found the same day.** Periods stranded behind a close are no
   longer refused — they are summed into a **single catch-up entry dated in the

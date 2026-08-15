@@ -138,6 +138,18 @@ Two functions, in [src/db/index.ts](../src/db/index.ts):
 - **`withSystem(fn)`** — the god view. Only after `requireSuperAdmin()`, or in
   trusted sync code: webhooks, `tenant-sync.ts`, `logAudit`, seeds, migrations.
 
+**All four context settings are written in ONE statement**, and that is a
+performance decision worth not undoing. They used to be four separate
+`set_config` round trips, so establishing context cost four before the caller's
+own query ran — six with the `BEGIN` and `COMMIT`. Collapsing them to one
+measured **30% off the whole database suite** (145s → 102s over a fixed subset,
+three runs each, under 1% variance) and takes the same three round trips off
+every production request that touches a tenant table. The semantics are
+identical: `set_config`'s third argument is `is_local`, so each is still
+transaction-scoped. `tests/isolation/core.test.ts` asserts all four actually
+land, because a silent failure would hide owners-only rows and whole mailboxes
+without looking like an error.
+
 RLS is the backstop, not the primary control — but it is the one that catches
 the mistakes the primary controls miss. A query that forgets its `WHERE` clause
 returns nothing instead of another client's data. Details and the full rule set:

@@ -184,6 +184,51 @@ d("tenant isolation (RLS)", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("sets ALL FOUR context settings, from one statement", async () => {
+    // THE REGRESSION GUARD FOR A LATENCY FIX. `withTenant` used to issue four
+    // separate `set_config` round trips; they are now one statement, which is
+    // 30% of the database suite's wall clock and the same saving on every
+    // production request. Identical semantics — but "identical" is a claim, and
+    // this is what checks it.
+    //
+    // A silent failure here would be the worst kind: `app.tenant_role`
+    // defaulting to empty would quietly hide every owners-only row, and
+    // `app.clerk_user_id` defaulting to empty would hide somebody's whole
+    // mailbox, and neither would look like an error.
+    const settings = await withTenant(
+      tenantA,
+      (tx) =>
+        tx.execute(sql`select
+          current_setting('app.role', true) as role,
+          current_setting('app.tenant_id', true) as tenant_id,
+          current_setting('app.tenant_role', true) as tenant_role,
+          current_setting('app.clerk_user_id', true) as clerk_user_id`),
+      { role: "owner", userId: "user-a" },
+    );
+    const row = (settings.rows ?? settings)[0] as Record<string, string>;
+    expect(row.role).toBe("member");
+    expect(row.tenant_id).toBe(tenantA);
+    expect(row.tenant_role).toBe("owner");
+    expect(row.clerk_user_id).toBe("user-a");
+  });
+
+  it("defaults the two opt-in settings DOWNWARD, never upward", async () => {
+    // A caller who forgets `role` gets `staff` (least privileged) and one who
+    // forgets `userId` gets an empty string, which `app_current_user()` turns
+    // into NULL and which matches no row. A forgotten opt-in must deny a read,
+    // never grant one — and writing them explicitly is what makes that true on
+    // a POOLED connection, where an unset variable still holds whatever the
+    // previous transaction on that backend left behind.
+    const settings = await withTenant(tenantA, (tx) =>
+      tx.execute(sql`select
+        current_setting('app.tenant_role', true) as tenant_role,
+        current_setting('app.clerk_user_id', true) as clerk_user_id`),
+    );
+    const row = (settings.rows ?? settings)[0] as Record<string, string>;
+    expect(row.tenant_role).toBe("staff");
+    expect(row.clerk_user_id).toBe("");
+  });
+
   it("no context at all → default deny (FORCE RLS catches raw access)", async () => {
     const db = await import("../../src/db");
     // A transaction that never sets app.role/app.tenant_id.

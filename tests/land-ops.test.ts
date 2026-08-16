@@ -14,6 +14,7 @@ import {
   endOccupancy,
   endZoneUse,
   listOccupancy,
+  listStructures,
   restByZone,
   startOccupancy,
   getParcel,
@@ -992,5 +993,40 @@ d("land ops", () => {
     );
     const fetched = await asOwner((tx) => getParcel(tx, tenantId, parcel.id));
     expect(fetched?.areaAcres).toBe(12.3456);
+  });
+
+  // ---- structures --------------------------------------------------------
+
+  it("offers only assets of the kinds that can hold something", async () => {
+    // This shipped unfiltered. Driving it on production put "Chest freezer"
+    // and "Tractor" in a picker headed "In a pen or barn", which is the kind of
+    // thing no amount of green tests was ever going to say out loud.
+    await withSystem(async (tx) => {
+      await tx.insert(schema.assets).values([
+        { tenantId, kind: "building", name: "S-Barn" },
+        { tenantId, kind: "equipment", name: "S-Chest freezer" },
+        { tenantId, kind: "vehicle", name: "S-Tractor" },
+        { tenantId, kind: "chicken_tractor", name: "S-Eggmobile" },
+        { tenantId, kind: "building", name: "S-Disposed", status: "disposed" },
+      ]);
+    });
+
+    const neutral = await asOwner((tx) =>
+      listStructures(tx, tenantId, ["building", "infrastructure"]),
+    );
+    const names = neutral.map((s) => s.name).filter((n) => n.startsWith("S-"));
+    expect(names).toEqual(["S-Barn"]);
+
+    // A profile widens it without land knowing what a chicken tractor is.
+    const farm = await asOwner((tx) =>
+      listStructures(tx, tenantId, ["building", "chicken_tractor"]),
+    );
+    expect(farm.map((s) => s.name).filter((n) => n.startsWith("S-"))).toEqual([
+      "S-Barn",
+      "S-Eggmobile",
+    ]);
+
+    // An empty list is a configured answer, and must not mean "no filter".
+    expect(await asOwner((tx) => listStructures(tx, tenantId, []))).toEqual([]);
   });
 });

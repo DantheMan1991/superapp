@@ -614,6 +614,14 @@ export function MoveToZoneForm({
                     ))}
                   </SelectContent>
                 </Select>
+                {/* Says WHY the list is short, so "where is my coop?" answers
+                    itself. The list is assets of the kinds Land counts as
+                    somewhere to put something, not every asset — a chest
+                    freezer used to be on it. */}
+                <p className="text-xs text-muted-foreground">
+                  Buildings and infrastructure from Assets. Something missing is
+                  usually recorded under a different kind.
+                </p>
               </div>
             )}
 

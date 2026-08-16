@@ -30,6 +30,7 @@ import {
   listStructures,
   listZones,
 } from "@/packs/land/ops";
+import { structureKindsFrom } from "@/packs/land/vocabulary";
 import { getLivestockLot, listIdentifiers } from "@/packs/livestock/ops";
 import {
   ageInDays,
@@ -86,7 +87,7 @@ export default async function LivestockLotPage({
         lot.inventoryLotId,
       );
       if (!inventoryLot) return null;
-      const [identifiers, movements, entries, zones, parcels, allZones, structures, pack] =
+      const [identifiers, movements, entries, zones, parcels, allZones, pack, landPack] =
         await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
           movementKindsForLots(tx, ctx.tenant.id, [lot.inventoryLotId]),
@@ -99,9 +100,18 @@ export default async function LivestockLotPage({
           ]),
           listParcels(tx, ctx.tenant.id, { status: "active" }),
           listZones(tx, ctx.tenant.id, { status: "active" }),
-          listStructures(tx, ctx.tenant.id),
           packContext(tx, ctx.tenant.id, ctx.tenant.industry, "livestock"),
+          // LAND's config, not this pack's. Which assets can hold animals is
+          // land's question, and `structureKindsFrom` is land's answer to it —
+          // this pack hands the config straight back rather than reading a key
+          // out of it, which is the `requires` seam working as intended.
+          packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
         ]);
+      const structures = await listStructures(
+        tx,
+        ctx.tenant.id,
+        structureKindsFrom(landPack.config),
+      );
       return {
         lot,
         inventoryLot,

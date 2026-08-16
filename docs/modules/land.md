@@ -40,6 +40,34 @@ examples exist.
 
 ## Build log
 
+### 2026-08-16 — A chest freezer was on the list of places to put chickens (`claude/structure-kinds`)
+
+Found by driving the write-level change on production. `listStructures` selected
+every ACTIVE asset with no filter at all, so the picker headed *"In a pen or
+barn"* offered **Chest freezer** and **Tractor** alongside the garage. The
+function's name claimed a filter it never applied, and nothing in ~1,500 tests
+was ever going to say that out loud.
+
+- **`structureKindsFrom(config)`** in `vocabulary.ts`, the third instance of the
+  pattern `areaUnitFrom` and `speciesFrom` established: read a key out of
+  `packConfig.land`, total by construction, tenant-tailorable through
+  `tenant_modules.config`.
+- **The default is `building` + `infrastructure`** — a thing you put up and then
+  put something inside. Industry-neutral, per ADR 0004.
+- **`equipment` is deliberately excluded even though a chicken tractor is
+  equipment.** That tension is the whole reason this is config and not a
+  constant: the homestead-farm profile adds `chicken_tractor`, `hoop_house`,
+  `coop` and `barn` on top, and a tenant can add their own.
+- **`listStructures` now REQUIRES the kinds argument.** An optional one with a
+  default would let the next caller reintroduce the bug by not thinking about
+  it; a required parameter makes not thinking about it a compile error.
+- **An empty list is honoured as an answer**, not read as "no filter" — a farm
+  that keeps nothing in a structure gets no picker.
+- The livestock page resolves LAND's pack context to get this, and hands the
+  config straight back to `structureKindsFrom` rather than reading a key out of
+  it. That is the `requires` seam working: livestock never learns what a
+  structure kind is.
+
 ### 2026-08-15 — Moving the herd stops being an owner's job (`claude/pack-write-levels`)
 
 Platform-wide change; the reasoning is in
@@ -298,6 +326,12 @@ rented ground, and retrofitting it means rewriting the report.
   (`src/lib/packs/authorize.ts`): the shape of the farm — parcels, zones, uses —
   is the owner's, because each carries a cost object; occupancy is a chore and
   open to any member.
+- **A structure is an ASSET, and which kinds count is config.** `land_occupancy`
+  points at `assets`, so the set of things that can hold animals is whatever the
+  tenant owns — which means the picker has to be filtered by kind, and the kind
+  taxonomy is open. `structureKindsFrom` is the filter and
+  `packConfig.land.structureKinds` is where it comes from. See the 2026-08-16
+  build log entry for what unfiltered looked like.
 
 ## Open items
 

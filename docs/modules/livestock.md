@@ -126,7 +126,25 @@ This pack is the one that forced the change; the full reasoning is in
 
 ## Open items
 
-- **Nobody has driven slice 0 yet.**
+- ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-16.** Driven on
+  production: record a loss (201 → 200, mortality 4.3% → 4.8%), add a visual
+  tag, move to a paddock. The loss appeared in `inventory`'s own ledger on the
+  item page, which is the cross-pack spine visible in one screen. It found the
+  two items below.
+- **"Move to a paddock" cannot move a lot that is already on one.** It refuses
+  with *"BATCH-2 · poultry is already somewhere and has not been moved off"* —
+  correct, since `startOccupancy` will not open a second stay for the same
+  occupant, but the fix is on a different page in a different pack. So the daily
+  act of a rotational farm is: go to Land, find the paddock they are on, Move
+  off, come back here, Move. **The likely answer is that `moveLotToZone` closes
+  the open stay itself** — a move from A to B means they left A — with
+  `endedOn = startedOn - 1`, since `ended_on` is the inclusive last day on it
+  and counting the same day on both paddocks would inflate grazing days. That is
+  a semantic change to a shipped op and a date rule that reaches every rotation
+  figure, so it is written down rather than guessed at.
+- **A failed move wipes the form.** React resets a `<form action={fn}>` after
+  the action, so a refusal costs the user their paddock and date selections. The
+  toast does say why — it fires and is easy to miss.
 - ~~Writes are owner-only, and this is where it stops being tenable~~ —
   **settled 2026-08-15**, see the build log. Placing, losing, moving and tagging
   are chores and open to any member; creating, editing and splitting a lot stay

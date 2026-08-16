@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
@@ -15,6 +16,7 @@ import {
   endZoneUse,
   listOccupancy,
   listStructures,
+  moveOccupant,
   restByZone,
   startOccupancy,
   getParcel,
@@ -993,6 +995,132 @@ d("land ops", () => {
     );
     const fetched = await asOwner((tx) => getParcel(tx, tenantId, parcel.id));
     expect(fetched?.areaAcres).toBe(12.3456);
+  });
+
+  // ---- moving ------------------------------------------------------------
+
+  /** A herd that is somewhere, ready to be moved off it. */
+  async function herdOn(
+    label: string,
+    startedOn: string,
+  ): Promise<{ from: string; to: string; occupantId: string }> {
+    const parcel = await newParcel(`Move ${label}`);
+    const [from, to] = await Promise.all([
+      asOwner((tx) => createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "A" })),
+      asOwner((tx) => createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "B" })),
+    ]);
+    const occupantId = randomUUID();
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), from.id, {
+        occupantLabel: label,
+        startedOn,
+        extensionSlug: "livestock",
+        occupantType: "lot",
+        occupantId,
+      }),
+    );
+    return { from: from.id, to: to.id, occupantId };
+  }
+
+  const moveTo = (zoneId: string, occupantId: string, label: string, on: string) =>
+    asOwner((tx) =>
+      moveOccupant(tx, staffCtx(), zoneId, {
+        occupantLabel: label,
+        startedOn: on,
+        extensionSlug: "livestock",
+        occupantType: "lot",
+        occupantId,
+      }),
+    );
+
+  it("takes them off the old paddock the DAY BEFORE, not the same day", async () => {
+    // The property the whole change turns on. On A from the 1st, moved to B on
+    // the 10th: A gets nine days, B starts on the 10th. Closing A on the 10th
+    // would count that day's grazing twice and inflate every rotation figure
+    // downstream — and nothing on the page would look wrong.
+    const { from, to, occupantId } = await herdOn("Herd", "2026-04-01");
+    const result = await moveTo(to, occupantId, "Herd", "2026-04-10");
+
+    expect(result.movedOff).toEqual({ zoneId: from, endedOn: "2026-04-09" });
+
+    const [oldStays, newStays] = await Promise.all([
+      asOwner((tx) => listOccupancy(tx, tenantId, from)),
+      asOwner((tx) => listOccupancy(tx, tenantId, to)),
+    ]);
+    expect(oldStays).toHaveLength(1);
+    expect(oldStays[0].endedOn).toBe("2026-04-09");
+    expect(newStays[0].startedOn).toBe("2026-04-10");
+    expect(newStays[0].endedOn).toBeNull();
+
+    // And the rest clock is running on the ground they left, which is the
+    // number the move exists to produce.
+    const rest = await asOwner((tx) => restByZone(tx, tenantId, [from], "2026-04-15"));
+    expect(rest.get(from)?.status).toBe("resting");
+    expect(rest.get(from)?.grazingDays).toBe(9);
+  });
+
+  it("moves them when they are nowhere, and says so", async () => {
+    const parcel = await newParcel("Move fresh");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
+    );
+    const result = await moveTo(zone.id, randomUUID(), "New herd", "2026-04-01");
+    expect(result.movedOff).toBeNull();
+    expect(result.occupancy.startedOn).toBe("2026-04-01");
+  });
+
+  it("gives a one-day stay when they are moved the day they arrived", async () => {
+    // Clamped rather than refused. A same-day move is a correction or a real
+    // twice-in-a-day rotation, and refusing would put the user back in the
+    // five-click hole this function exists to close. The old stay cannot end
+    // before it began, so one day is the honest record at day granularity.
+    const { from, occupantId, to } = await herdOn("Same day", "2026-04-01");
+    const result = await moveTo(to, occupantId, "Same day", "2026-04-01");
+    expect(result.movedOff?.endedOn).toBe("2026-04-01");
+
+    const stays = await asOwner((tx) => listOccupancy(tx, tenantId, from));
+    expect(stays[0].startedOn).toBe("2026-04-01");
+    expect(stays[0].endedOn).toBe("2026-04-01");
+  });
+
+  it("refuses moving them onto the ground they are already on", async () => {
+    // Changing the strip size or the pen is an EDIT of the stay they are on.
+    // Closing and reopening would invent a break in ground they never left,
+    // and the rest clock would show a gap that did not happen.
+    const { from, occupantId } = await herdOn("Already", "2026-04-01");
+    await expect(moveTo(from, occupantId, "Already", "2026-04-10")).rejects.toMatchObject(
+      { code: "ALREADY_THERE" },
+    );
+  });
+
+  it("refuses a move dated before they arrived where they are", async () => {
+    // A mis-keyed year far more often than a real correction, and silently
+    // reordering two stays would be worse than refusing.
+    const { to, occupantId } = await herdOn("Backwards", "2026-04-10");
+    await expect(
+      moveTo(to, occupantId, "Backwards", "2026-04-01"),
+    ).rejects.toMatchObject({ code: "DATE_ORDER" });
+  });
+
+  it("does not displace anything when recording a stay that already ended", async () => {
+    // Writing up last month's grazing must not take them off the paddock they
+    // are standing on today. This is the same condition `startOccupancy`'s own
+    // guard uses, so the two cannot drift apart.
+    const { from, to, occupantId } = await herdOn("Historic", "2026-04-01");
+    const result = await asOwner((tx) =>
+      moveOccupant(tx, staffCtx(), to, {
+        occupantLabel: "Historic",
+        startedOn: "2026-03-01",
+        endedOn: "2026-03-05",
+        extensionSlug: "livestock",
+        occupantType: "lot",
+        occupantId,
+      }),
+    );
+    expect(result.movedOff).toBeNull();
+
+    const stays = await asOwner((tx) => listOccupancy(tx, tenantId, from));
+    expect(stays[0].endedOn).toBeNull();
   });
 
   // ---- structures --------------------------------------------------------

@@ -50,6 +50,7 @@ d("livestock ops", () => {
   let tenantId: string;
   let itemId: string;
   let zoneId: string;
+  let parcelId: string;
 
   const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantId, fn, { role: "owner", userId: OWNER });
@@ -79,13 +80,15 @@ d("livestock ops", () => {
         }),
       )
     ).id;
-    const parcel = await asOwner((tx) =>
-      createParcel(tx, ctx(), { name: "Home Farm", areaAcres: 100 }),
-    );
+    parcelId = (
+      await asOwner((tx) =>
+        createParcel(tx, ctx(), { name: "Home Farm", areaAcres: 100 }),
+      )
+    ).id;
     zoneId = (
       await asOwner((tx) =>
         createZone(tx, ctx(), {
-          parcelId: parcel.id,
+          parcelId,
           name: "North Pasture",
           areaAcres: 10,
         }),
@@ -330,6 +333,57 @@ d("livestock ops", () => {
     );
     expect(rest.get(zoneId)?.status).toBe("resting");
     expect(rest.get(zoneId)?.restDays).toBe(10);
+  });
+
+  it("rotates a lot between paddocks in ONE act", async () => {
+    // The daily loop of a rotational farm, and it used to be impossible from
+    // this side: `startOccupancy` refused a second open stay, so moving meant
+    // going to Land, finding the paddock they were on, moving off, coming
+    // back, and moving on. Five clicks across two modules, every move.
+    // Found by driving it, 2026-08-16.
+    // Its own two paddocks, not the shared fixture: the assertions are about
+    // rest, and rest is a fold over every stay a zone has ever had.
+    const [first, second] = await Promise.all([
+      asOwner((tx) =>
+        createZone(tx, ctx(), { parcelId, name: "Rotate A", areaAcres: 8 }),
+      ),
+      asOwner((tx) =>
+        createZone(tx, ctx(), { parcelId, name: "Rotate B", areaAcres: 8 }),
+      ),
+    ]);
+
+    const { lot, inventoryLotId } = await newLot("ROTATE", "cattle");
+    await asOwner((tx) =>
+      moveLotToZone(tx, ctx(), {
+        livestockLotId: lot.id,
+        zoneId: first.id,
+        startedOn: "2026-05-01",
+      }),
+    );
+    const result = await asOwner((tx) =>
+      moveLotToZone(tx, ctx(), {
+        livestockLotId: lot.id,
+        zoneId: second.id,
+        startedOn: "2026-05-04",
+      }),
+    );
+
+    // Off the first the DAY BEFORE — the inclusive bound, so the 4th belongs
+    // to the new paddock alone and three days of grazing is three days.
+    expect(result.movedOff).toEqual({ zoneId: first.id, endedOn: "2026-05-03" });
+
+    const places = await asOwner((tx) =>
+      currentZoneForOccupants(tx, tenantId, "livestock", [inventoryLotId]),
+    );
+    expect(places.get(inventoryLotId)?.zoneName).toBe("Rotate B");
+
+    const rest = await asOwner((tx) =>
+      restByZone(tx, tenantId, [first.id, second.id], "2026-05-06"),
+    );
+    expect(rest.get(first.id)?.status).toBe("resting");
+    expect(rest.get(first.id)?.grazingDays).toBe(3);
+    expect(rest.get(first.id)?.restDays).toBe(3);
+    expect(rest.get(second.id)?.status).toBe("occupied");
   });
 
   it("records the STRUCTURE they are in, and null means loose", async () => {

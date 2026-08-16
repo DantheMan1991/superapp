@@ -40,6 +40,37 @@ examples exist.
 
 ## Build log
 
+### 2026-08-16 — Moving is one act, and the day belongs to one paddock (`claude/move-occupant`)
+
+`moveOccupant` — take an occupant off wherever it is and put it on a zone, in
+one call. `startOccupancy` refuses a second open stay for the same occupant,
+correctly, but that made MOVING impossible from the animal's own page: the daily
+loop was Land → find the paddock → move off → back to the lot → move on. Five
+clicks across two modules, times however many groups. Found by driving it.
+
+- **THE DATE RULE IS THE WHOLE DESIGN.** `ended_on` is inclusive, so a move on
+  the 16th closes the old stay on the **15th** (`dayBefore`). Closing it on the
+  16th would count that day's grazing on both paddocks and inflate every
+  rotation figure that reads them — and nothing on any page would look wrong.
+  `tests/land-rest.test.ts` states it as a property: the two stays must sum to
+  exactly the days that passed.
+- **It lives in `land`, not in the pack calling it.** `livestock` should no more
+  do arithmetic on `ended_on` than it should know what a paddock is. It calls
+  `moveOccupant` and gets back `{ occupancy, movedOff }`.
+- **Only an OPEN arrival displaces anything.** Writing up last month's grazing
+  must not take them off the ground they are on today — and that is exactly the
+  condition `startOccupancy`'s guard fires under, so the two cannot drift.
+- **Same-day is clamped, not refused.** Moved the day they arrived gives a
+  one-day stay. Refusing would put the user back in the five-click hole this
+  exists to close, and one day is the honest record at day granularity.
+- **Moving them where they already are is refused** (`ALREADY_THERE`). Changing
+  the strip size or the pen is an EDIT of the stay they are on; closing and
+  reopening would invent a break in ground they never left. The UI leaves that
+  paddock out of the picker rather than offering an option that only errors.
+- The dialog says the consequence before it happens — *"They come off Creek
+  Paddock the day before, and its rest clock starts there"* — and the toast
+  names the paddock now resting. The audit entry records which stay was closed.
+
 ### 2026-08-16 — A chest freezer was on the list of places to put chickens (`claude/structure-kinds`)
 
 Found by driving the write-level change on production. `listStructures` selected
@@ -235,7 +266,9 @@ rented ground, and retrofitting it means rewriting the report.
 ## Key files & seams
 
 - `src/packs/land/ops.ts` — all reads and writes. Takes a `Tx` so the caller
-  owns the transaction; that is what keeps a write and its dimension sync atomic
+  owns the transaction; that is what keeps a write and its dimension sync atomic.
+  **`moveOccupant` is the one other packs call** — `startOccupancy` puts
+  something somewhere, `moveOccupant` takes it off wherever it was first
 - `src/packs/land/core/area.ts` — pure. Unit conversion, formatting, totals that
   report their unknowns, and parcel-vs-zone coverage
 - `src/packs/land/core/rest.ts` — pure. Rest and grazing days from spans, the
@@ -303,6 +336,10 @@ rented ground, and retrofitting it means rewriting the report.
   reads an open stay as "occupied" and two of them make the rest clock
   unanswerable — not because a zone can only hold one thing. Closed overlaps are
   legitimate and the pilot has them.
+- **A MOVE is not two stays, it is one act** — `moveOccupant`. The guard above
+  is right and made moving impossible from the occupant's own page, which is a
+  reminder that a correct refusal can still be a broken workflow. The day the
+  move happens belongs to the NEW paddock only; see the 2026-08-16 entry.
 - **A day count is inclusive at both ends.** On Monday, off Monday is one day of
   grazing. It feeds the paddock arithmetic, so an off-by-one there reaches every
   rotation figure on the page.

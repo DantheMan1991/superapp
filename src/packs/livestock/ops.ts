@@ -10,7 +10,11 @@ import {
   splitLot as splitInventoryLot,
   type InventoryCtx,
 } from "@/packs/inventory/ops";
-import { startOccupancy, type LandCtx } from "@/packs/land/ops";
+import {
+  moveOccupant,
+  type LandCtx,
+  type MoveResult,
+} from "@/packs/land/ops";
 import { isValidSlug } from "@/packs/inventory/vocabulary";
 
 /**
@@ -347,12 +351,16 @@ export async function splitLivestockLot(
 // -------------------------------------------------------------- occupancy ---
 
 /**
- * Put a lot on a zone. **Writes into `land`'s table, through `land`'s ops.**
+ * Move a lot onto a zone. **Writes into `land`'s table, through `land`'s ops.**
  *
  * This is the seam land slice 1 was built for, now with its real caller. Land
  * owns the place and the rest clock and stays ignorant of what a lot is;
  * livestock supplies the fact and a LABEL, which is a copy — so a rest report
  * never needs to join into this pack, and keeps working if it is switched off.
+ *
+ * `moveOccupant`, not `startOccupancy`: if they are already somewhere, moving
+ * them means taking them off it, and the inclusive-date arithmetic that makes
+ * the two spans meet correctly is land's business, not this pack's.
  */
 export async function moveLotToZone(
   tx: Tx,
@@ -371,7 +379,7 @@ export async function moveLotToZone(
     structureAssetId?: string | null;
     notes?: string;
   },
-): Promise<void> {
+): Promise<MoveResult> {
   requireWrite(ctx, "member");
   const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
   if (!lot) {
@@ -382,7 +390,7 @@ export async function moveLotToZone(
     throw new LivestockError("LOT_INVALID", "that lot has no inventory record");
   }
 
-  await startOccupancy(tx, asLand(ctx), input.zoneId, {
+  return moveOccupant(tx, asLand(ctx), input.zoneId, {
     occupantLabel: `${inventoryLot.code} · ${lot.species}`,
     startedOn: input.startedOn,
     endedOn: input.endedOn ?? null,

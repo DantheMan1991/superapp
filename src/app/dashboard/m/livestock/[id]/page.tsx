@@ -211,6 +211,9 @@ export default async function LivestockLotPage({
                 zones={zoneOptions}
                 structures={structures.map((s) => ({ id: s.id, name: s.name }))}
                 structureWord={structureWord}
+                currentZone={
+                  zone ? { id: zone.zoneId, name: zone.zoneName } : null
+                }
                 today={today}
               />
             )}

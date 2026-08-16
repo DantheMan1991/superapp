@@ -24,6 +24,23 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-16 — Rotating a herd is one act again (`claude/move-occupant`)
+
+`moveLotToZone` calls land's new `moveOccupant` instead of `startOccupancy`, so
+moving a lot that is already on a paddock takes it off that paddock rather than
+refusing. The refusal was correct and the workflow was broken — five clicks
+across two modules for the single most frequent act on a rotational farm.
+
+- **The date arithmetic is land's, not this pack's.** `moveOccupant` returns
+  `{ occupancy, movedOff }`; this pack passes it through and never touches
+  `ended_on`. See [land.md](land.md) for the inclusive-bound rule.
+- The dialog names the paddock they will come off before the move happens, the
+  toast names the one whose rest clock just started, the picker leaves out the
+  paddock they are already on, and the audit entry records the closed stay.
+- **Still one lot at a time.** "Move every pen to the next paddock" is one act
+  in the design and N dialogs here — but N is now one dialog each rather than
+  five clicks each.
+
 ### 2026-08-15 — The daily log gets someone to write it (`claude/pack-write-levels`)
 
 This pack is the one that forced the change; the full reasoning is in
@@ -131,20 +148,15 @@ This pack is the one that forced the change; the full reasoning is in
   tag, move to a paddock. The loss appeared in `inventory`'s own ledger on the
   item page, which is the cross-pack spine visible in one screen. It found the
   two items below.
-- **"Move to a paddock" cannot move a lot that is already on one.** It refuses
-  with *"BATCH-2 · poultry is already somewhere and has not been moved off"* —
-  correct, since `startOccupancy` will not open a second stay for the same
-  occupant, but the fix is on a different page in a different pack. So the daily
-  act of a rotational farm is: go to Land, find the paddock they are on, Move
-  off, come back here, Move. **The likely answer is that `moveLotToZone` closes
-  the open stay itself** — a move from A to B means they left A — with
-  `endedOn = startedOn - 1`, since `ended_on` is the inclusive last day on it
-  and counting the same day on both paddocks would inflate grazing days. That is
-  a semantic change to a shipped op and a date rule that reaches every rotation
-  figure, so it is written down rather than guessed at.
+- ~~"Move to a paddock" cannot move a lot that is already on one~~ — **built
+  2026-08-16.** `moveLotToZone` now calls land's `moveOccupant`, which closes
+  the open stay on `dayBefore(startedOn)` and opens the new one in the same
+  transaction. The date rule and the reasoning live in
+  [land.md](land.md)'s build log, because the inclusive bound is land's.
 - **A failed move wipes the form.** React resets a `<form action={fn}>` after
   the action, so a refusal costs the user their paddock and date selections. The
-  toast does say why — it fires and is easy to miss.
+  toast does say why — it fires and is easy to miss. Less costly now that the
+  most common refusal is gone, but the pattern is in every dialog in the pack.
 - ~~Writes are owner-only, and this is where it stops being tenable~~ —
   **settled 2026-08-15**, see the build log. Placing, losing, moving and tagging
   are chores and open to any member; creating, editing and splitting a lot stay

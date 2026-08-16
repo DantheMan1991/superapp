@@ -233,7 +233,7 @@ export async function moveLotToZoneAction(input: unknown) {
   if (!parsed.success) return { error: "Check the details and try again." };
 
   try {
-    await withTenant(
+    const result = await withTenant(
       ctx.tenant.id,
       (tx) => moveLotToZone(tx, ctxOf(ctx), parsed.data),
       { role: ctx.role },
@@ -244,12 +244,19 @@ export async function moveLotToZoneAction(input: unknown) {
       actorClerkUserId: ctx.userId,
       targetType: "livestock_lot",
       targetId: parsed.data.livestockLotId,
-      meta: { zoneId: parsed.data.zoneId, startedOn: parsed.data.startedOn },
+      meta: {
+        zoneId: parsed.data.zoneId,
+        startedOn: parsed.data.startedOn,
+        // The move now closes a stay as well as opening one, and which stay it
+        // closed is the half somebody would come back to the log to ask about.
+        movedOffZoneId: result.movedOff?.zoneId ?? null,
+        movedOffOn: result.movedOff?.endedOn ?? null,
+      },
     });
     // Land's pages read this record too, so both trees are revalidated.
     revalidatePath(BASE, "layout");
     revalidatePath("/dashboard/m/land", "layout");
-    return { ok: true };
+    return { ok: true, movedOff: result.movedOff };
   } catch (err) {
     return toResult(err);
   }

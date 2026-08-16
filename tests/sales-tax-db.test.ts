@@ -476,7 +476,7 @@ d("sales tax (DB)", () => {
 
   it("the tax summary reports the taxable base and the tax by rate", async () => {
     const summary = await withTenant(tenantId, (tx) =>
-      getTaxSummary(tx, tenantId, { from: "2026-05-01", to: "2026-05-31" }),
+      getTaxSummary(tx, tenantId, { scope: COMBINED, from: "2026-05-01", to: "2026-05-31" }),
     );
     const state = summary.rows.find((r) => r.rateId === rateId)!;
     expect(state.name).toBe("State");
@@ -496,7 +496,7 @@ d("sales tax (DB)", () => {
     // difference against one period's charge is NORMAL, not a fault. Reading it
     // as a mismatch is the misunderstanding the field is named to prevent.
     const summary = await withTenant(tenantId, (tx) =>
-      getTaxSummary(tx, tenantId, { from: "2026-07-01", to: "2026-07-31" }),
+      getTaxSummary(tx, tenantId, { scope: COMBINED, from: "2026-07-01", to: "2026-07-31" }),
     );
     // July's only invoice was voided, so the period charged nothing.
     expect(summary.totals.taxCents).toBe(0);
@@ -509,7 +509,7 @@ d("sales tax (DB)", () => {
 
   it("a voided invoice is excluded from the summary entirely", async () => {
     const summary = await withTenant(tenantId, (tx) =>
-      getTaxSummary(tx, tenantId, { from: "2026-07-01", to: "2026-07-31" }),
+      getTaxSummary(tx, tenantId, { scope: COMBINED, from: "2026-07-01", to: "2026-07-31" }),
     );
     // Not "counted as zero" — absent. A void charged nothing and owes nothing.
     expect(summary.rows).toHaveLength(0);

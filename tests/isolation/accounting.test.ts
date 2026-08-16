@@ -136,6 +136,7 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.invoices)
         .values({
           tenantId,
+          entityId: entity.id,
           customerId: customer.id,
           invoiceNumber: `INV-${tag}`,
           status: "issued",
@@ -304,6 +305,23 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
           tenantId: tenantA,
           entityId: fx.b.entityId,
           entryDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: an invoice cannot name the OTHER tenant's company", async () => {
+    // Slice 1b put a company on the document itself, so the same guarantee the
+    // entry has now covers invoices, bills and registers.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.invoices).values({
+          tenantId: tenantA,
+          entityId: fx.b.entityId,
+          customerId: fx.a.customerId,
+          invoiceNumber: "INV-SMUGGLE",
+          issueDate: "2026-07-01",
           createdByClerkUserId: "attacker",
         }),
       ),

@@ -147,18 +147,29 @@ to close (the ADR is immutable, so they are recorded here rather than above):
   stamped on the page and in every CSV, exactly where the basis stamp goes, and
   an unknown id 404s rather than falling back.
 
-**What slice 1 does NOT do, and it is worth knowing before selling it.** Only a
-hand-written journal entry can name a company. Invoices, bills, bank rows,
-receipts and recurring journals all post to the tenant's DEFAULT company,
-because no document carries an entity yet — that is slices 2 and 4. So a
-ten-LLC landlord can keep ten separated sets of books, but only by journaling
-into them. The eleven posting sites that call `getDefaultEntityId` explicitly
-are the list of what the document slice has to revisit.
+**Slice 1b followed the same day** and closed the gap slice 1 left, which was
+worth having but not sellable on its own: `invoices`, `bills` and
+`bank_accounts` each carry an `entity_id` of their own, so every entry a
+document posts reads it from the document rather than from the tenant default.
+A/R aging, A/P aging and the tax summary take a scope now, having declined one
+only because the documents they read had no company.
 
-One rule was added that this file did not anticipate: **a document's entries all
-land in the company its FIRST one did** (`entityForDocument`). It is not
-headroom — the default can be moved, so without it an invoice issued under one
-default and paid under another would split its AR across two balance sheets.
+That slice forced one rule this file did not anticipate, and it is the more
+interesting half: **a journal line may not touch a register owned by a different
+company than the entry.** Paying Oak Row's bill out of Maple Street's checking
+account, as a single entry, leaves Oak's balance sheet showing cash leaving an
+account it does not own and Maple's showing nothing — *while the ledger still
+balances*. That is exactly the failure signature above, reached from the write
+side rather than the read side. It is intercompany, it needs the linked pair
+this ADR describes in slice 2, and until that exists the posting engine refuses
+it rather than recording it wrongly. The chart of accounts is deliberately not
+constrained the same way: two companies' receivables share account 1200 and are
+separated by the entry's company, because AR is not a thing anybody reconciles
+to a statement.
+
+**What is still not built:** intercompany pairs (2), consolidation with
+eliminations (3), per-entity close (4 — `period_closes` locks every company at
+once), and a company on fixed assets.
 
 **What would make us revisit:** a client needing one entity's data genuinely
 hidden from another's staff — a joint venture where a partner sees one LLC and

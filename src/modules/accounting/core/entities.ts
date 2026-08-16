@@ -1,5 +1,6 @@
 import "server-only";
 import { and, asc, eq, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import { schema, type Tx } from "@/db";
 import type { Entity } from "@/db/schema";
 import { LedgerError } from "./errors";
@@ -40,14 +41,22 @@ export type EntityScope =
 /**
  * The SQL predicate for a scope, or undefined for combined.
  *
- * Callers spread this into their existing condition list. It reads
- * `journal_entries.entity_id` — the entity is on the ENTRY, never on the line
- * (ADR 0010), which is what keeps every entry balanced on its own.
+ * Callers spread this into their existing condition list. It defaults to
+ * `journal_entries.entity_id`, because most reports are ledger reports and the
+ * entity is on the ENTRY, never on the line (ADR 0010) — which is what keeps
+ * every entry balanced on its own.
+ *
+ * The `column` argument is for the DOCUMENT reports: A/R aging reads
+ * `invoices.entity_id`, A/P aging reads `bills.entity_id`, and the tax summary
+ * reads both an invoice column and the ledger. One helper rather than three, so
+ * "combined means no predicate" is decided in exactly one place — a report that
+ * hand-rolled `eq(...)` would have to remember that on its own.
  */
-export function entityScopeCondition(scope: EntityScope): SQL | undefined {
-  return scope.kind === "one"
-    ? eq(schema.journalEntries.entityId, scope.entityId)
-    : undefined;
+export function entityScopeCondition(
+  scope: EntityScope,
+  column: PgColumn = schema.journalEntries.entityId,
+): SQL | undefined {
+  return scope.kind === "one" ? eq(column, scope.entityId) : undefined;
 }
 
 /**
@@ -86,12 +95,12 @@ export async function listEntities(
 /**
  * The entity an entry lands in when nothing chose one.
  *
- * CALLED EXPLICITLY AT EVERY POSTING SITE THAT CANNOT CHOOSE, never as a
- * fallback inside the posting engine. That visibility is the point: in slice 1
- * only a manual journal can state an entity, because invoices, bills and bank
- * accounts do not carry one yet, so the eleven call sites that pass this are a
- * grep-able list of exactly what the document slice has to revisit. A silent
- * default inside `postEntry` would be the same behaviour with nothing to find.
+ * NOT A POSTING FALLBACK ANY MORE. Since invoices, bills and bank accounts
+ * carry their own company, every entry reads it off the document that caused
+ * it. This is now only the answer to "which company when NOBODY has said" — the
+ * value a new draft, a new register or a template with no company of its own
+ * starts from. It is still never called inside `postEntry`: a silent default
+ * there would be a wrong company with nothing to grep for.
  *
  * Throws rather than inventing a row — the `SETTINGS_MISSING` shape. Every
  * tenant is given one by `drizzle/0142` and by `provisionEntity`.
@@ -117,6 +126,30 @@ export async function getDefaultEntityId(
 }
 
 /**
+ * The company that owns the register clearing this ledger account, or the
+ * tenant's default when the account is not a register at all.
+ *
+ * A receipt paid from an account, or any other write whose only clue about the
+ * company is which account the money left, resolves it here. The posting engine
+ * refuses a mismatch anyway (`assertNoForeignRegisters`), so this is about
+ * getting it RIGHT rather than about being allowed to.
+ */
+export async function entityForRegisterAccount(
+  tx: Tx,
+  tenantId: string,
+  accountId: string,
+): Promise<string> {
+  const row = await tx.query.bankAccounts.findFirst({
+    where: and(
+      eq(schema.bankAccounts.tenantId, tenantId),
+      eq(schema.bankAccounts.accountId, accountId),
+    ),
+    columns: { entityId: true },
+  });
+  return row?.entityId ?? (await getDefaultEntityId(tx, tenantId));
+}
+
+/**
  * The entity a document's ledger entries already landed in, or null if it has
  * none yet.
  *
@@ -130,11 +163,10 @@ export async function getDefaultEntityId(
  * moved. Issue an invoice, move the default, take the payment, and the two legs
  * are in different companies. So this is a live guard, not headroom.
  *
- * Keyed on the ORIGINAL document's source, not the payment's: an invoice
- * payment entry has `source = 'invoice_payment'` and a `sourceId` that is the
- * payment's own id, so the caller passes `("invoice", invoiceId)`. When
- * documents carry an entity of their own, this is replaced by reading it off
- * the document, and these call sites are the list of what to change.
+ * SUPERSEDED for invoices, bills and bank rows — they carry their own company
+ * now and their entries read it off the row. The assets pack is the last
+ * caller, because a fixed asset has no company column yet and its depreciation
+ * schedule still has to land every month where the first entry did.
  */
 export async function entityOfDocument(
   tx: Tx,
@@ -154,7 +186,15 @@ export async function entityOfDocument(
   return row?.entityId ?? null;
 }
 
-/** `entityOfDocument`, falling back to the tenant default for a first entry. */
+/**
+ * `entityOfDocument`, falling back to the tenant default for a first entry.
+ *
+ * ONLY THE ASSETS PACK STILL USES THIS. Invoices, bills and bank accounts now
+ * carry their own company, so their entries read it off the document; a fixed
+ * asset does not yet, and its depreciation schedule must still land every month
+ * in whichever company the first entry did. Give `assets` an `entity_id` and
+ * this loses its last caller.
+ */
 export async function entityForDocument(
   tx: Tx,
   tenantId: string,

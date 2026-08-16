@@ -353,19 +353,18 @@ export async function getGeneralLedger(
  *
  * Invoices are selected by ISSUE DATE, which is when the liability arises.
  *
- * NO `scope` PARAMETER EITHER, and it is the first report to decline one.
- * This report reads two sources and shows the gap between them: the per-rate
- * figures come from INVOICES, the amount owed comes from the LEDGER. An invoice
- * does not carry an entity yet (ADR 0010 slice 1 puts one only on the entry),
- * so scoping the ledger half while the document half stayed tenant-wide would
- * make the difference between the two columns meaningless — and that difference
- * is the whole report. Combined on both sides is honest; half-scoped is not.
- * When invoices gain an entity, this takes a scope like everything else.
+ * IT TAKES A SCOPE NOW, on BOTH halves. This report reads two sources and shows
+ * the gap between them — the per-rate figures come from INVOICES, the amount
+ * owed comes from the LEDGER — so it declined a scope for as long as invoices
+ * had no company: scoping one column and not the other makes the difference
+ * between them meaningless, and that difference is the whole report. Now that
+ * `invoices.entity_id` exists both halves are scoped by the same argument, and
+ * a return is filed per company, which is the point.
  */
 export async function getTaxSummary(
   tx: Tx,
   tenantId: string,
-  opts: { from: string; to: string },
+  opts: { scope: EntityScope; from: string; to: string },
 ): Promise<TaxSummaryReport> {
   const inv = schema.invoices;
   const il = schema.invoiceLines;
@@ -384,6 +383,7 @@ export async function getTaxSummary(
     .where(
       and(
         eq(il.tenantId, tenantId),
+        entityScopeCondition(opts.scope, inv.entityId),
         gte(inv.issueDate, opts.from),
         lte(inv.issueDate, opts.to),
       ),
@@ -403,6 +403,7 @@ export async function getTaxSummary(
     .where(
       and(
         eq(inv.tenantId, tenantId),
+        entityScopeCondition(opts.scope, inv.entityId),
         gte(inv.issueDate, opts.from),
         lte(inv.issueDate, opts.to),
       ),
@@ -433,10 +434,9 @@ export async function getTaxSummary(
   let liabilityCents: number | null = null;
   if (taxAccount) {
     const balances = await getBalances(tx, tenantId, {
-      // Combined DELIBERATELY, to match the invoice half above. See the note on
-      // this function — a scoped ledger figure beside an unscoped document
-      // figure would be worse than two unscoped ones.
-      scope: { kind: "combined" },
+      // The SAME scope as the invoice half above — that is what makes the
+      // difference between the two columns mean something.
+      scope: opts.scope,
       asOf: opts.to,
       accountIds: [taxAccount.id],
     });

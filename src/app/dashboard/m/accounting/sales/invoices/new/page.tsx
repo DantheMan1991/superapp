@@ -9,6 +9,7 @@ import {
   listProducts,
   listSalesTaxRates,
 } from "@/modules/accounting/invoicing/catalogue";
+import { getDefaultEntityId, listEntities } from "@/modules/accounting/core";
 import { suggestInvoiceNumber } from "@/modules/accounting/invoicing/numbering";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { SalesNav } from "../../sales-nav";
@@ -65,6 +66,8 @@ export default async function NewInvoicePage() {
     const defaultTaxRateId = taxRateRows.find((r) => r.isDefault)?.id ?? null;
     return {
       customers,
+      entities: await listEntities(tx, ctx.tenant.id),
+      defaultEntityId: await getDefaultEntityId(tx, ctx.tenant.id),
       incomeAccounts,
       suggestedNumber,
       products,
@@ -91,6 +94,8 @@ export default async function NewInvoicePage() {
       ) : (
         <InvoiceBuilder
           customers={data.customers.map((c) => ({ id: c.id, name: c.name }))}
+          entities={data.entities.map((e) => ({ id: e.id, name: e.name }))}
+          defaultEntityId={data.defaultEntityId}
           incomeAccounts={data.incomeAccounts.map((a) => ({
             id: a.id,
             code: a.code,

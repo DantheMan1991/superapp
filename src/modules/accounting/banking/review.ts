@@ -4,7 +4,6 @@ import { schema, type Tx } from "@/db";
 import type { BankTransaction, JournalEntry } from "@/db/schema";
 import {
   LedgerError,
-  entityForDocument,
   postEntry,
   requireOwnerRole,
   type LedgerCtx,
@@ -108,10 +107,10 @@ export async function categorizeTransaction(
       ),
     );
   const { entry } = await postEntry(tx, ctx, {
-    // The SAME company a previous categorization of this row landed in, so
-    // re-categorizing after a void cannot move the row's money between two
-    // sets of books when the tenant default has since been changed.
-    entityId: await entityForDocument(tx, ctx.tenantId, "bank_import", txn.id),
+    // THE REGISTER'S company. A bank transaction is money that moved through
+    // one company's account, so there is nothing to choose and nothing to
+    // inherit — it is a property of the account the row arrived on.
+    entityId: bankAccount.entityId,
     status: "posted",
     entryDate: txn.txnDate,
     memo: args.memo ?? txn.description,

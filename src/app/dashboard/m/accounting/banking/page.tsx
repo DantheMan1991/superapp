@@ -11,7 +11,11 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getBalances } from "@/modules/accounting/core";
+import {
+  getBalances,
+  getDefaultEntityId,
+  listEntities,
+} from "@/modules/accounting/core";
 import {
   formatCentsSigned,
   todayInTimezone,
@@ -70,9 +74,19 @@ export default async function BankingPage() {
       ),
       orderBy: (a, { asc }) => [asc(a.code)],
     });
-    return { bankAccounts, balances, unreviewed, items, categories };
+    return {
+      bankAccounts,
+      balances,
+      unreviewed,
+      items,
+      categories,
+      entities: await listEntities(tx, tenantId),
+      defaultEntityId: await getDefaultEntityId(tx, tenantId),
+    };
   });
 
+  const companyName = new Map(data.entities.map((e) => [e.id, e.name]));
+  const showCompany = data.entities.length > 1;
   const balanceOf = new Map(data.balances.map((b) => [b.accountId, b.netCents]));
   const unreviewedOf = new Map(data.unreviewed.map((u) => [u.bankAccountId, u.n]));
   const isOwner = ctx.role === "owner";
@@ -106,6 +120,8 @@ export default async function BankingPage() {
                 plaidReady={plaidConfigured()}
                 bankAccounts={bankAccountOptions}
                 categories={categoryOptions}
+                entities={data.entities.map((e) => ({ id: e.id, name: e.name }))}
+                defaultEntityId={data.defaultEntityId}
               />
             )}
           </>
@@ -177,6 +193,10 @@ export default async function BankingPage() {
                     {!b.isActive && <Badge variant="outline">inactive</Badge>}
                   </div>
                   <p className="mt-1.5 text-sm text-muted-foreground">
+                    {/* Which company owns the register, at two or more. It
+                        decides what may clear through the account, so it
+                        belongs on the card rather than a detail page. */}
+                    {showCompany ? `${companyName.get(b.entityId) ?? "—"} · ` : ""}
                     {b.kind.replaceAll("_", " ")}
                     {b.institution ? ` · ${b.institution}` : ""}
                     {b.last4 ? ` ···· ${b.last4}` : ""}

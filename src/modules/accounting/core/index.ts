@@ -33,6 +33,7 @@ export {
 export {
   createEntity,
   entityForDocument,
+  entityForRegisterAccount,
   entityOfDocument,
   entityScopeCondition,
   entityScopeLabel,

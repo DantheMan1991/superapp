@@ -935,12 +935,22 @@ d("invoicing (DB)", () => {
         .returning();
       return rows[0].id;
     });
+    // B needs a company of its own, so the insert below fails on the CUSTOMER
+    // foreign key rather than on a missing company — the assertion names which.
+    const otherEntity = await withTenant(otherTenant, async (tx) => {
+      const [e] = await tx
+        .insert(schema.entities)
+        .values({ tenantId: otherTenant, name: "Other Co", isDefault: true })
+        .returning();
+      return e.id;
+    });
     try {
       // Tenant B cannot reference tenant A's customer (composite FK pair absent).
       await expectDbReject(
         withTenant(otherTenant, (tx) =>
           tx.insert(schema.invoices).values({
             tenantId: otherTenant,
+            entityId: otherEntity,
             customerId,
             invoiceNumber: "INV-9999",
             issueDate: "2026-07-01",

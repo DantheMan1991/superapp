@@ -176,6 +176,14 @@ export async function setCustomerActiveAction(
 // --------------------------------------------------------------- invoices
 
 const draftInputSchema = z.object({
+  /**
+   * Which company issues this invoice (ADR 0010). Optional over the wire — a
+   * single-company tenant has no picker to send one from — and resolved to the
+   * tenant's default in `createInvoiceDraft`. On an UPDATE it is ignored: the
+   * company is fixed once the draft exists, because it is what the issuance
+   * entry and every payment will read.
+   */
+  entityId: z.string().uuid().optional(),
   customerId: z.string().uuid(),
   invoiceNumber: z.string().trim().min(1).max(30).optional(),
   issueDate: dateStr,

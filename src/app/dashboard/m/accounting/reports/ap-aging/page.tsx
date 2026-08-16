@@ -8,6 +8,7 @@ import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { ReportTable } from "@/modules/accounting/components/report-table";
 import { getSettings } from "@/modules/accounting/core";
 import { getApAging } from "@/modules/accounting/payables/aging-feed";
@@ -22,7 +23,7 @@ export const dynamic = "force-dynamic";
 export default async function ApAgingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ asOf?: string }>;
+  searchParams: Promise<{ asOf?: string; entity?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -32,8 +33,9 @@ export default async function ApAgingPage({
     const settings = await getSettings(tx, ctx.tenant.id);
     const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
-    const report = await getApAging(tx, ctx.tenant.id, asOf);
-    return { settings, today, asOf, report };
+    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    const report = await getApAging(tx, ctx.tenant.id, asOf, entityView.scope);
+    return { settings, today, asOf, report, entityView };
   });
 
   const { report } = data;
@@ -44,7 +46,8 @@ export default async function ApAgingPage({
         title="A/P Aging"
         description={
           <>
-            {ctx.tenant.name} · open bills as of {report.asOf} by days past due.
+            {data.entityView.stampLabel ?? ctx.tenant.name} · open bills as of{" "}
+            {report.asOf} by days past due.
             Voided bills are excluded.
           </>
         }
@@ -70,6 +73,8 @@ export default async function ApAgingPage({
         today={data.today}
         fiscalYearStartMonth={data.settings.fiscalYearStartMonth}
         asOf={data.asOf}
+        entity={sp.entity}
+        entities={data.entityView.entities}
       />
 
       {report.rows.length <= 1 ? (

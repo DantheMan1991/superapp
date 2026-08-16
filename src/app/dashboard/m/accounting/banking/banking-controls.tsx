@@ -191,10 +191,15 @@ export function BankingHeaderButtons({
   plaidReady,
   bankAccounts,
   categories,
+  entities = [],
+  defaultEntityId = null,
 }: {
   plaidReady: boolean;
   bankAccounts: BankAccountOption[];
   categories: CategoryOption[];
+  /** The tenant's companies (ADR 0010) — the picker shows at two or more. */
+  entities?: Array<{ id: string; name: string }>;
+  defaultEntityId?: string | null;
 }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -218,7 +223,10 @@ export function BankingHeaderButtons({
           {pending ? "Preparing…" : "Connect a bank"}
         </Button>
       )}
-      <CreateBankAccountButton />
+      <CreateBankAccountButton
+        entities={entities}
+        defaultEntityId={defaultEntityId}
+      />
       {bankAccounts.length > 0 && (
         <QuickAddButton bankAccounts={bankAccounts} categories={categories} />
       )}
@@ -231,10 +239,17 @@ export function BankingHeaderButtons({
 
 // -------------------------------------------------- create bank account
 
-function CreateBankAccountButton() {
+function CreateBankAccountButton({
+  entities,
+  defaultEntityId,
+}: {
+  entities: Array<{ id: string; name: string }>;
+  defaultEntityId: string | null;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [entityId, setEntityId] = useState(defaultEntityId ?? "");
   const [form, setForm] = useState({
     name: "",
     kind: "checking" as "checking" | "savings" | "credit_card",
@@ -261,6 +276,7 @@ function CreateBankAccountButton() {
       const result = await createBankAccountAction({
         name: form.name.trim(),
         kind: form.kind,
+        entityId: entityId || undefined,
         institution: form.institution.trim() || undefined,
         last4: form.last4 || undefined,
         openingBalanceCents: cents,
@@ -291,6 +307,30 @@ function CreateBankAccountButton() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-1">
+            {entities.length > 1 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ba-entity">Company</Label>
+                <Select value={entityId || undefined} onValueChange={setEntityId}>
+                  <SelectTrigger id="ba-entity">
+                    <SelectValue placeholder="Which company owns this account?" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {entities.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* Said once, where the decision is made — there is no way to
+                    move a register afterwards, because the entries that have
+                    cleared through it belong to whoever owned it then. */}
+                <p className="text-xs text-muted-foreground">
+                  This cannot be changed later. Only this company&apos;s
+                  invoices, bills and journals may use the account.
+                </p>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="ba-name">Name</Label>

@@ -111,9 +111,14 @@ Three things follow for anything written from here on:
 - **RLS is NOT the wall between two companies of one client**, deliberately, and
   that is the ADR's own stated cost. It remains absolute between CLIENTS. Do not
   add an `app.current_entity`; the separation is application code.
-- **A table with a balance on it will carry an entity later.** Bank accounts,
-  invoices, bills and period closes do not yet — they belong to the tenant and
-  post into its default company. Per-entity banking and close are slices 3–4.
+- **A table with a balance on it carries an entity.** `invoices`, `bills` and
+  `bank_accounts` do (`0145`), and every entry they post reads it from the
+  document. A new table with a balance is expected to do the same. `period_closes`
+  is the outstanding one — a close still locks every company at once.
+- **A journal line may not touch a register owned by another company**, enforced
+  in `postEntry`. Money moving between two of a client's companies is an
+  intercompany transaction needing a linked pair of entries, and until that
+  exists it is refused rather than recorded as one wrong entry.
 
 ---
 

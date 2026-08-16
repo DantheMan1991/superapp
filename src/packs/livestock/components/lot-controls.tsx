@@ -507,10 +507,12 @@ export function SplitHerdForm({
 export function MoveToZoneForm({
   livestockLotId,
   zones,
+  structures,
   today,
 }: {
   livestockLotId: string;
   zones: { id: string; name: string; parcelName: string }[];
+  structures: { id: string; name: string }[];
   today: string;
 }) {
   const router = useRouter();
@@ -521,6 +523,7 @@ export function MoveToZoneForm({
   function submit(formData: FormData) {
     if (!zoneId) return;
     const rawArea = String(formData.get("areaAcres") ?? "").trim();
+    const structure = String(formData.get("structureAssetId") ?? NONE);
     startTransition(async () => {
       const result = await moveLotToZoneAction({
         livestockLotId,
@@ -528,6 +531,7 @@ export function MoveToZoneForm({
         startedOn: String(formData.get("startedOn") ?? today),
         endedOn: String(formData.get("endedOn") ?? "") || null,
         areaAcres: rawArea ? Number(rawArea) : null,
+        structureAssetId: structure === NONE ? null : structure,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -588,6 +592,28 @@ export function MoveToZoneForm({
                 <Input id="move-off" name="endedOn" type="date" />
               </div>
             </div>
+            {structures.length > 0 && (
+              <div className="grid gap-2">
+                <Label htmlFor="structure">In a pen or barn</Label>
+                <Select name="structureAssetId" defaultValue={NONE}>
+                  <SelectTrigger id="structure">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* Loose is the DEFAULT and a real answer, not a blank.
+                        Cattle roam the paddock; broilers live in a pen that
+                        sits on it. */}
+                    <SelectItem value={NONE}>Loose on the paddock</SelectItem>
+                    {structures.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="grid gap-2">
               <Label htmlFor="move-area">Strip size in acres</Label>
               <Input

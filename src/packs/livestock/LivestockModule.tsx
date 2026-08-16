@@ -152,7 +152,16 @@ export async function LivestockModule({
                   <TableCell className="text-muted-foreground">
                     {/* From `land`, through land's own query. This pack never
                         touches land_occupancy directly. */}
-                    {zone ? zone.zoneName : "—"}
+                    {zone ? (
+                      <span>
+                        {zone.zoneName}
+                        {zone.structureName && (
+                          <span className="text-xs"> · {zone.structureName}</span>
+                        )}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {formatAge(ageInDays(lot.bornOn, today))}

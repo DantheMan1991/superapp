@@ -40,6 +40,33 @@ examples exist.
 
 ## Build log
 
+### 2026-08-15 — Occupancy names the STRUCTURE, and a wrong guard came out (`claude/occupancy-structures`)
+- **A pen, a barn or a chicken tractor can now be named on an occupancy.** From
+  the founder: *"sometimes there is no structure. cattle just roam in the zone,
+  but chickens are assigned to a pen."* So `structure_asset_id`, nullable, and
+  **null is a real answer rather than a missing one** — the UI says "Loose on
+  the paddock", not nothing.
+- **A structure is an ASSET, so `land` now requires `assets`.** The design
+  settled this before either pack existed: a chicken tractor is an asset that
+  holds a lot and sits on a zone. A structures table here would be that same row
+  a second time, without its depreciation or its service schedule. It lives on
+  `land_occupancy` rather than on `livestock` because it generalises — a
+  greenhouse holds a planting exactly as a pen holds a flock.
+- **THE REQUIREMENT EXPOSED A GUARD THAT WAS WRONG.** Slice 1 refused a second
+  open stay on a zone, reasoning that two would make rest unanswerable. Both
+  halves were false: `zoneRest` already takes the LATEST end date across every
+  span, and a paddock really does carry several occupants at once — the pilot
+  runs multiple chicken tractors on one paddock, and this design's own eggmobile
+  follows the cattle onto ground they are still grazing. **The guard is now
+  about the OCCUPANT**: the same lot cannot be in two places, which is a data
+  mistake rather than a farming arrangement. Hand-entered records are exempt,
+  having no identity to compare.
+- `occupantsInStructures` answers *"what is in Pen 3"* without joining into any
+  pack, because the occupant label is a copy.
+- The wrong guard shipped with a test that asserted it, which is worth noting:
+  **a test can lock in a mistake as firmly as it prevents one.** It took a
+  requirement from someone who keeps animals to notice.
+
 ### 2026-08-15 — Slice 1: occupancy, and rest computed from it (`claude/land-occupancy-rest`)
 - **The pack stops being a register and starts answering a question.** One
   table, `land_occupancy`, and every rest and rotation number on every screen is
@@ -57,10 +84,16 @@ examples exist.
 - **The strip decision is now real.** `area_acres` on the stay, null meaning the
   whole zone. A strip grazer records 0.4 of a 10-acre paddock and no new place
   is created; a fixed-paddock user leaves it blank. One model, no branch.
-- **Only an OPEN second stay is refused.** Two open stays would make "when did
-  rest start" unanswerable, which is the only reason the guard exists.
-  Overlapping *closed* stays are allowed, because the eggmobile following the
-  cattle is a real thing this farm does.
+- **Several occupants may be on one zone at once, and the guard is about the
+  OCCUPANT, not the zone.** The same lot in two places is a data mistake and is
+  refused; two different lots on one paddock is ordinary — the pilot runs
+  several chicken tractors on a paddock, and the eggmobile follows the cattle
+  onto ground they are still grazing. Corrected 2026-08-15, after the stricter
+  rule shipped with a test asserting it. `zoneRest` was always fine with it: it
+  takes the latest end date across every span.
+- **A structure is an asset, never a place of its own.** If a "pens" table ever
+  appears in this pack, it is the same asset row a second time and the
+  depreciation will not follow it.
 - **`never_grazed` is not `resting`.** A paddock nobody has used and one resting
   200 days are different facts; collapsing them would put every new zone at the
   top of a "most rested" list on the day it was created.
@@ -141,7 +174,7 @@ examples exist.
 | `land_parcels` | One row per deed or lease | `tenant_id`, FORCE RLS (`land_parcels_superadmin_all`, `land_parcels_member_all`). CHECKs: `tenure` in `owned\|leased\|crop_share`; `status` in `active\|retired`; name non-blank; area null or **> 0** |
 | `land_zones` | Management units inside a parcel | Composite FK `land_zones_parcel_fk` on `(tenant_id, parcel_id)` → `(tenant_id, id)`, **RESTRICT**, so cross-tenant nesting is unrepresentable and a parcel cannot be deleted out from under its zones |
 | `land_zone_uses` | What a zone is for, over a date range | Composite FK to the zone, **CASCADE**. `ended_on` is **INCLUSIVE**; null means current. CHECK `ended_on >= started_on`; `use` matches `^[a-z][a-z0-9_]{0,62}$` (**format only**) |
-| `land_occupancy` | What was actually ON a zone, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
+| `land_occupancy` | What was actually ON a zone, in what structure, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
 
 Mirrored into **`dimension_members`** with `dimension_type = 'parcel'` and
 `'zone'`, in the same transaction as the write. That is what makes ground a cost

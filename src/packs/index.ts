@@ -23,7 +23,7 @@ import { LivestockModule } from "./livestock/LivestockModule";
  * The designs these come from live in docs/modules/homestead-farm.md.
  */
 export const packRegistry: Record<string, PackDefinition> = {
-  // ---- No dependencies: the substrate packs ----
+  // ---- The substrate packs ----
 
   /**
    * Parcels, zones, geometry, area. Everything spatial references it.
@@ -37,7 +37,12 @@ export const packRegistry: Record<string, PackDefinition> = {
     slug: "land",
     name: "Land",
     icon: "map",
-    requires: [],
+    // REQUIRES `assets` since 2026-08-15, because an occupancy record can name
+    // the STRUCTURE something is in — a pen, a barn, a chicken tractor — and a
+    // structure is an asset. Cattle roam a paddock loose; broilers live in a
+    // pen that sits on it. A parallel structure table here would be the same
+    // asset row a second time, without its depreciation or service schedule.
+    requires: ["assets"],
     Component: LandModule,
   },
 

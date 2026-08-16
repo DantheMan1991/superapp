@@ -17,7 +17,13 @@ import {
 } from "../src/packs/livestock/ops";
 import { createItem, movementRowsForItem, LOT_DIMENSION } from "../src/packs/inventory/ops";
 import { balanceByItem, balanceOfLot } from "../src/packs/inventory/core/balances";
-import { createParcel, createZone, restByZone } from "../src/packs/land/ops";
+import {
+  createParcel,
+  createZone,
+  currentZoneForOccupants,
+  occupantsInStructures,
+  restByZone,
+} from "../src/packs/land/ops";
 import { summariseHead, mortalityRate } from "../src/packs/livestock/core/herd";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -324,6 +330,57 @@ d("livestock ops", () => {
     );
     expect(rest.get(zoneId)?.status).toBe("resting");
     expect(rest.get(zoneId)?.restDays).toBe(10);
+  });
+
+  it("records the STRUCTURE they are in, and null means loose", async () => {
+    // The founder's own distinction: cattle roam a paddock, chickens live in a
+    // pen that sits on it. Both are ordinary, so null is a real answer.
+    const penId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.assets)
+        .values({ tenantId, kind: "chicken_tractor", name: "Pen 3" })
+        .returning();
+      return rows[0].id;
+    });
+
+    const penned = await newLot("PENNED", "poultry");
+    await asOwner((tx) =>
+      moveLotToZone(tx, ctx(), {
+        livestockLotId: penned.lot.id,
+        zoneId,
+        startedOn: "2026-08-10",
+        structureAssetId: penId,
+      }),
+    );
+
+    const loose = await newLot("LOOSE", "cattle");
+    await asOwner((tx) =>
+      moveLotToZone(tx, ctx(), {
+        livestockLotId: loose.lot.id,
+        zoneId,
+        startedOn: "2026-08-10",
+      }),
+    );
+
+    const places = await asOwner((tx) =>
+      currentZoneForOccupants(tx, tenantId, "livestock", [
+        penned.inventoryLotId,
+        loose.inventoryLotId,
+      ]),
+    );
+    expect(places.get(penned.inventoryLotId)?.structureName).toBe("Pen 3");
+    // Loose animals are still ON the zone — the LEFT join is what stops an
+    // inner join silently hiding every herd that is not in a structure.
+    expect(places.get(loose.inventoryLotId)?.zoneName).toBe("North Pasture");
+    expect(places.get(loose.inventoryLotId)?.structureName).toBeNull();
+
+    // And "what is in Pen 3" is answerable from land, without joining into
+    // livestock at all — the label is a copy.
+    const inPen = await asOwner((tx) =>
+      occupantsInStructures(tx, tenantId, [penId]),
+    );
+    expect(inPen.get(penId)?.[0].occupantLabel).toContain("PENNED");
+    expect(inPen.get(penId)?.[0].zoneName).toBe("North Pasture");
   });
 
   // ---- identifiers -------------------------------------------------------

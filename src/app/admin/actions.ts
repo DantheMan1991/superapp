@@ -44,18 +44,20 @@ function featureName(slug: string): string {
 }
 
 /** Enable one feature for one tenant, idempotently. Caller supplies the tx. */
+/** Returns whether this actually CHANGED anything, so a caller can say so. */
 async function enableRow(
   tx: Parameters<Parameters<typeof withSystem>[0]>[0],
   tenantId: string,
   moduleId: string,
   enabled: boolean,
-) {
+): Promise<boolean> {
   const existing = await tx.query.tenantModules.findFirst({
     where: and(
       eq(schema.tenantModules.tenantId, tenantId),
       eq(schema.tenantModules.moduleId, moduleId),
     ),
   });
+  const changed = existing ? existing.enabled !== enabled : true;
   if (existing) {
     await tx
       .update(schema.tenantModules)
@@ -77,6 +79,7 @@ async function enableRow(
       enabledAt: enabled ? new Date() : null,
     });
   }
+  return changed;
 }
 
 const toggleModuleSchema = z.object({
@@ -241,9 +244,14 @@ export async function installProfile(
   // about. Dependencies enable before dependents, so the invariant that
   // `toggleModule` enforces one row at a time also holds at every intermediate
   // step of the install.
+  // Which packs this actually switched on, as opposed to which the profile
+  // lists. On a re-run those are different, and the difference is the whole
+  // point of the button — reporting the list either way said "7 packs switched
+  // on" when nothing had changed.
+  const switchedOn: string[] = [];
   await withSystem(async (tx) => {
     for (const slug of order) {
-      await enableRow(tx, tenantId, slug, true);
+      if (await enableRow(tx, tenantId, slug, true)) switchedOn.push(slug);
     }
     await tx
       .update(schema.tenants)
@@ -257,13 +265,13 @@ export async function installProfile(
     actorClerkUserId: userId,
     targetType: "industry_profile",
     targetId: profile.slug,
-    meta: { packs: order },
+    meta: { packs: order, switchedOn },
   });
 
   revalidatePath(`/admin/tenants/${tenantId}`);
   revalidatePath("/admin/modules");
   revalidatePath("/admin");
-  return { ok: true, installed: order };
+  return { ok: true, installed: order, switchedOn };
 }
 
 const setStatusSchema = z.object({

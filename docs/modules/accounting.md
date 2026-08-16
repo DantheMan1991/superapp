@@ -13,7 +13,27 @@ export for the accountant.
 
 ## Build log
 
-### 2026-08-16 — A tenant can hold several companies (branch `claude/adr-entities`)
+### 2026-08-16 — `entity_id` becomes NOT NULL (branch `claude/entity-id-not-null`)
+
+The contract half of the entry below, and the reason it is a separate PR: it
+runs AFTER the deploy that writes the column. `0144`, applied to dev AND
+production, both verified before the PR opened.
+
+- **The backfill runs AGAIN, first.** Rows written between `0142` and the deploy
+  going live have a NULL `entity_id` — nothing was writing the column yet — and
+  until they are repaired they are invisible to every entity-scoped report. That
+  is the window this migration exists to close, not a belt-and-braces re-run.
+  Guarded, so it is a no-op when there is nothing to fix, which is what it was
+  on both databases.
+- Verified on production after: `entity_id` NOT NULL, 12 entries, zero nulls,
+  7 tenants with 7 entities and 7 defaults, zero rows whose entity belongs to
+  another tenant, and `verify-rls` clean across all 116 tables.
+- **The schema comment changed with it.** `ledger.ts` said the column was
+  declared NOT NULL "one release ahead of the database"; that stopped being true
+  the moment this landed, and a comment describing a state that has passed is
+  worse than none.
+
+### 2026-08-16 — A tenant can hold several companies (branch `claude/entities-slice-1`)
 
 Slice 1 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md), which the
 same day flipped from Proposed to Accepted. A tenant is the CLIENT; a legal
@@ -995,7 +1015,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | --- | --- | --- |
 | `accounts` | S1 | Chart of accounts, hierarchical. **Tenant-wide, shared by every company** (ADR 0010) — that sharing is most of what "manage ten LLCs in one place" means |
 | `entities` | 2026-08-16 | The legal entities inside one client; **the entity owns the books** ([ADR 0010](../decisions/0010-entities-inside-a-tenant.md)). At least one per tenant, exactly one `is_default` by partial unique index. Deactivate, never delete — it owns posted entries and the FK is NO ACTION. NOT a `dimension_members` type: the test is whether the trial balance has to balance within it |
-| `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger. `journal_entries.entity_id` (`0142`) says whose books — **on the ENTRY, never the line**, so an entry still balances on its own. Composite FK `(tenant_id, entity_id)`. The `SET NOT NULL` is owed in `0144`, after the deploy |
+| `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger. `journal_entries.entity_id` (`0142`) says whose books — **on the ENTRY, never the line**, so an entry still balances on its own. Composite FK `(tenant_id, entity_id)`. NOT NULL since `0144`, which ran after the deploy — `0142` had to add it nullable because migrations precede deploys |
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.). Gained `reminders_enabled` (default **false**) and `reminder_offsets` jsonb (`0114`) |
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens |
@@ -1111,7 +1131,7 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
-- **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. **`drizzle/0144` is owed after this deploy**: `SET NOT NULL` on `journal_entries.entity_id`, alongside the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK already queued below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default
+- **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. `drizzle/0144` closed the expand/contract the same day: `entity_id` is NOT NULL on both databases, with the window's backfill re-run first. Still queued in that lane: the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)

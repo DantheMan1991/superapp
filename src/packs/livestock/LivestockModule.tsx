@@ -60,7 +60,13 @@ export async function LivestockModule({
       // rows, where each lot is, and the movements behind every head figure.
       const [inventoryLots, zones, movements] = await Promise.all([
         listLots(tx, ctx.tenant.id),
-        currentZoneForOccupants(tx, ctx.tenant.id, "livestock", inventoryLotIds),
+        currentZoneForOccupants(
+          tx,
+          ctx.tenant.id,
+          "livestock",
+          inventoryLotIds,
+          today,
+        ),
         movementKindsForLots(tx, ctx.tenant.id, inventoryLotIds),
       ]);
 

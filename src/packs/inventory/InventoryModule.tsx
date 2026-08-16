@@ -13,6 +13,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
 import { listItems, listKindsInUse, listLocations, onHandByItem } from "./ops";
 import { slugLabel } from "./vocabulary";
 import { formatQuantity } from "./core/units";
@@ -38,10 +40,10 @@ export async function InventoryModule({
   const kind = typeof kindParam === "string" ? kindParam : undefined;
   const showArchived = searchParams.archived === "1";
 
-  const { items, onHand, kinds, locations } = await withTenant(
+  const { items, onHand, kinds, locations, labels } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [items, onHand, kinds, locations] = await Promise.all([
+      const [items, onHand, kinds, locations, pack] = await Promise.all([
         listItems(tx, ctx.tenant.id, {
           kind,
           status: showArchived ? undefined : "active",
@@ -49,13 +51,15 @@ export async function InventoryModule({
         onHandByItem(tx, ctx.tenant.id),
         listKindsInUse(tx, ctx.tenant.id),
         listLocations(tx, ctx.tenant.id),
+        packContext(tx, ctx.tenant.id, ctx.tenant.industry, "inventory"),
       ]);
-      return { items, onHand, kinds, locations };
+      return { items, onHand, kinds, locations, labels: pack.labels };
     },
     { role: ctx.role },
   );
 
   const isOwner = ctx.role === "owner";
+  const itemWord = labelFor(labels, "item", "Item");
 
   return (
     <div className="space-y-6">
@@ -76,7 +80,7 @@ export async function InventoryModule({
           title="Nothing tracked yet"
           description={
             isOwner
-              ? "Add the first thing you hold — feed, cartons, meat in a freezer. What it is measured in decides how every number about it reads, so it is worth a moment."
+              ? `Add the first ${itemWord.toLowerCase()} you hold — feed, cartons, meat in a freezer. What it is measured in decides how every number about it reads, so it is worth a moment.`
               : "An owner adds what the business holds. Once they do, it shows up here."
           }
         />
@@ -84,7 +88,7 @@ export async function InventoryModule({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Item</TableHead>
+              <TableHead>{itemWord}</TableHead>
               <TableHead>Kind</TableHead>
               <TableHead>Keeps</TableHead>
               <TableHead className="text-right">On hand</TableHead>

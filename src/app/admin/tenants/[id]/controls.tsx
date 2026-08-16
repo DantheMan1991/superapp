@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import {
   addTenantNote,
   convertProspectToClient,
+  installProfile,
+  setTenantLabels,
   setTenantStatus,
   toggleModule,
 } from "../../actions";
@@ -163,5 +165,171 @@ export function AddNoteForm({ tenantId }: { tenantId: string }) {
         {pending ? "Saving…" : "Add note"}
       </Button>
     </form>
+  );
+}
+
+/**
+ * Install an industry profile.
+ *
+ * `installProfile` has existed, superadmin-guarded and audited, since Layer 2
+ * shipped — with NO CALLER. A profile could only be installed by invoking the
+ * action directly, which is why the pilot tenant ran four packs for a day with
+ * `industry` still set to `general` and every profile-supplied word and setting
+ * missing. This is the button.
+ */
+export function ProfileInstaller({
+  tenantId,
+  currentIndustry,
+  profiles,
+}: {
+  tenantId: string;
+  currentIndustry: string;
+  profiles: { slug: string; name: string; description: string; packs: string[] }[];
+}) {
+  const [pending, startTransition] = useTransition();
+  const [slug, setSlug] = useState(
+    profiles.some((p) => p.slug === currentIndustry) ? currentIndustry : "",
+  );
+  const chosen = profiles.find((p) => p.slug === slug);
+  const already = currentIndustry === slug;
+
+  return (
+    <div className="space-y-3">
+      <Select value={slug} onValueChange={setSlug}>
+        <SelectTrigger>
+          <SelectValue placeholder="Pick a profile" />
+        </SelectTrigger>
+        <SelectContent>
+          {profiles.map((p) => (
+            <SelectItem key={p.slug} value={p.slug}>
+              {p.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {chosen && (
+        <div className="space-y-1 text-sm text-muted-foreground">
+          <p>{chosen.description}</p>
+          <p>
+            {/* Named before the button is pressed. Installing switches on
+                every pack listed, and that is a change to what the client
+                sees. */}
+            Switches on: {chosen.packs.join(", ")}.
+          </p>
+          <p>
+            Installing is additive and can be re-run — it never switches
+            anything off, because a pack the tenant disabled is a decision
+            rather than drift.
+          </p>
+        </div>
+      )}
+
+      <Button
+        size="sm"
+        disabled={pending || !slug}
+        onClick={() =>
+          startTransition(async () => {
+            const result = await installProfile({ tenantId, profileSlug: slug });
+            if ("error" in result) toast.error(result.error);
+            else
+              toast.success(
+                `Installed — ${result.installed?.length ?? 0} packs switched on`,
+              );
+          })
+        }
+      >
+        {pending
+          ? "Installing…"
+          : already
+            ? "Re-run install"
+            : "Install profile"}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Edit a tenant's vocabulary.
+ *
+ * The fields come from what the FEATURES declare, so this screen lists exactly
+ * what is renameable rather than requiring somebody to know. Before the
+ * registry existed the answer to "what words can I change" was a grep for
+ * `labelFor`, and the honest answer was "one".
+ */
+export function VocabularyEditor({
+  tenantId,
+  labels,
+  values,
+}: {
+  tenantId: string;
+  labels: {
+    key: string;
+    fallback: string;
+    describes: string;
+    ownerName?: string;
+  }[];
+  values: Record<string, string>;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [draft, setDraft] = useState<Record<string, string>>(values);
+
+  if (labels.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No features with renameable words are switched on for this client.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {labels.map((label) => (
+        <div key={label.key} className="grid gap-1">
+          <label
+            htmlFor={`label-${label.key}`}
+            className="text-sm font-medium"
+          >
+            {label.fallback}
+            {label.ownerName && (
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {label.ownerName}
+              </span>
+            )}
+          </label>
+          <Input
+            id={`label-${label.key}`}
+            value={draft[label.key] ?? ""}
+            placeholder={label.fallback}
+            maxLength={60}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, [label.key]: e.target.value }))
+            }
+          />
+          <p className="text-xs text-muted-foreground">{label.describes}</p>
+        </div>
+      ))}
+
+      <p className="text-xs text-muted-foreground">
+        {/* Empty means the default, and saying so is what stops somebody
+            typing the default word back in to "clear" it. */}
+        Leave a field empty to use the word on the left. Changes apply
+        everywhere that word appears, immediately.
+      </p>
+
+      <Button
+        size="sm"
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            const result = await setTenantLabels({ tenantId, labels: draft });
+            if ("error" in result) toast.error(result.error);
+            else toast.success("Vocabulary saved");
+          })
+        }
+      >
+        {pending ? "Saving…" : "Save vocabulary"}
+      </Button>
+    </div>
   );
 }

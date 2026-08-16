@@ -1,4 +1,5 @@
 import type { ModuleDefinition } from "@/modules/types";
+import type { LabelDefinition } from "@/lib/packs/resolve";
 
 /**
  * Layer 2a — a capability pack.
@@ -22,6 +23,8 @@ export interface PackDefinition {
   /** lucide icon name used in nav (kept as string to stay serializable). */
   icon: string;
   layout?: ModuleDefinition["layout"];
+  /** Words this pack lets a tenant rename. See ModuleDefinition.labels. */
+  labels?: LabelDefinition[];
   /**
    * Packs that must be enabled first, by slug.
    *

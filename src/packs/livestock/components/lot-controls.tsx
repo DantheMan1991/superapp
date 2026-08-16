@@ -508,11 +508,14 @@ export function MoveToZoneForm({
   livestockLotId,
   zones,
   structures,
+  structureWord,
   today,
 }: {
   livestockLotId: string;
   zones: { id: string; name: string; parcelName: string }[];
   structures: { id: string; name: string }[];
+  /** The tenant's own word for a pen, from the vocabulary registry. */
+  structureWord: string;
   today: string;
 }) {
   const router = useRouter();
@@ -594,7 +597,7 @@ export function MoveToZoneForm({
             </div>
             {structures.length > 0 && (
               <div className="grid gap-2">
-                <Label htmlFor="structure">In a pen or barn</Label>
+                <Label htmlFor="structure">In a {structureWord.toLowerCase()}</Label>
                 <Select name="structureAssetId" defaultValue={NONE}>
                   <SelectTrigger id="structure">
                     <SelectValue />

@@ -70,6 +70,7 @@ export async function LandModule({
   );
 
   const unit = areaUnitFrom(config);
+  const parcelWord = labelFor(labels, "parcel", "Parcel");
   const zoneWord = labelFor(labels, "zone", "Zone");
   const zonesWord = `${zoneWord}s`;
   const isOwner = ctx.role === "owner";
@@ -82,7 +83,7 @@ export async function LandModule({
         title="Land"
         description={
           parcels.length > 0
-            ? `${parcels.length} ${parcels.length === 1 ? "parcel" : "parcels"} · ${formatAreaTotal(total, unit)}`
+            ? `${parcels.length} ${parcels.length === 1 ? parcelWord.toLowerCase() : `${parcelWord.toLowerCase()}s`} · ${formatAreaTotal(total, unit)}`
             : "The ground the business holds, and what each part of it is for."
         }
         actions={isOwner ? <ParcelForm unit={unit} /> : null}
@@ -95,7 +96,7 @@ export async function LandModule({
           title="No ground recorded yet"
           description={
             isOwner
-              ? `Add the first parcel — a deed or a lease. Divide it into ${zonesWord.toLowerCase()} and everything that happens on the ground has somewhere to land.`
+              ? `Add the first ${parcelWord.toLowerCase()} — a deed or a lease. Divide it into ${zonesWord.toLowerCase()} and everything that happens on the ground has somewhere to land.`
               : "An owner adds the parcels the business holds. Once they do, they show up here."
           }
         />
@@ -103,7 +104,7 @@ export async function LandModule({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Parcel</TableHead>
+              <TableHead>{parcelWord}</TableHead>
               <TableHead>Tenure</TableHead>
               <TableHead className="text-right">{zonesWord}</TableHead>
               <TableHead className="text-right">Area</TableHead>

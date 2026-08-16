@@ -4,6 +4,8 @@ import { ChevronLeft } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -84,7 +86,7 @@ export default async function LivestockLotPage({
         lot.inventoryLotId,
       );
       if (!inventoryLot) return null;
-      const [identifiers, movements, entries, zones, parcels, allZones, structures] =
+      const [identifiers, movements, entries, zones, parcels, allZones, structures, pack] =
         await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
           movementKindsForLots(tx, ctx.tenant.id, [lot.inventoryLotId]),
@@ -98,6 +100,7 @@ export default async function LivestockLotPage({
           listParcels(tx, ctx.tenant.id, { status: "active" }),
           listZones(tx, ctx.tenant.id, { status: "active" }),
           listStructures(tx, ctx.tenant.id),
+          packContext(tx, ctx.tenant.id, ctx.tenant.industry, "livestock"),
         ]);
       return {
         lot,
@@ -109,6 +112,7 @@ export default async function LivestockLotPage({
         parcels,
         allZones,
         structures,
+        labels: pack.labels,
       };
     },
     { role: ctx.role },
@@ -125,9 +129,11 @@ export default async function LivestockLotPage({
     parcels,
     allZones,
     structures,
+    labels,
   } = data;
 
   const isOwner = ctx.role === "owner";
+  const structureWord = labelFor(labels, "structure", "Pen or barn");
   const summary = summariseHead(movements);
   const rate = mortalityRate(summary);
   const preferred = preferredIdentifier(identifiers);
@@ -187,6 +193,7 @@ export default async function LivestockLotPage({
                   livestockLotId={lot.id}
                   zones={zoneOptions}
                   structures={structures.map((s) => ({ id: s.id, name: s.name }))}
+                  structureWord={structureWord}
                   today={today}
                 />
               )}

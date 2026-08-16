@@ -87,6 +87,19 @@ Roles within a tenant are `owner` | `staff` | `expert`:
 `owner` is the business owner. The distinction is enforced in RLS via
 `app.tenant_role`, not just in the UI.
 
+### A tenant is the client, not the legal entity
+
+One tenant currently means one set of books, and that stops being true the first
+time a client arrives with a property LLC per door. **The tenant is the client
+relationship; a legal entity lives inside it and owns the books** — see ADR
+[0010](decisions/0010-entities-inside-a-tenant.md), which also explains why
+entity is not a `dimension_members` type.
+
+Nothing is built yet, and the single-entity client — every client today — will
+never see the distinction. What it means while it is unbuilt: **do not write
+anything new that assumes a tenant has exactly one balance sheet**, and when
+adding a table with a balance on it, expect it to carry an entity later.
+
 ---
 
 ## 5. Request lifecycle

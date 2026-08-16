@@ -218,6 +218,12 @@ Paste these into the PR. They are the actual gate.
       what proves ownership, so never `withSystem` a client-supplied id
 - [ ] `logAudit()` / `logAuditInTx()` for anything sensitive or financial
 - [ ] Errors do not leak internals to the client (no raw PG errors)
+- [ ] **In a capability pack**: the op declares a write level through
+      `allowsWrite()` (`src/lib/packs/authorize.ts`) rather than testing
+      `ctx.role` by hand. Ask *is this a decision, or is it a chore?* Anything
+      that creates a cost object is a decision — `upsertDimensionMember`
+      requires the owner role, so the write would succeed where its cost object
+      could not
 
 ### Adding a route handler (`src/app/api/**`)
 

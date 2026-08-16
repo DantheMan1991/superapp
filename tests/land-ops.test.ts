@@ -183,7 +183,10 @@ d("land ops", () => {
 
   // ---- role ------------------------------------------------------------
 
-  it("refuses a staff write on every entity", async () => {
+  it("refuses a staff write on every entity the FARM is made of", async () => {
+    // Land's shape is a decision — a parcel is a deed, a zone is a fence, a
+    // use is what the ground is for this season. None of it is a chore, and
+    // all of it carries a cost object. See src/lib/packs/authorize.ts.
     const parcel = await newParcel("Owner Only");
     await expect(
       asOwner((tx) =>
@@ -872,19 +875,31 @@ d("land ops", () => {
     );
   });
 
-  it("refuses staff writes on occupancy too", async () => {
+  it("lets STAFF move animals on and off, because that is the chore", async () => {
+    // Settled 2026-08-15, reversing the slice-0 rule. Moving the herd to the
+    // next paddock is the single most frequent act on a rotational farm, and
+    // the person doing it is holding a reel of polywire, not the chequebook.
+    // Rest days are computed from these rows, so a rule that stops the hand
+    // recording them stops the whole page from meaning anything.
     const parcel = await newParcel("Occupancy Role");
     const zone = await asOwner((tx) =>
       createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
     );
+    const stay = await asOwner((tx) =>
+      startOccupancy(tx, staffCtx(), zone.id, {
+        occupantLabel: "The herd",
+        startedOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) => endOccupancy(tx, staffCtx(), stay.id, "2026-08-03"));
+    await asOwner((tx) => deleteOccupancy(tx, staffCtx(), stay.id));
+
+    // But the fence itself is still the owner's.
     await expect(
       asOwner((tx) =>
-        startOccupancy(tx, staffCtx(), zone.id, {
-          occupantLabel: "Nope",
-          startedOn: "2026-08-01",
-        }),
+        createZone(tx, staffCtx(), { parcelId: parcel.id, name: "Nope" }),
       ),
-    ).rejects.toThrow(LandError);
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("collects completed stay lengths per parcel, ignoring open ones", async () => {

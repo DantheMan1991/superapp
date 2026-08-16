@@ -1,6 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   InventoryItem,
   InventoryLot,
@@ -71,9 +72,9 @@ export interface InventoryCtx {
  * or that a bag of feed was opened is daily work for whoever is doing it, and
  * at 10x that person is not the owner. Slice 1 is where that starts to bite.
  */
-function requireOwner(ctx: InventoryCtx): void {
-  if (ctx.role !== "owner") {
-    throw new InventoryError("FORBIDDEN", "owner role required");
+function requireWrite(ctx: InventoryCtx, level: WriteLevel): void {
+  if (!allowsWrite(ctx.role, level)) {
+    throw new InventoryError("FORBIDDEN", "only an owner can change this");
   }
 }
 
@@ -122,7 +123,7 @@ export async function createItem(
   ctx: InventoryCtx,
   input: ItemInput,
 ): Promise<InventoryItem> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const itemKind = (input.itemKind ?? "supply").trim().toLowerCase();
   if (!isValidSlug(itemKind)) {
     throw new InventoryError("INVALID_KIND", `invalid item kind: ${input.itemKind}`);
@@ -156,7 +157,7 @@ export async function updateItem(
   id: string,
   input: Partial<ItemInput>,
 ): Promise<InventoryItem> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getItem(tx, ctx.tenantId, id);
   if (!existing) throw new InventoryError("NOT_FOUND", `item ${id} not found`);
 
@@ -225,7 +226,7 @@ export async function archiveItem(
   ctx: InventoryCtx,
   id: string,
 ): Promise<InventoryItem> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getItem(tx, ctx.tenantId, id);
   if (!existing) throw new InventoryError("NOT_FOUND", `item ${id} not found`);
   const rows = await tx
@@ -285,7 +286,7 @@ export async function createLot(
   ctx: InventoryCtx,
   input: LotInput,
 ): Promise<InventoryLot> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const item = await getItem(tx, ctx.tenantId, input.itemId);
   if (!item) throw new InventoryError("ITEM_INVALID", "that item does not exist");
   const source = input.source ?? "purchased";
@@ -376,7 +377,7 @@ export async function closeLot(
   ctx: InventoryCtx,
   id: string,
 ): Promise<InventoryLot> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getLot(tx, ctx.tenantId, id);
   if (!existing) throw new InventoryError("NOT_FOUND", `lot ${id} not found`);
   const rows = await tx
@@ -426,7 +427,7 @@ export async function recordMovement(
   ctx: InventoryCtx,
   input: MovementInput,
 ): Promise<InventoryMovement> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const item = await getItem(tx, ctx.tenantId, input.itemId);
   if (!item) throw new InventoryError("ITEM_INVALID", "that item does not exist");
 
@@ -589,7 +590,7 @@ export async function splitLot(
     notes?: string;
   },
 ): Promise<{ parent: InventoryLot; child: InventoryLot }> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const parent = await getLot(tx, ctx.tenantId, input.lotId);
   if (!parent) throw new InventoryError("NOT_FOUND", `lot ${input.lotId} not found`);
   const quantity = roundQuantity(input.quantity);
@@ -651,7 +652,7 @@ export async function mergeLot(
     locationAssetId?: string | null;
   },
 ): Promise<void> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const from = await getLot(tx, ctx.tenantId, input.fromLotId);
   const into = await getLot(tx, ctx.tenantId, input.intoLotId);
   if (!from || !into) throw new InventoryError("NOT_FOUND", "lot not found");

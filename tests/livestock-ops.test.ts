@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
-  LivestockError,
   addIdentifier,
   createLivestockLot,
   getLivestockLot,
@@ -13,6 +12,7 @@ import {
   removeHead,
   retireIdentifier,
   splitLivestockLot,
+  updateLivestockLot,
   type LivestockCtx,
 } from "../src/packs/livestock/ops";
 import { createItem, movementRowsForItem, LOT_DIMENSION } from "../src/packs/inventory/ops";
@@ -449,7 +449,66 @@ d("livestock ops", () => {
     ).rejects.toMatchObject({ code: "INVALID_SEX" });
   });
 
-  it("refuses staff writes", async () => {
+  // ---- who may write -----------------------------------------------------
+
+  it("STAFF may record chores: place, lose, move and tag", async () => {
+    // Settled 2026-08-15. Recording that four birds died is done by whoever is
+    // standing in the pen, and at 10× that person is not the owner — a daily
+    // log only the owner can use is built for the wrong person.
+    const { lot, inventoryLotId } = await newLot("STAFF-CHORES");
+
+    await asOwner((tx) =>
+      placeHead(tx, staffCtx(), {
+        itemId,
+        inventoryLotId,
+        head: 50,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      removeHead(tx, staffCtx(), {
+        itemId,
+        inventoryLotId,
+        head: 2,
+        reason: "death",
+        occurredOn: "2026-08-02",
+      }),
+    );
+    await asOwner((tx) =>
+      moveLotToZone(tx, staffCtx(), {
+        livestockLotId: lot.id,
+        zoneId,
+        startedOn: "2026-08-03",
+        endedOn: "2026-08-04",
+      }),
+    );
+    const tag = await asOwner((tx) =>
+      addIdentifier(tx, staffCtx(), {
+        livestockLotId: lot.id,
+        identifierKind: "visual",
+        value: "S-1",
+      }),
+    );
+    await asOwner((tx) => retireIdentifier(tx, staffCtx(), tag.id, "2026-08-05"));
+
+    const rows = await asOwner((tx) => movementRowsForItem(tx, tenantId, itemId));
+    expect(balanceOfLot(rows, inventoryLotId)).toBe(48);
+  });
+
+  it("STAFF may not make decisions: create, edit or split a lot", async () => {
+    // Creating a lot creates a cost object, and `upsertDimensionMember`
+    // requires the owner role — the write would succeed while its cost object
+    // did not, leaving something no report can group by.
+    const { lot, inventoryLotId } = await newLot("STAFF-DENIED");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 10,
+        occurredOn: "2026-08-01",
+      }),
+    );
+
     await expect(
       asOwner((tx) =>
         createLivestockLot(tx, staffCtx(), {
@@ -458,7 +517,46 @@ d("livestock ops", () => {
           species: "poultry",
         }),
       ),
-    ).rejects.toThrow(LivestockError);
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await expect(
+      asOwner((tx) =>
+        updateLivestockLot(tx, staffCtx(), lot.id, { breed: "Something else" }),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    // Splitting is a chore in spirit and a decision in the books. Kept with the
+    // owner deliberately: it happens at batch placement, a handful of times a
+    // season, not thirty times a day.
+    await expect(
+      asOwner((tx) =>
+        splitLivestockLot(tx, staffCtx(), {
+          livestockLotId: lot.id,
+          head: 5,
+          newCode: "NOPE-PEN",
+          occurredOn: "2026-08-02",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("an EXPERT is not an owner here either", async () => {
+    // The platform's own bookkeeper reviews books; they do not decide that the
+    // farm has bought a parcel. They may still record, like any member.
+    const expertCtx = (): LivestockCtx => ({
+      tenantId,
+      userId: OWNER,
+      role: "expert",
+    });
+    await expect(
+      asOwner((tx) =>
+        createLivestockLot(tx, expertCtx(), {
+          itemId,
+          code: "EXPERT",
+          species: "poultry",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("the whole item total is unchanged by everything above", async () => {
@@ -468,6 +566,8 @@ d("livestock ops", () => {
     const rows = await asOwner((tx) => movementRowsForItem(tx, tenantId, itemId));
     const total = balanceByItem(rows).get(itemId);
     // 210 - 4 (B-2) + 100 - 5 (B-3) + 210 (BATCH-A, split internally) + 10
-    expect(total).toBe(521);
+    // (GRAZERS) + 50 - 2 (STAFF-CHORES) + 10 (STAFF-DENIED, nothing denied
+    // moved head).
+    expect(total).toBe(579);
   });
 });

@@ -132,6 +132,14 @@ export default async function LivestockLotPage({
     labels,
   } = data;
 
+  /**
+   * Chores are for whoever is doing them; decisions are the owner's.
+   *
+   * Placing head, recording a loss, moving a lot and tagging an animal are all
+   * ungated — anyone in the workspace can record what they just did. Only
+   * SPLITTING is owner-gated, because it creates a new lot and therefore a cost
+   * object. See src/lib/packs/authorize.ts.
+   */
   const isOwner = ctx.role === "owner";
   const structureWord = labelFor(labels, "structure", "Pen or barn");
   const summary = summariseHead(movements);
@@ -169,36 +177,34 @@ export default async function LivestockLotPage({
           </span>
         }
         actions={
-          isOwner ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <PlaceHeadForm
-                itemId={inventoryLot.itemId}
-                inventoryLotId={inventoryLot.id}
+          <div className="flex flex-wrap items-center gap-2">
+            <PlaceHeadForm
+              itemId={inventoryLot.itemId}
+              inventoryLotId={inventoryLot.id}
+              today={today}
+            />
+            <RemoveHeadForm
+              itemId={inventoryLot.itemId}
+              inventoryLotId={inventoryLot.id}
+              today={today}
+            />
+            {isOwner && summary.balance > 0 && (
+              <SplitHerdForm
+                livestockLotId={lot.id}
+                balance={summary.balance}
                 today={today}
               />
-              <RemoveHeadForm
-                itemId={inventoryLot.itemId}
-                inventoryLotId={inventoryLot.id}
+            )}
+            {zoneOptions.length > 0 && (
+              <MoveToZoneForm
+                livestockLotId={lot.id}
+                zones={zoneOptions}
+                structures={structures.map((s) => ({ id: s.id, name: s.name }))}
+                structureWord={structureWord}
                 today={today}
               />
-              {summary.balance > 0 && (
-                <SplitHerdForm
-                  livestockLotId={lot.id}
-                  balance={summary.balance}
-                  today={today}
-                />
-              )}
-              {zoneOptions.length > 0 && (
-                <MoveToZoneForm
-                  livestockLotId={lot.id}
-                  zones={zoneOptions}
-                  structures={structures.map((s) => ({ id: s.id, name: s.name }))}
-                  structureWord={structureWord}
-                  today={today}
-                />
-              )}
-            </div>
-          ) : null
+            )}
+          </div>
         }
       />
 
@@ -272,7 +278,7 @@ export default async function LivestockLotPage({
           <h2 className="text-sm font-medium">
             Tags {identifiers.length > 0 && `(${identifiers.length})`}
           </h2>
-          {isOwner && <IdentifierForm livestockLotId={lot.id} today={today} />}
+          <IdentifierForm livestockLotId={lot.id} today={today} />
         </div>
         {identifiers.length === 0 ? (
           <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">

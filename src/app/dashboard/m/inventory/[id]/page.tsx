@@ -88,6 +88,11 @@ export default async function InventoryItemPage({
   if (!data) notFound();
   const { item, lots, rows, movements, locations } = data;
 
+  /**
+   * Recording stock in and out is a chore and is ungated. Starting a batch or
+   * splitting one creates a cost object, so both stay with the owner.
+   * See src/lib/packs/authorize.ts.
+   */
   const isOwner = ctx.role === "owner";
   const unit = item.stockingUnit;
   const unitLabel = getUnit(unit)?.plural ?? unit;

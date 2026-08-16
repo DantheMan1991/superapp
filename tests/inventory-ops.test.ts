@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
-  InventoryError,
   LOT_DIMENSION,
   archiveItem,
   closeLot,
@@ -466,26 +465,62 @@ d("inventory ops", () => {
     expect((await asOwner((tx) => listLots(tx, tenantId, { itemId: item.id })))).toHaveLength(1);
   });
 
-  it("refuses staff writes everywhere", async () => {
+  it("lets STAFF record a movement, because feeding out is a chore", async () => {
+    // Settled 2026-08-15. Every ledger row here is somebody reporting what
+    // they physically did with a bag of feed. Requiring the owner for that
+    // does not make the count safer, it makes the count empty.
+    const item = await newItem("Chore check");
+    const movement = await asOwner((tx) =>
+      recordMovement(tx, staffCtx(), {
+        itemId: item.id,
+        quantity: -1,
+        movementKind: "consumption",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    expect(movement.quantity).toBe(-1);
+  });
+
+  it("keeps items and lots with the OWNER, because both are cost objects", async () => {
+    // A lot is a dimension member — `upsertDimensionMember` requires the owner
+    // role, so a staff-created lot would exist with nothing to group it by.
+    // Splitting creates a lot, so it is on this side of the line even though
+    // it feels like a chore. See src/lib/packs/authorize.ts.
     const item = await newItem("Role check");
+    const lot = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), { itemId: item.id, code: "SPLIT-SRC" }),
+    );
+    await asOwner((tx) =>
+      recordMovement(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: lot.id,
+        quantity: 10,
+        movementKind: "receipt",
+        occurredOn: "2026-08-01",
+      }),
+    );
+
     await expect(
       asOwner((tx) =>
         createItem(tx, staffCtx(), { name: "Nope", stockingUnit: "lb" }),
       ),
-    ).rejects.toThrow(InventoryError);
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
       asOwner((tx) => createLot(tx, staffCtx(), { itemId: item.id, code: "N" })),
-    ).rejects.toThrow(InventoryError);
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      asOwner((tx) => archiveItem(tx, staffCtx(), item.id)),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
       asOwner((tx) =>
-        recordMovement(tx, staffCtx(), {
-          itemId: item.id,
-          quantity: 1,
-          movementKind: "receipt",
-          occurredOn: "2026-08-01",
+        splitLot(tx, staffCtx(), {
+          lotId: lot.id,
+          quantity: 4,
+          newCode: "SPLIT-DST",
+          occurredOn: "2026-08-02",
         }),
       ),
-    ).rejects.toThrow(InventoryError);
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("stores quantities at the column's scale", async () => {

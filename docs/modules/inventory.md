@@ -24,6 +24,21 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-15 — Feeding out is a chore; a lot is still a decision (`claude/pack-write-levels`)
+
+Platform-wide change; the reasoning is in
+[packs-and-profiles.md](packs-and-profiles.md). What it means here:
+
+- **`recordMovement` and `mergeLot` are open to any member.** Every ledger row
+  in this pack is somebody reporting what they physically did with a bag of
+  feed. Requiring the owner for that does not make the count safer, it makes the
+  count empty.
+- **`createItem`, `updateItem`, `archiveItem`, `createLot`, `closeLot` and
+  `splitLot` stay owner-only.** A lot is a dimension member, and
+  `upsertDimensionMember` requires the owner role — a staff-created lot would
+  exist with nothing to group it by. `splitLot` is on this side because it makes
+  a lot, not because it feels like a decision.
+
 ### 2026-08-15 — Slice 0: items, the lot spine, and the ledger (`claude/inventory-lot-spine`)
 - **`livestock` is now unblocked.** That was the point of building this pack
   ahead of the one that needs it, and it is why the lot spine was folded into
@@ -119,12 +134,10 @@ without sitting on a shelf.
 
 - **Nobody has driven slice 0 yet.** Written, migrated against both databases,
   covered by 61 tests — but every bug found this week was found by clicking.
-- **Writes are owner-only, and this pack is where that starts to hurt.**
-  Recording four dead birds or an opened bag of feed is daily work, and at 10×
-  the person doing it is not the owner. Forced from below today
-  (`upsertDimensionMember` requires the owner role), so relaxing it means
-  deciding what staff may write and what still syncs a cost object. **Slice 1 is
-  where this bites.**
+- ~~Writes are owner-only, and this pack is where that starts to hurt~~ —
+  **settled 2026-08-15**, see `docs/modules/livestock.md` for the reasoning.
+  Movements and merges are chores; items, lots, archiving and splits stay with
+  the owner because each of them creates or retires a cost object.
 - **Merge is not in the UI.** `mergeLot` exists, is tested, and has no caller —
   splits are what `livestock` needs first.
 - **No transfer between locations.** Moving stock from the barn to a freezer is

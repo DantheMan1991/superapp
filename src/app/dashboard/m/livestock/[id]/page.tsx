@@ -22,7 +22,12 @@ import {
   movementKindsForLots,
 } from "@/packs/inventory/ops";
 import { movementKindLabel, slugLabel } from "@/packs/inventory/vocabulary";
-import { currentZoneForOccupants, listParcels, listZones } from "@/packs/land/ops";
+import {
+  currentZoneForOccupants,
+  listParcels,
+  listStructures,
+  listZones,
+} from "@/packs/land/ops";
 import { getLivestockLot, listIdentifiers } from "@/packs/livestock/ops";
 import {
   ageInDays,
@@ -79,7 +84,7 @@ export default async function LivestockLotPage({
         lot.inventoryLotId,
       );
       if (!inventoryLot) return null;
-      const [identifiers, movements, entries, zones, parcels, allZones] =
+      const [identifiers, movements, entries, zones, parcels, allZones, structures] =
         await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
           movementKindsForLots(tx, ctx.tenant.id, [lot.inventoryLotId]),
@@ -92,6 +97,7 @@ export default async function LivestockLotPage({
           ]),
           listParcels(tx, ctx.tenant.id, { status: "active" }),
           listZones(tx, ctx.tenant.id, { status: "active" }),
+          listStructures(tx, ctx.tenant.id),
         ]);
       return {
         lot,
@@ -102,14 +108,24 @@ export default async function LivestockLotPage({
         zone: zones.get(lot.inventoryLotId) ?? null,
         parcels,
         allZones,
+        structures,
       };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { lot, inventoryLot, identifiers, movements, entries, zone, parcels, allZones } =
-    data;
+  const {
+    lot,
+    inventoryLot,
+    identifiers,
+    movements,
+    entries,
+    zone,
+    parcels,
+    allZones,
+    structures,
+  } = data;
 
   const isOwner = ctx.role === "owner";
   const summary = summariseHead(movements);
@@ -170,6 +186,7 @@ export default async function LivestockLotPage({
                 <MoveToZoneForm
                   livestockLotId={lot.id}
                   zones={zoneOptions}
+                  structures={structures.map((s) => ({ id: s.id, name: s.name }))}
                   today={today}
                 />
               )}
@@ -232,8 +249,11 @@ export default async function LivestockLotPage({
           <CardContent>
             <p className="text-2xl font-medium">{zone ? zone.zoneName : "—"}</p>
             <p className="mt-1 text-sm text-muted-foreground">
+              {/* "Loose" is stated rather than left blank. Cattle roaming a
+                  paddock is a real answer, and an empty space would read as a
+                  record somebody forgot to finish. */}
               {zone
-                ? `Since ${zone.startedOn}`
+                ? `${zone.structureName ? `In ${zone.structureName}` : "Loose"} · since ${zone.startedOn}`
                 : "Not on a paddock. Moving them off is what starts a paddock's rest clock."}
             </p>
           </CardContent>

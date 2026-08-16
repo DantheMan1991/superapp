@@ -661,8 +661,14 @@ d("land ops", () => {
     ).toHaveLength(1);
   });
 
-  it("refuses a second open stay, because two would make rest unanswerable", async () => {
-    const parcel = await newParcel("Double Booked");
+  it("ALLOWS several occupants on one zone at the same time", async () => {
+    // Corrected 2026-08-15. This first refused a second open stay on a zone,
+    // reasoning that two would make rest unanswerable. Both halves were wrong:
+    // `zoneRest` takes the LATEST end date across every span, and a paddock
+    // really does carry several occupants at once — the pilot runs multiple
+    // chicken tractors on one paddock, and the eggmobile follows the cattle
+    // onto ground they are still grazing.
+    const parcel = await newParcel("Shared Ground");
     const zone = await asOwner((tx) =>
       createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Busy" }),
     );
@@ -670,16 +676,81 @@ d("land ops", () => {
       startOccupancy(tx, ownerCtx(), zone.id, {
         occupantLabel: "Cow herd",
         startedOn: "2026-08-01",
+        occupantType: "lot",
+        occupantId: "11111111-1111-1111-1111-111111111111",
+      }),
+    );
+    const second = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Layer flock",
+        startedOn: "2026-08-05",
+        occupantType: "lot",
+        occupantId: "22222222-2222-2222-2222-222222222222",
+      }),
+    );
+    expect(second.occupantLabel).toBe("Layer flock");
+
+    // And the zone reads as occupied, once, rather than being confused by two.
+    const rest = await asOwner((tx) =>
+      restByZone(tx, tenantId, [zone.id], "2026-08-15"),
+    );
+    expect(rest.get(zone.id)?.status).toBe("occupied");
+  });
+
+  it("refuses the SAME occupant being put somewhere twice", async () => {
+    // That is a data mistake rather than a farming arrangement: a lot cannot be
+    // on two paddocks at once, and recording it means the first move was never
+    // closed.
+    const parcel = await newParcel("Double Booked");
+    const a = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "A" }),
+    );
+    const b = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "B" }),
+    );
+    const lotId = "33333333-3333-3333-3333-333333333333";
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), a.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-01",
+        extensionSlug: "livestock",
+        occupantType: "lot",
+        occupantId: lotId,
       }),
     );
     await expect(
       asOwner((tx) =>
-        startOccupancy(tx, ownerCtx(), zone.id, {
-          occupantLabel: "Layer flock",
+        startOccupancy(tx, ownerCtx(), b.id, {
+          occupantLabel: "Cow herd",
           startedOn: "2026-08-05",
+          extensionSlug: "livestock",
+          occupantType: "lot",
+          occupantId: lotId,
         }),
       ),
     ).rejects.toMatchObject({ code: "ALREADY_OCCUPIED" });
+  });
+
+  it("exempts hand-entered records, which have no identity to compare", async () => {
+    // A typed name is not an identity, and a wrong record can simply be
+    // removed. Refusing here would block the day-one manual path for no gain.
+    const parcel = await newParcel("Manual Twice");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Z" }),
+    );
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-01",
+      }),
+    );
+    const second = await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), zone.id, {
+        occupantLabel: "Cow herd",
+        startedOn: "2026-08-02",
+      }),
+    );
+    expect(second.id).toBeTruthy();
   });
 
   it("allows a CLOSED stay alongside an open one", async () => {

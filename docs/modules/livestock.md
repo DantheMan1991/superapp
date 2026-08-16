@@ -61,7 +61,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | How many head? | `inventory_movements`, folded by `core/herd.ts` |
 | Which batch, and what did it come from? | `inventory_lots` |
 | What did this pen cost? | `dimension_members`, synced by `inventory` |
-| Which paddock are they on? | `land_occupancy`, via `land`'s own query |
+| Which paddock are they on, and in what pen? | `land_occupancy`, via `land's own query |
 | How long has that paddock rested? | `land`, computed from the same record |
 
 ## Key files & seams

@@ -627,6 +627,12 @@ export interface OccupancyInput {
   endedOn?: string | null;
   /** How much of the zone. Null (the default) means all of it. */
   areaAcres?: number | null;
+  /**
+   * The structure they are in, while on the zone — a pen, a barn, a chicken
+   * tractor. Null means loose on the zone, which is what cattle do and is not
+   * a missing value.
+   */
+  structureAssetId?: string | null;
   notes?: string;
   /** Defaults to the hand-entered shape. `livestock` passes its own. */
   extensionSlug?: string;
@@ -705,19 +711,33 @@ export async function startOccupancy(
     );
   }
 
-  // Only an OPEN stay blocks another. A closed one is history.
-  if (!input.endedOn) {
+  // THE GUARD IS ABOUT THE OCCUPANT, NOT THE ZONE — corrected 2026-08-15.
+  //
+  // It first refused a second open stay on the same ZONE, reasoning that two of
+  // them make "when did rest start" unanswerable. That reasoning was wrong on
+  // both counts. `zoneRest` already takes the LATEST end date across every
+  // span, so several stays are fine; and a paddock really does carry several
+  // occupants at once — the pilot runs multiple chicken tractors on one
+  // paddock, and the design's own eggmobile follows the cattle onto the ground
+  // they are still grazing.
+  //
+  // What IS an error is the same lot being recorded onto ground twice without
+  // being moved off the first, which is a data mistake rather than a farming
+  // arrangement. Hand-entered records (no `occupantId`) are exempt: there is no
+  // identity to compare, and a wrong one can simply be removed.
+  if (!input.endedOn && input.occupantId) {
     const open = await tx.query.landOccupancy.findFirst({
       where: and(
         eq(schema.landOccupancy.tenantId, ctx.tenantId),
-        eq(schema.landOccupancy.zoneId, zoneId),
+        eq(schema.landOccupancy.extensionSlug, input.extensionSlug?.trim() || "land"),
+        eq(schema.landOccupancy.occupantId, input.occupantId),
         isNull(schema.landOccupancy.endedOn),
       ),
     });
     if (open) {
       throw new LandError(
         "ALREADY_OCCUPIED",
-        `${open.occupantLabel} has not been moved off yet`,
+        `${open.occupantLabel} is already somewhere and has not been moved off`,
       );
     }
   }
@@ -734,10 +754,36 @@ export async function startOccupancy(
       startedOn: input.startedOn,
       endedOn: input.endedOn ?? null,
       areaAcres: input.areaAcres ?? null,
+      structureAssetId: input.structureAssetId ?? null,
       notes: input.notes?.trim() ?? "",
     })
     .returning();
   return rows[0];
+}
+
+/**
+ * Structures something can be kept in: active assets.
+ *
+ * A pen, a barn, a chicken tractor, a greenhouse — all of them assets, which is
+ * why this pack declares `assets` in `requires`. Every active asset is offered
+ * rather than a filtered subset, because `assets.kind` is an open taxonomy and
+ * this pack has no business deciding which kinds can hold something.
+ */
+export async function listStructures(
+  tx: Tx,
+  tenantId: string,
+): Promise<{ id: string; name: string; kind: string }[]> {
+  return tx
+    .select({
+      id: schema.assets.id,
+      name: schema.assets.name,
+      kind: schema.assets.kind,
+    })
+    .from(schema.assets)
+    .where(
+      and(eq(schema.assets.tenantId, tenantId), eq(schema.assets.status, "active")),
+    )
+    .orderBy(asc(schema.assets.name));
 }
 
 /**
@@ -812,16 +858,22 @@ export async function deleteOccupancy(
  *
  * Only OPEN stays count: a herd that has moved off is not anywhere.
  */
+export interface OccupantPlace {
+  zoneId: string;
+  zoneName: string;
+  startedOn: string;
+  /** The pen or barn they are in. Null means loose on the zone. */
+  structureAssetId: string | null;
+  structureName: string | null;
+}
+
 export async function currentZoneForOccupants(
   tx: Tx,
   tenantId: string,
   extensionSlug: string,
   occupantIds: string[],
-): Promise<Map<string, { zoneId: string; zoneName: string; startedOn: string }>> {
-  const out = new Map<
-    string,
-    { zoneId: string; zoneName: string; startedOn: string }
-  >();
+): Promise<Map<string, OccupantPlace>> {
+  const out = new Map<string, OccupantPlace>();
   if (occupantIds.length === 0) return out;
   const rows = await tx
     .select({
@@ -829,6 +881,8 @@ export async function currentZoneForOccupants(
       zoneId: schema.landOccupancy.zoneId,
       zoneName: schema.landZones.name,
       startedOn: schema.landOccupancy.startedOn,
+      structureAssetId: schema.landOccupancy.structureAssetId,
+      structureName: schema.assets.name,
     })
     .from(schema.landOccupancy)
     .innerJoin(
@@ -836,6 +890,15 @@ export async function currentZoneForOccupants(
       and(
         eq(schema.landZones.tenantId, schema.landOccupancy.tenantId),
         eq(schema.landZones.id, schema.landOccupancy.zoneId),
+      ),
+    )
+    // LEFT join: being in no structure is the ordinary case for cattle, and an
+    // inner join here would silently hide every loose herd on the farm.
+    .leftJoin(
+      schema.assets,
+      and(
+        eq(schema.assets.tenantId, schema.landOccupancy.tenantId),
+        eq(schema.assets.id, schema.landOccupancy.structureAssetId),
       ),
     )
     .where(
@@ -852,8 +915,55 @@ export async function currentZoneForOccupants(
         zoneId: row.zoneId,
         zoneName: row.zoneName,
         startedOn: row.startedOn,
+        structureAssetId: row.structureAssetId,
+        structureName: row.structureName,
       });
     }
+  }
+  return out;
+}
+
+/**
+ * What is currently in each of these structures — "what is in Pen 3".
+ *
+ * The read that happens standing in front of it, and it is here rather than in
+ * `livestock` because the record is land's. The label is the occupant's own
+ * copy, so this answers without joining into any pack.
+ */
+export async function occupantsInStructures(
+  tx: Tx,
+  tenantId: string,
+  structureAssetIds: string[],
+): Promise<Map<string, { occupantLabel: string; zoneName: string }[]>> {
+  const out = new Map<string, { occupantLabel: string; zoneName: string }[]>();
+  if (structureAssetIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      structureAssetId: schema.landOccupancy.structureAssetId,
+      occupantLabel: schema.landOccupancy.occupantLabel,
+      zoneName: schema.landZones.name,
+    })
+    .from(schema.landOccupancy)
+    .innerJoin(
+      schema.landZones,
+      and(
+        eq(schema.landZones.tenantId, schema.landOccupancy.tenantId),
+        eq(schema.landZones.id, schema.landOccupancy.zoneId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.landOccupancy.tenantId, tenantId),
+        inArray(schema.landOccupancy.structureAssetId, structureAssetIds),
+        isNull(schema.landOccupancy.endedOn),
+      ),
+    );
+  for (const row of rows) {
+    if (!row.structureAssetId) continue;
+    const entry = { occupantLabel: row.occupantLabel, zoneName: row.zoneName };
+    const list = out.get(row.structureAssetId);
+    if (list) list.push(entry);
+    else out.set(row.structureAssetId, [entry]);
   }
   return out;
 }

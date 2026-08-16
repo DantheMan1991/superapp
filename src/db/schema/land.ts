@@ -53,6 +53,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
+import { assets } from "./assets";
 
 /**
  * A parcel: the legal/tenure unit. A deed, a lease, a handshake.
@@ -348,6 +349,26 @@ export const landOccupancy = pgTable(
       scale: 4,
       mode: "number",
     }),
+    /**
+     * The structure the occupant is IN, while on this zone. A pen, a barn, a
+     * chicken tractor, a greenhouse.
+     *
+     * **NULL IS A REAL AND COMMON ANSWER, not a missing one.** Cattle roam a
+     * paddock with no structure at all; broilers live in a pen that sits on
+     * the paddock. Both are ordinary, so the column is nullable and the UI must
+     * never imply that a structure was forgotten.
+     *
+     * IT IS AN ASSET, which is why `land` declares `assets` in `requires`. The
+     * design settled this before either pack was built: *"a chicken tractor is
+     * an asset (depreciates, needs repair) that holds a lot and sits on a zone
+     * with a location history."* A parallel structure table here would be that
+     * same row a second time, without the depreciation or the service
+     * schedule.
+     *
+     * On `land_occupancy` rather than on `livestock`, because it generalises:
+     * a greenhouse holds a crop planting exactly as a pen holds a flock.
+     */
+    structureAssetId: uuid("structure_asset_id"),
     notes: text("notes").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -367,11 +388,21 @@ export const landOccupancy = pgTable(
       t.extensionSlug,
       t.occupantId,
     ),
+    // "What is in Pen 3" — the read that happens standing in front of it.
+    index("land_occupancy_tenant_structure_idx").on(t.tenantId, t.structureAssetId),
     foreignKey({
       name: "land_occupancy_zone_fk",
       columns: [t.tenantId, t.zoneId],
       foreignColumns: [landZones.tenantId, landZones.id],
     }).onDelete("cascade"),
+    // Composite, so a structure is always a same-tenant asset. NO onDelete:
+    // a composite SET NULL would null `tenant_id` too, and removing a pen
+    // should require dealing with what is recorded as being in it.
+    foreignKey({
+      name: "land_occupancy_structure_fk",
+      columns: [t.tenantId, t.structureAssetId],
+      foreignColumns: [assets.tenantId, assets.id],
+    }),
     check(
       "land_occupancy_occupant_type_format",
       sql`${t.occupantType} ~ '^[a-z][a-z0-9_]{0,62}$'`,

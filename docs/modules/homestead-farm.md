@@ -116,6 +116,23 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-15 — Animals go in a pen, not only on a paddock (`claude/occupancy-structures`)
+- Founder, after driving livestock: *"sometimes there is no structure. cattle
+  just roam in the zone, but chickens are assigned to a pen."* Occupancy now
+  names an optional **structure**, which is an asset — a chicken tractor, a
+  barn, a greenhouse. The design had already written that a chicken tractor is
+  an asset that holds a lot and sits on a zone; this is that sentence built.
+- **It exposed a guard that was wrong.** Land slice 1 refused two open stays on
+  one paddock. But the pilot runs ~14 pens across 20 paddocks, and the eggmobile
+  follows the cattle onto ground they are still grazing — several occupants on
+  one paddock is the normal case here, not an error. Corrected; recorded in
+  [land.md](land.md).
+- **The profile was installed on the pilot tenant for the first time.** Until
+  now the packs had been switched on individually, so `tenants.industry` was
+  still `general` and every profile-supplied value was absent. Installing it is
+  what finally made `packConfig` and `resolveLabels` reach a screen: Land now
+  says "Paddocks", and livestock offers cattle, swine and poultry.
+
 ### 2026-08-15 — Livestock slice 0, and the pack model's bill comes due (`claude/livestock-lots`)
 - **The largest pack in the profile needed TWO TABLES.** Its slice 0 is "lots +
   head ledger + occupancy", and all three already existed — the lot and the

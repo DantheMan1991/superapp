@@ -226,6 +226,7 @@ export async function moveLotToZoneAction(input: unknown) {
       startedOn: requiredDate,
       endedOn: optionalDate.nullable(),
       areaAcres: z.number().positive().multipleOf(0.0001).nullable().optional(),
+      structureAssetId: z.string().uuid().nullable().optional(),
       notes: z.string().max(5000).optional(),
     })
     .safeParse(input);

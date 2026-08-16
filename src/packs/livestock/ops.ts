@@ -353,6 +353,11 @@ export async function moveLotToZone(
     endedOn?: string | null;
     /** Strip size for a polywire graze. Null means the whole zone. */
     areaAcres?: number | null;
+    /**
+     * The pen, barn or chicken tractor they are in. Null means loose on the
+     * paddock — which is what cattle do, and is not a missing value.
+     */
+    structureAssetId?: string | null;
     notes?: string;
   },
 ): Promise<void> {
@@ -371,6 +376,7 @@ export async function moveLotToZone(
     startedOn: input.startedOn,
     endedOn: input.endedOn ?? null,
     areaAcres: input.areaAcres ?? null,
+    structureAssetId: input.structureAssetId ?? null,
     notes: input.notes,
     // The identity `land` indexes on, and it is the INVENTORY lot id — the
     // spine, the same thing `dimension_members` points at. Using the biology

@@ -4,8 +4,8 @@ import { asc, desc, eq } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { withSystem, schema } from "@/db";
 import { getFeature, isRenderable } from "@/lib/features";
-import { listIndustryProfiles } from "@/industries";
-import { collectLabelDefinitions } from "@/lib/packs/resolve";
+import { getIndustryProfile, listIndustryProfiles } from "@/industries";
+import { collectLabelDefinitions, labelRows } from "@/lib/packs/resolve";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -151,6 +151,22 @@ export default async function TenantDetailPage({
     console.error("label key conflicts", conflicts);
   }
   const tenantLabels = (tenant.labels ?? {}) as Record<string, string>;
+
+  /**
+   * THE WORD THE CLIENT ACTUALLY SEES, which is not the pack's word.
+   *
+   * Three layers resolve into one: the pack declares `zone`, the installed
+   * profile renames it to `Paddock`, the tenant may rename it again. The editor
+   * showed only layer one, so this page told a superadmin the client's word was
+   * "Zone" while every Land screen said "Paddock" — and its own help text said
+   * that clearing a field would give you "Zone". Found by clicking, 2026-08-16.
+   */
+  const installedProfile = getIndustryProfile(tenant.industry);
+  const vocabularyRows = labelRows(
+    vocabulary,
+    installedProfile?.labels,
+    installedProfile?.name ?? null,
+  );
 
   return (
     <div className="space-y-6">
@@ -323,7 +339,7 @@ export default async function TenantDetailPage({
             <CardContent>
               <VocabularyEditor
                 tenantId={tenant.id}
-                labels={vocabulary}
+                labels={vocabularyRows}
                 values={tenantLabels}
               />
             </CardContent>

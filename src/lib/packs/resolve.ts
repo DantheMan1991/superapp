@@ -222,3 +222,45 @@ export function labelFor(
 ): string {
   return labels[key] ?? fallback;
 }
+
+/** A renameable word with the word it currently RESOLVES to, and from where. */
+export interface LabelRow extends LabelDefinition {
+  /** What an empty override box means: the profile's word, or the pack's. */
+  inherited: string;
+  /** The profile supplying `inherited`; null when it is the pack's own word. */
+  inheritedFrom: string | null;
+}
+
+/**
+ * Pair each renameable word with what it actually resolves to for a tenant.
+ *
+ * THE MIRROR OF `resolveLabels`, and it exists because the admin screen did
+ * this arithmetic in its head and got it wrong. Vocabulary has three layers —
+ * the pack declares `zone`, a profile renames it to `Paddock`, the tenant may
+ * rename it again — and the editor showed only the first, telling a superadmin
+ * the client's word was "Zone" while every Land screen said "Paddock". Its own
+ * help text then promised that clearing the box would give "Zone".
+ *
+ * `resolveLabels` answers "what word do I render?". This answers "and where did
+ * that come from?", which is the question an editor has to answer and a
+ * renderer never does. Keeping them in one file is what stops them disagreeing
+ * a second time.
+ */
+export function labelRows(
+  definitions: LabelDefinition[],
+  profileLabels: Record<string, string> | null | undefined,
+  profileName: string | null,
+): LabelRow[] {
+  return definitions.map((definition) => {
+    const fromProfile = profileLabels?.[definition.key];
+    // An empty string in a profile is not a rename. Same rule `resolveLabels`
+    // applies, and it has to be the same or the two answers diverge.
+    const overridden =
+      typeof fromProfile === "string" && fromProfile !== "" ? fromProfile : null;
+    return {
+      ...definition,
+      inherited: overridden ?? definition.fallback,
+      inheritedFrom: overridden ? profileName : null,
+    };
+  });
+}

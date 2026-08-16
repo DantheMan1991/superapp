@@ -231,11 +231,20 @@ export function ProfileInstaller({
         onClick={() =>
           startTransition(async () => {
             const result = await installProfile({ tenantId, profileSlug: slug });
-            if ("error" in result) toast.error(result.error);
-            else
-              toast.success(
-                `Installed — ${result.installed?.length ?? 0} packs switched on`,
-              );
+            if ("error" in result) {
+              toast.error(result.error);
+              return;
+            }
+            // What CHANGED, not what the profile lists. A re-run that switched
+            // nothing on used to report the full list, which made an idempotent
+            // button look like it had done something.
+            const on = result.switchedOn?.length ?? 0;
+            const listed = result.installed?.length ?? 0;
+            toast.success(
+              on === 0
+                ? `Installed — nothing to change, all ${listed} packs were already on`
+                : `Installed — ${on} of ${listed} packs switched on`,
+            );
           })
         }
       >
@@ -265,9 +274,14 @@ export function VocabularyEditor({
   tenantId: string;
   labels: {
     key: string;
+    /** The pack's own built-in word. */
     fallback: string;
     describes: string;
     ownerName?: string;
+    /** What an EMPTY box means — the profile's word, or the pack's. */
+    inherited: string;
+    /** The profile supplying `inherited`, or null when it is the pack's own. */
+    inheritedFrom: string | null;
   }[];
   values: Record<string, string>;
 }) {
@@ -290,7 +304,9 @@ export function VocabularyEditor({
             htmlFor={`label-${label.key}`}
             className="text-sm font-medium"
           >
-            {label.fallback}
+            {/* The word the CLIENT sees, not the pack's. This heading read
+                "Zone" on a farm whose every screen said "Paddock". */}
+            {draft[label.key]?.trim() || label.inherited}
             {label.ownerName && (
               <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {label.ownerName}
@@ -300,20 +316,34 @@ export function VocabularyEditor({
           <Input
             id={`label-${label.key}`}
             value={draft[label.key] ?? ""}
-            placeholder={label.fallback}
+            placeholder={label.inherited}
             maxLength={60}
             onChange={(e) =>
               setDraft((d) => ({ ...d, [label.key]: e.target.value }))
             }
           />
-          <p className="text-xs text-muted-foreground">{label.describes}</p>
+          <p className="text-xs text-muted-foreground">
+            {label.describes}
+            {label.inheritedFrom && (
+              // Where the word came from, so clearing the box is a known
+              // outcome rather than a guess. Only shown when a profile is
+              // actually overriding the pack — otherwise it is noise.
+              <>
+                {" "}
+                <span className="text-foreground/70">
+                  {label.inheritedFrom} calls this {label.inherited}; the
+                  built-in word is {label.fallback}.
+                </span>
+              </>
+            )}
+          </p>
         </div>
       ))}
 
       <p className="text-xs text-muted-foreground">
-        {/* Empty means the default, and saying so is what stops somebody
-            typing the default word back in to "clear" it. */}
-        Leave a field empty to use the word on the left. Changes apply
+        {/* Empty means the inherited word, and saying so is what stops somebody
+            typing that word back in to "clear" it. */}
+        Leave a field empty to use the word already shown in it. Changes apply
         everywhere that word appears, immediately.
       </p>
 

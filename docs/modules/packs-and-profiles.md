@@ -11,6 +11,42 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-16 — The vocabulary editor was showing the wrong words (`claude/vocabulary-truth`)
+
+Both admin surfaces from the registry PR were driven for the first time. Both
+work; both said something untrue.
+
+**The editor showed the PACK's word, not the client's.** A homestead farm whose
+every Land screen says *Paddock* had a field headed **Zone**, placeholder
+**Zone**, under a heading reading *"The words this client sees."* Its help text
+then promised that clearing the box would give you "Zone" — clearing it gives
+you *Paddock*. Confirmed live by typing `Block`, watching the whole Land module
+say "blocks", clearing it, and watching it go back to **Paddock** rather than
+Zone.
+
+- **Vocabulary has THREE layers** — the pack declares `zone`, the profile
+  renames it to `Paddock`, the tenant may rename it again — and the editor knew
+  only the first and the third. The middle one is the one an industry profile
+  exists to supply.
+- **`labelRows` in `resolve.ts`, beside `resolveLabels`.** The page was doing
+  this arithmetic inline, which is how it drifted from the renderer.
+  `resolveLabels` answers *"what word do I render?"*; `labelRows` answers *"and
+  where did it come from?"* — the question an editor must answer and a renderer
+  never does. Same file so they cannot disagree twice, including on the rule
+  that an empty string is not a rename.
+- The field now shows the effective word, and says *"Homestead Farm calls this
+  Paddock; the built-in word is Zone"* when a profile is overriding.
+
+**The installer claimed work it had not done.** Re-running an install on a
+tenant with all seven packs already on reported *"Installed — 7 packs switched
+on"*. Nothing was switched on. `enableRow` now returns whether it changed
+anything, and the toast reports *"nothing to change, all 7 packs were already
+on"* or *"3 of 7 packs switched on"*. The audit entry records `switchedOn`
+alongside the full list, so the log distinguishes them too.
+
+Neither is a data bug — both would have gone on quietly misinforming the only
+person who reads these screens.
+
 ### 2026-08-15 — Is it a decision, or is it a chore? (`claude/pack-write-levels`)
 
 Every pack shipped owner-only, as four private copies of `requireOwner`. That
@@ -349,6 +385,8 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
 - ~~`resolveLabels` has no caller~~ · ~~no UI for a per-tenant override~~ ·
   ~~no UI for `installProfile`~~ — **all closed 2026-08-15.** Both surfaces are
   on the admin tenant page, and the words they offer come from the registry.
+  ~~Neither has been driven~~ — **driven 2026-08-16**, and both were wrong in
+  the way only clicking shows. See the build log.
 - **Only four features declare vocabulary**, and the sweep is partial. Each pack
   declares the words on its list pages; plenty of nouns further in are still
   hardcoded English ("Species", "Tag", "Batch code"). Adding one is a

@@ -24,6 +24,37 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-16 — You could not add cattle without leaving (`claude/counted-as`)
+
+Founder, trying to add cattle: *"the counted as only has an option for broiler
+chicks? Maybe I'm not understanding the purpose of that. Also the breed has
+cornish cross."*
+
+Both halves were real, and the first was a wall.
+
+- **"Counted as" is the inventory ITEM the head are counted in**, and it had to
+  exist before the lot could. The tenant's only head-stocked item was "Broiler
+  chicks", so the picker cheerfully offered to count cattle as broiler chicks,
+  and the only way out was to leave for the Inventory module and come back.
+- **The explanation existed exactly once, in a state you never see again** — the
+  zero-items empty state. The moment you added your first item it vanished, and
+  it was needed most for your second species.
+- **`createLivestockLot` now takes `newItemName` instead of `itemId`**, creating
+  the stock line and the lot in one transaction. The picker gets the same
+  *"Something else…"* escape the species picker already had, which is why the
+  fix costs one option and a text box.
+- **The item is still a real and separate thing, and is not auto-created from
+  the species.** A farm running beef and dairy wants two stock lines for one
+  species. Guessing one item per species would have made that unrepresentable
+  and quietly wrong in the P&L.
+- **The button no longer requires an item to exist**, so a farm's first animal
+  is enterable from this page. The "nothing to count animals as" empty state is
+  gone with it.
+- **The breed placeholder follows the species.** A fixed *"e.g. Cornish Cross"*
+  under Species: Cattle reads as an instruction, not an example. `breedHint`
+  returns nothing for a species it does not know — an empty box beats a
+  confident irrelevance, and species is an open taxonomy so unknown is ordinary.
+
 ### 2026-08-16 — Rotating a herd is one act again (`claude/move-occupant`)
 
 `moveLotToZone` calls land's new `moveOccupant` instead of `startOccupancy`, so
@@ -116,6 +147,12 @@ This pack is the one that forced the change; the full reasoning is in
   them.** Livestock never queries `land_occupancy` or `inventory_movements`
   directly; both reads are functions on the owning pack's ops. That is what
   keeps `requires` meaningful rather than decorative.
+- **An ITEM is the stock line; a LOT is one batch of it.** "Beef cattle" is the
+  item, "COW-1" is the lot. Head and cost roll up to the item, so it is the
+  grain your P&L is grouped at — which is why beef and dairy are two items and
+  one species, and why the item is never inferred from the species. This
+  distinction is the one thing a person setting up livestock has to understand,
+  and it is now said in the form rather than in an empty state that disappears.
 - **Breeding stock is NOT in this slice, and not by accident.** A breeding
   animal is not inventory at all — it is a capital asset on the other side of
   the balance sheet, and moving between the two is an accounting event that must

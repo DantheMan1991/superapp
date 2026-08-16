@@ -8,6 +8,7 @@ import {
   preferredIdentifier,
   summariseHead,
 } from "../src/packs/livestock/core/herd";
+import { breedHint } from "../src/packs/livestock/vocabulary";
 
 /**
  * The pure half of `livestock`: head arithmetic.
@@ -168,5 +169,33 @@ describe("preferredIdentifier", () => {
 
   it("is null when there are none", () => {
     expect(preferredIdentifier([])).toBeNull();
+  });
+});
+
+describe("breedHint", () => {
+  /**
+   * The breed field carried a fixed "e.g. Cornish Cross", which sat under
+   * Species: Cattle and read as an instruction rather than an example.
+   * Reported by the founder, 2026-08-16.
+   */
+  it("follows the species chosen", () => {
+    expect(breedHint("cattle")).toBe("e.g. Angus");
+    expect(breedHint("poultry")).toBe("e.g. Cornish Cross");
+  });
+
+  it("gives NO hint for a species it does not know", () => {
+    // Species is an open taxonomy fed by profile config, so this is the
+    // ordinary path for anything a profile invents. An empty box beats a
+    // confident irrelevance, which is the bug being fixed.
+    expect(breedHint("alpaca")).toBeUndefined();
+    expect(breedHint("")).toBeUndefined();
+  });
+
+  it("matches the way the form slugs a typed species", () => {
+    // The picker's "Something else…" lets a person type "Beef Cattle", and
+    // the form lowercases and underscores it before submitting. The hint has
+    // to survive the same treatment or it only works for picker values.
+    expect(breedHint("Cattle")).toBe("e.g. Angus");
+    expect(breedHint("  POULTRY  ")).toBe("e.g. Cornish Cross");
   });
 });

@@ -76,7 +76,11 @@ export async function createLivestockLotAction(input: unknown) {
   await requireModuleEnabled(ctx.tenant.id, PACK);
   const parsed = z
     .object({
-      itemId: z.string().uuid(),
+      // Exactly one of these. `createLivestockLot` enforces it rather than a
+      // Zod union, so the rule has one home and the ops layer cannot be
+      // called past it.
+      itemId: z.string().uuid().optional(),
+      newItemName: z.string().min(1).max(200).optional(),
       code: z.string().min(1).max(120),
       species: z.string().min(1).max(63),
       sex: z.enum(["male", "female", "mixed"]).nullable().optional(),

@@ -63,3 +63,27 @@ export function speciesFrom(config: unknown): string[] {
   }
   return [];
 }
+
+/**
+ * An example breed for the species chosen, for the placeholder only.
+ *
+ * A HINT, NEVER A CONSTRAINT. `breed` is free text and nothing computes on it
+ * — homestead cattle are deliberately crossbred, so "½ Angus, ¼ Hereford,
+ * ¼ Simmental" is the real answer and any list here would be wrong about it.
+ *
+ * It exists because the field carried a fixed "e.g. Cornish Cross", which sat
+ * under Species: Cattle and read as an instruction rather than an example.
+ * A species this does not know gets NO placeholder, which is the honest answer
+ * — better an empty box than a confident irrelevance.
+ */
+const BREED_HINTS: Record<string, string> = {
+  cattle: "e.g. Angus",
+  poultry: "e.g. Cornish Cross",
+  swine: "e.g. Berkshire",
+  sheep: "e.g. Katahdin",
+  goat: "e.g. Boer",
+};
+
+export function breedHint(species: string): string | undefined {
+  return BREED_HINTS[species.trim().toLowerCase().replace(/\s+/g, "_")];
+}

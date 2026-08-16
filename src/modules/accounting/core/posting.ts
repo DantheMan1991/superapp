@@ -72,6 +72,32 @@ async function loadActiveAccounts(
 }
 
 /**
+ * The entry's entity must exist, belong to this tenant and be active. The
+ * composite FK already makes a cross-tenant entity unrepresentable; this gives
+ * a friendly error first, and it is the only place that checks `is_active` —
+ * the database has no opinion on that.
+ */
+async function assertEntityPostable(
+  tx: Tx,
+  tenantId: string,
+  entityId: string,
+): Promise<void> {
+  const row = await tx.query.entities.findFirst({
+    where: and(
+      eq(schema.entities.tenantId, tenantId),
+      eq(schema.entities.id, entityId),
+    ),
+    columns: { isActive: true },
+  });
+  if (!row) {
+    throw new LedgerError("ENTITY_NOT_FOUND", `entity ${entityId} not found`);
+  }
+  if (!row.isActive) {
+    throw new LedgerError("ENTITY_INACTIVE", `entity ${entityId} is inactive`);
+  }
+}
+
+/**
  * Validate dimension member ids and return a map id -> member. Also
  * enforces at most one member per dimension type per line (the DB unique
  * is the backstop; this gives a friendly error first).
@@ -209,6 +235,7 @@ export async function postEntry(
   );
   if (existing) return { entry: existing, deduped: true };
 
+  await assertEntityPostable(tx, ctx.tenantId, input.entityId);
   await loadActiveAccounts(tx, ctx.tenantId, input.lines.map((l) => l.accountId));
   const members = await loadDimensionMembers(tx, ctx.tenantId, input.lines);
   if (input.status === "posted") {
@@ -219,6 +246,7 @@ export async function postEntry(
     .insert(schema.journalEntries)
     .values({
       tenantId: ctx.tenantId,
+      entityId: input.entityId,
       entryDate: input.entryDate,
       memo: input.memo ?? "",
       status: input.status,
@@ -385,6 +413,12 @@ export async function editEntry(
   args: {
     entryId: string;
     expectedVersion: number;
+    /**
+     * No `entityId`, and that is deliberate rather than an omission: moving a
+     * posted entry between entities moves money between two balance sheets,
+     * which is a transfer to be recorded, not a field to be corrected. Reverse
+     * it and post it in the right one.
+     */
     patch: { entryDate?: string; memo?: string; lines?: EntryLineInput[] };
   },
 ): Promise<{ before: EntrySnapshot; after: EntrySnapshot }> {
@@ -555,6 +589,11 @@ export async function reverseEntry(
 
   return postEntry(tx, ctx, {
     status: "posted",
+    // The ORIGINAL's entity, never the tenant default and never an argument. A
+    // reversal landing in another entity would leave both of them out of
+    // balance while the tenant as a whole still netted to zero — the exact
+    // class of wrongness entity-scoped reports exist to catch.
+    entityId: entry.entityId,
     entryDate: reversalDate,
     memo: args.memo ?? `Reversal of entry dated ${entry.entryDate}`,
     source: "reversal",

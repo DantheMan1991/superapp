@@ -12,6 +12,7 @@ import {
 } from "../lib/dates";
 import { LedgerError } from "./errors";
 import { getBalances, type AccountingBasis } from "./balances";
+import { entityScopeCondition, type EntityScope } from "./entities";
 import { listAccounts } from "./coa";
 import { listDimensionMembers } from "./dimensions";
 import { getSettings } from "./guards";
@@ -36,6 +37,12 @@ import {
 /**
  * Thin fetch wrappers: listAccounts + 1–4 getBalances calls + a pure
  * builder. Read-only; compute-on-read per the balances.ts design note.
+ *
+ * EVERY ONE OF THEM STATES AN ENTITY SCOPE, and it is a required parameter
+ * rather than an optional one (ADR 0010). Two of the reports here decline to
+ * take one, each for its own stated reason — see `getTaxSummary` and the note
+ * on aging in docs/modules/accounting.md. Declining is a decision written down;
+ * an optional parameter is a decision nobody makes.
  */
 
 /**
@@ -53,6 +60,7 @@ export async function getProfitAndLoss(
   tx: Tx,
   tenantId: string,
   opts: {
+    scope: EntityScope;
     from: string;
     to: string;
     compare?: "prev-period" | "prev-year";
@@ -72,6 +80,7 @@ export async function getProfitAndLoss(
   const dimensionType = opts.compare || spread ? undefined : opts.dimensionType;
   const basis = opts.basis ?? "accrual";
   const current = await getBalances(tx, tenantId, {
+    scope: opts.scope,
     from: opts.from,
     to: opts.to,
     basis,
@@ -90,10 +99,12 @@ export async function getProfitAndLoss(
       buckets.map(async (b) => ({
         key: b.key,
         label: b.label,
-        // Every column on the SAME basis as the report as a whole — a cash
-        // month next to an accrual one would be two different questions in
-        // one table, the same reasoning the comparison column follows.
+        // Every column on the SAME basis AND the same entity scope as the
+        // report as a whole — a cash month next to an accrual one, or one
+        // company's January beside every company's February, would be two
+        // different questions in one table.
         rows: await getBalances(tx, tenantId, {
+          scope: opts.scope,
           from: b.from,
           to: b.to,
           basis,
@@ -116,7 +127,7 @@ export async function getProfitAndLoss(
       ...range,
       // The comparison period is computed on the SAME basis — comparing cash
       // against accrual would be two different questions in one column pair.
-      rows: await getBalances(tx, tenantId, { ...range, basis }),
+      rows: await getBalances(tx, tenantId, { ...range, scope: opts.scope, basis }),
     };
   }
   let dimension;
@@ -140,6 +151,7 @@ export async function getBalanceSheet(
   tx: Tx,
   tenantId: string,
   opts: {
+    scope: EntityScope;
     asOf: string;
     compare?: "prev-year";
     showZero?: boolean;
@@ -151,8 +163,9 @@ export async function getBalanceSheet(
   const fyStart = fiscalYearStart(opts.asOf, settings.fiscalYearStartMonth);
   const basis = opts.basis ?? "accrual";
   const fetchPair = async (asOf: string, fy: string) => ({
-    cumulative: await getBalances(tx, tenantId, { asOf, basis }),
+    cumulative: await getBalances(tx, tenantId, { scope: opts.scope, asOf, basis }),
     priorFyBoundary: await getBalances(tx, tenantId, {
+      scope: opts.scope,
       asOf: addDaysIso(fy, -1),
       basis,
     }),
@@ -182,7 +195,7 @@ export async function getBalanceSheet(
 export async function getCashActivity(
   tx: Tx,
   tenantId: string,
-  opts: { from: string; to: string },
+  opts: { scope: EntityScope; from: string; to: string },
 ): Promise<CashActivityReport> {
   const accounts = await listAccounts(tx, tenantId);
   const cashIds = accounts
@@ -191,11 +204,17 @@ export async function getCashActivity(
   if (cashIds.length === 0) {
     return buildCashActivity(accounts, [], [], opts);
   }
+  // It DOES take an entity scope, unlike a basis: a bank account is shared
+  // between entities only until slice 4 gives it an owner, but the MOVEMENTS
+  // through it already belong to one company or another, and "what did Maple
+  // Street move through the account this month" is a real question today.
   const opening = await getBalances(tx, tenantId, {
+    scope: opts.scope,
     asOf: addDaysIso(opts.from, -1),
     accountIds: cashIds,
   });
   const activity = await getBalances(tx, tenantId, {
+    scope: opts.scope,
     from: opts.from,
     to: opts.to,
     accountIds: cashIds,
@@ -236,6 +255,7 @@ export async function getGeneralLedger(
   tx: Tx,
   tenantId: string,
   opts: {
+    scope: EntityScope;
     from: string;
     to: string;
     /** Narrow to specific accounts; empty/absent means every account. */
@@ -261,6 +281,9 @@ export async function getGeneralLedger(
     // Only posted entries count, exactly as getBalances does — a general
     // ledger that included drafts would disagree with every other report.
     eq(je.status, "posted" as const),
+    // ...and the same entity scope, or the report would stop tying back to the
+    // trial balance, which is the one thing an accountant does with it first.
+    entityScopeCondition(opts.scope),
     gte(je.entryDate, opts.from),
     lte(je.entryDate, opts.to),
     ...(narrowed ? [inArray(jl.accountId, narrowed)] : []),
@@ -270,6 +293,7 @@ export async function getGeneralLedger(
     // The balance carried INTO the period — the same engine every other
     // report uses, so the opening column cannot drift from the balance sheet.
     getBalances(tx, tenantId, {
+      scope: opts.scope,
       asOf: addDaysIso(opts.from, -1),
       ...(narrowed ? { accountIds: narrowed } : {}),
     }),
@@ -328,6 +352,15 @@ export async function getGeneralLedger(
  * return computed on the wrong basis is not slightly wrong.
  *
  * Invoices are selected by ISSUE DATE, which is when the liability arises.
+ *
+ * NO `scope` PARAMETER EITHER, and it is the first report to decline one.
+ * This report reads two sources and shows the gap between them: the per-rate
+ * figures come from INVOICES, the amount owed comes from the LEDGER. An invoice
+ * does not carry an entity yet (ADR 0010 slice 1 puts one only on the entry),
+ * so scoping the ledger half while the document half stayed tenant-wide would
+ * make the difference between the two columns meaningless — and that difference
+ * is the whole report. Combined on both sides is honest; half-scoped is not.
+ * When invoices gain an entity, this takes a scope like everything else.
  */
 export async function getTaxSummary(
   tx: Tx,
@@ -400,6 +433,10 @@ export async function getTaxSummary(
   let liabilityCents: number | null = null;
   if (taxAccount) {
     const balances = await getBalances(tx, tenantId, {
+      // Combined DELIBERATELY, to match the invoice half above. See the note on
+      // this function — a scoped ledger figure beside an unscoped document
+      // figure would be worse than two unscoped ones.
+      scope: { kind: "combined" },
       asOf: opts.to,
       accountIds: [taxAccount.id],
     });

@@ -14,6 +14,7 @@ import type {
   DimensionMember,
   Document,
   DocumentLink,
+  Entity,
   Invoice,
   InvoiceLine,
   InvoicePayment,
@@ -42,6 +43,8 @@ import { formatRatePpm } from "../invoicing/tax";
 
 export interface BooksData {
   accounts: Account[];
+  /** ADR 0010: the legal entities whose books these are. */
+  entities: Entity[];
   journalEntries: JournalEntry[];
   journalLines: JournalLine[];
   dimensionMembers: DimensionMember[];
@@ -159,14 +162,32 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     ),
   );
 
+  const entityName = (id: string): string =>
+    data.entities.find((x) => x.id === id)?.name ?? "";
+
+  files.push(
+    file(
+      "ledger/entities.csv",
+      "Legal entities — each one owns a set of books",
+      ["id", "name", "legal_name", "is_default", "is_active"],
+      data.entities.map((e) => [
+        e.id, e.name, e.legalName, String(e.isDefault), String(e.isActive),
+      ]),
+    ),
+  );
+
   files.push(
     file(
       "ledger/journal_entries.csv",
       "Journal entry headers",
-      ["id", "date", "memo", "status", "source", "source_id", "reverses_entry_id", "posted_at", "created_by"],
+      // entity_id and entity are APPENDED, so a process reading this file by
+      // column position is unaffected — the same rule the sales-tax columns on
+      // invoices.csv followed.
+      ["id", "date", "memo", "status", "source", "source_id", "reverses_entry_id", "posted_at", "created_by", "entity_id", "entity"],
       data.journalEntries.map((e) => [
         e.id, e.entryDate, e.memo, e.status, e.source, e.sourceId ?? "",
         e.reversesEntryId ?? "", ts(e.postedAt), e.createdByClerkUserId ?? "",
+        e.entityId, entityName(e.entityId),
       ]),
     ),
   );

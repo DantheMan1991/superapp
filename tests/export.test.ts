@@ -3,7 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import { logAuditInTx } from "../src/lib/audit";
-import { postEntry, type LedgerCtx } from "../src/modules/accounting/core";
+import {
+  getDefaultEntityId,
+  postEntry,
+  type LedgerCtx,
+} from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
   buildBooksCsvFiles,
@@ -42,6 +46,13 @@ function minimalBooksData(): BooksData {
     updatedAt: new Date(),
   } as BooksData["settings"];
   return {
+    entities: [
+      {
+        id: "e1", tenantId: "t1", name: "Fixture Co", legalName: "",
+        isDefault: true, isActive: true,
+        createdAt: new Date(), updatedAt: new Date(),
+      },
+    ],
     accounts: [
       {
         id: "a1", tenantId: "t1", code: "1000", name: 'Checking, "Main"',
@@ -245,6 +256,7 @@ async function seedTenant(name: string, slug: string): Promise<string> {
     });
     const owner: LedgerCtx = { tenantId: id, userId: `${slug}-owner`, role: "owner" };
     await postEntry(tx, owner, {
+      entityId: await getDefaultEntityId(tx, id),
       entryDate: "2026-07-01",
       memo: `secret memo of ${name}`,
       status: "posted",

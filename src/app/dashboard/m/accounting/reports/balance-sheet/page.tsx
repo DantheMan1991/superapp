@@ -8,6 +8,7 @@ import { ReportControls } from "@/modules/accounting/components/report-controls"
 import { ReportTable } from "@/modules/accounting/components/report-table";
 import { ReportToolbar } from "@/modules/accounting/components/report-toolbar";
 import { getBalanceSheet, getSettings } from "@/modules/accounting/core";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { isValidIsoDate, todayInTimezone } from "@/modules/accounting/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +21,7 @@ export default async function BalanceSheetPage({
     compare?: string;
     zero?: string;
     basis?: string;
+    entity?: string;
   }>;
 }) {
   const ctx = await requireTenant();
@@ -34,13 +36,15 @@ export default async function BalanceSheetPage({
     const settings = await getSettings(tx, ctx.tenant.id);
     const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
+    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
     const report = await getBalanceSheet(tx, ctx.tenant.id, {
+      scope: entityView.scope,
       asOf,
       compare,
       showZero: sp.zero === "1",
       basis,
     });
-    return { settings, today, asOf, report };
+    return { settings, today, asOf, report, entityView };
   });
 
   const { report } = data;
@@ -51,7 +55,8 @@ export default async function BalanceSheetPage({
         title="Balance Sheet"
         description={
           <>
-            {ctx.tenant.name} · as of {report.asOf} · fiscal year begins{" "}
+            {data.entityView.stampLabel ?? ctx.tenant.name} · as of {report.asOf} ·
+            fiscal year begins{" "}
             {report.fyStart} · {basis === "cash" ? "Cash" : "Accrual"} basis
           </>
         }
@@ -72,6 +77,7 @@ export default async function BalanceSheetPage({
                 asOf: data.asOf,
                 compare,
                 basis,
+                entity: sp.entity,
               }}
             />
           </>
@@ -91,6 +97,8 @@ export default async function BalanceSheetPage({
         compareOptions={[["prev-year", "Previous year"]]}
         basis={basis}
         showBasis
+        entity={sp.entity}
+        entities={data.entityView.entities}
       />
 
       <ReportTable

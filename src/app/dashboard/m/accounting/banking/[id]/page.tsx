@@ -50,6 +50,8 @@ export default async function BankRegisterPage({
     if (!bankAccount) return null;
     const today = todayInTimezone(ctx.tenant.timezone);
     const [balance] = await getBalances(tx, tenantId, {
+      // Combined — see the register list page for why.
+      scope: { kind: "combined" },
       asOf: today,
       accountIds: [bankAccount.accountId],
     });

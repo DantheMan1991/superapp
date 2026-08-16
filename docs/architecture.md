@@ -95,10 +95,25 @@ relationship; a legal entity lives inside it and owns the books** — see ADR
 [0010](decisions/0010-entities-inside-a-tenant.md), which also explains why
 entity is not a `dimension_members` type.
 
-Nothing is built yet, and the single-entity client — every client today — will
-never see the distinction. What it means while it is unbuilt: **do not write
-anything new that assumes a tenant has exactly one balance sheet**, and when
-adding a table with a balance on it, expect it to carry an entity later.
+**Built 2026-08-16 (slice 1).** `entities` is a tenant-scoped table with FORCE
+RLS; `journal_entries.entity_id` says which set of books an entry belongs to,
+composite-FK'd as `(tenant_id, entity_id)`. Every tenant has exactly one today
+and never sees the word — the picker appears at two.
+
+Three things follow for anything written from here on:
+
+- **Every report engine takes a required `EntityScope`** (`core/entities.ts`),
+  never an optional one. A report that forgot its scope would be silently wrong
+  across companies and perfectly correct on the single-company tenant you are
+  testing on, so forgetting is made a compile error. Declining a scope is
+  allowed where mixing sources would be dishonest — the tax summary does, and
+  says why in its own comment.
+- **RLS is NOT the wall between two companies of one client**, deliberately, and
+  that is the ADR's own stated cost. It remains absolute between CLIENTS. Do not
+  add an `app.current_entity`; the separation is application code.
+- **A table with a balance on it will carry an entity later.** Bank accounts,
+  invoices, bills and period closes do not yet — they belong to the tenant and
+  post into its default company. Per-entity banking and close are slices 3–4.
 
 ---
 

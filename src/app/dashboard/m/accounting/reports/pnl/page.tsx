@@ -13,6 +13,7 @@ import {
   getSettings,
   listDimensionMembers,
 } from "@/modules/accounting/core";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { presetRange } from "@/modules/accounting/lib/dates";
 import { isValidIsoDate, todayInTimezone } from "@/modules/accounting/lib/money";
 
@@ -29,6 +30,7 @@ export default async function PnlPage({
     zero?: string;
     basis?: string;
     spread?: string;
+    entity?: string;
   }>;
 }) {
   const ctx = await requireTenant();
@@ -55,10 +57,12 @@ export default async function PnlPage({
     // A range too long for monthly columns is REFUSED by core rather than
     // quietly shortened, so the page has to catch it and say so — the
     // alternative is a 500 on a query string somebody can type.
+    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
     let report = null;
     let rangeError: string | null = null;
     try {
       report = await getProfitAndLoss(tx, ctx.tenant.id, {
+        scope: entityView.scope,
         from,
         to,
         compare,
@@ -73,7 +77,16 @@ export default async function PnlPage({
     }
     const members = await listDimensionMembers(tx, ctx.tenant.id);
     const dimensionTypes = [...new Set(members.map((m) => m.dimensionType))];
-    return { settings, today, from, to, report, rangeError, dimensionTypes };
+    return {
+      settings,
+      today,
+      from,
+      to,
+      report,
+      rangeError,
+      dimensionTypes,
+      entityView,
+    };
   });
 
   const { report } = data;
@@ -84,7 +97,8 @@ export default async function PnlPage({
         title="Profit & Loss"
         description={
           <>
-            {ctx.tenant.name} · {data.from} to {data.to}
+            {data.entityView.stampLabel ?? ctx.tenant.name} · {data.from} to{" "}
+            {data.to}
             {report?.comparison &&
               ` · vs ${report.comparison.from} to ${report.comparison.to}`}
             {spread === "month" && " · by month"}
@@ -101,6 +115,7 @@ export default async function PnlPage({
               dim,
               spread,
               basis,
+              entity: sp.entity,
             }}
           />
         }
@@ -127,6 +142,8 @@ export default async function PnlPage({
         showBasis
         spread={spread}
         showSpread
+        entity={sp.entity}
+        entities={data.entityView.entities}
       />
 
       {data.rangeError ? (

@@ -1,7 +1,12 @@
 import "server-only";
 import { and, eq, isNotNull, like } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import { LedgerError, postEntry, type LedgerCtx } from "../core";
+import {
+  LedgerError,
+  getDefaultEntityId,
+  postEntry,
+  type LedgerCtx,
+} from "../core";
 import { loadDocument } from "./documents";
 import { attachDocument } from "./links";
 
@@ -71,6 +76,8 @@ export async function recordExpenseFromReceipt(
 
   const status = ctx.role === "owner" ? ("posted" as const) : ("draft" as const);
   const { entry, deduped } = await postEntry(tx, ctx, {
+    // A receipt booked straight to an expense: no document entity, no picker.
+    entityId: await getDefaultEntityId(tx, ctx.tenantId),
     status,
     entryDate: input.entryDate,
     memo: input.memo ?? "",

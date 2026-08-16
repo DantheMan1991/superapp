@@ -2,6 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { COA_TEMPLATES } from "./general";
+import { provisionEntity } from "../core/entities";
 import { provisionCatalogue } from "./catalogue";
 
 /**
@@ -22,6 +23,17 @@ export async function provisionAccounting(
     .insert(schema.accountingSettings)
     .values({ tenantId, coaTemplate: template.slug })
     .onConflictDoNothing();
+
+  // FIRST, because every journal entry needs one and `postEntry` refuses
+  // without it. `drizzle/0142` gave every tenant that existed then a default
+  // company; this is the same row for every tenant created after it, and the
+  // backfill for anything the migration missed. Named after the tenant — the
+  // single-company client never sees it (ADR 0010).
+  const tenant = await tx.query.tenants.findFirst({
+    where: eq(schema.tenants.id, tenantId),
+    columns: { name: true },
+  });
+  await provisionEntity(tx, tenantId, tenant?.name ?? "My company");
 
   const existing = await tx
     .select({ id: schema.accounts.id, code: schema.accounts.code })

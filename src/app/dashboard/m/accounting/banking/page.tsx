@@ -37,6 +37,12 @@ export default async function BankingPage() {
     const balances =
       bankAccounts.length > 0
         ? await getBalances(tx, tenantId, {
+            // COMBINED, deliberately. A register's balance is every entry
+            // that touched it, whichever company posted it — a bank account
+            // does not belong to an entity until slice 4 (ADR 0010), so
+            // scoping this figure would hide half of a shared account's own
+            // money from the screen that reconciles it.
+            scope: { kind: "combined" },
             asOf: today,
             accountIds: bankAccounts.map((b) => b.accountId),
           })

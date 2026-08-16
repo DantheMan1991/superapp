@@ -8,12 +8,13 @@ import {
   completeClose,
   getClose,
   getCloseChecklist,
+  getDefaultEntityId,
+  type LedgerCtx,
   listCloses,
   postEntry,
   reopenClose,
   setClosedThrough,
   signOffClose,
-  type LedgerCtx,
 } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
@@ -24,6 +25,13 @@ import {
   lastCompleteMonthEndIso,
   monthEndIso,
 } from "../src/modules/accounting/lib/dates";
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+let entityId: string;
 
 /**
  * Session 7 certification: the month-end close subsystem + the expert-role
@@ -122,6 +130,9 @@ d("month-end close subsystem", () => {
       return rows[0].id;
     });
     await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
+    entityId = await withTenant(tenantId, (tx) =>
+      getDefaultEntityId(tx, tenantId),
+    );
     owner = { tenantId, userId: `${STAMP}-owner`, role: "owner" };
     staff = { tenantId, userId: `${STAMP}-staff`, role: "staff" };
     expert = { tenantId, userId: `${STAMP}-expert`, role: "expert" };
@@ -143,6 +154,7 @@ d("month-end close subsystem", () => {
     await withTenant(tenantId, async (tx) => {
       // Draft inside the period…
       await postEntry(tx, owner, {
+        entityId,
         entryDate: "2026-06-15",
         memo: "june draft",
         status: "draft",
@@ -153,6 +165,7 @@ d("month-end close subsystem", () => {
       });
       // …and one after period end (must not count).
       await postEntry(tx, owner, {
+        entityId,
         entryDate: "2026-07-10",
         memo: "july draft",
         status: "draft",
@@ -191,6 +204,7 @@ d("month-end close subsystem", () => {
     await expect(
       withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           entryDate: "2026-06-20",
           memo: "backdated",
           status: "posted",
@@ -640,3 +654,4 @@ import {
   gatherCloseNarrativeInputs,
   generateCloseNarrativeForClose,
 } from "../src/modules/accounting/ai/narrative";
+

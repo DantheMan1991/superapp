@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { BalanceRow } from "./balances";
+import { entityScopeCondition, type EntityScope } from "./entities";
 import {
   allocateDocument,
   type DocumentPayment,
@@ -35,6 +36,14 @@ import {
 const CONTROL_SUBTYPES = ["accounts_receivable", "accounts_payable"] as const;
 
 export interface CashBasisWindow {
+  /**
+   * REQUIRED, and it is applied in FOUR places below, not one: the payments
+   * that land in the window, every prior payment of those documents (allocation
+   * is cumulative — a payment made from another entity's books must not consume
+   * this entity's recognition), the documents' accrual lines, and the control
+   * leg. Scoping only the first would produce a report that still balances.
+   */
+  scope: EntityScope;
   asOf?: string;
   from?: string;
   to?: string;
@@ -81,8 +90,9 @@ export async function cashBasisAdjustment(
   opts: CashBasisWindow & {
     accountIds?: string[];
     groupByDimensionType?: string;
-  } = {},
+  },
 ): Promise<BalanceRow[]> {
+  const inScope = entityScopeCondition(opts.scope);
   const controls = await tx.query.accounts.findMany({
     where: and(
       eq(schema.accounts.tenantId, tenantId),
@@ -123,6 +133,7 @@ export async function cashBasisAdjustment(
         and(
           eq(schema.invoicePayments.tenantId, tenantId),
           eq(je.status, "posted"),
+          inScope,
           ...extra,
         ),
       );
@@ -147,6 +158,7 @@ export async function cashBasisAdjustment(
         and(
           eq(schema.billPayments.tenantId, tenantId),
           eq(je.status, "posted"),
+          inScope,
           ...extra,
         ),
       );
@@ -216,6 +228,7 @@ export async function cashBasisAdjustment(
       and(
         eq(jl.tenantId, tenantId),
         eq(je.status, "posted"),
+        inScope,
         inArray(je.source, ["invoice", "bill"]),
         inArray(je.sourceId, documentIds),
       ),

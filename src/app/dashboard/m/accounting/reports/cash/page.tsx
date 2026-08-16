@@ -15,6 +15,7 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
 import { ReportToolbar } from "@/modules/accounting/components/report-toolbar";
 import { getCashActivity, getSettings } from "@/modules/accounting/core";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { presetRange } from "@/modules/accounting/lib/dates";
 import {
   formatCentsSigned,
@@ -27,7 +28,7 @@ export const dynamic = "force-dynamic";
 export default async function CashActivityPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; entity?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -39,8 +40,13 @@ export default async function CashActivityPage({
     const fallback = presetRange("this-month", today, settings.fiscalYearStartMonth);
     const from = sp.from && isValidIsoDate(sp.from) ? sp.from : fallback.from;
     const to = sp.to && isValidIsoDate(sp.to) ? sp.to : fallback.to;
-    const report = await getCashActivity(tx, ctx.tenant.id, { from, to });
-    return { settings, today, from, to, report };
+    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    const report = await getCashActivity(tx, ctx.tenant.id, {
+      scope: entityView.scope,
+      from,
+      to,
+    });
+    return { settings, today, from, to, report, entityView };
   });
 
   const { report } = data;
@@ -51,12 +57,18 @@ export default async function CashActivityPage({
         title="Cash Activity"
         description={
           <>
-            {ctx.tenant.name} · {report.period.from} to {report.period.to}
+            {data.entityView.stampLabel ?? ctx.tenant.name} · {report.period.from}{" "}
+            to {report.period.to}
           </>
         }
         actions={
           <ReportToolbar
-            exportParams={{ report: "cash", from: data.from, to: data.to }}
+            exportParams={{
+              report: "cash",
+              from: data.from,
+              to: data.to,
+              entity: sp.entity,
+            }}
           />
         }
       />
@@ -71,6 +83,8 @@ export default async function CashActivityPage({
         fiscalYearStartMonth={data.settings.fiscalYearStartMonth}
         from={data.from}
         to={data.to}
+        entity={sp.entity}
+        entities={data.entityView.entities}
       />
 
       {report.groups.map((group) => (

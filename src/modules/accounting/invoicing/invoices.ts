@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Invoice, InvoiceLine } from "@/db/schema";
 import {
   LedgerError,
+  entityForDocument,
   postEntry,
   requireOwnerRole,
   voidEntry,
@@ -449,6 +450,10 @@ export async function issueInvoice(
     );
 
   const { entry } = await postEntry(tx, ctx, {
+    // An invoice does not carry an entity of its own yet (ADR 0010 puts one on
+    // the ENTRY in slice 1), so its issuance lands in the tenant's default
+    // company — and every later entry for the same invoice follows this one.
+    entityId: await entityForDocument(tx, ctx.tenantId, "invoice", invoice.id),
     status: "posted",
     entryDate: invoice.issueDate,
     memo: `Invoice ${invoice.invoiceNumber}`,

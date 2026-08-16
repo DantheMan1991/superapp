@@ -4,6 +4,7 @@ import { schema, withTenant, type Tx } from "@/db";
 import type { RecurringEntry } from "@/db/schema";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
+import { getDefaultEntityId } from "../core/entities";
 import { getSettings } from "../core/guards";
 import { postEntry } from "../core/posting";
 import { createBillDraft } from "../payables/bills";
@@ -168,6 +169,18 @@ export async function generateRecurringEntries(
         }
         await assertTemplateReferences(tx, ctx.tenantId, template);
 
+        /**
+         * A TEMPLATE RESOLVES ITS COMPANY; A DOCUMENT FREEZES ONE. The same
+         * split `recurring_entries` already makes for a sales-tax rate — a
+         * template is a standing instruction, so it follows the tenant's
+         * default company as it stands at generation, while an issued invoice
+         * keeps the one it was posted in. Resolved once per template rather
+         * than per catch-up month, so a twelve-month catch-up cannot straddle
+         * two sets of books. Per-template choice is a `template.entityId`
+         * away and waits for the document slice.
+         */
+        const entityId = await getDefaultEntityId(tx, ctx.tenantId);
+
         let next = entry.nextRunDate;
         let runs = 0;
         let posted = 0;
@@ -188,6 +201,7 @@ export async function generateRecurringEntries(
             if (wantsPost && inClosedPeriod) deferred += 1;
 
             await postEntry(tx, actor, {
+              entityId,
               status,
               entryDate: next,
               memo: template.memo ?? entry.name,

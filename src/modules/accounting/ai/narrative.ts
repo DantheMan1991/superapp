@@ -61,16 +61,26 @@ export async function gatherCloseNarrativeInputs(
   const periodStart = closePeriodStart(close, settings.fiscalYearStartMonth);
   const periodEnd = close.periodEnd;
 
+  /**
+   * COMBINED, and stated rather than assumed. A close is still tenant-wide in
+   * slice 1 — `period_closes` has no entity and locks every company at once
+   * (ADR 0010 puts per-entity close in slice 4) — so the narrative describes
+   * the same books the close covers. A per-company narrative for a close that
+   * is not per company would read as more precision than exists.
+   */
+  const scope = { kind: "combined" } as const;
   const pnl = await getProfitAndLoss(tx, ctx.tenantId, {
+    scope,
     from: periodStart,
     to: periodEnd,
     compare: "prev-period",
   });
   const cash = await getCashActivity(tx, ctx.tenantId, {
+    scope,
     from: periodStart,
     to: periodEnd,
   });
-  const bs = await getBalanceSheet(tx, ctx.tenantId, { asOf: periodEnd });
+  const bs = await getBalanceSheet(tx, ctx.tenantId, { scope, asOf: periodEnd });
   const checklist = await getCloseChecklist(tx, ctx.tenantId, periodEnd);
 
   // Largest posted entries in the period, by total debit magnitude.

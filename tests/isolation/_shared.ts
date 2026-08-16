@@ -37,6 +37,27 @@ if (!RUN) {
  * DATABASE enforces, and routing fixtures through application code would let a
  * bug in that code make the isolation tests agree with it.
  */
+/**
+ * Mint the legal entity behind any journal-entry fixture (ADR 0010).
+ *
+ * `journal_entries.entity_id` is NOT NULL and its composite FK is
+ * `(tenant_id, entity_id) -> entities (tenant_id, id)`, so every fixture that
+ * posts needs one — and the FK is itself one of the things this suite
+ * certifies. Raw insert for the reason `seedParty` is: this file proves what
+ * the DATABASE enforces.
+ */
+export async function seedEntity(
+  tx: Tx,
+  tenantId: string,
+  tag: string,
+): Promise<string> {
+  const [row] = await tx
+    .insert(schema.entities)
+    .values({ tenantId, name: `Company ${tag}`, isDefault: true })
+    .returning();
+  return row.id;
+}
+
 export async function seedParty(
   tx: Tx,
   tenantId: string,

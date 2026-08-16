@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import { listEntities } from "@/modules/accounting/core";
 import { formatCents, toSafeCents } from "@/modules/accounting/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -32,14 +33,16 @@ export default async function JournalPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
-  const entries = await withTenant(ctx.tenant.id, (tx) =>
-    tx
+  const { entries, entities } = await withTenant(ctx.tenant.id, async (tx) => ({
+    entities: await listEntities(tx, ctx.tenant.id, { includeInactive: true }),
+    entries: await tx
       .select({
         id: schema.journalEntries.id,
         entryDate: schema.journalEntries.entryDate,
         memo: schema.journalEntries.memo,
         status: schema.journalEntries.status,
         source: schema.journalEntries.source,
+        entityId: schema.journalEntries.entityId,
         totalDebits: sql<string>`coalesce(sum(case when ${schema.journalLines.amountCents} > 0 then ${schema.journalLines.amountCents} else 0 end), 0)`,
       })
       .from(schema.journalEntries)
@@ -57,7 +60,12 @@ export default async function JournalPage() {
         desc(schema.journalEntries.createdAt),
       )
       .limit(200),
-  );
+  }));
+
+  // The column appears only for a tenant with more than one company — ADR 0010:
+  // the single-company client never learns the concept exists.
+  const entityName = new Map(entities.map((e) => [e.id, e.name]));
+  const showEntity = entities.length > 1;
 
   return (
     <div className="space-y-6">
@@ -95,6 +103,7 @@ export default async function JournalPage() {
             <TableRow>
               <TableHead>Date</TableHead>
               <TableHead>Memo</TableHead>
+              {showEntity && <TableHead>Company</TableHead>}
               <TableHead className="hidden sm:table-cell">Source</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Amount</TableHead>
@@ -121,6 +130,11 @@ export default async function JournalPage() {
                     )}
                   </Link>
                 </TableCell>
+                {showEntity && (
+                  <TableCell className="text-xs text-muted-foreground">
+                    {entityName.get(e.entityId) ?? "—"}
+                  </TableCell>
+                )}
                 <TableCell className="hidden text-xs text-subtle-foreground sm:table-cell">
                   {e.source.replaceAll("_", " ")}
                 </TableCell>

@@ -19,6 +19,7 @@ import Link from "next/link";
 import { Lock, Scale } from "lucide-react";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { getSettings, getTrialBalance } from "@/modules/accounting/core";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import {
   formatCents,
   isValidIsoDate,
@@ -30,7 +31,7 @@ export const dynamic = "force-dynamic";
 export default async function TrialBalancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ asOf?: string; basis?: string }>;
+  searchParams: Promise<{ asOf?: string; basis?: string; entity?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -40,13 +41,23 @@ export default async function TrialBalancePage({
   // must never silently produce the other basis.
   const basis = sp.basis === "cash" ? "cash" : "accrual";
 
-  const { tb, asOf, settings } = await withTenant(ctx.tenant.id, async (tx) => {
-    const settings = await getSettings(tx, ctx.tenant.id);
-    const today = todayInTimezone(ctx.tenant.timezone);
-    const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
-    const tb = await getTrialBalance(tx, ctx.tenant.id, asOf, basis);
-    return { tb, asOf, settings };
-  });
+  const { tb, asOf, settings, entityView } = await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const settings = await getSettings(tx, ctx.tenant.id);
+      const today = todayInTimezone(ctx.tenant.timezone);
+      const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
+      const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+      const tb = await getTrialBalance(
+        tx,
+        ctx.tenant.id,
+        asOf,
+        entityView.scope,
+        basis,
+      );
+      return { tb, asOf, settings, entityView };
+    },
+  );
 
   const inBalance = tb.totalNetCents === 0;
 
@@ -58,6 +69,7 @@ export default async function TrialBalancePage({
           <>
             Every account&apos;s balance as of {asOf} — the two columns must
             agree. {basis === "cash" ? "Cash" : "Accrual"} basis.
+            {entityView.stampLabel ? ` · ${entityView.stampLabel}` : ""}
           </>
         }
         actions={
@@ -83,6 +95,29 @@ export default async function TrialBalancePage({
             </label>
             <Input id="asOf" name="asOf" type="date" defaultValue={asOf} className="h-9" />
           </div>
+          {entityView.entities.length > 1 && (
+            <div className="space-y-1.5">
+              <label
+                htmlFor="entity"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Company
+              </label>
+              <select
+                id="entity"
+                name="entity"
+                defaultValue={sp.entity ?? ""}
+                className="border-input h-9 w-52 rounded-md border bg-transparent px-3 text-sm shadow-xs"
+              >
+                <option value="">All companies (combined)</option>
+                {entityView.entities.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <label htmlFor="basis" className="text-xs font-medium text-muted-foreground">
               Basis

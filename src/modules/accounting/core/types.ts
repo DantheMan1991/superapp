@@ -21,6 +21,16 @@ export interface EntryLineInput {
 }
 
 export interface NewEntryInput {
+  /**
+   * Which legal entity's books this entry belongs to (ADR 0010). REQUIRED —
+   * there is no default here, deliberately.
+   *
+   * A caller that cannot choose (an invoice, a bill, a bank row — none of which
+   * carry an entity yet) passes `await getDefaultEntityId(tx, tenantId)`
+   * explicitly. Making that call visible at the call site is what turns the
+   * document slice's to-do list into a grep.
+   */
+  entityId: string;
   /** ISO date (yyyy-mm-dd) — the bookkeeping day. */
   entryDate: string;
   memo?: string;

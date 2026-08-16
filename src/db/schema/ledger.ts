@@ -103,6 +103,66 @@ export const accounts = pgTable(
   ],
 );
 
+/**
+ * A LEGAL ENTITY inside the tenant — the thing that owns a set of books.
+ * See docs/decisions/0010-entities-inside-a-tenant.md.
+ *
+ * The tenant is the CLIENT RELATIONSHIP; this is the company that files a
+ * return. Every tenant has at least one, the common case is exactly one, and
+ * that client never learns the word — the picker only appears at two.
+ *
+ * WHAT THIS IS NOT, because three other things in this codebase are also called
+ * an entity:
+ *   - NOT a `dimension_members` row. A dimension slices one set of books; this
+ *     IS one. The test is whether the trial balance has to balance within it —
+ *     North Pasture, no; an LLC, always. `dimensionMembers.packEntityId` means
+ *     a pack's own row and is unrelated.
+ *   - NOT a `parties` row. A party is somebody the tenant deals with.
+ *   - NOT a tenant. RLS is the wall between CLIENTS and that is untouched;
+ *     between two entities of one client, separation is application code, which
+ *     ADR 0010 names as its own strongest cost.
+ *
+ * The chart of accounts, vendors, customers and contacts stay TENANT-WIDE and
+ * shared — that sharing is most of what "manage ten LLCs in one place" means.
+ */
+export const entities = pgTable(
+  "entities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** What the picker and every report footer show. */
+    name: text("name").notNull(),
+    /** The name on the return, when it differs from what people call it. */
+    legalName: text("legal_name").notNull().default(""),
+    /**
+     * Where an entry lands when nothing chose. Exactly one per tenant, by the
+     * partial unique index below rather than by care — `payment_terms` and
+     * `sales_tax_rates` draw the same line.
+     */
+    isDefault: boolean("is_default").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Target of the composite FK from journal_entries. MUST exist before that
+    // constraint is added — drizzle-kit emits every FK before every index, so
+    // the generated migration is hand-reordered.
+    uniqueIndex("entities_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("entities_tenant_name_idx").on(t.tenantId, t.name),
+    index("entities_tenant_idx").on(t.tenantId),
+    uniqueIndex("entities_tenant_default_idx")
+      .on(t.tenantId)
+      .where(sql`${t.isDefault}`),
+  ],
+);
+
 export const journalEntries = pgTable(
   "journal_entries",
   {
@@ -110,6 +170,21 @@ export const journalEntries = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * The legal entity whose books this entry belongs to (ADR 0010).
+     *
+     * ON THE ENTRY, NEVER ON THE LINE. An entry belongs to one entity and
+     * therefore still balances on its own, so the posting invariant at the
+     * heart of this module is untouched. An intercompany transaction is a
+     * linked PAIR of entries (slice 2), not one entry spanning two entities.
+     *
+     * NOT NULL here is AHEAD OF THE DATABASE for one release: `drizzle/0142`
+     * adds the column nullable and backfills it, because the deploy running
+     * while that migration lands does not write it yet. The `SET NOT NULL`
+     * follows in a migration after this deploy — the same expand/contract split
+     * `0123` made for its `total = subtotal + tax` CHECK.
+     */
+    entityId: uuid("entity_id").notNull(),
     /** The bookkeeping day (no timezone). ISO string, compared lexically. */
     entryDate: date("entry_date", { mode: "string" }).notNull(),
     memo: text("memo").notNull().default(""),
@@ -133,6 +208,12 @@ export const journalEntries = pgTable(
   (t) => [
     uniqueIndex("journal_entries_tenant_id_id_idx").on(t.tenantId, t.id),
     index("journal_entries_tenant_date_idx").on(t.tenantId, t.entryDate),
+    // Every entity-scoped report filters on exactly this shape.
+    index("journal_entries_tenant_entity_date_idx").on(
+      t.tenantId,
+      t.entityId,
+      t.entryDate,
+    ),
     index("journal_entries_tenant_status_idx").on(t.tenantId, t.status),
     uniqueIndex("journal_entries_tenant_idem_idx")
       .on(t.tenantId, t.idempotencyKey)
@@ -145,6 +226,14 @@ export const journalEntries = pgTable(
       name: "journal_entries_reverses_fk",
       columns: [t.tenantId, t.reversesEntryId],
       foreignColumns: [t.tenantId, t.id],
+    }),
+    // Composite, so an entry naming another tenant's entity is unrepresentable
+    // rather than merely unwritten. NO ACTION: an entity with books is never
+    // deleted, only deactivated.
+    foreignKey({
+      name: "journal_entries_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
     }),
   ],
 );
@@ -265,6 +354,8 @@ export const dimensionMembers = pgTable(
  * ---------------------------------------------------------------------- */
 
 export type Account = typeof accounts.$inferSelect;
+
+export type Entity = typeof entities.$inferSelect;
 
 export type JournalEntry = typeof journalEntries.$inferSelect;
 

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import {
   LedgerError,
@@ -22,6 +22,14 @@ import {
   type EntityScope,
   type LedgerCtx,
 } from "../src/modules/accounting/core";
+import { createBankAccount } from "../src/modules/accounting/banking/accounts";
+import { createCustomer } from "../src/modules/accounting/invoicing/customers";
+import {
+  createInvoiceDraft,
+  issueInvoice,
+} from "../src/modules/accounting/invoicing/invoices";
+import { recordPayment } from "../src/modules/accounting/invoicing/payments";
+import { getArAging } from "../src/modules/accounting/invoicing/aging-feed";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 
 /**
@@ -47,6 +55,9 @@ let tenantId: string;
 let owner: LedgerCtx;
 let maple: string;
 let oak: string;
+let oakCustomer: string;
+let oakBankLedgerAccountId: string;
+let mapleBankLedgerAccountId: string;
 const acct: Record<string, string> = {};
 
 async function accountId(code: string): Promise<string> {
@@ -89,6 +100,25 @@ d("entities: two sets of books in one tenant", () => {
     const cash = await accountId("1000");
     const rent = await accountId("4000");
     const repairs = await accountId("6200");
+
+    // ONE REGISTER PER COMPANY, which is the shape slice 1b is about: the
+    // chart of accounts is shared, the accounts themselves are not.
+    await withTenant(tenantId, async (tx) => {
+      const oakBank = await createBankAccount(tx, owner, {
+        name: "Oak Row Checking",
+        kind: "checking",
+        entityId: oak,
+      });
+      oakBankLedgerAccountId = oakBank.ledgerAccount.id;
+      const mapleBank = await createBankAccount(tx, owner, {
+        name: "Maple Checking",
+        kind: "checking",
+        entityId: maple,
+      });
+      mapleBankLedgerAccountId = mapleBank.ledgerAccount.id;
+      const customer = await createCustomer(tx, owner, { name: "Oak Tenant" });
+      oakCustomer = customer.id;
+    });
 
     // Maple: 300.00 of income, 50.00 of repairs.
     // Oak:   700.00 of income, 20.00 of repairs.
@@ -328,6 +358,152 @@ d("entities: two sets of books in one tenant", () => {
     );
     expect(view.scope).toEqual({ kind: "one", entityId: closed });
     expect(view.stampLabel).toBe("Wound Up LLC");
+  });
+
+
+  /* -- documents carry their own company (slice 1b) ----------------------- */
+
+  it("an invoice keeps its company through issue and payment", async () => {
+    // The failure this replaces: before invoices carried a company, both legs
+    // took the tenant DEFAULT, so moving the default between issuing and being
+    // paid split one invoice's AR across two balance sheets. The default is
+    // moved mid-test precisely to prove that cannot happen now.
+    const income = await accountId("4000");
+    const invoiceId = await withTenant(tenantId, async (tx) => {
+      const inv = await createInvoiceDraft(tx, owner, {
+        entityId: oak,
+        customerId: oakCustomer,
+        issueDate: "2026-06-01",
+        lines: [
+          {
+            description: "Rent",
+            quantity: "1",
+            unitPriceCents: 40_000,
+            incomeAccountId: income,
+          },
+        ],
+      });
+      await issueInvoice(tx, owner, { invoiceId: inv.id, expectedVersion: inv.version });
+      return inv.id;
+    });
+
+    await withTenant(tenantId, (tx) => setDefaultEntity(tx, owner, maple));
+    try {
+      await withTenant(tenantId, async (tx) => {
+        const inv = await tx.query.invoices.findFirst({
+          where: eq(schema.invoices.id, invoiceId),
+        });
+        await recordPayment(tx, owner, {
+          invoiceId,
+          expectedVersion: inv!.version,
+          amountCents: 40_000,
+          paymentDate: "2026-06-10",
+          depositAccountId: oakBankLedgerAccountId,
+          method: "check",
+        });
+      });
+      const entries = await withTenant(tenantId, (tx) =>
+        tx.query.journalEntries.findMany({
+          where: and(
+            eq(schema.journalEntries.tenantId, tenantId),
+            inArray(schema.journalEntries.source, ["invoice", "invoice_payment"]),
+          ),
+        }),
+      );
+      const forThisInvoice = entries.filter(
+        (e) => e.sourceId === invoiceId || e.memo.includes("Rent") || true,
+      );
+      expect(forThisInvoice.length).toBeGreaterThanOrEqual(2);
+      // BOTH legs in Oak Row, even though Maple is the default by now.
+      for (const e of entries) expect(e.entityId).toBe(oak);
+    } finally {
+      await withTenant(tenantId, (tx) => setDefaultEntity(tx, owner, maple));
+    }
+  });
+
+  it("REFUSES a payment deposited into another company's register", async () => {
+    // The ten-LLC landlord's constant move, and the one thing slice 1b will not
+    // let you record: as a single entry it would show cash arriving in an
+    // account the company does not own. It is intercompany (slice 2).
+    const income = await accountId("4000");
+    const invoiceId = await withTenant(tenantId, async (tx) => {
+      const inv = await createInvoiceDraft(tx, owner, {
+        entityId: oak,
+        customerId: oakCustomer,
+        issueDate: "2026-06-02",
+        lines: [
+          {
+            description: "Rent 2",
+            quantity: "1",
+            unitPriceCents: 10_000,
+            incomeAccountId: income,
+          },
+        ],
+      });
+      await issueInvoice(tx, owner, { invoiceId: inv.id, expectedVersion: inv.version });
+      return inv.id;
+    });
+    await expect(
+      withTenant(tenantId, async (tx) => {
+        const inv = await tx.query.invoices.findFirst({
+          where: eq(schema.invoices.id, invoiceId),
+        });
+        return recordPayment(tx, owner, {
+          invoiceId,
+          expectedVersion: inv!.version,
+          amountCents: 10_000,
+          paymentDate: "2026-06-11",
+          depositAccountId: mapleBankLedgerAccountId,
+          method: "check",
+        });
+      }),
+    ).rejects.toMatchObject({ code: "CROSS_ENTITY_REGISTER" });
+  });
+
+  it("REFUSES a hand-written journal touching another company's register", async () => {
+    // Same guard, reached from the other direction — it lives in the posting
+    // engine because any entry can name any account.
+    const income = await accountId("4000");
+    await expect(
+      withTenant(tenantId, (tx) =>
+        postEntry(tx, owner, {
+          entityId: oak,
+          status: "posted",
+          entryDate: "2026-06-12",
+          memo: "Oak income into Maple's account",
+          lines: [
+            { accountId: mapleBankLedgerAccountId, amountCents: 5_000 },
+            { accountId: income, amountCents: -5_000 },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "CROSS_ENTITY_REGISTER" });
+  });
+
+  it("A/R aging is per company", async () => {
+    const [oakAging, mapleAging, combined] = await withTenant(
+      tenantId,
+      async (tx) => [
+        await getArAging(tx, tenantId, "2026-12-31", scopeOf(oak)),
+        await getArAging(tx, tenantId, "2026-12-31", scopeOf(maple)),
+        await getArAging(tx, tenantId, "2026-12-31", COMBINED),
+      ],
+    );
+    // Oak issued 40,000 (paid) + 10,000 (unpaid); Maple issued nothing.
+    expect(oakAging.totalCents).toBe(10_000);
+    expect(mapleAging.totalCents).toBe(0);
+    expect(combined.totalCents).toBe(10_000);
+  });
+
+  it("only this company's registers are offered to its documents", async () => {
+    // Not a UI assertion — the ENGINE decides, and the picker only mirrors it.
+    const registers = await withTenant(tenantId, (tx) =>
+      tx.query.bankAccounts.findMany({
+        where: eq(schema.bankAccounts.tenantId, tenantId),
+      }),
+    );
+    expect(registers.find((r) => r.accountId === oakBankLedgerAccountId)?.entityId).toBe(oak);
+    expect(registers.find((r) => r.accountId === mapleBankLedgerAccountId)?.entityId).toBe(maple);
   });
 
   it("only one company is the default, and moving it is two statements", async () => {

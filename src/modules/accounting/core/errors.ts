@@ -19,6 +19,7 @@ export type LedgerErrorCode =
   | "ENTITY_IS_DEFAULT"
   | "ENTITY_NAME_INVALID"
   | "ENTITY_NAME_TAKEN"
+  | "CROSS_ENTITY_REGISTER"
   | "DUPLICATE_CODE"
   | "COA_SELF_PARENT"
   | "COA_CYCLE"
@@ -132,6 +133,8 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "This is the default company — make another one the default first.",
   ENTITY_NAME_INVALID: "Give the company a name.",
   ENTITY_NAME_TAKEN: "A company already has that name.",
+  CROSS_ENTITY_REGISTER:
+    "That bank account belongs to a different company. Use one of this company's own accounts — money moving between two of your companies is a transfer, and recording it properly needs both sides.",
   DUPLICATE_CODE: "That account code is already in use.",
   COA_SELF_PARENT: "An account cannot be its own parent.",
   COA_CYCLE: "That parent choice would create a loop in the account tree.",

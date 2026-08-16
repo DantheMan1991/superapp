@@ -4,7 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Invoice, InvoiceLine } from "@/db/schema";
 import {
   LedgerError,
-  entityForDocument,
+  getDefaultEntityId,
   postEntry,
   requireOwnerRole,
   voidEntry,
@@ -209,6 +209,13 @@ async function resolveTaxForWrite(
 }
 
 export interface InvoiceDraftInput {
+  /**
+   * Which company's books (ADR 0010). OPTIONAL over the wire and resolved to
+   * the tenant's default when absent — a single-company tenant has no picker to
+   * send one from. Frozen once the document exists: it is what every entry the
+   * document posts will read.
+   */
+  entityId?: string;
   customerId: string;
   invoiceNumber?: string;
   issueDate: string;
@@ -241,8 +248,12 @@ export async function createInvoiceDraft(
   let number = input.invoiceNumber ?? (await suggestInvoiceNumber(tx, ctx.tenantId));
   const tax = await resolveTaxForWrite(tx, ctx.tenantId, input.taxRateId);
 
+  const entityId =
+    input.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId));
+
   const values = (invoiceNumber: string) => ({
     tenantId: ctx.tenantId,
+    entityId,
     customerId: input.customerId,
     invoiceNumber,
     issueDate: input.issueDate,
@@ -318,6 +329,10 @@ export async function updateInvoiceDraft(
   const totals = invoiceTaxTotals(written, tax.taxRateId ? tax.taxRatePpm : null);
 
   const number = args.patch.invoiceNumber ?? invoice.invoiceNumber;
+  // NOTE `entityId` is deliberately NOT in this SET, even though the patch type
+  // carries it. A draft's company is fixed at creation: it is what issuance and
+  // every payment will read, so editing it here would be a way to move a
+  // document between two balance sheets by typing in a form.
   const rows = await tx
     .update(schema.invoices)
     .set({
@@ -450,10 +465,11 @@ export async function issueInvoice(
     );
 
   const { entry } = await postEntry(tx, ctx, {
-    // An invoice does not carry an entity of its own yet (ADR 0010 puts one on
-    // the ENTRY in slice 1), so its issuance lands in the tenant's default
-    // company — and every later entry for the same invoice follows this one.
-    entityId: await entityForDocument(tx, ctx.tenantId, "invoice", invoice.id),
+    // THE INVOICE'S OWN COMPANY. Chosen when the draft was created and frozen
+    // from then on — issuance, every payment, and any reversal all read it from
+    // the same row, so moving the tenant's default cannot split one document's
+    // AR across two balance sheets.
+    entityId: invoice.entityId,
     status: "posted",
     entryDate: invoice.issueDate,
     memo: `Invoice ${invoice.invoiceNumber}`,

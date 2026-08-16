@@ -317,13 +317,16 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
       // file by position is unaffected. `tax_rate_percent` is the rate AS
       // CHARGED, from the invoice rather than from the rate list, so an
       // exported invoice states its own arithmetic.
-      ["id", "invoice_number", "customer", "status", "issue_date", "due_date", "memo", "total", "journal_entry_id", "subtotal", "sales_tax", "tax_rate", "tax_rate_percent"],
+      // `company` is APPENDED like the tax columns before it, so a process
+      // reading this file by position is unaffected.
+      ["id", "invoice_number", "customer", "status", "issue_date", "due_date", "memo", "total", "journal_entry_id", "subtotal", "sales_tax", "tax_rate", "tax_rate_percent", "company"],
       data.invoices.map((i) => [
         i.id, i.invoiceNumber, custName(i.customerId), i.status,
         i.issueDate, i.dueDate ?? "", i.memo, money(i.totalCents),
         i.journalEntryId ?? "",
         money(i.subtotalCents), money(i.taxCents),
         taxRateName(i.taxRateId), i.taxRateId ? formatRatePpm(i.taxRatePpm) : "",
+        entityName(i.entityId),
       ]),
     ),
   );
@@ -403,10 +406,11 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "purchases/bills.csv",
       "Vendor bills",
-      ["id", "vendor", "vendor_invoice_number", "status", "bill_date", "due_date", "memo", "total", "journal_entry_id"],
+      ["id", "vendor", "vendor_invoice_number", "status", "bill_date", "due_date", "memo", "total", "journal_entry_id", "company"],
       data.bills.map((b) => [
         b.id, vendName(b.vendorId), b.billNumber, b.status, b.billDate,
         b.dueDate ?? "", b.memo, money(b.totalCents), b.journalEntryId ?? "",
+        entityName(b.entityId),
       ]),
     ),
   );
@@ -443,10 +447,10 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "banking/bank_accounts.csv",
       "Bank and card registers",
-      ["id", "name", "kind", "institution", "last4", "ledger_account_code", "active"],
+      ["id", "name", "kind", "institution", "last4", "ledger_account_code", "active", "company"],
       data.bankAccounts.map((b) => [
         b.id, b.name, b.kind, b.institution, b.last4,
-        acctCode(b.accountId), String(b.isActive),
+        acctCode(b.accountId), String(b.isActive), entityName(b.entityId),
       ]),
     ),
   );

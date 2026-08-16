@@ -49,7 +49,7 @@ d("documents isolation (RLS + composite tenant FKs)", () => {
         .returning();
       const [bank] = await tx
         .insert(schema.bankAccounts)
-        .values({ tenantId, accountId: cash.id, name: `Bank ${tag}`, kind: "checking" })
+        .values({ tenantId, entityId, accountId: cash.id, name: `Bank ${tag}`, kind: "checking" })
         .returning();
       const [txn] = await tx
         .insert(schema.bankTransactions)
@@ -65,7 +65,7 @@ d("documents isolation (RLS + composite tenant FKs)", () => {
         .returning();
       const [invoice] = await tx
         .insert(schema.invoices)
-        .values({ tenantId, customerId: customer.id, invoiceNumber: `INV-${tag}`, issueDate: "2026-07-01", createdByClerkUserId: `user-${tag}` })
+        .values({ tenantId, entityId, customerId: customer.id, invoiceNumber: `INV-${tag}`, issueDate: "2026-07-01", createdByClerkUserId: `user-${tag}` })
         .returning();
       const [doc] = await tx
         .insert(schema.documents)

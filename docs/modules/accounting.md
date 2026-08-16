@@ -13,6 +13,77 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — Invoices, bills and bank accounts carry a company (branch `claude/entities-on-documents`)
+
+Slice 1 put the company on the journal ENTRY, which made reports scopeable and
+left every document posting into the tenant's DEFAULT. This is the half that
+makes the ten-LLC landlord's books actually separable. Migration `0145`;
+**`0146` is owed after this deploy** and is the three `SET NOT NULL`s.
+
+- **THE DOCUMENT DECIDES, and every entry it posts follows it.** An invoice's
+  issuance and all its payments read `invoices.entity_id`; a bill's approval and
+  payments read `bills.entity_id`; a bank row, an opening balance and a register
+  quick-add read `bank_accounts.entity_id`. `entityForDocument` — the slice-1
+  rule that inherited a company from a document's FIRST entry — is now dead for
+  all three, because there is nothing left to infer.
+- **A LINE MAY NOT TOUCH ANOTHER COMPANY'S REGISTER**, enforced in `postEntry`
+  and in `editEntry`, not at the call sites. There is no useful list of call
+  sites: any journal can name any account. The case it refuses is the one the
+  ADR says this client does constantly — paying Oak Row's bill out of Maple
+  Street's checking. As a single entry that is `Dr AP (Oak) / Cr Checking
+  (Maple)` tagged to ONE company, so Oak's balance sheet shows cash leaving an
+  account it does not own and Maple's shows nothing, **and the ledger still
+  balances**. It is intercompany (slice 2), and until that exists it is refused
+  rather than mis-recorded. The error says so and says what to do instead.
+- **The chart of accounts is NOT constrained by that guard, deliberately.** AR,
+  AP and every expense account stay shared: two companies' receivables both sit
+  in 1200 and are separated by the entry's company. Only a REGISTER is owned,
+  because only a register is an account with a balance somebody reconciles.
+- **A/R and A/P aging, and the tax summary, now TAKE A SCOPE.** All three
+  declined one in slice 1 for the same stated reason — the documents they read
+  had no company — and that reason is gone. The tax summary is the one that
+  matters: it shows the gap between what the invoices say and what the ledger
+  says, so scoping one column and not the other made the difference
+  meaningless. A sales-tax return is filed per company.
+- **`entityScopeCondition` grew a column argument** rather than being copied
+  three times, so "combined means no predicate" is decided in one place. A
+  report that hand-rolled its own `eq(...)` would have to remember that alone.
+- **The company is fixed at creation on all three.** `updateInvoiceDraft` and
+  `updateBillDraft` do not write it (there is a comment where it would go), and
+  a register has no update path for it at all: every entry that has cleared
+  through an account belongs to whoever owned it then, so moving one would
+  strand them. The correction is a new register and a transfer.
+- **A TEMPLATE RESOLVES; A DOCUMENT FREEZES.** `recurring_entries.template`
+  gained an OPTIONAL `entityId` — optional for the reason `taxRateId` is, that a
+  template which stopped parsing would silently stop generating. Absent means
+  the tenant's default, resolved at generation. The invoice or bill it produces
+  then freezes what it was given, like any other document.
+- **A receipt takes the company of the account it was paid from**
+  (`entityForRegisterAccount`). A receipt is not a document with a company of
+  its own — it is evidence of money leaving an account, and the account has an
+  owner. It falls back to the default only when the paid-from account is not a
+  register at all.
+- **The list pages scope the WHOLE page, not just the header figure** — the
+  MoneyBar, the bucket tallies and the table read one `entity`. A list showing
+  one company's invoices under another company's "overdue" total is a screen
+  somebody makes a decision from. `CompanyPicker` navigates on change rather
+  than behind a Run button (a list is not a question you assemble), and it
+  PRESERVES the status filter and bucket in the query string — dropping them
+  would widen the list at the moment it narrowed it.
+- **The books export gains a `company` column** on `invoices.csv`, `bills.csv`
+  and `bank_accounts.csv`, APPENDED in each case so a process reading by
+  position is unaffected.
+- `tests/entities-db.test.ts` grows to 17: an invoice keeps its company through
+  issue and payment **with the default moved in between**, a payment into
+  another company's register is refused, a hand-written journal into one is
+  refused, and A/R aging comes out per company. Isolation gains three composite
+  FK cases — an invoice, a bill and a register each cannot name another
+  tenant's company.
+- **NOT built, and each is still its own slice:** intercompany pairs (2),
+  consolidation with eliminations (3), per-entity CLOSE (4) — `period_closes`
+  still locks every company at once. Fixed assets have no company either, so the
+  assets pack is `entityForDocument`'s last caller.
+
 ### 2026-08-16 — The Journal header claimed one company's books (branch `claude/journal-company-copy`)
 
 Found by driving the live Test tenant straight after slice 1 deployed, which is
@@ -1034,7 +1105,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger. `journal_entries.entity_id` (`0142`) says whose books — **on the ENTRY, never the line**, so an entry still balances on its own. Composite FK `(tenant_id, entity_id)`. NOT NULL since `0144`, which ran after the deploy — `0142` had to add it nullable because migrations precede deploys |
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.). Gained `reminders_enabled` (default **false**) and `reminder_offsets` jsonb (`0114`) |
-| `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens |
+| `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens. `bank_accounts.entity_id` (`0145`) — **a register belongs to exactly one company**, chosen at creation and never moved, and `postEntry` refuses any line touching another company's register |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
 | `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and awaits its DROP |
@@ -1090,16 +1161,20 @@ sentence rather than leaving it aspirational.
   it stays absolute between clients. There is no `app.current_entity` and there
   is not going to be one in this design — separation between companies is
   application code, which ADR 0010 names as its own strongest counter-argument.
-- **A DOCUMENT keeps the company it first posted in; a TEMPLATE resolves the
-  current default.** `entityForDocument` is why an invoice's payments cannot end
-  up in different books from its issuance when somebody moves the default, and a
-  reversal always takes its original's company rather than the default. The
-  template half is the same split the sales-tax rate already makes.
-- **Only a journal entry can name a company.** Invoices, bills, bank rows,
-  receipts and recurring journals post to the tenant's default, because no
-  document carries an entity yet. Every one of those call sites calls
-  `getDefaultEntityId` EXPLICITLY rather than relying on a fallback inside
-  `postEntry`, so the list of what the document slice must revisit is a grep.
+- **A DOCUMENT carries its own company; a TEMPLATE resolves the current
+  default.** `invoices`, `bills` and `bank_accounts` each have an `entity_id`
+  chosen at creation and never editable afterwards, and every entry they post
+  reads it — so moving the tenant's default cannot split a document's AR across
+  two balance sheets, and a reversal always takes its original's company. A
+  recurring template resolves the default at generation instead, the same split
+  the sales-tax rate already makes.
+- **A LINE MAY NOT TOUCH ANOTHER COMPANY'S REGISTER**, enforced in `postEntry`
+  and `editEntry`. Paying one company's bill from another's account is
+  INTERCOMPANY (slice 2) and is refused rather than mis-recorded — as one entry
+  it would leave both balance sheets wrong while the ledger still balanced. The
+  chart of accounts is deliberately NOT constrained: two companies' receivables
+  share account 1200, separated by the entry's company. Only a register is
+  owned.
 - **Three-tier mutability**: draft (free edit) → posted (edit-with-version/void/reverse) → reconciled (immutable; reverse only). The DB backs each tier with triggers/FKs, not just app code.
 - **Derived, never stored**: invoice/bill statuses derive from payments; `closed_through` derives from period_closes; Retained Earnings is computed — no closing entries exist.
 - **All money is integer cents.** No floats, and no division in report math — with exactly one quarantined exception, `core/cash-basis-allocate.ts`, where pro-rata recognition inherently divides. It uses BigInt intermediates and a largest-remainder rule so each split sums to the cent. Nowhere else in the report path may divide.
@@ -1147,6 +1222,7 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
+- **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. **`drizzle/0146` is owed after this deploy** — the three `SET NOT NULL`s. What is NOT built: **intercompany pairs** (slice 2, and the register guard is what refuses the case until it exists), **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller
 - **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. `drizzle/0144` closed the expand/contract the same day: `entity_id` is NOT NULL on both databases, with the window's backfill re-run first. Still queued in that lane: the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)

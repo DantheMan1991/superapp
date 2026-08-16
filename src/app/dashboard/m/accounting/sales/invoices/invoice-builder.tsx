@@ -74,6 +74,8 @@ interface LineRow {
 export interface BuilderInvoice {
   id: string;
   version: number;
+  /** Read-only once the draft exists — the company is fixed at creation. */
+  entityId?: string;
   customerId: string;
   invoiceNumber: string;
   issueDate: string;
@@ -111,6 +113,8 @@ function emptyRow(defaultAccount: string, taxable: boolean): LineRow {
 
 export function InvoiceBuilder({
   customers,
+  entities = [],
+  defaultEntityId = null,
   incomeAccounts,
   suggestedNumber,
   today,
@@ -122,6 +126,16 @@ export function InvoiceBuilder({
   defaultTaxRateId = null,
 }: {
   customers: BuilderCustomer[];
+  /**
+   * The tenant's companies (ADR 0010). Shown only at TWO or more — one company
+   * and the client never learns the concept.
+   *
+   * Chosen once, on the DRAFT, and never editable afterwards: the company is
+   * what issuance and every payment read, so changing it on a document that has
+   * already posted would move money between two balance sheets.
+   */
+  entities?: Array<{ id: string; name: string }>;
+  defaultEntityId?: string | null;
   incomeAccounts: BuilderAccount[];
   suggestedNumber: string;
   today: string;
@@ -141,6 +155,9 @@ export function InvoiceBuilder({
   const [pending, startTransition] = useTransition();
   const defaultAccount = incomeAccounts[0]?.id ?? "";
   const [customerId, setCustomerId] = useState(invoice?.customerId ?? "");
+  const [entityId, setEntityId] = useState(
+    invoice?.entityId ?? defaultEntityId ?? "",
+  );
   const [number, setNumber] = useState(invoice?.invoiceNumber ?? suggestedNumber);
   const [issueDate, setIssueDate] = useState(invoice?.issueDate ?? today);
   // An EXISTING draft keeps the date it was saved with — re-deriving it from
@@ -263,6 +280,7 @@ export function InvoiceBuilder({
     });
     startTransition(async () => {
       const payload = {
+        entityId: entityId || undefined,
         customerId,
         invoiceNumber: number.trim() || undefined,
         issueDate,
@@ -294,6 +312,24 @@ export function InvoiceBuilder({
   return (
     <Card>
       <CardContent className="space-y-4 pt-6">
+        {!invoice && entities.length > 1 && (
+          <div className="space-y-1.5 sm:max-w-xs">
+            <Label>Company</Label>
+            <Select value={entityId || undefined} onValueChange={setEntityId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Which company is invoicing?" />
+              </SelectTrigger>
+              <SelectContent>
+                {entities.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Customer</Label>

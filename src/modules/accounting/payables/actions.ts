@@ -194,6 +194,12 @@ export async function findVendorCandidatesAction(input: {
 // ------------------------------------------------------------------ bills
 
 const billDraftSchema = z.object({
+  /**
+   * Which company owes this bill (ADR 0010). Optional over the wire and
+   * resolved to the tenant's default; ignored on an UPDATE, because the company
+   * is what approval and every payment read.
+   */
+  entityId: z.string().uuid().optional(),
   vendorId: z.string().uuid(),
   billNumber: z.string().trim().max(100).optional(),
   billDate: dateStr,

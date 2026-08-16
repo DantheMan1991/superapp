@@ -4,7 +4,6 @@ import { schema, type Tx } from "@/db";
 import type { Invoice, InvoicePayment } from "@/db/schema";
 import {
   LedgerError,
-  entityForDocument,
   postEntry,
   requireOwnerRole,
   voidEntry,
@@ -113,10 +112,10 @@ export async function recordPayment(
   // no FK gymnastics. Both inserts share this transaction.
   const paymentId = crypto.randomUUID();
   const { entry } = await postEntry(tx, ctx, {
-    // THE INVOICE'S company, not the tenant default. Both legs of an invoice
-    // have to sit in one set of books or its AR is wrong in two of them — and
-    // the default can move between issuing and being paid.
-    entityId: await entityForDocument(tx, ctx.tenantId, "invoice", invoice.id),
+    // THE INVOICE'S company. `postEntry` additionally refuses a deposit account
+    // that is another company's register — depositing Oak Row's rent into Maple
+    // Street's account is an intercompany transfer, not a payment.
+    entityId: invoice.entityId,
     status: "posted",
     entryDate: args.paymentDate,
     memo: `Payment — ${invoice.invoiceNumber}`,

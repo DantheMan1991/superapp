@@ -4,7 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Bill, BillLine } from "@/db/schema";
 import {
   LedgerError,
-  entityForDocument,
+  getDefaultEntityId,
   postEntry,
   requireOwnerRole,
   voidEntry,
@@ -161,6 +161,13 @@ async function insertBillLines(
 }
 
 export interface BillDraftInput {
+  /**
+   * Which company's books (ADR 0010). OPTIONAL over the wire and resolved to
+   * the tenant's default when absent — a single-company tenant has no picker to
+   * send one from. Frozen once the document exists: it is what every entry the
+   * document posts will read.
+   */
+  entityId?: string;
   vendorId: string;
   billNumber?: string;
   billDate: string;
@@ -182,6 +189,7 @@ export async function createBillDraft(
     .insert(schema.bills)
     .values({
       tenantId: ctx.tenantId,
+      entityId: input.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId)),
       vendorId: input.vendorId,
       billNumber: input.billNumber ?? "",
       billDate: input.billDate,
@@ -377,9 +385,9 @@ export async function approveBill(
     );
 
   const { entry } = await postEntry(tx, ctx, {
-    // As for an invoice: the bill carries no entity yet, so approval lands in
-    // the default company and its payments follow it.
-    entityId: await entityForDocument(tx, ctx.tenantId, "bill", bill.id),
+    // THE BILL'S OWN COMPANY, chosen at draft and frozen — the AP mirror of the
+    // invoice rule.
+    entityId: bill.entityId,
     status: "posted",
     entryDate: bill.billDate,
     memo: `Bill — ${vendor.name}${bill.billNumber ? ` ${bill.billNumber}` : ""}`,

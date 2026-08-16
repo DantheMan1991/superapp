@@ -172,14 +172,15 @@ export async function generateRecurringEntries(
         /**
          * A TEMPLATE RESOLVES ITS COMPANY; A DOCUMENT FREEZES ONE. The same
          * split `recurring_entries` already makes for a sales-tax rate — a
-         * template is a standing instruction, so it follows the tenant's
-         * default company as it stands at generation, while an issued invoice
-         * keeps the one it was posted in. Resolved once per template rather
-         * than per catch-up month, so a twelve-month catch-up cannot straddle
-         * two sets of books. Per-template choice is a `template.entityId`
-         * away and waits for the document slice.
+         * template is a standing instruction, so a template naming no company
+         * follows the tenant's default as it stands at generation, while the
+         * invoice or bill it produces freezes whatever it was given.
+         *
+         * Resolved ONCE per template rather than per catch-up month, so a
+         * twelve-month catch-up cannot straddle two sets of books.
          */
-        const entityId = await getDefaultEntityId(tx, ctx.tenantId);
+        const entityId =
+          template.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId));
 
         let next = entry.nextRunDate;
         let runs = 0;
@@ -224,6 +225,7 @@ export async function generateRecurringEntries(
             // is what makes it immune to PERIOD_CLOSED. That rule came with
             // `recurring_invoices` and survives the move unchanged.
             await createInvoiceDraft(tx, actor, {
+              entityId,
               customerId: entry.customerId!,
               issueDate: next,
               dueDate: addDaysIso(next, template.dueInDays),
@@ -244,6 +246,7 @@ export async function generateRecurringEntries(
             // that approval is the control an owner already exercises over
             // money going out — generating an approved bill would remove it.
             await createBillDraft(tx, actor, {
+              entityId,
               vendorId: entry.vendorId!,
               billDate: next,
               dueDate: addDaysIso(next, template.dueInDays),

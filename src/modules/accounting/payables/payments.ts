@@ -4,7 +4,6 @@ import { schema, type Tx } from "@/db";
 import type { Bill, BillPayment } from "@/db/schema";
 import {
   LedgerError,
-  entityForDocument,
   postEntry,
   requireOwnerRole,
   voidEntry,
@@ -102,8 +101,9 @@ export async function recordBillPayment(
   // and the payment row is born with its real entry id (invoicing mirror).
   const paymentId = crypto.randomUUID();
   const { entry } = await postEntry(tx, ctx, {
-    // THE BILL'S company — the AP mirror of the invoice-payment rule.
-    entityId: await entityForDocument(tx, ctx.tenantId, "bill", bill.id),
+    // THE BILL'S company. Paying it from another company's account is refused
+    // by `postEntry` rather than mis-recorded — that is intercompany (slice 2).
+    entityId: bill.entityId,
     status: "posted",
     entryDate: args.paymentDate,
     memo: `Bill payment — ${vendor.name}${bill.billNumber ? ` ${bill.billNumber}` : ""}`,

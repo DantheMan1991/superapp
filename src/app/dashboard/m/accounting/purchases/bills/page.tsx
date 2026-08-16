@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import { CompanyPicker } from "@/modules/accounting/components/company-picker";
 import { MoneyBar } from "@/modules/accounting/components/money-bar";
 import {
   AP_BUCKETS,
@@ -37,6 +38,8 @@ import {
   formatCentsSigned,
   todayInTimezone,
 } from "@/modules/accounting/lib/money";
+import { entityScopeCondition } from "@/modules/accounting/core";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { PurchasesNav } from "../purchases-nav";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +64,7 @@ const TONE_BADGE: Record<ObligationTone, "default" | "secondary" | "destructive"
 export default async function BillsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; bucket?: string }>;
+  searchParams: Promise<{ tab?: string; bucket?: string; entity?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -73,6 +76,10 @@ export default async function BillsPage({
 
   const data = await withTenant(tenantId, async (tx) => {
     const today = todayInTimezone(ctx.tenant.timezone);
+    // The bar, the buckets and the table all read one scope — see the invoice
+    // list for why a half-scoped list is worse than an unscoped one.
+    const entityView = await reportEntityOr404(tx, tenantId, sp.entity);
+    const inScope = entityScopeCondition(entityView.scope, schema.bills.entityId);
 
     /**
      * The bar covers EVERY bill, not the 200 the table shows — a total that
@@ -88,7 +95,7 @@ export default async function BillsPage({
         paidCents: sql<string>`coalesce((select sum(${schema.billPayments.amountCents}) from ${schema.billPayments} where ${schema.billPayments.tenantId} = ${schema.bills.tenantId} and ${schema.billPayments.billId} = ${schema.bills.id}), 0)`,
       })
       .from(schema.bills)
-      .where(eq(schema.bills.tenantId, tenantId));
+      .where(and(eq(schema.bills.tenantId, tenantId), inScope));
 
     const recentPayments = await tx
       .select({
@@ -173,6 +180,7 @@ export default async function BillsPage({
       .where(
         and(
           eq(schema.bills.tenantId, tenantId),
+          inScope,
           statusFilter
             ? inArray(
                 schema.bills.status,
@@ -190,9 +198,19 @@ export default async function BillsPage({
       )
       .orderBy(desc(schema.bills.billDate), desc(schema.bills.createdAt))
       .limit(200);
-    const aging = await getApAging(tx, tenantId, today);
-    return { bills, aging, today, tally, inBucket };
+    const aging = await getApAging(tx, tenantId, today, entityView.scope);
+    return { bills, aging, today, tally, inBucket, entityView };
   });
+
+  const companyName = new Map(data.entityView.entities.map((e) => [e.id, e.name]));
+  const showCompany = data.entityView.entities.length > 1;
+  // Every link out keeps the scope — see the invoice list.
+  const q = (extra: Record<string, string> = {}) => {
+    const p = new URLSearchParams(extra);
+    if (sp.entity) p.set("entity", sp.entity);
+    const s = p.toString();
+    return `/dashboard/m/accounting/purchases/bills${s ? `?${s}` : ""}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -230,13 +248,13 @@ export default async function BillsPage({
       <MoneyBar
         noun="bill"
         activeKey={bucket}
-        clearHref="/dashboard/m/accounting/purchases/bills"
+        clearHref={q()}
         buckets={AP_BUCKETS.map((key) => ({
           key,
           label: AP_BUCKET_LABEL[key],
           cents: data.tally[key][0],
           count: data.tally[key][1],
-          href: `/dashboard/m/accounting/purchases/bills?bucket=${key}`,
+          href: q({ bucket: key }),
           alarm: key === "overdue",
         }))}
       />
@@ -244,15 +262,23 @@ export default async function BillsPage({
       {/* Sub-nav and status filter share one row, as on the invoices page. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PurchasesNav />
+        <div className="flex flex-wrap items-center gap-3">
+        <CompanyPicker
+          entities={data.entityView.entities.map((e) => ({
+            id: e.id,
+            name: e.name,
+          }))}
+        />
         <FilterPills
           activeKey={tab}
           items={TABS.map((t) => ({
             key: t.key,
             label: t.label,
-            href: `/dashboard/m/accounting/purchases/bills?tab=${t.key}`,
+            href: q({ tab: t.key }),
           }))}
           className="print:hidden"
         />
+        </div>
       </div>
 
       <DataTable
@@ -282,6 +308,7 @@ export default async function BillsPage({
           <TableHeader>
             <TableRow>
               <TableHead>Vendor</TableHead>
+              {showCompany && <TableHead>Company</TableHead>}
               <TableHead className="hidden sm:table-cell">Invoice #</TableHead>
               <TableHead>Bill date</TableHead>
               <TableHead className="hidden sm:table-cell">Due</TableHead>
@@ -310,6 +337,11 @@ export default async function BillsPage({
                       {vendorName}
                     </Link>
                   </TableCell>
+                  {showCompany && (
+                    <TableCell className="text-xs text-muted-foreground">
+                      {companyName.get(bill.entityId) ?? "—"}
+                    </TableCell>
+                  )}
                   <TableCell className="hidden font-mono text-xs sm:table-cell">
                     {bill.billNumber || "—"}
                   </TableCell>

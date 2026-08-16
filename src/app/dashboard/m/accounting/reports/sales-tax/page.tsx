@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { getSettings, getTaxSummary } from "@/modules/accounting/core";
 import { formatRatePpm } from "@/modules/accounting/invoicing/tax";
 import { presetRange } from "@/modules/accounting/lib/dates";
@@ -38,7 +39,7 @@ export const dynamic = "force-dynamic";
 export default async function SalesTaxReportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; entity?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -50,8 +51,13 @@ export default async function SalesTaxReportPage({
     const fallback = presetRange("this-month", today, settings.fiscalYearStartMonth);
     const from = sp.from && isValidIsoDate(sp.from) ? sp.from : fallback.from;
     const to = sp.to && isValidIsoDate(sp.to) ? sp.to : fallback.to;
-    const report = await getTaxSummary(tx, ctx.tenant.id, { from, to });
-    return { settings, today, from, to, report };
+    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    const report = await getTaxSummary(tx, ctx.tenant.id, {
+      scope: entityView.scope,
+      from,
+      to,
+    });
+    return { settings, today, from, to, report, entityView };
   });
 
   const { report } = data;
@@ -63,8 +69,8 @@ export default async function SalesTaxReportPage({
         title="Sales Tax Summary"
         description={
           <>
-            {ctx.tenant.name} · {report.from} to {report.to} · accrual basis
-            (invoice date)
+            {data.entityView.stampLabel ?? ctx.tenant.name} · {report.from} to{" "}
+            {report.to} · accrual basis (invoice date)
           </>
         }
       />
@@ -79,6 +85,8 @@ export default async function SalesTaxReportPage({
         fiscalYearStartMonth={data.settings.fiscalYearStartMonth}
         from={data.from}
         to={data.to}
+        entity={sp.entity}
+        entities={data.entityView.entities}
       />
 
       <Panel

@@ -63,6 +63,16 @@ export async function createBankAccount(
   input: {
     name: string;
     kind: BankAccountKind;
+    /**
+     * Which company owns this register (ADR 0010). Absent = the tenant's
+     * default, which is the only answer for a single-company tenant.
+     *
+     * It is chosen ONCE, at creation, and there is deliberately no way to move
+     * a register between companies afterwards: every entry that has cleared
+     * through it belongs to the old owner, so moving the account would strand
+     * them — the correction is a new register and a transfer.
+     */
+    entityId?: string;
     institution?: string;
     last4?: string;
     /** Statement convention: credit cards positive = amount owed. */
@@ -88,6 +98,7 @@ export async function createBankAccount(
     .insert(schema.bankAccounts)
     .values({
       tenantId: ctx.tenantId,
+      entityId: input.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId)),
       accountId: ledgerAccount.id,
       name: input.name,
       kind: input.kind,
@@ -120,9 +131,10 @@ export async function createBankAccount(
             { accountId: obe.id, amountCents: -cents },
           ];
     await postEntry(tx, ctx, {
-      // A bank account belongs to one entity from slice 4 (ADR 0010); until it
-      // does, its opening balance lands in the tenant's default company.
-      entityId: await getDefaultEntityId(tx, ctx.tenantId),
+      // THE REGISTER'S OWN COMPANY. An opening balance belongs to whoever owns
+      // the account, and nothing else could be right — the entry's other leg is
+      // the account itself.
+      entityId: bankAccount.entityId,
       status: "posted",
       entryDate: input.openingBalanceDate,
       memo: `Opening balance — ${input.name}`,

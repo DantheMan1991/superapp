@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { DimensionMember, JournalEntry, JournalLine } from "@/db/schema";
 import { MAX_AMOUNT_CENTS, isValidIsoDate, todayInTimezone } from "../lib/money";
@@ -94,6 +94,59 @@ async function assertEntityPostable(
   }
   if (!row.isActive) {
     throw new LedgerError("ENTITY_INACTIVE", `entity ${entityId} is inactive`);
+  }
+}
+
+/**
+ * A LINE MAY NOT TOUCH ANOTHER COMPANY'S REGISTER.
+ *
+ * This is the invariant that makes per-company bank accounts safe, and it lives
+ * here rather than at each call site because there is no useful list of call
+ * sites — any journal entry can name any account.
+ *
+ * The case it refuses is the one the ten-LLC landlord does constantly: paying
+ * Oak Row's bill out of Maple Street's checking account. As a single entry that
+ * would be `Dr AP (Oak) / Cr Checking (Maple)` tagged to ONE company, which
+ * makes Oak's balance sheet show cash leaving an account it does not own and
+ * Maple's show nothing at all. Both statements are then wrong, and the ledger
+ * still balances — the failure signature ADR 0010 is written against.
+ *
+ * It is an INTERCOMPANY transaction, and the honest form is a linked PAIR of
+ * entries with due-to/due-from legs (ADR 0010 slice 2). Until that exists this
+ * refuses rather than mis-records.
+ *
+ * The chart of accounts is NOT constrained: AR, AP and every expense account
+ * are shared, and two companies' receivables both sit in 1200, separated by the
+ * entry's company. Only a REGISTER — a row in `bank_accounts` — is owned.
+ */
+async function assertNoForeignRegisters(
+  tx: Tx,
+  tenantId: string,
+  entityId: string,
+  accountIds: string[],
+): Promise<void> {
+  const distinct = [...new Set(accountIds)];
+  if (distinct.length === 0) return;
+  const foreign = await tx
+    .select({
+      name: schema.bankAccounts.name,
+      accountId: schema.bankAccounts.accountId,
+    })
+    .from(schema.bankAccounts)
+    .where(
+      and(
+        eq(schema.bankAccounts.tenantId, tenantId),
+        inArray(schema.bankAccounts.accountId, distinct),
+        ne(schema.bankAccounts.entityId, entityId),
+      ),
+    )
+    .limit(1);
+  if (foreign.length > 0) {
+    throw new LedgerError(
+      "CROSS_ENTITY_REGISTER",
+      `account ${foreign[0].accountId} is a register of another company`,
+      { registerName: foreign[0].name },
+    );
   }
 }
 
@@ -237,6 +290,12 @@ export async function postEntry(
 
   await assertEntityPostable(tx, ctx.tenantId, input.entityId);
   await loadActiveAccounts(tx, ctx.tenantId, input.lines.map((l) => l.accountId));
+  await assertNoForeignRegisters(
+    tx,
+    ctx.tenantId,
+    input.entityId,
+    input.lines.map((l) => l.accountId),
+  );
   const members = await loadDimensionMembers(tx, ctx.tenantId, input.lines);
   if (input.status === "posted") {
     await assertPeriodOpen(tx, ctx.tenantId, input.entryDate);
@@ -444,6 +503,13 @@ export async function editEntry(
     await loadActiveAccounts(
       tx,
       ctx.tenantId,
+      args.patch.lines.map((l) => l.accountId),
+    );
+    // An EDIT can introduce a foreign register just as a create can.
+    await assertNoForeignRegisters(
+      tx,
+      ctx.tenantId,
+      entry.entityId,
       args.patch.lines.map((l) => l.accountId),
     );
     const members = await loadDimensionMembers(tx, ctx.tenantId, args.patch.lines);

@@ -24,7 +24,14 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { parties } from "./parties";
-import { accounts, dimensionMembers, entryEditPolicy, journalEntries, journalLines } from "./ledger";
+import {
+  accounts,
+  dimensionMembers,
+  entities,
+  entryEditPolicy,
+  journalEntries,
+  journalLines,
+} from "./ledger";
 import { billLines, vendors } from "./payables";
 
 export const invoiceStatus = pgEnum("invoice_status", [
@@ -495,6 +502,20 @@ export const invoices = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * Which company's books this document belongs to (ADR 0010).
+     *
+     * THE DOCUMENT DECIDES, and every entry it ever posts follows it — issuance
+     * and each payment. Before this column those entries took the tenant's
+     * DEFAULT company and inherited from each other, which meant moving the
+     * default between issuing and being paid split one document's AR across two
+     * balance sheets. Now there is nothing to inherit from.
+     *
+     * NOT NULL here is one release ahead of the database: `drizzle/0145` adds it
+     * nullable and backfills, `0146` closes it after the deploy. Same reason as
+     * `journal_entries.entity_id` — migrations precede deploys.
+     */
+    entityId: uuid("entity_id").notNull(),
     customerId: uuid("customer_id").notNull(),
     invoiceNumber: text("invoice_number").notNull(),
     status: invoiceStatus("status").notNull().default("draft"),
@@ -565,11 +586,17 @@ export const invoices = pgTable(
     // The numbering race arbiter.
     uniqueIndex("invoices_tenant_number_idx").on(t.tenantId, t.invoiceNumber),
     index("invoices_tenant_status_idx").on(t.tenantId, t.status),
+    index("invoices_tenant_entity_idx").on(t.tenantId, t.entityId),
     index("invoices_tenant_customer_idx").on(t.tenantId, t.customerId),
     // One invoice per issuance entry — mirrors bank_transactions.
     uniqueIndex("invoices_tenant_entry_idx")
       .on(t.tenantId, t.journalEntryId)
       .where(sql`${t.journalEntryId} is not null`),
+    foreignKey({
+      name: "invoices_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
+    }),
     foreignKey({
       name: "invoices_customer_fk",
       columns: [t.tenantId, t.customerId],

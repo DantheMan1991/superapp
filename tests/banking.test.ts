@@ -385,6 +385,7 @@ d("banking (DB)", () => {
       withTenant(tenantId, (tx) =>
         tx.insert(schema.bankAccounts).values({
           tenantId,
+          entityId,
           accountId: ledgerAccount.id,
           name: "Duplicate register",
           kind: "checking",

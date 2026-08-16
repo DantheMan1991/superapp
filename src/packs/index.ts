@@ -1,6 +1,7 @@
 import type { PackDefinition } from "./types";
 import { AssetsModule } from "./assets/AssetsModule";
 import { LandModule } from "./land/LandModule";
+import { InventoryModule } from "./inventory/InventoryModule";
 
 /**
  * Layer 2a registry: slug → how the pack behaves.
@@ -11,8 +12,9 @@ import { LandModule } from "./land/LandModule";
  * happens at the shell layer in `src/lib/features.ts`, which is Layer 0 and is
  * allowed to know both exist.
  *
- * `assets` and `land` are built; the other five are DECLARED AND UNBUILT. That
- * is not a placeholder state: a declared pack has a real dependency graph,
+ * `assets`, `land` and `inventory` are built; the other four are DECLARED AND
+ * UNBUILT. That is not a placeholder state: a declared pack has a real
+ * dependency graph,
  * installs with a profile, and shows as an empty slot in the admin registry —
  * exactly how `scheduling` and `work` were carried before they shipped. Each
  * grows a `src/packs/<slug>/` directory and a `Component` when it is built.
@@ -59,12 +61,19 @@ export const packRegistry: Record<string, PackDefinition> = {
    * Owns the lot spine. Quantity-bearing lots with event-sourced balances and
    * lineage — which is why `livestock` requires it rather than the reverse:
    * market animals ARE inventory, and breeding stock is a capital asset.
+   *
+   * REQUIRES `assets`, added when slice 0 shipped. A storage location IS an
+   * asset — a chest freezer, in a garage, on a parcel — so the movement ledger
+   * points at `assets` with a composite FK rather than inventing a parallel
+   * location model. Every profile that lists `inventory` already lists
+   * `assets`, so this costs nobody anything.
    */
   inventory: {
     slug: "inventory",
     name: "Inventory",
     icon: "boxes",
-    requires: [],
+    requires: ["assets"],
+    Component: InventoryModule,
   },
 
   // ---- Dependent packs ----

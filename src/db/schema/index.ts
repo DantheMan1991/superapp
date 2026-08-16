@@ -29,3 +29,4 @@ export * from "./work";
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";
 export * from "./land";
+export * from "./inventory";

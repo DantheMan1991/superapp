@@ -953,6 +953,20 @@
       "when": 1786827493968,
       "tag": "0135_land_occupancy_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1786839291982,
+      "tag": "0136_inventory_lot_spine",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1786839343377,
+      "tag": "0137_inventory_rls",
+      "breakpoints": true
     }
   ]
 }

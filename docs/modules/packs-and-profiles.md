@@ -11,6 +11,25 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-15 — A pack declares a dependency on another pack for the first time (`claude/inventory-lot-spine`)
+- **`inventory` slice 0** ships the lot spine — full dossier in
+  [inventory.md](inventory.md).
+- **`requires: ["assets"]` is the first pack-to-pack dependency that exists
+  because of a FOREIGN KEY** rather than a conceptual ordering. A storage
+  location IS an asset, so `inventory_movements` points at `assets` with a
+  composite `(tenant_id, location_asset_id)` FK. That makes the dependency
+  enforced by Postgres as well as by `toggleModule`, which is a stronger
+  guarantee than the graph alone — and it is the shape every later pack should
+  copy rather than inventing a soft reference.
+- **Three dimension types now exist across three packs** (`asset`, `parcel`,
+  `zone`, `lot`) and core has still never changed. That is the fourth
+  independent test of ADR 0004's claim.
+- **A pack read another pack's TABLE for the first time**, and deliberately: the
+  location picker selects from `assets`. That is allowed precisely because the
+  dependency is declared — `requires` is what makes the difference between a
+  legitimate read and the leak extension-model.md §4 forbids. A pack must never
+  read the tables of something it does not require.
+
 ### 2026-08-15 — Second pack ships, and vocabulary finally has a reader (`claude/land-places`)
 - **`land` slice 0** — parcels, zones and dated zone use, full dossier in
   [land.md](land.md). The substrate `livestock` and `crops` declare in

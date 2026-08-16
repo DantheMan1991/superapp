@@ -3,6 +3,7 @@ import { neonConfig, Pool } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { sql } from "drizzle-orm";
 import ws from "ws";
+import { configureNeonForLocalProxy } from "./lib/neon-local";
 import * as schema from "../src/db/schema";
 
 /**
@@ -272,6 +273,10 @@ async function main() {
   if (!globalThis.WebSocket) {
     neonConfig.webSocketConstructor = ws;
   }
+  // A no-op unless NEON_LOCAL_PROXY is set, which only CI does. Every script
+  // that opens its OWN Neon pool needs this line — the first CI run failed
+  // because `migrate.ts` did not have it, and this is the same shape.
+  configureNeonForLocalProxy();
   const pool = new Pool({ connectionString: url });
   const db = drizzle(pool, { schema });
 

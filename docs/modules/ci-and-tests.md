@@ -7,6 +7,71 @@
 
 ## Build log
 
+### 2026-08-15 — The database moves into the runner (branch `claude/ci-postgres-in-runner`)
+
+The real fix, after the round-trip trim bought 30% off a number that can double
+overnight. The suite no longer talks to Neon at all: every run builds its own
+**Postgres 18 inside its own runner**, so a round trip is sub-millisecond and
+the runtime is a property of the code again rather than of the network.
+
+**Measured on a real runner:**
+
+| | Neon branch | Postgres in the runner |
+| --- | ---: | ---: |
+| Whole job | **25m 53s** | **2m 52s** |
+| vitest wall clock | 1519.4s | **117.0s** |
+| Time inside tests | 1465.9s | **64.5s** |
+| Files | 135 passed, 5 skipped | 135 passed, 5 skipped |
+
+**22.7× on test time**, and the file counts are identical — checked
+deliberately, because a fast green is the exact shape of a suite that skipped.
+
+The single most telling number is not in that table: **building the whole schema
+from zero took 3 seconds** here against 117 seconds when the same 136 migrations
+were applied to Neon. Same work, same SQL, ~39× apart. It was all network.
+
+**Three problems, one change.**
+
+1. **Latency.** 1465 of 1519 seconds were spent waiting. Gone.
+2. **The repo-wide queue.** `concurrency: db-tests` existed because every run
+   shared one Neon branch, so three PRs queued for thirty-six minutes. **It is
+   deleted.** Two runs cannot see each other when each builds its own database,
+   and a cancelled run leaves nothing behind to clean up.
+3. **Drift.** The `ci` branch was migrated forward run after run and could
+   diverge from what a fresh database produces. Building from empty every time
+   means **the migration chain itself is exercised on every run** — the thing
+   that would otherwise be discovered during a production migration.
+
+**The driver stays the one production uses.** The app talks to Neon over a
+WebSocket, so swapping in `pg` would certify a driver that ships nowhere, and
+transaction handling and pooling are exactly what the isolation suite leans on.
+`ghcr.io/neondatabase/wsproxy` speaks that protocol and forwards to plain
+Postgres, so no application code changes. `scripts/lib/neon-local.ts` points the
+driver at it and is **a no-op unless `NEON_LOCAL_PROXY` is set** — no ordinary
+run enters that path.
+
+**Postgres 18, because Neon reports 18.4.** A suite whose whole job is to
+certify what the DATABASE enforces has no business running on a different major
+version.
+
+**The part that is load-bearing rather than ceremonial:** `app_user` is created
+in SQL and the run refuses to continue if it can bypass RLS or is a superuser.
+The container's superuser bypasses RLS, and so would any role a provider's API
+minted — Neon's carry `neon_superuser`, the trap recorded in this repo since the
+per-run-branch research. An isolation suite running as a bypassing role is a
+green tick over nothing, which is worse than no suite. The grants live in
+`scripts/lib/app-role.ts` and are shared with `create-app-role.ts` so the two
+paths cannot drift.
+
+**Verified before writing any of it:** the full 136-migration chain applies to
+an empty database cleanly — 110 tables, 239 policies, 8 `app_*` functions.
+
+Secrets removed rather than replaced: `TEST_DATABASE_URL` and
+`TEST_DATABASE_URL_OWNER` are no longer used by CI, and the step that existed to
+check they were present is gone with them. The database is now built by the job,
+so it cannot be missing — a misconfiguration fails at `db:migrate`, loudly,
+before a single test runs.
+
 ### 2026-08-15 — The suite was never CPU-bound; it was waiting (branch `claude/withtenant-one-roundtrip`)
 
 The founder again: *"every CI test is taking like 20 minutes… they never seem to
@@ -163,8 +228,11 @@ None. No tables, no migrations.
 | `vitest.config.ts` | The `pure` / `db` project split |
 | `tests/db-backed-files.ts` | Which files are database-backed |
 | `tests/db-backed-files.test.ts` | Recomputes that list and fails if it drifted |
-| `tests/setup/database-guard.ts` | Aims DB suites at `TEST_DATABASE_URL`, or skips them |
-| `scripts/migrate.ts` | `-- --dev` targets `TEST_DATABASE_URL_OWNER`; CI uses it on its own branch |
+| `tests/setup/database-guard.ts` | Aims DB suites at `TEST_DATABASE_URL`, or skips them. Also refuses a local proxy pointed at a non-localhost host |
+| `scripts/migrate.ts` | `-- --dev` targets `TEST_DATABASE_URL_OWNER`; CI uses it to build its own database from zero |
+| `scripts/lib/neon-local.ts` | Points the Neon driver at a local Postgres through `wsproxy`. **No-op unless `NEON_LOCAL_PROXY` is set** |
+| `scripts/lib/app-role.ts` | The `app_user` grants, shared by the interactive and CI paths so they cannot drift |
+| `scripts/ci-provision-db.ts` | Creates `app_user` in the runner and refuses to continue if it can bypass RLS |
 
 ## Decisions & gotchas
 
@@ -221,29 +289,36 @@ None. No tables, no migrations.
 
 ## Open items
 
-- **Parallelising the `db` project** is still where the remaining time is, and
-  the 2026-08-15 review found the stated blockers weaker than recorded. Every
+- **Parallelising the `db` project is no longer worth doing**, and that is worth
+  saying rather than leaving the item open forever. It was the plan while the
+  suite took 25 minutes; at 2m52s the sequential `db` project costs about a
+  minute in total, so the win is now smaller than the risk of two runs
+  interleaving. The analysis is kept below because it is still true, not because
+  it is still a priority.
+
+  The 2026-08-15 review found the stated blockers weaker than recorded: every
   `withSystem` call in the suite is a scoped INSERT of the file's own fixtures —
   there is not one unscoped read anywhere — 60 of 64 files stamp their tenants
   per pid, each with its own prefix, and vitest's default `forks` pool gives
-  concurrently-running files distinct pids. An attempt at
-  `--fileParallelism --maxWorkers=4` was started and **abandoned without a
-  result**: it ran longer than a sequential pass before being killed, which is
-  itself worth knowing. Contention on the shared Neon branch is the likeliest
-  explanation and it is untested. Do not enable this on the strength of the
-  reasoning alone — get a completed run first.
-- The parallel win may be **smaller on a GitHub runner** (2–4 cores) than on the
-  founder's machine, and a latency-bound suite may not be CPU-limited at all.
-  Re-measure from a real CI run before quoting a number anywhere that matters.
-- **The suite is latency-bound by design**, which makes its runtime a property of
-  Neon's round trip cost that day rather than of the code. The 717s → 1519s
-  doubling is the evidence. The structural fix is a **Postgres service container
-  inside the runner**, where round trips are sub-millisecond: it would also
-  remove the repo-wide `db-tests` queue and the shared-branch collision risk,
-  since every run would get its own database. The honest cost is the driver —
-  the app talks to Neon over a WebSocket, so this needs either a driver swap in
-  tests (divergence from what production runs) or Neon's `wsproxy` container
-  alongside Postgres (keeps the driver identical, and is the version to want).
+  concurrently-running files distinct pids. But an attempt at
+  `--fileParallelism --maxWorkers=4` was **abandoned without a result**: it ran
+  longer than a sequential pass before being killed. Contention on the shared
+  Neon branch was the likeliest explanation and is now moot. If anyone revisits
+  this, get a completed run first — the reasoning alone was never enough.
+- ~~The suite is latency-bound by design~~ — **done 2026-08-15.** Postgres 18
+  and `wsproxy` now run inside the runner; see the build log. The `db-tests`
+  concurrency group went with it.
+- **Nothing runs against a real Neon branch any more**, and that is a genuine
+  trade rather than a pure win. A managed Postgres and a container are not
+  bit-identical — connection limits, autovacuum settings and extension
+  availability all differ — so a failure mode that only appears on Neon would no
+  longer be caught here. The major version is pinned to match, which covers the
+  part that matters for RLS. If something Neon-specific ever bites in
+  production, this is the first place to look.
+- **`TEST_DATABASE_URL` / `TEST_DATABASE_URL_OWNER` are still repository
+  secrets** and are no longer read by CI. They remain the local mechanism (and
+  `database-guard.ts` still requires them), but the CI copies can be deleted
+  whenever somebody is in the settings page.
 - **`paths-ignore` and branch protection do not mix.** A run skipped by
   `paths-ignore` reports no status at all, so a REQUIRED check stays permanently
   "expected" and a docs-only PR could never merge. There is no branch protection

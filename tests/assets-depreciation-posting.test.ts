@@ -17,6 +17,14 @@ import {
 } from "../src/packs/assets/depreciation-ops";
 import { buildSchedule } from "../src/packs/assets/core/depreciation";
 
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+const COMBINED = { kind: "combined" } as const;
+
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
 
@@ -215,7 +223,7 @@ d("depreciation posting", () => {
     );
 
     const balances = await asOwner((tx) =>
-      getBalances(tx, tenantId, { from: "2026-01-01", to: "2026-05-31" }),
+      getBalances(tx, tenantId, { scope: COMBINED, from: "2026-01-01", to: "2026-05-31" }),
     );
     const expense = balances.find(
       (b) => b.accountId === accounts.expenseAccountId,
@@ -231,6 +239,7 @@ d("depreciation posting", () => {
     // asset dimension, attributes the expense to this specific machine.
     const byAsset = await asOwner((tx) =>
       getBalances(tx, tenantId, {
+        scope: COMBINED,
         from: "2026-01-01",
         to: "2026-05-31",
         groupByDimensionType: "asset",

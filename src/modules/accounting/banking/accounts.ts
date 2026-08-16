@@ -5,6 +5,7 @@ import type { Account, BankAccount } from "@/db/schema";
 import {
   LedgerError,
   createAccount,
+  getDefaultEntityId,
   listAccounts,
   postEntry,
   requireOwnerRole,
@@ -119,6 +120,9 @@ export async function createBankAccount(
             { accountId: obe.id, amountCents: -cents },
           ];
     await postEntry(tx, ctx, {
+      // A bank account belongs to one entity from slice 4 (ADR 0010); until it
+      // does, its opening balance lands in the tenant's default company.
+      entityId: await getDefaultEntityId(tx, ctx.tenantId),
       status: "posted",
       entryDate: input.openingBalanceDate,
       memo: `Opening balance — ${input.name}`,

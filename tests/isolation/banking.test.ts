@@ -2,7 +2,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../../src/db";
-import { d } from "./_shared";
+import { d, seedEntity } from "./_shared";
 
 /**
  * Banking tables: RLS isolation plus the composite-tenant-FK guarantees.
@@ -99,11 +99,13 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
         })
         .returning();
 
+      const entityId = await seedEntity(tx, tenantId, tag);
       // A posted entry, so there is a real journal line to clear.
       const [entry] = await tx
         .insert(schema.journalEntries)
         .values({
           tenantId,
+          entityId,
           entryDate: "2026-07-06",
           memo: `bank entry of ${tag}`,
           status: "posted",

@@ -2,7 +2,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../../src/db";
-import { d, seedParty } from "./_shared";
+import { d, seedEntity, seedParty } from "./_shared";
 
 /**
  * Payables (session 6): RLS isolation for vendors/bills/bill_lines/
@@ -40,9 +40,10 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.accounts)
         .values({ tenantId, code: "6000", name: `Expense ${tag}`, accountType: "expense", subtype: "operating_expense" })
         .returning();
+      const entityId = await seedEntity(tx, tenantId, tag);
       const [entry] = await tx
         .insert(schema.journalEntries)
-        .values({ tenantId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
+        .values({ tenantId, entityId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
         .returning();
       const partyId = await seedParty(tx, tenantId, `Vendor ${tag}`);
       const [vendor] = await tx

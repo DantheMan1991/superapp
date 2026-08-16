@@ -31,9 +31,25 @@ export {
   voidEntry,
 } from "./posting";
 export {
+  createEntity,
+  entityForDocument,
+  entityOfDocument,
+  entityScopeCondition,
+  entityScopeLabel,
+  getDefaultEntityId,
+  listEntities,
+  provisionEntity,
+  resolveEntityScope,
+  resolveReportEntity,
+  setDefaultEntity,
+  updateEntity,
+  type EntityScope,
+} from "./entities";
+export {
   getBalances,
   getTrialBalance,
   ledgerIsBalanced,
+  ledgerIsBalancedPerEntity,
   type AccountingBasis,
   type BalanceRow,
   type TrialBalance,

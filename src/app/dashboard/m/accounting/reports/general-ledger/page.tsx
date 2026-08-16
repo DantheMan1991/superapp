@@ -22,6 +22,7 @@ import {
   getSettings,
   listAccounts,
 } from "@/modules/accounting/core";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { presetRange } from "@/modules/accounting/lib/dates";
 import {
   formatCentsSigned,
@@ -49,7 +50,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export default async function GeneralLedgerPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; account?: string }>;
+  searchParams: Promise<{
+    from?: string;
+    to?: string;
+    account?: string;
+    entity?: string;
+  }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -68,12 +74,14 @@ export default async function GeneralLedgerPage({
       sp.account && UUID.test(sp.account) && accounts.some((a) => a.id === sp.account)
         ? sp.account
         : "";
+    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
     const report = await getGeneralLedger(tx, ctx.tenant.id, {
+      scope: entityView.scope,
       from,
       to,
       ...(account ? { accountIds: [account] } : {}),
     });
-    return { settings, today, from, to, account, accounts, report };
+    return { settings, today, from, to, account, accounts, report, entityView };
   });
 
   const { report } = data;
@@ -85,7 +93,8 @@ export default async function GeneralLedgerPage({
         title="General Ledger"
         description={
           <>
-            {ctx.tenant.name} · {report.period.from} to {report.period.to}
+            {data.entityView.stampLabel ?? ctx.tenant.name} · {report.period.from}{" "}
+            to {report.period.to}
             {selected ? ` · ${selected.code} ${selected.name}` : ""} · accrual
             basis
           </>
@@ -97,6 +106,7 @@ export default async function GeneralLedgerPage({
               from: data.from,
               to: data.to,
               ...(data.account ? { accountIds: [data.account] } : {}),
+              entity: sp.entity,
             }}
           />
         }
@@ -118,6 +128,8 @@ export default async function GeneralLedgerPage({
           code: a.code,
           name: a.name,
         }))}
+        entity={sp.entity}
+        entities={data.entityView.entities}
       />
 
       {report.truncated && (

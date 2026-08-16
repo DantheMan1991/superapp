@@ -15,6 +15,7 @@ const STAMP_ACC = `iso-acc-${process.pid}`;
 
 interface AccFixture {
   accountId: string;
+  entityId: string;
   entryId: string;
   lineId: string;
   memberId: string;
@@ -33,6 +34,10 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
   async function seedAccounting(tenantId: string, tag: string): Promise<AccFixture> {
     return withTenant(tenantId, async (tx) => {
       await tx.insert(schema.accountingSettings).values({ tenantId });
+      const [entity] = await tx
+        .insert(schema.entities)
+        .values({ tenantId, name: `Company ${tag}`, isDefault: true })
+        .returning();
       const [cash] = await tx
         .insert(schema.accounts)
         .values({
@@ -57,6 +62,7 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.journalEntries)
         .values({
           tenantId,
+          entityId: entity.id,
           entryDate: "2026-07-01",
           memo: `secret entry of ${tag}`,
           status: "posted",
@@ -145,6 +151,7 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         .returning();
       return {
         accountId: cash.id,
+        entityId: entity.id,
         entryId: entry.id,
         lineId: lines[0].id,
         memberId: member.id,
@@ -232,6 +239,70 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
       withTenant(tenantA, (tx) =>
         tx.insert(schema.journalEntries).values({
           tenantId: tenantB,
+          entityId: fx.b.entityId,
+          entryDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  /* -- entities (ADR 0010) ------------------------------------------------
+   *
+   * The wall between two CLIENTS. Note what these do NOT certify: two entities
+   * of the SAME tenant are not separated by RLS and are not meant to be — that
+   * separation is a required `EntityScope` argument in application code, which
+   * `tests/entities-db.test.ts` proves instead. The database's job here is that
+   * one client's companies are invisible to another, and that no entry can name
+   * a company belonging to somebody else.
+   */
+
+  it("unscoped selects on entities return only the tenant's rows", async () => {
+    const rows = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.entities),
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.tenantId === tenantA)).toBe(true);
+    expect(rows.some((r) => r.id === fx.b.entityId)).toBe(false);
+  });
+
+  it("cannot INSERT an entity attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.entities).values({
+          tenantId: tenantB,
+          name: "smuggled company",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot UPDATE the other tenant's entity", async () => {
+    // The write half. Renaming somebody else's company would rename what their
+    // reports and exports say the books belong to.
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.entities)
+        .set({ name: "renamed by A" })
+        .where(eq(schema.entities.id, fx.b.entityId))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const stillB = await withTenant(tenantB, (tx) =>
+      tx.query.entities.findFirst({ where: eq(schema.entities.id, fx.b.entityId) }),
+    );
+    expect(stillB?.name).toBe("Company B");
+  });
+
+  it("composite FK: cannot post an entry into the OTHER tenant's company", async () => {
+    // The money test. tenant_id passes RLS (it is A's own), but
+    // (tenant_id, entity_id) is not a pair that exists, so the FK refuses —
+    // a cross-tenant set of books is unrepresentable, not merely unwritten.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.journalEntries).values({
+          tenantId: tenantA,
+          entityId: fx.b.entityId,
           entryDate: "2026-07-01",
           createdByClerkUserId: "attacker",
         }),

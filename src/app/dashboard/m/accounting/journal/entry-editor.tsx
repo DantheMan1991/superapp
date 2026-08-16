@@ -31,6 +31,8 @@ export interface EditorAccount {
 export interface EditorEntry {
   id: string;
   version: number;
+  /** Read-only here: shown on an edit, never changed. */
+  entityId?: string;
   entryDate: string;
   memo: string;
   lines: Array<{ accountId: string; amountCents: number; memo: string }>;
@@ -71,11 +73,24 @@ function rowCents(row: LineRow): number | null {
 
 export function EntryEditor({
   accounts,
+  entities,
+  defaultEntityId,
   entry,
   canPost,
   today,
 }: {
   accounts: EditorAccount[];
+  /**
+   * The tenant's legal entities (ADR 0010). The control renders only at TWO or
+   * more — the single-company client never learns the concept.
+   *
+   * The journal is the ONE write path in slice 1 that can choose: an invoice, a
+   * bill and a bank row have no company of their own yet, so they land in the
+   * default. That makes a hand-written journal the way a two-company tenant
+   * puts anything into the second set of books today.
+   */
+  entities?: Array<{ id: string; name: string }>;
+  defaultEntityId?: string;
   /** When set, the editor edits this entry instead of creating a new one. */
   entry?: EditorEntry;
   /** Owners can post; staff can only save drafts. */
@@ -86,6 +101,10 @@ export function EntryEditor({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [entryDate, setEntryDate] = useState(entry?.entryDate ?? today);
+  // An EXISTING entry's company is fixed — moving a posted entry between two
+  // balance sheets is a transfer to record, not a field to edit — so the
+  // control is only offered when creating.
+  const [entityId, setEntityId] = useState(entry?.entityId ?? defaultEntityId ?? "");
   const [memo, setMemo] = useState(entry?.memo ?? "");
   const [rows, setRows] = useState<LineRow[]>(
     entry ? entry.lines.map(rowFromLine) : [emptyRow(), emptyRow()],
@@ -135,6 +154,7 @@ export function EntryEditor({
           })
         : await createEntry({
             status,
+            entityId: entityId || undefined,
             entryDate,
             memo: memo.trim() || undefined,
             idempotencyKey,
@@ -155,6 +175,24 @@ export function EntryEditor({
   return (
     <Card>
       <CardContent className="space-y-4 pt-6">
+        {!entry && entities && entities.length > 1 && (
+          <div className="space-y-1.5">
+            <Label htmlFor="entry-entity">Company</Label>
+            <Select value={entityId || undefined} onValueChange={setEntityId}>
+              <SelectTrigger id="entry-entity" className="h-9 w-full sm:w-72">
+                <SelectValue placeholder="Which company's books?" />
+              </SelectTrigger>
+              <SelectContent>
+                {entities.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="entry-date">Date</Label>

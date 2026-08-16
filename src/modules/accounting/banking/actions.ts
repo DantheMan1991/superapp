@@ -12,6 +12,7 @@ import {
   cancelReconciliation,
   completeReconciliation,
   friendlyMessage,
+  getDefaultEntityId,
   postEntry,
   reopenReconciliation,
   requireOwnerRole,
@@ -708,6 +709,10 @@ export async function quickAddTransactionAction(
             ];
       const status = ctx.role === "owner" ? ("posted" as const) : ("draft" as const);
       const { entry } = await postEntry(tx, ctx, {
+        // Quick-add from a register. It has no document to inherit from and no
+        // company picker of its own, so it lands in the default — one of the
+        // eleven `getDefaultEntityId` sites the document slice revisits.
+        entityId: await getDefaultEntityId(tx, ctx.tenantId),
         status,
         entryDate: p.txnDate,
         memo: p.memo ?? "",

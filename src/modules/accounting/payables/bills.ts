@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Bill, BillLine } from "@/db/schema";
 import {
   LedgerError,
+  entityForDocument,
   postEntry,
   requireOwnerRole,
   voidEntry,
@@ -376,6 +377,9 @@ export async function approveBill(
     );
 
   const { entry } = await postEntry(tx, ctx, {
+    // As for an invoice: the bill carries no entity yet, so approval lands in
+    // the default company and its payments follow it.
+    entityId: await entityForDocument(tx, ctx.tenantId, "bill", bill.id),
     status: "posted",
     entryDate: bill.billDate,
     memo: `Bill — ${vendor.name}${bill.billNumber ? ` ${bill.billNumber}` : ""}`,

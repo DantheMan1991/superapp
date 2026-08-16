@@ -13,6 +13,12 @@ export type LedgerErrorCode =
   | "ENTRY_IMMUTABLE"
   | "STALE_VERSION"
   | "DIMENSION_INVALID"
+  | "ENTITY_MISSING"
+  | "ENTITY_NOT_FOUND"
+  | "ENTITY_INACTIVE"
+  | "ENTITY_IS_DEFAULT"
+  | "ENTITY_NAME_INVALID"
+  | "ENTITY_NAME_TAKEN"
   | "DUPLICATE_CODE"
   | "COA_SELF_PARENT"
   | "COA_CYCLE"
@@ -118,6 +124,14 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "This entry is locked (closed period, reconciled, or strict mode). Create a reversal instead.",
   STALE_VERSION: "This entry changed since you opened it — reload and try again.",
   DIMENSION_INVALID: "One of the selected tags is invalid or inactive.",
+  ENTITY_MISSING:
+    "This business has no company set up to keep books for. Toggle the module off and on again.",
+  ENTITY_NOT_FOUND: "That company no longer exists.",
+  ENTITY_INACTIVE: "That company is inactive — reactivate it first.",
+  ENTITY_IS_DEFAULT:
+    "This is the default company — make another one the default first.",
+  ENTITY_NAME_INVALID: "Give the company a name.",
+  ENTITY_NAME_TAKEN: "A company already has that name.",
   DUPLICATE_CODE: "That account code is already in use.",
   COA_SELF_PARENT: "An account cannot be its own parent.",
   COA_CYCLE: "That parent choice would create a loop in the account tree.",

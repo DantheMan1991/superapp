@@ -8,6 +8,7 @@ import {
   displayCents,
   getBalanceSheet,
   getCashActivity,
+  getDefaultEntityId,
   getGeneralLedger,
   getProfitAndLoss,
   getTrialBalance,
@@ -38,6 +39,14 @@ import {
   formatCentsSigned,
 } from "../src/modules/accounting/lib/money";
 import { generalLedgerToCsvRows, toCsv } from "../src/modules/accounting/lib/csv";
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+const COMBINED = { kind: "combined" } as const;
+let entityId: string;
 
 /**
  * Session 2 certification. Part A: pure builders and helpers — runs with
@@ -763,6 +772,9 @@ d("reports integration (DB)", () => {
     });
     owner = { tenantId, userId: "owner", role: "owner" };
     await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
+    entityId = await withTenant(tenantId, (tx) =>
+      getDefaultEntityId(tx, tenantId),
+    );
 
     const bank = await accountId("1000");
     const sales = await accountId("4000");
@@ -770,6 +782,7 @@ d("reports integration (DB)", () => {
     // FY2025: revenue 1000.00, expense 300.00; FY2026: revenue 500.00.
     await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "posted",
         entryDate: "2025-03-01",
         lines: [
@@ -780,6 +793,7 @@ d("reports integration (DB)", () => {
     );
     await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "posted",
         entryDate: "2025-04-01",
         lines: [
@@ -790,6 +804,7 @@ d("reports integration (DB)", () => {
     );
     await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "posted",
         entryDate: "2026-02-01",
         lines: [
@@ -808,12 +823,12 @@ d("reports integration (DB)", () => {
 
   it("P&L, Balance Sheet, and Cash Activity agree end-to-end", async () => {
     const pnl = await withTenant(tenantId, (tx) =>
-      getProfitAndLoss(tx, tenantId, { from: "2026-01-01", to: "2026-06-30" }),
+      getProfitAndLoss(tx, tenantId, { scope: COMBINED, from: "2026-01-01", to: "2026-06-30" }),
     );
     expect(pnl.netIncomeCents).toBe(50_000);
 
     const bs = await withTenant(tenantId, (tx) =>
-      getBalanceSheet(tx, tenantId, { asOf: "2026-06-30" }),
+      getBalanceSheet(tx, tenantId, { scope: COMBINED, asOf: "2026-06-30" }),
     );
     // Prior-year NI = 70000; current FY NI = 50000; assets = 120000.
     expect(bs.rows.map((r) => [r.label, r.cents])).toContainEqual([
@@ -832,7 +847,7 @@ d("reports integration (DB)", () => {
     );
 
     const cash = await withTenant(tenantId, (tx) =>
-      getCashActivity(tx, tenantId, { from: "2026-01-01", to: "2026-06-30" }),
+      getCashActivity(tx, tenantId, { scope: COMBINED, from: "2026-01-01", to: "2026-06-30" }),
     );
     const bankRow = cash.groups
       .find((g) => g.key === "cash")!
@@ -857,6 +872,7 @@ d("reports integration (DB)", () => {
     );
     await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "posted",
         entryDate: "2026-03-01",
         lines: [
@@ -867,6 +883,7 @@ d("reports integration (DB)", () => {
     );
     const byDim = await withTenant(tenantId, (tx) =>
       getProfitAndLoss(tx, tenantId, {
+        scope: COMBINED,
         from: "2026-01-01",
         to: "2026-06-30",
         dimensionType: "property",
@@ -878,6 +895,7 @@ d("reports integration (DB)", () => {
 
     const { entry } = await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "posted",
         entryDate: "2026-04-01",
         lines: [
@@ -887,13 +905,13 @@ d("reports integration (DB)", () => {
       }),
     );
     const before = await withTenant(tenantId, (tx) =>
-      getProfitAndLoss(tx, tenantId, { from: "2026-01-01", to: "2026-06-30" }),
+      getProfitAndLoss(tx, tenantId, { scope: COMBINED, from: "2026-01-01", to: "2026-06-30" }),
     );
     await withTenant(tenantId, (tx) =>
       voidEntry(tx, owner, { entryId: entry.id, expectedVersion: entry.version }),
     );
     const after = await withTenant(tenantId, (tx) =>
-      getProfitAndLoss(tx, tenantId, { from: "2026-01-01", to: "2026-06-30" }),
+      getProfitAndLoss(tx, tenantId, { scope: COMBINED, from: "2026-01-01", to: "2026-06-30" }),
     );
     expect(before.netIncomeCents - after.netIncomeCents).toBe(-9_999);
   });
@@ -909,8 +927,8 @@ d("reports integration (DB)", () => {
   it("closing balances tie out to the trial balance at the same date", async () => {
     const asOf = "2026-12-31";
     const [gl, tb] = await withTenant(tenantId, async (tx) => [
-      await getGeneralLedger(tx, tenantId, { from: "2000-01-01", to: asOf }),
-      await getTrialBalance(tx, tenantId, asOf),
+      await getGeneralLedger(tx, tenantId, { scope: COMBINED, from: "2000-01-01", to: asOf }),
+      await getTrialBalance(tx, tenantId, asOf, COMBINED),
     ]);
     expect(gl.truncated).toBe(false);
 
@@ -936,12 +954,13 @@ d("reports integration (DB)", () => {
     const period = { from: "2026-09-01", to: "2026-09-30" };
 
     const linesIn = async () =>
-      (await withTenant(tenantId, (tx) => getGeneralLedger(tx, tenantId, period)))
+      (await withTenant(tenantId, (tx) => getGeneralLedger(tx, tenantId, { scope: COMBINED, ...period })))
         .lineCount;
     const before = await linesIn();
 
     await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "draft",
         entryDate: "2026-09-10",
         lines: [
@@ -954,6 +973,7 @@ d("reports integration (DB)", () => {
 
     const { entry } = await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "posted",
         entryDate: "2026-09-11",
         lines: [
@@ -971,7 +991,7 @@ d("reports integration (DB)", () => {
     // reversal both stand in the ledger — which is the point of an audit
     // trail. What must be true is that they cancel.
     const after = await withTenant(tenantId, (tx) =>
-      getGeneralLedger(tx, tenantId, period),
+      getGeneralLedger(tx, tenantId, { scope: COMBINED, ...period }),
     );
     const repairsRow = after.accounts.find((a) => a.accountId === repairs);
     expect(repairsRow?.closingCents ?? 0).toBe(0);
@@ -981,6 +1001,7 @@ d("reports integration (DB)", () => {
     const bank = await accountId("1000");
     const gl = await withTenant(tenantId, (tx) =>
       getGeneralLedger(tx, tenantId, {
+        scope: COMBINED,
         from: "2000-01-01",
         to: "2026-12-31",
         accountIds: [bank],
@@ -994,6 +1015,7 @@ d("reports integration (DB)", () => {
   it("flags truncation instead of quietly showing a prefix", async () => {
     const gl = await withTenant(tenantId, (tx) =>
       getGeneralLedger(tx, tenantId, {
+        scope: COMBINED,
         from: "2000-01-01",
         to: "2026-12-31",
         limit: 2,
@@ -1014,8 +1036,8 @@ d("reports integration (DB)", () => {
   it("monthly columns add back up to the same P&L without a spread", async () => {
     const range = { from: "2025-01-01", to: "2026-12-31" };
     const [plain, monthly] = await withTenant(tenantId, async (tx) => [
-      await getProfitAndLoss(tx, tenantId, range),
-      await getProfitAndLoss(tx, tenantId, { ...range, spread: "month" }),
+      await getProfitAndLoss(tx, tenantId, { scope: COMBINED, ...range }),
+      await getProfitAndLoss(tx, tenantId, { scope: COMBINED, ...range, spread: "month" }),
     ]);
 
     expect(monthly.netIncomeCents).toBe(plain.netIncomeCents);
@@ -1043,6 +1065,7 @@ d("reports integration (DB)", () => {
     await expect(
       withTenant(tenantId, (tx) =>
         getProfitAndLoss(tx, tenantId, {
+          scope: COMBINED,
           from: "2020-01-01",
           to: "2026-12-31",
           spread: "month",
@@ -1055,6 +1078,7 @@ d("reports integration (DB)", () => {
     // One axis, one occupant — the same v1 pin compare and dim already carry.
     const report = await withTenant(tenantId, (tx) =>
       getProfitAndLoss(tx, tenantId, {
+        scope: COMBINED,
         from: "2026-01-01",
         to: "2026-03-31",
         spread: "month",

@@ -13,6 +13,110 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — A tenant can hold several companies (branch `claude/adr-entities`)
+
+Slice 1 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md), which the
+same day flipped from Proposed to Accepted. A tenant is the CLIENT; a legal
+entity inside it owns a set of books. Migrations `0142` (table, column,
+backfill, FK) and `0143` (RLS); **`0144` is owed after this deploy** and is the
+`SET NOT NULL`.
+
+- **`entity_id` is on the ENTRY, never the line**, so every entry still balances
+  on its own and the posting invariant this module is built around is untouched.
+  The alternative — an entry spanning entities with a per-entity balance check
+  inside it — rewrites that invariant to save writing two rows.
+- **THE WHOLE DEFENCE IS ONE REQUIRED PARAMETER.** `EntityScope` is
+  `{ kind: "one", entityId } | { kind: "combined" }`, and `getBalances`,
+  `getTrialBalance`, `getProfitAndLoss`, `getBalanceSheet`, `getCashActivity`,
+  `getGeneralLedger`, `ledgerIsBalanced` and `cashBasisAdjustment` all require
+  it. Not optional, and not `entityId?: string` where absent means everything —
+  `undefined` is exactly what a caller forgets, while `{ kind: "combined" }` is
+  something somebody had to type. This is `listStructures`' lesson applied to
+  the ledger, and it matters more here: ADR 0010 names the failure as a report
+  that is silently wrong across companies and **perfectly correct on the
+  single-company tenant you are testing on**, which is every other fixture in
+  the repo.
+- **`combined`, not `consolidated`.** It is a plain sum with no eliminations.
+  Today that is also the consolidated figure because intercompany does not
+  exist; when it does, "combined" is still an honest name for a number that has
+  eliminated nothing, so nothing has to be renamed or quietly redefined.
+- **`cashBasisAdjustment` is scoped in three places, not one.** The payments in
+  the window, EVERY prior payment of those documents (allocation is cumulative),
+  and the documents' accrual lines. Scoping only the first would have produced a
+  cash-basis report that still balanced and was wrong.
+- **The picker is a URL parameter per report, not an ambient selection.** An
+  ambient one is the failure mode with a nicer UI: a statement whose scope came
+  from a control three screens ago is one whose reader cannot tell whose books
+  it is. **An unknown entity id 404s rather than falling back** — the inverse of
+  the `basis` rule, and deliberately: an unreadable basis has a safe answer,
+  whereas substituting a different company's books for the one that was named is
+  wrong about which business it describes while looking entirely normal.
+- **The company is stamped wherever the basis is** — page footer, CSV content,
+  CSV filename — and **only when the tenant has more than one**. A
+  single-company tenant's exports are byte-identical to what they were, which is
+  the same promise the picker makes on screen.
+- **Two reports decline a scope, each for its own stated reason**, joining the
+  three that decline a basis. The **tax summary** reads two sources and shows
+  the gap between them — invoices for the per-rate figures, the ledger for what
+  is owed — and an invoice has no company yet, so scoping the ledger half alone
+  would make the difference between the columns meaningless. **Register
+  balances** on the banking pages are every entry that touched the account,
+  because a bank account belongs to an entity only from slice 4.
+- **A document's entries all land in the company its FIRST one did**
+  (`entityForDocument`). This is a live guard, not headroom: the default company
+  can be moved, so without it an invoice issued under one default and paid under
+  another would split its AR across two balance sheets. Same rule for bill
+  payments, re-categorized bank rows and an asset's whole depreciation schedule.
+- **A reversal takes the ORIGINAL's company**, never the default and never an
+  argument. Otherwise both companies go out of balance while the tenant as a
+  whole still nets to zero — the precise shape of wrongness the scope exists to
+  catch. Pinned by a test that moves the default first.
+- **A TEMPLATE resolves its company; a DOCUMENT freezes one.** Recurring
+  journals follow the default as it stands at generation — the same split
+  `recurring_entries` already makes for a sales-tax rate. Resolved once per
+  template rather than per catch-up month, so a twelve-month catch-up cannot
+  straddle two sets of books.
+- **The hub asks `ledgerIsBalancedPerEntity`, not `ledgerIsBalanced`.** Two
+  companies out by equal and opposite amounts sum to zero, so the combined check
+  would report a healthy ledger in exactly the case a mis-scoped write produces.
+- **`tests/entities-db.test.ts` is the only fixture in the repo with two
+  companies**, and that is why it exists. Eleven cases: each trial balance
+  balances on its own, the two add back up to the combined one account by
+  account, the P&L/BS/GL each honour their scope, cash equals accrual per
+  company, a reversal follows its original, an inactive company refuses a
+  posting, and an unknown id refuses rather than falling back.
+- **Isolation gains four**, including the one that matters: the composite FK
+  refuses an entry naming ANOTHER TENANT's company, so a cross-tenant set of
+  books is unrepresentable rather than merely unwritten. The file also says out
+  loud what these do *not* certify — two companies of one client are not
+  separated by RLS and are not meant to be.
+- **`0142` is hand-edited three ways** and the header says so: drizzle-kit
+  emitted `ADD COLUMN … NOT NULL` on a table with rows, no backfill at all, and
+  the composite FK before the unique index it targets. The column arrives
+  NULLABLE because migrations go out AHEAD of the deploy and the deploy running
+  while it lands does not write it — a NOT NULL there rejects every invoice
+  issued in that window. Same expand/contract split `0123` made for its
+  `total = subtotal + tax` CHECK. `src/db/schema/ledger.ts` declares it NOT NULL,
+  one release ahead of the database, on purpose.
+- **Companies live on their own page reached from ONE hub card**, not an
+  eleventh tab: `AccountingNav` was rebuilt because ten tabs already wrapped
+  onto two lines, and most tenants have one company for ever. The page still
+  exists at one, because adding the second is the only way to get to two.
+- **The books export produces a full set of statements PER COMPANY plus a
+  combined set**, once there is more than one. A return is filed per entity, so
+  an export that could only produce the combined statements would be incomplete
+  for exactly the client this was built for. At one company the loop runs once
+  and every filename is unchanged. `ledger/entities.csv` is new, and
+  `journal_entries.csv` gains `entity_id`/`entity` as APPENDED columns.
+- **NOT BUILT, and each is a later slice rather than an oversight:**
+  intercompany pairs (2), consolidation with eliminations (3), per-entity
+  banking and close (4). **And the honest limit of this one: only a hand-written
+  journal can name a company.** Invoices, bills, bank rows, receipts and
+  recurring journals all post to the default. The eleven explicit
+  `getDefaultEntityId` call sites are the grep that lists what the document
+  slice has to revisit — a silent default inside `postEntry` would be the same
+  behaviour with nothing to find.
+
 ### 2026-08-13 — Sales tax (branch `claude/accounting-sales-tax`)
 
 The largest remaining gap from the 2026-08-10 QuickBooks review, and greenfield
@@ -889,8 +993,9 @@ preview in either state. The change is argued to be inert, not observed to be.
 
 | Table | Since | Purpose |
 | --- | --- | --- |
-| `accounts` | S1 | Chart of accounts, hierarchical |
-| `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger |
+| `accounts` | S1 | Chart of accounts, hierarchical. **Tenant-wide, shared by every company** (ADR 0010) — that sharing is most of what "manage ten LLCs in one place" means |
+| `entities` | 2026-08-16 | The legal entities inside one client; **the entity owns the books** ([ADR 0010](../decisions/0010-entities-inside-a-tenant.md)). At least one per tenant, exactly one `is_default` by partial unique index. Deactivate, never delete — it owns posted entries and the FK is NO ACTION. NOT a `dimension_members` type: the test is whether the trial balance has to balance within it |
+| `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger. `journal_entries.entity_id` (`0142`) says whose books — **on the ENTRY, never the line**, so an entry still balances on its own. Composite FK `(tenant_id, entity_id)`. The `SET NOT NULL` is owed in `0144`, after the deploy |
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.). Gained `reminders_enabled` (default **false**) and `reminder_offsets` jsonb (`0114`) |
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens |
@@ -933,6 +1038,32 @@ sentence rather than leaving it aspirational.
 
 ## Decisions & gotchas
 
+- **A REPORT MUST STATE ITS COMPANY, and cannot forget to.** `EntityScope` is a
+  required argument on every report engine — `{ kind: "one" }` or
+  `{ kind: "combined" }`, never an optional field where absent means everything.
+  A report that lost its scope would be silently wrong across companies and
+  perfectly correct on the single-company tenant it is tested against, which is
+  every fixture in the repo bar `tests/entities-db.test.ts`. If a new report
+  genuinely should not take one, say why in its own comment the way the tax
+  summary does — do not make the parameter optional. See
+  [ADR 0010](../decisions/0010-entities-inside-a-tenant.md).
+- **`combined` is not `consolidated`.** It sums across companies and eliminates
+  nothing. That is the same number today, because intercompany does not exist
+  yet; the name is chosen so it stays true when it does.
+- **RLS is not the wall between two companies of one client**, deliberately, and
+  it stays absolute between clients. There is no `app.current_entity` and there
+  is not going to be one in this design — separation between companies is
+  application code, which ADR 0010 names as its own strongest counter-argument.
+- **A DOCUMENT keeps the company it first posted in; a TEMPLATE resolves the
+  current default.** `entityForDocument` is why an invoice's payments cannot end
+  up in different books from its issuance when somebody moves the default, and a
+  reversal always takes its original's company rather than the default. The
+  template half is the same split the sales-tax rate already makes.
+- **Only a journal entry can name a company.** Invoices, bills, bank rows,
+  receipts and recurring journals post to the tenant's default, because no
+  document carries an entity yet. Every one of those call sites calls
+  `getDefaultEntityId` EXPLICITLY rather than relying on a fallback inside
+  `postEntry`, so the list of what the document slice must revisit is a grep.
 - **Three-tier mutability**: draft (free edit) → posted (edit-with-version/void/reverse) → reconciled (immutable; reverse only). The DB backs each tier with triggers/FKs, not just app code.
 - **Derived, never stored**: invoice/bill statuses derive from payments; `closed_through` derives from period_closes; Retained Earnings is computed — no closing entries exist.
 - **All money is integer cents.** No floats, and no division in report math — with exactly one quarantined exception, `core/cash-basis-allocate.ts`, where pro-rata recognition inherently divides. It uses BigInt intermediates and a largest-remainder rule so each split sums to the cent. Nowhere else in the report path may divide.
@@ -980,6 +1111,7 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
+- **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. **`drizzle/0144` is owed after this deploy**: `SET NOT NULL` on `journal_entries.entity_id`, alongside the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK already queued below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)

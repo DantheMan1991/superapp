@@ -4,13 +4,15 @@ import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import { logAuditInTx } from "../src/lib/audit";
 import {
-  LedgerError,
   createAccount,
   deactivateAccount,
   editEntry,
   getBalances,
+  getDefaultEntityId,
   getLedgerIntegrity,
   getTrialBalance,
+  type LedgerCtx,
+  LedgerError,
   ledgerIsBalanced,
   postDraft,
   postEntry,
@@ -19,9 +21,16 @@ import {
   updateAccount,
   upsertDimensionMember,
   voidEntry,
-  type LedgerCtx,
 } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+const COMBINED = { kind: "combined" } as const;
+let entityId: string;
 
 /**
  * Certification of the Core Ledger Platform:
@@ -94,6 +103,9 @@ d("core ledger platform", () => {
     owner = { tenantId, userId: "owner-user", role: "owner" };
     staff = { tenantId, userId: "staff-user", role: "staff" };
     await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
+    entityId = await withTenant(tenantId, (tx) =>
+      getDefaultEntityId(tx, tenantId),
+    );
   });
 
   afterAll(async () => {
@@ -113,6 +125,7 @@ d("core ledger platform", () => {
           .insert(schema.journalEntries)
           .values({
             tenantId,
+            entityId,
             entryDate: "2026-01-10",
             status: "posted",
             postedAt: new Date(),
@@ -135,6 +148,7 @@ d("core ledger platform", () => {
             .insert(schema.journalEntries)
             .values({
               tenantId,
+              entityId,
               entryDate: "2026-01-10",
               status: "posted",
               postedAt: new Date(),
@@ -157,6 +171,7 @@ d("core ledger platform", () => {
           .insert(schema.journalEntries)
           .values({
             tenantId,
+            entityId,
             entryDate: "2026-01-10",
             status: "draft",
             createdByClerkUserId: "raw",
@@ -175,6 +190,7 @@ d("core ledger platform", () => {
           .insert(schema.journalEntries)
           .values({
             tenantId,
+            entityId,
             entryDate: "2026-01-10",
             status: "draft",
             createdByClerkUserId: "raw",
@@ -204,6 +220,7 @@ d("core ledger platform", () => {
             .insert(schema.journalEntries)
             .values({
               tenantId,
+              entityId,
               entryDate: "2026-01-10",
               status: "posted",
               postedAt: new Date(),
@@ -229,6 +246,7 @@ d("core ledger platform", () => {
           .insert(schema.journalEntries)
           .values({
             tenantId,
+            entityId,
             entryDate: "2026-01-11",
             status: "posted",
             postedAt: new Date(),
@@ -277,6 +295,7 @@ d("core ledger platform", () => {
               .insert(schema.journalEntries)
               .values({
                 tenantId,
+                entityId,
                 entryDate: "2026-01-12",
                 status: "posted",
                 postedAt: new Date(),
@@ -308,6 +327,7 @@ d("core ledger platform", () => {
       const exp = await accountId("6300");
       const { entry, deduped } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-02-01",
           memo: "office supplies",
@@ -330,6 +350,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-01",
             lines: [
@@ -347,6 +368,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, staff, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-02",
             lines: pair(exp, cash, 100),
@@ -355,6 +377,7 @@ d("core ledger platform", () => {
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
       const { entry } = await withTenant(tenantId, (tx) =>
         postEntry(tx, staff, {
+          entityId,
           status: "draft",
           entryDate: "2026-02-02",
           lines: pair(exp, cash, 100),
@@ -382,6 +405,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-03",
             lines: pair(misc.id, cash, 100),
@@ -391,6 +415,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-03",
             lines: pair(crypto.randomUUID(), cash, 100),
@@ -408,6 +433,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-15",
             lines: pair(exp, cash, 100),
@@ -416,6 +442,7 @@ d("core ledger platform", () => {
       ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
       const { entry } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-01",
           lines: pair(exp, cash, 100),
@@ -431,6 +458,7 @@ d("core ledger platform", () => {
       const key = `${STAMP}-idem-1`;
       const first = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-02",
           idempotencyKey: key,
@@ -439,6 +467,7 @@ d("core ledger platform", () => {
       );
       const second = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-02",
           idempotencyKey: key,
@@ -457,6 +486,7 @@ d("core ledger platform", () => {
       const attempt = () =>
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-03-03",
             idempotencyKey: key,
@@ -482,6 +512,7 @@ d("core ledger platform", () => {
       const exp = await accountId("6000");
       const { entry } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-04",
           memo: "before",
@@ -539,19 +570,20 @@ d("core ledger platform", () => {
       // Void: effect disappears.
       const { entry: toVoid } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-05",
           lines: pair(exp, cash, 11100),
         }),
       );
       const feesBefore = await withTenant(tenantId, (tx) =>
-        getBalances(tx, tenantId, { accountIds: [exp] }),
+        getBalances(tx, tenantId, { scope: COMBINED, accountIds: [exp] }),
       );
       await withTenant(tenantId, (tx) =>
         voidEntry(tx, owner, { entryId: toVoid.id, expectedVersion: toVoid.version }),
       );
       const feesAfter = await withTenant(tenantId, (tx) =>
-        getBalances(tx, tenantId, { accountIds: [exp] }),
+        getBalances(tx, tenantId, { scope: COMBINED, accountIds: [exp] }),
       );
       const net = (rows: { netCents: number }[]) =>
         rows.reduce((a, r) => a + r.netCents, 0);
@@ -560,6 +592,7 @@ d("core ledger platform", () => {
       // Reverse: original stays posted, pair nets to zero, second reverse dedups.
       const { entry: toReverse } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-06",
           lines: pair(exp, cash, 3300),
@@ -588,6 +621,7 @@ d("core ledger platform", () => {
       const exp = await accountId("6200");
       const { entry } = await withTenant(tenantId, (tx) =>
         postEntry(tx, staff, {
+          entityId,
           status: "draft",
           entryDate: "2026-03-09",
           lines: pair(exp, cash, 800),
@@ -742,6 +776,7 @@ d("core ledger platform", () => {
       );
       await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-04-01",
           lines: [
@@ -752,6 +787,7 @@ d("core ledger platform", () => {
       );
       const grouped = await withTenant(tenantId, (tx) =>
         getBalances(tx, tenantId, {
+          scope: COMBINED,
           accountIds: [exp],
           groupByDimensionType: "property",
         }),
@@ -775,6 +811,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-04-02",
             lines: [
@@ -797,6 +834,7 @@ d("core ledger platform", () => {
       await expectDbReject(
         withTenant(tenantId, async (tx) => {
           await postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-04-03",
             memo: marker,
@@ -869,11 +907,11 @@ d("core ledger platform", () => {
   describe("balances & integrity", () => {
     it("trial balance sums to zero and matches the fixture", async () => {
       const tb = await withTenant(tenantId, (tx) =>
-        getTrialBalance(tx, tenantId, "2026-12-31"),
+        getTrialBalance(tx, tenantId, "2026-12-31", COMBINED),
       );
       expect(tb.totalNetCents).toBe(0);
       expect(tb.totalDebitCents).toBe(tb.totalCreditCents);
-      expect(await withTenant(tenantId, (tx) => ledgerIsBalanced(tx, tenantId))).toBe(
+      expect(await withTenant(tenantId, (tx) => ledgerIsBalanced(tx, tenantId, COMBINED))).toBe(
         true,
       );
     });
@@ -883,16 +921,17 @@ d("core ledger platform", () => {
       const exp = await accountId("6550");
       await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2027-06-01",
           lines: pair(exp, cash, 7700),
         }),
       );
       const before = await withTenant(tenantId, (tx) =>
-        getBalances(tx, tenantId, { accountIds: [exp], asOf: "2026-12-31" }),
+        getBalances(tx, tenantId, { scope: COMBINED, accountIds: [exp], asOf: "2026-12-31" }),
       );
       const after = await withTenant(tenantId, (tx) =>
-        getBalances(tx, tenantId, { accountIds: [exp], asOf: "2027-12-31" }),
+        getBalances(tx, tenantId, { scope: COMBINED, accountIds: [exp], asOf: "2027-12-31" }),
       );
       const net = (rows: { netCents: number }[]) =>
         rows.reduce((a, r) => a + r.netCents, 0);
@@ -913,6 +952,7 @@ d("core ledger platform", () => {
     try {
       await withTenant(tenantId, (tx) =>
         postEntry(tx, staff, {
+          entityId,
           status: "posted",
           entryDate: "2026-05-01",
           lines: [],

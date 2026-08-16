@@ -1,7 +1,7 @@
 # 0010 — A tenant holds many legal entities; the entity owns the books
 
 - **Date:** 2026-08-16
-- **Status:** Proposed
+- **Status:** Accepted (slice 1 built 2026-08-16)
 - **Affects:** Layer 0 tenancy; the ledger (`journal_entries`, reporting,
   close); banking, invoicing, payables, assets; billing; `docs/architecture.md`
   §4
@@ -131,9 +131,34 @@ Intercompany pairs. (3) Consolidation with eliminations. (4) Per-entity banking
 and close. **Slice 1 is the one with the leverage** — it is what sells to the
 ten-LLC landlord, and 2–4 can be a year later.
 
-**Status is `Proposed` because nothing is built.** It should flip to `Accepted`
-when slice 1 lands, or sooner if the founder signs it off. The value of writing
-it now is that the next session cannot reach for `dimension_members` by default.
+**Slice 1 landed on 2026-08-16**, which is what flipped the status. What it
+turned into, and the two decisions this file deliberately left open that it had
+to close (the ADR is immutable, so they are recorded here rather than above):
+
+- **The scope is a required argument, not a defaulted one.** `EntityScope` is
+  `{ kind: "one", entityId } | { kind: "combined" }` and every report engine
+  takes it — no optional field, no `undefined` meaning everything. That is the
+  answer to "a report that forgets is silently wrong": forgetting is a compile
+  error. `"combined"` rather than `"consolidated"` because it eliminates
+  nothing, which stays true when slice 2 arrives.
+- **The picker is a URL parameter per report, not an ambient selection.** A
+  report inheriting its scope from a control on another screen is a report whose
+  reader cannot tell whose books they are looking at. The chosen company is
+  stamped on the page and in every CSV, exactly where the basis stamp goes, and
+  an unknown id 404s rather than falling back.
+
+**What slice 1 does NOT do, and it is worth knowing before selling it.** Only a
+hand-written journal entry can name a company. Invoices, bills, bank rows,
+receipts and recurring journals all post to the tenant's DEFAULT company,
+because no document carries an entity yet — that is slices 2 and 4. So a
+ten-LLC landlord can keep ten separated sets of books, but only by journaling
+into them. The eleven posting sites that call `getDefaultEntityId` explicitly
+are the list of what the document slice has to revisit.
+
+One rule was added that this file did not anticipate: **a document's entries all
+land in the company its FIRST one did** (`entityForDocument`). It is not
+headroom — the default can be moved, so without it an invoice issued under one
+default and paid under another would split its AR across two balance sheets.
 
 **What would make us revisit:** a client needing one entity's data genuinely
 hidden from another's staff — a joint venture where a partner sees one LLC and

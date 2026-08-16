@@ -3,6 +3,7 @@ import { and, eq, gt, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Asset } from "@/db/schema";
 import {
+  entityForDocument,
   getSettings,
   listDimensionMembers,
   postEntry,
@@ -365,6 +366,10 @@ export async function postDepreciation(
     const first = stranded[0].period;
     const last = stranded.at(-1)!.period;
     await postEntry(tx, ctx, {
+      // Every entry an asset ever posts lands in the company its FIRST one did
+      // — a depreciation schedule split across two sets of books by a moved
+      // default would understate one and overstate the other for years.
+      entityId: await entityForDocument(tx, ctx.tenantId, "depreciation", asset.id),
       status: "posted",
       entryDate: periodEndDate(catchUpPeriod),
       memo: `Depreciation catch-up — ${asset.name} (${first} to ${last}, ${stranded.length} months before close)`,
@@ -379,6 +384,7 @@ export async function postDepreciation(
 
   for (const row of open) {
     await postEntry(tx, ctx, {
+      entityId: await entityForDocument(tx, ctx.tenantId, "depreciation", asset.id),
       status: "posted",
       entryDate: periodEndDate(row.period),
       memo: `Depreciation — ${asset.name} (${row.period})`,
@@ -503,6 +509,7 @@ export async function postDisposal(
     .map((l) => ({ ...l, memo: asset.name, dimensionMemberIds }));
 
   await postEntry(tx, ctx, {
+    entityId: await entityForDocument(tx, ctx.tenantId, "depreciation", asset.id),
     status: "posted",
     entryDate: args.disposedOn,
     memo: `Disposal — ${asset.name}`,

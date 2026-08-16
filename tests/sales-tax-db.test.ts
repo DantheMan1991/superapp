@@ -24,6 +24,14 @@ import {
 } from "../src/modules/accounting/invoicing/invoices";
 import { recordPayment } from "../src/modules/accounting/invoicing/payments";
 
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+const COMBINED = { kind: "combined" } as const;
+
 /**
  * Sales tax against the database: the whole path an owner walks.
  *
@@ -66,7 +74,7 @@ d("sales tax (DB)", () => {
     window: { from?: string; to?: string; asOf?: string },
   ): Promise<number> {
     const rows = await withTenant(tenantId, (tx) =>
-      getBalances(tx, tenantId, window),
+      getBalances(tx, tenantId, { scope: COMBINED, ...window }),
     );
     return rows
       .filter((r) => r.accountId === accountId)
@@ -224,7 +232,7 @@ d("sales tax (DB)", () => {
   it("the P&L shows the subtotal as income and never the tax", async () => {
     // THE ASSERTION THE FEATURE EXISTS TO EARN.
     const pnl = await withTenant(tenantId, (tx) =>
-      getProfitAndLoss(tx, tenantId, { from: "2026-05-01", to: "2026-05-31" }),
+      getProfitAndLoss(tx, tenantId, { scope: COMBINED, from: "2026-05-01", to: "2026-05-31" }),
     );
     const sales = pnl.rows.find((r) => r.accountId === salesId);
     expect(sales?.cents).toBe(150_000);

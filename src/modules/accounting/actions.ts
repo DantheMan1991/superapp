@@ -16,10 +16,12 @@ import {
   friendlyMessage,
   getBalanceSheet,
   getCashActivity,
+  getDefaultEntityId,
   getGeneralLedger,
   getProfitAndLoss,
   postDraft,
   postEntry,
+  resolveReportEntity,
   reverseEntry,
   updateAccount,
   voidEntry,
@@ -91,6 +93,13 @@ const lineSchema = z.object({
 });
 
 const entryInputSchema = z.object({
+  /**
+   * Which company's books (ADR 0010). Optional over the wire, because a
+   * single-entity tenant has no picker to send one from — absent means the
+   * tenant's default. It is NOT optional at the posting engine, where it is
+   * resolved explicitly below; the two are different questions.
+   */
+  entityId: z.string().uuid().optional(),
   entryDate: dateStr,
   memo: z.string().trim().max(1000).optional(),
   lines: z.array(lineSchema).min(1).max(100),
@@ -109,7 +118,13 @@ export async function createEntry(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     const result = await withTenant(ctx.tenantId, async (tx) => {
-      const r = await postEntry(tx, ctx, parsed.data);
+      const r = await postEntry(tx, ctx, {
+        ...parsed.data,
+        // The journal is the ONE write path in slice 1 that can name a company.
+        // `postEntry` re-checks that it belongs to this tenant and is active.
+        entityId:
+          parsed.data.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId)),
+      });
       if (!r.deduped) {
         await logAuditInTx(tx, {
           action:
@@ -429,9 +444,32 @@ export async function setCoaAccountActive(
 
 // --------------------------------------------------------------- reports
 
+/**
+ * A company name in a filename: lowercase, no spaces, nothing a shell or a
+ * Windows path minds. Bounded, because a name can be long and a filename
+ * cannot.
+ */
+function filenamePart(label: string): string {
+  return (
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "company"
+  );
+}
+
+/**
+ * `entity` is on every variant, and it is the same uuid the page was rendered
+ * with. An export that quietly re-ran the report combined while the screen
+ * showed one company would be the ADR 0010 failure with a download attached.
+ */
+const entityParam = z.string().uuid().optional();
+
 const exportCsvSchema = z.discriminatedUnion("report", [
   z.object({
     report: z.literal("pnl"),
+    entity: entityParam,
     from: dateStr,
     to: dateStr,
     compare: z.enum(["prev-period", "prev-year"]).optional(),
@@ -441,17 +479,20 @@ const exportCsvSchema = z.discriminatedUnion("report", [
   }),
   z.object({
     report: z.literal("balance-sheet"),
+    entity: entityParam,
     asOf: dateStr,
     compare: z.enum(["prev-year"]).optional(),
     basis: z.enum(["accrual", "cash"]).optional(),
   }),
   z.object({
     report: z.literal("cash"),
+    entity: entityParam,
     from: dateStr,
     to: dateStr,
   }),
   z.object({
     report: z.literal("general-ledger"),
+    entity: entityParam,
     from: dateStr,
     to: dateStr,
     // Bounded so a crafted request cannot turn the filter into an enormous
@@ -473,8 +514,17 @@ export async function exportReportCsv(
   const p = parsed.data;
   try {
     const data = await withTenant(ctx.tenantId, async (tx) => {
+      const { scope, stampLabel } = await resolveReportEntity(
+        tx,
+        ctx.tenantId,
+        p.entity,
+      );
+      // Only when there is a choice, so a single-company tenant's filenames are
+      // unchanged and no process that reads them by name breaks.
+      const suffix = stampLabel ? `_${filenamePart(stampLabel)}` : "";
       if (p.report === "pnl") {
         const report = await getProfitAndLoss(tx, ctx.tenantId, {
+          scope,
           from: p.from,
           to: p.to,
           compare: p.compare,
@@ -486,39 +536,42 @@ export async function exportReportCsv(
           // The basis is in the FILENAME as well as the content: these files
           // get emailed to accountants, and two profit figures for the same
           // period are only safe if you can tell them apart at a glance.
-          filename: `profit-and-loss${p.spread === "month" ? "-by-month" : ""}_${p.from}_${p.to}_${p.basis ?? "accrual"}.csv`,
-          csv: toCsv(pnlToCsvRows(report, p.basis ?? "accrual")),
+          filename: `profit-and-loss${p.spread === "month" ? "-by-month" : ""}_${p.from}_${p.to}_${p.basis ?? "accrual"}${suffix}.csv`,
+          csv: toCsv(pnlToCsvRows(report, p.basis ?? "accrual", stampLabel)),
         };
       }
       if (p.report === "balance-sheet") {
         const report = await getBalanceSheet(tx, ctx.tenantId, {
+          scope,
           asOf: p.asOf,
           compare: p.compare,
           basis: p.basis,
         });
         return {
-          filename: `balance-sheet_${p.asOf}_${p.basis ?? "accrual"}.csv`,
-          csv: toCsv(balanceSheetToCsvRows(report, p.basis ?? "accrual")),
+          filename: `balance-sheet_${p.asOf}_${p.basis ?? "accrual"}${suffix}.csv`,
+          csv: toCsv(balanceSheetToCsvRows(report, p.basis ?? "accrual", stampLabel)),
         };
       }
       if (p.report === "general-ledger") {
         const report = await getGeneralLedger(tx, ctx.tenantId, {
+          scope,
           from: p.from,
           to: p.to,
           ...(p.accountIds?.length ? { accountIds: p.accountIds } : {}),
         });
         return {
-          filename: `general-ledger_${p.from}_${p.to}.csv`,
-          csv: toCsv(generalLedgerToCsvRows(report)),
+          filename: `general-ledger_${p.from}_${p.to}${suffix}.csv`,
+          csv: toCsv(generalLedgerToCsvRows(report, stampLabel)),
         };
       }
       const report = await getCashActivity(tx, ctx.tenantId, {
+        scope,
         from: p.from,
         to: p.to,
       });
       return {
-        filename: `cash-activity_${p.from}_${p.to}.csv`,
-        csv: toCsv(cashActivityToCsvRows(report)),
+        filename: `cash-activity_${p.from}_${p.to}${suffix}.csv`,
+        csv: toCsv(cashActivityToCsvRows(report, stampLabel)),
       };
     });
     return { ok: true, data };

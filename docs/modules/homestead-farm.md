@@ -116,6 +116,26 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-15 — Livestock slice 0, and the pack model's bill comes due (`claude/livestock-lots`)
+- **The largest pack in the profile needed TWO TABLES.** Its slice 0 is "lots +
+  head ledger + occupancy", and all three already existed — the lot and the
+  ledger in `inventory`, occupancy in `land`. What was left was species, birth
+  date and tags. Six tables' worth of design, two tables of code.
+- **That is the whole argument for ADR 0004, settled empirically.** Had
+  `livestock` been built first, there would now be a livestock lot table, a
+  livestock head counter and a livestock occupancy table — three duplicates that
+  `crops` and `production` would each have had to choose between.
+- **The claims held under composition**: a split still balances when livestock
+  drives it and carries the biology across; head events land in inventory's
+  ledger stamped as livestock's; moving a herd onto a paddock writes land's
+  occupancy and starts its rest clock.
+- **Four of seven packs built.** Full build record in [livestock.md](livestock.md).
+- **The open item that now matters most is not a feature.** Writes are
+  owner-only across all four packs, forced from below by
+  `upsertDimensionMember`. Recording four dead birds is daily work done by
+  whoever is in the pen, and slice 1 is the daily log — so this needs settling
+  before the wedge, not after it.
+
 ### 2026-08-15 — Inventory slice 0: the lot spine exists (`claude/inventory-lot-spine`)
 - **`livestock` is unblocked.** It declares `inventory` in `requires` for the lot
   spine, and the spine now exists: quantity-bearing lots with event-sourced
@@ -374,7 +394,7 @@ own words condensed, not reinterpreted.
 | Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–1 built**, [land.md](land.md) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
-| Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) |
+| Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slice 0 built**, [livestock.md](livestock.md) |
 | Gardens/crops | `crops` pack | **yes** | **done** — [category design](#category-design--crops--garden-brainstormed-2026-08-13) |
 | Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
 | Baking | `production` pack — shared run, separate template | no | **done** — same design |
@@ -440,7 +460,7 @@ a category-design section below and a slice order.
   communication (email + CRM), vendor scheduling (scheduling + party spine).
 - **Explicitly deferred as code:** marketing — see *Explicitly deferred*.
 
-**Three of the seven are being built.** `assets` has shipped register,
+**Four of the seven are being built.** `assets` has shipped register,
 containment, depreciation, disposal and maintenance
 ([assets.md](assets.md)); `land` has shipped slice 0
 ([land.md](land.md)) and carries the slice order the design lacked. The other

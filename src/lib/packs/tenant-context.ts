@@ -8,21 +8,24 @@ import { resolveLabels } from "./resolve";
  * What a pack needs to know about the tenant it is rendering for: its
  * vocabulary and its configuration.
  *
- * THE FIRST CALLER OF `resolveLabels`, which has been built and tested and
- * unread since Layer 2 shipped, because nothing rendered a label. `land` is the
- * first pack whose core word is genuinely wrong for its first customer — a
- * homestead says "paddock", not "zone" — so this is where the seam finally has
- * a consumer.
+ * THE FIRST CALLER OF `resolveLabels`, which had been built and tested and
+ * unread since Layer 2 shipped because nothing rendered a label.
  *
  * Both halves degrade silently and neither throws. `tenants.industry` defaults
- * to `'general'`, which is not a profile and never will be, and
- * `tenant_modules.config` is jsonb with no shape constraint. The no-profile,
- * no-config path is therefore the COMMON one — it runs for every tenant that
- * has never installed anything — and a corrupted row must at worst mean default
- * words and default settings, never a crashed page.
+ * to `'general'`, which is not a profile and never will be, and both jsonb
+ * columns have no shape constraint — so the no-profile, no-override path is the
+ * COMMON one and a corrupted row must at worst mean default words, never a
+ * crashed page.
+ *
+ * **LABELS ARE TENANT-WIDE, not per pack.** They were briefly stored on each
+ * pack's own `tenant_modules.config` row, on the reasoning that renaming a word
+ * for one pack should not silently rename it in another. That was backwards:
+ * `zone` is `land`'s word that `livestock` also displays, so a per-pack
+ * override would have changed one screen and left the other alone. A paddock is
+ * a paddock everywhere on a farm. Corrected 2026-08-15 — see `tenants.labels`.
  */
 export interface PackContext {
-  /** Profile vocabulary, overridden per tenant. Read through `labelFor`. */
+  /** Profile vocabulary, overridden tenant-wide. Read through `labelFor`. */
   labels: Record<string, string>;
   /**
    * This pack's settings: the profile's `packConfig[slug]` as defaults, with
@@ -51,26 +54,24 @@ export async function packContext(
 ): Promise<PackContext> {
   const profile = getIndustryProfile(industry);
 
-  const row = await tx.query.tenantModules.findFirst({
-    where: and(
-      eq(schema.tenantModules.tenantId, tenantId),
-      eq(schema.tenantModules.moduleId, slug),
-    ),
-    columns: { config: true },
-  });
-  const tenantConfig = asRecord(row?.config);
+  const [moduleRow, tenantRow] = await Promise.all([
+    tx.query.tenantModules.findFirst({
+      where: and(
+        eq(schema.tenantModules.tenantId, tenantId),
+        eq(schema.tenantModules.moduleId, slug),
+      ),
+      columns: { config: true },
+    }),
+    tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+      columns: { labels: true },
+    }),
+  ]);
 
-  // Per-tenant vocabulary lives under a `labels` key on the pack's own row, so
-  // a tenant renaming a word for one pack does not silently rename it in
-  // another. Everything else on that row is the pack's settings.
-  const { labels: labelOverrides, ...settings } = tenantConfig ?? {};
-
-  const profileDefaults = asRecord(
-    asRecord(profile?.packConfig)?.[slug],
-  );
+  const profileDefaults = asRecord(asRecord(profile?.packConfig)?.[slug]);
 
   return {
-    labels: resolveLabels(profile?.labels, labelOverrides),
-    config: { ...(profileDefaults ?? {}), ...settings },
+    labels: resolveLabels(profile?.labels, tenantRow?.labels),
+    config: { ...(profileDefaults ?? {}), ...(asRecord(moduleRow?.config) ?? {}) },
   };
 }

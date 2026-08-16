@@ -20,6 +20,7 @@ import { currentZoneForOccupants } from "@/packs/land/ops";
 import { slugLabel } from "@/packs/inventory/vocabulary";
 import { listLivestockLots } from "./ops";
 import { ageInDays, formatAge, formatRate, mortalityRate, summariseHead } from "./core/herd";
+import { labelFor } from "@/lib/packs/resolve";
 import { speciesFrom } from "./vocabulary";
 import { LivestockLotForm } from "./components/lot-controls";
 
@@ -73,12 +74,13 @@ export async function LivestockModule({
   const byId = new Map(inventoryLots.map((l) => [l.id, l]));
   const headItems = items.filter((i) => i.stockingUnit === "head");
   const suggestedSpecies = speciesFrom(pack.config);
+  const lotWord = labelFor(pack.labels, "livestockLot", "Lot");
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Livestock"
-        description="Every animal is a lot, and an individual is a lot of one."
+        description={`Every animal is a ${lotWord.toLowerCase()}, and an individual is a ${lotWord.toLowerCase()} of one.`}
         actions={
           isOwner && headItems.length > 0 ? (
             <LivestockLotForm
@@ -112,7 +114,7 @@ export async function LivestockModule({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Lot</TableHead>
+              <TableHead>{lotWord}</TableHead>
               <TableHead>Species</TableHead>
               <TableHead>Where</TableHead>
               <TableHead className="text-right">Age</TableHead>

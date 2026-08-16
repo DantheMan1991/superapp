@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { withSystem, schema } from "@/db";
-import { isRenderable } from "@/lib/features";
+import { getFeature, isRenderable } from "@/lib/features";
+import { listIndustryProfiles } from "@/industries";
+import { collectLabelDefinitions } from "@/lib/packs/resolve";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +24,9 @@ import {
   AddNoteForm,
   ConvertProspectForm,
   ModuleToggle,
+  ProfileInstaller,
   TenantStatusSelect,
+  VocabularyEditor,
 } from "./controls";
 import {
   AllotmentForm,
@@ -119,6 +123,34 @@ export default async function TenantDetailPage({
   const enabledBySlug = new Map(
     tenantMods.map((tm) => [tm.moduleId, tm.enabled]),
   );
+
+  /**
+   * What this client can actually rename.
+   *
+   * Only ENABLED features contribute, because offering to rename something the
+   * client cannot see is noise — and the vocabulary of a pack they later switch
+   * on will appear here when it does. Unknown saved keys are left in the stored
+   * map untouched: a pack being switched off must not silently discard the
+   * words somebody chose for it.
+   */
+  const { labels: vocabulary, conflicts } = collectLabelDefinitions(
+    allModules
+      .filter((m) => enabledBySlug.get(m.id))
+      .map((m) => {
+        const feature = getFeature(m.id);
+        return {
+          slug: m.id,
+          name: m.name,
+          labels: feature?.labels,
+        };
+      }),
+  );
+  if (conflicts.length > 0) {
+    // Two features claiming one word means renaming it does something one of
+    // them did not expect. Loud in the server log rather than silently merged.
+    console.error("label key conflicts", conflicts);
+  }
+  const tenantLabels = (tenant.labels ?? {}) as Record<string, string>;
 
   return (
     <div className="space-y-6">
@@ -254,6 +286,46 @@ export default async function TenantDetailPage({
                   </div>
                 );
               })}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Industry profile</CardTitle>
+              <CardDescription>
+                {tenant.industry === "general"
+                  ? "None installed. The client's packs, vocabulary and pack settings all come from a profile — without one they are on defaults."
+                  : `Installed: ${tenant.industry}.`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ProfileInstaller
+                tenantId={tenant.id}
+                currentIndustry={tenant.industry}
+                profiles={listIndustryProfiles().map((p) => ({
+                  slug: p.slug,
+                  name: p.name,
+                  description: p.description,
+                  packs: p.packs,
+                }))}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Vocabulary</CardTitle>
+              <CardDescription>
+                The words this client sees. Only features that are switched ON
+                are listed, because renaming something they cannot see is noise.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <VocabularyEditor
+                tenantId={tenant.id}
+                labels={vocabulary}
+                values={tenantLabels}
+              />
             </CardContent>
           </Card>
 

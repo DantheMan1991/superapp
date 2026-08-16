@@ -988,6 +988,13 @@
       "when": 1786844919396,
       "tag": "0140_occupancy_structures",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1786847004557,
+      "tag": "0141_tenant_labels",
+      "breakpoints": true
     }
   ]
 }

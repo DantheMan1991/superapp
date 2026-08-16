@@ -43,6 +43,20 @@ export const packRegistry: Record<string, PackDefinition> = {
     // pen that sits on it. A parallel structure table here would be the same
     // asset row a second time, without its depreciation or service schedule.
     requires: ["assets"],
+    labels: [
+      {
+        key: "parcel",
+        fallback: "Parcel",
+        describes:
+          "The legal unit of ground — a deed or a lease. Some call it a property, or a block.",
+      },
+      {
+        key: "zone",
+        fallback: "Zone",
+        describes:
+          "A management area inside a parcel. A grazier calls it a paddock; a market garden calls it a bed.",
+      },
+    ],
     Component: LandModule,
   },
 
@@ -60,6 +74,14 @@ export const packRegistry: Record<string, PackDefinition> = {
     name: "Assets",
     icon: "wrench",
     requires: [],
+    labels: [
+      {
+        key: "asset",
+        fallback: "Asset",
+        describes:
+          "Anything owned with a cost and a working life — a tractor, a building, a freezer.",
+      },
+    ],
     Component: AssetsModule,
   },
 
@@ -79,6 +101,19 @@ export const packRegistry: Record<string, PackDefinition> = {
     name: "Inventory",
     icon: "boxes",
     requires: ["assets"],
+    labels: [
+      {
+        key: "item",
+        fallback: "Item",
+        describes: "A kind of thing held in quantity — feed, cartons, ground beef.",
+      },
+      {
+        key: "lot",
+        fallback: "Batch",
+        describes:
+          "A particular batch of an item, with lineage — one delivery, one hatch, one pen.",
+      },
+    ],
     Component: InventoryModule,
   },
 
@@ -93,6 +128,20 @@ export const packRegistry: Record<string, PackDefinition> = {
     name: "Livestock",
     icon: "beef",
     requires: ["inventory", "land"],
+    labels: [
+      {
+        key: "livestockLot",
+        fallback: "Lot",
+        describes:
+          "A group of animals, or one animal. A poultry keeper says flock; a cattle operation says herd.",
+      },
+      {
+        key: "structure",
+        fallback: "Pen or barn",
+        describes:
+          "What animals are kept in while on a zone — a pen, a coop, a chicken tractor. Blank means loose.",
+      },
+    ],
     Component: LivestockModule,
   },
 

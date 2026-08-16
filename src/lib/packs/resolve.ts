@@ -116,6 +116,76 @@ export function unlistedRequirements(
 }
 
 /**
+ * ONE WORD A FEATURE LETS YOU RENAME.
+ *
+ * Vocabulary is the cheapest way to express an industry difference
+ * (extension-model.md §3), and until this existed the mechanism had almost
+ * nothing flowing through it: three keys were declared in one profile, exactly
+ * ONE of them was read by any code, and every other noun in every pack was
+ * hardcoded English. Nobody — including whoever wrote the packs — could answer
+ * "what words can I change?" without grepping for `labelFor`.
+ *
+ * A declaration is what makes the answer knowable. It gives the admin screen
+ * something to list, gives a test something to check against, and gives the
+ * next pack a place to say what its words are.
+ */
+export interface LabelDefinition {
+  /** The key passed to `labelFor`. Unique across the whole product. */
+  key: string;
+  /** The word used when nobody has overridden it. */
+  fallback: string;
+  /**
+   * What it names, in a sentence — shown beside the field on the admin screen,
+   * because "zone" means nothing to somebody deciding whether to rename it.
+   */
+  describes: string;
+  /** The feature that owns the word. Set by `collectLabelDefinitions`. */
+  owner?: string;
+  /** The feature's display name, for grouping. Set by the collector. */
+  ownerName?: string;
+}
+
+/**
+ * Every renameable word across the features given, sorted and attributed.
+ *
+ * Takes the definitions rather than reading a registry, for the same reason
+ * the dependency helpers above do: the rules stay testable against fixtures
+ * instead of against whatever packs happen to exist this week.
+ *
+ * A key declared by two features is a CONFLICT and is reported rather than
+ * merged — two owners for one word means renaming it does something one of
+ * them did not expect.
+ */
+export function collectLabelDefinitions(
+  features: { slug: string; name: string; labels?: LabelDefinition[] }[],
+): { labels: LabelDefinition[]; conflicts: string[] } {
+  const byKey = new Map<string, LabelDefinition>();
+  const conflicts: string[] = [];
+  for (const feature of features) {
+    for (const label of feature.labels ?? []) {
+      const existing = byKey.get(label.key);
+      if (existing && existing.owner !== feature.slug) {
+        conflicts.push(label.key);
+        continue;
+      }
+      byKey.set(label.key, {
+        ...label,
+        owner: feature.slug,
+        ownerName: feature.name,
+      });
+    }
+  }
+  return {
+    labels: [...byKey.values()].sort(
+      (a, b) =>
+        (a.ownerName ?? "").localeCompare(b.ownerName ?? "") ||
+        a.key.localeCompare(b.key),
+    ),
+    conflicts: [...new Set(conflicts)].sort(),
+  };
+}
+
+/**
  * Vocabulary for a tenant: the profile's labels, overridden per tenant.
  *
  * TOTAL BY CONSTRUCTION, and that is load-bearing. `tenant_modules.config` is

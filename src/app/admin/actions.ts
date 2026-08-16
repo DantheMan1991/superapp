@@ -525,3 +525,63 @@ export async function convertProspectToClient(formData: FormData) {
   revalidatePath("/admin");
   return { ok: true, warning };
 }
+
+// ------------------------------------------------------------ vocabulary ---
+
+const setLabelsSchema = z.object({
+  tenantId: z.string().uuid(),
+  /**
+   * The whole map, not a patch. A form that submits every field can clear one
+   * by emptying it, and a patch shape gives no way to say "back to default".
+   */
+  labels: z.record(z.string(), z.string()),
+});
+
+/**
+ * Set a tenant's vocabulary — Layer 3 tailoring, and the half of the extension
+ * model that had no way in until now.
+ *
+ * Superadmin for the moment because it lives on the admin tenant page; the
+ * mechanism is a tenant-owner concern and the guard can move when there is a
+ * settings surface for it.
+ *
+ * WRITES THROUGH `withSystem`, deliberately. `tenants` is SELECT-only for
+ * members and must stay that way — RLS is row-level, so any member UPDATE
+ * policy permissive enough to allow this would also expose `status` (a tenant
+ * could flip itself to active and skip billing) and `clerk_org_id`. Same
+ * arrangement as `setTenantTimezoneAction`.
+ */
+export async function setTenantLabels(input: z.infer<typeof setLabelsSchema>) {
+  const { userId } = await requireSuperAdmin();
+  const parsed = setLabelsSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  const { tenantId, labels } = parsed.data;
+
+  // An empty value means "use the default word", so it is dropped rather than
+  // stored — otherwise the override would render as a blank heading.
+  const cleaned: Record<string, string> = {};
+  for (const [key, value] of Object.entries(labels)) {
+    const trimmed = value.trim();
+    if (trimmed) cleaned[key] = trimmed;
+  }
+
+  await withSystem((tx) =>
+    tx
+      .update(schema.tenants)
+      .set({ labels: cleaned, updatedAt: new Date() })
+      .where(eq(schema.tenants.id, tenantId)),
+  );
+
+  await logAudit({
+    action: "tenant.labels_set",
+    tenantId,
+    actorClerkUserId: userId,
+    targetType: "tenant",
+    targetId: tenantId,
+    // The KEYS, never the words — a tenant's own vocabulary is their business.
+    meta: { keys: Object.keys(cleaned).sort() },
+  });
+
+  revalidatePath(`/admin/tenants/${tenantId}`);
+  return { ok: true };
+}

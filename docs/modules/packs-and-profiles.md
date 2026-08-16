@@ -11,6 +11,37 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-15 — Vocabulary becomes declarable, and installing a profile becomes a button (`claude/vocabulary-registry`)
+
+Founder: *"how do I control the terminology used in the homestead farm profile?
+I should be able to customize it even further at the tenant level."* The honest
+answer was that the mechanism existed and the controls did not, and that the
+mechanism was barely used.
+
+- **The state this replaced:** three label keys declared in one profile, **one**
+  of them read by any code, every other noun in every pack hardcoded English,
+  and no way to answer *"what words can I change?"* except grepping for
+  `labelFor`. Setting up a profile meant invoking a server action directly.
+- **`LabelDefinition` — features declare their own words**, with a fallback and
+  a sentence describing what the word names. That one declaration serves three
+  purposes at once: the admin screen has something to LIST, the test has
+  something to CHECK, and the next pack has somewhere to put its vocabulary.
+- **`tests/vocabulary.test.ts` scans the source**: every key rendered through
+  `labelFor` must be declared. A declaration nothing verifies drifts back to
+  decoration within a slice or two — this is the ratchet.
+- **Two admin surfaces**, both on the tenant page: install a profile (naming the
+  packs it will switch on *before* the button), and edit vocabulary (a field per
+  declared word, with its description beside it).
+- **LABELS MOVED TO `tenants.labels`, and that is a correction.** They were on
+  each pack's `tenant_modules.config` row, on the reasoning that renaming a word
+  for one pack should not silently rename it in another. Backwards: `zone` is
+  `land`'s word that `livestock` also displays, so a per-pack override would
+  have changed one screen and not the other. A paddock is a paddock everywhere.
+  Moved while there was still no data in the wrong shape.
+- **Written through `withSystem` after a superadmin check**, because `tenants`
+  is SELECT-only for members and must stay so — RLS is row-level, and a member
+  UPDATE policy permissive enough for `labels` would also expose `status`.
+
 ### 2026-08-15 — A pack declares a dependency on another pack for the first time (`claude/inventory-lot-spine`)
 - **`inventory` slice 0** ships the lot spine — full dossier in
   [inventory.md](inventory.md).
@@ -127,7 +158,8 @@ when starting Layer 2 is to build a parallel set of all of it.
 | --- | --- | --- |
 | `modules.category` | [platform.ts:268](../../src/db/schema/platform.ts:268) | Defaults to `'core'`. `'pack'` is the second value. |
 | `tenant_modules.enabled` | [platform.ts:281](../../src/db/schema/platform.ts:281) | Per-tenant on/off. Works for packs unchanged. |
-| `tenant_modules.config` | [platform.ts:281](../../src/db/schema/platform.ts:281) | jsonb. Layer 3 tailoring **and** per-tenant label overrides. |
+| `tenant_modules.config` | [platform.ts:281](../../src/db/schema/platform.ts:281) | jsonb. Layer 3 tailoring, per pack. **Not** labels — those are tenant-wide. |
+| `tenants.labels` | [platform.ts](../../src/db/schema/platform.ts) | jsonb, tenant-wide vocabulary overrides. Keys come from the registry. |
 | `tenants.industry` | [platform.ts:78](../../src/db/schema/platform.ts:78) | text, `default 'general'`. The installed profile slug. |
 | `requireModuleEnabled()` | [modules.ts:52](../../src/lib/modules.ts:52) | 404s when off. Works for packs unchanged. |
 | `getActiveModules()` | [modules.ts:13](../../src/lib/modules.ts:13) | Builds the nav, ordered by `sortOrder`. |
@@ -148,7 +180,7 @@ cost dimensions all land in tables that already exist and already have RLS.
 | 2 | `src/industries/<slug>.ts` manifests | **built** — `homestead-farm` is the first |
 | 3 | Dependency declaration + enforcement | **built** — declared in `PackDefinition.requires`, enforced in `toggleModule` |
 | 4 | The install action | **partly** — `installProfile` enables packs and stamps `tenants.industry`. **Seed application is not built** |
-| 5 | Label resolution | **built and in use** — `resolveLabels` / `labelFor` in `src/lib/packs/resolve.ts`, reached through `packContext` in `src/lib/packs/tenant-context.ts`. First caller: `land`, 2026-08-15 |
+| 5 | Label resolution | **built, in use, and now DECLARED** — see the vocabulary registry below. Was: **built and in use** — `resolveLabels` / `labelFor` in `src/lib/packs/resolve.ts`, reached through `packContext` in `src/lib/packs/tenant-context.ts`. First caller: `land`, 2026-08-15 |
 | 6 | Nav grouping by `category` | **built** — the pack group takes the installed profile's name |
 | 7 | **P5 extension points** | **not built.** Two packs now hardcode a suggestion list that should come from profile `packConfig` (`assets.kind`, `land`'s zone uses). Config-shaped tailoring already works via `packContext`; what is still missing is a pack CONTRIBUTING nav or registering an entity type |
 
@@ -268,12 +300,16 @@ Pack-owned tables follow the ordinary rules: `tenant_id`, FORCE RLS, a
   `tenant_modules.module_id` foreign key, which fails loudly at install rather
   than silently — acceptable, but it fails at the worst moment. The fix, when it
   is worth doing, is extracting the `MODULES` array into an importable module.
-- ~~`resolveLabels` has no caller~~ — **closed 2026-08-15.** `land` reads it
-  through `packContext`. What remains open is that a per-tenant label override
-  has no UI: it is a jsonb edit on `tenant_modules.config`.
-- **No UI for `installProfile`.** The action exists, is superadmin-guarded and
-  audited, but no admin page calls it — a profile is installed by invoking the
-  action directly. The tenant detail page is the obvious home.
+- ~~`resolveLabels` has no caller~~ · ~~no UI for a per-tenant override~~ ·
+  ~~no UI for `installProfile`~~ — **all closed 2026-08-15.** Both surfaces are
+  on the admin tenant page, and the words they offer come from the registry.
+- **Only four features declare vocabulary**, and the sweep is partial. Each pack
+  declares the words on its list pages; plenty of nouns further in are still
+  hardcoded English ("Species", "Tag", "Batch code"). Adding one is a
+  `LabelDefinition` plus a `labelFor` call, and `tests/vocabulary.test.ts` fails
+  if a key is rendered without being declared — so the ratchet only turns one
+  way. **Core modules declare none at all**, which is the bigger gap: "customer"
+  and "invoice" are exactly the words an industry renames.
 - **Re-apply and drift** — a profile edit does not reach installed tenants. No
   action to re-run an installer, and no report of how a tenant differs from its
   manifest. Accepted cost in ADR 0009; revisit when it bites.

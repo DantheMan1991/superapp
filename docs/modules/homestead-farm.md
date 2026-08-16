@@ -116,6 +116,24 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-15 — Inventory slice 0: the lot spine exists (`claude/inventory-lot-spine`)
+- **`livestock` is unblocked.** It declares `inventory` in `requires` for the lot
+  spine, and the spine now exists: quantity-bearing lots with event-sourced
+  balances and lineage, where an individual is a lot of one, and split and merge
+  are the only operations that change cardinality.
+- **A split BALANCES**, certified rather than asserted — 210 chicks split 70 into
+  a pen leaves 140 and 70, with an item total still reading 210. That property is
+  what makes a head count reconcile with its own history instead of being
+  declared.
+- **Head really is just a unit of measure**, as the design claimed. It sits in
+  the `count` dimension beside `each` and `dozen`, and the head ledger turned out
+  to be the inventory ledger with no special case anywhere in the code.
+- **`inventory` now requires `assets`** — a storage location IS an asset, so the
+  ledger points at one with a composite FK rather than growing a parallel
+  location model. Every profile listing `inventory` already lists `assets`.
+- **Three packs built, four to go.** Full build record in
+  [inventory.md](inventory.md).
+
 ### 2026-08-15 — Land slice 1: occupancy is the join, and it exists now (`claude/land-occupancy-rest`)
 - **The record that carries cost allocation in both directions is built**, which
   is the thing the Livestock design named as what joins `land` to `livestock`. A
@@ -353,14 +371,14 @@ own words condensed, not reinterpreted.
 
 | Category | Lands in | Farm-specific? | Brainstormed? |
 | --- | --- | :---: | :---: |
-| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slice 0 built**, [land.md](land.md) |
+| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–1 built**, [land.md](land.md) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) |
 | Gardens/crops | `crops` pack | **yes** | **done** — [category design](#category-design--crops--garden-brainstormed-2026-08-13) |
 | Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
 | Baking | `production` pack — shared run, separate template | no | **done** — same design |
-| Retail | `inventory` + `retail` packs | no | **done** — [inventory](#category-design--inventory-brainstormed-2026-08-13) · [retail](#category-design--retail-brainstormed-2026-08-13) |
+| Retail | `inventory` (**slice 0 built**, [inventory.md](inventory.md)) + `retail` packs | no | **done** — [inventory](#category-design--inventory-brainstormed-2026-08-13) · [retail](#category-design--retail-brainstormed-2026-08-13) |
 | Marketing | core CRM + email; thin pack at most | no | first pass |
 | Accounting | **core module, already built** — seed + config | — | first pass |
 | Communication | **core email + CRM, already built** | — | not yet |
@@ -422,13 +440,14 @@ a category-design section below and a slice order.
   communication (email + CRM), vendor scheduling (scheduling + party spine).
 - **Explicitly deferred as code:** marketing — see *Explicitly deferred*.
 
-**Two of the seven are being built.** `assets` has shipped register,
+**Three of the seven are being built.** `assets` has shipped register,
 containment, depreciation, disposal and maintenance
 ([assets.md](assets.md)); `land` has shipped slice 0
 ([land.md](land.md)) and carries the slice order the design lacked. The other
 five are still designs. The risk the earlier version of this paragraph named —
 that designing stays comfortable while building does not — has not gone away, it
-has just moved down the list to `inventory`.
+has just moved down the list to `livestock` — which is now unblocked, and is the
+pack the pilot farm actually lives in.
 
 Notes worth keeping from the first pass, because they are the load-bearing
 design calls and the ones most likely to be got wrong twice:

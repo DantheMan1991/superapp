@@ -188,7 +188,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     description:
       "Quantities on hand, where they are, what they cost, and the lot each one came from.",
     category: "pack",
-    status: "coming_soon",
+    // `available` from slice 0 (2026-08-15): items, the LOT SPINE and the
+    // movement ledger. Receipts and issues follow in slice 1, valuation in
+    // slice 3, and the description grows as they do.
+    status: "available",
     sortOrder: 220,
   },
   {

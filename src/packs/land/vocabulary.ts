@@ -79,3 +79,38 @@ export function zoneUseLabel(use: string): string {
 export function isTenure(value: string): value is Tenure {
   return (TENURES as readonly string[]).includes(value);
 }
+
+/**
+ * Which ASSET KINDS can hold animals.
+ *
+ * A pen is not a kind of land — it is an asset, and `land_occupancy` points at
+ * one so a stay can say "in the coop on North Pasture". But `assets.kind` is an
+ * open taxonomy covering everything the business owns, so without a filter the
+ * picker offers a chest freezer and a tractor as places to put chickens. Found
+ * by clicking, 2026-08-16.
+ *
+ * `building` and `infrastructure` are the industry-neutral answer: a thing you
+ * put up and then put something inside. `equipment` is deliberately NOT here
+ * even though a chicken tractor is equipment — the tenant's own kind is the
+ * escape, which is why this reads config rather than being a constant.
+ */
+export const DEFAULT_STRUCTURE_KINDS = ["building", "infrastructure"] as const;
+
+/**
+ * Structure kinds from `packConfig.land.structureKinds`, tailorable per tenant
+ * in `tenant_modules.config`.
+ *
+ * TOTAL BY CONSTRUCTION, like `areaUnitFrom` and `speciesFrom` — jsonb has no
+ * shape constraint and most tenants have no profile, so anything unreadable
+ * means the default rather than a crashed page. An explicitly EMPTY list is
+ * honoured: a farm that keeps nothing in a structure gets no picker.
+ */
+export function structureKindsFrom(config: unknown): string[] {
+  if (config && typeof config === "object" && !Array.isArray(config)) {
+    const value = (config as Record<string, unknown>).structureKinds;
+    if (Array.isArray(value)) {
+      return value.filter((v): v is string => typeof v === "string" && v !== "");
+    }
+  }
+  return [...DEFAULT_STRUCTURE_KINDS];
+}

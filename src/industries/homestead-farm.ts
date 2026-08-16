@@ -46,6 +46,20 @@ export const homesteadFarm: IndustryProfile = {
     },
     land: {
       areaUnit: "acre",
+      /**
+       * On top of Land's neutral default of building + infrastructure. A
+       * chicken tractor and a hoop house are equipment by any accountant's
+       * reckoning and a home to something by any farmer's, which is the whole
+       * reason the list is config and not a constant.
+       */
+      structureKinds: [
+        "building",
+        "infrastructure",
+        "chicken_tractor",
+        "hoop_house",
+        "coop",
+        "barn",
+      ],
     },
   },
 };

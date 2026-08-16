@@ -773,7 +773,16 @@ export async function startOccupancy(
 export async function listStructures(
   tx: Tx,
   tenantId: string,
+  /**
+   * Which asset kinds count as a place to put something — from
+   * `structureKindsFrom(pack.config)`. REQUIRED, and required on purpose: this
+   * shipped unfiltered and offered a chest freezer and a tractor as homes for
+   * chickens, so a caller that has not thought about the filter should not
+   * compile.
+   */
+  kinds: string[],
 ): Promise<{ id: string; name: string; kind: string }[]> {
+  if (kinds.length === 0) return [];
   return tx
     .select({
       id: schema.assets.id,
@@ -782,7 +791,12 @@ export async function listStructures(
     })
     .from(schema.assets)
     .where(
-      and(eq(schema.assets.tenantId, tenantId), eq(schema.assets.status, "active")),
+      and(
+        eq(schema.assets.tenantId, tenantId),
+        eq(schema.assets.status, "active"),
+        // `inArray`, never an interpolated JS array in a raw fragment.
+        inArray(schema.assets.kind, kinds),
+      ),
     )
     .orderBy(asc(schema.assets.name));
 }

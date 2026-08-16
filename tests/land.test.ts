@@ -18,6 +18,8 @@ import {
   isTenure,
   isValidZoneUse,
   zoneUseLabel,
+  DEFAULT_STRUCTURE_KINDS,
+  structureKindsFrom,
   ZONE_USE_FORMAT,
 } from "../src/packs/land/vocabulary";
 
@@ -78,6 +80,44 @@ describe("areaUnitFrom", () => {
     expect(isAreaUnit("acre")).toBe(true);
     expect(isAreaUnit("hectare")).toBe(true);
     expect(isAreaUnit("section")).toBe(false);
+  });
+});
+
+describe("structureKindsFrom", () => {
+  // The picker built on this shipped unfiltered and offered a chest freezer
+  // and a tractor as places to put chickens. Found by clicking, 2026-08-16.
+  it("does not count equipment as somewhere to put an animal", () => {
+    expect(DEFAULT_STRUCTURE_KINDS).not.toContain("equipment");
+    expect(DEFAULT_STRUCTURE_KINDS).not.toContain("vehicle");
+    expect(DEFAULT_STRUCTURE_KINDS).toContain("building");
+  });
+
+  it("takes the tenant's own kinds when it has them", () => {
+    // A chicken tractor is equipment to an accountant and a home to a bird.
+    expect(structureKindsFrom({ structureKinds: ["coop", "chicken_tractor"] }))
+      .toEqual(["coop", "chicken_tractor"]);
+  });
+
+  it("honours an explicitly empty list rather than overriding it", () => {
+    // A farm that keeps nothing in a structure gets no picker, and that is a
+    // configured answer rather than a missing one.
+    expect(structureKindsFrom({ structureKinds: [] })).toEqual([]);
+  });
+
+  it("drops entries that are not usable kinds", () => {
+    expect(structureKindsFrom({ structureKinds: ["barn", "", 42, null] }))
+      .toEqual(["barn"]);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["an array", ["barn"]],
+    ["a string", "barn"],
+    ["a non-array value", { structureKinds: "barn" }],
+    ["an empty object", {}],
+  ])("falls back to the default when config is %s", (_label, config) => {
+    expect(structureKindsFrom(config)).toEqual([...DEFAULT_STRUCTURE_KINDS]);
   });
 });
 

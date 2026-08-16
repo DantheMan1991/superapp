@@ -13,6 +13,24 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — The deposit picker offered another company's account (branch `claude/register-pickers-by-company`)
+
+Found by driving the live Test tenant right after slice 1b deployed: Oak Row
+LLC's invoice offered **Test Operating** in "Deposit to". The server refuses it
+(`CROSS_ENTITY_REGISTER`, and the toast says why), so this was never a
+correctness hole — it is a control that offers a choice which always fails.
+
+- Same class as the recurring invoice that could be coded to Checking, and
+  found the same way. The picker listed every ACTIVE register of the tenant; it
+  now lists the ones belonging to the document's company.
+- **Both sides**: the invoice's Deposit-to and the bill's Paid-from.
+- **Undeposited Funds is still offered to everybody**, and that is right: it is
+  a chart account rather than a register, so two companies' unbanked cheques
+  both sit in 1250 separated by the entry's company — the same way their
+  receivables share 1200.
+- The engine guard is unchanged and is still the thing that makes this safe.
+  The picker mirrors it; it does not replace it.
+
 ### 2026-08-16 — Invoices, bills and bank accounts carry a company (branch `claude/entities-on-documents`)
 
 Slice 1 put the company on the journal ENTRY, which made reports scopeable and

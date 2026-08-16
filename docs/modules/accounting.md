@@ -13,6 +13,22 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — The Journal header claimed one company's books (branch `claude/journal-company-copy`)
+
+Found by driving the live Test tenant straight after slice 1 deployed, which is
+the only way it could have been found: the string is correct at one company and
+every test fixture has one.
+
+- The page read **"Every entry in Test's books"** — the TENANT's name — directly
+  above a table whose new Company column showed two different companies. It
+  reads as a scoped list that is not scoped.
+- At two or more it now says **"Every entry across all N companies"**; at one it
+  is unchanged, so nobody who has never heard of the concept sees it.
+- **The list itself stays unscoped, deliberately.** The journal is where you see
+  everything; the reports are where you scope. Adding a third filter to this
+  page would duplicate the report control without the stamping that makes it
+  safe.
+
 ### 2026-08-16 — `entity_id` becomes NOT NULL (branch `claude/entity-id-not-null`)
 
 The contract half of the entry below, and the reason it is a separate PR: it

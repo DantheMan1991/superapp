@@ -71,7 +71,17 @@ export default async function JournalPage() {
     <div className="space-y-6">
       <PageHeader
         title="Journal"
-        description={`Every entry in ${ctx.tenant.name}'s books.`}
+        description={
+          // "Every entry in Test's books" is the TENANT's name, and at two
+          // companies it reads as one company's ledger while the table beside
+          // it shows a Company column with two different values in it. Found by
+          // driving the live app after ADR 0010 slice 1 landed. The list itself
+          // is unscoped and stays that way — the journal is where you see
+          // everything; the reports are where you scope.
+          entities.length > 1
+            ? `Every entry across all ${entities.length} companies.`
+            : `Every entry in ${ctx.tenant.name}'s books.`
+        }
         actions={
           <Button asChild size="sm">
             <Link href="/dashboard/m/accounting/journal/new">New entry</Link>

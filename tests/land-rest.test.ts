@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   areaGrazed,
+  dayBefore,
   daysBetween,
   daysOccupied,
   formatDays,
@@ -40,6 +41,28 @@ describe("day arithmetic", () => {
   it("crosses a year end", () => {
     expect(daysBetween("2025-12-31", "2026-01-01")).toBe(1);
     expect(daysBetween("2025-01-01", "2026-01-01")).toBe(365);
+  });
+
+  it("steps back a day across every boundary a move can land on", () => {
+    // `moveOccupant` closes the old stay on this date. It is arithmetic that
+    // runs on every rotation, so month ends, leap days and year ends are the
+    // ordinary path rather than edge cases.
+    expect(dayBefore("2026-04-10")).toBe("2026-04-09");
+    expect(dayBefore("2026-03-01")).toBe("2026-02-28");
+    expect(dayBefore("2028-03-01")).toBe("2028-02-29");
+    expect(dayBefore("2026-01-01")).toBe("2025-12-31");
+  });
+
+  it("makes a move-day handover add up to exactly the days that passed", () => {
+    // THE PROPERTY THE DATE RULE EXISTS FOR. On A from the 1st, moved to B on
+    // the 10th: nine days on A, and the 10th belongs to B alone. Ending A on
+    // the 10th instead would make these sum to eleven days out of ten.
+    const movedOn = "2026-04-10";
+    const aDays = daysOccupied("2026-04-01", dayBefore(movedOn));
+    const bDays = daysOccupied(movedOn, "2026-04-15");
+    expect(aDays).toBe(9);
+    expect(bDays).toBe(6);
+    expect(aDays + bDays).toBe(daysOccupied("2026-04-01", "2026-04-15"));
   });
 
   it("counts a stay inclusively at BOTH ends", () => {

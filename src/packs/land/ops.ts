@@ -14,7 +14,7 @@ import {
   upsertDimensionMember,
 } from "@/modules/accounting/core";
 import { defaultProductive, isTenure, isValidZoneUse } from "./vocabulary";
-import { zoneRest, daysOccupied, type ZoneRest } from "./core/rest";
+import { zoneRest, dayBefore, daysOccupied, type ZoneRest } from "./core/rest";
 
 /**
  * Land operations. Every function takes a `Tx` so the caller owns the
@@ -49,6 +49,8 @@ export class LandError extends Error {
       | "PARCEL_INVALID"
       | "DATE_ORDER"
       | "ALREADY_OCCUPIED"
+      /** Distinct from ALREADY_OCCUPIED: moving them where they already are. */
+      | "ALREADY_THERE"
       | "INVALID_OCCUPANT",
     message: string,
   ) {
@@ -766,9 +768,14 @@ export async function startOccupancy(
  * Structures something can be kept in: active assets.
  *
  * A pen, a barn, a chicken tractor, a greenhouse — all of them assets, which is
- * why this pack declares `assets` in `requires`. Every active asset is offered
- * rather than a filtered subset, because `assets.kind` is an open taxonomy and
- * this pack has no business deciding which kinds can hold something.
+ * why this pack declares `assets` in `requires`.
+ *
+ * It DID offer every active asset, on the reasoning that `assets.kind` is an
+ * open taxonomy and this pack has no business deciding which kinds can hold
+ * something. Driving it on production settled that: the picker offered a chest
+ * freezer and a tractor as homes for chickens. Deciding is unavoidable — the
+ * choice is only whether the decision is a constant or config, and it is
+ * config (`structureKindsFrom`).
  */
 export async function listStructures(
   tx: Tx,
@@ -840,6 +847,96 @@ export async function endOccupancy(
     )
     .returning();
   return rows[0];
+}
+
+export interface MoveResult {
+  occupancy: LandOccupancy;
+  /** The stay this closed, if there was one. Null when they were nowhere. */
+  movedOff: { zoneId: string; endedOn: string } | null;
+}
+
+/**
+ * Move an occupant from wherever it is to a zone — off the old ground and onto
+ * the new one, in one act.
+ *
+ * WHY THIS EXISTS. `startOccupancy` refuses to open a second stay for the same
+ * occupant, correctly: a lot in two places at once is a data mistake. But that
+ * made MOVING — the single most frequent act on a rotational farm — impossible
+ * from the animal's own page. The daily loop was: go to Land, find the paddock
+ * they are on, move off, come back, move on. Five clicks across two modules,
+ * times however many groups. Found by driving it, 2026-08-16.
+ *
+ * **THE DATE RULE IS THE WHOLE OF THE DESIGN.** `ended_on` is inclusive, so a
+ * move on the 16th means the old stay's last day was the 15th — `dayBefore`.
+ * Closing it ON the 16th instead would count that day's grazing on both
+ * paddocks and quietly inflate every rotation figure that reads them. This is
+ * the one place in the pack where two spans meet, so it is the one place that
+ * can get it wrong.
+ *
+ * IT LIVES IN LAND, not in the pack calling it. `livestock` should not be
+ * arithmetic on `ended_on` any more than it should know what a paddock is.
+ */
+export async function moveOccupant(
+  tx: Tx,
+  ctx: LandCtx,
+  zoneId: string,
+  input: OccupancyInput,
+): Promise<MoveResult> {
+  requireWrite(ctx, "member");
+
+  // Only an OPEN arrival displaces anything. Recording a completed stay that
+  // happened last month must not move them off the paddock they are on today —
+  // and this is exactly the condition under which `startOccupancy`'s guard
+  // fires, so the two stay in step by construction.
+  const open =
+    !input.endedOn && input.occupantId
+      ? await tx.query.landOccupancy.findFirst({
+          where: and(
+            eq(schema.landOccupancy.tenantId, ctx.tenantId),
+            eq(
+              schema.landOccupancy.extensionSlug,
+              input.extensionSlug?.trim() || "land",
+            ),
+            eq(schema.landOccupancy.occupantId, input.occupantId),
+            isNull(schema.landOccupancy.endedOn),
+          ),
+        })
+      : null;
+
+  let movedOff: MoveResult["movedOff"] = null;
+  if (open) {
+    if (open.zoneId === zoneId) {
+      // Not a move. Changing the strip size or the pen they are in is an edit
+      // of the stay they are on, and closing and reopening it would invent a
+      // break in ground they never left.
+      throw new LandError(
+        "ALREADY_THERE",
+        `${open.occupantLabel} is already on this one, since ${open.startedOn}`,
+      );
+    }
+    if (input.startedOn < open.startedOn) {
+      // They cannot arrive somewhere before they arrived where they are. This
+      // is a mis-keyed year far more often than it is a real correction, and
+      // silently reordering two stays would be worse than refusing.
+      throw new LandError(
+        "DATE_ORDER",
+        `they have been on ${open.occupantLabel === input.occupantLabel ? "their current spot" : "another spot"} since ${open.startedOn}, so they cannot have moved on ${input.startedOn}`,
+      );
+    }
+    // Clamped, not just `dayBefore`. Moving them on the day they arrived is a
+    // same-day move or a correction; either way the old stay cannot end before
+    // it began, and refusing would put the user back in the five-click hole
+    // this function exists to close. A one-day stay is the honest record at
+    // day granularity.
+    const endedOn =
+      open.startedOn > dayBefore(input.startedOn)
+        ? open.startedOn
+        : dayBefore(input.startedOn);
+    await endOccupancy(tx, ctx, open.id, endedOn);
+    movedOff = { zoneId: open.zoneId, endedOn };
+  }
+
+  return { occupancy: await startOccupancy(tx, ctx, zoneId, input), movedOff };
 }
 
 /** Remove a stay entered by mistake. Correcting a record is not rewriting history. */

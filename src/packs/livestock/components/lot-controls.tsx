@@ -509,6 +509,7 @@ export function MoveToZoneForm({
   zones,
   structures,
   structureWord,
+  currentZone,
   today,
 }: {
   livestockLotId: string;
@@ -516,6 +517,8 @@ export function MoveToZoneForm({
   structures: { id: string; name: string }[];
   /** The tenant's own word for a pen, from the vocabulary registry. */
   structureWord: string;
+  /** Where they are now, so the dialog can say what moving takes them off. */
+  currentZone: { id: string; name: string } | null;
   today: string;
 }) {
   const router = useRouter();
@@ -541,7 +544,17 @@ export function MoveToZoneForm({
         toast.error(result.error);
         return;
       }
-      toast.success("Moved");
+      // Name the paddock the rest clock just started on. It is the half of the
+      // move nobody sees, and the number the whole pack is for.
+      const off = "movedOff" in result ? result.movedOff : null;
+      const leftName = off
+        ? (zones.find((z) => z.id === off.zoneId)?.name ?? "the last paddock")
+        : null;
+      toast.success(
+        off
+          ? `Moved — ${leftName} is resting from ${off.endedOn}`
+          : "Moved",
+      );
       setOpen(false);
       router.refresh();
     });
@@ -559,8 +572,13 @@ export function MoveToZoneForm({
           <DialogHeader>
             <DialogTitle>Move this lot</DialogTitle>
             <DialogDescription>
-              This is what starts the paddock&apos;s rest clock when they move
-              off again — the same record Land computes rest from.
+              {currentZone
+                ? // Say the consequence before it happens. Moving them closes
+                  // the stay they are on, which is what starts that paddock's
+                  // rest clock — silently doing it would be worse than the
+                  // five-click version it replaced.
+                  `They come off ${currentZone.name} the day before, and its rest clock starts there.`
+                : "This is what starts the paddock's rest clock when they move off again — the same record Land computes rest from."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -571,11 +589,16 @@ export function MoveToZoneForm({
                   <SelectValue placeholder="Pick a paddock" />
                 </SelectTrigger>
                 <SelectContent>
-                  {zones.map((z) => (
-                    <SelectItem key={z.id} value={z.id}>
-                      {z.parcelName} · {z.name}
-                    </SelectItem>
-                  ))}
+                  {/* The one they are on is left out. Land refuses it, and an
+                      option that only ever produces an error is worse than an
+                      option that is not there. */}
+                  {zones
+                    .filter((z) => z.id !== currentZone?.id)
+                    .map((z) => (
+                      <SelectItem key={z.id} value={z.id}>
+                        {z.parcelName} · {z.name}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>

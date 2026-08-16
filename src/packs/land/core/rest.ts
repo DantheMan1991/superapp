@@ -27,6 +27,23 @@ export function daysBetween(from: string, to: string): number {
   return toEpochDay(to) - toEpochDay(from);
 }
 
+/** Days since the epoch → `YYYY-MM-DD`. */
+function fromEpochDay(day: number): string {
+  return new Date(day * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * The day before — which is the LAST DAY ON a paddock when the next stay starts
+ * the following morning.
+ *
+ * `ended_on` is inclusive, so a move on the 16th means the old stay ended on
+ * the 15th. Using the 16th for both would count that day's grazing on two
+ * paddocks and inflate every rotation figure that reads them.
+ */
+export function dayBefore(iso: string): string {
+  return fromEpochDay(toEpochDay(iso) - 1);
+}
+
 /**
  * How many days a stay covered, counting BOTH ends.
  *

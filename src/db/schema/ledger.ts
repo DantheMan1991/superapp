@@ -178,11 +178,12 @@ export const journalEntries = pgTable(
      * heart of this module is untouched. An intercompany transaction is a
      * linked PAIR of entries (slice 2), not one entry spanning two entities.
      *
-     * NOT NULL here is AHEAD OF THE DATABASE for one release: `drizzle/0142`
-     * adds the column nullable and backfills it, because the deploy running
-     * while that migration lands does not write it yet. The `SET NOT NULL`
-     * follows in a migration after this deploy — the same expand/contract split
-     * `0123` made for its `total = subtotal + tax` CHECK.
+     * NOT NULL in the database since `drizzle/0144`. It arrived NULLABLE in
+     * `0142` and was closed a release later, because migrations go out AHEAD of
+     * the deploy and the deploy running while `0142` landed did not write the
+     * column — a NOT NULL there rejects every invoice issued in that window.
+     * Same expand/contract split `0123` made for its `total = subtotal + tax`
+     * CHECK. Worth knowing before adding the next required column here.
      */
     entityId: uuid("entity_id").notNull(),
     /** The bookkeeping day (no timezone). ISO string, compared lexically. */

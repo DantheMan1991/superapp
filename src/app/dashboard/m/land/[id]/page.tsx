@@ -99,7 +99,7 @@ export default async function ParcelDetailPage({
           listUsesInUse(tx, ctx.tenant.id),
           packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
           restByZone(tx, ctx.tenant.id, zoneIds, today),
-          completedStayDays(tx, ctx.tenant.id, id),
+          completedStayDays(tx, ctx.tenant.id, id, today),
         ]);
       return {
         parcel,

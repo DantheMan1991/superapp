@@ -142,13 +142,72 @@ describe("zoneRest", () => {
     expect(rest.status).toBe("occupied");
   });
 
-  it("never reports negative rest for a stay ending in the future", () => {
-    // A booked move entered ahead of time. Clamped rather than shown as -5.
+  // ---- what has happened, versus what is planned -------------------------
+  //
+  // Every case below was wrong until 2026-08-16, and one of them was wrong
+  // WITH A TEST ASSERTING IT — the booked-departure case read "resting 0 days"
+  // while the herd was still standing on the ground. Clamping a negative
+  // number to zero hid the question instead of answering it. Found by driving
+  // the one-act move, which put the "On" date in reach and made recording a
+  // stay ahead of time easy.
+
+  it("counts a booked departure as STILL OCCUPIED, not as rested", () => {
+    // On since the 1st, leaving on the 20th, today is the 15th. They are
+    // eating. The rest clock has not started and must not read 0 days, which
+    // is a number somebody rotates on.
     const rest = zoneRest(
       [{ startedOn: "2026-08-01", endedOn: "2026-08-20" }],
       TODAY,
     );
-    expect(rest.restDays).toBe(0);
+    expect(rest.status).toBe("occupied");
+    expect(rest.restDays).toBeNull();
+    // And only the days actually elapsed: the 1st to the 15th, not to the 20th.
+    expect(rest.grazingDays).toBe(15);
+  });
+
+  it("ignores a stay that has not begun", () => {
+    // "They go to Creek Paddock on Monday", typed on Friday. It used to read
+    // as occupied the moment it was saved, stopping the rest clock days early
+    // on ground nothing was standing on.
+    const rest = zoneRest(
+      [
+        { startedOn: "2026-06-01", endedOn: "2026-06-05" },
+        { startedOn: "2026-08-20", endedOn: null },
+      ],
+      TODAY,
+    );
+    expect(rest.status).toBe("resting");
+    expect(rest.restingSince).toBe("2026-06-05");
+    expect(rest.restDays).toBe(71);
+    // The planned stay contributes nothing — not a day, not a count.
+    expect(rest.grazingDays).toBe(5);
+    expect(rest.stays).toBe(1);
+  });
+
+  it("treats a paddock whose only stay is in the future as never used", () => {
+    // Not "rested forever" and not "occupied". Nothing has been on it, which
+    // is what never_grazed means.
+    const rest = zoneRest([{ startedOn: "2026-09-01", endedOn: null }], TODAY);
+    expect(rest.status).toBe("never_grazed");
+    expect(rest.grazingDays).toBe(0);
+    expect(rest.stays).toBe(0);
+  });
+
+  it("counts an open stay only up to today", () => {
+    // Unchanged behaviour, restated because the clipping rule now covers it:
+    // a herd three weeks into a stay must not read as zero grazing days.
+    const rest = zoneRest([{ startedOn: "2026-08-01", endedOn: null }], TODAY);
+    expect(rest.status).toBe("occupied");
+    expect(rest.grazingDays).toBe(15);
+  });
+
+  it("starts counting a stay on the very day it begins", () => {
+    // The boundary: `startedOn === today` has begun. An off-by-one here would
+    // make every move invisible on the day it happened.
+    const rest = zoneRest([{ startedOn: TODAY, endedOn: null }], TODAY);
+    expect(rest.status).toBe("occupied");
+    expect(rest.grazingDays).toBe(1);
+    expect(rest.stays).toBe(1);
   });
 });
 

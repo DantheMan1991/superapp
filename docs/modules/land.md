@@ -40,6 +40,33 @@ examples exist.
 
 ## Build log
 
+### 2026-08-16 — Rest is what happened, not what is planned (`claude/rest-not-yet`)
+
+Found by driving the one-act move. Recording an arrival with a forward `On`
+date read the destination as **occupied** from the moment it was typed, stopping
+its rest clock days early on ground nothing was standing on. Rest is the number
+this pack exists to produce, and nothing on the page looked wrong.
+
+- **`zoneRest` clips every span to `today`.** A stay that has not begun
+  contributes nothing — not a day, not a count. A stay that has begun
+  contributes only the part that has elapsed.
+- **A booked departure is still OCCUPIED.** `endedOn` in the future means they
+  are standing there now. This is the half that was wrong *with a test asserting
+  it*: the old code clamped a negative rest to `0`, and the old test checked for
+  the `0`. Clamping hid the question instead of answering it. **Second time this
+  month a test has locked in a mistake** — the other was the occupancy guard.
+- **A paddock whose only stay is in the future is `never_grazed`**, not
+  "occupied" and not "rested forever". Nothing has been on it.
+- **`completedStayDays` takes `today`** and drops stays that have not finished.
+  A planned departure is not a measurement, and the rotation formula would
+  otherwise report a graze length the farm has never done.
+- The zone page follows: "Move off" and the *Currently* card need an open stay
+  that has **begun**, and a future arrival's row reads **not yet** rather than
+  *still on it*. Without that the headline card and the table underneath it
+  would contradict each other on the same screen.
+- Nothing is stored to make this work. The same two rows answer differently on
+  the 15th and the 20th, which is the pack's rule about derived numbers holding.
+
 ### 2026-08-16 — Moving is one act, and the day belongs to one paddock (`claude/move-occupant`)
 
 `moveOccupant` — take an occupant off wherever it is and put it on a zone, in
@@ -343,6 +370,12 @@ rented ground, and retrofitting it means rewriting the report.
 - **A day count is inclusive at both ends.** On Monday, off Monday is one day of
   grazing. It feeds the paddock arithmetic, so an off-by-one there reaches every
   rotation figure on the page.
+- **Every rest figure is clipped to `today`.** A stay can be recorded ahead —
+  the move dialog has an `On` date — and a stay recorded ahead has not happened.
+  It contributes nothing until it starts, and an `ended_on` in the future means
+  they are still on the ground. Anything new that folds occupancy spans has to
+  take `today` and apply the same rule; `zoneRest` and `completedStayDays` both
+  do. See the 2026-08-16 entry for what the unclipped version reported.
 - **drizzle-kit emits every FK before every index** — hit three times (`0125`,
   `0130`, `0132`) and NOT on `0134`. The rule is *check whether the FK's target
   unique index is created in the same migration*, not *always reorder*: a
@@ -383,10 +416,12 @@ rented ground, and retrofitting it means rewriting the report.
   Prefixing the parcel would make the headings unreadable; disambiguating only on
   collision is the likely answer, and it needs deciding before there is data.
 - ~~No zone detail page~~ — **built in slice 1.**
-- **Nobody has driven slice 1 yet.** It was written, migrated against both
-  databases, and covered by 52 tests, but the local dev session is `org:member`
-  and the production deploy is what can actually be clicked. Slice 0 shipped a
-  bug that only clicking found; assume this one has too until somebody looks.
+- ~~Nobody has driven slice 1 yet~~ — **closed 2026-08-16.** Driven on
+  production across four sessions of clicking. It found, in order: the
+  structure picker offering a chest freezer, the move that could not move, and
+  rest counting a booked arrival as occupancy. All three are fixed; none of them
+  was going to be found by a test, and two of them had passing tests over the
+  wrong behaviour.
 - **Stocking density stops at area.** Land supplies the acreage a stay used;
   head count belongs to `livestock`, so animal-units-per-acre cannot be computed
   until that pack exists. Deliberate — a `head` column here would be this pack

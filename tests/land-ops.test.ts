@@ -934,9 +934,19 @@ d("land ops", () => {
         startedOn: "2026-08-10",
       }),
     );
+    // Recorded ahead, and already given an end date. It has a length on paper
+    // and nobody has grazed it — feeding that into the rotation formula would
+    // report a graze length the farm has never done.
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), b.id, {
+        occupantLabel: "Herd",
+        startedOn: "2026-09-01",
+        endedOn: "2026-09-09",
+      }),
+    );
 
     const days = await asOwner((tx) =>
-      completedStayDays(tx, tenantId, parcel.id),
+      completedStayDays(tx, tenantId, parcel.id, "2026-08-15"),
     );
     expect(days.sort()).toEqual([1, 2]);
   });
@@ -1121,6 +1131,55 @@ d("land ops", () => {
 
     const stays = await asOwner((tx) => listOccupancy(tx, tenantId, from));
     expect(stays[0].endedOn).toBeNull();
+  });
+
+  it("does not let a move recorded ahead stop a paddock's rest clock", async () => {
+    // The exact sequence that found this on production: rotate a herd off,
+    // then record the next arrival with a forward "On" date. The paddock they
+    // LEFT is resting; the one they are going to has not been used yet.
+    const parcel = await newParcel("Booked ahead");
+    const [from, to] = await Promise.all([
+      asOwner((tx) => createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "A" })),
+      asOwner((tx) => createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "B" })),
+    ]);
+    const occupantId = randomUUID();
+    await asOwner((tx) =>
+      startOccupancy(tx, ownerCtx(), from.id, {
+        occupantLabel: "Herd",
+        startedOn: "2026-08-01",
+        extensionSlug: "livestock",
+        occupantType: "lot",
+        occupantId,
+      }),
+    );
+    await asOwner((tx) =>
+      moveOccupant(tx, staffCtx(), to.id, {
+        occupantLabel: "Herd",
+        startedOn: "2026-08-20",
+        extensionSlug: "livestock",
+        occupantType: "lot",
+        occupantId,
+      }),
+    );
+
+    const rest = await asOwner((tx) =>
+      restByZone(tx, tenantId, [from.id, to.id], "2026-08-15"),
+    );
+    // The move closed A on the 19th, but that has not arrived: on the 15th
+    // the herd is still on A, and A is not resting.
+    expect(rest.get(from.id)?.status).toBe("occupied");
+    expect(rest.get(from.id)?.grazingDays).toBe(15);
+    // And B is untouched ground, not a paddock with a herd on it.
+    expect(rest.get(to.id)?.status).toBe("never_grazed");
+    expect(rest.get(to.id)?.stays).toBe(0);
+
+    // Come the 20th, both flip — from the same two rows, with nothing entered.
+    const later = await asOwner((tx) =>
+      restByZone(tx, tenantId, [from.id, to.id], "2026-08-20"),
+    );
+    expect(later.get(from.id)?.status).toBe("resting");
+    expect(later.get(from.id)?.restingSince).toBe("2026-08-19");
+    expect(later.get(to.id)?.status).toBe("occupied");
   });
 
   // ---- structures --------------------------------------------------------

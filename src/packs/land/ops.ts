@@ -1105,12 +1105,16 @@ export async function restByZone(
  * Completed stay lengths across a parcel, for the rotation finding.
  *
  * Open stays are excluded: a herd that moved on this morning has a length, and
- * one still standing there does not yet.
+ * one still standing there does not yet. **A stay that has not finished YET is
+ * excluded for the same reason** — a planned departure is not a measurement,
+ * and feeding one into the rotation formula would report a graze length nobody
+ * has done. Same rule `zoneRest` applies; see its comment.
  */
 export async function completedStayDays(
   tx: Tx,
   tenantId: string,
   parcelId: string,
+  today: string,
 ): Promise<number[]> {
   const rows = await tx
     .select({
@@ -1132,7 +1136,10 @@ export async function completedStayDays(
       ),
     );
   return rows
-    .filter((r): r is { startedOn: string; endedOn: string } => !!r.endedOn)
+    .filter(
+      (r): r is { startedOn: string; endedOn: string } =>
+        !!r.endedOn && r.endedOn <= today,
+    )
     .map((r) => daysOccupied(r.startedOn, r.endedOn));
 }
 

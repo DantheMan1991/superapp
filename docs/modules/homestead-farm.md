@@ -1238,7 +1238,7 @@ and is the first screen.
 
 | # | Slice | Why here |
 | --- | --- | --- |
-| 0 | Items + units + locations + on-hand ledger | The day-one wedge: what do I have and where |
+| 0 | Items + units + locations + on-hand ledger + **the lot spine** | The day-one wedge: what do I have and where |
 | 1 | Receipts and issues | Feed in, feed out to lots — closes the `livestock` costing loop |
 | 2 | Adjustments, physical counts, expiry/FEFO | Makes the balance trustworthy |
 | 3 | Valuation + COGS posting, basis-aware | Rides the existing ADR 0007 lens |
@@ -1246,6 +1246,15 @@ and is the first screen.
 | 5 | Reorder points, capacity warnings | Needs history |
 
 Production outputs land in inventory but are blocked on the `production` pack.
+
+> **The lot spine is IN slice 0, decided 2026-08-15.** The original list did not
+> name it, and that ambiguity mattered: `livestock` declares `inventory` in
+> `requires` specifically for the lot spine, so an inventory slice 0 without it
+> would ship and leave livestock exactly as blocked as before — which defeats
+> the reason for building inventory ahead of the pack that needs it. Head is
+> just a unit of measure, a lot is a ledger of head, and split and merge are the
+> only operations that change cardinality; all of that is the spine rather than
+> an extension of it. Items and locations ride alongside.
 
 ## Category design — Production (brainstormed 2026-08-13)
 

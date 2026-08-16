@@ -89,7 +89,25 @@ export interface ZoneRest {
  * it was created.
  */
 export function zoneRest(spans: OccupancySpan[], today: string): ZoneRest {
-  if (spans.length === 0) {
+  /**
+   * REST DESCRIBES WHAT HAS HAPPENED, NOT WHAT IS PLANNED.
+   *
+   * A stay can be recorded ahead — the move dialog has an "On" date, so
+   * "they go to Creek Paddock on Monday" is a Friday entry. Counting it read
+   * that paddock as **occupied** from the moment it was typed, which stopped
+   * its rest clock days early and understated the rest on ground nothing was
+   * standing on. Rest is the number this pack exists to produce, and nothing on
+   * the page looked wrong. Found by clicking, 2026-08-16.
+   *
+   * So every span is clipped to `today`: one that has not begun contributes
+   * nothing at all, and one that has begun contributes only the part that has
+   * actually elapsed.
+   */
+  const begun = spans.filter((span) => span.startedOn <= today);
+
+  if (begun.length === 0) {
+    // Including the case where every stay is in the future. Nothing has been on
+    // it, which is exactly what `never_grazed` means.
     return {
       status: "never_grazed",
       restDays: null,
@@ -103,12 +121,17 @@ export function zoneRest(spans: OccupancySpan[], today: string): ZoneRest {
   let occupied = false;
   let lastEnd: string | null = null;
 
-  for (const span of spans) {
-    if (span.endedOn === null) {
+  for (const span of begun) {
+    // Still running: no end, OR an end that has not arrived yet. The second
+    // case is a planned departure — they are standing on it now, so treating
+    // that future date as the start of rest would have the clock running while
+    // the herd is still eating.
+    if (span.endedOn === null || span.endedOn > today) {
       occupied = true;
-      // An open stay still counts the days it has run so far, or a herd that
-      // has been somewhere three weeks would read as zero grazing days.
-      grazingDays += Math.max(0, daysOccupied(span.startedOn, today));
+      // Counts the days it has run SO FAR — a herd three weeks into a stay
+      // reading zero grazing days would be worse than the arithmetic being
+      // slightly behind. Never negative now: `begun` guarantees it started.
+      grazingDays += daysOccupied(span.startedOn, today);
       continue;
     }
     grazingDays += daysOccupied(span.startedOn, span.endedOn);
@@ -121,17 +144,17 @@ export function zoneRest(spans: OccupancySpan[], today: string): ZoneRest {
       restDays: null,
       restingSince: null,
       grazingDays,
-      stays: spans.length,
+      stays: begun.length,
     };
   }
 
   return {
     status: "resting",
-    // lastEnd is non-null here: every span is closed and there is at least one.
+    // lastEnd is non-null here: every begun span is closed, and there is one.
     restDays: Math.max(0, daysBetween(lastEnd as string, today)),
     restingSince: lastEnd,
     grazingDays,
-    stays: spans.length,
+    stays: begun.length,
   };
 }
 

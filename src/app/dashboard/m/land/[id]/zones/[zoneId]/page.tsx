@@ -100,7 +100,14 @@ export default async function ZoneDetailPage({
     stays.map((s) => ({ startedOn: s.startedOn, endedOn: s.endedOn })),
     today,
   );
-  const openStay = stays.find((s) => s.endedOn === null) ?? null;
+  /**
+   * Open AND BEGUN. A stay recorded ahead of time is not something you can
+   * move off, and calling it "occupied now" is the same lie `zoneRest` was
+   * fixed to stop telling — the headline card reads from `rest`, so without
+   * this the two halves of this page would contradict each other.
+   */
+  const openStay =
+    stays.find((s) => s.endedOn === null && s.startedOn <= today) ?? null;
   const currentUse = uses.find((u) => u.endedOn === null) ?? null;
 
   const rows: OccupancyRow[] = stays.map((s) => ({
@@ -286,9 +293,15 @@ export default async function ZoneDetailPage({
                     {row.startedOn}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">
-                    {row.endedOn ?? (
-                      <Badge variant="outline">still on it</Badge>
-                    )}
+                    {row.endedOn ??
+                      (row.startedOn > today ? (
+                        // Recorded ahead. "Still on it" would claim a herd is
+                        // standing on ground it has not reached, and this row
+                        // is the only place that distinction is visible.
+                        <Badge variant="outline">not yet</Badge>
+                      ) : (
+                        <Badge variant="outline">still on it</Badge>
+                      ))}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {row.daysLabel ?? "—"}

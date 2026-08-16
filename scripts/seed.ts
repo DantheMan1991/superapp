@@ -200,7 +200,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     description:
       "Animals tracked as lots — health, movement, breeding and what each one has cost.",
     category: "pack",
-    status: "coming_soon",
+    // `available` from slice 0 (2026-08-15): lots, the head ledger and
+    // occupancy — all composed from `inventory` and `land` rather than
+    // rebuilt. Daily log, feed, health and breeding follow.
+    status: "available",
     sortOrder: 230,
   },
   {

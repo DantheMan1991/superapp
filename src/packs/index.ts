@@ -2,6 +2,7 @@ import type { PackDefinition } from "./types";
 import { AssetsModule } from "./assets/AssetsModule";
 import { LandModule } from "./land/LandModule";
 import { InventoryModule } from "./inventory/InventoryModule";
+import { LivestockModule } from "./livestock/LivestockModule";
 
 /**
  * Layer 2a registry: slug → how the pack behaves.
@@ -12,9 +13,9 @@ import { InventoryModule } from "./inventory/InventoryModule";
  * happens at the shell layer in `src/lib/features.ts`, which is Layer 0 and is
  * allowed to know both exist.
  *
- * `assets`, `land` and `inventory` are built; the other four are DECLARED AND
- * UNBUILT. That is not a placeholder state: a declared pack has a real
- * dependency graph,
+ * `assets`, `land`, `inventory` and `livestock` are built; the other three are
+ * DECLARED AND UNBUILT. That is not a placeholder state: a declared pack has a
+ * real dependency graph,
  * installs with a profile, and shows as an empty slot in the admin registry —
  * exactly how `scheduling` and `work` were carried before they shipped. Each
  * grows a `src/packs/<slug>/` directory and a `Component` when it is built.
@@ -87,6 +88,7 @@ export const packRegistry: Record<string, PackDefinition> = {
     name: "Livestock",
     icon: "beef",
     requires: ["inventory", "land"],
+    Component: LivestockModule,
   },
 
   /** Beds are land zones; harvests feed inventory. */

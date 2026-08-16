@@ -803,6 +803,62 @@ export async function deleteOccupancy(
 }
 
 /**
+ * Where each of these occupants currently is, keyed by `occupant_id`.
+ *
+ * THE READ THE OWNING PACK NEEDS, owned by the pack that owns the table.
+ * `livestock` wants "which paddock is this herd on" and may not query
+ * `land_occupancy` itself — so the query lives here and the caller passes its
+ * own `extension_slug`. Land still learns nothing about what a lot is.
+ *
+ * Only OPEN stays count: a herd that has moved off is not anywhere.
+ */
+export async function currentZoneForOccupants(
+  tx: Tx,
+  tenantId: string,
+  extensionSlug: string,
+  occupantIds: string[],
+): Promise<Map<string, { zoneId: string; zoneName: string; startedOn: string }>> {
+  const out = new Map<
+    string,
+    { zoneId: string; zoneName: string; startedOn: string }
+  >();
+  if (occupantIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      occupantId: schema.landOccupancy.occupantId,
+      zoneId: schema.landOccupancy.zoneId,
+      zoneName: schema.landZones.name,
+      startedOn: schema.landOccupancy.startedOn,
+    })
+    .from(schema.landOccupancy)
+    .innerJoin(
+      schema.landZones,
+      and(
+        eq(schema.landZones.tenantId, schema.landOccupancy.tenantId),
+        eq(schema.landZones.id, schema.landOccupancy.zoneId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.landOccupancy.tenantId, tenantId),
+        eq(schema.landOccupancy.extensionSlug, extensionSlug),
+        inArray(schema.landOccupancy.occupantId, occupantIds),
+        isNull(schema.landOccupancy.endedOn),
+      ),
+    );
+  for (const row of rows) {
+    if (row.occupantId) {
+      out.set(row.occupantId, {
+        zoneId: row.zoneId,
+        zoneName: row.zoneName,
+        startedOn: row.startedOn,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Rest for each of these zones, as of the tenant's today.
  *
  * Computed, never stored — the same reasoning accumulated depreciation follows

@@ -967,6 +967,20 @@
       "when": 1786839343377,
       "tag": "0137_inventory_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1786841769621,
+      "tag": "0138_livestock_lots",
+      "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1786841802024,
+      "tag": "0139_livestock_rls",
+      "breakpoints": true
     }
   ]
 }

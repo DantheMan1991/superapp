@@ -507,6 +507,45 @@ export async function movementRowsForItem(
 }
 
 /**
+ * Movement KINDS and quantities for a set of lots.
+ *
+ * `MovementRow` deliberately carries only what a balance needs, and a balance
+ * does not care why stock moved. But a pack that composes this one may:
+ * `livestock` has to tell a death from a transfer to compute mortality at all,
+ * and that classification is its business rather than inventory's. So the rows
+ * come out typed and unclassified, and the caller decides what they mean.
+ */
+export async function movementKindsForLots(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<Map<string, { movementKind: string; quantity: number }[]>> {
+  const out = new Map<string, { movementKind: string; quantity: number }[]>();
+  if (lotIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      lotId: schema.inventoryMovements.lotId,
+      movementKind: schema.inventoryMovements.movementKind,
+      quantity: schema.inventoryMovements.quantity,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.lotId, lotIds),
+      ),
+    );
+  for (const row of rows) {
+    if (!row.lotId) continue;
+    const entry = { movementKind: row.movementKind, quantity: row.quantity };
+    const list = out.get(row.lotId);
+    if (list) list.push(entry);
+    else out.set(row.lotId, [entry]);
+  }
+  return out;
+}
+
+/**
  * On-hand per item for the list page, summed in SQL.
  *
  * Folded in the database rather than in JS purely because the list would

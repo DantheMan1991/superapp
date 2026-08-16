@@ -1,0 +1,176 @@
+import Link from "next/link";
+import { Beef } from "lucide-react";
+import { withTenant } from "@/db";
+import type { TenantContext } from "@/lib/auth";
+import { todayInTimezone } from "@/lib/timezone";
+import { PageHeader } from "@/components/app/page-header";
+import { EmptyState } from "@/components/app/empty-state";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { packContext } from "@/lib/packs/tenant-context";
+import { listItems, listLots, movementKindsForLots } from "@/packs/inventory/ops";
+import { currentZoneForOccupants } from "@/packs/land/ops";
+import { slugLabel } from "@/packs/inventory/vocabulary";
+import { listLivestockLots } from "./ops";
+import { ageInDays, formatAge, formatRate, mortalityRate, summariseHead } from "./core/herd";
+import { speciesFrom } from "./vocabulary";
+import { LivestockLotForm } from "./components/lot-controls";
+
+/**
+ * The `livestock` pack's home: every animal lot, what is in it, and where it is.
+ *
+ * "SEEING YOUR ANIMALS ON PADDOCKS ALREADY BEATS NOTHING" is the design's own
+ * justification for this slice, and it is why the location column is here
+ * rather than on the detail page. It also happens to be the visible proof of
+ * the pack model: the code comes from `inventory`, the head count from
+ * `inventory`'s ledger, the paddock from `land`, and the species from here.
+ */
+export async function LivestockModule({
+  ctx,
+  searchParams,
+}: {
+  ctx: TenantContext;
+  searchParams: Record<string, string | string[] | undefined>;
+}) {
+  const speciesParam = searchParams.species;
+  const species = typeof speciesParam === "string" ? speciesParam : undefined;
+  const today = todayInTimezone(ctx.tenant.timezone);
+
+  const data = await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const [lots, pack, items] = await Promise.all([
+        listLivestockLots(tx, ctx.tenant.id, { species }),
+        packContext(tx, ctx.tenant.id, ctx.tenant.industry, "livestock"),
+        // Only items counted in head can hold animals, which is what makes
+        // "head is a unit of measure" true in the UI as well as the schema.
+        listItems(tx, ctx.tenant.id, { status: "active" }),
+      ]);
+
+      const inventoryLotIds = lots.map((l) => l.inventoryLotId);
+      // Three queries for the whole page, whatever the lot count: the spine
+      // rows, where each lot is, and the movements behind every head figure.
+      const [inventoryLots, zones, movements] = await Promise.all([
+        listLots(tx, ctx.tenant.id),
+        currentZoneForOccupants(tx, ctx.tenant.id, "livestock", inventoryLotIds),
+        movementKindsForLots(tx, ctx.tenant.id, inventoryLotIds),
+      ]);
+
+      return { lots, pack, items, inventoryLots, zones, movements };
+    },
+    { role: ctx.role },
+  );
+
+  const { lots, pack, items, inventoryLots, zones, movements } = data;
+  const isOwner = ctx.role === "owner";
+  const byId = new Map(inventoryLots.map((l) => [l.id, l]));
+  const headItems = items.filter((i) => i.stockingUnit === "head");
+  const suggestedSpecies = speciesFrom(pack.config);
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Livestock"
+        description="Every animal is a lot, and an individual is a lot of one."
+        actions={
+          isOwner && headItems.length > 0 ? (
+            <LivestockLotForm
+              items={headItems.map((i) => ({ id: i.id, name: i.name }))}
+              speciesOptions={suggestedSpecies}
+              today={today}
+            />
+          ) : null
+        }
+      />
+
+      {headItems.length === 0 ? (
+        <EmptyState
+          panel
+          icon={<Beef className="h-5 w-5" />}
+          title="Nothing to count animals as yet"
+          description={
+            isOwner
+              ? "Animals are counted in head, and head is an inventory item like anything else. Add one under Inventory — 'Broiler chicks', counted in head — and it becomes something you can start a lot of."
+              : "An owner sets this up. Once they do, the animals show up here."
+          }
+        />
+      ) : lots.length === 0 ? (
+        <EmptyState
+          panel
+          icon={<Beef className="h-5 w-5" />}
+          title="No animals recorded yet"
+          description="Start a lot — a batch of chicks, a group of feeders, one named cow. What goes in and what leaves are both entries against it, so the count always reconciles."
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Lot</TableHead>
+              <TableHead>Species</TableHead>
+              <TableHead>Where</TableHead>
+              <TableHead className="text-right">Age</TableHead>
+              <TableHead className="text-right">Lost</TableHead>
+              <TableHead className="text-right">Head</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {lots.map((lot) => {
+              const inv = byId.get(lot.inventoryLotId);
+              const lotMovements = movements.get(lot.inventoryLotId) ?? [];
+              // The head count IS the balance — the same fold, over the same
+              // ledger, that inventory's own pages use.
+              const summary = summariseHead(lotMovements);
+              const zone = zones.get(lot.inventoryLotId);
+              return (
+                <TableRow key={lot.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-2 font-medium">
+                      <Link
+                        href={`/dashboard/m/livestock/${lot.id}`}
+                        className="hover:underline"
+                      >
+                        {inv?.code ?? "—"}
+                      </Link>
+                      {inv?.parentLotId && <Badge variant="outline">split</Badge>}
+                    </div>
+                    {lot.breed && (
+                      <div className="text-xs text-muted-foreground">
+                        {lot.breed}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {slugLabel(lot.species)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {/* From `land`, through land's own query. This pack never
+                        touches land_occupancy directly. */}
+                    {zone ? zone.zoneName : "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {formatAge(ageInDays(lot.bornOn, today))}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {formatRate(mortalityRate(summary))}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {/* An em dash before anything has been placed. "No animals"
+                        and "none recorded yet" are different facts. */}
+                    {lotMovements.length === 0 ? "—" : summary.balance}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}

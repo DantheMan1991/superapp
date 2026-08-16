@@ -40,6 +40,26 @@ examples exist.
 
 ## Build log
 
+### 2026-08-16 — "Where is it" needed a date too (`claude/current-needs-today`)
+
+The loose end of the entry below, found by driving it an hour later. `zoneRest`
+and `completedStayDays` learned to clip to `today`; `currentZoneForOccupants`
+and `occupantsInStructures` read the same table and did not.
+
+Both matched on *"the stay with no end date"*. After a move dated ahead, that is
+the wrong row twice over: the stay they are actually on has been closed on a
+date that has not arrived, and the one with no end has not started. So the
+Livestock page said the herd was on Creek Paddock while Land said Creek Paddock
+was resting — **two pages, the same rows, different answers.**
+
+- Both now take `today` and match the stay that COVERS it:
+  `started_on <= today AND (ended_on IS NULL OR ended_on >= today)`.
+- Overlapping stays are legitimate, so when two cover today the **most recent
+  arrival** wins.
+- **Three reads have now needed `today`.** That is the pattern: anything in this
+  pack answering "currently" is a question about a date, and the date has to be
+  passed in rather than assumed. Written into Decisions & gotchas.
+
 ### 2026-08-16 — Rest is what happened, not what is planned (`claude/rest-not-yet`)
 
 Found by driving the one-act move. Recording an arrival with a forward `On`
@@ -370,12 +390,19 @@ rented ground, and retrofitting it means rewriting the report.
 - **A day count is inclusive at both ends.** On Monday, off Monday is one day of
   grazing. It feeds the paddock arithmetic, so an off-by-one there reaches every
   rotation figure on the page.
-- **Every rest figure is clipped to `today`.** A stay can be recorded ahead —
-  the move dialog has an `On` date — and a stay recorded ahead has not happened.
-  It contributes nothing until it starts, and an `ended_on` in the future means
-  they are still on the ground. Anything new that folds occupancy spans has to
-  take `today` and apply the same rule; `zoneRest` and `completedStayDays` both
-  do. See the 2026-08-16 entry for what the unclipped version reported.
+- **"CURRENTLY" IS A QUESTION ABOUT A DATE, so pass `today` in.** A stay can be
+  recorded ahead — the move dialog has an `On` date — and a stay recorded ahead
+  has not happened. It contributes nothing until it starts, and an `ended_on` in
+  the future means they are still on the ground. Four reads have needed this
+  and each was found separately: `zoneRest`, `completedStayDays`,
+  `currentZoneForOccupants`, `occupantsInStructures`. **A new read that folds
+  occupancy spans or asks "where is it now" takes `today` — assume it does until
+  you have proved otherwise**, because the failures are silent and they
+  contradict each other across pages. See the two 2026-08-16 entries.
+- **Never match on "the stay with no end date" to mean the current one.** After
+  a move dated ahead, the row they are actually on is CLOSED (on a date that
+  has not arrived) and the open one has not begun. The correct predicate is
+  `started_on <= today AND (ended_on IS NULL OR ended_on >= today)`.
 - **drizzle-kit emits every FK before every index** — hit three times (`0125`,
   `0130`, `0132`) and NOT on `0134`. The rule is *check whether the FK's target
   unique index is created in the same migration*, not *always reorder*: a

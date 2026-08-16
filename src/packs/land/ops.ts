@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -984,6 +984,14 @@ export async function currentZoneForOccupants(
   tenantId: string,
   extensionSlug: string,
   occupantIds: string[],
+  /**
+   * "Currently" needs a date, and this is the third read that turned out to
+   * need one. `zoneRest` learned it first; this one kept reporting the stay
+   * with no end date, so a herd booked onto a paddock for next Monday showed
+   * as being there today — while Land's own page said that paddock was
+   * resting. Two pages, the same rows, different answers.
+   */
+  today: string,
 ): Promise<Map<string, OccupantPlace>> {
   const out = new Map<string, OccupantPlace>();
   if (occupantIds.length === 0) return out;
@@ -1018,9 +1026,20 @@ export async function currentZoneForOccupants(
         eq(schema.landOccupancy.tenantId, tenantId),
         eq(schema.landOccupancy.extensionSlug, extensionSlug),
         inArray(schema.landOccupancy.occupantId, occupantIds),
-        isNull(schema.landOccupancy.endedOn),
+        // The stay that COVERS today. Not "the one with no end date": after a
+        // move the old stay is closed on a date that may still be ahead, and
+        // that closed stay is where the animals actually are.
+        lte(schema.landOccupancy.startedOn, today),
+        or(
+          isNull(schema.landOccupancy.endedOn),
+          gte(schema.landOccupancy.endedOn, today),
+        ),
       ),
-    );
+    )
+    // Overlapping stays are legitimate — see the guard's note — so when two
+    // cover today the most recent arrival wins. Ascending, and later rows
+    // overwrite, which keeps this a single pass.
+    .orderBy(asc(schema.landOccupancy.startedOn));
   for (const row of rows) {
     if (row.occupantId) {
       out.set(row.occupantId, {
@@ -1046,6 +1065,8 @@ export async function occupantsInStructures(
   tx: Tx,
   tenantId: string,
   structureAssetIds: string[],
+  /** Same rule as `currentZoneForOccupants`: "in it" means in it TODAY. */
+  today: string,
 ): Promise<Map<string, { occupantLabel: string; zoneName: string }[]>> {
   const out = new Map<string, { occupantLabel: string; zoneName: string }[]>();
   if (structureAssetIds.length === 0) return out;
@@ -1067,7 +1088,11 @@ export async function occupantsInStructures(
       and(
         eq(schema.landOccupancy.tenantId, tenantId),
         inArray(schema.landOccupancy.structureAssetId, structureAssetIds),
-        isNull(schema.landOccupancy.endedOn),
+        lte(schema.landOccupancy.startedOn, today),
+        or(
+          isNull(schema.landOccupancy.endedOn),
+          gte(schema.landOccupancy.endedOn, today),
+        ),
       ),
     );
   for (const row of rows) {

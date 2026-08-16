@@ -460,7 +460,7 @@ d("livestock ops", () => {
     expect(result.movedOff).toEqual({ zoneId: first.id, endedOn: "2026-05-03" });
 
     const places = await asOwner((tx) =>
-      currentZoneForOccupants(tx, tenantId, "livestock", [inventoryLotId]),
+      currentZoneForOccupants(tx, tenantId, "livestock", [inventoryLotId], "2026-05-06"),
     );
     expect(places.get(inventoryLotId)?.zoneName).toBe("Rotate B");
 
@@ -471,6 +471,50 @@ d("livestock ops", () => {
     expect(rest.get(first.id)?.grazingDays).toBe(3);
     expect(rest.get(first.id)?.restDays).toBe(3);
     expect(rest.get(second.id)?.status).toBe("occupied");
+  });
+
+  it("says where they are TODAY, not where they are booked", async () => {
+    // Found on production the day the one-act move shipped. After a move dated
+    // ahead, the OLD stay is closed on a date that has not arrived and the NEW
+    // one has not started — so "the stay with no end date" was the wrong
+    // answer. Livestock said Creek Paddock while Land said Creek Paddock was
+    // resting: two pages, the same rows, different answers.
+    const [here, next] = await Promise.all([
+      asOwner((tx) =>
+        createZone(tx, ctx(), { parcelId, name: "Booked A", areaAcres: 5 }),
+      ),
+      asOwner((tx) =>
+        createZone(tx, ctx(), { parcelId, name: "Booked B", areaAcres: 5 }),
+      ),
+    ]);
+    const { lot, inventoryLotId } = await newLot("BOOKED", "cattle");
+    await asOwner((tx) =>
+      moveLotToZone(tx, ctx(), {
+        livestockLotId: lot.id,
+        zoneId: here.id,
+        startedOn: "2026-06-01",
+      }),
+    );
+    await asOwner((tx) =>
+      moveLotToZone(tx, ctx(), {
+        livestockLotId: lot.id,
+        zoneId: next.id,
+        startedOn: "2026-06-20",
+      }),
+    );
+
+    const where = (today: string) =>
+      asOwner((tx) =>
+        currentZoneForOccupants(tx, tenantId, "livestock", [inventoryLotId], today),
+      ).then((m) => m.get(inventoryLotId)?.zoneName ?? null);
+
+    // Still on the first, even though its stay is closed — on the 19th.
+    expect(await where("2026-06-10")).toBe("Booked A");
+    expect(await where("2026-06-19")).toBe("Booked A");
+    // And on the day itself, the new one. Nothing is entered to make it flip.
+    expect(await where("2026-06-20")).toBe("Booked B");
+    // Before any of it, they were nowhere.
+    expect(await where("2026-05-01")).toBeNull();
   });
 
   it("records the STRUCTURE they are in, and null means loose", async () => {
@@ -504,10 +548,13 @@ d("livestock ops", () => {
     );
 
     const places = await asOwner((tx) =>
-      currentZoneForOccupants(tx, tenantId, "livestock", [
-        penned.inventoryLotId,
-        loose.inventoryLotId,
-      ]),
+      currentZoneForOccupants(
+        tx,
+        tenantId,
+        "livestock",
+        [penned.inventoryLotId, loose.inventoryLotId],
+        "2026-08-10",
+      ),
     );
     expect(places.get(penned.inventoryLotId)?.structureName).toBe("Pen 3");
     // Loose animals are still ON the zone — the LEFT join is what stops an
@@ -518,7 +565,7 @@ d("livestock ops", () => {
     // And "what is in Pen 3" is answerable from land, without joining into
     // livestock at all — the label is a copy.
     const inPen = await asOwner((tx) =>
-      occupantsInStructures(tx, tenantId, [penId]),
+      occupantsInStructures(tx, tenantId, [penId], "2026-08-10"),
     );
     expect(inPen.get(penId)?.[0].occupantLabel).toContain("PENNED");
     expect(inPen.get(penId)?.[0].zoneName).toBe("North Pasture");

@@ -95,9 +95,13 @@ export default async function LivestockLotPage({
             lotId: lot.inventoryLotId,
             limit: 25,
           }),
-          currentZoneForOccupants(tx, ctx.tenant.id, "livestock", [
-            lot.inventoryLotId,
-          ]),
+          currentZoneForOccupants(
+            tx,
+            ctx.tenant.id,
+            "livestock",
+            [lot.inventoryLotId],
+            today,
+          ),
           listParcels(tx, ctx.tenant.id, { status: "active" }),
           listZones(tx, ctx.tenant.id, { status: "active" }),
           packContext(tx, ctx.tenant.id, ctx.tenant.industry, "livestock"),

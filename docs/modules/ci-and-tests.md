@@ -14,6 +14,22 @@ overnight. The suite no longer talks to Neon at all: every run builds its own
 **Postgres 18 inside its own runner**, so a round trip is sub-millisecond and
 the runtime is a property of the code again rather than of the network.
 
+**Measured on a real runner:**
+
+| | Neon branch | Postgres in the runner |
+| --- | ---: | ---: |
+| Whole job | **25m 53s** | **2m 52s** |
+| vitest wall clock | 1519.4s | **117.0s** |
+| Time inside tests | 1465.9s | **64.5s** |
+| Files | 135 passed, 5 skipped | 135 passed, 5 skipped |
+
+**22.7× on test time**, and the file counts are identical — checked
+deliberately, because a fast green is the exact shape of a suite that skipped.
+
+The single most telling number is not in that table: **building the whole schema
+from zero took 3 seconds** here against 117 seconds when the same 136 migrations
+were applied to Neon. Same work, same SQL, ~39× apart. It was all network.
+
 **Three problems, one change.**
 
 1. **Latency.** 1465 of 1519 seconds were spent waiting. Gone.
@@ -273,20 +289,22 @@ None. No tables, no migrations.
 
 ## Open items
 
-- **Parallelising the `db` project** is still where the remaining time is, and
-  the 2026-08-15 review found the stated blockers weaker than recorded. Every
+- **Parallelising the `db` project is no longer worth doing**, and that is worth
+  saying rather than leaving the item open forever. It was the plan while the
+  suite took 25 minutes; at 2m52s the sequential `db` project costs about a
+  minute in total, so the win is now smaller than the risk of two runs
+  interleaving. The analysis is kept below because it is still true, not because
+  it is still a priority.
+
+  The 2026-08-15 review found the stated blockers weaker than recorded: every
   `withSystem` call in the suite is a scoped INSERT of the file's own fixtures —
   there is not one unscoped read anywhere — 60 of 64 files stamp their tenants
   per pid, each with its own prefix, and vitest's default `forks` pool gives
-  concurrently-running files distinct pids. An attempt at
-  `--fileParallelism --maxWorkers=4` was started and **abandoned without a
-  result**: it ran longer than a sequential pass before being killed, which is
-  itself worth knowing. Contention on the shared Neon branch is the likeliest
-  explanation and it is untested. Do not enable this on the strength of the
-  reasoning alone — get a completed run first.
-- The parallel win may be **smaller on a GitHub runner** (2–4 cores) than on the
-  founder's machine, and a latency-bound suite may not be CPU-limited at all.
-  Re-measure from a real CI run before quoting a number anywhere that matters.
+  concurrently-running files distinct pids. But an attempt at
+  `--fileParallelism --maxWorkers=4` was **abandoned without a result**: it ran
+  longer than a sequential pass before being killed. Contention on the shared
+  Neon branch was the likeliest explanation and is now moot. If anyone revisits
+  this, get a completed run first — the reasoning alone was never enough.
 - ~~The suite is latency-bound by design~~ — **done 2026-08-15.** Postgres 18
   and `wsproxy` now run inside the runner; see the build log. The `db-tests`
   concurrency group went with it.

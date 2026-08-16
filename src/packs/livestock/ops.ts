@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type { LivestockIdentifier, LivestockLot } from "@/db/schema";
 import {
+  createItem,
   createLot as createInventoryLot,
   getLot as getInventoryLot,
   recordMovement,
@@ -45,6 +46,7 @@ export class LivestockError extends Error {
       | "INVALID_SPECIES"
       | "INVALID_SEX"
       | "INVALID_IDENTIFIER"
+      | "ITEM_REQUIRED"
       | "LOT_INVALID",
     message: string,
   ) {
@@ -84,8 +86,23 @@ const SEXES = new Set(["male", "female", "mixed"]);
 // ------------------------------------------------------------------- lots ---
 
 export interface LivestockLotInput {
-  /** The inventory item these animals are counted as. Must be stocked in head. */
-  itemId: string;
+  /**
+   * The inventory item these animals are counted as. Must be stocked in head.
+   *
+   * Omitted when `newItemName` is given — see `createLivestockLot`.
+   */
+  itemId?: string;
+  /**
+   * Create the item as part of starting the lot: "Beef cattle", "Laying hens".
+   *
+   * WHY THIS EXISTS. The item is a real and separate thing — it is the cost
+   * object head roll up to, and a farm running beef and dairy as two lines
+   * wants two items for one species. But requiring it to exist FIRST meant a
+   * farm's first cattle could only be entered by leaving for the Inventory
+   * module, and the picker cheerfully offered to count cattle as broiler
+   * chicks in the meantime. Reported by the founder, 2026-08-16.
+   */
+  newItemName?: string;
   /** The lot's human code: "B-2026-04-15", "Pen 3", "#47". */
   code: string;
   species: string;
@@ -118,8 +135,30 @@ export async function createLivestockLot(
     throw new LivestockError("INVALID_SEX", `invalid sex: ${input.sex}`);
   }
 
+  // Exactly one. Both would leave it ambiguous which item the head landed in,
+  // and neither is the caller forgetting the field rather than meaning "any".
+  const newItemName = input.newItemName?.trim();
+  if (!input.itemId === !newItemName) {
+    throw new LivestockError(
+      "ITEM_REQUIRED",
+      "give either an existing item or a name for a new one",
+    );
+  }
+
+  const itemId = newItemName
+    ? (
+        await createItem(tx, asInventory(ctx), {
+          name: newItemName,
+          // Head, always: this is the livestock pack, and a lot whose item were
+          // stocked in pounds could not carry a head count at all.
+          stockingUnit: "head",
+          itemKind: "livestock",
+        })
+      ).id
+    : input.itemId!;
+
   const inventoryLot = await createInventoryLot(tx, asInventory(ctx), {
-    itemId: input.itemId,
+    itemId,
     code: input.code,
     source: input.source ?? "purchased",
     openedOn: input.bornOn ?? null,

@@ -82,7 +82,9 @@ export async function LivestockModule({
         title="Livestock"
         description={`Every animal is a ${lotWord.toLowerCase()}, and an individual is a ${lotWord.toLowerCase()} of one.`}
         actions={
-          isOwner && headItems.length > 0 ? (
+          // No longer gated on an item existing: the form can create one. A
+          // farm's first animal used to require a trip to Inventory first.
+          isOwner ? (
             <LivestockLotForm
               items={headItems.map((i) => ({ id: i.id, name: i.name }))}
               speciesOptions={suggestedSpecies}
@@ -92,23 +94,16 @@ export async function LivestockModule({
         }
       />
 
-      {headItems.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<Beef className="h-5 w-5" />}
-          title="Nothing to count animals as yet"
-          description={
-            isOwner
-              ? "Animals are counted in head, and head is an inventory item like anything else. Add one under Inventory — 'Broiler chicks', counted in head — and it becomes something you can start a lot of."
-              : "An owner sets this up. Once they do, the animals show up here."
-          }
-        />
-      ) : lots.length === 0 ? (
+      {lots.length === 0 ? (
         <EmptyState
           panel
           icon={<Beef className="h-5 w-5" />}
           title="No animals recorded yet"
-          description="Start a lot — a batch of chicks, a group of feeders, one named cow. What goes in and what leaves are both entries against it, so the count always reconciles."
+          description={
+            isOwner
+              ? "Start a lot — a batch of chicks, a group of feeders, one named cow. What goes in and what leaves are both entries against it, so the count always reconciles."
+              : "An owner starts the first lot. Once they do, the animals show up here."
+          }
         />
       ) : (
         <Table>

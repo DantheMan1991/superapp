@@ -37,6 +37,7 @@ import {
   REMOVAL_REASON_LABELS,
   SEXES,
   SEX_LABELS,
+  breedHint,
   identifierKindLabel,
 } from "../vocabulary";
 
@@ -59,17 +60,23 @@ export function LivestockLotForm({
   const [pending, startTransition] = useTransition();
   const [species, setSpecies] = useState(UNSET);
   const [customSpecies, setCustomSpecies] = useState("");
+  // Nothing preselected unless there is exactly one thing it could be. A farm
+  // with broilers AND cattle must say which, or the first option silently wins.
   const [itemId, setItemId] = useState(items.length === 1 ? items[0].id : UNSET);
+  const [customItem, setCustomItem] = useState("");
 
   const chosen = species === CUSTOM ? customSpecies.trim() : species;
-  const canSubmit = Boolean(chosen) && Boolean(itemId);
+  const newItemName = itemId === CUSTOM ? customItem.trim() : "";
+  const canSubmit =
+    Boolean(chosen) && (itemId === CUSTOM ? Boolean(newItemName) : Boolean(itemId));
 
   function submit(formData: FormData) {
     if (!canSubmit) return;
     const sex = String(formData.get("sex") ?? NONE);
     startTransition(async () => {
       const result = await createLivestockLotAction({
-        itemId,
+        itemId: itemId === CUSTOM ? undefined : itemId,
+        newItemName: newItemName || undefined,
         code: String(formData.get("code") ?? ""),
         species: chosen.toLowerCase().replace(/\s+/g, "_"),
         sex: sex === NONE ? null : sex,
@@ -153,10 +160,34 @@ export function LivestockLotForm({
                         {i.name}
                       </SelectItem>
                     ))}
+                    {/* Same escape the species picker has. Without it, a farm's
+                        first cattle could only be entered by leaving for the
+                        Inventory module — and the list would meanwhile offer to
+                        count them as broiler chicks. */}
+                    <SelectItem value={CUSTOM}>Something else…</SelectItem>
                   </SelectContent>
                 </Select>
+                {itemId === CUSTOM && (
+                  <Input
+                    aria-label="New item name"
+                    placeholder="e.g. Beef cattle"
+                    value={customItem}
+                    onChange={(e) => setCustomItem(e.target.value)}
+                    maxLength={200}
+                  />
+                )}
               </div>
             </div>
+
+            <p className="text-xs text-muted-foreground">
+              {/* The field's whole meaning, said every time rather than once in
+                  an empty state you never see again. */}
+              <span className="font-medium">Counted as</span> is the stock line
+              these animals are counted in — head of it go up when they arrive
+              and down when they leave, and their cost lands against it. One per
+              kind you want costed separately: beef and dairy are two, even
+              though both are cattle.
+            </p>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
@@ -183,11 +214,14 @@ export function LivestockLotForm({
 
             <div className="grid gap-2">
               <Label htmlFor="breed">Breed</Label>
+              {/* A fixed "e.g. Cornish Cross" sat under Species: Cattle and read
+                  as an instruction. An example has to follow the species chosen
+                  or not be there — reported by the founder, 2026-08-16. */}
               <Input
                 id="breed"
                 name="breed"
                 maxLength={200}
-                placeholder="e.g. Cornish Cross"
+                placeholder={breedHint(chosen)}
               />
             </div>
 

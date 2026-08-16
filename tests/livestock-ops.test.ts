@@ -169,6 +169,93 @@ d("livestock ops", () => {
     expect(orphan).toBeUndefined();
   });
 
+  // ---- what the animals are counted as -----------------------------------
+
+  it("creates the stock line as part of starting the lot", async () => {
+    // The founder hit this on production: the only item stocked in head was
+    // "Broiler chicks", so the picker offered to count CATTLE as broiler
+    // chicks, and the only way out was to leave for the Inventory module.
+    const created = await asOwner((tx) =>
+      createLivestockLot(tx, ctx(), {
+        newItemName: "Beef cattle",
+        code: "COW-1",
+        species: "cattle",
+      }),
+    );
+
+    const lot = await asOwner((tx) =>
+      tx.query.inventoryLots.findFirst({
+        where: eq(schema.inventoryLots.id, created.inventoryLotId),
+      }),
+    );
+    const item = await asOwner((tx) =>
+      tx.query.inventoryItems.findFirst({
+        where: eq(schema.inventoryItems.id, lot!.itemId),
+      }),
+    );
+    expect(item?.name).toBe("Beef cattle");
+    // Head, always. An item stocked in pounds could not carry a head count.
+    expect(item?.stockingUnit).toBe("head");
+    expect(item?.itemKind).toBe("livestock");
+
+    // And it is a cost object, because inventory made it one — livestock still
+    // never touches dimension_members.
+    const members = await asOwner((tx) =>
+      tx.query.dimensionMembers.findMany({
+        where: and(
+          eq(schema.dimensionMembers.tenantId, tenantId),
+          eq(schema.dimensionMembers.dimensionType, LOT_DIMENSION),
+        ),
+      }),
+    );
+    expect(members.some((m) => m.packEntityId === created.inventoryLotId)).toBe(
+      true,
+    );
+  });
+
+  it("refuses both an item and a new name, and refuses neither", async () => {
+    // Both would leave it ambiguous which stock line the head landed in.
+    // Neither is the caller forgetting the field, not meaning "any".
+    await expect(
+      asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId,
+          newItemName: "Beef cattle",
+          code: "AMBIGUOUS",
+          species: "cattle",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "ITEM_REQUIRED" });
+
+    await expect(
+      asOwner((tx) =>
+        createLivestockLot(tx, ctx(), { code: "NOTHING", species: "cattle" }),
+      ),
+    ).rejects.toMatchObject({ code: "ITEM_REQUIRED" });
+  });
+
+  it("rolls the new stock line back with everything else", async () => {
+    // The item is created inside the same transaction, so a lot that fails
+    // must not leave a stock line and a cost object nobody asked for.
+    await expect(
+      asOwner(async (tx) => {
+        await createLivestockLot(tx, ctx(), {
+          newItemName: "Doomed herd",
+          code: "DOOMED-2",
+          species: "cattle",
+        });
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+
+    const items = await asOwner((tx) =>
+      tx.query.inventoryItems.findMany({
+        where: eq(schema.inventoryItems.tenantId, tenantId),
+      }),
+    );
+    expect(items.map((i) => i.name)).not.toContain("Doomed herd");
+  });
+
   // ---- the head ledger is inventory's ------------------------------------
 
   it("head events land in INVENTORY's ledger, stamped as livestock's", async () => {

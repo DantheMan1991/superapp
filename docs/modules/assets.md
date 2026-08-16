@@ -15,6 +15,19 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-15 — Whoever changed the oil can log the oil change (`claude/pack-write-levels`)
+
+Platform-wide change; the reasoning is in
+[packs-and-profiles.md](packs-and-profiles.md). What it means here:
+
+- **`recordMeterReading` and `recordService` are open to any member.** The
+  person holding the dipstick is the person who knows the hours on the meter.
+- **The asset, its schedules, and raising due maintenance stay owner-only.**
+  Creating an asset is capital and syncs a cost object; raising the due work
+  moves the schedule's clock, which is the same act as writing the schedule.
+- The pack's private `requireOwner` is gone, replaced by `allowsWrite()` from
+  `src/lib/packs/authorize.ts` — the same helper all four packs now share.
+
 ### 2026-08-15 — Slice 2: maintenance, raised as work (`claude/assets-maintenance`)
 - **The pack has no task engine, and that was the point of the slice.** A due
   service becomes an ordinary work item through the Layer 0 seam and is worked
@@ -190,9 +203,14 @@ to be listed by a trades profile unchanged.
   so `chicken_tractor` works without a migration. The picker offers suggestions
   plus a free-text escape, because a closed dropdown would turn an open column
   into an enum in the UI instead of the schema.
-- **Writes are owner-only, reads are member-wide.** Forced from below as well as
-  chosen: `upsertDimensionMember` calls `requireOwnerRole`, so a staff-created
-  asset could not sync its cost object and would be invisible to every report.
+- **The asset itself is the owner's; what happens to it is not.** Creating,
+  editing and disposing all touch capital, and `upsertDimensionMember` calls
+  `requireOwnerRole`, so a staff-created asset could not sync its cost object
+  and would be invisible to every report. Reading the hour meter and logging an
+  oil change are chores, open to any member since 2026-08-15 — decided by
+  `allowsWrite()` in `src/lib/packs/authorize.ts`. Raising due maintenance
+  stays with the owner: it moves the schedule's clock, which is the same act as
+  writing the schedule.
 - Containment via a **composite self-FK** so a parent is always same-tenant.
   Cycle prevention is split: the CHECK catches self-parenting, and `ops.ts`
   catches longer loops, because a CHECK cannot see other rows.

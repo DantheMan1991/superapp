@@ -1,6 +1,7 @@
 import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   Asset,
   AssetMaintenanceSchedule,
@@ -69,7 +70,7 @@ export async function createSchedule(
   assetId: string,
   input: ScheduleInput,
 ): Promise<AssetMaintenanceSchedule> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   if (!isMaintenanceKind(input.kind)) {
     throw new AssetError("INVALID_KIND", `invalid schedule kind: ${input.kind}`);
   }
@@ -98,7 +99,7 @@ export async function setScheduleActive(
   scheduleId: string,
   isActive: boolean,
 ): Promise<void> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   await tx
     .update(schema.assetMaintenanceSchedules)
     .set({ isActive, updatedAt: new Date() })
@@ -140,7 +141,7 @@ export async function recordMeterReading(
   assetId: string,
   input: { readOn: string; reading: number; unit?: string },
 ): Promise<void> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   await tx.insert(schema.assetMeterReadings).values({
     tenantId: ctx.tenantId,
     assetId,
@@ -206,7 +207,7 @@ export async function recordService(
     workItemId?: string | null;
   },
 ): Promise<AssetMaintenanceEvent> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const rows = await tx
     .insert(schema.assetMaintenanceEvents)
     .values({
@@ -329,7 +330,7 @@ export async function raiseDueMaintenance(
   asset: Asset,
   today: string,
 ): Promise<RaiseResult> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const statuses = await getScheduleStatuses(tx, ctx.tenantId, asset, today);
   const raised: RaiseResult["raised"] = [];
 
@@ -375,8 +376,15 @@ export async function listMaintenanceWork(
   );
 }
 
-function requireOwner(ctx: AssetCtx): void {
-  if (ctx.role !== "owner") {
-    throw new AssetError("FORBIDDEN", "owner role required");
+/**
+ * See src/lib/packs/authorize.ts. **Is this a decision, or is it a chore?**
+ *
+ * Setting up a service schedule is a decision. Recording that the oil was
+ * changed, or reading the hour meter, is done by whoever did the work — and if
+ * they cannot record it, it is recorded late or not at all.
+ */
+function requireWrite(ctx: AssetCtx, level: WriteLevel): void {
+  if (!allowsWrite(ctx.role, level)) {
+    throw new AssetError("FORBIDDEN", "only an owner can change this");
   }
 }

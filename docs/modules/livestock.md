@@ -24,6 +24,22 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-15 — The daily log gets someone to write it (`claude/pack-write-levels`)
+
+This pack is the one that forced the change; the full reasoning is in
+[packs-and-profiles.md](packs-and-profiles.md). What it means here:
+
+- **Placing head, recording a loss, moving a lot to a zone and applying or
+  retiring a tag are open to any member.** Recording four dead birds across
+  twenty pens is daily work done by whoever is standing in the pen.
+- **Creating, editing and splitting a lot stay with the owner**, all three
+  because they touch the cost object. Splitting is the awkward one — it is a
+  chore in the yard — but it happens at batch placement, a handful of times a
+  season.
+- The detail page's action bar is no longer wrapped in `isOwner`; only
+  `SplitHerdForm` is.
+- **Slice 1 is now unblocked.** It was waiting on exactly this.
+
 ### 2026-08-15 — Slice 0: two tables, because the other three already existed (`claude/livestock-lots`)
 - **THE PACK MODEL'S BILL CAME DUE, AND IT PAID.** The design's slice 0 is "lots
   + head ledger + occupancy", and all three already existed: the lot and the
@@ -111,12 +127,10 @@ and [land.md](land.md) before changing anything about where animals are.
 ## Open items
 
 - **Nobody has driven slice 0 yet.**
-- **Writes are owner-only, and this is where it stops being tenable.** Recording
-  four dead birds across twenty pens is daily work, done by whoever is standing
-  in the pen, and at 10× that person is not the owner. It is forced from below —
-  `upsertDimensionMember` requires the owner role — so relaxing it means
-  deciding which verbs staff may use and what still needs to sync a cost object.
-  **This should be settled before slice 1**, which is the daily log.
+- ~~Writes are owner-only, and this is where it stops being tenable~~ —
+  **settled 2026-08-15**, see the build log. Placing, losing, moving and tagging
+  are chores and open to any member; creating, editing and splitting a lot stay
+  with the owner.
 - **No daily log, and no advisory layer.** Slice 1, and the design names it the
   day-one wedge: the founder records nothing today, so a tool that is only
   valuable in year two never reaches year two.

@@ -1,6 +1,7 @@
 import "server-only";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   LandOccupancy,
   LandParcel,
@@ -71,9 +72,9 @@ export interface LandCtx {
  * worse outcome than a refusal. Reading where the ground is remains ordinary
  * work for anybody who has to go and stand on it.
  */
-function requireOwner(ctx: LandCtx): void {
-  if (ctx.role !== "owner") {
-    throw new LandError("FORBIDDEN", "owner role required");
+function requireWrite(ctx: LandCtx, level: WriteLevel): void {
+  if (!allowsWrite(ctx.role, level)) {
+    throw new LandError("FORBIDDEN", "only an owner can change this");
   }
 }
 
@@ -121,7 +122,7 @@ export async function createParcel(
   ctx: LandCtx,
   input: ParcelInput,
 ): Promise<LandParcel> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const tenure = input.tenure ?? "owned";
   if (!isTenure(tenure)) {
     throw new LandError("INVALID_TENURE", `invalid tenure: ${input.tenure}`);
@@ -157,7 +158,7 @@ export async function updateParcel(
   id: string,
   input: Partial<ParcelInput>,
 ): Promise<LandParcel> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getParcel(tx, ctx.tenantId, id);
   if (!existing) throw new LandError("NOT_FOUND", `parcel ${id} not found`);
 
@@ -219,7 +220,7 @@ export async function retireParcel(
   ctx: LandCtx,
   id: string,
 ): Promise<{ parcel: LandParcel; zonesRetired: number }> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getParcel(tx, ctx.tenantId, id);
   if (!existing) throw new LandError("NOT_FOUND", `parcel ${id} not found`);
 
@@ -288,7 +289,7 @@ export async function createZone(
   ctx: LandCtx,
   input: ZoneInput,
 ): Promise<LandZone> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const parcel = await getParcel(tx, ctx.tenantId, input.parcelId);
   if (!parcel) {
     throw new LandError("PARCEL_INVALID", "that parcel does not exist");
@@ -321,7 +322,7 @@ export async function updateZone(
   id: string,
   input: Partial<ZoneInput>,
 ): Promise<LandZone> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getZone(tx, ctx.tenantId, id);
   if (!existing) throw new LandError("NOT_FOUND", `zone ${id} not found`);
 
@@ -374,7 +375,7 @@ export async function retireZone(
   id: string,
   endedOn?: string,
 ): Promise<LandZone> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getZone(tx, ctx.tenantId, id);
   if (!existing) throw new LandError("NOT_FOUND", `zone ${id} not found`);
 
@@ -518,7 +519,7 @@ export async function startZoneUse(
   zoneId: string,
   input: ZoneUseInput,
 ): Promise<LandZoneUse> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const zone = await getZone(tx, ctx.tenantId, zoneId);
   if (!zone) throw new LandError("NOT_FOUND", `zone ${zoneId} not found`);
 
@@ -578,7 +579,7 @@ export async function endZoneUse(
   useId: string,
   endedOn: string,
 ): Promise<LandZoneUse> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await tx.query.landZoneUses.findFirst({
     where: and(
       eq(schema.landZoneUses.tenantId, ctx.tenantId),
@@ -693,7 +694,7 @@ export async function startOccupancy(
   zoneId: string,
   input: OccupancyInput,
 ): Promise<LandOccupancy> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const zone = await getZone(tx, ctx.tenantId, zoneId);
   if (!zone) throw new LandError("NOT_FOUND", `zone ${zoneId} not found`);
 
@@ -797,7 +798,7 @@ export async function endOccupancy(
   occupancyId: string,
   endedOn: string,
 ): Promise<LandOccupancy> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const existing = await tx.query.landOccupancy.findFirst({
     where: and(
       eq(schema.landOccupancy.tenantId, ctx.tenantId),
@@ -833,7 +834,7 @@ export async function deleteOccupancy(
   ctx: LandCtx,
   occupancyId: string,
 ): Promise<void> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const deleted = await tx
     .delete(schema.landOccupancy)
     .where(

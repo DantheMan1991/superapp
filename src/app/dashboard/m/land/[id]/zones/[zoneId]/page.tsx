@@ -90,7 +90,11 @@ export default async function ZoneDetailPage({
 
   const unit = areaUnitFrom(pack.config);
   const zoneWord = labelFor(pack.labels, "zone", "Zone");
-  const isOwner = ctx.role === "owner";
+  /**
+   * Moving an occupant on or off is a chore — anyone in the workspace records
+   * what they just did. Everything structural about the zone is a decision and
+   * lives on the parcel page, owner-gated. See src/lib/packs/authorize.ts.
+   */
 
   const rest = zoneRest(
     stays.map((s) => ({ startedOn: s.startedOn, endedOn: s.endedOn })),
@@ -151,7 +155,7 @@ export default async function ZoneDetailPage({
           </span>
         }
         actions={
-          isOwner && zone.status === "active" ? (
+          zone.status === "active" ? (
             <div className="flex items-center gap-2">
               {openStay && (
                 <EndOccupancy
@@ -293,7 +297,7 @@ export default async function ZoneDetailPage({
                     {row.areaLabel ?? "all of it"}
                   </TableCell>
                   <TableCell className="text-right">
-                    {isOwner && <DeleteOccupancy stay={row} />}
+                    <DeleteOccupancy stay={row} />
                   </TableCell>
                 </TableRow>
               ))}

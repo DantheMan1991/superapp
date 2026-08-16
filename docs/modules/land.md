@@ -40,6 +40,22 @@ examples exist.
 
 ## Build log
 
+### 2026-08-15 — Moving the herd stops being an owner's job (`claude/pack-write-levels`)
+
+Platform-wide change; the reasoning is in
+[packs-and-profiles.md](packs-and-profiles.md). What it means here:
+
+- **Occupancy is a chore.** `startOccupancy`, `endOccupancy` and
+  `deleteOccupancy` are open to any member. Moving the herd to the next paddock
+  is the most frequent act on a rotational farm, and the person doing it is
+  holding a reel of polywire. Every rest and rotation number on the zone page is
+  computed from those rows, so a rule that stops the hand recording them stops
+  the page from meaning anything.
+- **The shape of the farm is a decision.** Parcels, zones and zone uses stay
+  owner-only — a deed, a fence and what the ground is for, each of them a cost
+  object.
+- The zone page's occupancy controls are no longer behind `isOwner`.
+
 ### 2026-08-15 — Occupancy names the STRUCTURE, and a wrong guard came out (`claude/occupancy-structures`)
 - **A pen, a barn or a chicken tractor can now be named on an occupancy.** From
   the founder: *"sometimes there is no structure. cattle just roam in the zone,
@@ -278,8 +294,10 @@ rented ground, and retrofitting it means rewriting the report.
   guarantees live.
 - **RLS is tenancy, not role.** Land has no owners-only subset, so these tables
   do not reach `app_tenant_role()` the way `document_folders` must. Who may write
-  is an application concern — owner-only, forced from below by
-  `upsertDimensionMember` calling `requireOwnerRole`.
+  is an application concern, decided in the ops layer through `allowsWrite()`
+  (`src/lib/packs/authorize.ts`): the shape of the farm — parcels, zones, uses —
+  is the owner's, because each carries a cost object; occupancy is a chore and
+  open to any member.
 
 ## Open items
 

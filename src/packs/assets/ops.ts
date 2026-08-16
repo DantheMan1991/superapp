@@ -1,6 +1,7 @@
 import "server-only";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type { Asset } from "@/db/schema";
 import { upsertDimensionMember, archiveDimensionMember } from "@/modules/accounting/core";
 import { listDimensionMembers } from "@/modules/accounting/core";
@@ -58,9 +59,9 @@ export interface AssetCtx {
  * refusal. RLS stays member-wide because READING what the business owns is
  * ordinary work (see drizzle/0126_assets_rls.sql).
  */
-function requireOwner(ctx: AssetCtx): void {
-  if (ctx.role !== "owner") {
-    throw new AssetError("FORBIDDEN", "owner role required");
+function requireWrite(ctx: AssetCtx, level: WriteLevel): void {
+  if (!allowsWrite(ctx.role, level)) {
+    throw new AssetError("FORBIDDEN", "only an owner can change this");
   }
 }
 
@@ -217,7 +218,7 @@ export async function createAsset(
   ctx: AssetCtx,
   input: AssetInput,
 ): Promise<Asset> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const kind = input.kind.trim().toLowerCase();
   if (!isValidAssetKind(kind)) {
     throw new AssetError("INVALID_KIND", `invalid asset kind: ${input.kind}`);
@@ -263,7 +264,7 @@ export async function updateAsset(
   id: string,
   input: Partial<AssetInput>,
 ): Promise<Asset> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getAsset(tx, ctx.tenantId, id);
   if (!existing) throw new AssetError("NOT_FOUND", `asset ${id} not found`);
 
@@ -340,7 +341,7 @@ export async function disposeAsset(
   id: string,
   disposedOn: string,
 ): Promise<Asset> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getAsset(tx, ctx.tenantId, id);
   if (!existing) throw new AssetError("NOT_FOUND", `asset ${id} not found`);
 

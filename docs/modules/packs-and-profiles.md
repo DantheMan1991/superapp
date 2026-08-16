@@ -11,6 +11,52 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-15 — Is it a decision, or is it a chore? (`claude/pack-write-levels`)
+
+Every pack shipped owner-only, as four private copies of `requireOwner`. That
+was survivable while the packs were registers of things you buy. The next slice
+is livestock's daily log, and **a daily-entry surface only the owner can use is
+built for the wrong person** — at ten times the pilot's size there are two or
+three people doing chores and none of them signs cheques.
+
+- **The rule, in one question: is this a decision, or is it a chore?** Declaring
+  that North Pasture is hay ground this year is a decision. Recording that four
+  birds died is a chore, and the person doing it is standing in the pen. Every
+  pack write now says which, and the four copies collapse into one
+  `allowsWrite(role, level)` in `src/lib/packs/authorize.ts`.
+- **The line is not taste — it is forced from below.** `upsertDimensionMember`
+  in accounting core calls `requireOwnerRole`. Anything that CREATES a cost
+  object must be owner-only, or the write succeeds while its cost object does
+  not, leaving an entity no report can group by. That constraint lands exactly
+  on the decision/chore line, which is why this was a small change rather than a
+  negotiation with the ledger.
+- **Where it fell.** Owner: parcels, zones, zone uses, items, lots, assets,
+  maintenance schedules and raising due maintenance, creating/editing/splitting
+  a livestock lot. Member: occupancy, inventory movements and merges, placing
+  and losing head, moving a lot, tagging, meter readings and service records.
+- **Splitting stayed with the owner deliberately**, against its feel. It is a
+  chore in the yard and a decision in the books — it makes a lot, therefore a
+  cost object. It also happens a handful of times a season, at batch placement,
+  not thirty times a day, so nobody is blocked in the middle of a chore.
+- **`expert` does not clear the owner level.** The platform's own bookkeeper
+  reviews and reconciles; they do not decide the farm has bought a parcel.
+  Accounting already gives them `requireReviewRole` for what is genuinely
+  theirs.
+- **This is not a security boundary and the doc says so.** RLS is member-wide by
+  design — what the business owns and where its animals are is not private
+  correspondence, and whoever is sent to fetch something has to be able to find
+  it. The database decides whose rows these are; this decides who may change
+  them. Weakening it cannot leak another tenant's data, only let a colleague
+  record something.
+- **The UI moved with it**, which is the half that would otherwise rot: the
+  livestock detail page no longer hides place/lose/move/tag behind `isOwner`,
+  and the zone page no longer hides the occupancy controls. `SplitHerdForm` and
+  inventory's `LotForm` are still gated, and now say why in a comment.
+- **Tests state the rule from both sides.** Three old "refuses staff writes"
+  tests asserted the rule being replaced — a reminder from earlier this week
+  that a test locks in a mistake as firmly as it prevents one. Each became a
+  pair: what staff may now do, and what they still may not.
+
 ### 2026-08-15 — Vocabulary becomes declarable, and installing a profile becomes a button (`claude/vocabulary-registry`)
 
 Founder: *"how do I control the terminology used in the homestead farm profile?

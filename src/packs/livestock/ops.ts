@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
+import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type { LivestockIdentifier, LivestockLot } from "@/db/schema";
 import {
   createLot as createInventoryLot,
@@ -58,9 +59,19 @@ export interface LivestockCtx {
 const asInventory = (ctx: LivestockCtx): InventoryCtx => ctx;
 const asLand = (ctx: LivestockCtx): LandCtx => ctx;
 
-function requireOwner(ctx: LivestockCtx): void {
-  if (ctx.role !== "owner") {
-    throw new LivestockError("FORBIDDEN", "owner role required");
+/**
+ * Who may write, and at which level. The rule lives in
+ * `src/lib/packs/authorize.ts`: **is this a decision, or is it a chore?**
+ *
+ * `owner` is FORCED for anything that creates a cost object, because
+ * `upsertDimensionMember` requires the owner role — a staff-created entity
+ * would succeed while its cost object did not, leaving something no report can
+ * group by. `member` is for recording that something happened to a thing that
+ * already exists, which is daily work done by whoever is doing it.
+ */
+function requireWrite(ctx: LivestockCtx, level: WriteLevel): void {
+  if (!allowsWrite(ctx.role, level)) {
+    throw new LivestockError("FORBIDDEN", "only an owner can change this");
   }
 }
 
@@ -94,7 +105,7 @@ export async function createLivestockLot(
   ctx: LivestockCtx,
   input: LivestockLotInput,
 ): Promise<{ lot: LivestockLot; inventoryLotId: string }> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const species = input.species.trim().toLowerCase();
   if (!isValidSlug(species)) {
     throw new LivestockError("INVALID_SPECIES", `invalid species: ${input.species}`);
@@ -178,7 +189,7 @@ export async function updateLivestockLot(
   id: string,
   input: Partial<Pick<LivestockLotInput, "species" | "sex" | "breed" | "bornOn" | "notes">>,
 ): Promise<LivestockLot> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const existing = await getLivestockLot(tx, ctx.tenantId, id);
   if (!existing) throw new LivestockError("NOT_FOUND", `lot ${id} not found`);
 
@@ -234,7 +245,7 @@ export async function placeHead(
     notes?: string;
   },
 ): Promise<void> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   await recordMovement(tx, asInventory(ctx), {
     itemId: input.itemId,
     lotId: input.inventoryLotId,
@@ -269,7 +280,7 @@ export async function removeHead(
     notes?: string;
   },
 ): Promise<void> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   await recordMovement(tx, asInventory(ctx), {
     itemId: input.itemId,
     lotId: input.inventoryLotId,
@@ -302,7 +313,7 @@ export async function splitLivestockLot(
     locationAssetId?: string | null;
   },
 ): Promise<{ lot: LivestockLot; inventoryLotId: string }> {
-  requireOwner(ctx);
+  requireWrite(ctx, "owner");
   const parent = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
   if (!parent) {
     throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId} not found`);
@@ -361,7 +372,7 @@ export async function moveLotToZone(
     notes?: string;
   },
 ): Promise<void> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
   if (!lot) {
     throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId} not found`);
@@ -436,7 +447,7 @@ export async function addIdentifier(
     notes?: string;
   },
 ): Promise<LivestockIdentifier> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
   if (!lot) {
     throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId} not found`);
@@ -476,7 +487,7 @@ export async function retireIdentifier(
   id: string,
   removedOn: string,
 ): Promise<LivestockIdentifier> {
-  requireOwner(ctx);
+  requireWrite(ctx, "member");
   const rows = await tx
     .update(schema.livestockIdentifiers)
     .set({ removedOn, updatedAt: new Date() })

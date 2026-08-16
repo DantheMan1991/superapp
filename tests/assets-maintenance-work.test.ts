@@ -187,7 +187,9 @@ d("maintenance raises work", () => {
     expect(annual?.due.status).toBe("ok");
   });
 
-  it("refuses a staff member", async () => {
+  it("refuses a staff member deciding WHEN a machine gets serviced", async () => {
+    // Raising the work sets the schedule's clock forward, which is the same
+    // kind of act as writing the schedule. See src/lib/packs/authorize.ts.
     await expect(
       asOwner(async (tx) =>
         raiseDueMaintenance(
@@ -198,5 +200,26 @@ d("maintenance raises work", () => {
         ),
       ),
     ).rejects.toThrow();
+  });
+
+  it("lets a staff member read the hour meter and log the oil change", async () => {
+    // The person who actually changed the oil is the person holding the
+    // dipstick. Recording what happened is a chore; deciding the interval is
+    // not. Settled 2026-08-15.
+    const staff = { tenantId, userId: `${STAMP}-hand`, role: "staff" as const };
+    await asOwner((tx) =>
+      recordMeterReading(tx, staff, assetId, {
+        readOn: "2026-09-01",
+        reading: 640,
+      }),
+    );
+
+    const service = await asOwner((tx) =>
+      recordService(tx, staff, assetId, {
+        performedOn: "2026-09-01",
+        description: "Oil and filter",
+      }),
+    );
+    expect(service.description).toBe("Oil and filter");
   });
 });

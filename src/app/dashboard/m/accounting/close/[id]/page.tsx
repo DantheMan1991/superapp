@@ -20,6 +20,7 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
   LedgerError,
   getClose,
+  listEntities,
   type CloseChecklist,
 } from "@/modules/accounting/core";
 import type { CloseNarrative } from "@/modules/accounting/ai/narrative-validate";
@@ -45,6 +46,19 @@ export default async function CloseDetailPage({
   try {
     data = await withTenant(ctx.tenant.id, async (tx) => {
       const { close, notes } = await getClose(tx, ctx.tenant.id, id);
+      // WHOSE close this is. Found by driving slice 4 on the live Test tenant:
+      // the page said "Close through 2026-07-31" over Oak Row's checklist with
+      // nothing naming Oak Row — the same shape as the Journal header that
+      // claimed one company's books in slice 1, and it reads as authoritative.
+      // Undefined at one company, so nobody who has never heard of the concept
+      // sees it.
+      const entities = await listEntities(tx, ctx.tenant.id, {
+        includeInactive: true,
+      });
+      const companyName =
+        entities.length > 1 && close.entityId
+          ? (entities.find((e) => e.id === close.entityId)?.name ?? null)
+          : null;
       const userIds = [
         ...new Set(
           [close.completedByClerkUserId, close.signedOffByClerkUserId,
@@ -61,7 +75,7 @@ export default async function CloseDetailPage({
             .from(schema.profiles)
             .where(inArray(schema.profiles.clerkUserId, userIds))
         : [];
-      return { close, notes, people };
+      return { close, notes, people, companyName };
     });
   } catch (err) {
     if (err instanceof LedgerError && err.code === "CLOSE_NOT_FOUND") notFound();
@@ -91,10 +105,15 @@ export default async function CloseDetailPage({
             Close
           </Link>{" "}
           / {close.periodEnd}
+          {data.companyName ? ` · ${data.companyName}` : ""}
         </p>
         <PageHeader
           className="mt-1"
-          title={`Close through ${close.periodEnd}`}
+          title={
+            data.companyName
+              ? `${data.companyName} — close through ${close.periodEnd}`
+              : `Close through ${close.periodEnd}`
+          }
           description={
             <>
               Completed by {who(close.completedByClerkUserId)} on{" "}

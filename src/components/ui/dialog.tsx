@@ -130,7 +130,14 @@ function DialogTitle({
     <DialogPrimitive.Title
       data-slot="dialog-title"
       className={cn(
-        "font-heading text-base leading-none font-medium",
+        // `pr-7` reserves the close button's own corner: DialogContent puts an
+        // icon button at `top-2 right-2`, so any title long enough to wrap ran
+        // underneath it. Found on the per-entity close dialog, whose title
+        // names a company and a date and is the longest in the app — but the
+        // collision belongs to the primitive that positions the button, not to
+        // that one caller. `leading-none` is also why it looked cramped: two
+        // lines with no leading.
+        "font-heading text-base leading-tight font-medium pr-7",
         className
       )}
       {...props}

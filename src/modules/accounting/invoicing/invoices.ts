@@ -224,8 +224,6 @@ export interface InvoiceDraftInput {
   /** Null or absent = no tax on this invoice. */
   taxRateId?: string | null;
   lines: InvoiceLineInput[];
-  /** DEPRECATED with the table it points at; dropped in the follow-up PR. */
-  recurringInvoiceId?: string | null;
   /** The unified template that generated this invoice. */
   recurringEntryId?: string | null;
 }
@@ -261,7 +259,6 @@ export async function createInvoiceDraft(
     memo: input.memo ?? "",
     taxRateId: tax.taxRateId,
     taxRatePpm: tax.taxRatePpm,
-    recurringInvoiceId: input.recurringInvoiceId ?? null,
     recurringEntryId: input.recurringEntryId ?? null,
     createdByClerkUserId: ctx.userId,
   });
@@ -304,7 +301,7 @@ export async function updateInvoiceDraft(
   args: {
     invoiceId: string;
     expectedVersion: number;
-    patch: Omit<InvoiceDraftInput, "recurringInvoiceId" | "recurringEntryId">;
+    patch: Omit<InvoiceDraftInput, "recurringEntryId">;
   },
 ): Promise<Invoice> {
   const invoice = await loadInvoice(tx, ctx.tenantId, args.invoiceId);

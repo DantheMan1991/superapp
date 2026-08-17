@@ -1030,6 +1030,13 @@
       "when": 1786924910877,
       "tag": "0146_document_entity_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1786927090966,
+      "tag": "0147_drop_recurring_invoices",
+      "breakpoints": true
     }
   ]
 }

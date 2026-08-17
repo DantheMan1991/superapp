@@ -177,6 +177,9 @@ d("crm merge executor (database)", () => {
             status: "issued",
             issueDate: "2026-08-01",
             dueDate: "2026-08-31",
+            // `subtotal + tax = total` is a CHECK from `0147`, so a raw
+            // fixture has to state the arithmetic rather than only the answer.
+            subtotalCents: 12_500,
             totalCents: 12_500,
             createdByClerkUserId: "owner",
           },
@@ -188,6 +191,7 @@ d("crm merge executor (database)", () => {
             status: "issued",
             issueDate: "2026-08-02",
             dueDate: "2026-09-01",
+            subtotalCents: 7_500,
             totalCents: 7_500,
             createdByClerkUserId: "owner",
           },

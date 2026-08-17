@@ -13,6 +13,42 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — `recurring_invoices` dropped, and the invoice total gets its CHECK (branch `claude/drop-recurring-invoices`)
+
+Two contract jobs owed since 2026-08-12 and 2026-08-13, done together because
+both must run AFTER this PR's deploy — for opposite reasons, which is the point
+worth keeping.
+
+- **The DROP inverts the usual order.** `recurring_invoices` and
+  `invoices.recurring_invoice_id` stopped being read when the fold landed
+  (`0121`/`0122`), but Drizzle builds its SELECT column list from `schema.ts`,
+  so a deployment still declaring the column selects it — dropping under a live
+  old build 500s every invoice page. Schema first, deploy, then migrate. That is
+  the `0075`/`0088` lesson.
+- **The CHECK could not ship earlier for the exact opposite reason.** Migrations
+  precede deploys, and the deployment running when `0123` landed wrote
+  `total_cents` without touching `subtotal_cents`, so the constraint would have
+  rejected every draft edit in that window. Every write path has written all
+  three together since.
+- **So one is safe only after a deploy and the other is safe either side.** They
+  go in one migration that runs after — one instruction rather than two with
+  opposite rules.
+- **`tsc` did not catch the dead write, and could not.**
+  `recurringInvoiceId: input.recurringInvoiceId ?? null` sat inside an object
+  returned from a helper, so excess-property checking never reached it — the
+  compiler is only strict about literals passed straight to a call. Found by
+  grep after removing the column. Same blindness the module has hit before with
+  `server-only`.
+- **The dev branch had two invoices violating the CHECK**, both on a `Merge
+  Test` tenant left behind by an interrupted run. The FIXTURES that made them
+  now state the arithmetic, and the stale rows were deleted by hand — **not**
+  repaired by the migration. An invoice whose total does not equal subtotal plus
+  tax is a real problem when the data is real, and a migration that quietly
+  rewrote one to satisfy a constraint would be the worst possible way to learn
+  that. Production had none.
+- `verify-rls` reports **115 tables** where it reported 116, which is the drop
+  showing up in the one place that counts them.
+
 ### 2026-08-16 — Document `entity_id` becomes NOT NULL, and the refusal says which line (branch `claude/document-entity-not-null`)
 
 The contract half of slice 1b, plus the follow-up the founder asked for after
@@ -1159,13 +1195,13 @@ preview in either state. The change is argued to be inert, not observed to be.
 | `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens. `bank_accounts.entity_id` (`0145`) — **a register belongs to exactly one company**, chosen at creation and never moved, and `postEntry` refuses any line touching another company's register |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
-| `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and awaits its DROP |
+| `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and was dropped in `0147` |
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
 | `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
 | `period_closes`, `close_notes` | S7 | Month-end close |
 | `recurring_entries` | 2026-08-12 | **The** recurrence table: invoices, bills and journals. `kind` discriminates the jsonb `template`; two CHECKs pin the shape (`party_shape` — a bill has a vendor, an invoice a customer, a journal neither; and `auto_post_shape` — only a journal may post itself). `invoices.recurring_entry_id` records which template made a row |
 | `products`, `payment_terms`, `payment_methods` | 2026-08-12 | The catalogue: saved invoice lines, named terms (`due_in_days`, one default per tenant by partial unique index), and the tenant-owned payment-method list. `invoice_payments.method` stores a method's CODE with **no FK** — deactivating a method must never rewrite a posted payment. `customers.payment_terms_id` (nullable = use the default) |
-| `sales_tax_rates` | 2026-08-13 | The fourth reference list, and the only one **not seeded** — there is no rate that is right anywhere. `rate_ppm` is percent × 10,000 (8.875% = 88,750), because basis points cannot express a real US rate. One default per tenant by partial unique index. `invoices` gained `tax_rate_id` (composite FK, NO ACTION), `tax_rate_ppm` (**a frozen copy**, so a rate change never re-prices an issued invoice), `tax_cents` and `subtotal_cents`; `invoice_lines` gained `is_taxable`. `total_cents` is now the GROSS and still means what it always did — what the customer owes. The `total = subtotal + tax` CHECK waits for the follow-up migration (`0123`'s header says why) |
+| `sales_tax_rates` | 2026-08-13 | The fourth reference list, and the only one **not seeded** — there is no rate that is right anywhere. `rate_ppm` is percent × 10,000 (8.875% = 88,750), because basis points cannot express a real US rate. One default per tenant by partial unique index. `invoices` gained `tax_rate_id` (composite FK, NO ACTION), `tax_rate_ppm` (**a frozen copy**, so a rate change never re-prices an issued invoice), `tax_cents` and `subtotal_cents`; `invoice_lines` gained `is_taxable`. `total_cents` is now the GROSS and still means what it always did — what the customer owes. The `total = subtotal + tax` CHECK landed in `0147` (`0123`'s header says why it had to wait) |
 
 All tables: `tenant_id`, FORCE RLS. Isolation coverage is split by area, one file
 per area under `tests/isolation/` — `accounting.test.ts` (core ledger),
@@ -1287,8 +1323,8 @@ compiled-and-tested, not seen.
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - **Line account pickers are filtered in the UI ONLY.** `createInvoiceDraft`, `createBillDraft` and the recurring create action all accept whatever account id they are given, so nothing but the dropdown stops an invoice line posting revenue to Checking. Worth a server-side type check on all three paths, in one change rather than three
 - **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else
-- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **Still to do: `drizzle/0123` dropping `recurring_invoices` and `invoices.recurring_invoice_id`, which must land in a PR AFTER the fold has deployed.** What is not built for any kind: editing a template, and any cadence other than monthly
+- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. What is not built for any kind: editing a template, and any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
 - **Sales tax is DONE** (2026-08-13) — a tenant-owned rate list, per-line taxability, one frozen tax block on the invoice, one Cr to the `sales_tax` account at issue, and a per-rate summary that reconciles against the ledger. Deliberately NOT built, each for a reason in the build log: **tax on bills** (US purchase tax is part of the expense; the regime where it matters is VAT/GST, a different posting model), a **customer-level default rate and tax-exempt flag** (the invoice-level control is live; this is the `resolveTaxRate` signature's obvious next argument, ~30 lines), a **one-click remittance** debiting the tax account (a journal or a bill does it today, and the summary shows the balance to remit), **cash-basis tax**, and **splitting a combined rate into components** for a return that wants state and county separately
-- **`drizzle/0125` is owed**, after this deploy: the CHECK `total_cents = subtotal_cents + tax_cents`, which could not ship in `0123` because the previously deployed `updateInvoiceDraft` writes `total_cents` without `subtotal_cents`. Natural companion to the `recurring_invoices` DROP already queued above — one contract migration, both jobs
+- **`drizzle/0147` closed the last two owed contract migrations** (2026-08-16): the `recurring_invoices` DROP and the `total_cents = subtotal_cents + tax_cents` CHECK. They ran together because both must follow this deploy — the DROP because a live build still selecting a dropped column 500s, the CHECK because it could not precede the deploy that started writing `subtotal_cents`. Nothing is owed in that lane now
 - ~~The last item from that review~~: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built

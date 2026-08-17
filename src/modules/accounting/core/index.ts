@@ -70,6 +70,7 @@ export {
   NORMAL_BALANCE,
   createAccount,
   deactivateAccount,
+  isCodableAccount,
   listAccounts,
   updateAccount,
   type AccountTypeValue,

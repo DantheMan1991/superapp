@@ -13,6 +13,30 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-17 — The affiliate accounts were codable on a bill (branch `claude/affiliate-accounts-not-codable`)
+
+Found by driving the bill path: the line Account dropdown offered **1500 · Due
+from Affiliates** and **2450 · Due to Affiliates**.
+
+- **Not the same class as the three picker bugs before it**, and that is the
+  point. Those offered something `postEntry` refuses, so the books were never at
+  risk while the screens caught up. This one the engine has no reason to refuse:
+  a hand-coded line into an affiliate account posts happily and produces a
+  balance that "who owes whom" cannot attribute to anybody, because that table
+  walks the intercompany LINKS. The list is the only place it can be prevented.
+- **ONE PREDICATE WHERE THERE WERE FOUR COPIES.** `isCodableAccount` now lives
+  in `core/coa.ts`; the rule had been spelled out separately in the new-bill
+  page, the bill detail page, the recurring dialog and `ai/bill-code.ts`. Four
+  copies is why the affiliate accounts had to be remembered in four places and
+  were remembered in none — the next system account has one place to go.
+- **The AI bill-coder shared the copy too**, so it could have SUGGESTED an
+  affiliate account. It now filters through the same predicate as the form: the
+  model cannot propose a category a person is not offered.
+- **The JOURNAL still allows it, deliberately**, the way it already allows a
+  manual entry against AR or AP. That is what a journal is for. The cost is
+  stated rather than hidden: an entry into an affiliate account by hand is a
+  balance the who-owes-whom table will not explain.
+
 ### 2026-08-16 — A retired register is still somebody's (branch `claude/transfer-account-list`)
 
 Found by driving the transfer dialog again after the previous fix. "What did

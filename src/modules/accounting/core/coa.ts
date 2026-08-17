@@ -218,3 +218,52 @@ export async function deactivateAccount(
   }
   return rows[0];
 }
+
+/**
+ * Accounts a DOCUMENT LINE may be coded to — a bill line, a recurring bill
+ * line, or the AI coder's candidate list.
+ *
+ * ONE PREDICATE, WHERE THERE WERE FOUR COPIES. The rule lived in the new-bill
+ * page, the bill detail page, the recurring dialog and `ai/bill-code.ts`, all
+ * spelling out the same three exclusions — so the affiliate accounts arriving in
+ * ADR 0010 slice 2 would have had to be remembered in four places, and were
+ * remembered in none. That is what put "Due from Affiliates" in a bill's
+ * category dropdown.
+ *
+ * What it excludes, and why each one:
+ *
+ *  - REGISTERS. A bill line is what was bought, not where the money left; the
+ *    paid-from account is a separate question the payment dialog asks.
+ *  - OPENING BALANCE EQUITY. It exists to absorb the start of the books.
+ *  - AR and AP. The document itself posts the control leg; coding a line there
+ *    would double it.
+ *  - THE AFFILIATE PAIR. `due_from_affiliate` / `due_to_affiliate` are written
+ *    only by `postIntercompanyPair`, which keeps them explainable by the link.
+ *    A hand-coded line into one produces an affiliate balance that "who owes
+ *    whom" cannot attribute to anybody — and unlike a cross-company register,
+ *    the posting engine has no reason to refuse it, so the list is the only
+ *    place it can be prevented.
+ *
+ * NOT applied to the JOURNAL, deliberately. A journal may name any account,
+ * the way it may already touch AR and AP directly (see the cash-basis note in
+ * docs/modules/accounting.md) — that is what a journal is for. The cost is
+ * accepted and stated: a manual entry into an affiliate account is a balance
+ * the who-owes-whom table will not explain.
+ */
+export function isCodableAccount(
+  account: Pick<Account, "id" | "subtype" | "isSystem">,
+  registerAccountIds: ReadonlySet<string>,
+): boolean {
+  if (registerAccountIds.has(account.id)) return false;
+  if (account.subtype === "opening_balance") return false;
+  if (account.subtype === "due_from_affiliate") return false;
+  if (account.subtype === "due_to_affiliate") return false;
+  if (
+    account.isSystem &&
+    (account.subtype === "accounts_receivable" ||
+      account.subtype === "accounts_payable")
+  ) {
+    return false;
+  }
+  return true;
+}

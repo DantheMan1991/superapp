@@ -17,7 +17,7 @@ import {
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
-import { getSettings } from "@/modules/accounting/core";
+import { getClosedThrough, getSettings } from "@/modules/accounting/core";
 import { formatCents, todayInTimezone } from "@/modules/accounting/lib/money";
 import { EntryActions } from "../entry-actions";
 import { EntryEditor } from "../entry-editor";
@@ -110,6 +110,7 @@ export default async function EntryPage({
         ...(ownerOf.has(a.id) ? { registerEntityId: ownerOf.get(a.id)! } : {}),
       })),
       settings,
+      closedThrough: await getClosedThrough(tx, ctx.tenant.id, entry.entityId),
       reversal,
     };
   });
@@ -117,8 +118,10 @@ export default async function EntryPage({
   const { entry, lines, accounts, settings, reversal } = data;
 
   const isOwner = ctx.role === "owner";
+  // THE ENTRY'S OWN COMPANY decides whether it sits in a closed period (ADR
+  // 0010 slice 4) — a tenant-wide date would lock an entry whose books are open.
   const inClosedPeriod =
-    !!settings.closedThrough && entry.entryDate <= settings.closedThrough;
+    !!data.closedThrough && entry.entryDate <= data.closedThrough;
   const canMutatePosted =
     settings.entryEditPolicy === "standard" && !inClosedPeriod;
   const editing =

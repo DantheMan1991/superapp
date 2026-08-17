@@ -765,8 +765,13 @@ export const accountingSettings = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    /** Entries dated on or before this are locked (reversal-only). */
-    closedThrough: date("closed_through", { mode: "string" }),
+    // `closed_through` lived here from session 7 until ADR 0010 slice 4. The
+    // lock is a property of a SET OF BOOKS, and a tenant can hold several — it
+    // is `entities.closed_through` now, backfilled from this column by
+    // `drizzle/0152`. The column stays in the database one release longer than
+    // it stays here: Drizzle builds its SELECT list from this file, so a
+    // deployment still declaring it would 500 on every settings read the moment
+    // it were dropped. Schema first, deploy, then the DROP — the `0147` lesson.
     coaTemplate: text("coa_template").notNull().default("general"),
     fiscalYearStartMonth: integer("fiscal_year_start_month")
       .notNull()

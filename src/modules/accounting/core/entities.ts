@@ -106,6 +106,30 @@ export function entityScopeLabel(
   return entities.find((e) => e.id === scope.entityId)?.name ?? "Unknown company";
 }
 
+/**
+ * The date EVERY company is locked through, or null if any one of them is not.
+ *
+ * The honest reading of "the books are closed through X" once there are several
+ * sets of books: the point before which nothing can be posted ANYWHERE. It is
+ * the earliest of the companies' own dates, and null the moment one has never
+ * been closed — because a group where Oak is still open is not a group that is
+ * closed through anything, however tidy Maple's June looks.
+ *
+ * The alternative — showing the latest, or the default company's — is a number
+ * that reads as a guarantee the books do not give.
+ */
+export function groupClosedThrough(
+  entities: Array<Pick<Entity, "closedThrough">>,
+): string | null {
+  if (entities.length === 0) return null;
+  let earliest: string | null = null;
+  for (const e of entities) {
+    if (!e.closedThrough) return null;
+    if (!earliest || e.closedThrough < earliest) earliest = e.closedThrough;
+  }
+  return earliest;
+}
+
 export async function listEntities(
   tx: Tx,
   tenantId: string,

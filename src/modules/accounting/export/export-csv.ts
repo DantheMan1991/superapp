@@ -169,9 +169,14 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "ledger/entities.csv",
       "Legal entities — each one owns a set of books",
-      ["id", "name", "legal_name", "is_default", "is_active"],
+      // `closed_through` is APPENDED, so a process reading this file by column
+      // position is unaffected. It moved here from settings.csv when the period
+      // lock became per company (ADR 0010 slice 4) — a set of books is what
+      // gets closed, and ten of them close in different months.
+      ["id", "name", "legal_name", "is_default", "is_active", "closed_through"],
       data.entities.map((e) => [
         e.id, e.name, e.legalName, String(e.isDefault), String(e.isActive),
+        e.closedThrough ?? "",
       ]),
     ),
   );
@@ -236,9 +241,12 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "ledger/settings.csv",
       "Accounting policy settings",
-      ["closed_through", "coa_template", "fiscal_year_start_month", "entry_edit_policy", "bookkeeping_timezone"],
+      // `closed_through` LEFT this file in slice 4 — it is per company now and
+      // lives on entities.csv. Removed rather than left empty: a column that is
+      // always blank reads as "never closed", which is a different and wrong
+      // claim about the books.
+      ["coa_template", "fiscal_year_start_month", "entry_edit_policy", "bookkeeping_timezone"],
       [[
-        data.settings.closedThrough ?? "",
         data.settings.coaTemplate,
         String(data.settings.fiscalYearStartMonth),
         data.settings.entryEditPolicy,
@@ -251,7 +259,11 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "ledger/period_closes.csv",
       "Month-end close history",
-      ["id", "period_end", "status", "completed_by", "completed_at", "signed_off_by", "signed_off_at", "reopened_by", "reopened_at", "open_items_at_close"],
+      // entity_id and entity APPENDED (slice 4): a close covers one company,
+      // and a history that does not say which is unreadable the moment a tenant
+      // has two. Blank on a close that predates per-entity closes, which locked
+      // every company at once.
+      ["id", "period_end", "status", "completed_by", "completed_at", "signed_off_by", "signed_off_at", "reopened_by", "reopened_at", "open_items_at_close", "entity_id", "entity"],
       data.periodCloses.map((c) => {
         const checklist = c.checklist as { blockerCount?: number } | null;
         return [
@@ -260,6 +272,7 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
           c.signedOffByClerkUserId ?? "", ts(c.signedOffAt),
           c.reopenedByClerkUserId ?? "", ts(c.reopenedAt),
           String(checklist?.blockerCount ?? ""),
+          c.entityId ?? "", c.entityId ? entityName(c.entityId) : "",
         ];
       }),
     ),

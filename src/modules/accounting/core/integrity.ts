@@ -16,13 +16,22 @@ export interface LedgerIntegrity {
  * makes drift impossible in theory; this proves it in practice. Callable
  * under withSystem (reads only — the "withSystem never writes accounting
  * rows" rule is untouched).
+ *
+ * `entityId` NARROWS IT TO ONE COMPANY, and the close checklist always passes
+ * one (ADR 0010 slice 4). The platform health check deliberately passes none:
+ * "is this tenant's ledger sound" is the right question for an operator, while
+ * "may I close Maple's June" must not be answered no because OAK is out of
+ * balance. Note a combined zero is not evidence each company balances — see
+ * `ledgerIsBalancedPerEntity` — which is why the narrowed call exists at all.
  */
 export async function getLedgerIntegrity(
   tx: Tx,
   tenantId: string,
+  entityId?: string,
 ): Promise<LedgerIntegrity> {
   const jl = schema.journalLines;
   const je = schema.journalEntries;
+  const inEntity = entityId ? eq(je.entityId, entityId) : undefined;
   const perEntry = await tx
     .select({
       entryId: jl.entryId,
@@ -30,7 +39,7 @@ export async function getLedgerIntegrity(
     })
     .from(jl)
     .innerJoin(je, and(eq(jl.tenantId, je.tenantId), eq(jl.entryId, je.id)))
-    .where(and(eq(jl.tenantId, tenantId), eq(je.status, "posted" as const)))
+    .where(and(eq(jl.tenantId, tenantId), eq(je.status, "posted" as const), inEntity))
     .groupBy(jl.entryId)
     .having(sql`sum(${jl.amountCents}) <> 0`)
     .limit(5);
@@ -38,7 +47,7 @@ export async function getLedgerIntegrity(
     .select({ total: sql<string>`coalesce(sum(${jl.amountCents}), 0)` })
     .from(jl)
     .innerJoin(je, and(eq(jl.tenantId, je.tenantId), eq(jl.entryId, je.id)))
-    .where(and(eq(jl.tenantId, tenantId), eq(je.status, "posted" as const)));
+    .where(and(eq(jl.tenantId, tenantId), eq(je.status, "posted" as const), inEntity));
   const totalCents = toSafeCents(total[0]?.total ?? 0);
   const unbalancedEntries = perEntry.map((r) => ({
     entryId: r.entryId,

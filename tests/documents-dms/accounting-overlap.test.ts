@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { withSystem, withTenant, schema } from "@/db";
 import { listDocuments } from "@/modules/accounting/documents/documents";
 import { getCloseChecklist } from "@/modules/accounting/core/close";
+import { getDefaultEntityId } from "@/modules/accounting/core/entities";
 import { STAMP_OPS, d } from "./_shared";
 
 d("shared documents table: accounting is unaffected by DMS rows", () => {
@@ -25,6 +26,13 @@ d("shared documents table: accounting is unaffected by DMS rows", () => {
       tenantId,
       async (tx) => {
         await tx.insert(schema.accountingSettings).values({ tenantId });
+        // Every tenant has had a default company since `0142`; this fixture
+        // hand-rolls its settings row and predates that, so it says so itself.
+        // The close checklist is per company now (ADR 0010 slice 4) and has to
+        // have one to ask about.
+        await tx
+          .insert(schema.entities)
+          .values({ tenantId, name: "DMS Share", isDefault: true });
         // One unfiled DMS file, and one real receipt for contrast.
         await tx.insert(schema.documents).values({
           tenantId,
@@ -67,7 +75,13 @@ d("shared documents table: accounting is unaffected by DMS rows", () => {
   it("an unfiled DMS file is not a month-end close blocker", async () => {
     const checklist = await withTenant(
       tenantId,
-      (tx) => getCloseChecklist(tx, tenantId, "2026-07-31"),
+      async (tx) =>
+        getCloseChecklist(
+          tx,
+          tenantId,
+          await getDefaultEntityId(tx, tenantId),
+          "2026-07-31",
+        ),
       { role: "owner" },
     );
     const item = checklist.items.find((i) => i.key === "inbox_documents");
@@ -90,7 +104,13 @@ d("shared documents table: accounting is unaffected by DMS rows", () => {
     );
     const after = await withTenant(
       tenantId,
-      (tx) => getCloseChecklist(tx, tenantId, "2026-07-31"),
+      async (tx) =>
+        getCloseChecklist(
+          tx,
+          tenantId,
+          await getDefaultEntityId(tx, tenantId),
+          "2026-07-31",
+        ),
       { role: "owner" },
     );
     const afterItem = after.items.find((i) => i.key === "inbox_documents");

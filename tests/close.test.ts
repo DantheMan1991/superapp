@@ -8,6 +8,7 @@ import {
   completeClose,
   getClose,
   getCloseChecklist,
+  getClosedThrough,
   getDefaultEntityId,
   type LedgerCtx,
   listCloses,
@@ -176,7 +177,7 @@ d("month-end close subsystem", () => {
       });
     });
     const checklist = await withTenant(tenantId, (tx) =>
-      getCloseChecklist(tx, tenantId, "2026-06-30"),
+      getCloseChecklist(tx, tenantId, entityId, "2026-06-30"),
     );
     const drafts = checklist.items.find((i) => i.key === "draft_entries");
     expect(drafts?.count).toBe(1);
@@ -188,7 +189,7 @@ d("month-end close subsystem", () => {
 
   it("completeClose warns-not-blocks, snapshots the checklist, and locks the period", async () => {
     const { close, checklist } = await withTenant(tenantId, (tx) =>
-      completeClose(tx, owner, { periodEnd: "2026-06-30" }),
+      completeClose(tx, owner, { entityId, periodEnd: "2026-06-30" }),
     );
     expect(close.status).toBe("completed");
     expect(close.periodEnd).toBe("2026-06-30");
@@ -221,7 +222,7 @@ d("month-end close subsystem", () => {
     for (const ctx of [staff, expert]) {
       await expect(
         withTenant(tenantId, (tx) =>
-          completeClose(tx, ctx, { periodEnd: "2026-07-31" }),
+          completeClose(tx, ctx, { entityId, periodEnd: "2026-07-31" }),
         ),
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
     }
@@ -230,12 +231,12 @@ d("month-end close subsystem", () => {
   it("closes are monotonic (CLOSE_NOT_FORWARD)", async () => {
     await expect(
       withTenant(tenantId, (tx) =>
-        completeClose(tx, owner, { periodEnd: "2026-06-30" }),
+        completeClose(tx, owner, { entityId, periodEnd: "2026-06-30" }),
       ),
     ).rejects.toMatchObject({ code: "CLOSE_NOT_FORWARD" });
     await expect(
       withTenant(tenantId, (tx) =>
-        completeClose(tx, owner, { periodEnd: "2026-05-31" }),
+        completeClose(tx, owner, { entityId, periodEnd: "2026-05-31" }),
       ),
     ).rejects.toMatchObject({ code: "CLOSE_NOT_FORWARD" });
   });
@@ -292,7 +293,7 @@ d("month-end close subsystem", () => {
   it("reopen restores the prior closed-through, latest-only, CAS-guarded", async () => {
     // Second close (July) on top of June.
     const { close: july } = await withTenant(tenantId, (tx) =>
-      completeClose(tx, owner, { periodEnd: "2026-07-31" }),
+      completeClose(tx, owner, { entityId, periodEnd: "2026-07-31" }),
     );
     expect(july.previousClosedThrough).toBe("2026-06-30");
 
@@ -317,12 +318,13 @@ d("month-end close subsystem", () => {
     await withTenant(tenantId, (tx) =>
       reopenClose(tx, owner, { closeId: july.id, expectedVersion: july.version }),
     );
-    const settings = await withTenant(tenantId, (tx) =>
-      tx.query.accountingSettings.findFirst({
-        where: eq(schema.accountingSettings.tenantId, tenantId),
-      }),
-    );
-    expect(settings?.closedThrough).toBe("2026-06-30");
+    // THE LOCK LIVES ON THE COMPANY NOW (ADR 0010 slice 4) — same rule, same
+    // two writers, one row per set of books.
+    expect(
+      await withTenant(tenantId, (tx) =>
+        getClosedThrough(tx, tenantId, entityId),
+      ),
+    ).toBe("2026-06-30");
 
     // Reopening the same close again: no longer completed.
     const reopened = await withTenant(tenantId, (tx) =>
@@ -341,30 +343,29 @@ d("month-end close subsystem", () => {
   it("legacy scalar close: reopen restores a closedThrough that predates period_closes", async () => {
     // Simulate a pre-session-7 lock set directly (no close row).
     await withTenant(tenantId, async (tx) => {
-      await setClosedThrough(tx, owner, { date: "2026-08-15" });
+      await setClosedThrough(tx, owner, { entityId, date: "2026-08-15" });
     });
     const { close } = await withTenant(tenantId, (tx) =>
-      completeClose(tx, owner, { periodEnd: "2026-08-31" }),
+      completeClose(tx, owner, { entityId, periodEnd: "2026-08-31" }),
     );
     expect(close.previousClosedThrough).toBe("2026-08-15");
     await withTenant(tenantId, (tx) =>
       reopenClose(tx, owner, { closeId: close.id, expectedVersion: close.version }),
     );
-    const settings = await withTenant(tenantId, (tx) =>
-      tx.query.accountingSettings.findFirst({
-        where: eq(schema.accountingSettings.tenantId, tenantId),
-      }),
-    );
-    expect(settings?.closedThrough).toBe("2026-08-15");
+    expect(
+      await withTenant(tenantId, (tx) =>
+        getClosedThrough(tx, tenantId, entityId),
+      ),
+    ).toBe("2026-08-15");
     // Restore June state for any later assertions.
     await withTenant(tenantId, (tx) =>
-      setClosedThrough(tx, owner, { date: "2026-06-30" }),
+      setClosedThrough(tx, owner, { entityId, date: "2026-06-30" }),
     );
   });
 
   it("re-close after reopen inserts a fresh row (history preserved)", async () => {
     const { close } = await withTenant(tenantId, (tx) =>
-      completeClose(tx, owner, { periodEnd: "2026-07-31" }),
+      completeClose(tx, owner, { entityId, periodEnd: "2026-07-31" }),
     );
     expect(close.signedOffAt).toBeNull(); // re-close starts unsigned
     const closes = await withTenant(tenantId, (tx) => listCloses(tx, tenantId));

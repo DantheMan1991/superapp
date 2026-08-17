@@ -5,7 +5,12 @@ import { schema, withTenant, type Tx } from "@/db";
 import { CLAUDE_MODEL, CLAUDE_THINKING_OFF, getClaude } from "@/lib/claude";
 import { logAuditInTx } from "@/lib/audit";
 import { LedgerError, type LedgerCtx } from "../core";
-import { closePeriodStart, getCloseChecklist, loadClose } from "../core/close";
+import {
+  closePeriodStart,
+  getCloseChecklist,
+  loadClose,
+  type CloseChecklist,
+} from "../core/close";
 import { getSettings } from "../core/guards";
 import {
   getBalanceSheet,
@@ -62,13 +67,19 @@ export async function gatherCloseNarrativeInputs(
   const periodEnd = close.periodEnd;
 
   /**
-   * COMBINED, and stated rather than assumed. A close is still tenant-wide in
-   * slice 1 — `period_closes` has no entity and locks every company at once
-   * (ADR 0010 puts per-entity close in slice 4) — so the narrative describes
-   * the same books the close covers. A per-company narrative for a close that
-   * is not per company would read as more precision than exists.
+   * THE COMPANY THE CLOSE COVERS (ADR 0010 slice 4). The rule this comment held
+   * in slice 1 has not changed — the narrative describes the same books the
+   * close covers — but a close now covers ONE company, so the narrative does
+   * too. Anything else would be a story about Maple's month told over Oak's
+   * numbers.
+   *
+   * A legacy close written before slice 4 has no company and locked everything,
+   * so combined is still the honest scope for it. `entity_id` goes NOT NULL in
+   * the contract migration after this deploy, and this branch dies with it.
    */
-  const scope = { kind: "combined" } as const;
+  const scope = close.entityId
+    ? ({ kind: "one", entityId: close.entityId } as const)
+    : ({ kind: "combined" } as const);
   const pnl = await getProfitAndLoss(tx, ctx.tenantId, {
     scope,
     from: periodStart,
@@ -81,7 +92,12 @@ export async function gatherCloseNarrativeInputs(
     to: periodEnd,
   });
   const bs = await getBalanceSheet(tx, ctx.tenantId, { scope, asOf: periodEnd });
-  const checklist = await getCloseChecklist(tx, ctx.tenantId, periodEnd);
+  const checklist = close.entityId
+    ? await getCloseChecklist(tx, ctx.tenantId, close.entityId, periodEnd)
+    : // Legacy close: no company to scope the review to, so the checklist is
+      // the one already snapshotted on the row rather than a recomputed one
+      // that would silently describe the default company.
+      (close.checklist as CloseChecklist);
 
   // Largest posted entries in the period, by total debit magnitude.
   const topEntries = await tx

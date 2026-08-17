@@ -4,8 +4,7 @@ import { schema, withTenant, type Tx } from "@/db";
 import type { RecurringEntry } from "@/db/schema";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
-import { getDefaultEntityId } from "../core/entities";
-import { getSettings } from "../core/guards";
+import { getDefaultEntityId, listEntities } from "../core/entities";
 import { postEntry } from "../core/posting";
 import { createBillDraft } from "../payables/bills";
 import { createInvoiceDraft } from "../invoicing/invoices";
@@ -116,9 +115,17 @@ export async function generateRecurringEntries(
 ): Promise<RecurringEntryResult> {
   requireOwnerRole(ctx);
 
-  const { due, today, closedThrough } = await withTenant(ctx.tenantId, async (tx) => {
+  const { due, today, closedByEntity } = await withTenant(ctx.tenantId, async (tx) => {
     const today = todayInTimezone(await getTenantTimezone(tx, ctx.tenantId));
-    const settings = await getSettings(tx, ctx.tenantId);
+    // PER COMPANY since ADR 0010 slice 4: a template resolves its own company
+    // below, and the lock that matters is that company's. One tenant-wide date
+    // would defer Maple's monthly journal to a draft because Oak closed June.
+    const closedByEntity = new Map(
+      (await listEntities(tx, ctx.tenantId, { includeInactive: true })).map((e) => [
+        e.id,
+        e.closedThrough,
+      ]),
+    );
     const due = await tx.query.recurringEntries.findMany({
       where: and(
         eq(schema.recurringEntries.tenantId, ctx.tenantId),
@@ -126,7 +133,7 @@ export async function generateRecurringEntries(
         lte(schema.recurringEntries.nextRunDate, today),
       ),
     });
-    return { due, today, closedThrough: settings.closedThrough };
+    return { due, today, closedByEntity };
   });
 
   const result: RecurringEntryResult = {
@@ -181,6 +188,7 @@ export async function generateRecurringEntries(
          */
         const entityId =
           template.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId));
+        const closedThrough = closedByEntity.get(entityId) ?? null;
 
         let next = entry.nextRunDate;
         let runs = 0;

@@ -4,7 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { BankRule } from "@/db/schema";
 import {
   LedgerError,
-  getSettings,
+  listEntities,
   requireOwnerRole,
   type LedgerCtx,
 } from "../core";
@@ -375,8 +375,24 @@ export async function applyRulesToUnreviewed(
   if (rules.length === 0) return result;
 
   const matchable = rules.map(toMatchable);
-  const settings = await getSettings(tx, ctx.tenantId);
-  const closedThrough = settings.closedThrough;
+  // THE LOCK IS PER COMPANY (ADR 0010 slice 4), and a bulk apply spans every
+  // register, so one date cannot answer for all of them. Read once into a map
+  // rather than per transaction: this loop already runs over hundreds of rows,
+  // and the closed-through of a company cannot change mid-transaction.
+  const closedByEntity = new Map(
+    (await listEntities(tx, ctx.tenantId, { includeInactive: true })).map((e) => [
+      e.id,
+      e.closedThrough,
+    ]),
+  );
+  const entityOfAccount = new Map(
+    (
+      await tx.query.bankAccounts.findMany({
+        where: eq(schema.bankAccounts.tenantId, ctx.tenantId),
+        columns: { id: true, entityId: true },
+      })
+    ).map((a) => [a.id, a.entityId]),
+  );
 
   const txns = await tx.query.bankTransactions.findMany({
     where: and(
@@ -465,6 +481,11 @@ export async function applyRulesToUnreviewed(
     result.matched += 1;
 
     if (!match.autoPost) continue;
+    // The register's own company decides. A transaction on Maple's account is
+    // not locked by Oak having closed its June.
+    const closedThrough = closedByEntity.get(
+      entityOfAccount.get(txn.bankAccountId) ?? "",
+    );
     if (closedThrough && txn.txnDate <= closedThrough) {
       result.skippedLocked += 1;
       continue;

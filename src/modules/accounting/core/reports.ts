@@ -12,7 +12,12 @@ import {
 } from "../lib/dates";
 import { LedgerError } from "./errors";
 import { getBalances, type AccountingBasis } from "./balances";
-import { entityScopeCondition, type EntityScope } from "./entities";
+import { ledgerScopeConditions } from "./consolidation";
+import {
+  entityScopeCondition,
+  type EntityScope,
+  type FilterScope,
+} from "./entities";
 import { listAccounts } from "./coa";
 import { listDimensionMembers } from "./dimensions";
 import { getSettings } from "./guards";
@@ -43,6 +48,11 @@ import {
  * take one, each for its own stated reason — see `getTaxSummary` and the note
  * on aging in docs/modules/accounting.md. Declining is a decision written down;
  * an optional parameter is a decision nobody makes.
+ *
+ * SINCE SLICE 3 THE SAME IS TRUE OF CONSOLIDATION, in the type rather than in a
+ * comment. A report that takes `EntityScope` can be asked to eliminate and goes
+ * through `ledgerScopeConditions`; one that takes `FilterScope` cannot be asked
+ * at all, and the reason it declines is written above it.
  */
 
 /**
@@ -191,11 +201,18 @@ export async function getBalanceSheet(
  * register line exactly where it was. Cash Activity is the same report on
  * either basis, so offering a toggle would only invite the reader to look for
  * a difference that cannot exist.
+ *
+ * NO CONSOLIDATED SCOPE EITHER, for exactly that reason a second time
+ * (`FilterScope`, so it cannot be handed one). Every register belongs to one
+ * company and no register balance is inflated by intercompany: a transfer takes
+ * cash out of one and puts it into another, and both movements are real. The
+ * group's cash is the sum of the registers on either scope, so consolidating
+ * would change nothing and only invite the reader to hunt for the difference.
  */
 export async function getCashActivity(
   tx: Tx,
   tenantId: string,
-  opts: { scope: EntityScope; from: string; to: string },
+  opts: { scope: FilterScope; from: string; to: string },
 ): Promise<CashActivityReport> {
   const accounts = await listAccounts(tx, tenantId);
   const cashIds = accounts
@@ -250,6 +267,13 @@ export const GENERAL_LEDGER_LINE_CAP = 5000;
  * earliest part of the period rather than an arbitrary sample. Note that a
  * truncated report no longer reconciles to the trial balance at `to` — its
  * closing balances are as at the last line shown.
+ *
+ * IT DOES TAKE A CONSOLIDATED SCOPE, and the reason is that reconciliation. A
+ * consolidated trial balance you cannot drill into is a number an accountant
+ * has no way to check; the eliminated legs are simply absent here, exactly as
+ * they are absent from the totals above. Both queries below share the one
+ * `where`, so the count, the lines and the opening balance cannot disagree
+ * about what was eliminated.
  */
 export async function getGeneralLedger(
   tx: Tx,
@@ -281,9 +305,10 @@ export async function getGeneralLedger(
     // Only posted entries count, exactly as getBalances does — a general
     // ledger that included drafts would disagree with every other report.
     eq(je.status, "posted" as const),
-    // ...and the same entity scope, or the report would stop tying back to the
-    // trial balance, which is the one thing an accountant does with it first.
-    entityScopeCondition(opts.scope),
+    // ...and the same scope AND the same elimination, from the same helper the
+    // engine uses, or the report would stop tying back to the trial balance —
+    // which is the one thing an accountant does with it first.
+    ...(await ledgerScopeConditions(tx, tenantId, opts.scope)),
     gte(je.entryDate, opts.from),
     lte(je.entryDate, opts.to),
     ...(narrowed ? [inArray(jl.accountId, narrowed)] : []),
@@ -360,11 +385,18 @@ export async function getGeneralLedger(
  * between them meaningless, and that difference is the whole report. Now that
  * `invoices.entity_id` exists both halves are scoped by the same argument, and
  * a return is filed per company, which is the point.
+ *
+ * IT DECLINES A CONSOLIDATED SCOPE (`FilterScope`), and joins the aging reports
+ * in that. Both halves read things intercompany cannot reach: an affiliate
+ * balance never becomes an invoice, and the sales-tax control is not an
+ * affiliate account. Consolidated would therefore be combined with a different
+ * name on it — and a tax return is filed by a legal entity anyway, so the group
+ * is not a filer this report has anything to say to.
  */
 export async function getTaxSummary(
   tx: Tx,
   tenantId: string,
-  opts: { scope: EntityScope; from: string; to: string },
+  opts: { scope: FilterScope; from: string; to: string },
 ): Promise<TaxSummaryReport> {
   const inv = schema.invoices;
   const il = schema.invoiceLines;

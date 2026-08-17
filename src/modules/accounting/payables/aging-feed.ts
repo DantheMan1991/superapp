@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { toSafeCents } from "../lib/money";
-import { entityScopeCondition, type EntityScope } from "../core/entities";
+import { entityScopeCondition, type FilterScope } from "../core/entities";
 import { buildApAging, type ApAgingReport } from "./aging";
 
 /**
@@ -12,12 +12,17 @@ import { buildApAging, type ApAgingReport } from "./aging";
  * Aging declined one before because bills carried no company, and scoping half a
  * report is worse than scoping none. They do now, so it does — required, like
  * every other report engine (ADR 0010).
+ *
+ * A `FilterScope`, so it CANNOT be asked to consolidate (slice 3), for the same
+ * reason as A/R. A bill one company pays on another's behalf stays that
+ * company's bill — the pair settles the AP, and what is left owing is owed to a
+ * real vendor outside the group. Nothing here is intercompany.
  */
 export async function getApAging(
   tx: Tx,
   tenantId: string,
   asOf: string,
-  scope: EntityScope,
+  scope: FilterScope,
 ): Promise<ApAgingReport> {
   const rows = await tx
     .select({

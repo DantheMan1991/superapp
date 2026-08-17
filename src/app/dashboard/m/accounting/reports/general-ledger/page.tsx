@@ -21,7 +21,9 @@ import {
   getGeneralLedger,
   getSettings,
   listAccounts,
+  residualIfConsolidated,
 } from "@/modules/accounting/core";
+import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { presetRange } from "@/modules/accounting/lib/dates";
 import {
@@ -76,14 +78,37 @@ export default async function GeneralLedgerPage({
       sp.account && UUID.test(sp.account) && accounts.some((a) => a.id === sp.account)
         ? sp.account
         : "";
-    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    // OFFERED, and it is the reason to bother: a consolidated trial balance
+    // nobody can drill into is a number an accountant cannot check. The
+    // eliminated legs are simply absent here, exactly as they are absent from
+    // the totals, so the two still tie.
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      "offered",
+    );
     const report = await getGeneralLedger(tx, ctx.tenant.id, {
       scope: entityView.scope,
       from,
       to,
       ...(account ? { accountIds: [account] } : {}),
     });
-    return { settings, today, from, to, account, accounts, report, entityView };
+    const residual = await residualIfConsolidated(tx, ctx.tenant.id, entityView.scope, {
+      from,
+      to,
+    });
+    return {
+      settings,
+      today,
+      from,
+      to,
+      account,
+      accounts,
+      report,
+      entityView,
+      residual,
+    };
   });
 
   const { report } = data;
@@ -132,7 +157,10 @@ export default async function GeneralLedgerPage({
         }))}
         entity={sp.entity}
         entities={data.entityView.entities}
+        offerConsolidated={data.entityView.offerConsolidated}
       />
+
+      <ConsolidationNote residual={data.residual} />
 
       {report.truncated && (
         // Never a silent cap. A ledger that quietly shows part of a period

@@ -41,6 +41,7 @@ export function ReportControls({
   showSpread,
   entity,
   entities,
+  offerConsolidated,
 }: {
   mode: "range" | "asOf";
   today: string;
@@ -91,6 +92,14 @@ export function ReportControls({
    * page footer and in every CSV, exactly as the basis is.
    */
   entities?: Array<{ id: string; name: string }>;
+  /**
+   * Offer "All companies (consolidated)" beside combined (ADR 0010 slice 3).
+   *
+   * Comes from `resolveReportEntity`, never decided here: the reports that
+   * decline it do so for reasons about what they read, and a picker that
+   * offered it on one of them would produce a 404 rather than a report.
+   */
+  offerConsolidated?: boolean;
 }) {
   const [range, setRange] = useState({ from: from ?? today, to: to ?? today });
   const [preset, setPreset] = useState<RangePreset>("custom");
@@ -181,6 +190,9 @@ export function ReportControls({
             className="border-input h-9 w-52 rounded-md border bg-transparent px-3 text-sm shadow-xs"
           >
             <option value="">All companies (combined)</option>
+            {offerConsolidated && (
+              <option value="consolidated">All companies (consolidated)</option>
+            )}
             {entities.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.name}

@@ -6,6 +6,7 @@ import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError, type LedgerCtx } from "../core";
 import { getSettings } from "../core/guards";
 import { getTrialBalance } from "../core/balances";
+import { residualIfConsolidated, residualNote } from "../core/consolidation";
 import {
   entityScopeLabel,
   listEntities,
@@ -197,12 +198,35 @@ export async function gatherBooksExport(
           scope: { kind: "combined" as const },
           label: entityScopeLabel({ kind: "combined" }, data.entities),
         },
+        // AND A CONSOLIDATED SET (slice 3), which is the one an accountant
+        // asked for: the group's figures with intercompany eliminated. It sits
+        // BESIDE the combined set rather than replacing it — combined is the
+        // plain sum and still means exactly what it meant, and an export whose
+        // "combined" files quietly started eliminating would change what every
+        // archived zip says.
+        {
+          scope: { kind: "consolidated" as const },
+          label: entityScopeLabel({ kind: "consolidated" }, data.entities),
+        },
       ]
     : [{ scope: { kind: "combined" as const }, label: undefined }];
 
   for (const run of runs) {
     const part = run.label ? `_${statementFilePart(run.label)}` : "";
     const suffix = run.label ? ` — ${run.label}` : "";
+    // Null on every run but the consolidated one, and on that one only when a
+    // hand-written affiliate journal left something elimination could not
+    // follow. The two windows differ for the same reason they differ on the
+    // pages: a P&L covers the period, a balance sheet is cumulative.
+    const periodResidual = await residualIfConsolidated(tx, tid, run.scope, {
+      from: fyStart,
+      to: opts.todayIso,
+    });
+    const asOfResidual = await residualIfConsolidated(tx, tid, run.scope, {
+      asOf: opts.todayIso,
+    });
+    const periodNote = periodResidual ? residualNote(periodResidual) : undefined;
+    const asOfNote = asOfResidual ? residualNote(asOfResidual) : undefined;
     const pnl = await getProfitAndLoss(tx, tid, {
       scope: run.scope,
       from: fyStart,
@@ -211,7 +235,7 @@ export async function gatherBooksExport(
     csvFiles.push({
       zipPath: `reports/profit-and-loss_${fyStart}_${opts.todayIso}${part}.csv`,
       description: `Profit & loss, fiscal year to export date${suffix}`,
-      content: toCsv(pnlToCsvRows(pnl, "accrual", run.label)),
+      content: toCsv(pnlToCsvRows(pnl, "accrual", run.label, periodNote)),
       rowCount: pnl.rows.length,
     });
     const bs = await getBalanceSheet(tx, tid, {
@@ -221,14 +245,16 @@ export async function gatherBooksExport(
     csvFiles.push({
       zipPath: `reports/balance-sheet_${opts.todayIso}${part}.csv`,
       description: `Balance sheet as of export date${suffix}`,
-      content: toCsv(balanceSheetToCsvRows(bs, "accrual", run.label)),
+      content: toCsv(balanceSheetToCsvRows(bs, "accrual", run.label, asOfNote)),
       rowCount: bs.rows.length,
     });
     const tb = await getTrialBalance(tx, tid, opts.todayIso, run.scope);
     csvFiles.push({
       zipPath: `reports/trial-balance_${opts.todayIso}${part}.csv`,
       description: `Trial balance as of export date${suffix}`,
-      content: toCsv(trialBalanceToCsvRows(tb, opts.todayIso, run.label)),
+      content: toCsv(
+        trialBalanceToCsvRows(tb, opts.todayIso, run.label, asOfNote),
+      ),
       rowCount: tb.rows.length,
     });
   }

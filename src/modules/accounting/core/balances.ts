@@ -4,7 +4,8 @@ import { schema, type Tx } from "@/db";
 import type { Account } from "@/db/schema";
 import { toSafeCents } from "../lib/money";
 import { cashBasisAdjustment } from "./cash-basis";
-import { entityScopeCondition, listEntities, type EntityScope } from "./entities";
+import { ledgerScopeConditions } from "./consolidation";
+import { listEntities, type EntityScope } from "./entities";
 
 /**
  * The one query engine reports use. Compute-on-read by design: at this
@@ -77,8 +78,11 @@ export async function getBalances(
   const conditions = [
     eq(jl.tenantId, tenantId),
     eq(je.status, "posted" as const),
-    // On the ENTRY, so this filter never has to reason about a line.
-    entityScopeCondition(opts.scope),
+    // The entity filter is on the ENTRY; the ELIMINATION is on the line. Both
+    // come back from one call so a report cannot take one and forget the other
+    // — see consolidation.ts for why that is the failure worth designing
+    // against.
+    ...(await ledgerScopeConditions(tx, tenantId, opts.scope)),
     opts.asOf ? lte(je.entryDate, opts.asOf) : undefined,
     opts.from ? gte(je.entryDate, opts.from) : undefined,
     opts.to ? lte(je.entryDate, opts.to) : undefined,

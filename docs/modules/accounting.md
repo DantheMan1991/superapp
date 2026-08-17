@@ -13,6 +13,98 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-17 — Consolidation, and the third scope (branch `claude/consolidated-scope`)
+
+Slice 3 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md): the
+group's figures with intercompany eliminated. **No migration** — elimination is
+derived at read time from links that already exist, like invoice status,
+`closed_through` and retained earnings.
+
+- **ELIMINATION IS A LINE-LEVEL EXCLUSION, AND THE SCOPE HAD ALWAYS BEEN AN
+  ENTRY-LEVEL PREDICATE.** That mismatch is the whole risk in this slice: a
+  consolidated scope that reused `entityScopeCondition` would filter nothing,
+  eliminate nothing, and produce a statement that looks right, balances, and
+  double-counts every intercompany transaction. So the defence is the same one
+  slice 1 used — **make forgetting a compile error**. `entityScopeCondition` now
+  takes a `FilterScope` (`Exclude<EntityScope, {kind:"consolidated"}>`), which
+  broke all eight of its call sites and made each of them state what it does
+  about consolidation. Ledger reports go through `ledgerScopeConditions` in the
+  new `core/consolidation.ts`, which returns the entity filter AND the
+  elimination in one list to spread, so a report cannot take one and forget the
+  other.
+- **Eliminate by following the LINK, never by matching amounts** — drop exactly
+  the affiliate legs of entries carrying an `intercompany_id`, and nothing else
+  in those entries. `intercompany_id IS NOT NULL` is the whole test because
+  `0149` enforces exactly two entries in two companies, deferred: a committed
+  pair is a complete pair.
+- **Why it cannot unbalance a statement:** a pair's affiliate legs are always +X
+  and −X, so removing them removes zero. The consolidated trial balance still
+  ties with no plug and no invented figure. Checked on paper before any code was
+  written, against the two shapes the module can produce: a bill pair
+  consolidates to `Dr expense / Cr cash` — the group paid a vendor — and a
+  transfer pair to nothing at all, cash out of one register and into another.
+  Both are now tests.
+- **`combined` KEEPS ITS MEANING.** It sums and eliminates nothing, and
+  consolidated arrived BESIDE it as a third kind rather than redefining it — a
+  report that quietly started eliminating under the old name would change what
+  every saved report link and every archived export already says. A test asserts
+  combined still shows both affiliate legs, which is what makes that a promise
+  rather than an intention.
+- **Consolidated has no `entityId`, in the type.** Eliminating one side of a
+  pair while keeping the other leaves that company short by the amount, so a
+  consolidated single company is not a thing.
+- **Who takes it and who declines, each with its reason in the code.** Trial
+  balance, balance sheet and P&L take it. **The general ledger takes it too**,
+  because a consolidated trial balance nobody can drill into is a number an
+  accountant cannot check — a test pins the two tying out through `displayCents`.
+  **Cash Activity declines** (`FilterScope`), the same shape of reason it already
+  declines a basis: every register belongs to one company and none is inflated by
+  intercompany, so the difference the reader would go looking for cannot exist.
+  **A/R aging, A/P aging and the tax summary decline** because they read
+  documents, and an affiliate balance never becomes an invoice or a bill.
+- **THE P&L'S NUMBERS ARE IDENTICAL TO COMBINED TODAY, and it offers the scope
+  anyway.** No intercompany leg touches income or expense. It is offered for the
+  stamp — a reader who scoped the balance sheet to the group should not have to
+  switch back to see its profit — and because the day one company charges another
+  management fees, the obvious next step for a landlord with a management LLC,
+  the two stop being equal with nobody having to remember this page. A test pins
+  the equality so that day fails loudly.
+- **The manual-journal residual is SURFACED, not hidden**, and the argument is
+  stronger than consistency with the tax summary's gap: an unlinked affiliate
+  line has no counterparty leg to remove with it, so suppressing it would leave
+  assets short against liabilities-plus-equity and **hiding it would require
+  inventing an equity plug**. `consolidationResidual` counts what elimination
+  could not follow — defined as the exact complement of the elimination
+  predicate, so it is always precisely what survived on the face of the statement
+  — and `ConsolidationNote` says it on the page while `residualNote` puts the
+  same sentence in the CSV. It counts LINES as well as the net, because two
+  hand-written journals can offset to nothing and still mean something went in
+  unlinked.
+- **The stamp says which of the three it is** — page, CSV content and CSV
+  filename, the rule the basis stamp follows. `?entity=consolidated` on a
+  report that declines it **404s**, the same rule an unknown id follows: a scope
+  this report does not have is refused rather than quietly answered with the
+  combined figures under the name the reader chose for the difference. And on a
+  single-company tenant it resolves to that company, so the client who has one
+  never learns the word.
+- **The books export gains a consolidated set** of the three statements beside
+  the per-company and combined ones, once there is more than one company. That
+  zip is what goes to the accountant. At one company it is byte-identical.
+- **A BUG FOUND BY READING, not by driving, and it predates this slice:**
+  `entityParam` on the CSV export was `z.string().uuid().optional()`, but the
+  picker's own "All companies" option submits an EMPTY string. On a two-company
+  tenant, choosing combined and pressing Export CSV answered *"Invalid input"*
+  instead of downloading. It now accepts `""`, `combined` and `consolidated`
+  alongside a uuid; `resolveEntityScope` still decides what each one means.
+- `tests/entities-db.test.ts` grows to 32. The new eight: the bill pair
+  consolidating to Dr expense / Cr cash, the transfer pair consolidating to
+  nothing at all (asserted as "the only accounts that moved are the two
+  registers"), consolidated differing from combined ONLY in the affiliate
+  accounts, the consolidated trial balance showing neither and still tying, the
+  general ledger dropping the same lines and reconciling to it, the P&L pin, the
+  picker's three answers (offered / refused / invisible), and the unlinked
+  journal surviving with the residual reporting it.
+
 ### 2026-08-17 — The affiliate accounts were codable on a bill (branch `claude/affiliate-accounts-not-codable`)
 
 Found by driving the bill path: the line Account dropdown offered **1500 · Due
@@ -1453,6 +1545,7 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
+- **Consolidation is DONE** (2026-08-17, slice 3 of ADR 0010): a third scope beside "one company" and combined, on the trial balance, balance sheet, P&L and general ledger, plus a consolidated set in the books export. Eliminates by following the `intercompany_id`, never by matching amounts; the unlinked-journal residual is surfaced on the page and in the CSV rather than reconciled away. What is NOT built: **per-entity close** (4 — `period_closes` still locks every company at once), a company on **fixed assets** (the assets pack is `entityForDocument`'s last caller), and **receiving an invoice payment into another company's account**, the mirror of the bill case, still refused. And deliberately not built at all: full GAAP consolidation — no investment-in-subsidiary elimination, no minority interest, no purchase accounting, because these are commonly owned LLCs rather than a parent with subsidiaries
 - **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. `drizzle/0146` closed the expand/contract — all three are NOT NULL on both databases. **Intercompany pairs are DONE** (slice 2, same day — `0148`–`0151`). What is NOT built: **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller
 - **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. `drizzle/0144` closed the expand/contract the same day: `entity_id` is NOT NULL on both databases, with the window's backfill re-run first. Still queued in that lane: the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default
 - Credit memos (designed-for headroom in S4, unbuilt)

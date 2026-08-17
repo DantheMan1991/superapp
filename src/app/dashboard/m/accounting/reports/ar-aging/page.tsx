@@ -33,7 +33,14 @@ export default async function ArAgingPage({
     const settings = await getSettings(tx, ctx.tenant.id);
     const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
-    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      // DECLINED: aging reads invoices, and an affiliate balance never becomes
+      // a receivable — it is recorded as a linked pair. Nothing to eliminate.
+      "declined",
+    );
     const report = await getArAging(tx, ctx.tenant.id, asOf, entityView.scope);
     return { settings, today, asOf, report, entityView };
   });

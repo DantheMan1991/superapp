@@ -18,7 +18,12 @@ import {
 import Link from "next/link";
 import { Lock, Scale } from "lucide-react";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getSettings, getTrialBalance } from "@/modules/accounting/core";
+import {
+  getSettings,
+  getTrialBalance,
+  residualIfConsolidated,
+} from "@/modules/accounting/core";
+import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import {
   formatCents,
@@ -41,13 +46,21 @@ export default async function TrialBalancePage({
   // must never silently produce the other basis.
   const basis = sp.basis === "cash" ? "cash" : "accrual";
 
-  const { tb, asOf, settings, entityView } = await withTenant(
+  const { tb, asOf, settings, entityView, residual } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const settings = await getSettings(tx, ctx.tenant.id);
       const today = todayInTimezone(ctx.tenant.timezone);
       const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
-      const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+      // OFFERED: this is the report where elimination is provable, because a
+      // consolidated trial balance still has to balance — and it does, since a
+      // pair's two affiliate legs are +X and -X and removing them removes zero.
+      const entityView = await reportEntityOr404(
+        tx,
+        ctx.tenant.id,
+        sp.entity,
+        "offered",
+      );
       const tb = await getTrialBalance(
         tx,
         ctx.tenant.id,
@@ -55,7 +68,13 @@ export default async function TrialBalancePage({
         entityView.scope,
         basis,
       );
-      return { tb, asOf, settings, entityView };
+      const residual = await residualIfConsolidated(
+        tx,
+        ctx.tenant.id,
+        entityView.scope,
+        { asOf },
+      );
+      return { tb, asOf, settings, entityView, residual };
     },
   );
 
@@ -110,6 +129,11 @@ export default async function TrialBalancePage({
                 className="border-input h-9 w-52 rounded-md border bg-transparent px-3 text-sm shadow-xs"
               >
                 <option value="">All companies (combined)</option>
+                {entityView.offerConsolidated && (
+                  <option value="consolidated">
+                    All companies (consolidated)
+                  </option>
+                )}
                 {entityView.entities.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.name}
@@ -147,6 +171,8 @@ export default async function TrialBalancePage({
           {" · manage on the Close page"}
         </Link>
       </div>
+
+      <ConsolidationNote residual={residual} />
 
       <DataTable
         isEmpty={tb.rows.length === 0}

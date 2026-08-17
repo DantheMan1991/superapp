@@ -7,7 +7,12 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
 import { ReportTable } from "@/modules/accounting/components/report-table";
 import { ReportToolbar } from "@/modules/accounting/components/report-toolbar";
-import { getBalanceSheet, getSettings } from "@/modules/accounting/core";
+import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
+import {
+  getBalanceSheet,
+  getSettings,
+  residualIfConsolidated,
+} from "@/modules/accounting/core";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { isValidIsoDate, todayInTimezone } from "@/modules/accounting/lib/money";
 
@@ -36,7 +41,14 @@ export default async function BalanceSheetPage({
     const settings = await getSettings(tx, ctx.tenant.id);
     const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
-    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    // OFFERED here: the balance sheet is where a group's affiliate balances
+    // would otherwise be double-counted, and where eliminating them shows.
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      "offered",
+    );
     const report = await getBalanceSheet(tx, ctx.tenant.id, {
       scope: entityView.scope,
       asOf,
@@ -44,7 +56,10 @@ export default async function BalanceSheetPage({
       showZero: sp.zero === "1",
       basis,
     });
-    return { settings, today, asOf, report, entityView };
+    const residual = await residualIfConsolidated(tx, ctx.tenant.id, entityView.scope, {
+      asOf,
+    });
+    return { settings, today, asOf, report, entityView, residual };
   });
 
   const { report } = data;
@@ -99,7 +114,10 @@ export default async function BalanceSheetPage({
         showBasis
         entity={sp.entity}
         entities={data.entityView.entities}
+        offerConsolidated={data.entityView.offerConsolidated}
       />
+
+      <ConsolidationNote residual={data.residual} />
 
       <ReportTable
         rows={report.rows}

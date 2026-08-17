@@ -96,6 +96,29 @@ derived at read time from links that already exist, like invoice status,
   tenant, choosing combined and pressing Export CSV answered *"Invalid input"*
   instead of downloading. It now accepts `""`, `combined` and `consolidated`
   alongside a uuid; `resolveEntityScope` still decides what each one means.
+- **DRIVEN ON THE LIVE TEST TENANT after the deploy**, which is how every bug in
+  slices 1 and 2 was found. The trial balance drops both affiliate rows and
+  totals **10,127.09** against combined's 13,227.09; the balance sheet comes out
+  6,272.91 with **Total Liabilities 0.00** where combined shows 9,372.91 and
+  3,100 — exactly 3,100 apart on both sides, with equity identical in both,
+  which is what elimination not touching equity looks like. The general ledger
+  shows no affiliate sections and the bill pair reads as the paper test said it
+  would: `Dr Subcontractor Expense 600` in Oak Row, AP raised and settled to
+  zero, `Cr Test Operating 600`. Consolidated and combined P&L both come out
+  (5,356.78). `/reports/cash?entity=consolidated` 404s. Export CSV on combined
+  no longer answers "Invalid input".
+- **THE RESIDUAL NOTE HAS BEEN SEEN, and Test now carries a standing residual on
+  purpose.** A hand journal was posted on Test —
+  `Dr 1500 Due from Affiliates 4.00 / Cr 4000 Sales 4.00`, memo *"Oak Row owes us
+  for supplies - booked by hand, not as a transfer"* — and deliberately left
+  there, so the note is visible on the consolidated reports from now on rather
+  than being a code path nobody has ever rendered. It reads: *"Not eliminated: 1
+  journal line in the affiliate accounts with no linked transfer to follow (net
+  4.00 debit)."* The distinction it exists to make is visible in the number: 1500
+  shows **4.00**, not 3,104 — the linked pair is still eliminated and only the
+  unlinked journal survives. Both statements still balance **with it on them**
+  (6,276.91 either side), which is the argument for surfacing rather than hiding
+  in one figure. A future session should not read that 4.00 as stray data.
 - `tests/entities-db.test.ts` grows to 32. The new eight: the bill pair
   consolidating to Dr expense / Cr cash, the transfer pair consolidating to
   nothing at all (asserted as "the only accounts that moved are the two

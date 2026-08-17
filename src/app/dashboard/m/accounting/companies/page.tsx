@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { Building2 } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -40,7 +40,7 @@ export default async function CompaniesPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
-  const { entities, entryCounts, owed, registers, today } = await withTenant(
+  const { entities, entryCounts, owed, registers, today, codable } = await withTenant(
     ctx.tenant.id,
     async (tx) => ({
     entities: await listEntities(tx, ctx.tenant.id, { includeInactive: true }),
@@ -54,6 +54,17 @@ export default async function CompaniesPage() {
       ),
     }),
     today: todayInTimezone(ctx.tenant.timezone),
+    // What the receiving side may have got, other than cash. Registers are
+    // offered separately and per company, so they are excluded here along with
+    // the two affiliate accounts — naming one of those as "what they got" would
+    // put the affiliate leg on both sides of the same entry.
+    codable: await tx.query.accounts.findMany({
+      where: and(
+        eq(schema.accounts.tenantId, ctx.tenant.id),
+        eq(schema.accounts.isActive, true),
+      ),
+      orderBy: asc(schema.accounts.code),
+    }),
     // How many entries each set of books holds — the figure that says whether
     // deactivating one would strand anything.
     entryCounts: await tx
@@ -97,6 +108,14 @@ export default async function CompaniesPage() {
                   companies={entities
                     .filter((e) => e.isActive)
                     .map((e) => ({ id: e.id, name: e.name }))}
+                  accounts={codable
+                    .filter(
+                      (a) =>
+                        !registers.some((r) => r.accountId === a.id) &&
+                        a.subtype !== "due_from_affiliate" &&
+                        a.subtype !== "due_to_affiliate",
+                    )
+                    .map((a) => ({ id: a.id, code: a.code, name: a.name }))}
                   today={today}
                 />
               )}
@@ -114,8 +133,8 @@ export default async function CompaniesPage() {
         <div className="rounded-xl bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
           Reports carry a <strong className="font-medium">Company</strong>{" "}
           control, and every statement and export says which one it covers.
-          Invoices, bills and bank transactions all post to the default company
-          for now — a journal entry is the one thing that can name another.
+          Invoices, bills and bank accounts each belong to one company, and
+          money moving between two of them is recorded on both sides at once.
         </div>
       )}
 

@@ -26,6 +26,13 @@ export interface EditorAccount {
   code: string;
   name: string;
   accountType: string;
+  /**
+   * Set when this account is a REGISTER, naming the company that owns it
+   * (ADR 0010). Undefined for every ordinary chart account, which is most of
+   * them — AR, AP and the expense accounts are shared, and only a register has
+   * an owner.
+   */
+  registerEntityId?: string;
 }
 
 export interface EditorEntry {
@@ -111,6 +118,27 @@ export function EntryEditor({
   );
   // One key per editor mount: double-clicks and retries post exactly once.
   const [idempotencyKey] = useState(() => crypto.randomUUID());
+  /**
+   * The account the server refused, and why.
+   *
+   * A toast says the entry was rejected; on a twelve-line journal it does not
+   * say WHICH line to fix, and the account list is long enough that hunting is
+   * real work. The server sends the account id back for exactly this.
+   */
+  const [rejected, setRejected] = useState<{ accountId: string; message: string } | null>(null);
+
+  /**
+   * A register owned by ANOTHER company is not offered at all.
+   *
+   * `postEntry` refuses such a line anyway, so this is not what makes the
+   * ledger safe — it is what stops the form offering a choice that always
+   * fails, the same fix the invoice's Deposit-to picker got. Everything else in
+   * the chart stays: a journal has to be able to name any account, and only a
+   * register is owned.
+   */
+  const selectableAccounts = accounts.filter(
+    (a) => !a.registerEntityId || !entityId || a.registerEntityId === entityId,
+  );
 
   const filled = rows.filter((r) => r.accountId !== "" || r.debit !== "" || r.credit !== "");
   const parsed = filled.map((r) => ({ row: r, cents: rowCents(r) }));
@@ -137,6 +165,26 @@ export function EntryEditor({
 
   function setRow(key: string, patch: Partial<LineRow>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    setRejected(null);
+  }
+
+  /**
+   * Changing the company clears any line that had picked a register belonging
+   * to the company you just left. Leaving it selected would show an account
+   * that is no longer in the list — a stale value the dropdown cannot even
+   * render a label for.
+   */
+  function chooseEntity(next: string) {
+    setEntityId(next);
+    setRejected(null);
+    setRows((rs) =>
+      rs.map((r) => {
+        const acct = accounts.find((a) => a.id === r.accountId);
+        return acct?.registerEntityId && acct.registerEntityId !== next
+          ? { ...r, accountId: "" }
+          : r;
+      }),
+    );
   }
 
   function submit(status: "draft" | "posted") {
@@ -161,7 +209,12 @@ export function EntryEditor({
             lines,
           });
       if ("error" in result) {
+        // The toast still fires — it is what tells you something happened at
+        // all. `accountId` adds WHERE, which the toast cannot.
         toast.error(result.error);
+        if (result.accountId) {
+          setRejected({ accountId: result.accountId, message: result.error });
+        }
         return;
       }
       toast.success(
@@ -178,7 +231,7 @@ export function EntryEditor({
         {!entry && entities && entities.length > 1 && (
           <div className="space-y-1.5">
             <Label htmlFor="entry-entity">Company</Label>
-            <Select value={entityId || undefined} onValueChange={setEntityId}>
+            <Select value={entityId || undefined} onValueChange={chooseEntity}>
               <SelectTrigger id="entry-entity" className="h-9 w-full sm:w-72">
                 <SelectValue placeholder="Which company's books?" />
               </SelectTrigger>
@@ -226,20 +279,24 @@ export function EntryEditor({
             {rows.map((row) => {
               const cents = rowCents(row);
               const bad = cents === null;
+              // The line the server named, if it named one.
+              const refused = rejected?.accountId === row.accountId;
               return (
+                <div key={row.key} className="space-y-1">
                 <div
-                  key={row.key}
                   className="grid grid-cols-[1fr_120px_120px_1fr_32px] items-center gap-2"
                 >
                   <Select
                     value={row.accountId || undefined}
                     onValueChange={(v) => setRow(row.key, { accountId: v })}
                   >
-                    <SelectTrigger className="h-9">
+                    <SelectTrigger
+                      className={`h-9 ${refused ? "border-destructive" : ""}`}
+                    >
                       <SelectValue placeholder="Select account" />
                     </SelectTrigger>
                     <SelectContent>
-                      {accounts.map((a) => (
+                      {selectableAccounts.map((a) => (
                         <SelectItem key={a.id} value={a.id}>
                           {a.code} · {a.name}
                         </SelectItem>
@@ -282,6 +339,10 @@ export function EntryEditor({
                     <Trash2 className="size-4" />
                     <span className="sr-only">Remove line</span>
                   </Button>
+                </div>
+                {refused && (
+                  <p className="text-xs text-destructive">{rejected!.message}</p>
+                )}
                 </div>
               );
             })}

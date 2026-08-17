@@ -49,7 +49,13 @@ const BASE = "/dashboard/m/accounting";
 
 type ActionResult<T = undefined> =
   | { ok: true; data?: T }
-  | { error: string };
+  /**
+   * `accountId` rides along when the failure is about ONE account, so a form
+   * can put the message where the mistake is instead of only in a toast.
+   * Optional and absent for every other error, so `"error" in result` and every
+   * existing call site are unchanged.
+   */
+  | { error: string; accountId?: string };
 
 async function gate(opts?: { allowExpert?: boolean }): Promise<LedgerCtx> {
   const ctx = await requireTenant();
@@ -62,11 +68,15 @@ async function gate(opts?: { allowExpert?: boolean }): Promise<LedgerCtx> {
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
 }
 
-function fail(err: unknown): { error: string } {
+function fail(err: unknown): { error: string; accountId?: string } {
   if (!(err instanceof LedgerError)) {
     console.error("accounting action failed", err);
   }
-  return { error: friendlyMessage(err) };
+  const accountId = err instanceof LedgerError ? err.meta?.accountId : undefined;
+  return {
+    error: friendlyMessage(err),
+    ...(typeof accountId === "string" ? { accountId } : {}),
+  };
 }
 
 function revalidate(): void {

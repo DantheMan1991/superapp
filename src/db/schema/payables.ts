@@ -89,9 +89,9 @@ export const bills = pgTable(
       .references(() => tenants.id, { onDelete: "cascade" }),
     /**
      * Which company's books this document belongs to (ADR 0010). The document
-     * decides, and its approval and every payment follow it. NOT NULL here is
-     * one release ahead of the database — `0145` adds it nullable, `0146`
-     * closes it after the deploy.
+     * decides, and its approval and every payment follow it. NOT NULL in the
+     * database since `0146` — it arrived nullable in `0145`, because migrations
+     * precede deploys.
      */
     entityId: uuid("entity_id").notNull(),
     vendorId: uuid("vendor_id").notNull(),

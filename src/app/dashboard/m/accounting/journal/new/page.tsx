@@ -32,8 +32,19 @@ export default async function NewEntryPage() {
           ),
         )
         .orderBy(asc(schema.accounts.code));
+      // Which accounts are REGISTERS, and whose. The editor uses it to keep
+      // another company's account out of the list (ADR 0010 slice 1b); every
+      // other account is shared and carries nothing.
+      const registers = await tx.query.bankAccounts.findMany({
+        where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
+        columns: { accountId: true, entityId: true },
+      });
+      const ownerOf = new Map(registers.map((r) => [r.accountId, r.entityId]));
       return {
-        accounts,
+        accounts: accounts.map((a) => ({
+          ...a,
+          ...(ownerOf.has(a.id) ? { registerEntityId: ownerOf.get(a.id)! } : {}),
+        })),
         today: todayInTimezone(ctx.tenant.timezone),
         entities: await listEntities(tx, ctx.tenant.id),
         defaultEntityId: await getDefaultEntityId(tx, ctx.tenant.id),

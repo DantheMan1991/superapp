@@ -69,15 +69,16 @@ const transferSchema = z.object({
     .refine(isValidIsoDate, "Not a real calendar date"),
   memo: z.string().trim().max(1000).optional(),
   /**
-   * Where it landed in the receiving company. OPTIONAL, and the distinction is
-   * the whole of the difference between a transfer and a loan:
+   * WHAT THE RECEIVING COMPANY GOT, and it is required.
    *
-   *  - GIVEN — the money arrived in that company's own account, so its cash
-   *    goes up and it owes the payer. Two registers move.
-   *  - ABSENT — the money never reached the other company as cash; the payer
-   *    settled something on its behalf, so only the affiliate balance moves.
+   * Its own register when cash arrived; an expense or asset account when the
+   * payer bought or settled something on its behalf. The first cut made this
+   * optional — "it did not reach their account" — which produced an entry with
+   * a single affiliate line that could not balance and could not post. There is
+   * no accounting for nothing: if a company is better off by an amount, its
+   * books say what it got.
    */
-  toAccountId: z.string().uuid().optional(),
+  toAccountId: z.string().uuid(),
 });
 
 export async function recordIntercompanyTransferAction(
@@ -103,13 +104,7 @@ export async function recordIntercompanyTransferAction(
         payerLines: [
           { accountId: p.fromAccountId, amountCents: -p.amountCents },
         ],
-        // Nothing on the receiving side when the cash never got there — the
-        // affiliate leg alone is the whole story, and `postIntercompanyPair`
-        // adds it. An entry of one line would fail the balance check; it does
-        // not, because the affiliate leg is always there.
-        payeeLines: p.toAccountId
-          ? [{ accountId: p.toAccountId, amountCents: p.amountCents }]
-          : [],
+        payeeLines: [{ accountId: p.toAccountId, amountCents: p.amountCents }],
       });
       await logAuditInTx(tx, {
         action: "ledger.intercompany_recorded",

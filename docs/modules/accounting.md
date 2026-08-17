@@ -13,6 +13,33 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — There is no accounting for nothing (branch `claude/intercompany-transfer-fix`)
+
+Found by driving the transfer dialog on the live Test tenant, minutes after
+slice 2 deployed. Test pays Oak Row 2,500, "Into" left blank, Record transfer →
+**"A journal entry needs at least two lines."**
+
+- **A design error, not a typo.** The dialog offered *"it did not reach their
+  account"*, which made the receiving entry a single `Cr Due to Affiliates`
+  line. One line cannot balance, so it cannot post — and the server said so in
+  terms about journal lines rather than about companies, which is the tell that
+  the question was wrong rather than the answer.
+- **The model was wrong, and the fix is the sentence.** If a company is better
+  off by an amount, its books have to say WHAT IT GOT: its own register when the
+  cash arrived, or the expense or asset the payer settled on its behalf. There
+  is no third option, so "optional" was never a real choice.
+- The field is now **required** and asks "What did they get?", offering the
+  receiving company's registers (labelled *cash in*) and then the rest of the
+  chart. `postIntercompanyPair` refuses an empty side outright with a message
+  about companies, so the engine cannot be talked into a one-line entry by a
+  future caller either.
+- **The `payerLines` side had the same hole and was never exercised** — every
+  caller happened to pass one. Both are checked now.
+- Also on that page: the banner still said invoices, bills and bank
+  transactions all post to the default company, which stopped being true when
+  slice 1b landed. A banner that describes last week's behaviour is worse than
+  no banner.
+
 ### 2026-08-16 — Intercompany pairs (branch `claude/intercompany-pairs`)
 
 Slice 2 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md). Slice 1b

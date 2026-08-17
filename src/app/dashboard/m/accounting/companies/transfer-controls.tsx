@@ -32,6 +32,12 @@ export interface TransferRegister {
   entityName: string;
 }
 
+export interface TransferAccount {
+  id: string;
+  code: string;
+  name: string;
+}
+
 /**
  * Moving money between two companies of one client (ADR 0010 slice 2).
  *
@@ -40,18 +46,30 @@ export interface TransferRegister {
  * posting engine would refuse that anyway. One question, no way to get it
  * wrong.
  *
- * "Where it landed" is optional, and that optionality is the whole difference
- * between the two things this records: choose a receiving account and both
- * companies' cash moves; leave it blank and the payer settled something on the
- * other's behalf, so only the affiliate balance moves.
+ * "WHAT THEY GOT" IS REQUIRED, and the first cut of this dialog had it wrong.
+ * It offered "it did not reach their account", which produced a receiving entry
+ * of one affiliate line — an entry that cannot balance and cannot post, and the
+ * server said so in terms about journal lines rather than about companies.
+ * Found by driving it on the live tenant.
+ *
+ * There is no accounting for nothing: if a company is better off by an amount,
+ * its books have to say what it got. Its own register when cash arrived, or the
+ * expense or asset the payer bought on its behalf.
  */
 export function TransferButton({
   registers,
   companies,
+  accounts,
   today,
 }: {
   registers: TransferRegister[];
   companies: Array<{ id: string; name: string }>;
+  /**
+   * Everything the receiving side may have got that is NOT a register —
+   * expenses, assets, payables. Registers of other companies are excluded
+   * upstream, because money cannot land in a third company's account.
+   */
+  accounts: TransferAccount[];
   today: string;
 }) {
   const router = useRouter();
@@ -82,7 +100,7 @@ export function TransferButton({
         amountCents: cents,
         entryDate: date,
         memo: memo.trim() || undefined,
-        toAccountId: toAccountId || undefined,
+        toAccountId,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -160,27 +178,32 @@ export function TransferButton({
               </Select>
             </div>
 
-            {toEntityId && receiving.length > 0 && (
+            {toEntityId && (
               <div className="space-y-1.5">
-                <Label>Into (optional)</Label>
+                <Label>What did they get?</Label>
                 <Select
                   value={toAccountId || undefined}
                   onValueChange={setToAccountId}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="It did not reach their account" />
+                    <SelectValue placeholder="Cash into an account, or what it paid for" />
                   </SelectTrigger>
                   <SelectContent>
                     {receiving.map((r) => (
                       <SelectItem key={r.ledgerAccountId} value={r.ledgerAccountId}>
-                        {r.name}
+                        {r.name} (cash in)
+                      </SelectItem>
+                    ))}
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.code} · {a.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Leave this blank when the money never reached them — when one
-                  company paid something on the other&apos;s behalf.
+                  Their own account if the cash reached them, otherwise whatever
+                  it paid for on their behalf.
                 </p>
               </div>
             )}
@@ -222,7 +245,9 @@ export function TransferButton({
               Cancel
             </Button>
             <Button
-              disabled={pending || !fromAccountId || !toEntityId || !amount}
+              disabled={
+                pending || !fromAccountId || !toEntityId || !toAccountId || !amount
+              }
               onClick={submit}
             >
               {pending ? "Recording…" : "Record transfer"}

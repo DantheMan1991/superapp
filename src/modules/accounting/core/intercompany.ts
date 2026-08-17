@@ -101,8 +101,16 @@ export async function postIntercompanyPair(
     payerLines: EntryLineInput[];
     /**
      * What the money did in the BENEFITING company, minus the affiliate leg —
-     * a debit to AP when a bill was settled, or nothing at all for a plain
-     * transfer, where the affiliate leg is the whole story on that side.
+     * a debit to AP when a bill was settled, to a register when cash arrived,
+     * to an expense when the payer bought something on their behalf.
+     *
+     * REQUIRED AND NON-EMPTY. There is no "the money went nowhere": if one
+     * company is better off by an amount, its books have to say what it got.
+     * The first cut of the transfer dialog made this optional, offering "it did
+     * not reach their account" — and produced a one-line entry that could not
+     * balance and could not post. Found by driving it. `postEntry` would refuse
+     * it anyway, with `TOO_FEW_LINES`, which is a true error message about the
+     * wrong thing.
      */
     payeeLines: EntryLineInput[];
     /**
@@ -132,6 +140,13 @@ export async function postIntercompanyPair(
     throw new LedgerError(
       "INTERCOMPANY_AMOUNT_INVALID",
       "an intercompany amount must be a positive whole number of cents",
+    );
+  }
+
+  if (input.payerLines.length === 0 || input.payeeLines.length === 0) {
+    throw new LedgerError(
+      "INTERCOMPANY_INCOMPLETE",
+      "both sides of a transfer need a line of their own",
     );
   }
 

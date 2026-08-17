@@ -24,6 +24,7 @@ export type LedgerErrorCode =
   | "INTERCOMPANY_SAME_COMPANY"
   | "INTERCOMPANY_AMOUNT_INVALID"
   | "INTERCOMPANY_NOT_FOUND"
+  | "INTERCOMPANY_INCOMPLETE"
   | "ENTRY_INTERCOMPANY"
   | "DUPLICATE_CODE"
   | "COA_SELF_PARENT"
@@ -143,6 +144,8 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   INTERCOMPANY_SAME_COMPANY: "Pick two different companies.",
   INTERCOMPANY_AMOUNT_INVALID: "Enter an amount above zero.",
   INTERCOMPANY_NOT_FOUND: "That transfer no longer exists.",
+  INTERCOMPANY_INCOMPLETE:
+    "Say what the receiving company got — cash into an account, or what was paid for on its behalf.",
   ENTRY_INTERCOMPANY:
     "This is one half of a transfer between two of your companies. Undo it from the transfer, so both sides move together.",
   CROSS_ENTITY_REGISTER:

@@ -313,59 +313,6 @@ export const customers = pgTable(
   ],
 );
 
-/**
- * RETIRED 2026-08-12. Folded into `recurringEntries` below (`0121`/`0122`),
- * which carries the same rows under `kind = 'invoice'` with the same ids.
- *
- * Nothing reads it. It is still declared because the TABLE still exists: a
- * DROP must follow the deploy that stopped selecting it, never precede it
- * (docs/conventions.md 4), so `drizzle/0123` and the deletion of this block
- * are a separate PR that lands after the fold has deployed.
- */
-export const recurringInvoices = pgTable(
-  "recurring_invoices",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
-    customerId: uuid("customer_id").notNull(),
-    name: text("name").notNull(),
-    /** {lines: [{description, quantity, unitPriceCents, incomeAccountId,
-     * dimensionMemberIds?}], memo, dueInDays} */
-    template: jsonb("template").notNull(),
-    frequency: recurringFrequency("frequency").notNull().default("monthly"),
-    dayOfMonth: integer("day_of_month").notNull(),
-    nextRunDate: date("next_run_date", { mode: "string" }).notNull(),
-    isActive: boolean("is_active").notNull().default(true),
-    lastGeneratedAt: timestamp("last_generated_at", { withTimezone: true }),
-    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
-    version: integer("version").notNull().default(1),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("recurring_invoices_tenant_id_id_idx").on(t.tenantId, t.id),
-    index("recurring_invoices_tenant_next_idx")
-      .on(t.tenantId, t.nextRunDate)
-      .where(sql`${t.isActive} = true`),
-    foreignKey({
-      name: "recurring_invoices_customer_fk",
-      columns: [t.tenantId, t.customerId],
-      foreignColumns: [customers.tenantId, customers.id],
-    }),
-    // 1–28 keeps month advancement a total function (no clamping logic).
-    check(
-      "recurring_invoices_day_of_month",
-      sql`${t.dayOfMonth} between 1 and 28`,
-    ),
-  ],
-);
-
 /* ------------------------------------------------------------------------
  * Recurring entries live HERE rather than in payables.ts, and the reason is
  * a dependency cycle rather than taste: an invoice template references
@@ -396,10 +343,10 @@ export const recurringEntryKind = pgEnum("recurring_entry_kind", [
  * re-validated at generation — accounts, customers and vendors may all have
  * deactivated since it was saved.
  *
- * `recurring_invoices` and `invoices.recurring_invoice_id` still EXIST at the
- * time of writing and are no longer read. They go in a separate migration in a
- * separate PR, because a DROP must follow the deploy that stopped selecting
- * them (docs/conventions.md 4).
+ * `recurring_invoices` and `invoices.recurring_invoice_id` are GONE
+ * (`drizzle/0147`). They outlived the fold by one release because a DROP must
+ * follow the deploy that stopped selecting them, never precede it
+ * (docs/conventions.md 4).
  */
 export const recurringEntries = pgTable(
   "recurring_entries",
@@ -555,22 +502,16 @@ export const invoices = pgTable(
      * reminders, the PDF balance and bank matching all keep working with tax
      * switched on. Only the value moved.
      *
-     * There is deliberately no `total = subtotal + tax` CHECK yet. A migration
-     * goes out AHEAD of the deploy (docs/conventions.md 4), and the previous
-     * deployment's `updateInvoiceDraft` writes `total_cents` without touching
-     * `subtotal_cents` — the constraint would reject every draft edit during
-     * the window. It lands in the follow-up migration, with the
-     * `recurring_invoices` DROP. Until then `tests/sales-tax.test.ts` pins it.
+     * `total = subtotal + tax` is a CHECK from `drizzle/0147`. It could not
+     * ship with `0123`: a migration goes out AHEAD of the deploy
+     * (docs/conventions.md 4), and the deployment running then wrote
+     * `total_cents` without touching `subtotal_cents`, so the constraint would
+     * have rejected every draft edit in that window. Every write path has
+     * written all three together since, which is what made it safe to add.
      */
     totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
     /** The issuance entry. Null while draft; survives void (audit trail). */
     journalEntryId: uuid("journal_entry_id"),
-    /**
-     * DEPRECATED, dropped in the follow-up PR. Superseded by
-     * `recurring_entry_id` below; kept for this deploy because a DROP must
-     * follow the deploy that stops selecting the column, never precede it.
-     */
-    recurringInvoiceId: uuid("recurring_invoice_id"),
     /** The template that generated this invoice, in the unified table. */
     recurringEntryId: uuid("recurring_entry_id"),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
@@ -609,11 +550,6 @@ export const invoices = pgTable(
       foreignColumns: [journalEntries.tenantId, journalEntries.id],
     }),
     foreignKey({
-      name: "invoices_recurring_fk",
-      columns: [t.tenantId, t.recurringInvoiceId],
-      foreignColumns: [recurringInvoices.tenantId, recurringInvoices.id],
-    }),
-    foreignKey({
       name: "invoices_recurring_entry_fk",
       columns: [t.tenantId, t.recurringEntryId],
       foreignColumns: [recurringEntries.tenantId, recurringEntries.id],
@@ -626,6 +562,12 @@ export const invoices = pgTable(
       foreignColumns: [salesTaxRates.tenantId, salesTaxRates.id],
     }),
     check("invoices_total_nonnegative", sql`${t.totalCents} >= 0`),
+    // The arithmetic the document states, enforced rather than trusted. Owed
+    // since `0123` and deferred for the reason on `totalCents` above.
+    check(
+      "invoices_total_is_subtotal_plus_tax",
+      sql`${t.totalCents} = ${t.subtotalCents} + ${t.taxCents}`,
+    ),
     // Safe in the same migration as the column: the previous deployment never
     // writes this, and its DEFAULT 0 satisfies the constraint. The
     // total = subtotal + tax CHECK is not, and waits for the follow-up.
@@ -911,7 +853,6 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 
 export type InvoicePayment = typeof invoicePayments.$inferSelect;
 
-export type RecurringInvoice = typeof recurringInvoices.$inferSelect;
 
 export type RecurringEntry = typeof recurringEntries.$inferSelect;
 

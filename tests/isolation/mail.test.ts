@@ -784,6 +784,8 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
               status: "issued",
               issueDate: "2026-08-01",
               dueDate: "2026-08-31",
+              // `subtotal + tax = total` is a CHECK from `0147`.
+              subtotalCents: 10_000,
               totalCents: 10_000,
               createdByClerkUserId: `user-${tag}`,
             })

@@ -22,7 +22,7 @@ import { listRecordHistory } from "@/modules/accounting/history/list";
 import { RecordHistory } from "@/modules/accounting/components/record-history";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
 import { loadBillLines, findPossibleDuplicates } from "@/modules/accounting/payables/bills";
-import { listEntities } from "@/modules/accounting/core";
+import { isCodableAccount, listEntities } from "@/modules/accounting/core";
 import { paidCentsFor } from "@/modules/accounting/payables/payments";
 import { readBillCoding } from "@/modules/accounting/ai/bill-validate";
 import {
@@ -151,12 +151,8 @@ export default async function BillDetailPage({
     data.allAccounts.map((a) => [a.id, `${a.code} · ${a.name}`]),
   );
   const registerIds = new Set(data.registers.map((r) => r.accountId));
-  const codableAccounts = data.accounts.filter(
-    (a) =>
-      !registerIds.has(a.id) &&
-      a.subtype !== "opening_balance" &&
-      !(a.isSystem &&
-        ["accounts_receivable", "accounts_payable"].includes(a.subtype)),
+  const codableAccounts = data.accounts.filter((a) =>
+    isCodableAccount(a, registerIds),
   );
   const coding = readBillCoding(bill.aiCoding);
   const isOwner = ctx.role === "owner";

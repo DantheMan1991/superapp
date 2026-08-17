@@ -7,7 +7,11 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listVendors } from "@/modules/accounting/payables/vendors";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { PurchasesNav } from "../../purchases-nav";
-import { getDefaultEntityId, listEntities } from "@/modules/accounting/core";
+import {
+  getDefaultEntityId,
+  isCodableAccount,
+  listEntities,
+} from "@/modules/accounting/core";
 import { BillBuilder } from "../bill-builder";
 
 export const dynamic = "force-dynamic";
@@ -37,13 +41,7 @@ export default async function NewBillPage() {
       entities: await listEntities(tx, tenantId),
       defaultEntityId: await getDefaultEntityId(tx, tenantId),
       today: todayInTimezone(ctx.tenant.timezone),
-      accounts: accounts.filter(
-        (a) =>
-          !registerIds.has(a.id) &&
-          a.subtype !== "opening_balance" &&
-          !(a.isSystem &&
-            ["accounts_receivable", "accounts_payable"].includes(a.subtype)),
-      ),
+      accounts: accounts.filter((a) => isCodableAccount(a, registerIds)),
     };
   });
 

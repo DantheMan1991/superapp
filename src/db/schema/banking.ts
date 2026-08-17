@@ -85,7 +85,8 @@ export const bankAccounts = pgTable(
      * transaction and needs a linked pair of entries, which is slice 2 — until
      * then it is refused rather than mis-recorded.
      *
-     * NOT NULL one release ahead of the database; see `0145`/`0146`.
+     * NOT NULL in the database since `0146`; it arrived nullable in `0145`,
+     * because migrations precede deploys.
      */
     entityId: uuid("entity_id").notNull(),
     /** The ledger account this register clears. 1:1 (unique below). */

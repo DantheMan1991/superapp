@@ -142,10 +142,14 @@ async function assertNoForeignRegisters(
     )
     .limit(1);
   if (foreign.length > 0) {
+    // `accountId` is in the meta so the JOURNAL EDITOR can mark the line that
+    // caused it. A toast alone tells you the entry was refused; on a
+    // twelve-line journal it does not tell you which line to fix, and the
+    // account list is long enough that hunting for it is real work.
     throw new LedgerError(
       "CROSS_ENTITY_REGISTER",
       `account ${foreign[0].accountId} is a register of another company`,
-      { registerName: foreign[0].name },
+      { registerName: foreign[0].name, accountId: foreign[0].accountId },
     );
   }
 }

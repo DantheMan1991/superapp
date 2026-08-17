@@ -95,7 +95,23 @@ export default async function EntryPage({
             eq(schema.journalEntries.reversesEntryId, id),
           ),
         });
-    return { entry, lines, accounts, settings, reversal };
+    // Register ownership, so an EDIT offers the same accounts a create does.
+    // The entry's company is fixed, so the filter is exact here.
+    const registers = await tx.query.bankAccounts.findMany({
+      where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
+      columns: { accountId: true, entityId: true },
+    });
+    const ownerOf = new Map(registers.map((r) => [r.accountId, r.entityId]));
+    return {
+      entry,
+      lines,
+      accounts: accounts.map((a) => ({
+        ...a,
+        ...(ownerOf.has(a.id) ? { registerEntityId: ownerOf.get(a.id)! } : {}),
+      })),
+      settings,
+      reversal,
+    };
   });
   if (!data) notFound();
   const { entry, lines, accounts, settings, reversal } = data;
@@ -213,6 +229,7 @@ export default async function EntryPage({
             entry={{
               id: entry.id,
               version: entry.version,
+              entityId: entry.entityId,
               entryDate: entry.entryDate,
               memo: entry.memo,
               lines: lines.map((l) => ({

@@ -13,6 +13,39 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — Document `entity_id` becomes NOT NULL, and the refusal says which line (branch `claude/document-entity-not-null`)
+
+The contract half of slice 1b, plus the follow-up the founder asked for after
+watching a cross-company journal get refused with nothing but a toast.
+
+- **`0146`** closes `entity_id` on `invoices`, `bills` and `bank_accounts`,
+  after the deploy that writes them. Third time this repo has made that split —
+  `0123`/`0125`, `0142`/`0144`, now `0145`/`0146` — and the backfills re-run
+  first, because rows written in the window between migration and deploy carry
+  a NULL nobody would otherwise repair.
+- **The dev branch refused it, and that was worth more than a clean run.** A
+  `Merge Test` tenant had invoices and NO company at all — left by a fixture
+  written before slice 1 — and `SET NOT NULL` failed with nothing but *column
+  "entity_id" contains null values*. `0146` now re-runs `0142`'s guarded
+  "one default company per tenant" INSERT first. It is a REPAIR, not an
+  invention: `0142` established that invariant, so a tenant lacking a company is
+  a gap in it. Production matched nothing, as expected; a migration that only
+  works on the two databases you happened to check is not finished.
+- **The journal editor no longer offers another company's register**, and
+  changing the company CLEARS any line that had picked one — a selection left
+  behind would be a value the dropdown cannot render a label for. Same fix the
+  Deposit-to picker got, in the one place a cross-company register was still
+  selectable. Everything else in the chart stays: a journal has to be able to
+  name any account, and only a register is owned.
+- **The refusal now marks the line.** `CROSS_ENTITY_REGISTER` carries the
+  offending `accountId` in its meta, `fail()` passes it through as an optional
+  field on the error result, and the editor rings that row and prints the
+  message beneath it. The toast still fires — it is what tells you something
+  happened at all — but on a twelve-line journal it cannot tell you WHERE, and
+  the account list is long enough that hunting for it is real work.
+- `ActionResult`'s error arm gained an optional `accountId`, so `"error" in
+  result` and every existing call site are untouched.
+
 ### 2026-08-16 — The deposit picker offered another company's account (branch `claude/register-pickers-by-company`)
 
 Found by driving the live Test tenant right after slice 1b deployed: Oak Row
@@ -1240,7 +1273,7 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
-- **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. **`drizzle/0146` is owed after this deploy** — the three `SET NOT NULL`s. What is NOT built: **intercompany pairs** (slice 2, and the register guard is what refuses the case until it exists), **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller
+- **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. `drizzle/0146` closed the expand/contract — all three are NOT NULL on both databases. What is NOT built: **intercompany pairs** (slice 2, and the register guard is what refuses the case until it exists), **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller
 - **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. `drizzle/0144` closed the expand/contract the same day: `entity_id` is NOT NULL on both databases, with the window's backfill re-run first. Still queued in that lane: the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)

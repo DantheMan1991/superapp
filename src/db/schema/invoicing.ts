@@ -511,9 +511,10 @@ export const invoices = pgTable(
      * default between issuing and being paid split one document's AR across two
      * balance sheets. Now there is nothing to inherit from.
      *
-     * NOT NULL here is one release ahead of the database: `drizzle/0145` adds it
-     * nullable and backfills, `0146` closes it after the deploy. Same reason as
-     * `journal_entries.entity_id` — migrations precede deploys.
+     * NOT NULL in the database since `drizzle/0146`. It arrived nullable in
+     * `0145` and was closed a release later, because migrations precede deploys
+     * and the deploy running while `0145` landed did not write it. Worth knowing
+     * before adding the next required column here.
      */
     entityId: uuid("entity_id").notNull(),
     customerId: uuid("customer_id").notNull(),

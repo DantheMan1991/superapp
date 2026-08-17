@@ -47,6 +47,32 @@ export async function assertEntryNotSourceManaged(
   }
 }
 
+/**
+ * NEITHER HALF OF AN INTERCOMPANY PAIR MOVES ALONE (ADR 0010 slice 2).
+ *
+ * Voiding or reversing one leg leaves the other company still owing an
+ * affiliate that no longer owes it — both balance sheets stay internally
+ * consistent and disagree with each other, which is the asymmetry the pair
+ * exists to prevent. `reverseIntercompanyPair` undoes both as a new pair.
+ *
+ * Stricter than the managed-source guard above, which still permits a reverse:
+ * here reverse is refused too, because a one-sided reversal is exactly as
+ * wrong as a one-sided void.
+ */
+export async function assertNotIntercompanyLeg(
+  tx: Tx,
+  tenantId: string,
+  entryId: string,
+): Promise<void> {
+  const entry = await tx.query.journalEntries.findFirst({
+    where: eq(schema.journalEntries.id, entryId),
+    columns: { tenantId: true, intercompanyId: true },
+  });
+  if (entry && entry.tenantId === tenantId && entry.intercompanyId) {
+    throw new LedgerError("ENTRY_INTERCOMPANY", entry.intercompanyId);
+  }
+}
+
 export async function getSettings(
   tx: Tx,
   tenantId: string,

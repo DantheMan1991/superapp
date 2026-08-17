@@ -1037,6 +1037,34 @@
       "when": 1786927090966,
       "tag": "0147_drop_recurring_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1786928833538,
+      "tag": "0148_intercompany_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1786928894671,
+      "tag": "0149_intercompany_pair_trigger",
+      "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1786929041173,
+      "tag": "0150_intercompany_source",
+      "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1786930033881,
+      "tag": "0151_affiliate_accounts",
+      "breakpoints": true
     }
   ]
 }

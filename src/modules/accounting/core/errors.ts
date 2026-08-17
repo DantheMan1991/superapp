@@ -20,6 +20,11 @@ export type LedgerErrorCode =
   | "ENTITY_NAME_INVALID"
   | "ENTITY_NAME_TAKEN"
   | "CROSS_ENTITY_REGISTER"
+  | "AFFILIATE_ACCOUNTS_MISSING"
+  | "INTERCOMPANY_SAME_COMPANY"
+  | "INTERCOMPANY_AMOUNT_INVALID"
+  | "INTERCOMPANY_NOT_FOUND"
+  | "ENTRY_INTERCOMPANY"
   | "DUPLICATE_CODE"
   | "COA_SELF_PARENT"
   | "COA_CYCLE"
@@ -133,6 +138,13 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "This is the default company — make another one the default first.",
   ENTITY_NAME_INVALID: "Give the company a name.",
   ENTITY_NAME_TAKEN: "A company already has that name.",
+  AFFILIATE_ACCOUNTS_MISSING:
+    "This business is missing the Due from / Due to Affiliates accounts. Toggle the accounting module off and on again to add them.",
+  INTERCOMPANY_SAME_COMPANY: "Pick two different companies.",
+  INTERCOMPANY_AMOUNT_INVALID: "Enter an amount above zero.",
+  INTERCOMPANY_NOT_FOUND: "That transfer no longer exists.",
+  ENTRY_INTERCOMPANY:
+    "This is one half of a transfer between two of your companies. Undo it from the transfer, so both sides move together.",
   CROSS_ENTITY_REGISTER:
     "That bank account belongs to a different company. Use one of this company's own accounts — money moving between two of your companies is a transfer, and recording it properly needs both sides.",
   DUPLICATE_CODE: "That account code is already in use.",

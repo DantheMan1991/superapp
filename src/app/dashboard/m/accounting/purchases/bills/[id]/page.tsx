@@ -22,6 +22,7 @@ import { listRecordHistory } from "@/modules/accounting/history/list";
 import { RecordHistory } from "@/modules/accounting/components/record-history";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
 import { loadBillLines, findPossibleDuplicates } from "@/modules/accounting/payables/bills";
+import { listEntities } from "@/modules/accounting/core";
 import { paidCentsFor } from "@/modules/accounting/payables/payments";
 import { readBillCoding } from "@/modules/accounting/ai/bill-validate";
 import {
@@ -84,18 +85,23 @@ export default async function BillDetailPage({
       orderBy: (p, { asc }) => [asc(p.paymentDate)],
     });
     const paid = await paidCentsFor(tx, tenantId, bill.id);
-    // ONLY THIS DOCUMENT'S COMPANY. `postEntry` refuses a foreign register
-    // anyway (ADR 0010 slice 1b), so an unfiltered list was never a correctness
-    // hole — it is a control that offers a choice which always fails, the same
-    // class as the recurring invoice that could be coded to Checking. Found by
-    // driving the live app: Oak Row LLC's invoice offered Test's account.
+    /**
+     * EVERY active register, including other companies' — and that reverses
+     * what slice 1b did here on purpose.
+     *
+     * Slice 1b filtered this list because paying one company's bill from
+     * another's account was refused, so offering it was offering a choice that
+     * always failed. Slice 2 records it instead, as a linked intercompany pair,
+     * so it is now a real option. The dialog labels whose account each one is;
+     * `recordBillPayment` decides from the register which shape to write.
+     */
     const registers = await tx.query.bankAccounts.findMany({
       where: and(
         eq(schema.bankAccounts.tenantId, tenantId),
         eq(schema.bankAccounts.isActive, true),
-        eq(schema.bankAccounts.entityId, bill.entityId),
       ),
     });
+    const companies = await listEntities(tx, tenantId, { includeInactive: true });
     const vendors = await tx.query.vendors.findMany({
       where: and(
         eq(schema.vendors.tenantId, tenantId),
@@ -123,6 +129,7 @@ export default async function BillDetailPage({
         : []),
     ]);
     return {
+      companies,
       bill,
       vendor,
       lines,
@@ -302,6 +309,15 @@ export default async function BillDetailPage({
                   ledgerAccountId: r.accountId,
                   name: r.name,
                   kind: r.kind,
+                  // Named only when it is somebody ELSE'S account, because
+                  // that is the only time the answer changes what gets
+                  // written — and a label on every row would be noise for
+                  // the single-company tenant.
+                  otherCompany:
+                    r.entityId === bill.entityId
+                      ? undefined
+                      : (data.companies.find((c) => c.id === r.entityId)?.name ??
+                        "another company"),
                 }))}
               />
             )}

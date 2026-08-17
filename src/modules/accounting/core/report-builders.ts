@@ -149,6 +149,11 @@ export const BS_GROUP_BY_SUBTYPE: Record<string, BsGroupKey> = {
   cash: "current_assets",
   undeposited_funds: "current_assets",
   accounts_receivable: "current_assets",
+  // Intercompany (ADR 0010 slice 2). Current on both sides: an affiliate
+  // balance is settled out of working capital, not held for years — and
+  // CONSOLIDATION eliminates the pair entirely, so on the combined statement
+  // neither line survives to be classified at all.
+  due_from_affiliate: "current_assets",
   inventory: "current_assets",
   other_current_asset: "current_assets",
   fixed_asset: "fixed_assets",
@@ -156,6 +161,7 @@ export const BS_GROUP_BY_SUBTYPE: Record<string, BsGroupKey> = {
   accounts_payable: "current_liabilities",
   credit_card: "current_liabilities",
   sales_tax: "current_liabilities",
+  due_to_affiliate: "current_liabilities",
   payroll_liability: "current_liabilities",
   other_current_liability: "current_liabilities",
   long_term_liability: "long_term_liabilities",

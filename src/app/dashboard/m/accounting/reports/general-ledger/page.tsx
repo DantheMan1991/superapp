@@ -43,6 +43,8 @@ const SOURCE_LABEL: Record<string, string> = {
   opening_balance: "Opening",
   recurring: "Recurring",
   reversal: "Reversal",
+  intercompany: "Between companies",
+  depreciation: "Depreciation",
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

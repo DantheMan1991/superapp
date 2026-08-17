@@ -167,9 +167,24 @@ constrained the same way: two companies' receivables share account 1200 and are
 separated by the entry's company, because AR is not a thing anybody reconciles
 to a statement.
 
-**What is still not built:** intercompany pairs (2), consolidation with
-eliminations (3), per-entity close (4 — `period_closes` locks every company at
-once), and a company on fixed assets.
+**Slice 2 landed the same day.** `intercompany_id` links the two halves; the
+due-to/due-from legs are generated against ONE shared account per side rather
+than one per counterparty, because ten LLCs would otherwise be ninety accounts
+and "who owes whom" is a property of the transaction — derived from the links,
+the way this module derives everything else. A deferred trigger enforces exactly
+two entries in two different companies, and neither leg can be voided or
+reversed alone.
+
+The thing this file did not anticipate, and it is worth recording: **the pair
+needs no exception to the register guard slice 1b added.** Each leg touches only
+its own company's accounts plus a shared affiliate account, so the guard that
+refuses a single cross-company entry is exactly what makes the two-entry form
+the only representable one. The constraint turned out to define the solution.
+
+**What is still not built:** consolidation with eliminations (3), per-entity
+close (4 — `period_closes` locks every company at once), a company on fixed
+assets, and receiving an invoice payment into another company's account, which
+is the mirror of the bill case and still refused.
 
 **What would make us revisit:** a client needing one entity's data genuinely
 hidden from another's staff — a joint venture where a partner sees one LLC and

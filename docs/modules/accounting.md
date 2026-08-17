@@ -13,6 +13,27 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — A retired register is still somebody's (branch `claude/transfer-account-list`)
+
+Found by driving the transfer dialog again after the previous fix. "What did
+they get?" offered Oak Row **1020 · Rules Test Checking** — Test's own register,
+deactivated months ago — and the server refused it with the cross-company
+message. A choice that can never succeed, for the third time in this feature.
+
+- **The exclusion filtered ACTIVE registers only.** The list of things the
+  receiving company might have got removes registers, because their own are
+  offered separately labelled *cash in* — but it was built from the same active
+  -only query that feeds those choices, so a deactivated register of any company
+  fell through. `postEntry`'s guard has no `is_active` condition, and rightly
+  not: **deactivating a register does not stop it being somebody's.**
+- Fixed by excluding every register, active or not, from the account list —
+  a second query whose only job is that exclusion.
+- The engine was right throughout and refused it every time. Three of the four
+  bugs in this slice have been the same shape: a picker offering something the
+  posting engine will not accept. The guard has been the thing holding the line
+  while the pickers caught up, which is the argument for having put it in the
+  engine rather than in each screen.
+
 ### 2026-08-16 — There is no accounting for nothing (branch `claude/intercompany-transfer-fix`)
 
 Found by driving the transfer dialog on the live Test tenant, minutes after

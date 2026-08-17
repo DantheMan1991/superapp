@@ -40,19 +40,44 @@ export default async function CompaniesPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
 
-  const { entities, entryCounts, owed, registers, today, codable } = await withTenant(
+  const {
+    entities,
+    entryCounts,
+    owed,
+    registers,
+    today,
+    codable,
+    allRegisterAccountIds,
+  } = await withTenant(
     ctx.tenant.id,
     async (tx) => ({
     entities: await listEntities(tx, ctx.tenant.id, { includeInactive: true }),
     // Who owes whom, walked from the intercompany links rather than held in
     // ninety accounts (ADR 0010 slice 2).
     owed: await affiliateBalances(tx, ctx.tenant.id),
+    // ACTIVE registers, for the "paid from" and "cash in" choices.
     registers: await tx.query.bankAccounts.findMany({
       where: and(
         eq(schema.bankAccounts.tenantId, ctx.tenant.id),
         eq(schema.bankAccounts.isActive, true),
       ),
     }),
+    /**
+     * EVERY register, active or not, purely to exclude them from "what did
+     * they get".
+     *
+     * The first cut excluded only the ACTIVE ones, so a DEACTIVATED register
+     * belonging to another company stayed in the list — and `postEntry` refuses
+     * it, because the guard does not care whether a register is active. Found
+     * by driving it: Oak Row was offered Test's retired "Rules Test Checking".
+     * Deactivating a register does not stop it being somebody's.
+     */
+    allRegisterAccountIds: (
+      await tx.query.bankAccounts.findMany({
+        where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
+        columns: { accountId: true },
+      })
+    ).map((r) => r.accountId),
     today: todayInTimezone(ctx.tenant.timezone),
     // What the receiving side may have got, other than cash. Registers are
     // offered separately and per company, so they are excluded here along with
@@ -111,7 +136,7 @@ export default async function CompaniesPage() {
                   accounts={codable
                     .filter(
                       (a) =>
-                        !registers.some((r) => r.accountId === a.id) &&
+                        !allRegisterAccountIds.includes(a.id) &&
                         a.subtype !== "due_from_affiliate" &&
                         a.subtype !== "due_to_affiliate",
                     )

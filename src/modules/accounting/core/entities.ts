@@ -28,15 +28,37 @@ import type { LedgerCtx } from "./types";
  * error.
  *
  * "COMBINED", NOT "CONSOLIDATED", and the name is doing work. It is the plain
- * sum across entities with NO eliminations. Today that is also the consolidated
- * figure, because intercompany pairs do not exist yet (slice 2). When they do,
- * "combined" is still an honest name for a number that has eliminated nothing,
- * so nothing here has to be renamed or quietly redefined — the consolidated
- * report arrives beside it as its own kind.
+ * sum across entities with NO eliminations, and slice 3 did not redefine it:
+ * `consolidated` arrived BESIDE it as a third kind. A report that quietly
+ * started eliminating under the name "combined" would change what every saved
+ * report link and every already-exported file means.
+ *
+ * CONSOLIDATED HAS NO `entityId`, and that is deliberate rather than an
+ * omission. Eliminating one side of an intercompany pair while keeping the
+ * other leaves that company's books short by the amount — so a consolidated
+ * single company is not a thing, and the type says so.
  */
 export type EntityScope =
   | { kind: "one"; entityId: string }
-  | { kind: "combined" };
+  | { kind: "combined" }
+  | { kind: "consolidated" };
+
+/**
+ * The scopes that are a plain ROW FILTER, with nothing to eliminate.
+ *
+ * THIS TYPE IS THE WHOLE DEFENCE OF SLICE 3, the way the required argument was
+ * the defence of slice 1. Elimination is a LINE-level exclusion, but a scope has
+ * so far been an ENTRY-level predicate — so a consolidated scope handed to
+ * `entityScopeCondition` would eliminate nothing and produce a statement that
+ * looks right, balances, and double-counts every intercompany transaction.
+ * Narrowing that function's parameter makes it a COMPILE ERROR to hand it one:
+ * every existing call site had to say what it does about consolidation, and so
+ * does the next report anybody writes.
+ */
+export type FilterScope = Exclude<EntityScope, { kind: "consolidated" }>;
+
+/** Does a report offer the consolidated scope at all? Stated, never defaulted. */
+export type Consolidation = "offered" | "declined";
 
 /**
  * The SQL predicate for a scope, or undefined for combined.
@@ -51,9 +73,13 @@ export type EntityScope =
  * reads both an invoice column and the ledger. One helper rather than three, so
  * "combined means no predicate" is decided in exactly one place — a report that
  * hand-rolled `eq(...)` would have to remember that on its own.
+ *
+ * IT TAKES A `FilterScope`, NOT AN `EntityScope`. A ledger report reading
+ * journal lines wants `ledgerScopeConditions` in `consolidation.ts`, which
+ * returns this predicate AND the elimination alongside it.
  */
 export function entityScopeCondition(
-  scope: EntityScope,
+  scope: FilterScope,
   column: PgColumn = schema.journalEntries.entityId,
 ): SQL | undefined {
   return scope.kind === "one" ? eq(column, scope.entityId) : undefined;
@@ -73,6 +99,10 @@ export function entityScopeLabel(
   entities: Array<Pick<Entity, "id" | "name">>,
 ): string {
   if (scope.kind === "combined") return "All companies (combined)";
+  // The two sit side by side and the difference between them is the whole
+  // feature, so the label says which one it is rather than leaving the reader
+  // to infer it from the numbers.
+  if (scope.kind === "consolidated") return "All companies (consolidated)";
   return entities.find((e) => e.id === scope.entityId)?.name ?? "Unknown company";
 }
 
@@ -220,22 +250,49 @@ export async function entityForDocument(
  * several. So the single-entity client never sees the concept, and a
  * multi-entity client's unscoped visit is labelled "All entities (combined)"
  * rather than silently showing one company's books.
+ *
+ * `consolidated` follows the SAME two rules. On a one-company tenant it means
+ * that company — there is nothing to consolidate and the client never learns
+ * the word. On a report that DECLINES consolidation it refuses, exactly as an
+ * unknown id does, rather than quietly answering with the combined figures
+ * under a name the reader chose for the difference.
  */
 export async function resolveEntityScope(
   tx: Tx,
   tenantId: string,
   requested: string | undefined,
   entities: Array<Pick<Entity, "id">>,
+  consolidation: Consolidation,
 ): Promise<EntityScope> {
+  const only = entities.length === 1 ? entities[0].id : undefined;
   if (!requested || requested === "combined") {
-    return entities.length === 1
-      ? { kind: "one", entityId: entities[0].id }
-      : { kind: "combined" };
+    return only ? { kind: "one", entityId: only } : { kind: "combined" };
+  }
+  if (requested === "consolidated") {
+    if (only) return { kind: "one", entityId: only };
+    if (consolidation === "declined") {
+      throw new LedgerError(
+        "SCOPE_NOT_OFFERED",
+        "this report does not offer a consolidated scope",
+      );
+    }
+    return { kind: "consolidated" };
   }
   if (!entities.some((e) => e.id === requested)) {
     throw new LedgerError("ENTITY_NOT_FOUND", `entity ${requested} not found`);
   }
   return { kind: "one", entityId: requested };
+}
+
+export interface ReportEntityView<S extends EntityScope = EntityScope> {
+  scope: S;
+  entities: Entity[];
+  /** Show the picker at all? Only once there is a choice to make. */
+  showPicker: boolean;
+  /** Does the picker list "All companies (consolidated)" beside combined? */
+  offerConsolidated: boolean;
+  /** For the report footer and the CSV, or undefined when there is one company. */
+  stampLabel: string | undefined;
 }
 
 /**
@@ -247,31 +304,51 @@ export async function resolveEntityScope(
  * and the filename are all exactly what they were: the client who has one
  * company never learns the word. The moment there are two it appears
  * everywhere, on the same rule the basis stamp follows.
+ *
+ * THE `consolidation` ARGUMENT IS REQUIRED, and it is what the returned
+ * `scope`'s TYPE depends on. A report that declines gets a `FilterScope` back
+ * and therefore type-checks against `entityScopeCondition`; a report that
+ * offers gets the full `EntityScope` and can only reach the ledger through
+ * `ledgerScopeConditions`, which eliminates. Which reports decline, and why
+ * each one does, is written down in docs/modules/accounting.md.
  */
 export async function resolveReportEntity(
   tx: Tx,
   tenantId: string,
   requested: string | undefined,
-): Promise<{
-  scope: EntityScope;
-  entities: Entity[];
-  /** Show the picker at all? Only once there is a choice to make. */
-  showPicker: boolean;
-  /** For the report footer and the CSV, or undefined when there is one company. */
-  stampLabel: string | undefined;
-}> {
+  consolidation: "offered",
+): Promise<ReportEntityView<EntityScope>>;
+export async function resolveReportEntity(
+  tx: Tx,
+  tenantId: string,
+  requested: string | undefined,
+  consolidation: "declined",
+): Promise<ReportEntityView<FilterScope>>;
+export async function resolveReportEntity(
+  tx: Tx,
+  tenantId: string,
+  requested: string | undefined,
+  consolidation: Consolidation,
+): Promise<ReportEntityView> {
   // INACTIVE ONES INCLUDED, unlike the journal form's picker. You cannot post
   // into a deactivated company, but its books do not stop existing — a closed
   // LLC still has last year's balance sheet, and a return may still be filed
   // for it. Excluding them would make those books unreachable and turn a saved
   // report link into a 404.
   const entities = await listEntities(tx, tenantId, { includeInactive: true });
-  const scope = await resolveEntityScope(tx, tenantId, requested, entities);
+  const scope = await resolveEntityScope(
+    tx,
+    tenantId,
+    requested,
+    entities,
+    consolidation,
+  );
   const showPicker = entities.length > 1;
   return {
     scope,
     entities,
     showPicker,
+    offerConsolidated: showPicker && consolidation === "offered",
     stampLabel: showPicker ? entityScopeLabel(scope, entities) : undefined,
   };
 }

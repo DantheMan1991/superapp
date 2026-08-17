@@ -78,7 +78,15 @@ export default async function BillsPage({
     const today = todayInTimezone(ctx.tenant.timezone);
     // The bar, the buckets and the table all read one scope — see the invoice
     // list for why a half-scoped list is worse than an unscoped one.
-    const entityView = await reportEntityOr404(tx, tenantId, sp.entity);
+    const entityView = await reportEntityOr404(
+      tx,
+      tenantId,
+      sp.entity,
+      // A list of bills, not a statement: consolidation eliminates ledger
+      // legs, and a bill one company paid for another is still that
+      // company's bill to a real vendor outside the group.
+      "declined",
+    );
     const inScope = entityScopeCondition(entityView.scope, schema.bills.entityId);
 
     /**

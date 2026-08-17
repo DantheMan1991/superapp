@@ -22,6 +22,8 @@ import {
   getProfitAndLoss,
   postDraft,
   postEntry,
+  residualIfConsolidated,
+  residualNote,
   resolveReportEntity,
   reverseEntry,
   updateAccount,
@@ -479,11 +481,22 @@ function filenamePart(label: string): string {
 }
 
 /**
- * `entity` is on every variant, and it is the same uuid the page was rendered
+ * `entity` is on every variant, and it is the same value the page was rendered
  * with. An export that quietly re-ran the report combined while the screen
  * showed one company would be the ADR 0010 failure with a download attached.
+ *
+ * IT IS NOT ONLY A UUID, and taking it for one was a bug this slice found by
+ * reading rather than by driving. The picker's own "All companies" option
+ * submits an EMPTY string, which `z.string().uuid()` rejects — so on a
+ * two-company tenant, choosing combined and pressing Export CSV answered
+ * "Invalid input" instead of downloading the file. `consolidated` is the third
+ * value the picker can now produce, and it is not a uuid either.
+ * `resolveEntityScope` is what decides what each one means; this only decides
+ * what may be asked.
  */
-const entityParam = z.string().uuid().optional();
+const entityParam = z
+  .union([z.string().uuid(), z.enum(["", "combined", "consolidated"])])
+  .optional();
 
 const exportCsvSchema = z.discriminatedUnion("report", [
   z.object({
@@ -533,15 +546,50 @@ export async function exportReportCsv(
   const p = parsed.data;
   try {
     const data = await withTenant(ctx.tenantId, async (tx) => {
+      // Only when there is a choice, so a single-company tenant's filenames are
+      // unchanged and no process that reads them by name breaks. The label
+      // differs between combined and consolidated, so the two files cannot be
+      // mistaken for each other on disk either.
+      const suffixOf = (label: string | undefined) =>
+        label ? `_${filenamePart(label)}` : "";
+
+      // CASH ACTIVITY RESOLVES ITS OWN SCOPE, and separately on purpose: it
+      // DECLINES consolidation exactly as its page does, so `?entity=
+      // consolidated` refuses here too rather than downloading the combined
+      // figures under the consolidated name. Its own block is also what keeps
+      // the scope's TYPE narrow enough for `getCashActivity` to accept it —
+      // one shared resolve would widen it back to `EntityScope` and the
+      // compiler would stop being able to tell the two apart.
+      if (p.report === "cash") {
+        const { scope, stampLabel } = await resolveReportEntity(
+          tx,
+          ctx.tenantId,
+          p.entity,
+          "declined",
+        );
+        const report = await getCashActivity(tx, ctx.tenantId, {
+          scope,
+          from: p.from,
+          to: p.to,
+        });
+        return {
+          filename: `cash-activity_${p.from}_${p.to}${suffixOf(stampLabel)}.csv`,
+          csv: toCsv(cashActivityToCsvRows(report, stampLabel)),
+        };
+      }
+
       const { scope, stampLabel } = await resolveReportEntity(
         tx,
         ctx.tenantId,
         p.entity,
+        "offered",
       );
-      // Only when there is a choice, so a single-company tenant's filenames are
-      // unchanged and no process that reads them by name breaks.
-      const suffix = stampLabel ? `_${filenamePart(stampLabel)}` : "";
+      const suffix = suffixOf(stampLabel);
       if (p.report === "pnl") {
+        const residual = await residualIfConsolidated(tx, ctx.tenantId, scope, {
+          from: p.from,
+          to: p.to,
+        });
         const report = await getProfitAndLoss(tx, ctx.tenantId, {
           scope,
           from: p.from,
@@ -556,10 +604,20 @@ export async function exportReportCsv(
           // get emailed to accountants, and two profit figures for the same
           // period are only safe if you can tell them apart at a glance.
           filename: `profit-and-loss${p.spread === "month" ? "-by-month" : ""}_${p.from}_${p.to}_${p.basis ?? "accrual"}${suffix}.csv`,
-          csv: toCsv(pnlToCsvRows(report, p.basis ?? "accrual", stampLabel)),
+          csv: toCsv(
+            pnlToCsvRows(
+              report,
+              p.basis ?? "accrual",
+              stampLabel,
+              residual ? residualNote(residual) : undefined,
+            ),
+          ),
         };
       }
       if (p.report === "balance-sheet") {
+        const residual = await residualIfConsolidated(tx, ctx.tenantId, scope, {
+          asOf: p.asOf,
+        });
         const report = await getBalanceSheet(tx, ctx.tenantId, {
           scope,
           asOf: p.asOf,
@@ -568,10 +626,21 @@ export async function exportReportCsv(
         });
         return {
           filename: `balance-sheet_${p.asOf}_${p.basis ?? "accrual"}${suffix}.csv`,
-          csv: toCsv(balanceSheetToCsvRows(report, p.basis ?? "accrual", stampLabel)),
+          csv: toCsv(
+            balanceSheetToCsvRows(
+              report,
+              p.basis ?? "accrual",
+              stampLabel,
+              residual ? residualNote(residual) : undefined,
+            ),
+          ),
         };
       }
       if (p.report === "general-ledger") {
+        const residual = await residualIfConsolidated(tx, ctx.tenantId, scope, {
+          from: p.from,
+          to: p.to,
+        });
         const report = await getGeneralLedger(tx, ctx.tenantId, {
           scope,
           from: p.from,
@@ -580,18 +649,19 @@ export async function exportReportCsv(
         });
         return {
           filename: `general-ledger_${p.from}_${p.to}${suffix}.csv`,
-          csv: toCsv(generalLedgerToCsvRows(report, stampLabel)),
+          csv: toCsv(
+            generalLedgerToCsvRows(
+              report,
+              stampLabel,
+              residual ? residualNote(residual) : undefined,
+            ),
+          ),
         };
       }
-      const report = await getCashActivity(tx, ctx.tenantId, {
-        scope,
-        from: p.from,
-        to: p.to,
-      });
-      return {
-        filename: `cash-activity_${p.from}_${p.to}${suffix}.csv`,
-        csv: toCsv(cashActivityToCsvRows(report, stampLabel)),
-      };
+      // Unreachable: the discriminated union has four members and the other
+      // three returned above. Stated rather than left as a fallthrough, so
+      // adding a fifth report is a compile error here instead of a wrong file.
+      throw new Error(`unhandled report ${(p as { report: string }).report}`);
     });
     return { ok: true, data };
   } catch (err) {

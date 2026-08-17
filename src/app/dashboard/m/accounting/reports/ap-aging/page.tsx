@@ -33,7 +33,15 @@ export default async function ApAgingPage({
     const settings = await getSettings(tx, ctx.tenant.id);
     const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
-    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      // DECLINED: aging reads bills, and money one company owes another is an
+      // intercompany pair rather than a payable. There is nothing here to
+      // eliminate, so consolidated would be combined under another name.
+      "declined",
+    );
     const report = await getApAging(tx, ctx.tenant.id, asOf, entityView.scope);
     return { settings, today, asOf, report, entityView };
   });

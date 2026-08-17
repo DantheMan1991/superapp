@@ -181,10 +181,36 @@ its own company's accounts plus a shared affiliate account, so the guard that
 refuses a single cross-company entry is exactly what makes the two-entry form
 the only representable one. The constraint turned out to define the solution.
 
-**What is still not built:** consolidation with eliminations (3), per-entity
-close (4 — `period_closes` locks every company at once), a company on fixed
-assets, and receiving an invoice payment into another company's account, which
-is the mirror of the bill case and still refused.
+**Slice 3 landed on 2026-08-17.** Consolidation with eliminations, and the thing
+this file did not anticipate is where the elimination had to LIVE. A scope had
+been an ENTRY-level predicate since slice 1 (`journal_entries.entity_id`), and an
+elimination is a LINE-level exclusion — so a consolidated scope reusing that
+shape would have eliminated nothing while producing a statement that looks right,
+balances, and double-counts every intercompany transaction. The answer is the
+same instrument slice 1 used: `entityScopeCondition` narrowed to a `FilterScope`
+that cannot express consolidation, which turned every existing call site into a
+compile error until it said what it does about it, and `ledgerScopeConditions`
+returns the filter and the elimination together so no report can take one and
+forget the other.
+
+**Consolidated is a THIRD kind, not a redefinition of `combined`** — that
+promise, made when `combined` was named, is kept and tested. And **it carries no
+`entityId`**: eliminating one side of a pair while keeping the other leaves that
+company short, so a consolidated single company is not representable.
+
+**The residual is surfaced.** A manual journal into an affiliate account has no
+link to follow, so consolidation leaves it standing — and it has no counterparty
+leg to remove with it either, so hiding it would require inventing an equity
+plug. That, rather than a preference for candour, is why the report names it.
+
+**What is still not built:** per-entity close (4 — `period_closes` locks every
+company at once), a company on fixed assets, and receiving an invoice payment
+into another company's account, which is the mirror of the bill case and still
+refused. **And what this deliberately is not:** full GAAP consolidation. No
+investment-in-subsidiary elimination, no minority interest, no purchase
+accounting. These are commonly owned LLCs rather than a parent holding
+subsidiaries — combining them and eliminating intercompany is the whole job, and
+most of the rest would be wrong here.
 
 **What would make us revisit:** a client needing one entity's data genuinely
 hidden from another's staff — a joint venture where a partner sees one LLC and

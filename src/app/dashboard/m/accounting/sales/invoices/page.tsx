@@ -84,7 +84,13 @@ export default async function InvoicesPage({
      * list showing one company's invoices under another company's "overdue"
      * total is the kind of screen somebody makes a decision from.
      */
-    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      // A list of invoices, not a statement — nothing on it is intercompany.
+      "declined",
+    );
     const inScope = entityScopeCondition(entityView.scope, schema.invoices.entityId);
     const aging = await getArAging(tx, ctx.tenant.id, today, entityView.scope);
 

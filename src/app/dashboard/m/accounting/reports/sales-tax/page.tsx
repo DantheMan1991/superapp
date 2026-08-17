@@ -51,7 +51,16 @@ export default async function SalesTaxReportPage({
     const fallback = presetRange("this-month", today, settings.fiscalYearStartMonth);
     const from = sp.from && isValidIsoDate(sp.from) ? sp.from : fallback.from;
     const to = sp.to && isValidIsoDate(sp.to) ? sp.to : fallback.to;
-    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      // DECLINED: both halves read things intercompany cannot reach — invoices
+      // for the per-rate figures, the sales-tax control for what is owed. And a
+      // return is filed by a legal entity, so the group is not a filer this
+      // report has anything to say to.
+      "declined",
+    );
     const report = await getTaxSummary(tx, ctx.tenant.id, {
       scope: entityView.scope,
       from,

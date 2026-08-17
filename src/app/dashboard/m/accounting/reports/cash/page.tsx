@@ -40,7 +40,17 @@ export default async function CashActivityPage({
     const fallback = presetRange("this-month", today, settings.fiscalYearStartMonth);
     const from = sp.from && isValidIsoDate(sp.from) ? sp.from : fallback.from;
     const to = sp.to && isValidIsoDate(sp.to) ? sp.to : fallback.to;
-    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      // DECLINED, the same shape of reason this report declines a basis: every
+      // register belongs to one company and none of them is inflated by
+      // intercompany. A transfer moves real cash out of one and into another,
+      // so the group's cash is the sum either way and consolidating could only
+      // invite the reader to hunt for a difference that cannot exist.
+      "declined",
+    );
     const report = await getCashActivity(tx, ctx.tenant.id, {
       scope: entityView.scope,
       from,

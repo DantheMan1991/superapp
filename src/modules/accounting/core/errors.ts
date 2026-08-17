@@ -19,6 +19,7 @@ export type LedgerErrorCode =
   | "ENTITY_IS_DEFAULT"
   | "ENTITY_NAME_INVALID"
   | "ENTITY_NAME_TAKEN"
+  | "SCOPE_NOT_OFFERED"
   | "CROSS_ENTITY_REGISTER"
   | "AFFILIATE_ACCOUNTS_MISSING"
   | "INTERCOMPANY_SAME_COMPANY"
@@ -139,6 +140,8 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "This is the default company — make another one the default first.",
   ENTITY_NAME_INVALID: "Give the company a name.",
   ENTITY_NAME_TAKEN: "A company already has that name.",
+  SCOPE_NOT_OFFERED:
+    "This report has no consolidated view — nothing it reads is affected by transfers between your companies. Pick a company, or all companies combined.",
   AFFILIATE_ACCOUNTS_MISSING:
     "This business is missing the Due from / Due to Affiliates accounts. Toggle the accounting module off and on again to add them.",
   INTERCOMPANY_SAME_COMPANY: "Pick two different companies.",

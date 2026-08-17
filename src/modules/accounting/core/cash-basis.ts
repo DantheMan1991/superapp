@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { BalanceRow } from "./balances";
+import { asFilterScope } from "./consolidation";
 import { entityScopeCondition, type EntityScope } from "./entities";
 import {
   allocateDocument,
@@ -92,7 +93,12 @@ export async function cashBasisAdjustment(
     groupByDimensionType?: string;
   },
 ): Promise<BalanceRow[]> {
-  const inScope = entityScopeCondition(opts.scope);
+  // CONSOLIDATED BEHAVES AS COMBINED HERE, and there is nothing to eliminate:
+  // this adjustment only ever moves recognition between the AR/AP controls and
+  // the P&L, so no line it produces or reads can be an affiliate leg. The
+  // accrual half it is merged into was eliminated by `getBalances`, which is
+  // where the group's intercompany actually lives.
+  const inScope = entityScopeCondition(asFilterScope(opts.scope));
   const controls = await tx.query.accounts.findMany({
     where: and(
       eq(schema.accounts.tenantId, tenantId),

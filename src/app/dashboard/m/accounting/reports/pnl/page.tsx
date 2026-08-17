@@ -12,7 +12,9 @@ import {
   getProfitAndLoss,
   getSettings,
   listDimensionMembers,
+  residualIfConsolidated,
 } from "@/modules/accounting/core";
+import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { presetRange } from "@/modules/accounting/lib/dates";
 import { isValidIsoDate, todayInTimezone } from "@/modules/accounting/lib/money";
@@ -57,7 +59,19 @@ export default async function PnlPage({
     // A range too long for monthly columns is REFUSED by core rather than
     // quietly shortened, so the page has to catch it and say so — the
     // alternative is a 500 on a query string somebody can type.
-    const entityView = await reportEntityOr404(tx, ctx.tenant.id, sp.entity);
+    // OFFERED, even though no intercompany leg touches income or expense today,
+    // so the consolidated figures equal the combined ones. Two reasons it is
+    // offered anyway: a reader who scoped the balance sheet to the group should
+    // not have to switch back to combined to see its profit, and the day one
+    // company charges another management fees — the obvious next step for a
+    // landlord with a management LLC — the two stop being equal without anybody
+    // having to remember this page. The elimination is already in the engine.
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      "offered",
+    );
     let report = null;
     let rangeError: string | null = null;
     try {
@@ -75,6 +89,10 @@ export default async function PnlPage({
       if (!(err instanceof LedgerError)) throw err;
       rangeError = friendlyMessage(err);
     }
+    const residual = await residualIfConsolidated(tx, ctx.tenant.id, entityView.scope, {
+      from,
+      to,
+    });
     const members = await listDimensionMembers(tx, ctx.tenant.id);
     const dimensionTypes = [...new Set(members.map((m) => m.dimensionType))];
     return {
@@ -86,6 +104,7 @@ export default async function PnlPage({
       rangeError,
       dimensionTypes,
       entityView,
+      residual,
     };
   });
 
@@ -144,7 +163,10 @@ export default async function PnlPage({
         showSpread
         entity={sp.entity}
         entities={data.entityView.entities}
+        offerConsolidated={data.entityView.offerConsolidated}
       />
+
+      <ConsolidationNote residual={data.residual} />
 
       {data.rangeError ? (
         <div className="rounded-xl bg-warning/10 px-4 py-3 text-sm text-warning-foreground">

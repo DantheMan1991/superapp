@@ -45,8 +45,19 @@ export {
   resolveReportEntity,
   setDefaultEntity,
   updateEntity,
+  type Consolidation,
   type EntityScope,
+  type FilterScope,
+  type ReportEntityView,
 } from "./entities";
+// `asFilterScope` is deliberately NOT re-exported: it is the one way past the
+// compile error FilterScope exists to cause, and it stays inside core/.
+export {
+  consolidationResidual,
+  residualIfConsolidated,
+  residualNote,
+  type ConsolidationResidual,
+} from "./consolidation";
 export {
   affiliateBalances,
   loadIntercompanyEntries,

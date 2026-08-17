@@ -151,14 +151,30 @@ export function RecordBillPaymentDialogButton({
   version: number;
   remainingCents: number;
   today: string;
-  registers: Array<{ ledgerAccountId: string; name: string; kind: string }>;
+  /**
+   * Every active register, including other companies'. `otherCompany` is set
+   * only when the account belongs to somebody else — paying from one is an
+   * INTERCOMPANY payment (ADR 0010 slice 2), recorded as a linked pair rather
+   * than refused, and the dialog says so before it happens.
+   */
+  registers: Array<{
+    ledgerAccountId: string;
+    name: string;
+    kind: string;
+    otherCompany?: string;
+  }>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [amount, setAmount] = useState(formatCents(remainingCents).replace(/,/g, ""));
   const [date, setDate] = useState(today);
-  const [paidFrom, setPaidFrom] = useState(registers[0]?.ledgerAccountId ?? "");
+  // Default to one of THIS company's own accounts, so the ordinary payment
+  // stays one click and paying from an affiliate is always deliberate.
+  const [paidFrom, setPaidFrom] = useState(
+    (registers.find((r) => !r.otherCompany) ?? registers[0])?.ledgerAccountId ?? "",
+  );
+  const chosen = registers.find((r) => r.ledgerAccountId === paidFrom);
   const [method, setMethod] = useState<"cash" | "check" | "card" | "bank_transfer" | "other">("check");
   const [memo, setMemo] = useState("");
 
@@ -236,10 +252,20 @@ export function RecordBillPaymentDialogButton({
                   {registers.map((r) => (
                     <SelectItem key={r.ledgerAccountId} value={r.ledgerAccountId}>
                       {r.name} ({r.kind.replaceAll("_", " ")})
+                      {r.otherCompany ? ` — ${r.otherCompany}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {chosen?.otherCompany && (
+                // Said BEFORE it happens. Two entries rather than one is not
+                // something to discover afterwards in the journal.
+                <p className="text-xs text-muted-foreground">
+                  {chosen.otherCompany} is paying this. It will be recorded on
+                  both sides: this company owes {chosen.otherCompany} the amount
+                  until it is settled.
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">

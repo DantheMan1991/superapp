@@ -57,6 +57,21 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
    * and reversing one is an ordinary correction.
    */
   "depreciation",
+  /**
+   * BOTH HALVES of an intercompany pair (ADR 0010 slice 2). Added in
+   * `drizzle/0150`, alone in its own migration for the reason `depreciation`
+   * was: an enum value cannot be USED in the transaction that adds it, and
+   * Drizzle runs every pending migration in one.
+   *
+   * Both legs carry it, including the one that settles a bill — the bill's
+   * `bill_payments` row still points at that entry, so AP, aging and status
+   * derivation are unaffected, and the source now says what the entry actually
+   * is rather than hiding half a transfer behind `bill_payment`.
+   *
+   * NOT in MANAGED_SOURCES: `assertNotIntercompanyLeg` covers these by their
+   * link and is stricter, refusing a one-sided REVERSE as well as a void.
+   */
+  "intercompany",
 ]);
 
 export const entryEditPolicy = pgEnum("entry_edit_policy", [
@@ -194,6 +209,29 @@ export const journalEntries = pgTable(
     /** Soft back-pointer to the source document (invoice, bank txn, …). */
     sourceId: uuid("source_id"),
     idempotencyKey: text("idempotency_key"),
+    /**
+     * The two halves of an INTERCOMPANY transaction share this (ADR 0010
+     * slice 2). Null on every ordinary entry, which is nearly all of them.
+     *
+     * Money moving between two companies of one client cannot be one entry: as
+     * `Dr AP (Oak) / Cr Checking (Maple)` tagged to a single company it leaves
+     * Oak's balance sheet showing cash leaving an account it does not own and
+     * Maple's showing nothing, while the ledger still balances. So it is a PAIR
+     * — one entry per company, each balancing on its own against a shared
+     * `due_from_affiliate` / `due_to_affiliate` account — written together or
+     * not at all.
+     *
+     * A GROUPING KEY, not a foreign key: it points at no row, because the thing
+     * it identifies is the pair itself. Consolidation (slice 3) eliminates by
+     * following it rather than by matching amounts, which is what makes
+     * elimination mechanical instead of a judgement call.
+     *
+     * EXACTLY TWO ENTRIES PER ID, enforced by a deferred constraint trigger in
+     * `drizzle/0149` — the same backstop shape the balance check uses. A
+     * half-written pair leaves one company owing an affiliate that nobody is
+     * owed by, which no report would notice.
+     */
+    intercompanyId: uuid("intercompany_id"),
     reversesEntryId: uuid("reverses_entry_id"),
     postedAt: timestamp("posted_at", { withTimezone: true }),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
@@ -216,6 +254,10 @@ export const journalEntries = pgTable(
       t.entryDate,
     ),
     index("journal_entries_tenant_status_idx").on(t.tenantId, t.status),
+    // Both halves are fetched by this, and consolidation walks it.
+    index("journal_entries_tenant_intercompany_idx")
+      .on(t.tenantId, t.intercompanyId)
+      .where(sql`${t.intercompanyId} is not null`),
     uniqueIndex("journal_entries_tenant_idem_idx")
       .on(t.tenantId, t.idempotencyKey)
       .where(sql`${t.idempotencyKey} is not null`),

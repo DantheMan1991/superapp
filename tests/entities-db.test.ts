@@ -15,8 +15,12 @@ import {
   ledgerIsBalancedPerEntity,
   listEntities,
   postEntry,
+  affiliateBalances,
+  assertNotIntercompanyLeg,
+  postIntercompanyPair,
   resolveEntityScope,
   resolveReportEntity,
+  reverseIntercompanyPair,
   reverseEntry,
   setDefaultEntity,
   type EntityScope,
@@ -29,6 +33,12 @@ import {
   issueInvoice,
 } from "../src/modules/accounting/invoicing/invoices";
 import { recordPayment } from "../src/modules/accounting/invoicing/payments";
+import { createVendor } from "../src/modules/accounting/payables/vendors";
+import {
+  approveBill,
+  createBillDraft,
+} from "../src/modules/accounting/payables/bills";
+import { recordBillPayment } from "../src/modules/accounting/payables/payments";
 import { getArAging } from "../src/modules/accounting/invoicing/aging-feed";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 
@@ -504,6 +514,190 @@ d("entities: two sets of books in one tenant", () => {
     );
     expect(registers.find((r) => r.accountId === oakBankLedgerAccountId)?.entityId).toBe(oak);
     expect(registers.find((r) => r.accountId === mapleBankLedgerAccountId)?.entityId).toBe(maple);
+  });
+
+
+  /* -- intercompany (slice 2) --------------------------------------------- */
+
+  it("a transfer is a PAIR, and each company still balances on its own", async () => {
+    const pair = await withTenant(tenantId, (tx) =>
+      postIntercompanyPair(tx, owner, {
+        fromEntityId: maple,
+        toEntityId: oak,
+        amountCents: 25_000,
+        entryDate: "2026-07-01",
+        memo: "Maple funds Oak",
+        payerLines: [
+          { accountId: mapleBankLedgerAccountId, amountCents: -25_000 },
+        ],
+        payeeLines: [{ accountId: oakBankLedgerAccountId, amountCents: 25_000 }],
+      }),
+    );
+    expect(pair.from.entityId).toBe(maple);
+    expect(pair.to.entityId).toBe(oak);
+    expect(pair.from.intercompanyId).toBe(pair.intercompanyId);
+    expect(pair.to.intercompanyId).toBe(pair.intercompanyId);
+
+    // THE INVARIANT. Both sets of books balance separately — which is the whole
+    // reason this is two entries rather than one.
+    expect(
+      await withTenant(tenantId, (tx) => ledgerIsBalancedPerEntity(tx, tenantId)),
+    ).toBe(true);
+  });
+
+  it("who owes whom is derived from the links", async () => {
+    const rows = await withTenant(tenantId, (tx) =>
+      affiliateBalances(tx, tenantId),
+    );
+    const mapleRow = rows.find((r) => r.entityId === maple);
+    const oakRow = rows.find((r) => r.entityId === oak);
+    // Equal and opposite, and neither figure is stored anywhere.
+    expect(mapleRow?.netCents).toBe(25_000);
+    expect(oakRow?.netCents).toBe(-25_000);
+    expect(mapleRow?.counterpartyEntityId).toBe(oak);
+  });
+
+  it("REFUSES a transfer from a company to itself", async () => {
+    await expect(
+      withTenant(tenantId, (tx) =>
+        postIntercompanyPair(tx, owner, {
+          fromEntityId: oak,
+          toEntityId: oak,
+          amountCents: 100,
+          entryDate: "2026-07-02",
+          memo: "nowhere",
+          payerLines: [{ accountId: oakBankLedgerAccountId, amountCents: -100 }],
+          payeeLines: [],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INTERCOMPANY_SAME_COMPANY" });
+  });
+
+  it("the DATABASE refuses a half-written pair", async () => {
+    // The backstop, not the app rule. A lone entry carrying an intercompany_id
+    // passes every application check and fails at COMMIT — the same shape the
+    // balance trigger has.
+    const cash = await accountId("1000");
+    const rent = await accountId("4000");
+    await expect(
+      withTenant(tenantId, async (tx) => {
+        const [entry] = await tx
+          .insert(schema.journalEntries)
+          .values({
+            tenantId,
+            entityId: oak,
+            intercompanyId: crypto.randomUUID(),
+            entryDate: "2026-07-03",
+            status: "posted",
+            postedAt: new Date(),
+            createdByClerkUserId: "raw",
+          })
+          .returning();
+        await tx.insert(schema.journalLines).values([
+          { tenantId, entryId: entry.id, accountId: cash, amountCents: 100, lineNo: 1 },
+          { tenantId, entryId: entry.id, accountId: rent, amountCents: -100, lineNo: 2 },
+        ]);
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("neither leg can be voided or reversed on its own", async () => {
+    const pair = await withTenant(tenantId, (tx) =>
+      postIntercompanyPair(tx, owner, {
+        fromEntityId: maple,
+        toEntityId: oak,
+        amountCents: 1_000,
+        entryDate: "2026-07-04",
+        memo: "one-sided undo attempt",
+        payerLines: [{ accountId: mapleBankLedgerAccountId, amountCents: -1_000 }],
+        payeeLines: [{ accountId: oakBankLedgerAccountId, amountCents: 1_000 }],
+      }),
+    );
+    for (const leg of [pair.from, pair.to]) {
+      await expect(
+        withTenant(tenantId, (tx) =>
+          assertNotIntercompanyLeg(tx, tenantId, leg.id),
+        ),
+      ).rejects.toMatchObject({ code: "ENTRY_INTERCOMPANY" });
+    }
+  });
+
+  it("reversing a transfer undoes BOTH sides and clears the balance", async () => {
+    const before = await withTenant(tenantId, (tx) => affiliateBalances(tx, tenantId));
+    const owedBefore = before.find((r) => r.entityId === maple)?.netCents ?? 0;
+    const pair = await withTenant(tenantId, (tx) =>
+      postIntercompanyPair(tx, owner, {
+        fromEntityId: maple,
+        toEntityId: oak,
+        amountCents: 4_000,
+        entryDate: "2026-07-05",
+        memo: "to be reversed",
+        payerLines: [{ accountId: mapleBankLedgerAccountId, amountCents: -4_000 }],
+        payeeLines: [{ accountId: oakBankLedgerAccountId, amountCents: 4_000 }],
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      reverseIntercompanyPair(tx, owner, {
+        intercompanyId: pair.intercompanyId,
+        entryDate: "2026-07-06",
+      }),
+    );
+    const after = await withTenant(tenantId, (tx) => affiliateBalances(tx, tenantId));
+    expect(after.find((r) => r.entityId === maple)?.netCents ?? 0).toBe(owedBefore);
+    expect(
+      await withTenant(tenantId, (tx) => ledgerIsBalancedPerEntity(tx, tenantId)),
+    ).toBe(true);
+  });
+
+  it("one company pays another's bill — the case the ADR is written about", async () => {
+    const expense = await accountId("6200");
+    const vendor = await withTenant(tenantId, (tx) =>
+      createVendor(tx, owner, { name: "Roofer" }),
+    );
+    const billId = await withTenant(tenantId, async (tx) => {
+      const bill = await createBillDraft(tx, owner, {
+        entityId: oak,
+        vendorId: vendor.id,
+        billDate: "2026-07-10",
+        lines: [{ description: "Roof", amountCents: 60_000, accountId: expense }],
+      });
+      await approveBill(tx, owner, {
+        billId: bill.id,
+        expectedVersion: bill.version,
+      });
+      return bill.id;
+    });
+
+    // Maple's account pays Oak's bill. Slice 1b refused this outright.
+    await withTenant(tenantId, async (tx) => {
+      const b = await tx.query.bills.findFirst({
+        where: eq(schema.bills.id, billId),
+      });
+      await recordBillPayment(tx, owner, {
+        billId,
+        expectedVersion: b!.version,
+        paymentDate: "2026-07-11",
+        amountCents: 60_000,
+        paidFromAccountId: mapleBankLedgerAccountId,
+        method: "check",
+      });
+    });
+
+    const bill = await withTenant(tenantId, (tx) =>
+      tx.query.bills.findFirst({ where: eq(schema.bills.id, billId) }),
+    );
+    // The BILL is paid: aging and status read the payment row, and neither asks
+    // whose cash settled it.
+    expect(bill!.status).toBe("paid");
+
+    // And Oak owes Maple for it, on top of what it owed before.
+    const owed = await withTenant(tenantId, (tx) => affiliateBalances(tx, tenantId));
+    expect(owed.find((r) => r.entityId === oak)!.netCents).toBeLessThanOrEqual(
+      -60_000,
+    );
+    expect(
+      await withTenant(tenantId, (tx) => ledgerIsBalancedPerEntity(tx, tenantId)),
+    ).toBe(true);
   });
 
   it("only one company is the default, and moving it is two statements", async () => {

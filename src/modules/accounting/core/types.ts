@@ -39,6 +39,12 @@ export interface NewEntryInput {
   sourceId?: string | null;
   /** Dedup key: retries and double-clicks with the same key post once. */
   idempotencyKey?: string | null;
+  /**
+   * Set on BOTH halves of an intercompany pair, by `postIntercompanyPair`
+   * (ADR 0010 slice 2). Nothing else should pass it: an entry carrying this id
+   * without a partner fails the deferred trigger at commit.
+   */
+  intercompanyId?: string | null;
 }
 
 export interface PostResult {

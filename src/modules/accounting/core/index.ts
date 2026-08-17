@@ -2,6 +2,7 @@ export { LedgerError, friendlyMessage, type LedgerErrorCode } from "./errors";
 export type { EntryLineInput, LedgerCtx, NewEntryInput, PostResult } from "./types";
 export {
   assertEntryNotSourceManaged,
+  assertNotIntercompanyLeg,
   assertPeriodOpen,
   getSettings,
   requireOwnerRole,
@@ -46,6 +47,14 @@ export {
   updateEntity,
   type EntityScope,
 } from "./entities";
+export {
+  affiliateBalances,
+  loadIntercompanyEntries,
+  postIntercompanyPair,
+  reverseIntercompanyPair,
+  type AffiliateBalance,
+  type IntercompanyPair,
+} from "./intercompany";
 export {
   getBalances,
   getTrialBalance,

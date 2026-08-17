@@ -13,6 +13,68 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-16 — Intercompany pairs (branch `claude/intercompany-pairs`)
+
+Slice 2 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md). Slice 1b
+REFUSED paying one company's bill from another's account; this records it.
+Migrations `0148` (the link), `0149` (the trigger), `0150` (the enum value,
+alone), `0151` (the accounts for existing tenants).
+
+- **A pair, one entry per company, sharing an `intercompany_id`:**
+
+  ```
+  Oak Row     Dr Accounts Payable      500
+              Cr Due to Affiliates     500     <- Oak now owes Maple
+  Maple St    Dr Due from Affiliates   500     <- Maple is owed by Oak
+              Cr Checking              500
+  ```
+
+  **Each balances on its own**, so the invariant at the heart of this module is
+  untouched — the same reason `entity_id` went on the entry rather than the
+  line.
+- **THE REGISTER GUARD NEEDED NO EXCEPTION, and that is the strongest signal
+  the shape is right.** Oak's entry touches AP and Due-to, both shared chart
+  accounts; Maple's touches Due-from and its OWN register. Neither entry touches
+  a foreign register, so `assertNoForeignRegisters` is exactly as it was and
+  still refuses the unlinked single entry, which is still wrong.
+- **ONE PAIR OF ACCOUNTS, not one per counterparty.** Ten LLCs would otherwise
+  mean ninety accounts in a chart every company can see. Who owes whom is a
+  property of the TRANSACTION, so `affiliateBalances` walks the links at read
+  time — the same derived-never-stored habit as invoice status, `closed_through`
+  and retained earnings. Found by SUBTYPE (`due_from_affiliate` /
+  `due_to_affiliate`), never by code.
+- **`intercompany_id` is a GROUPING KEY, not a foreign key.** It points at no
+  row, because the thing it identifies is the pair. Consolidation (slice 3)
+  eliminates by following it rather than by matching amounts, which is what
+  makes elimination mechanical instead of a judgement call.
+- **The database enforces "exactly two entries, in two different companies"**
+  (`0149`), deferred, same shape as the balance trigger. A half-written pair
+  leaves one company owing an affiliate that nobody is owed by; every report
+  still balances and no screen surfaces it.
+- **NEITHER LEG MOVES ALONE.** `assertNotIntercompanyLeg` refuses voiding *or
+  reversing* a single side — stricter than the managed-source guard, which
+  still permits a reverse, because a one-sided reversal is exactly as wrong as
+  a one-sided void. `reverseIntercompanyPair` undoes both as a new pair.
+- **The bill's Paid-from picker offers other companies' registers again**,
+  reversing what slice 1b did there — deliberately. That filter existed because
+  the choice always failed; it now records a pair, so it is a real option, and
+  the dialog says what will happen before it happens. `bill_payments` still
+  points at the bill's own leg, so aging, status and unapply are untouched.
+- **"Where it landed" is optional on the transfer, and that optionality is the
+  feature.** Name a receiving account and both companies' cash moves; leave it
+  blank and one company simply settled something on the other's behalf, so only
+  the affiliate balance does.
+- **THE BUG THIS SLICE ALMOST SHIPPED.** `intercompanyId` was added to the
+  schema, to `NewEntryInput`, and to every caller — and `postEntry` never wrote
+  it. Both legs would have posted unlinked, the trigger's null-check would have
+  waved them through, and consolidation would simply never have found them.
+  Caught by the test asserting the id round-trips, which is the only assertion
+  that could have.
+- **NOT built: consolidation (slice 3).** The links exist and the accounts exist;
+  nothing yet sums across companies and eliminates them. Also not built:
+  receiving an invoice payment into another company's account, which is the
+  mirror of the bill case and still refused.
+
 ### 2026-08-16 — `recurring_invoices` dropped, and the invoice total gets its CHECK (branch `claude/drop-recurring-invoices`)
 
 Two contract jobs owed since 2026-08-12 and 2026-08-13, done together because
@@ -1188,6 +1250,7 @@ preview in either state. The change is argued to be inert, not observed to be.
 | Table | Since | Purpose |
 | --- | --- | --- |
 | `accounts` | S1 | Chart of accounts, hierarchical. **Tenant-wide, shared by every company** (ADR 0010) — that sharing is most of what "manage ten LLCs in one place" means |
+| `journal_entries.intercompany_id` | 2026-08-16 | The link between the two halves of an INTERCOMPANY transaction (`0148`). A grouping key, not a foreign key. Exactly two entries per id, in two different companies, by the deferred trigger in `0149` |
 | `entities` | 2026-08-16 | The legal entities inside one client; **the entity owns the books** ([ADR 0010](../decisions/0010-entities-inside-a-tenant.md)). At least one per tenant, exactly one `is_default` by partial unique index. Deactivate, never delete — it owns posted entries and the FK is NO ACTION. NOT a `dimension_members` type: the test is whether the trial balance has to balance within it |
 | `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger. `journal_entries.entity_id` (`0142`) says whose books — **on the ENTRY, never the line**, so an entry still balances on its own. Composite FK `(tenant_id, entity_id)`. NOT NULL since `0144`, which ran after the deploy — `0142` had to add it nullable because migrations precede deploys |
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
@@ -1232,6 +1295,15 @@ sentence rather than leaving it aspirational.
 
 ## Decisions & gotchas
 
+- **MONEY BETWEEN TWO COMPANIES IS A PAIR OF ENTRIES**, never one. As a single
+  entry it leaves one balance sheet showing cash it does not own and the other
+  showing nothing, while the ledger still balances. Each leg touches only its
+  own company's accounts plus a shared affiliate account, which is why the
+  register guard needs no exception for it. Neither leg may be voided or
+  reversed alone. See [ADR 0010](../decisions/0010-entities-inside-a-tenant.md).
+- **One Due-from and one Due-to account, shared.** Who owes whom is derived from
+  the links (`affiliateBalances`), not from per-counterparty accounts — ten LLCs
+  would be ninety accounts otherwise.
 - **A REPORT MUST STATE ITS COMPANY, and cannot forget to.** `EntityScope` is a
   required argument on every report engine — `{ kind: "one" }` or
   `{ kind: "combined" }`, never an optional field where absent means everything.
@@ -1309,7 +1381,7 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
-- **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. `drizzle/0146` closed the expand/contract — all three are NOT NULL on both databases. What is NOT built: **intercompany pairs** (slice 2, and the register guard is what refuses the case until it exists), **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller
+- **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. `drizzle/0146` closed the expand/contract — all three are NOT NULL on both databases. **Intercompany pairs are DONE** (slice 2, same day — `0148`–`0151`). What is NOT built: **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller
 - **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. `drizzle/0144` closed the expand/contract the same day: `entity_id` is NOT NULL on both databases, with the window's backfill re-run first. Still queued in that lane: the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)

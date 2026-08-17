@@ -9,6 +9,7 @@ import { logAuditInTx } from "@/lib/audit";
 import {
   LedgerError,
   assertEntryNotSourceManaged,
+  assertNotIntercompanyLeg,
   createAccount,
   deactivateAccount,
   deleteDraft,
@@ -268,6 +269,10 @@ export async function voidPostedEntry(
       // P19 (session 6): document-owned entries are voided from their
       // document (voidInvoice/voidBill/unapply) — never from the journal.
       await assertEntryNotSourceManaged(tx, ctx.tenantId, parsed.data.entryId);
+      // Neither half of an intercompany pair moves alone: voiding one side
+      // leaves the other company still owing an affiliate that no longer owes
+      // it (ADR 0010 slice 2).
+      await assertNotIntercompanyLeg(tx, ctx.tenantId, parsed.data.entryId);
       const entry = await voidEntry(tx, ctx, parsed.data);
       // Tool coordination (actions layer — core stays tool-unaware): a
       // voided entry that satisfies a bank-feed row — whether born from
@@ -304,6 +309,10 @@ export async function reversePostedEntry(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     const result = await withTenant(ctx.tenantId, async (tx) => {
+      // Stricter than the managed-source rule, which permits a reverse: a
+      // ONE-SIDED reversal of a transfer is exactly as wrong as a one-sided
+      // void, so the pair is reversed as a unit instead.
+      await assertNotIntercompanyLeg(tx, ctx.tenantId, parsed.data.entryId);
       const r = await reverseEntry(tx, ctx, parsed.data);
       if (!r.deduped) {
         await logAuditInTx(tx, {

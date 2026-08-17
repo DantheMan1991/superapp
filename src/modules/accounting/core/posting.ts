@@ -316,6 +316,9 @@ export async function postEntry(
       source: input.source ?? "manual",
       sourceId: input.sourceId ?? null,
       idempotencyKey: input.idempotencyKey ?? null,
+      // Both halves of an intercompany pair carry the same id (ADR 0010
+      // slice 2); null on every ordinary entry, which is nearly all of them.
+      intercompanyId: input.intercompanyId ?? null,
       reversesEntryId: input.reversesEntryId ?? null,
       postedAt: input.status === "posted" ? new Date() : null,
       createdByClerkUserId: ctx.userId,

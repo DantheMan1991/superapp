@@ -84,10 +84,16 @@ export default async function BillDetailPage({
       orderBy: (p, { asc }) => [asc(p.paymentDate)],
     });
     const paid = await paidCentsFor(tx, tenantId, bill.id);
+    // ONLY THIS DOCUMENT'S COMPANY. `postEntry` refuses a foreign register
+    // anyway (ADR 0010 slice 1b), so an unfiltered list was never a correctness
+    // hole — it is a control that offers a choice which always fails, the same
+    // class as the recurring invoice that could be coded to Checking. Found by
+    // driving the live app: Oak Row LLC's invoice offered Test's account.
     const registers = await tx.query.bankAccounts.findMany({
       where: and(
         eq(schema.bankAccounts.tenantId, tenantId),
         eq(schema.bankAccounts.isActive, true),
+        eq(schema.bankAccounts.entityId, bill.entityId),
       ),
     });
     const vendors = await tx.query.vendors.findMany({

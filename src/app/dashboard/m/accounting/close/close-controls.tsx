@@ -32,10 +32,20 @@ interface BlockerRow {
 }
 
 export function CloseControls({
+  entityId,
+  entityName,
   periodEnd,
   periodOptions,
   blockers,
 }: {
+  /** Whose books are being closed (ADR 0010 slice 4). */
+  entityId: string;
+  /**
+   * Undefined on a single-company tenant, and then the dialog reads exactly as
+   * it always did. The moment there are two, every sentence here names the
+   * company — closing the wrong one is the mistake this screen can make.
+   */
+  entityName: string | undefined;
   periodEnd: string;
   periodOptions: string[];
   blockers: BlockerRow[];
@@ -72,10 +82,17 @@ export function CloseControls({
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Close the books through {periodEnd}?</DialogTitle>
+            <DialogTitle>
+              Close {entityName ? `${entityName}'s` : "the"} books through{" "}
+              {periodEnd}?
+            </DialogTitle>
             <DialogDescription>
-              Entries dated on or before this day become locked — corrections
-              go through reversals. You can reopen the latest close if needed.
+              {entityName ? `${entityName}'s entries` : "Entries"} dated on or
+              before this day become locked — corrections go through reversals.
+              You can reopen the latest close if needed.
+              {entityName
+                ? " Your other companies are unaffected; each one closes on its own."
+                : ""}
             </DialogDescription>
           </DialogHeader>
           {blockers.length > 0 && (
@@ -102,13 +119,17 @@ export function CloseControls({
               disabled={pending}
               onClick={() =>
                 startTransition(async () => {
-                  const res = await completeCloseAction({ periodEnd });
+                  const res = await completeCloseAction({ entityId, periodEnd });
                   if ("error" in res) {
                     toast.error(res.error);
                     return;
                   }
                   setOpen(false);
-                  toast.success(`Books closed through ${periodEnd}.`);
+                  toast.success(
+                    entityName
+                      ? `${entityName} closed through ${periodEnd}.`
+                      : `Books closed through ${periodEnd}.`,
+                  );
                   if (res.data)
                     router.push(
                       `/dashboard/m/accounting/close/${res.data.closeId}`,

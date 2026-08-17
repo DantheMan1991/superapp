@@ -203,10 +203,28 @@ link to follow, so consolidation leaves it standing — and it has no counterpar
 leg to remove with it either, so hiding it would require inventing an equity
 plug. That, rather than a preference for candour, is why the report names it.
 
-**What is still not built:** per-entity close (4 — `period_closes` locks every
-company at once), a company on fixed assets, and receiving an invoice payment
-into another company's account, which is the mirror of the bill case and still
-refused. **And what this deliberately is not:** full GAAP consolidation. No
+**Slice 4 landed on 2026-08-17**, which completes the slice list this file set
+out. The lock became `entities.closed_through` — a property of a set of books,
+which is what this ADR says an entity is — and `period_closes` gained the
+company it covers. `assertPeriodOpen` takes a required entity for the same
+reason every report engine does, and the failure it forecloses is the sharper
+one: a tenant-wide check refuses a write to a company whose books are open, and
+accepts one into a company whose books are closed.
+
+**The thing this file did not anticipate: the lock could not be DERIVED.**
+Deriving closed-through from `max(period_end)` over the close rows is the
+tidier design and the one this module's habits point at — but production held a
+lock that came from the old scalar with a single close row on a two-company
+tenant, so deriving would either silently unlock the second company or require
+fabricating a close nobody performed. The data decided the design, and the
+lesson generalises: **derive-on-read is only free when the history is complete.**
+
+**What is still not built:** a company on fixed assets (the assets pack is
+`entityForDocument`'s last caller, including for its period lock), and receiving
+an invoice payment into another company's account, which is the mirror of the
+bill case and still refused. One rough edge worth knowing: a company whose lock
+was INHERITED from the tenant-wide scalar has no close row to reopen, so it can
+only be closed forward. **And what this deliberately is not:** full GAAP consolidation. No
 investment-in-subsidiary elimination, no minority interest, no purchase
 accounting. These are commonly owned LLCs rather than a parent holding
 subsidiaries — combining them and eliminating intercompany is the whole job, and

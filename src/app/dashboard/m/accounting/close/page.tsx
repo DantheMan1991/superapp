@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { inArray } from "drizzle-orm";
 import { CheckCircle2, CircleAlert } from "lucide-react";
 import { requireTenant } from "@/lib/auth";
@@ -25,8 +26,9 @@ import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
   getCloseChecklist,
-  getSettings,
+  getDefaultEntityId,
   listCloses,
+  listEntities,
   type CloseChecklist,
 } from "@/modules/accounting/core";
 import {
@@ -58,16 +60,36 @@ function periodOptions(closedThrough: string | null, today: string): string[] {
 export default async function ClosePage({
   searchParams,
 }: {
-  searchParams: Promise<{ periodEnd?: string }>;
+  searchParams: Promise<{ periodEnd?: string; entity?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
-    const settings = await getSettings(tx, ctx.tenant.id);
+    /**
+     * A CLOSE IS AN ACT ON ONE SET OF BOOKS, so this picker has no "all
+     * companies" — unlike every report picker in the module. You cannot close
+     * everything at once any more, and offering it would be offering the very
+     * thing slice 4 took away.
+     *
+     * Inactive companies included, for the reason the report picker includes
+     * them: a wound-up LLC still has a final period to close and a return to
+     * file. Absent means the tenant's default; an unknown id 404s rather than
+     * quietly closing a different company's books, which is the same refusal
+     * every report makes and matters more here, because this one WRITES.
+     */
+    const entities = await listEntities(tx, ctx.tenant.id, {
+      includeInactive: true,
+    });
+    const defaultEntityId = await getDefaultEntityId(tx, ctx.tenant.id);
+    if (sp.entity && !entities.some((e) => e.id === sp.entity)) notFound();
+    const entityId = sp.entity ?? defaultEntityId;
+    const entity = entities.find((e) => e.id === entityId)!;
+    const showPicker = entities.length > 1;
+
     const today = todayInTimezone(ctx.tenant.timezone);
-    const options = periodOptions(settings.closedThrough, today);
+    const options = periodOptions(entity.closedThrough, today);
     const defaultEnd =
       options.find((o) => o >= lastCompleteMonthEndIso(today)) ??
       options[options.length - 1] ??
@@ -77,9 +99,11 @@ export default async function ClosePage({
         ? sp.periodEnd
         : defaultEnd;
     const checklist: CloseChecklist | null =
-      periodEnd && (!settings.closedThrough || periodEnd > settings.closedThrough)
-        ? await getCloseChecklist(tx, ctx.tenant.id, periodEnd)
+      periodEnd && (!entity.closedThrough || periodEnd > entity.closedThrough)
+        ? await getCloseChecklist(tx, ctx.tenant.id, entityId, periodEnd)
         : null;
+    // Every company's closes, not just this one's — see listCloses. An owner
+    // comes here to find out that Oak has not been closed since March.
     const closes = await listCloses(tx, ctx.tenant.id);
     const userIds = [
       ...new Set(
@@ -100,7 +124,16 @@ export default async function ClosePage({
           .from(schema.profiles)
           .where(inArray(schema.profiles.clerkUserId, userIds))
       : [];
-    return { settings, options, periodEnd, checklist, closes, people };
+    return {
+      entities,
+      entity,
+      showPicker,
+      options,
+      periodEnd,
+      checklist,
+      closes,
+      people,
+    };
   });
 
   const who = (clerkUserId: string | null): string => {
@@ -109,7 +142,13 @@ export default async function ClosePage({
     return p?.name || p?.email || "member";
   };
 
-  const latestCompleted = data.closes.find((c) => c.status === "completed");
+  // Latest completed OF THIS COMPANY: the reopen button lives on that row, and
+  // a tenant-wide "latest" would offer it on a row `reopenClose` refuses.
+  const latestCompleted = data.closes.find(
+    (c) => c.status === "completed" && c.entityId === data.entity.id,
+  );
+  const nameOfEntity = (id: string | null): string =>
+    (id && data.entities.find((e) => e.id === id)?.name) || "";
   const blockers =
     data.checklist?.items.filter((i) => !i.ok).map((i) => ({
       label: i.label,
@@ -125,12 +164,15 @@ export default async function ClosePage({
         actions={
           <>
             {canExport && <ExportBooksDialog />}
-            {data.settings.closedThrough ? (
+            {data.entity.closedThrough ? (
               <Badge variant="secondary">
-                Closed through {data.settings.closedThrough}
+                {data.showPicker ? `${data.entity.name} · ` : ""}Closed through{" "}
+                {data.entity.closedThrough}
               </Badge>
             ) : (
-              <Badge variant="outline">Books open</Badge>
+              <Badge variant="outline">
+                {data.showPicker ? `${data.entity.name} · ` : ""}Books open
+              </Badge>
             )}
           </>
         }
@@ -138,12 +180,38 @@ export default async function ClosePage({
 
       <AccountingNav />
 
+      {/* WHERE EVERY COMPANY STANDS, on the page whose job is to tell you. One
+          company closed through June and another through March is the ordinary
+          state of a ten-LLC client, and it is invisible from a picker that only
+          shows the one you happen to have selected. */}
+      {data.showPicker && (
+        <div className="flex flex-wrap items-center gap-2">
+          {data.entities.map((e) => (
+            <Link
+              key={e.id}
+              href={`/dashboard/m/accounting/close?entity=${e.id}`}
+              className={
+                e.id === data.entity.id
+                  ? "border-primary bg-primary/8 rounded-full border px-3 py-1 text-xs font-medium"
+                  : "border-border hover:bg-muted rounded-full border px-3 py-1 text-xs"
+              }
+            >
+              {e.name}
+              <span className="text-muted-foreground ml-1.5">
+                {e.closedThrough ? `closed through ${e.closedThrough}` : "open"}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
+
       {data.checklist && (
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
             <div>
               <CardTitle>
-                Pre-close checklist — through {data.periodEnd}
+                Pre-close checklist{data.showPicker ? ` — ${data.entity.name}` : ""}{" "}
+                — through {data.periodEnd}
               </CardTitle>
               <CardDescription>
                 Outstanding items warn but never block a close; they get
@@ -152,6 +220,8 @@ export default async function ClosePage({
             </div>
             {ctx.role === "owner" && (
               <CloseControls
+                entityId={data.entity.id}
+                entityName={data.showPicker ? data.entity.name : undefined}
                 periodEnd={data.periodEnd}
                 periodOptions={data.options}
                 blockers={blockers}
@@ -217,6 +287,7 @@ export default async function ClosePage({
               <TableHeader>
                 <TableRow>
                   <TableHead>Period end</TableHead>
+                  {data.showPicker && <TableHead>Company</TableHead>}
                   <TableHead>Status</TableHead>
                   <TableHead>Completed</TableHead>
                   <TableHead>Review</TableHead>
@@ -234,6 +305,18 @@ export default async function ClosePage({
                         {c.periodEnd}
                       </Link>
                     </TableCell>
+                    {data.showPicker && (
+                      <TableCell className="text-sm">
+                        {/* Blank on a close that predates per-entity closes:
+                            it locked every company at once, and naming one
+                            would be a claim the row cannot support. */}
+                        {nameOfEntity(c.entityId) || (
+                          <span className="text-muted-foreground">
+                            All companies
+                          </span>
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell>
                       {c.status === "completed" ? (
                         <Badge className="bg-success/12 text-success-foreground hover:bg-success/12">

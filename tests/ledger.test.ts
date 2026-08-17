@@ -428,7 +428,7 @@ d("core ledger platform", () => {
       const cash = await accountId("1000");
       const exp = await accountId("6400");
       await withTenant(tenantId, (tx) =>
-        setClosedThrough(tx, owner, { date: "2026-02-28" }),
+        setClosedThrough(tx, owner, { entityId: entityId, date: "2026-02-28" }),
       );
       await expect(
         withTenant(tenantId, (tx) =>
@@ -449,7 +449,7 @@ d("core ledger platform", () => {
         }),
       );
       expect(entry.status).toBe("posted");
-      await withTenant(tenantId, (tx) => setClosedThrough(tx, owner, { date: null }));
+      await withTenant(tenantId, (tx) => setClosedThrough(tx, owner, { entityId: entityId, date: null }));
     });
 
     it("idempotency: same key returns the same entry", async () => {

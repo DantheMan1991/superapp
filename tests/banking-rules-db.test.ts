@@ -2,7 +2,11 @@ import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
-import { setClosedThrough, type LedgerCtx } from "../src/modules/accounting/core";
+import {
+  getDefaultEntityId,
+  setClosedThrough,
+  type LedgerCtx,
+} from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import { createBankAccount } from "../src/modules/accounting/banking/accounts";
 import { createVendor } from "../src/modules/accounting/payables/vendors";
@@ -202,8 +206,8 @@ d("bank rules (DB)", () => {
   });
 
   it("auto-post yields to a closed period, and the import still succeeds", async () => {
-    await withTenant(tenantId, (tx) =>
-      setClosedThrough(tx, owner, { date: "2026-04-30" }),
+    await withTenant(tenantId, async (tx) =>
+      setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: "2026-04-30" }),
     );
 
     const result = await importRows([
@@ -223,8 +227,8 @@ d("bank rules (DB)", () => {
     expect(readRuleSuggestion(locked!)?.accountCode).toBe("6650");
     expect(rows.find((r) => r.txnDate === "2026-05-15")?.status).toBe("posted");
 
-    await withTenant(tenantId, (tx) =>
-      setClosedThrough(tx, owner, { date: null }),
+    await withTenant(tenantId, async (tx) =>
+      setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: null }),
     );
   });
 

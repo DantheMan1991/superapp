@@ -306,11 +306,13 @@ d("depreciation posting", () => {
     // The production bug, 2026-08-15: an asset whose schedule starts before the
     // last close could never be depreciated at all, because the run is atomic
     // and one closed month refused everything behind it.
+    // The lock lives on the COMPANY since ADR 0010 slice 4 — this fixture has
+    // one, and depreciation posts into it.
     await withSystem((tx) =>
       tx
-        .update(schema.accountingSettings)
+        .update(schema.entities)
         .set({ closedThrough: "2026-06-30" })
-        .where(eq(schema.accountingSettings.tenantId, tenantId)),
+        .where(eq(schema.entities.tenantId, tenantId)),
     );
 
     const backdated = await asOwner((tx) =>

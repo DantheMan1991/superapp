@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import {
   assertEntryNotSourceManaged,
+  getDefaultEntityId,
   setClosedThrough,
   startReconciliation,
   toggleReconciliationLine,
@@ -558,16 +559,16 @@ d("payables (DB)", () => {
     it("closed period blocks approval", async () => {
       const expense = await accountId("6000");
       const bill = await makeBill([line(1000, expense)], { billDate: "2026-01-15" });
-      await withTenant(tenantId, (tx) =>
-        setClosedThrough(tx, owner, { date: "2026-01-31" }),
+      await withTenant(tenantId, async (tx) =>
+        setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: "2026-01-31" }),
       );
       await expect(
         withTenant(tenantId, (tx) =>
           approveBill(tx, owner, { billId: bill.id, expectedVersion: bill.version }),
         ),
       ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
-      await withTenant(tenantId, (tx) =>
-        setClosedThrough(tx, owner, { date: null }),
+      await withTenant(tenantId, async (tx) =>
+        setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: null }),
       );
     });
 

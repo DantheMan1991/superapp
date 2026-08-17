@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import {
+  getDefaultEntityId,
   startReconciliation,
   toggleReconciliationLine,
   setClosedThrough,
@@ -519,8 +520,8 @@ d("invoicing (DB)", () => {
 
   it("closed period blocks issuing (T-D7)", async () => {
     const sales = await accountId("4000");
-    await withTenant(tenantId, (tx) =>
-      setClosedThrough(tx, owner, { date: "2026-01-31" }),
+    await withTenant(tenantId, async (tx) =>
+      setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: "2026-01-31" }),
     );
     const invoice = await withTenant(tenantId, (tx) =>
       createInvoiceDraft(tx, owner, {
@@ -537,7 +538,7 @@ d("invoicing (DB)", () => {
         }),
       ),
     ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
-    await withTenant(tenantId, (tx) => setClosedThrough(tx, owner, { date: null }));
+    await withTenant(tenantId, async (tx) => setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: null }));
     await withTenant(tenantId, (tx) =>
       deleteInvoiceDraft(tx, owner, {
         invoiceId: invoice.id,

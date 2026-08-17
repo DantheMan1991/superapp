@@ -4,7 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { Asset } from "@/db/schema";
 import {
   entityForDocument,
-  getSettings,
+  getClosedThrough,
   listDimensionMembers,
   postEntry,
 } from "@/modules/accounting/core";
@@ -264,8 +264,17 @@ export async function getDepreciationStatus(
   const posted = await postedToDateCents(tx, tenantId, asset.id);
   const due = unpostedPeriods(input, through, postedPeriods);
 
-  const settings = await getSettings(tx, tenantId);
-  const { stranded, open } = splitAtClose(due, settings.closedThrough);
+  // The lock of the company this asset's depreciation posts into (ADR 0010
+   // slice 4). A fixed asset still has no company of its own — the assets pack
+   // is `entityForDocument`'s last caller — so the answer comes from where its
+   // entries have always landed, which is the same source the posting path
+   // below uses. Give `assets` an `entity_id` and both read it directly.
+  const closedThrough = await getClosedThrough(
+    tx,
+    tenantId,
+    await entityForDocument(tx, tenantId, "depreciation", asset.id),
+  );
+  const { stranded, open } = splitAtClose(due, closedThrough);
   return {
     schedule,
     postedPeriods,
@@ -330,8 +339,12 @@ export async function postDepreciation(
     return { postedPeriods: [], totalCents: 0, caughtUpCount: 0 };
   }
 
-  const settings = await getSettings(tx, ctx.tenantId);
-  const { stranded, open } = splitAtClose(due, settings.closedThrough);
+  const closedThrough = await getClosedThrough(
+    tx,
+    ctx.tenantId,
+    await entityForDocument(tx, ctx.tenantId, "depreciation", asset.id),
+  );
+  const { stranded, open } = splitAtClose(due, closedThrough);
 
   const members = await listDimensionMembers(tx, ctx.tenantId, ASSET_DIMENSION);
   const member = members.find((m) => m.packEntityId === asset.id);

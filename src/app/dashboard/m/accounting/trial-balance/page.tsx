@@ -19,8 +19,8 @@ import Link from "next/link";
 import { Lock, Scale } from "lucide-react";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
-  getSettings,
   getTrialBalance,
+  groupClosedThrough,
   residualIfConsolidated,
 } from "@/modules/accounting/core";
 import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
@@ -46,10 +46,10 @@ export default async function TrialBalancePage({
   // must never silently produce the other basis.
   const basis = sp.basis === "cash" ? "cash" : "accrual";
 
-  const { tb, asOf, settings, entityView, residual } = await withTenant(
+  const { tb, asOf, entityView, residual, closedThrough, closedLabel } =
+    await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const settings = await getSettings(tx, ctx.tenant.id);
       const today = todayInTimezone(ctx.tenant.timezone);
       const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
       // OFFERED: this is the report where elimination is provable, because a
@@ -74,7 +74,27 @@ export default async function TrialBalancePage({
         entityView.scope,
         { asOf },
       );
-      return { tb, asOf, settings, entityView, residual };
+      // The lock, said correctly for whatever this report is showing.
+      const scope = entityView.scope;
+      const scoped =
+        scope.kind === "one"
+          ? entityView.entities.filter((e) => e.id === scope.entityId)
+          : entityView.entities;
+      const closedThrough = groupClosedThrough(scoped);
+      const closedLabel =
+        entityView.showPicker && scoped.length === 1
+          ? `${scoped[0].name} `
+          : entityView.showPicker
+            ? "All companies "
+            : "";
+      return {
+        tb,
+        asOf,
+        entityView,
+        residual,
+        closedThrough,
+        closedLabel,
+      };
     },
   );
 
@@ -165,9 +185,14 @@ export default async function TrialBalancePage({
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
           <Lock className="h-3.5 w-3.5" />
-          {settings.closedThrough
-            ? `Closed through ${settings.closedThrough}`
-            : "Books open"}
+          {/* WHOSE lock, on a report that may be showing several companies
+              (ADR 0010 slice 4). Scoped to one company it is that company's
+              date; across the group it is the date EVERY company is closed
+              through, which is null the moment one of them is still open —
+              see groupClosedThrough for why the earliest is the honest one. */}
+          {closedThrough
+            ? `${closedLabel}closed through ${closedThrough}`
+            : `${closedLabel}books open`}
           {" · manage on the Close page"}
         </Link>
       </div>

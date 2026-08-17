@@ -158,6 +158,19 @@ export const entities = pgTable(
      */
     isDefault: boolean("is_default").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
+    /**
+     * The period lock, PER SET OF BOOKS (ADR 0010 slice 4). Null = never closed.
+     *
+     * It moved here from `accounting_settings` because ten LLCs close in
+     * different months — one bookkeeper finishing Maple's June while Oak's is
+     * still missing a bank statement is the ordinary case, and a tenant-wide
+     * scalar made it one decision for all of them.
+     *
+     * DERIVED STATE, written ONLY by completeClose/reopenClose, exactly as the
+     * tenant-wide scalar was. That is what keeps drift between the lock and the
+     * close history unrepresentable.
+     */
+    closedThrough: date("closed_through", { mode: "string" }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

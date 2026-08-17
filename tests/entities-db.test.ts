@@ -18,8 +18,14 @@ import {
   affiliateBalances,
   assertNotIntercompanyLeg,
   postIntercompanyPair,
+  completeClose,
   consolidationResidual,
   displayCents,
+  getCloseChecklist,
+  getClosedThrough,
+  groupClosedThrough,
+  listCloses,
+  reopenClose,
   resolveEntityScope,
   resolveReportEntity,
   reverseIntercompanyPair,
@@ -1035,6 +1041,167 @@ d("entities: two sets of books in one tenant", () => {
     // balances WITH it there — which is the whole argument for surfacing it.
     expect(netOf(rows, dueFrom)).toBe(400);
     expect(rows.reduce((a, r) => a + r.netCents, 0)).toBe(0);
+  });
+
+  /* -- per-entity close (slice 4) ----------------------------------------- */
+
+  /**
+   * THE FAILURE THIS SECTION EXISTS FOR: a period check that reads a
+   * tenant-wide lock refuses a write to a company whose books are open, and —
+   * worse — accepts one into a company whose books are closed. Neither is
+   * visible on a single-company tenant, which is every other fixture here.
+   *
+   * These run LAST and deliberately leave Maple closed through 2026-01-31: the
+   * dates above are 2026-03 onward, so nothing earlier in the file is affected,
+   * and the closing itself is the point.
+   */
+  it("closing ONE company leaves the other's books open", async () => {
+    const cash = await accountId("1000");
+    const rent = await accountId("4000");
+
+    await withTenant(tenantId, (tx) =>
+      completeClose(tx, owner, { entityId: maple, periodEnd: "2026-01-31" }),
+    );
+
+    // Maple is locked...
+    expect(
+      await withTenant(tenantId, (tx) => getClosedThrough(tx, tenantId, maple)),
+    ).toBe("2026-01-31");
+    await expect(
+      withTenant(tenantId, (tx) =>
+        postEntry(tx, owner, {
+          entityId: maple,
+          status: "posted",
+          entryDate: "2026-01-15",
+          memo: "into Maple's closed January",
+          lines: [
+            { accountId: cash, amountCents: 100 },
+            { accountId: rent, amountCents: -100 },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
+
+    // ...and Oak is NOT. Same date, same accounts, different set of books.
+    expect(
+      await withTenant(tenantId, (tx) => getClosedThrough(tx, tenantId, oak)),
+    ).toBeNull();
+    const posted = await withTenant(tenantId, (tx) =>
+      postEntry(tx, owner, {
+        entityId: oak,
+        status: "posted",
+        entryDate: "2026-01-15",
+        memo: "into Oak's OPEN January",
+        lines: [
+          { accountId: cash, amountCents: 100 },
+          { accountId: rent, amountCents: -100 },
+        ],
+      }),
+    );
+    expect(posted.entry.status).toBe("posted");
+  });
+
+  it("the checklist counts THIS company's work, not the tenant's", async () => {
+    const cash = await accountId("1000");
+    const rent = await accountId("4000");
+    // A draft in Oak's books only.
+    await withTenant(tenantId, (tx) =>
+      postEntry(tx, owner, {
+        entityId: oak,
+        status: "draft",
+        entryDate: "2026-02-10",
+        memo: "Oak draft, February",
+        lines: [
+          { accountId: cash, amountCents: 500 },
+          { accountId: rent, amountCents: -500 },
+        ],
+      }),
+    );
+    const [oakList, mapleList] = await withTenant(tenantId, async (tx) => [
+      await getCloseChecklist(tx, tenantId, oak, "2026-02-28"),
+      await getCloseChecklist(tx, tenantId, maple, "2026-02-28"),
+    ]);
+    const drafts = (c: { items: Array<{ key: string; count: number }> }) =>
+      c.items.find((i) => i.key === "draft_entries")!.count;
+    // Telling somebody closing Maple that Oak has a draft is the noise this
+    // scoping removes — and it would have been a blocker on their screen.
+    expect(drafts(oakList)).toBeGreaterThanOrEqual(1);
+    expect(drafts(mapleList)).toBe(0);
+    expect(oakList.entityId).toBe(oak);
+  });
+
+  it("two companies can close the SAME period — it is not a collision", async () => {
+    // The old unique index was (tenant, period_end) and would have refused
+    // this outright. Ten LLCs closing the same June is the ordinary case.
+    await withTenant(tenantId, (tx) =>
+      completeClose(tx, owner, { entityId: oak, periodEnd: "2026-01-31" }),
+    );
+    const closes = await withTenant(tenantId, (tx) => listCloses(tx, tenantId));
+    const january = closes.filter(
+      (c) => c.periodEnd === "2026-01-31" && c.status === "completed",
+    );
+    expect(january).toHaveLength(2);
+    expect(new Set(january.map((c) => c.entityId))).toEqual(
+      new Set([maple, oak]),
+    );
+  });
+
+  it("'the latest close' is per company, and reopening one leaves the other alone", async () => {
+    // Maple moves on to February; Oak stays at January.
+    await withTenant(tenantId, (tx) =>
+      completeClose(tx, owner, { entityId: maple, periodEnd: "2026-02-28" }),
+    );
+    const closes = await withTenant(tenantId, (tx) => listCloses(tx, tenantId));
+    const oakJan = closes.find(
+      (c) => c.entityId === oak && c.periodEnd === "2026-01-31",
+    )!;
+
+    // Oak's January is still ITS latest, even though a later close exists in
+    // the tenant. A tenant-wide check would have refused this with
+    // CLOSE_NOT_LATEST.
+    await withTenant(tenantId, (tx) =>
+      reopenClose(tx, owner, {
+        closeId: oakJan.id,
+        expectedVersion: oakJan.version,
+      }),
+    );
+    expect(
+      await withTenant(tenantId, (tx) => getClosedThrough(tx, tenantId, oak)),
+    ).toBeNull();
+    // Maple is untouched by Oak being reopened.
+    expect(
+      await withTenant(tenantId, (tx) => getClosedThrough(tx, tenantId, maple)),
+    ).toBe("2026-02-28");
+  });
+
+  it("closing is monotonic WITHIN a company and says nothing about another", async () => {
+    // Backwards in Maple: refused, because Maple is at February.
+    await expect(
+      withTenant(tenantId, (tx) =>
+        completeClose(tx, owner, { entityId: maple, periodEnd: "2026-01-31" }),
+      ),
+    ).rejects.toMatchObject({ code: "CLOSE_NOT_FORWARD" });
+    // The SAME date in Oak is fine — it is behind, which is the whole point.
+    const { close } = await withTenant(tenantId, (tx) =>
+      completeClose(tx, owner, { entityId: oak, periodEnd: "2026-01-31" }),
+    );
+    expect(close.entityId).toBe(oak);
+    expect(close.previousClosedThrough).toBeNull();
+  });
+
+  it("the group is closed through the EARLIEST company, and open if any is", async () => {
+    const entities = await withTenant(tenantId, (tx) =>
+      listEntities(tx, tenantId, { includeInactive: true }),
+    );
+    // Maple 2026-02-28, Oak 2026-01-31, and any company never closed makes the
+    // whole group open — the rule the hub card and the trial-balance footer
+    // both read through.
+    const closed = entities.filter((e) => e.closedThrough);
+    expect(closed.length).toBeGreaterThanOrEqual(2);
+    expect(groupClosedThrough(closed)).toBe("2026-01-31");
+    expect(groupClosedThrough(entities)).toBe(
+      entities.every((e) => e.closedThrough) ? "2026-01-31" : null,
+    );
   });
 
   it("combined balancing is NOT evidence that each company balances", async () => {

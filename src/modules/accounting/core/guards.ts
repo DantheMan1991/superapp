@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { AccountingSettings } from "@/db/schema";
 import { LedgerError } from "./errors";
@@ -87,34 +87,79 @@ export async function getSettings(
 }
 
 /**
+ * The date THIS COMPANY's books are locked through, or null.
+ *
+ * Per entity since ADR 0010 slice 4: ten LLCs close in different months, and
+ * one bookkeeper finishing Maple's June while Oak is still missing a bank
+ * statement is the ordinary case rather than an edge one.
+ */
+export async function getClosedThrough(
+  tx: Tx,
+  tenantId: string,
+  entityId: string,
+): Promise<string | null> {
+  const row = await tx.query.entities.findFirst({
+    where: and(
+      eq(schema.entities.tenantId, tenantId),
+      eq(schema.entities.id, entityId),
+    ),
+    columns: { closedThrough: true },
+  });
+  if (!row) {
+    throw new LedgerError("ENTITY_NOT_FOUND", `entity ${entityId} not found`);
+  }
+  return row.closedThrough;
+}
+
+/**
  * Reject writes dated inside the closed period. ISO date strings compare
  * lexically, so plain <= is correct.
+ *
+ * `entityId` IS REQUIRED, and that is the whole safety story of slice 4 — the
+ * same instrument slices 1 and 3 used. A period check that read a tenant-wide
+ * lock would refuse a write to a company whose books are open, and — far worse
+ * — ACCEPT one into a company whose books are closed, the moment two companies
+ * close in different months. Neither is visible on a single-company tenant,
+ * which is every other fixture in the repo.
  */
 export async function assertPeriodOpen(
   tx: Tx,
   tenantId: string,
+  entityId: string,
   entryDate: string,
 ): Promise<void> {
-  const settings = await getSettings(tx, tenantId);
-  if (settings.closedThrough && entryDate <= settings.closedThrough) {
-    throw new LedgerError("PERIOD_CLOSED", `period closed through ${settings.closedThrough}`, {
-      closedThrough: settings.closedThrough,
+  const closedThrough = await getClosedThrough(tx, tenantId, entityId);
+  if (closedThrough && entryDate <= closedThrough) {
+    throw new LedgerError("PERIOD_CLOSED", `period closed through ${closedThrough}`, {
+      closedThrough,
       entryDate,
     });
   }
 }
 
-/** Set (or clear) the closing date. Owner-only. Returns {before, after}. */
+/**
+ * Set (or clear) ONE COMPANY's closing date. Owner-only.
+ *
+ * Still derived state with exactly two writers — `completeClose` and
+ * `reopenClose` — which is what makes the lock and the close history unable to
+ * disagree. It moved from `accounting_settings` to `entities` without changing
+ * that rule.
+ */
 export async function setClosedThrough(
   tx: Tx,
   ctx: LedgerCtx,
-  args: { date: string | null },
+  args: { entityId: string; date: string | null },
 ): Promise<{ before: string | null; after: string | null }> {
   requireOwnerRole(ctx);
-  const settings = await getSettings(tx, ctx.tenantId);
+  const before = await getClosedThrough(tx, ctx.tenantId, args.entityId);
   await tx
-    .update(schema.accountingSettings)
+    .update(schema.entities)
     .set({ closedThrough: args.date, updatedAt: new Date() })
-    .where(eq(schema.accountingSettings.id, settings.id));
-  return { before: settings.closedThrough, after: args.date };
+    .where(
+      and(
+        eq(schema.entities.tenantId, ctx.tenantId),
+        eq(schema.entities.id, args.entityId),
+      ),
+    );
+  return { before, after: args.date };
 }

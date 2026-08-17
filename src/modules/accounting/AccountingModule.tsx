@@ -6,7 +6,11 @@ import type { TenantContext } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { StatCard } from "@/components/app/stat-card";
-import { getSettings, ledgerIsBalancedPerEntity, listEntities } from "./core";
+import {
+  groupClosedThrough,
+  ledgerIsBalancedPerEntity,
+  listEntities,
+} from "./core";
 import { formatCentsSigned, toSafeCents } from "./lib/money";
 import { AccountingNav } from "./components/accounting-nav";
 
@@ -35,8 +39,9 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
     // amounts sum to zero, so a combined check would report a healthy ledger
     // in exactly the case a mis-scoped write produces.
     const balanced = await ledgerIsBalancedPerEntity(tx, tenantId);
-    const entities = await listEntities(tx, tenantId);
-    const settings = await getSettings(tx, tenantId);
+    // Inactive included: a wound-up company still has books, and leaving it
+    // out would make the group look closed through a date it is not.
+    const entities = await listEntities(tx, tenantId, { includeInactive: true });
     const [unreviewed] = await tx
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.bankTransactions)
@@ -131,10 +136,14 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
       toSafeCents(openBillsPaid[0]?.paid ?? 0);
     return {
       accountCount: accountCount.n,
-      entityCount: entities.length,
+      entityCount: entities.filter((e) => e.isActive).length,
+      // The date EVERY company is locked through — null if any is still open.
+      // See groupClosedThrough: the latest, or the default company's, would
+      // read as a guarantee about the group that the books do not give.
+      closedThrough: groupClosedThrough(entities),
+      companiesClosed: entities.filter((e) => e.closedThrough).length,
       statusCounts,
       balanced,
-      settings,
       unreviewed: unreviewed.n,
       arOutstandingCents,
       receiptInbox: receiptInbox.n,
@@ -250,9 +259,13 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
         />
         <StatCard
           label="Books closed through"
-          value={data.settings.closedThrough ?? "—"}
+          value={data.closedThrough ?? "—"}
           href="/dashboard/m/accounting/close"
-          footnote="Month-end close, review and export"
+          footnote={
+            data.entityCount > 1
+              ? `${data.companiesClosed} of ${data.entityCount} companies closed · earliest shown`
+              : "Month-end close, review and export"
+          }
         />
       </div>
     </div>

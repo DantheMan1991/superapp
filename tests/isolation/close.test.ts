@@ -10,6 +10,8 @@ interface CloseFixture {
   closeId: string;
   noteId: string;
   membershipId: string;
+  /** The company whose books the close covers (ADR 0010 slice 4). */
+  entityId: string;
 }
 
 d("close-tools isolation (RLS + composite tenant FKs)", () => {
@@ -31,10 +33,15 @@ d("close-tools isolation (RLS + composite tenant FKs)", () => {
       return m.id;
     });
     return withTenant(tenantId, async (tx) => {
+      const [entity] = await tx
+        .insert(schema.entities)
+        .values({ tenantId, name: `Close Iso ${tag} Co`, isDefault: true })
+        .returning();
       const [close] = await tx
         .insert(schema.periodCloses)
         .values({
           tenantId,
+          entityId: entity.id,
           periodEnd: "2026-06-30",
           checklist: { items: [], blockerCount: 0 },
           completedByClerkUserId: `user-${tag}`,
@@ -44,7 +51,7 @@ d("close-tools isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.closeNotes)
         .values({ tenantId, closeId: close.id, authorClerkUserId: `user-${tag}`, body: `note ${tag}` })
         .returning();
-      return { closeId: close.id, noteId: note.id, membershipId };
+      return { closeId: close.id, noteId: note.id, membershipId, entityId: entity.id };
     });
   }
 
@@ -111,17 +118,58 @@ d("close-tools isolation (RLS + composite tenant FKs)", () => {
     ).rejects.toThrow();
   });
 
-  it("one completed close per period end (partial unique)", async () => {
+  it("composite FK: A's close cannot name B's company", async () => {
+    // The wall that matters, at the close: a set of books belongs to one
+    // client, so a close naming another tenant's company is unrepresentable
+    // rather than merely unwritten (ADR 0010 slice 4).
     await expect(
       withTenant(tenantA, (tx) =>
         tx.insert(schema.periodCloses).values({
           tenantId: tenantA,
+          entityId: fx.b.entityId,
+          periodEnd: "2026-04-30",
+          checklist: {},
+          completedByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("one completed close per period end PER COMPANY (partial unique)", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.periodCloses).values({
+          tenantId: tenantA,
+          entityId: fx.a.entityId,
           periodEnd: "2026-06-30",
           checklist: {},
           completedByClerkUserId: "user-A",
         }),
       ),
     ).rejects.toThrow();
+  });
+
+  it("...but a SECOND company may close the same period", async () => {
+    // What the old (tenant, period_end) index refused. Ten LLCs closing the
+    // same June is the ordinary case, not a collision.
+    const second = await withTenant(tenantA, async (tx) => {
+      const [e] = await tx
+        .insert(schema.entities)
+        .values({ tenantId: tenantA, name: "Close Iso A Co 2" })
+        .returning();
+      const [c] = await tx
+        .insert(schema.periodCloses)
+        .values({
+          tenantId: tenantA,
+          entityId: e.id,
+          periodEnd: "2026-06-30",
+          checklist: {},
+          completedByClerkUserId: "user-A",
+        })
+        .returning();
+      return c;
+    });
+    expect(second.periodEnd).toBe("2026-06-30");
   });
 
   it("memberships UPDATE under tenant context is scoped to the tenant", async () => {

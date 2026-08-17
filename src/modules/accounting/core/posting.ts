@@ -5,7 +5,12 @@ import type { DimensionMember, JournalEntry, JournalLine } from "@/db/schema";
 import { MAX_AMOUNT_CENTS, isValidIsoDate, todayInTimezone } from "../lib/money";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError } from "./errors";
-import { assertPeriodOpen, getSettings, requireOwnerRole } from "./guards";
+import {
+  assertPeriodOpen,
+  getClosedThrough,
+  getSettings,
+  requireOwnerRole,
+} from "./guards";
 import type { EntryLineInput, LedgerCtx, NewEntryInput, PostResult } from "./types";
 
 /**
@@ -302,7 +307,9 @@ export async function postEntry(
   );
   const members = await loadDimensionMembers(tx, ctx.tenantId, input.lines);
   if (input.status === "posted") {
-    await assertPeriodOpen(tx, ctx.tenantId, input.entryDate);
+    // The company being posted INTO decides whether the period is open. One
+    // company's June being closed says nothing about another's.
+    await assertPeriodOpen(tx, ctx.tenantId, input.entityId, input.entryDate);
   }
 
   const inserted = await tx
@@ -463,7 +470,8 @@ async function assertPostedMutable(
   if (settings.entryEditPolicy === "strict_append_only") {
     throw new LedgerError("ENTRY_IMMUTABLE", "tenant is in strict append-only mode");
   }
-  if (settings.closedThrough && entry.entryDate <= settings.closedThrough) {
+  const closedThrough = await getClosedThrough(tx, ctx.tenantId, entry.entityId);
+  if (closedThrough && entry.entryDate <= closedThrough) {
     throw new LedgerError("ENTRY_IMMUTABLE", "entry is in a closed period");
   }
   if (await entryHasReconciledLines(tx, ctx.tenantId, entry.id)) {
@@ -500,8 +508,10 @@ export async function editEntry(
 
   if (entry.status === "posted") {
     await assertPostedMutable(tx, ctx, entry);
-    // The new date must also land in the open period.
-    await assertPeriodOpen(tx, ctx.tenantId, newDate);
+    // The new date must also land in the open period — of the entry's OWN
+    // company, which is the only one it can be in (there is no entityId in the
+    // patch, deliberately, see above).
+    await assertPeriodOpen(tx, ctx.tenantId, entry.entityId, newDate);
   }
 
   if (args.patch.lines) {
@@ -559,7 +569,7 @@ export async function postDraft(
   validateLineAmounts(lines);
   assertBalanced(lines);
   await loadActiveAccounts(tx, ctx.tenantId, lines.map((l) => l.accountId));
-  await assertPeriodOpen(tx, ctx.tenantId, entry.entryDate);
+  await assertPeriodOpen(tx, ctx.tenantId, entry.entityId, entry.entryDate);
   return bumpVersion(tx, ctx.tenantId, entry.id, args.expectedVersion, {
     status: "posted",
     postedAt: new Date(),

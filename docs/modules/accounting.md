@@ -13,6 +13,74 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-17 — The mirror case, and the one-sided void it found (branch `claude/invoice-payment-intercompany`)
+
+The last thing ADR 0010 listed as refused rather than recorded: a customer pays
+Oak Row's invoice and the cheque goes into Test's account. No migration —
+`postIntercompanyPair` already had the shape.
+
+- **THE MIRROR, and note which way round it goes.** The invoice's company clears
+  its receivable and is now OWED by the company that took the money in:
+
+  ```
+  Oak Row   Dr Due from Affiliates  1,000   <- Oak is owed by Test
+            Cr Accounts Receivable  1,000      (the invoice is settled)
+  Test      Dr Checking             1,000      (Test's cash arrived)
+            Cr Due to Affiliates    1,000   <- Test now owes Oak
+  ```
+
+  So the INVOICE'S company is the `from` side even though no money left it.
+  `postIntercompanyPair` names that argument for the bill case, where the
+  payer's cash really does move; **what the two shapes actually share is which
+  company ends up holding the asset**, and that is what the parameter decides.
+- **`invoice_payments.journalEntryId` points at the INVOICE'S leg**, so status
+  derivation, A/R aging and unapply keep reading the payment row exactly as they
+  did — the same choice `bill_payments` made in slice 2.
+- **Undeposited Funds falls through to the ordinary single-entry path**, because
+  it is a chart account rather than a register and has no owner. Two companies'
+  unbanked cheques share 1250 exactly as their receivables share 1200.
+- **The Deposit-to picker offers every register again**, reversing what slice 1b
+  did here — the same reversal slice 2 made on the bill's Paid-from, for the
+  same reason: the choice used to always fail and now records something. The
+  dialog names whose account it is and says what will happen before it happens.
+
+**THE BUG THIS FOUND, which predates it and was live in the bill path since
+slice 2.** `assertNotIntercompanyLeg` lived only in `actions.ts`, so the journal
+screens were covered and `unapplyBillPayment` was not: it went straight to
+`voidEntry` and **voided one leg of a pair**. Proved against the dev database
+before writing the fix — the two legs came back `['posted', 'void']`. The paying
+company was left with its cash gone and a Due-from balance that
+`affiliateBalances` cannot even report, because a group with one surviving entry
+reads as half a pair and is skipped.
+
+- **The guard moved into the ENGINE** — `voidEntry` and `reverseEntry` both
+  refuse a bare leg now. Same lesson as `assertNoForeignRegisters`: a rule
+  enforced per screen is a rule the next caller does not get, and unapply was
+  the next caller.
+- **`voidIntercompanyPair` is the undo that takes both**, and it is distinct
+  from `reverseIntercompanyPair` on purpose: unapply says the payment did not
+  happen, which removes it from every report, while a reversal says it happened
+  and is being corrected. Both unapply paths route through it.
+- `voidEntryUnchecked` is core-internal and deliberately not re-exported from
+  `core/index.ts`, the way `asFilterScope` is not — its only caller is the pair
+  void, which has already established that it is taking both sides.
+- The mutability tiers still apply to EACH leg, so a reconciled line or a closed
+  period on either side refuses and the whole transaction rolls back.
+
+**One test changed its mind, which is worth recording rather than hiding.** The
+slice-1b case asserting `CROSS_ENTITY_REGISTER` on exactly this payment is gone,
+replaced by one asserting the pair — that refusal was right while there was no
+way to record the thing. The refusal for a HAND-WRITTEN journal touching a
+foreign register is unchanged and still asserted: the guard did not move, the
+recording path grew a second shape. Two downstream figures moved with it, and
+both are now explained in place: `affiliateBalances` nets to 20,000 rather than
+25,000 because the fixture contains 5,000 running the other way, which is the
+netting the derived-not-stored design exists to do.
+
+`tests/entities-db.test.ts` is 41 cases: the pair and its direction, the payment
+row pointing at the invoice's leg, consolidation eliminating it to a plain bank
+deposit, unapply voiding both legs, and the engine refusing a one-sided void.
+
 ### 2026-08-17 — `0153`: the lock's contract half, and the scalar goes (branch `claude/close-contract-migration`)
 
 The contract half of ADR 0010 slice 4, run AFTER the deploy that writes
@@ -1731,6 +1799,7 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
+- **An invoice banked into another company's account is RECORDED** (2026-08-17), the mirror of the bill case and the last item ADR 0010 listed as refused. It also closed a live hole in the bill path: unapplying an intercompany payment voided ONE leg, because `assertNotIntercompanyLeg` lived only in the action layer. The guard is in `voidEntry`/`reverseEntry` now and `voidIntercompanyPair` is the undo that takes both
 - **Per-entity close is DONE** (2026-08-17, slice 4 of ADR 0010) — the lock is `entities.closed_through`, the checklist is scoped, and two companies can close different months. **The contract half is DONE too** (`0153`, applied and verified on both databases the same day): `period_closes.entity_id` is NOT NULL and `accounting_settings.closed_through` is dropped. **Nothing is owed in the migration lane.** Two things this slice leaves behind on purpose: a company carrying a lock INHERITED from the tenant-wide scalar has no close row to reopen and can only be closed forward (on production that is Oak Row LLC), and `assets` still has no company, so depreciation reads its lock through `entityForDocument`
 - **Consolidation is DONE** (2026-08-17, slice 3 of ADR 0010): a third scope beside "one company" and combined, on the trial balance, balance sheet, P&L and general ledger, plus a consolidated set in the books export. Eliminates by following the `intercompany_id`, never by matching amounts; the unlinked-journal residual is surfaced on the page and in the CSV rather than reconciled away. What is NOT built: **per-entity close** (4 — `period_closes` still locks every company at once), a company on **fixed assets** (the assets pack is `entityForDocument`'s last caller), and **receiving an invoice payment into another company's account**, the mirror of the bill case, still refused. And deliberately not built at all: full GAAP consolidation — no investment-in-subsidiary elimination, no minority interest, no purchase accounting, because these are commonly owned LLCs rather than a parent with subsidiaries
 - **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. `drizzle/0146` closed the expand/contract — all three are NOT NULL on both databases. **Intercompany pairs are DONE** (slice 2, same day — `0148`–`0151`). What is NOT built: **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller

@@ -52,7 +52,13 @@ export function InvoiceActions({
   paymentMethods,
 }: {
   invoice: InvoiceRef;
-  depositOptions: Array<{ id: string; label: string }>;
+  /**
+   * Every active register plus Undeposited Funds. `otherCompany` is set only
+   * when the account belongs to somebody else — depositing into one is an
+   * INTERCOMPANY payment (ADR 0010, the mirror of the bill case), recorded as a
+   * linked pair rather than refused, and the dialog says so before it happens.
+   */
+  depositOptions: Array<{ id: string; label: string; otherCompany?: string }>;
   today: string;
   canAct: boolean;
   /** The tenant's own list. Codes are what get stored on the payment. */
@@ -65,12 +71,17 @@ export function InvoiceActions({
   const [pay, setPay] = useState({
     date: today,
     amount: (invoice.balanceCents / 100).toFixed(2),
-    depositAccountId: depositOptions[0]?.id ?? "",
+    // Default to one of THIS company's own accounts, so the ordinary payment
+    // stays one click and banking it into an affiliate is always deliberate.
+    depositAccountId:
+      (depositOptions.find((o) => !o.otherCompany) ?? depositOptions[0])?.id ?? "",
     // Whatever the tenant listed first, rather than a hardcoded "check" that
     // might not be one of their methods at all.
     method: paymentMethods[0]?.code ?? "other",
     memo: "",
   });
+
+  const chosenDeposit = depositOptions.find((o) => o.id === pay.depositAccountId);
 
   async function run(kind: "issue" | "void" | "delete") {
     const asked =
@@ -231,10 +242,20 @@ export function InvoiceActions({
                     {depositOptions.map((o) => (
                       <SelectItem key={o.id} value={o.id}>
                         {o.label}
+                        {o.otherCompany ? ` — ${o.otherCompany}` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {chosenDeposit?.otherCompany && (
+                  // Said BEFORE it happens, the way the bill dialog says it.
+                  <p className="text-xs text-muted-foreground">
+                    The money is going into {chosenDeposit.otherCompany}&apos;s
+                    account. It will be recorded on both sides:{" "}
+                    {chosenDeposit.otherCompany} owes this company the amount
+                    until it is settled.
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>Method</Label>

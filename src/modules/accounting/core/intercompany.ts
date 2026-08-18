@@ -5,7 +5,7 @@ import type { JournalEntry } from "@/db/schema";
 import { LedgerError } from "./errors";
 import { listAccounts } from "./coa";
 import { requireOwnerRole } from "./guards";
-import { postEntry } from "./posting";
+import { postEntry, voidEntryUnchecked } from "./posting";
 import type { EntryLineInput, LedgerCtx } from "./types";
 
 /**
@@ -201,6 +201,53 @@ export async function loadIntercompanyEntries(
     ),
     orderBy: asc(schema.journalEntries.createdAt),
   });
+}
+
+/**
+ * VOID both halves.
+ *
+ * The undo `unapplyPayment` and `unapplyBillPayment` need: unapplying says the
+ * payment did not happen, which removes it from every report rather than
+ * recording a correcting entry — so both legs go, or neither does. Voiding one
+ * leaves the other company holding an affiliate balance with nothing to explain
+ * it, and `affiliateBalances` cannot even report it, because a group with one
+ * surviving entry is skipped as half a pair.
+ *
+ * Distinct from `reverseIntercompanyPair`, which posts a NEW pair and leaves
+ * the original standing — that is the answer when the transfer really happened
+ * and is being undone after the fact. This one is for a transfer that should
+ * not have been recorded at all.
+ *
+ * The mutability tiers apply to EACH leg through `voidEntryUnchecked`, so a
+ * reconciled register line or a closed period on either side refuses, and the
+ * caller's transaction rolls back whole.
+ */
+export async function voidIntercompanyPair(
+  tx: Tx,
+  ctx: LedgerCtx,
+  intercompanyId: string,
+): Promise<JournalEntry[]> {
+  requireOwnerRole(ctx);
+  const entries = await loadIntercompanyEntries(tx, ctx.tenantId, intercompanyId);
+  if (entries.length !== 2) {
+    throw new LedgerError(
+      "INTERCOMPANY_NOT_FOUND",
+      `intercompany ${intercompanyId} is not a pair`,
+    );
+  }
+  const voided: JournalEntry[] = [];
+  for (const entry of entries) {
+    // Already void is not an error: unapply can be reached twice, and the
+    // second pass has nothing left to do on that side.
+    if (entry.status !== "posted") continue;
+    voided.push(
+      await voidEntryUnchecked(tx, ctx, {
+        entryId: entry.id,
+        expectedVersion: entry.version,
+      }),
+    );
+  }
+  return voided;
 }
 
 /**

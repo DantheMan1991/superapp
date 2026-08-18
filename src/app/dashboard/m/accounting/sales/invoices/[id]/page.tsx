@@ -22,6 +22,7 @@ import {
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
+import { listEntities } from "@/modules/accounting/core";
 import { loadInvoiceLines } from "@/modules/accounting/invoicing/invoices";
 import { paidCentsFor } from "@/modules/accounting/invoicing/payments";
 import {
@@ -98,17 +99,25 @@ export default async function InvoiceDetailPage({
       orderBy: asc(schema.invoicePayments.paymentDate),
     });
     const paid = await paidCentsFor(tx, ctx.tenant.id, invoice.id);
-    // ONLY THIS DOCUMENT'S COMPANY. `postEntry` refuses a foreign register
-    // anyway (ADR 0010 slice 1b), so an unfiltered list was never a correctness
-    // hole — it is a control that offers a choice which always fails, the same
-    // class as the recurring invoice that could be coded to Checking. Found by
-    // driving the live app: Oak Row LLC's invoice offered Test's account.
+    /**
+     * EVERY active register, including other companies' — and that reverses
+     * what slice 1b did here, exactly as slice 2 reversed it on the bill.
+     *
+     * Slice 1b filtered this list because depositing one company's payment into
+     * another's account was refused, so offering it was offering a choice that
+     * always failed. It is recorded now, as a linked intercompany pair — the
+     * mirror of the bill case — so it is a real option. The dialog labels whose
+     * account each one is; `recordPayment` decides from the register which
+     * shape to write.
+     */
     const bankAccounts = await tx.query.bankAccounts.findMany({
       where: and(
         eq(schema.bankAccounts.tenantId, ctx.tenant.id),
         eq(schema.bankAccounts.isActive, true),
-        eq(schema.bankAccounts.entityId, invoice.entityId),
       ),
+    });
+    const companies = await listEntities(tx, ctx.tenant.id, {
+      includeInactive: true,
     });
     const undeposited = accounts.find(
       (a) => a.subtype === "undeposited_funds" && a.isSystem,
@@ -188,6 +197,7 @@ export default async function InvoiceDetailPage({
       paymentMethods: methodRows.map((m) => ({ code: m.code, name: m.name })),
       customerEmail: preferredContactValue(contacts, "email") ?? "",
       bankAccounts,
+      companies,
       undeposited,
       customersActive,
       today: todayInTimezone(ctx.tenant.timezone),
@@ -201,7 +211,21 @@ export default async function InvoiceDetailPage({
   const editing = sp.edit === "1" && invoice.status === "draft";
 
   const depositOptions = [
-    ...data.bankAccounts.map((b) => ({ id: b.accountId, label: b.name })),
+    ...data.bankAccounts.map((b) => ({
+      id: b.accountId,
+      label: b.name,
+      // Named only when it is somebody ELSE'S account, because that is the only
+      // time the answer changes what gets written — and a label on every row
+      // would be noise for the single-company tenant.
+      otherCompany:
+        b.entityId === invoice.entityId
+          ? undefined
+          : (data.companies.find((c) => c.id === b.entityId)?.name ??
+            "another company"),
+    })),
+    // Undeposited Funds last and never labelled: it is a chart account rather
+    // than a register, so it has no owner and both companies' unbanked cheques
+    // sit in it.
     ...(data.undeposited
       ? [{ id: data.undeposited.id, label: "Undeposited Funds" }]
       : []),

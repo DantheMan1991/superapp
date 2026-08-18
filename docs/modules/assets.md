@@ -18,8 +18,8 @@ to be listed by a trades profile unchanged.
 ### 2026-08-17 — A fixed asset carries its own company (branch `claude/assets-carry-a-company`)
 
 The last thing [ADR 0010](../decisions/0010-entities-inside-a-tenant.md) listed
-as unbuilt. Migration `0154` (expand); the `SET NOT NULL` is owed after this
-deploy.
+as unbuilt. Migration `0154`, and **nothing is owed after it** — see the last
+bullet, which is the interesting one.
 
 - **`assets.entity_id`, fixed at creation.** An asset is a thing with a balance:
   its cost sits on one balance sheet and its depreciation lands in one P&L, so it
@@ -59,6 +59,18 @@ deploy.
   entry, else the tenant default — so no existing schedule changes company.
 - Verified on both databases: production's three assets all resolved to `Test`,
   the one with three depreciation entries included, and zero nulls.
+- **`entity_id` STAYS NULLABLE, and CI is what settled it.** Every other
+  `entity_id` in this schema gets a `SET NOT NULL` a release later; this one
+  must not. The first cut resolved the tenant default in `createAsset` and threw
+  `ENTITY_MISSING` when there was none — and the test suite failed on a fixture
+  that creates a bare tenant, which is not an artificial case: **this pack
+  declares `requires: []`**, so a tenant can run the asset register with no
+  accounting at all. A farm listing its equipment and never keeping books is a
+  supported customer, and "add a tractor" must not depend on a chart of
+  accounts. `provisionAccounting` now ADOPTS any company-less asset when the
+  books are opened, so depreciation works on the first press. **The pack
+  boundary was the thing that was wrong, and only a test with no accounting in
+  it could have said so.**
 
 ### 2026-08-15 — Whoever changed the oil can log the oil change (`claude/pack-write-levels`)
 

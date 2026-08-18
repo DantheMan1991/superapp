@@ -5,8 +5,8 @@ import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type { Asset } from "@/db/schema";
 import { upsertDimensionMember, archiveDimensionMember } from "@/modules/accounting/core";
 import {
-  getDefaultEntityId,
   listDimensionMembers,
+  listEntities,
 } from "@/modules/accounting/core";
 import { isValidAssetKind } from "./vocabulary";
 
@@ -200,9 +200,6 @@ export interface AssetInput {
    * WHICH COMPANY OWNS IT (ADR 0010). Optional over the wire because a
    * single-company tenant has no picker to send one from — absent means the
    * tenant's default, resolved once at creation and frozen on the row.
-   *
-   * It is not optional at the ledger: every entry this asset posts reads the
-   * column, so an asset without one would have nowhere to depreciate.
    */
   entityId?: string | null;
   identifier?: string;
@@ -227,6 +224,18 @@ export interface AssetInput {
   salvageValueCents?: number | null;
 }
 
+/**
+ * The tenant's default company, or null when it has no books at all.
+ *
+ * Deliberately NOT `getDefaultEntityId`, which throws: for accounting that is
+ * right (an entry with no company cannot post), and for the asset REGISTER it
+ * is not — see the note at the call site.
+ */
+async function defaultEntityIfAny(tx: Tx, tenantId: string): Promise<string | null> {
+  const rows = await listEntities(tx, tenantId);
+  return rows.find((e) => e.isDefault)?.id ?? null;
+}
+
 export async function createAsset(
   tx: Tx,
   ctx: AssetCtx,
@@ -245,10 +254,19 @@ export async function createAsset(
     .insert(schema.assets)
     .values({
       tenantId: ctx.tenantId,
-      // Resolved HERE and frozen, rather than inferred later from wherever the
-      // first depreciation entry happened to land. The composite FK refuses one
-      // belonging to another tenant.
-      entityId: input.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId)),
+      /**
+       * Resolved HERE and frozen, rather than inferred later from wherever the
+       * first depreciation entry happened to land. The composite FK refuses one
+       * belonging to another tenant.
+       *
+       * NULL IS A REAL STATE, and CI is what proved it: this pack declares
+       * `requires: []`, so a tenant can run the asset register with no
+       * accounting at all — a farm listing its equipment and never keeping
+       * books. Such a tenant has no `entities` row, and demanding one here
+       * turned "add a tractor" into `ENTITY_MISSING`. `provisionAccounting`
+       * adopts these the moment books are opened.
+       */
+      entityId: input.entityId ?? (await defaultEntityIfAny(tx, ctx.tenantId)),
       kind,
       name: input.name.trim(),
       identifier: input.identifier?.trim() ?? "",

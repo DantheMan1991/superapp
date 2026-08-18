@@ -1,5 +1,5 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { COA_TEMPLATES } from "./general";
 import { provisionEntity } from "../core/entities";
@@ -34,6 +34,25 @@ export async function provisionAccounting(
     columns: { name: true },
   });
   await provisionEntity(tx, tenantId, tenant?.name ?? "My company");
+
+  /**
+   * ADOPT ANY ASSETS THAT PREDATE THE BOOKS.
+   *
+   * The assets pack declares `requires: []`, so a tenant can have been listing
+   * equipment for months with no accounting and therefore no company — those
+   * rows carry a null `entity_id`. Opening the books is exactly the moment they
+   * acquire one, and doing it here means depreciation works on the first press
+   * rather than failing with a message about a column.
+   *
+   * Guarded to nulls, so an asset that already names a company is never moved:
+   * re-provisioning is idempotent everywhere else in this file and stays so.
+   */
+  await tx
+    .update(schema.assets)
+    .set({ entityId: sql`(select id from entities where tenant_id = ${tenantId} and is_default)` })
+    .where(
+      and(eq(schema.assets.tenantId, tenantId), isNull(schema.assets.entityId)),
+    );
 
   const existing = await tx
     .select({ id: schema.accounts.id, code: schema.accounts.code })

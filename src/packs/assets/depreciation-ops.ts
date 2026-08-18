@@ -12,19 +12,22 @@ import { AssetError, ASSET_DIMENSION, type AssetCtx } from "./ops";
 /**
  * The company whose books this asset depreciates in.
  *
- * `entity_id` is nullable for one release (see the schema note), so a row
- * written between `0154` and the deploy could carry null — and an entry needs a
- * company. It REFUSES rather than falling back to the tenant default: a default
- * chosen at posting time is exactly the behaviour this column replaced, and
- * reintroducing it as an error path would put one asset's schedule in two sets
- * of books. Re-running the migration's backfill is the repair, and the message
- * says which asset.
+ * `entity_id` is legitimately nullable — an asset can be registered by a tenant
+ * with no accounting at all (see the schema note) — and such an asset cannot
+ * depreciate, because there are no books to depreciate in. It REFUSES rather
+ * than falling back to the tenant default: a default chosen at posting time is
+ * exactly the behaviour this column replaced, and reintroducing it as an error
+ * path would put one asset's schedule in two sets of books.
+ *
+ * Reaching this means accounting was provisioned after the asset was created
+ * AND the adoption in `provisionAccounting` did not run, so the message names
+ * the repair rather than the symptom.
  */
 function entityOf(asset: Pick<Asset, "id" | "entityId">): string {
   if (!asset.entityId) {
     throw new AssetError(
       "ASSET_NO_COMPANY",
-      `asset ${asset.id} has no company; re-run the drizzle/0154 backfill`,
+      `asset ${asset.id} belongs to no company — open the books for this tenant first`,
     );
   }
   return asset.entityId;

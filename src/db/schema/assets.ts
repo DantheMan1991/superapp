@@ -80,9 +80,16 @@ export const assets = pgTable(
      * correction is a disposal in one company and an acquisition in the other,
      * which is also what actually happened.
      *
-     * NULLABLE ONE RELEASE ONLY — `drizzle/0154` backfills it from where each
-     * asset's depreciation has been landing, and the contract migration after
-     * that deploy closes it.
+     * NULLABLE, AND IT STAYS THAT WAY — no contract migration follows this one,
+     * which is the opposite of every other `entity_id` in this schema. The
+     * assets pack declares `requires: []`, so a tenant can run the register with
+     * no accounting at all and therefore no company: a farm listing its
+     * equipment and never keeping books. CI proved it by failing on a fixture
+     * that is exactly that tenant. `provisionAccounting` adopts any such asset
+     * the moment books are opened.
+     *
+     * `drizzle/0154` backfills every asset that DOES have books, from where its
+     * depreciation has been landing.
      */
     entityId: uuid("entity_id"),
     kind: text("kind").notNull(),

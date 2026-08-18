@@ -4,7 +4,10 @@ import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type { Asset } from "@/db/schema";
 import { upsertDimensionMember, archiveDimensionMember } from "@/modules/accounting/core";
-import { listDimensionMembers } from "@/modules/accounting/core";
+import {
+  getDefaultEntityId,
+  listDimensionMembers,
+} from "@/modules/accounting/core";
 import { isValidAssetKind } from "./vocabulary";
 
 /**
@@ -34,7 +37,9 @@ export class AssetError extends Error {
       | "PARENT_INVALID"
       | "PARENT_CYCLE"
       | "NOT_DEPRECIABLE"
-      | "DEPRECIATION_ACCOUNTS",
+      | "DEPRECIATION_ACCOUNTS"
+      /** An asset with no company, which only a row from the `0154` window can be. */
+      | "ASSET_NO_COMPANY",
     message: string,
   ) {
     super(message);
@@ -191,6 +196,15 @@ async function assertParentUsable(
 export interface AssetInput {
   kind: string;
   name: string;
+  /**
+   * WHICH COMPANY OWNS IT (ADR 0010). Optional over the wire because a
+   * single-company tenant has no picker to send one from — absent means the
+   * tenant's default, resolved once at creation and frozen on the row.
+   *
+   * It is not optional at the ledger: every entry this asset posts reads the
+   * column, so an asset without one would have nowhere to depreciate.
+   */
+  entityId?: string | null;
   identifier?: string;
   /** Manufacturer's model — what it IS, as opposed to which one it is. */
   model?: string;
@@ -231,6 +245,10 @@ export async function createAsset(
     .insert(schema.assets)
     .values({
       tenantId: ctx.tenantId,
+      // Resolved HERE and frozen, rather than inferred later from wherever the
+      // first depreciation entry happened to land. The composite FK refuses one
+      // belonging to another tenant.
+      entityId: input.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId)),
       kind,
       name: input.name.trim(),
       identifier: input.identifier?.trim() ?? "",

@@ -28,6 +28,8 @@ d("assets table (RLS)", () => {
   const MATE = `${STAMP}-mate`; // staff in tenant A
   const OTHER = `${STAMP}-other`; // owner of tenant B
 
+  let entityA: string;
+  let entityB: string;
   let tenantA: string;
   let tenantB: string;
   let barnA: string; // container in tenant A
@@ -53,10 +55,24 @@ d("assets table (RLS)", () => {
       tenantA = tenants[0].id;
       tenantB = tenants[1].id;
 
+      // A company each, so the composite FK below has a real target on both
+      // sides (ADR 0010 — an asset belongs to one set of books).
+      const [entA] = await tx
+        .insert(schema.entities)
+        .values({ tenantId: tenantA, name: "Assets A Co", isDefault: true })
+        .returning();
+      entityA = entA.id;
+      const [entB] = await tx
+        .insert(schema.entities)
+        .values({ tenantId: tenantB, name: "Assets B Co", isDefault: true })
+        .returning();
+      entityB = entB.id;
+
       const barn = await tx
         .insert(schema.assets)
         .values({
           tenantId: tenantA,
+          entityId: entityA,
           kind: "building",
           name: "Barn",
           acquisitionCostCents: 4_500_000,
@@ -132,6 +148,22 @@ d("assets table (RLS)", () => {
       tx.delete(schema.assets).where(eq(schema.assets.id, tractorB)).returning(),
     );
     expect(deleted).toHaveLength(0);
+  });
+
+  it("composite FK: A's asset cannot belong to B's company", async () => {
+    // The wall that matters. Two companies of ONE client are separated by
+    // application code; two companies of two clients are unrepresentable, and
+    // this is the constraint that makes it so (ADR 0010).
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.assets).values({
+          tenantId: tenantA,
+          entityId: entityB,
+          kind: "equipment",
+          name: "smuggled",
+        }),
+      ),
+    ).rejects.toThrow();
   });
 
   it("cannot insert a row stamped with another tenant", async () => {

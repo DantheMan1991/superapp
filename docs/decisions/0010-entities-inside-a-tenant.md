@@ -236,8 +236,20 @@ and left the other posted. The guard belongs in the engine, and that is where it
 is now. **The generalisable half: a pair is only as atomic as its least-guarded
 undo.**
 
-**What is still not built:** a company on fixed assets (the assets pack is
-`entityForDocument`'s last caller, including for its period lock). One rough edge worth knowing: a company whose lock
+**Fixed assets carry a company from 2026-08-17 (`0154`), and the list is
+empty.** Every slice this ADR named is built, plus the two things it recorded as
+refused rather than recorded, plus this. `entityForDocument` and
+`entityOfDocument` are deleted: **nothing infers a company from history any
+more; every document states one.**
+
+The last one is worth a sentence of its own, because it was the quietest. An
+asset's depreciation used to land in whichever company its FIRST entry did,
+which is the tenant default at the moment somebody first pressed Post — a
+company chosen by TIMING. Move the default between two months of a schedule and
+one asset's depreciation splits across two balance sheets, every entry
+balancing, nothing complaining. That is the failure signature in the Consequences
+section above, reached by a route this ADR did not anticipate: not a report that
+forgot its scope, but a WRITE that inherited one. One rough edge worth knowing: a company whose lock
 was INHERITED from the tenant-wide scalar has no close row to reopen, so it can
 only be closed forward. **And what this deliberately is not:** full GAAP consolidation. No
 investment-in-subsidiary elimination, no minority interest, no purchase

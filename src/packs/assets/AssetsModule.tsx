@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Wrench } from "lucide-react";
 import { withTenant } from "@/db";
+import { listEntities } from "@/modules/accounting/core";
 import type { TenantContext } from "@/lib/auth";
 import { formatCents } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
@@ -48,10 +49,10 @@ export async function AssetsModule({
 
   const currentPeriod = periodOf(todayInTimezone(ctx.tenant.timezone));
 
-  const { rows, kinds, containers, due } = await withTenant(
+  const { rows, kinds, containers, companies, due } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [rows, kinds, containers] = await Promise.all([
+      const [rows, kinds, containers, companies] = await Promise.all([
         listAssets(tx, ctx.tenant.id, {
           kind,
           // Disposed assets stay in the books forever but are noise in the
@@ -60,6 +61,9 @@ export async function AssetsModule({
         }),
         listKindsInUse(tx, ctx.tenant.id),
         listContainerCandidates(tx, ctx.tenant.id),
+        // ACTIVE only, unlike a report picker: this list is for CREATING an
+        // asset, and a wound-up company must not be given new ones.
+        listEntities(tx, ctx.tenant.id),
       ]);
 
       // What month-end would post, so the button can say so before it is
@@ -78,7 +82,13 @@ export async function AssetsModule({
         assetsDue += 1;
         totalCents += status.due.reduce((s, r) => s + r.amountCents, 0);
       }
-      return { rows, kinds, containers, due: { assetsDue, totalCents } };
+      return {
+        rows,
+        kinds,
+        containers,
+        companies,
+        due: { assetsDue, totalCents },
+      };
     },
     { role: ctx.role },
   );
@@ -102,6 +112,11 @@ export async function AssetsModule({
               <AssetForm
                 containers={containers.map((c) => ({ id: c.id, name: c.name }))}
                 kindsInUse={kinds.map((k) => k.kind)}
+                companies={companies.map((c) => ({
+                  id: c.id,
+                  name: c.name,
+                  isDefault: c.isDefault,
+                }))}
               />
             </div>
           ) : null

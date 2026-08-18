@@ -300,7 +300,25 @@ export function InvoiceActions({
   );
 }
 
-function UnapplyButton({ paymentId, version }: { paymentId: string; version: number }) {
+/**
+ * A PLAIN NAMED EXPORT, not `InvoiceActions.Unapply`.
+ *
+ * It was attached as a property of `InvoiceActions` and rendered as
+ * `<InvoiceActions.Unapply />` from the invoice page — which is a SERVER
+ * component. Properties hung on a "use client" export do not survive the RSC
+ * boundary: the server sees a client reference, `.Unapply` is undefined on it,
+ * and React throws #130 ("element type is invalid"). The whole page 500s.
+ *
+ * It only ever rendered when an invoice had a payment, which is why nothing
+ * caught it — found by recording the first one on the live Test tenant.
+ */
+export function UnapplyPaymentButton({
+  paymentId,
+  version,
+}: {
+  paymentId: string;
+  version: number;
+}) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
@@ -337,8 +355,6 @@ function UnapplyButton({ paymentId, version }: { paymentId: string; version: num
     </>
   );
 }
-
-InvoiceActions.Unapply = UnapplyButton;
 
 /**
  * Email the invoice to the customer, PDF attached.

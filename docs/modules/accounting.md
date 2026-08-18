@@ -13,6 +13,28 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-17 — The first invoice payment ever rendered, and it 500'd (branch `claude/unapply-across-the-rsc-boundary`)
+
+Found by driving the mirror case on the live Test tenant, one minute after it
+deployed. The payment RECORDED — the toast said so and the ledger is exactly
+right — and then the invoice page threw `Something went wrong`.
+
+- **`InvoiceActions.Unapply` was a property hung on a `"use client"` export**,
+  rendered from the invoice page, which is a SERVER component. Properties do not
+  survive the RSC boundary: the server sees a client reference, `.Unapply` is
+  `undefined` on it, and React throws #130 (*element type is invalid*). It is a
+  plain named export now.
+- **NOTHING TO DO WITH INTERCOMPANY.** Any invoice payment would have done it —
+  the branch only renders when `payments.length > 0`, and on this tenant no
+  invoice had ever had one. That is the whole reason it survived: `tsc` is happy
+  (the property exists on the module's own type), the build is happy, ~2,800
+  tests are happy, and the one thing that fails is a person clicking Record
+  payment. The dossier already lists this area as thinly driven.
+- The books were checked directly while the page was down, and were correct:
+  `Oak Row Cr AR 1,250 / Dr Due from Affiliates 1,250`, `Test Dr Test Operating
+  1,250 / Cr Due to Affiliates 1,250`, both legs linked and posted, invoice
+  `paid`. **The feature worked; only the page that shows it did not.**
+
 ### 2026-08-17 — The mirror case, and the one-sided void it found (branch `claude/invoice-payment-intercompany`)
 
 The last thing ADR 0010 listed as refused rather than recorded: a customer pays

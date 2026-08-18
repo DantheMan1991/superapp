@@ -47,7 +47,11 @@ import {
 import { describeTaxRate } from "@/modules/accounting/invoicing/tax";
 import { nextReminder } from "@/modules/accounting/invoicing/reminder-schedule";
 import { InvoiceRemindersPanel } from "@/modules/accounting/components/invoice-reminders-panel";
-import { InvoiceActions, SendInvoiceButton } from "./invoice-detail-controls";
+import {
+  InvoiceActions,
+  SendInvoiceButton,
+  UnapplyPaymentButton,
+} from "./invoice-detail-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -467,7 +471,7 @@ export default async function InvoiceDetailPage({
                           {formatCentsSigned(p.amountCents)}
                         </span>
                         {isOwner && (
-                          <InvoiceActions.Unapply
+                          <UnapplyPaymentButton
                             paymentId={p.id}
                             version={p.version}
                           />

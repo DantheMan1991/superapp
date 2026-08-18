@@ -65,6 +65,7 @@ export {
   loadIntercompanyEntries,
   postIntercompanyPair,
   reverseIntercompanyPair,
+  voidIntercompanyPair,
   type AffiliateBalance,
   type IntercompanyPair,
 } from "./intercompany";

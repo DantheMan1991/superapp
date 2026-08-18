@@ -6,6 +6,7 @@ import { MAX_AMOUNT_CENTS, isValidIsoDate, todayInTimezone } from "../lib/money"
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError } from "./errors";
 import {
+  assertNotIntercompanyLeg,
   assertPeriodOpen,
   getClosedThrough,
   getSettings,
@@ -611,6 +612,40 @@ export async function voidEntry(
   ctx: LedgerCtx,
   args: { entryId: string; expectedVersion: number },
 ): Promise<JournalEntry> {
+  /**
+   * NEITHER LEG OF AN INTERCOMPANY PAIR MOVES ALONE, and this guard is in the
+   * ENGINE rather than in the action layer because that is where it holds.
+   *
+   * It lived only in `actions.ts` until now, so the journal screens were
+   * covered and `unapplyBillPayment` was not: unapplying a bill one company had
+   * paid for another voided the bill's leg and left the paying company's
+   * posted, with cash gone and a "Due from Affiliates" balance no counterparty
+   * explains. Proved against the dev database before this was written — the two
+   * legs came back `['posted', 'void']`. Same lesson as
+   * `assertNoForeignRegisters`: a rule enforced per screen is a rule the next
+   * caller does not get.
+   *
+   * Undoing a pair is `voidIntercompanyPair`, which takes both.
+   */
+  await assertNotIntercompanyLeg(tx, ctx.tenantId, args.entryId);
+  return voidEntryUnchecked(tx, ctx, args);
+}
+
+/**
+ * The void itself, with no intercompany check.
+ *
+ * CORE-INTERNAL — deliberately not re-exported from `core/index.ts`, the way
+ * `asFilterScope` is not. Its only caller is `voidIntercompanyPair`, which has
+ * already established that it is voiding BOTH legs; every other route must go
+ * through `voidEntry` and be refused. The mutability tiers still apply to each
+ * leg, so a reconciled line or a closed period blocks one half and rolls the
+ * whole transaction back.
+ */
+export async function voidEntryUnchecked(
+  tx: Tx,
+  ctx: LedgerCtx,
+  args: { entryId: string; expectedVersion: number },
+): Promise<JournalEntry> {
   const entry = await loadEntry(tx, ctx.tenantId, args.entryId);
   if (entry.status !== "posted") {
     throw new LedgerError("ENTRY_NOT_POSTED", "only posted entries can be voided");
@@ -632,6 +667,9 @@ export async function reverseEntry(
   args: { entryId: string; entryDate?: string; memo?: string },
 ): Promise<PostResult> {
   requireOwnerRole(ctx);
+  // Same rule as the void above, and for the same reason: a one-sided reversal
+  // leaves the other company still owing. `reverseIntercompanyPair` posts both.
+  await assertNotIntercompanyLeg(tx, ctx.tenantId, args.entryId);
   const entry = await loadEntry(tx, ctx.tenantId, args.entryId);
   if (entry.status !== "posted") {
     throw new LedgerError("ENTRY_NOT_POSTED", "only posted entries can be reversed");

@@ -17,7 +17,10 @@ import {
   postEntry,
   affiliateBalances,
   assertNotIntercompanyLeg,
+  loadIntercompanyEntries,
   postIntercompanyPair,
+  voidEntry,
+  voidIntercompanyPair,
   completeClose,
   consolidationResidual,
   displayCents,
@@ -41,7 +44,10 @@ import {
   createInvoiceDraft,
   issueInvoice,
 } from "../src/modules/accounting/invoicing/invoices";
-import { recordPayment } from "../src/modules/accounting/invoicing/payments";
+import {
+  recordPayment,
+  unapplyPayment,
+} from "../src/modules/accounting/invoicing/payments";
 import { createVendor } from "../src/modules/accounting/payables/vendors";
 import {
   approveBill,
@@ -480,10 +486,21 @@ d("entities: two sets of books in one tenant", () => {
     }
   });
 
-  it("REFUSES a payment deposited into another company's register", async () => {
-    // The ten-LLC landlord's constant move, and the one thing slice 1b will not
-    // let you record: as a single entry it would show cash arriving in an
-    // account the company does not own. It is intercompany (slice 2).
+  it("an invoice banked into another company's account is RECORDED, not refused", async () => {
+    /**
+     * SUPERSEDES the slice-1b test that asserted `CROSS_ENTITY_REGISTER` here.
+     * That refusal was right while there was no way to record the thing; it is
+     * an intercompany pair now — the mirror of the bill case — so the same call
+     * that used to throw writes two entries. The refusal for a HAND-WRITTEN
+     * journal touching a foreign register is unchanged and asserted below: the
+     * guard did not move, the recording path grew a second shape.
+     *
+     * It still issues the 10,000 "Rent 2" invoice and still leaves it unpaid,
+     * because the A/R aging case further down was written to find exactly that.
+     * The payment goes against a SECOND invoice of its own. The affiliate
+     * balances do move — recording the pair is the point — and the "who owes
+     * whom" case says so.
+     */
     const income = await accountId("4000");
     const invoiceId = await withTenant(tenantId, async (tx) => {
       const inv = await createInvoiceDraft(tx, owner, {
@@ -502,21 +519,68 @@ d("entities: two sets of books in one tenant", () => {
       await issueInvoice(tx, owner, { invoiceId: inv.id, expectedVersion: inv.version });
       return inv.id;
     });
-    await expect(
-      withTenant(tenantId, async (tx) => {
-        const inv = await tx.query.invoices.findFirst({
-          where: eq(schema.invoices.id, invoiceId),
-        });
-        return recordPayment(tx, owner, {
-          invoiceId,
-          expectedVersion: inv!.version,
-          amountCents: 10_000,
-          paymentDate: "2026-06-11",
-          depositAccountId: mapleBankLedgerAccountId,
-          method: "check",
-        });
+    // A SECOND invoice, which is the one this case banks into Maple's account.
+    // Kept separate so the unpaid 10,000 above stays unpaid.
+    const bankedInvoiceId = await withTenant(tenantId, async (tx) => {
+      const inv = await createInvoiceDraft(tx, owner, {
+        entityId: oak,
+        customerId: oakCustomer,
+        issueDate: "2026-06-03",
+        lines: [
+          {
+            description: "Rent 3",
+            quantity: "1",
+            unitPriceCents: 5_000,
+            incomeAccountId: income,
+          },
+        ],
+      });
+      await issueInvoice(tx, owner, { invoiceId: inv.id, expectedVersion: inv.version });
+      return inv.id;
+    });
+    expect(invoiceId).not.toBe(bankedInvoiceId);
+    const before = await withTenant(tenantId, (tx) => affiliateBalances(tx, tenantId));
+    const owedBefore = before.find((r) => r.entityId === oak)?.netCents ?? 0;
+
+    const payment = await withTenant(tenantId, async (tx) => {
+      const inv = await tx.query.invoices.findFirst({
+        where: eq(schema.invoices.id, bankedInvoiceId),
+      });
+      const r = await recordPayment(tx, owner, {
+        invoiceId: bankedInvoiceId,
+        expectedVersion: inv!.version,
+        amountCents: 5_000,
+        paymentDate: "2026-06-11",
+        depositAccountId: mapleBankLedgerAccountId,
+        method: "check",
+      });
+      return r.payment;
+    });
+
+    const entry = await withTenant(tenantId, (tx) =>
+      tx.query.journalEntries.findFirst({
+        where: eq(schema.journalEntries.id, payment.journalEntryId),
       }),
-    ).rejects.toMatchObject({ code: "CROSS_ENTITY_REGISTER" });
+    );
+    expect(entry!.entityId).toBe(oak);
+    expect(entry!.intercompanyId).toBeTruthy();
+    // Oak is owed the banked amount by Maple, on top of whatever it was owed.
+    const after = await withTenant(tenantId, (tx) => affiliateBalances(tx, tenantId));
+    expect(after.find((r) => r.entityId === oak)?.netCents ?? 0).toBe(
+      owedBefore + 5_000,
+    );
+    // Both sets of books still balance on their own.
+    expect(
+      await withTenant(tenantId, (tx) => ledgerIsBalancedPerEntity(tx, tenantId)),
+    ).toBe(true);
+    // ...and the invoice is settled, which is the part that must not depend on
+    // whose account the money reached.
+    const inv = await withTenant(tenantId, (tx) =>
+      tx.query.invoices.findFirst({
+        where: eq(schema.invoices.id, bankedInvoiceId),
+      }),
+    );
+    expect(inv!.status).toBe("paid");
   });
 
   it("REFUSES a hand-written journal touching another company's register", async () => {
@@ -600,9 +664,17 @@ d("entities: two sets of books in one tenant", () => {
     );
     const mapleRow = rows.find((r) => r.entityId === maple);
     const oakRow = rows.find((r) => r.entityId === oak);
-    // Equal and opposite, and neither figure is stored anywhere.
-    expect(mapleRow?.netCents).toBe(25_000);
-    expect(oakRow?.netCents).toBe(-25_000);
+    /**
+     * Equal and opposite, and neither figure is stored anywhere.
+     *
+     * 20,000 rather than the transfer's 25,000 because the fixture now also
+     * contains an invoice of Oak's banked into MAPLE's account — 5,000 running
+     * the other way. That netting is the feature: who owes whom is one number
+     * per pair of companies, derived from every link between them, not a
+     * balance per transaction.
+     */
+    expect(mapleRow?.netCents).toBe(20_000);
+    expect(oakRow?.netCents).toBe(-20_000);
     expect(mapleRow?.counterpartyEntityId).toBe(oak);
   });
 
@@ -1202,6 +1274,212 @@ d("entities: two sets of books in one tenant", () => {
     expect(groupClosedThrough(entities)).toBe(
       entities.every((e) => e.closedThrough) ? "2026-01-31" : null,
     );
+  });
+
+  /* -- an invoice paid into another company's account --------------------- */
+
+  /**
+   * THE MIRROR OF THE BILL CASE, and the last thing ADR 0010 listed as refused
+   * rather than recorded. Placed after the slice-3 assertions on purpose: these
+   * post further intercompany pairs, and the consolidation cases above are
+   * written against the fixture as it stands before them.
+   */
+  it("an invoice banked into another company's account records a PAIR", async () => {
+    const dueFrom = await accountIdBySubtype("due_from_affiliate");
+    const dueTo = await accountIdBySubtype("due_to_affiliate");
+    const ar = await accountIdBySubtype("accounts_receivable");
+
+    // Oak Row issues; the cheque goes into MAPLE's account.
+    const income = await accountId("4000");
+    const invoice = await withTenant(tenantId, async (tx) => {
+      const draft = await createInvoiceDraft(tx, owner, {
+        entityId: oak,
+        customerId: oakCustomer,
+        issueDate: "2026-12-01",
+        lines: [
+          {
+            description: "Rent",
+            quantity: "1",
+            unitPriceCents: 9_000,
+            incomeAccountId: income,
+          },
+        ],
+      });
+      return issueInvoice(tx, owner, {
+        invoiceId: draft.id,
+        expectedVersion: draft.version,
+      });
+    });
+    const payment = await withTenant(tenantId, async (tx) => {
+      const inv = await tx.query.invoices.findFirst({
+        where: eq(schema.invoices.id, invoice.id),
+      });
+      const r = await recordPayment(tx, owner, {
+        invoiceId: invoice.id,
+        expectedVersion: inv!.version,
+        paymentDate: "2026-12-02",
+        amountCents: 9_000,
+        depositAccountId: mapleBankLedgerAccountId,
+        method: "check",
+      });
+      return r.payment;
+    });
+
+    const entry = await withTenant(tenantId, (tx) =>
+      tx.query.journalEntries.findFirst({
+        where: eq(schema.journalEntries.id, payment.journalEntryId),
+      }),
+    );
+    // The payment row points at the INVOICE'S leg, so status, aging and unapply
+    // read it exactly as they always did.
+    expect(entry!.entityId).toBe(oak);
+    expect(entry!.intercompanyId).toBeTruthy();
+
+    const legs = await withTenant(tenantId, (tx) =>
+      loadIntercompanyEntries(tx, tenantId, entry!.intercompanyId!),
+    );
+    expect(legs).toHaveLength(2);
+    expect(new Set(legs.map((l) => l.entityId))).toEqual(new Set([oak, maple]));
+
+    const DEC = { from: "2026-12-01", to: "2026-12-31" };
+    const [oakRows, mapleRows] = await withTenant(tenantId, async (tx) => [
+      await getBalances(tx, tenantId, { scope: scopeOf(oak), ...DEC }),
+      await getBalances(tx, tenantId, { scope: scopeOf(maple), ...DEC }),
+    ]);
+    // Oak: the receivable rose on issue and cleared on payment, and it is owed
+    // the money by Maple instead.
+    expect(netOf(oakRows, ar)).toBe(0);
+    expect(netOf(oakRows, dueFrom)).toBe(9_000);
+    // Maple: cash in, and it owes Oak for it.
+    expect(netOf(mapleRows, mapleBankLedgerAccountId)).toBe(9_000);
+    expect(netOf(mapleRows, dueTo)).toBe(-9_000);
+
+    // Each set of books still balances on its own, which is the invariant the
+    // pair exists to preserve.
+    expect(
+      await withTenant(tenantId, (tx) => ledgerIsBalancedPerEntity(tx, tenantId)),
+    ).toBe(true);
+
+    // ...and consolidated, the affiliate legs are gone and all that is left is
+    // a bank deposit.
+    const consolidated = await withTenant(tenantId, (tx) =>
+      getBalances(tx, tenantId, { scope: CONSOLIDATED, ...DEC }),
+    );
+    expect(netOf(consolidated, dueFrom)).toBe(0);
+    expect(netOf(consolidated, dueTo)).toBe(0);
+    expect(netOf(consolidated, mapleBankLedgerAccountId)).toBe(9_000);
+
+    // The invoice itself is paid, and nothing about that asked which company's
+    // account the money landed in.
+    const after = await withTenant(tenantId, (tx) =>
+      tx.query.invoices.findFirst({ where: eq(schema.invoices.id, invoice.id) }),
+    );
+    expect(after!.status).toBe("paid");
+  });
+
+  it("unapplying it voids BOTH legs, not just the invoice's", async () => {
+    /**
+     * THE BUG THIS FOUND, and it predates the mirror. `assertNotIntercompanyLeg`
+     * lived only in the journal ACTIONS, so `unapplyBillPayment` went straight
+     * to `voidEntry` and voided one side — proved against the dev database,
+     * which returned `['posted', 'void']`. The other company was left holding a
+     * "Due from Affiliates" balance that `affiliateBalances` cannot even report,
+     * because a group with one surviving entry reads as half a pair.
+     */
+    const income = await accountId("4000");
+    const invoice = await withTenant(tenantId, async (tx) => {
+      const draft = await createInvoiceDraft(tx, owner, {
+        entityId: oak,
+        customerId: oakCustomer,
+        issueDate: "2026-12-05",
+        lines: [
+          {
+            description: "Rent",
+            quantity: "1",
+            unitPriceCents: 2_500,
+            incomeAccountId: income,
+          },
+        ],
+      });
+      return issueInvoice(tx, owner, {
+        invoiceId: draft.id,
+        expectedVersion: draft.version,
+      });
+    });
+    const payment = await withTenant(tenantId, async (tx) => {
+      const inv = await tx.query.invoices.findFirst({
+        where: eq(schema.invoices.id, invoice.id),
+      });
+      const r = await recordPayment(tx, owner, {
+        invoiceId: invoice.id,
+        expectedVersion: inv!.version,
+        paymentDate: "2026-12-06",
+        amountCents: 2_500,
+        depositAccountId: mapleBankLedgerAccountId,
+        method: "check",
+      });
+      return r.payment;
+    });
+    const icId = (await withTenant(tenantId, (tx) =>
+      tx.query.journalEntries.findFirst({
+        where: eq(schema.journalEntries.id, payment.journalEntryId),
+      }),
+    ))!.intercompanyId!;
+
+    await withTenant(tenantId, (tx) =>
+      unapplyPayment(tx, owner, {
+        paymentId: payment.id,
+        expectedVersion: payment.version,
+      }),
+    );
+
+    const legs = await withTenant(tenantId, (tx) =>
+      loadIntercompanyEntries(tx, tenantId, icId),
+    );
+    expect(legs).toHaveLength(2);
+    expect(legs.every((l) => l.status === "void")).toBe(true);
+
+    // Nothing is left owed either way — the whole point of taking both.
+    const balances = await withTenant(tenantId, (tx) =>
+      affiliateBalances(tx, tenantId),
+    );
+    expect(
+      balances.every((b) => b.netCents !== 2_500 && b.netCents !== -2_500),
+    ).toBe(true);
+    expect(
+      await withTenant(tenantId, (tx) => ledgerIsBalancedPerEntity(tx, tenantId)),
+    ).toBe(true);
+  });
+
+  it("the ENGINE refuses a one-sided void now, not just the journal screen", async () => {
+    // The guard moved from `actions.ts` into `voidEntry`, which is what makes
+    // every future caller inherit it rather than remember it.
+    const pair = await withTenant(tenantId, (tx) =>
+      postIntercompanyPair(tx, owner, {
+        fromEntityId: maple,
+        toEntityId: oak,
+        amountCents: 700,
+        entryDate: "2026-12-10",
+        memo: "one-sided void attempt",
+        payerLines: [{ accountId: mapleBankLedgerAccountId, amountCents: -700 }],
+        payeeLines: [{ accountId: oakBankLedgerAccountId, amountCents: 700 }],
+      }),
+    );
+    for (const leg of [pair.from, pair.to]) {
+      await expect(
+        withTenant(tenantId, (tx) =>
+          voidEntry(tx, owner, { entryId: leg.id, expectedVersion: leg.version }),
+        ),
+      ).rejects.toMatchObject({ code: "ENTRY_INTERCOMPANY" });
+    }
+    // And the pair-aware undo takes both.
+    await withTenant(tenantId, (tx) =>
+      voidIntercompanyPair(tx, owner, pair.intercompanyId),
+    );
+    const legs = await withTenant(tenantId, (tx) =>
+      loadIntercompanyEntries(tx, tenantId, pair.intercompanyId),
+    );
+    expect(legs.every((l) => l.status === "void")).toBe(true);
   });
 
   it("combined balancing is NOT evidence that each company balances", async () => {

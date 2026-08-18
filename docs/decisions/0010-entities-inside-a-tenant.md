@@ -227,10 +227,17 @@ the scalar was stale against a company that had since closed a further month, so
 repeating it would have reopened somebody's July. **A backfill is only safe to
 repeat while it is still the source of truth.**
 
+**The mirror case landed on 2026-08-17** — an invoice paid into another
+company's account is a linked pair like the bill, with the INVOICE's company
+holding the Due-from because it is the side that ends up owed. Building it
+exposed something slice 2 had left open: `assertNotIntercompanyLeg` was enforced
+in the action layer only, so unapplying an intercompany payment voided one leg
+and left the other posted. The guard belongs in the engine, and that is where it
+is now. **The generalisable half: a pair is only as atomic as its least-guarded
+undo.**
+
 **What is still not built:** a company on fixed assets (the assets pack is
-`entityForDocument`'s last caller, including for its period lock), and receiving
-an invoice payment into another company's account, which is the mirror of the
-bill case and still refused. One rough edge worth knowing: a company whose lock
+`entityForDocument`'s last caller, including for its period lock). One rough edge worth knowing: a company whose lock
 was INHERITED from the tenant-wide scalar has no close row to reopen, so it can
 only be closed forward. **And what this deliberately is not:** full GAAP consolidation. No
 investment-in-subsidiary elimination, no minority interest, no purchase

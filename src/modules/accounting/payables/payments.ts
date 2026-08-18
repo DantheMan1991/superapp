@@ -8,6 +8,7 @@ import {
   postIntercompanyPair,
   requireOwnerRole,
   voidEntry,
+  voidIntercompanyPair,
   type LedgerCtx,
 } from "../core";
 import { toSafeCents } from "../lib/money";
@@ -223,7 +224,15 @@ export async function unapplyBillPayment(
     ),
   });
   if (entry && entry.status === "posted") {
-    await voidEntry(tx, ctx, { entryId: entry.id, expectedVersion: entry.version });
+    // BOTH LEGS, when the money came from (or went to) another company. The
+    // payment row points at this company's leg; voiding only that one leaves
+    // the affiliate holding a balance nothing explains — see
+    // `voidIntercompanyPair`.
+    if (entry.intercompanyId) {
+      await voidIntercompanyPair(tx, ctx, entry.intercompanyId);
+    } else {
+      await voidEntry(tx, ctx, { entryId: entry.id, expectedVersion: entry.version });
+    }
   }
   await tx
     .delete(schema.billPayments)

@@ -103,6 +103,54 @@ d("assets ops", () => {
     expect(members[0].isActive).toBe(true);
   });
 
+  it("keeps the account its cost sits in, through create AND update", async () => {
+    /**
+     * FOUND BY DRIVING, 2026-08-18. "Cost sits in" could not be saved from the
+     * UI at all: `assetAccountId` was missing from the action's zod schema, and
+     * zod STRIPS what it does not declare — so the form sent it, the boundary
+     * dropped it, and this layer (which has always handled it) never saw it.
+     *
+     * That is the explanation for an anomaly the dossier recorded three days
+     * earlier: an asset with 6,706.78 of accumulated depreciation against a cost
+     * on no account. Not a column nobody had filled in — a column nobody COULD.
+     *
+     * This covers the ops half. The boundary is covered by the schema being
+     * `.strict()`, which turns the next silently-dropped field into a refusal.
+     */
+    const account = await withTenant(tenantId, async (tx) => {
+      const rows = await tx
+        .insert(schema.accounts)
+        .values({
+          tenantId,
+          code: "1690",
+          name: "Test fixed asset",
+          accountType: "asset",
+          subtype: "fixed_asset",
+        })
+        .returning();
+      return rows[0].id;
+    });
+
+    const created = await asOwner((tx) =>
+      createAsset(tx, ownerCtx(), {
+        kind: "equipment",
+        name: "Costed thing",
+        assetAccountId: account,
+      }),
+    );
+    expect(created.assetAccountId).toBe(account);
+
+    const cleared = await asOwner((tx) =>
+      updateAsset(tx, ownerCtx(), created.id, { assetAccountId: null }),
+    );
+    expect(cleared.assetAccountId).toBeNull();
+
+    const reset = await asOwner((tx) =>
+      updateAsset(tx, ownerCtx(), created.id, { assetAccountId: account }),
+    );
+    expect(reset.assetAccountId).toBe(account);
+  });
+
   it("rolls the dimension member back when the asset write fails", async () => {
     // The reason ops take a `Tx` instead of opening their own: if the two could
     // land separately, a cost object could point at a row that never existed.

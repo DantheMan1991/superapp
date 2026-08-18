@@ -307,14 +307,7 @@ export default async function ClosePage({
                     </TableCell>
                     {data.showPicker && (
                       <TableCell className="text-sm">
-                        {/* Blank on a close that predates per-entity closes:
-                            it locked every company at once, and naming one
-                            would be a claim the row cannot support. */}
-                        {nameOfEntity(c.entityId) || (
-                          <span className="text-muted-foreground">
-                            All companies
-                          </span>
-                        )}
+                        {nameOfEntity(c.entityId)}
                       </TableCell>
                     )}
                     <TableCell>

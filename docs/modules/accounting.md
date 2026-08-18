@@ -13,6 +13,51 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-17 — `0153`: the lock's contract half, and the scalar goes (branch `claude/close-contract-migration`)
+
+The contract half of ADR 0010 slice 4, run AFTER the deploy that writes
+per-company locks — and the two statements in it could not ship together in
+`0152` for OPPOSITE reasons, which is the pairing worth remembering.
+
+- **`period_closes.entity_id` SET NOT NULL** could not precede the deploy:
+  migrations run ahead of it, and the build live while `0152` landed still
+  inserted closes with no company, so the constraint would have rejected every
+  close in that window. Fourth time this repo has made that split —
+  `0123`/`0125`, `0142`/`0144`, `0145`/`0146`, now `0152`/`0153`.
+- **`accounting_settings.closed_through` DROP** could not precede it either, for
+  the mirror reason: Drizzle builds its SELECT list from `schema.ts`, so a
+  running old build would 500 on every settings read. The schema stopped
+  declaring it in the slice-4 PR, that deploy is live (`48aa06b`), and only then
+  is the column safe to remove. The `0147` lesson.
+- **`0152`'s FIRST backfill is deliberately NOT re-run, and that is the one real
+  decision in the file.** It copied the tenant-wide scalar onto every company.
+  Re-running it now would copy a STALE scalar over live per-company locks —
+  production's scalar still read 2026-06-30 while Oak Row LLC had since closed
+  through 2026-07-31, so a re-run would have silently reopened a month somebody
+  closed. **A backfill is only safe to repeat while it is still the source of
+  truth**, and this one stopped being that the moment the deploy went live. The
+  SECOND backfill (entity_id on close rows) does re-run, guarded, because it
+  only touches NULLs.
+- **Checked before writing it, not assumed:** zero rows on either database had a
+  NULL `entity_id`, so the window produced nothing to repair and the guarded
+  re-run was the no-op it was expected to be.
+- **The null branches the nullable column forced are gone with it** — the
+  `closeEntity` helper in `core/close.ts`, the narrative's combined-scope
+  fallback, the "All companies" cell in the close history, and the blank
+  `entity` columns in the export. A branch for a state the database can no
+  longer hold is worse than none.
+- **Verified on BOTH databases after applying:** `entity_id` NOT NULL with zero
+  nulls, `accounting_settings.closed_through` gone, `entities.closed_through`
+  still nullable (null means never closed), and production's two locks intact
+  and DIFFERENT — Oak Row LLC through 2026-07-31, Test through 2026-06-30.
+  `verify-rls` clean across **115 tables**. The live app was driven afterwards:
+  the Close page and the hub card both render, which is the check a DROP
+  actually needs — the running build must not select the column that just left.
+- The isolation suite's close INSERT case now gives the attacker row **B's own
+  company**, so the composite FK has nothing to object to and RLS is the only
+  thing that can reject it. A test that could pass for two reasons was proving
+  half of what it claimed.
+
 ### 2026-08-17 — A close that would not say whose it was (branch `claude/close-names-its-company`)
 
 Found by driving slice 4 on the live Test tenant, minutes after it deployed —
@@ -49,8 +94,7 @@ first of them.
 
 Slice 4 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md), and the
 last one it named. `period_closes` locked every company at once; ten LLCs close
-in different months. Migration `0152` (expand); **the contract half is owed
-after this deploy** — `period_closes.entity_id` SET NOT NULL and the
+in different months. Migration `0152` (expand); **`0153` is the contract half** — `period_closes.entity_id` SET NOT NULL and the
 `accounting_settings.closed_through` DROP.
 
 - **THE LOCK MOVED ONTO THE COMPANY** — `entities.closed_through`, written only
@@ -1687,7 +1731,7 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
-- **Per-entity close is DONE** (2026-08-17, slice 4 of ADR 0010) — the lock is `entities.closed_through`, the checklist is scoped, and two companies can close different months. **OWED AFTER THIS DEPLOY** (the contract half of `0152`): `period_closes.entity_id` SET NOT NULL with the backfill re-run first, and the `accounting_settings.closed_through` DROP — the schema already stopped declaring it, so the column is one release ahead of nothing reading it. Two things this slice leaves behind on purpose: a company carrying a lock INHERITED from the tenant-wide scalar has no close row to reopen and can only be closed forward (on production that is Oak Row LLC), and `assets` still has no company, so depreciation reads its lock through `entityForDocument`
+- **Per-entity close is DONE** (2026-08-17, slice 4 of ADR 0010) — the lock is `entities.closed_through`, the checklist is scoped, and two companies can close different months. **The contract half is DONE too** (`0153`, applied and verified on both databases the same day): `period_closes.entity_id` is NOT NULL and `accounting_settings.closed_through` is dropped. **Nothing is owed in the migration lane.** Two things this slice leaves behind on purpose: a company carrying a lock INHERITED from the tenant-wide scalar has no close row to reopen and can only be closed forward (on production that is Oak Row LLC), and `assets` still has no company, so depreciation reads its lock through `entityForDocument`
 - **Consolidation is DONE** (2026-08-17, slice 3 of ADR 0010): a third scope beside "one company" and combined, on the trial balance, balance sheet, P&L and general ledger, plus a consolidated set in the books export. Eliminates by following the `intercompany_id`, never by matching amounts; the unlinked-journal residual is surfaced on the page and in the CSV rather than reconciled away. What is NOT built: **per-entity close** (4 — `period_closes` still locks every company at once), a company on **fixed assets** (the assets pack is `entityForDocument`'s last caller), and **receiving an invoice payment into another company's account**, the mirror of the bill case, still refused. And deliberately not built at all: full GAAP consolidation — no investment-in-subsidiary elimination, no minority interest, no purchase accounting, because these are commonly owned LLCs rather than a parent with subsidiaries
 - **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. `drizzle/0146` closed the expand/contract — all three are NOT NULL on both databases. **Intercompany pairs are DONE** (slice 2, same day — `0148`–`0151`). What is NOT built: **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller
 - **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. `drizzle/0144` closed the expand/contract the same day: `entity_id` is NOT NULL on both databases, with the window's backfill re-run first. Still queued in that lane: the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default

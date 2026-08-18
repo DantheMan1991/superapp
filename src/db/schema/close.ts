@@ -38,12 +38,11 @@ export const periodCloses = pgTable(
      * performed on one set of books, so it belongs to an entity the way an
      * invoice, a bill and a register already do.
      *
-     * NULLABLE ONE RELEASE ONLY. `drizzle/0152` backfills every existing row and
-     * the contract migration that follows this deploy makes it NOT NULL — it
-     * cannot be NOT NULL yet because migrations go out AHEAD of the deploy, and
-     * the build running while `0152` lands still inserts closes without it.
+     * NOT NULL since `drizzle/0153`, the contract half — it arrived nullable in
+     * `0152` because the build running while that migration landed still
+     * inserted closes without a company.
      */
-    entityId: uuid("entity_id"),
+    entityId: uuid("entity_id").notNull(),
     /** The date this close set the company's closed_through to. */
     periodEnd: date("period_end", { mode: "string" }).notNull(),
     status: periodCloseStatus("status").notNull().default("completed"),

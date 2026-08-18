@@ -214,6 +214,26 @@ export default async function InvoiceDetailPage({
   const accountName = new Map(data.accounts.map((a) => [a.id, `${a.code} · ${a.name}`]));
   const editing = sp.edit === "1" && invoice.status === "draft";
 
+  /**
+   * WHOSE ACCOUNT A PAYMENT LANDED IN, when it was not this invoice's own
+   * company — the mirror of the same line on the bill page. Undefined at one
+   * company and for the ordinary payment.
+   *
+   * Found by driving the mirror case: the row read "→ 1040 · Test Operating"
+   * on an Oak Row invoice and said nothing about the money having gone to an
+   * affiliate. It was legible there only because that tenant named the register
+   * after its company.
+   */
+  const recipientOf = (depositAccountId: string): string | undefined => {
+    if (data.companies.length < 2) return undefined;
+    const register = data.bankAccounts.find((b) => b.accountId === depositAccountId);
+    if (!register || register.entityId === invoice.entityId) return undefined;
+    return (
+      data.companies.find((c) => c.id === register.entityId)?.name ??
+      "another company"
+    );
+  };
+
   const depositOptions = [
     ...data.bankAccounts.map((b) => ({
       id: b.accountId,
@@ -464,6 +484,14 @@ export default async function InvoiceDetailPage({
                         <span className="font-mono text-xs">{p.paymentDate}</span> ·{" "}
                         {p.method.replaceAll("_", " ")} →{" "}
                         {accountName.get(p.depositAccountId) ?? "account"}
+                        {recipientOf(p.depositAccountId) && (
+                          // The same words the ledger entry carries in its
+                          // memo, so the row and the journal agree.
+                          <span className="text-muted-foreground">
+                            {" · received by "}
+                            {recipientOf(p.depositAccountId)}
+                          </span>
+                        )}
                         {p.memo ? ` · ${p.memo}` : ""}
                       </span>
                       <span className="flex items-center gap-3">

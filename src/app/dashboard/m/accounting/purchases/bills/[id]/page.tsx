@@ -147,6 +147,23 @@ export default async function BillDetailPage({
   if (!data) notFound();
   const { bill, vendor, lines, payments } = data;
 
+  /**
+   * WHOSE ACCOUNT A PAYMENT CAME OUT OF, when it was not this bill's own
+   * company. Undefined at one company, and undefined for the ordinary payment,
+   * so the row is exactly what it was in every case but the one that needs
+   * explaining.
+   *
+   * The register's NAME is not the answer: it reads as an explanation only when
+   * a tenant happens to have called the account after its company. "Main
+   * Checking" on somebody else's books looks like your own.
+   */
+  const payerOf = (paidFromAccountId: string): string | undefined => {
+    if (data.companies.length < 2) return undefined;
+    const register = data.registers.find((r) => r.accountId === paidFromAccountId);
+    if (!register || register.entityId === bill.entityId) return undefined;
+    return data.companies.find((c) => c.id === register.entityId)?.name ?? "another company";
+  };
+
   const accountName = new Map(
     data.allAccounts.map((a) => [a.id, `${a.code} · ${a.name}`]),
   );
@@ -332,6 +349,14 @@ export default async function BillDetailPage({
                       {p.paymentDate} · {p.method.replaceAll("_", " ")}
                       {" · "}
                       {accountName.get(p.paidFromAccountId) ?? "account"}
+                      {payerOf(p.paidFromAccountId) && (
+                        // The same words the ledger entry carries in its memo,
+                        // so the row and the journal agree.
+                        <span className="text-muted-foreground">
+                          {" · paid by "}
+                          {payerOf(p.paidFromAccountId)}
+                        </span>
+                      )}
                       {p.memo && ` · ${p.memo}`}
                     </span>
                     <span className="flex items-center gap-2">

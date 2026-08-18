@@ -13,6 +13,32 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-17 — A payment row that would not say whose account it was (branch `claude/payment-rows-name-the-company`)
+
+Found while finishing the drive of the mirror case. The invoice's payment row
+read **"2026-08-18 · check → 1040 · Test Operating"** on an OAK ROW invoice, with
+nothing saying the money had gone to an affiliate.
+
+- **The register's name is not the answer**, and that is the whole point. It
+  reads as an explanation only because this tenant happened to name the account
+  after its company; "Main Checking" on somebody else's books looks exactly like
+  your own. The row now says **"· received by Test"** — and the bill's row, which
+  had the identical gap since slice 2, says **"· paid by Test"**.
+- **The same words the ledger entry already carries in its memo** (`received by
+  another company` / `paid by another company`), so the document and the journal
+  agree rather than describing the same event two ways.
+- Both sides in one change, because it is one omission with two instances — the
+  bill half had simply never been driven with an affiliate payment on screen.
+- Undefined at one company and for the ordinary payment, so every row that does
+  not need explaining is byte-identical to what it was.
+
+**Third time this shape has come up** — the Journal header that named the tenant
+(slice 1), the close detail page that named no company (slice 4), and now this.
+The pattern worth naming: **a screen that shows a document's own data is safe;
+one that shows a RELATIONSHIP to another company has to say which.** Every
+instance has been found by driving and none by a test, because the fixtures all
+have one company and the string is correct there.
+
 ### 2026-08-17 — The first invoice payment ever rendered, and it 500'd (branch `claude/unapply-across-the-rsc-boundary`)
 
 Found by driving the mirror case on the live Test tenant, one minute after it

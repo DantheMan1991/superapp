@@ -17,7 +17,11 @@ import {
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
-import { getClosedThrough, getSettings } from "@/modules/accounting/core";
+import {
+  getClosedThrough,
+  getSettings,
+  listEntities,
+} from "@/modules/accounting/core";
 import { formatCents, todayInTimezone } from "@/modules/accounting/lib/money";
 import { EntryActions } from "../entry-actions";
 import { EntryEditor } from "../entry-editor";
@@ -111,6 +115,18 @@ export default async function EntryPage({
       })),
       settings,
       closedThrough: await getClosedThrough(tx, ctx.tenant.id, entry.entityId),
+      // WHICH COMPANY'S BOOKS this entry is in. The journal LIST grew a Company
+      // column in slice 1 and the detail page never did — so a two-company
+      // tenant could open an entry and not be told whose books it belongs to,
+      // on the page where they void and reverse it. Undefined at one company.
+      companyName: await (async () => {
+        const entities = await listEntities(tx, ctx.tenant.id, {
+          includeInactive: true,
+        });
+        return entities.length > 1
+          ? (entities.find((e) => e.id === entry.entityId)?.name ?? null)
+          : null;
+      })(),
       reversal,
     };
   });
@@ -143,6 +159,7 @@ export default async function EntryPage({
           title="Journal entry"
           description={
             <>
+              {data.companyName ? `${data.companyName} · ` : ""}
               {entry.entryDate} · {entry.source.replaceAll("_", " ")}
               {entry.memo ? ` · ${entry.memo}` : ""}
             </>

@@ -13,6 +13,38 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-17 — A close that would not say whose it was (branch `claude/close-names-its-company`)
+
+Found by driving slice 4 on the live Test tenant, minutes after it deployed —
+the same way every bug in slices 1 and 2 was found, and the same shape as the
+first of them.
+
+- **The close detail page read "Close through 2026-07-31"** above Oak Row LLC's
+  checklist snapshot, with nothing anywhere on the page naming Oak Row. It is
+  the Journal header bug again (2026-08-16): a string that is correct at one
+  company, unfalsifiable in every fixture, and authoritative-looking on the one
+  screen where somebody signs a month off. The title and the breadcrumb both
+  name the company now, and only when there is more than one.
+- **The journal ENTRY page had the same hole, one slice older.** The journal
+  LIST grew a Company column in slice 1; the detail page never did. So a
+  two-company tenant could open an entry — on the page where they void and
+  reverse it — and not be told whose books it belongs to. Noticed while voiding
+  the probe entry from the spin, which is the sort of thing only driving finds.
+- **The dialog title ran under the close button.** `DialogContent` puts an icon
+  button at `top-2 right-2` and `DialogTitle` had no right padding, so any title
+  long enough to wrap went beneath it — "Close Oak Row LLC's books through
+  2026-07-×31" on screen. Fixed in the PRIMITIVE rather than in the caller: the
+  component that positions the button is the one that should reserve its corner.
+  `leading-none` went with it, which is why the two lines looked jammed.
+- **What the spin PROVED, and it is the point of the slice:** Oak Row closed
+  through 2026-07-31 while Test stayed at 2026-06-30; the same journal entry,
+  same date, same accounts was REFUSED in Oak Row ("That date falls in a closed
+  period") and POSTED in Test. The checklist showed Test's 4 unreviewed
+  transactions, 2 draft invoices and 1 draft bill, and showed Oak Row none of
+  them — each with only its own register under "not reconciled". The probe entry
+  was voided afterwards; Oak Row is left closed through July on purpose, as the
+  standing demonstration that two companies sit at different months.
+
 ### 2026-08-17 — Per-entity close (branch `claude/per-entity-close`)
 
 Slice 4 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md), and the

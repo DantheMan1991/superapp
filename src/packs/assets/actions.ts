@@ -105,6 +105,12 @@ const createSchema = z.object({
   // Cents, so the ledger and this agree without a float ever existing.
   acquisitionCostCents: z.number().int().min(0).nullable().optional(),
   parentId: z.string().uuid().nullable().optional(),
+  /**
+   * Which company's books (ADR 0010). Absent or null means the tenant's
+   * default, resolved by `createAsset` — a single-company tenant has no picker
+   * to send one from. The composite FK refuses another tenant's company.
+   */
+  entityId: z.string().uuid().nullable().optional(),
   notes: z.string().max(5000).optional(),
   inServiceOn: optionalDate.nullable(),
   depreciationMethod: z.enum(["none", "straight_line"]).optional(),

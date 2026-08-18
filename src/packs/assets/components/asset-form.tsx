@@ -40,9 +40,19 @@ const CUSTOM_KIND = "__custom__";
 export function AssetForm({
   containers,
   kindsInUse,
+  companies,
 }: {
   containers: { id: string; name: string }[];
   kindsInUse: string[];
+  /**
+   * The tenant's companies (ADR 0010). Rendered only at TWO OR MORE — a client
+   * with one company must never learn the concept exists, and the server
+   * resolves the default when nothing is sent.
+   *
+   * An asset is a thing with a balance, so it belongs to one set of books: its
+   * cost sits on that balance sheet and its depreciation lands in that P&L.
+   */
+  companies: { id: string; name: string; isDefault: boolean }[];
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -76,6 +86,7 @@ export function AssetForm({
           ? Math.round(Number(rawCost) * 100)
           : null,
         parentId: parentId === NO_PARENT ? null : parentId,
+        entityId: String(formData.get("entityId") ?? "") || null,
         notes: String(formData.get("notes") ?? ""),
       });
       // `in` rather than `result.error`: the action returns a UNION, and a
@@ -167,6 +178,33 @@ export function AssetForm({
                 <Input id="identifier" name="identifier" maxLength={200} />
               </div>
             </div>
+
+            {companies.length > 1 && (
+              <div className="grid gap-2">
+                <Label htmlFor="entityId">Company</Label>
+                <Select
+                  name="entityId"
+                  defaultValue={
+                    (companies.find((c) => c.isDefault) ?? companies[0]).id
+                  }
+                >
+                  <SelectTrigger id="entityId">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {companies.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-muted-foreground text-xs">
+                  Whose books this asset sits on. It cannot be moved later —
+                  every depreciation entry belongs to whoever owned it then.
+                </p>
+              </div>
+            )}
 
             {containers.length > 0 && (
               <div className="grid gap-2">

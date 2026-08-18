@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { withTenant } from "@/db";
+import { eq } from "drizzle-orm";
+import { schema, withTenant } from "@/db";
+import { listEntities } from "@/modules/accounting/core";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { formatCents } from "@/lib/money";
@@ -98,14 +100,33 @@ export default async function AssetDetailPage({
           latestMeter(tx, ctx.tenant.id, asset.id),
           listAssignableMembers(tx, ctx.tenant.id),
         ]);
-      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers };
+      // Registers so the proceeds picker can exclude other companies', and
+      // companies so the page can name this asset's owner (ADR 0010).
+      const registers = await tx.query.bankAccounts.findMany({
+        where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
+        columns: { accountId: true, entityId: true },
+      });
+      const companies = await listEntities(tx, ctx.tenant.id, {
+        includeInactive: true,
+      });
+      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers } = data;
+  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies } = data;
   const isOwner = ctx.role === "owner";
+  /**
+   * WHOSE BOOKS THIS ASSET IS ON. Undefined at one company, so nobody who has
+   * never heard of the concept sees it — and shown otherwise, because this page
+   * is where somebody presses Post depreciation and Dispose, and both write to
+   * exactly one set of books.
+   */
+  const companyName =
+    companies.length > 1
+      ? (companies.find((c) => c.id === asset.entityId)?.name ?? null)
+      : null;
 
   const dueTotal =
     depreciation?.due.reduce((s, r) => s + r.amountCents, 0) ?? 0;
@@ -176,10 +197,30 @@ export default async function AssetDetailPage({
   const assetAccounts = accounts
     .filter((a) => a.isActive && a.subtype === "fixed_asset")
     .map((a) => ({ id: a.id, label: `${a.code} ${a.name}` }));
+  /**
+   * Proceeds can land in a register, in AR, or in another current asset — but
+   * ONLY IN THIS ASSET'S OWN COMPANY'S REGISTERS (ADR 0010).
+   *
+   * A disposal posts in the company that owns the asset, and `postEntry`
+   * refuses a line touching another company's register, so an unfiltered list
+   * offers a choice that always fails. That is the fifth time this shape has
+   * come up — the recurring invoice coded to Checking, the invoice's Deposit-to,
+   * the bill's Paid-from, the transfer dialog — so the register ids are
+   * filtered here rather than discovered by somebody selling a tractor.
+   *
+   * Selling one company's asset and banking the money in another IS a real
+   * thing, and it is intercompany: the same shape as the invoice and the bill.
+   * It is not built, and offering the account without building it would be the
+   * one option that cannot work.
+   */
+  const foreignRegisterIds = new Set(
+    registers.filter((r) => r.entityId !== asset.entityId).map((r) => r.accountId),
+  );
   const proceedsAccounts = accounts
     .filter(
       (a) =>
         a.isActive &&
+        !foreignRegisterIds.has(a.id) &&
         ["bank", "cash", "accounts_receivable", "other_current_asset"].includes(
           a.subtype,
         ),
@@ -227,6 +268,12 @@ export default async function AssetDetailPage({
         description={
           <span className="flex items-center gap-2">
             {assetKindLabel(asset.kind)}
+            {companyName && (
+              <>
+                <span className="text-muted-foreground">·</span>
+                <span>{companyName}</span>
+              </>
+            )}
             {asset.status === "disposed" && (
               <Badge variant="outline">
                 disposed {asset.disposedOn ?? ""}

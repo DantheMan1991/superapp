@@ -3,12 +3,35 @@ import { and, eq, gt, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Asset } from "@/db/schema";
 import {
-  entityForDocument,
   getClosedThrough,
   listDimensionMembers,
   postEntry,
 } from "@/modules/accounting/core";
 import { AssetError, ASSET_DIMENSION, type AssetCtx } from "./ops";
+
+/**
+ * The company whose books this asset depreciates in.
+ *
+ * `entity_id` is legitimately nullable — an asset can be registered by a tenant
+ * with no accounting at all (see the schema note) — and such an asset cannot
+ * depreciate, because there are no books to depreciate in. It REFUSES rather
+ * than falling back to the tenant default: a default chosen at posting time is
+ * exactly the behaviour this column replaced, and reintroducing it as an error
+ * path would put one asset's schedule in two sets of books.
+ *
+ * Reaching this means accounting was provisioned after the asset was created
+ * AND the adoption in `provisionAccounting` did not run, so the message names
+ * the repair rather than the symptom.
+ */
+function entityOf(asset: Pick<Asset, "id" | "entityId">): string {
+  if (!asset.entityId) {
+    throw new AssetError(
+      "ASSET_NO_COMPANY",
+      `asset ${asset.id} belongs to no company — open the books for this tenant first`,
+    );
+  }
+  return asset.entityId;
+}
 import {
   buildSchedule,
   catchUpKey,
@@ -264,16 +287,10 @@ export async function getDepreciationStatus(
   const posted = await postedToDateCents(tx, tenantId, asset.id);
   const due = unpostedPeriods(input, through, postedPeriods);
 
-  // The lock of the company this asset's depreciation posts into (ADR 0010
-   // slice 4). A fixed asset still has no company of its own — the assets pack
-   // is `entityForDocument`'s last caller — so the answer comes from where its
-   // entries have always landed, which is the same source the posting path
-   // below uses. Give `assets` an `entity_id` and both read it directly.
-  const closedThrough = await getClosedThrough(
-    tx,
-    tenantId,
-    await entityForDocument(tx, tenantId, "depreciation", asset.id),
-  );
+  // The lock of the company that OWNS this asset. It reads the column now
+  // rather than inferring the company from where the first entry landed, which
+  // is what `entityForDocument` did and why that helper is gone.
+  const closedThrough = await getClosedThrough(tx, tenantId, entityOf(asset));
   const { stranded, open } = splitAtClose(due, closedThrough);
   return {
     schedule,
@@ -339,11 +356,7 @@ export async function postDepreciation(
     return { postedPeriods: [], totalCents: 0, caughtUpCount: 0 };
   }
 
-  const closedThrough = await getClosedThrough(
-    tx,
-    ctx.tenantId,
-    await entityForDocument(tx, ctx.tenantId, "depreciation", asset.id),
-  );
+  const closedThrough = await getClosedThrough(tx, ctx.tenantId, entityOf(asset));
   const { stranded, open } = splitAtClose(due, closedThrough);
 
   const members = await listDimensionMembers(tx, ctx.tenantId, ASSET_DIMENSION);
@@ -382,7 +395,7 @@ export async function postDepreciation(
       // Every entry an asset ever posts lands in the company its FIRST one did
       // — a depreciation schedule split across two sets of books by a moved
       // default would understate one and overstate the other for years.
-      entityId: await entityForDocument(tx, ctx.tenantId, "depreciation", asset.id),
+      entityId: entityOf(asset),
       status: "posted",
       entryDate: periodEndDate(catchUpPeriod),
       memo: `Depreciation catch-up — ${asset.name} (${first} to ${last}, ${stranded.length} months before close)`,
@@ -397,7 +410,7 @@ export async function postDepreciation(
 
   for (const row of open) {
     await postEntry(tx, ctx, {
-      entityId: await entityForDocument(tx, ctx.tenantId, "depreciation", asset.id),
+      entityId: entityOf(asset),
       status: "posted",
       entryDate: periodEndDate(row.period),
       memo: `Depreciation — ${asset.name} (${row.period})`,
@@ -522,7 +535,7 @@ export async function postDisposal(
     .map((l) => ({ ...l, memo: asset.name, dimensionMemberIds }));
 
   await postEntry(tx, ctx, {
-    entityId: await entityForDocument(tx, ctx.tenantId, "depreciation", asset.id),
+    entityId: entityOf(asset),
     status: "posted",
     entryDate: args.disposedOn,
     memo: `Disposal — ${asset.name}`,

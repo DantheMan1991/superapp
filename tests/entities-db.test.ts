@@ -56,6 +56,8 @@ import {
 import { recordBillPayment } from "../src/modules/accounting/payables/payments";
 import { getArAging } from "../src/modules/accounting/invoicing/aging-feed";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
+import { createAsset } from "../src/packs/assets/ops";
+import { postDepreciation } from "../src/packs/assets/depreciation-ops";
 
 /**
  * TWO COMPANIES IN ONE TENANT — the case every other DB suite cannot see.
@@ -1480,6 +1482,92 @@ d("entities: two sets of books in one tenant", () => {
       loadIntercompanyEntries(tx, tenantId, pair.intercompanyId),
     );
     expect(legs.every((l) => l.status === "void")).toBe(true);
+  });
+
+  /* -- a fixed asset carries its own company ------------------------------ */
+
+  it("an asset's depreciation lands in ITS company, even after the default moves", async () => {
+    /**
+     * THE LAST ITEM ON ADR 0010'S LIST. Until `assets.entity_id` existed, an
+     * asset's depreciation went wherever its FIRST entry landed
+     * (`entityForDocument`), which meant the tenant's default at the moment
+     * somebody first pressed Post — a company chosen by timing rather than by
+     * anybody. Moving the default between two months of one schedule then split
+     * it across two balance sheets.
+     *
+     * The default is moved MID-TEST, exactly as the invoice case does, because
+     * that is the only way to tell a stored company from an inferred one.
+     */
+    const fixedAssetAccount = await accountIdBySubtype("fixed_asset");
+    const asset = await withTenant(tenantId, (tx) =>
+      createAsset(
+        tx,
+        { tenantId, userId: "owner-user", role: "owner" },
+        {
+          kind: "equipment",
+          name: "Oak Row mower",
+          entityId: oak,
+          acquisitionCostCents: 24_000,
+          inServiceOn: "2027-01-01",
+          assetAccountId: fixedAssetAccount,
+          depreciationMethod: "straight_line",
+          usefulLifeMonths: 24,
+          salvageValueCents: 0,
+        },
+      ),
+    );
+    expect(asset.entityId).toBe(oak);
+
+    // The tenant default is MAPLE at this point; move it to make the point.
+    await withTenant(tenantId, (tx) => setDefaultEntity(tx, owner, maple));
+
+    const posted = await withTenant(tenantId, (tx) =>
+      postDepreciation(
+        tx,
+        { tenantId, userId: "owner-user", role: "owner" },
+        asset,
+        "2027-02",
+      ),
+    );
+    expect(posted.postedPeriods.length).toBeGreaterThan(0);
+
+    const entries = await withTenant(tenantId, (tx) =>
+      tx.query.journalEntries.findMany({
+        where: and(
+          eq(schema.journalEntries.tenantId, tenantId),
+          eq(schema.journalEntries.source, "depreciation"),
+          eq(schema.journalEntries.sourceId, asset.id),
+        ),
+      }),
+    );
+    expect(entries.length).toBeGreaterThan(0);
+    // EVERY month in OAK's books, not the default's.
+    for (const e of entries) expect(e.entityId).toBe(oak);
+
+    // And it shows up on Oak's P&L rather than Maple's.
+    const FEB = { from: "2027-01-01", to: "2027-02-28" };
+    const [oakRows, mapleRows] = await withTenant(tenantId, async (tx) => [
+      await getBalances(tx, tenantId, { scope: scopeOf(oak), ...FEB }),
+      await getBalances(tx, tenantId, { scope: scopeOf(maple), ...FEB }),
+    ]);
+    const expense = await accountId("6900");
+    expect(netOf(oakRows, expense)).toBeGreaterThan(0);
+    expect(netOf(mapleRows, expense)).toBe(0);
+  });
+
+  it("an asset defaults to the tenant's default company when nobody says", async () => {
+    // The single-company tenant's path: no picker, no argument, and the asset
+    // still ends up somewhere real rather than null.
+    const asset = await withTenant(tenantId, (tx) =>
+      createAsset(
+        tx,
+        { tenantId, userId: "owner-user", role: "owner" },
+        { kind: "equipment", name: "Unassigned trailer" },
+      ),
+    );
+    expect(asset.entityId).toBe(
+      await withTenant(tenantId, (tx) => getDefaultEntityId(tx, tenantId)),
+    );
   });
 
   it("combined balancing is NOT evidence that each company balances", async () => {

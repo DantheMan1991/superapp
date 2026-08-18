@@ -15,6 +15,63 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-17 — A fixed asset carries its own company (branch `claude/assets-carry-a-company`)
+
+The last thing [ADR 0010](../decisions/0010-entities-inside-a-tenant.md) listed
+as unbuilt. Migration `0154`, and **nothing is owed after it** — see the last
+bullet, which is the interesting one.
+
+- **`assets.entity_id`, fixed at creation.** An asset is a thing with a balance:
+  its cost sits on one balance sheet and its depreciation lands in one P&L, so it
+  belongs to one set of books like an invoice, a bill and a register before it.
+  It cannot be moved afterwards, for the reason the other three cannot — every
+  entry already posted belongs to whoever owned it then. The correction is a
+  disposal in one company and an acquisition in the other, which is also what
+  actually happened.
+- **WHAT IT REPLACES IS THE INTERESTING PART.** Until now depreciation went
+  wherever the asset's FIRST entry landed (`entityForDocument`), which is the
+  tenant's DEFAULT at the moment somebody first pressed Post — a company chosen
+  by timing rather than by anybody. Move the default between two months of one
+  schedule and that asset's depreciation splits across two balance sheets, with
+  every entry balancing and nothing complaining. The test moves the default
+  mid-run, because that is the only way to tell a stored company from an
+  inferred one.
+- **`entityForDocument` AND `entityOfDocument` ARE GONE**, and that is the end of
+  ADR 0010's list. Nothing infers a company from history any more; every
+  document states one.
+- **The proceeds picker on a disposal now excludes other companies' registers.**
+  A disposal posts in the asset's company and `postEntry` refuses a line
+  touching a foreign register, so the unfiltered list was offering a choice that
+  always fails — the FIFTH time that shape has appeared (the recurring invoice
+  coded to Checking, the invoice's Deposit-to, the bill's Paid-from, the transfer
+  dialog). Selling one company's asset into another's account is real, and it is
+  intercompany like the invoice and the bill; it is not built, and offering the
+  account without building it would be the one option that cannot work.
+- **The asset form grows a Company picker at two or more companies**, defaulting
+  to the tenant default, and the detail page names the owner beside the kind —
+  that page is where Post depreciation and Dispose live, and both write to
+  exactly one set of books.
+- **`0154` is hand-edited three ways** and the header says so: drizzle-kit
+  emitted a stray `period_closes` NOT NULL (a `--custom` migration does not teach
+  the snapshot what its SQL did, so `0153`'s work reappeared), emitted no
+  backfill at all, and put the foreign key before it. The backfill freezes
+  exactly what `entityForDocument` answered at runtime — first depreciation
+  entry, else the tenant default — so no existing schedule changes company.
+- Verified on both databases: production's three assets all resolved to `Test`,
+  the one with three depreciation entries included, and zero nulls.
+- **`entity_id` STAYS NULLABLE, and CI is what settled it.** Every other
+  `entity_id` in this schema gets a `SET NOT NULL` a release later; this one
+  must not. The first cut resolved the tenant default in `createAsset` and threw
+  `ENTITY_MISSING` when there was none — and the test suite failed on a fixture
+  that creates a bare tenant, which is not an artificial case: **this pack
+  declares `requires: []`**, so a tenant can run the asset register with no
+  accounting at all. A farm listing its equipment and never keeping books is a
+  supported customer, and "add a tractor" must not depend on a chart of
+  accounts. `provisionAccounting` now ADOPTS any company-less asset when the
+  books are opened, so depreciation works on the first press. **The pack
+  boundary was the thing that was wrong, and only a test with no accounting in
+  it could have said so.**
+
 ### 2026-08-15 — Whoever changed the oil can log the oil change (`claude/pack-write-levels`)
 
 Platform-wide change; the reasoning is in

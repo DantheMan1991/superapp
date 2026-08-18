@@ -46,7 +46,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
-import { accounts } from "./ledger";
+import { accounts, entities } from "./ledger";
 
 export const assets = pgTable(
   "assets",
@@ -62,6 +62,36 @@ export const assets = pgTable(
      * never needs a migration to core. Same arrangement as
      * `documents.doc_kind` and `mail_links.entity_type`.
      */
+    /**
+     * WHICH COMPANY OWNS IT (ADR 0010). A fixed asset is a thing with a balance
+     * — its cost sits on one balance sheet and its depreciation lands in one
+     * P&L — so it belongs to exactly one set of books, like an invoice, a bill
+     * and a register before it.
+     *
+     * Until this column existed, an asset's depreciation went wherever its
+     * FIRST entry happened to land (`entityForDocument`), which meant the
+     * tenant's default at the moment somebody first pressed Post. That is a
+     * company chosen by timing rather than by anybody, and moving the default
+     * between two months of a schedule split one asset's depreciation across
+     * two balance sheets.
+     *
+     * FIXED AT CREATION, like the other three. Every entry already posted
+     * belongs to whoever owned it then; moving it would strand them. The
+     * correction is a disposal in one company and an acquisition in the other,
+     * which is also what actually happened.
+     *
+     * NULLABLE, AND IT STAYS THAT WAY — no contract migration follows this one,
+     * which is the opposite of every other `entity_id` in this schema. The
+     * assets pack declares `requires: []`, so a tenant can run the register with
+     * no accounting at all and therefore no company: a farm listing its
+     * equipment and never keeping books. CI proved it by failing on a fixture
+     * that is exactly that tenant. `provisionAccounting` adopts any such asset
+     * the moment books are opened.
+     *
+     * `drizzle/0154` backfills every asset that DOES have books, from where its
+     * depreciation has been landing.
+     */
+    entityId: uuid("entity_id"),
     kind: text("kind").notNull(),
     name: text("name").notNull(),
     /** Serial, VIN, plate, asset tag. Free text — every kind numbers differently. */
@@ -153,6 +183,14 @@ export const assets = pgTable(
     // Target for the composite self-FK below, and for any future pack table
     // that needs to point at an asset without losing tenant agreement.
     uniqueIndex("assets_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("assets_tenant_entity_idx").on(t.tenantId, t.entityId),
+    // Composite, so an asset can never name another tenant's company — the
+    // pattern every entity reference in this schema uses.
+    foreignKey({
+      name: "assets_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
+    }).onDelete("restrict"),
     index("assets_tenant_kind_idx").on(t.tenantId, t.kind),
     index("assets_tenant_status_idx").on(t.tenantId, t.status),
     index("assets_tenant_parent_idx").on(t.tenantId, t.parentId),

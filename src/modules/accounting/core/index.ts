@@ -34,9 +34,7 @@ export {
 } from "./posting";
 export {
   createEntity,
-  entityForDocument,
   entityForRegisterAccount,
-  entityOfDocument,
   entityScopeCondition,
   entityScopeLabel,
   getDefaultEntityId,

@@ -204,62 +204,18 @@ export async function entityForRegisterAccount(
 }
 
 /**
- * The entity a document's ledger entries already landed in, or null if it has
- * none yet.
+ * `entityOfDocument` and `entityForDocument` lived here from slice 1 until
+ * `drizzle/0154`, and their removal is the end of ADR 0010's list.
  *
- * A DOCUMENT'S ENTRIES ALL BELONG TO ONE COMPANY. An invoice issued in Maple
- * Street's books whose payment posts into Oak Row's leaves both AR balances
- * wrong while the tenant as a whole still ties out — the exact failure mode
- * that only shows up on a client with two entities.
+ * They answered "which company did this document's entries land in", by reading
+ * the FIRST entry and falling back to the tenant default. That was the right
+ * answer while nothing carried a company of its own — and a trap, because the
+ * fallback picks whatever the default happened to be at the moment somebody
+ * first pressed Post. Invoices, bills and registers stopped needing it in slice
+ * 1b; fixed assets were the last caller, and now carry `assets.entity_id`.
  *
- * It is reachable today even though nothing chooses an entity yet: `postEntry`
- * callers that cannot choose pass the tenant's DEFAULT, and the default can be
- * moved. Issue an invoice, move the default, take the payment, and the two legs
- * are in different companies. So this is a live guard, not headroom.
- *
- * SUPERSEDED for invoices, bills and bank rows — they carry their own company
- * now and their entries read it off the row. The assets pack is the last
- * caller, because a fixed asset has no company column yet and its depreciation
- * schedule still has to land every month where the first entry did.
+ * Nothing infers a company from history any more. Every document states one.
  */
-export async function entityOfDocument(
-  tx: Tx,
-  tenantId: string,
-  source: "invoice" | "bill" | "bank_import" | "depreciation" | "opening_balance",
-  sourceId: string,
-): Promise<string | null> {
-  const row = await tx.query.journalEntries.findFirst({
-    where: and(
-      eq(schema.journalEntries.tenantId, tenantId),
-      eq(schema.journalEntries.source, source),
-      eq(schema.journalEntries.sourceId, sourceId),
-    ),
-    columns: { entityId: true },
-    orderBy: asc(schema.journalEntries.createdAt),
-  });
-  return row?.entityId ?? null;
-}
-
-/**
- * `entityOfDocument`, falling back to the tenant default for a first entry.
- *
- * ONLY THE ASSETS PACK STILL USES THIS. Invoices, bills and bank accounts now
- * carry their own company, so their entries read it off the document; a fixed
- * asset does not yet, and its depreciation schedule must still land every month
- * in whichever company the first entry did. Give `assets` an `entity_id` and
- * this loses its last caller.
- */
-export async function entityForDocument(
-  tx: Tx,
-  tenantId: string,
-  source: "invoice" | "bill" | "bank_import" | "depreciation" | "opening_balance",
-  sourceId: string,
-): Promise<string> {
-  return (
-    (await entityOfDocument(tx, tenantId, source, sourceId)) ??
-    (await getDefaultEntityId(tx, tenantId))
-  );
-}
 
 /**
  * Turn a URL parameter into a scope.

@@ -219,6 +219,14 @@ tenant, so deriving would either silently unlock the second company or require
 fabricating a close nobody performed. The data decided the design, and the
 lesson generalises: **derive-on-read is only free when the history is complete.**
 
+**The expand/contract pair closed the same day** (`0152`/`0153`): the column
+went NOT NULL and the tenant-wide `accounting_settings.closed_through` was
+dropped, once the deploy that stopped reading it was live. The half worth
+recording is what did NOT re-run — `0152`'s backfill from the scalar. By then
+the scalar was stale against a company that had since closed a further month, so
+repeating it would have reopened somebody's July. **A backfill is only safe to
+repeat while it is still the source of truth.**
+
 **What is still not built:** a company on fixed assets (the assets pack is
 `entityForDocument`'s last caller, including for its period lock), and receiving
 an invoice payment into another company's account, which is the mirror of the

@@ -56,7 +56,7 @@ export default async function CloseDetailPage({
         includeInactive: true,
       });
       const companyName =
-        entities.length > 1 && close.entityId
+        entities.length > 1
           ? (entities.find((e) => e.id === close.entityId)?.name ?? null)
           : null;
       const userIds = [

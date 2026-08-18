@@ -33,20 +33,6 @@ import { addDaysIso, fiscalYearStart } from "../lib/dates";
 
 const BASE = "/dashboard/m/accounting";
 
-/**
- * Match a close's own company — including the legacy row that has none.
- *
- * `entity_id` is nullable for one release (see the schema note), so a close
- * written in the window between `0152` and the deploy carries null. Comparing
- * it with `eq` would match nothing and quietly report "no later close exists",
- * which is the one answer that must not be guessed at when it decides whether a
- * period can be reopened.
- */
-function closeEntity(close: Pick<PeriodClose, "entityId">) {
-  return close.entityId
-    ? eq(schema.periodCloses.entityId, close.entityId)
-    : isNull(schema.periodCloses.entityId);
-}
 
 export interface CloseChecklistItem {
   key:
@@ -344,7 +330,7 @@ export async function reopenClose(
     .where(
       and(
         eq(schema.periodCloses.tenantId, ctx.tenantId),
-        closeEntity(close),
+        eq(schema.periodCloses.entityId, close.entityId),
         eq(schema.periodCloses.status, "completed"),
         gt(schema.periodCloses.periodEnd, close.periodEnd),
       ),
@@ -373,12 +359,10 @@ export async function reopenClose(
   if (!updated) {
     throw new LedgerError("STALE_VERSION", "close changed since loaded");
   }
-  if (close.entityId) {
-    await setClosedThrough(tx, ctx, {
-      entityId: close.entityId,
-      date: close.previousClosedThrough,
-    });
-  }
+  await setClosedThrough(tx, ctx, {
+    entityId: close.entityId,
+    date: close.previousClosedThrough,
+  });
   return updated;
 }
 

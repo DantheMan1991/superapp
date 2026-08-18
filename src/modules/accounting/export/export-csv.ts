@@ -261,8 +261,7 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
       "Month-end close history",
       // entity_id and entity APPENDED (slice 4): a close covers one company,
       // and a history that does not say which is unreadable the moment a tenant
-      // has two. Blank on a close that predates per-entity closes, which locked
-      // every company at once.
+      // has two.
       ["id", "period_end", "status", "completed_by", "completed_at", "signed_off_by", "signed_off_at", "reopened_by", "reopened_at", "open_items_at_close", "entity_id", "entity"],
       data.periodCloses.map((c) => {
         const checklist = c.checklist as { blockerCount?: number } | null;
@@ -272,7 +271,7 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
           c.signedOffByClerkUserId ?? "", ts(c.signedOffAt),
           c.reopenedByClerkUserId ?? "", ts(c.reopenedAt),
           String(checklist?.blockerCount ?? ""),
-          c.entityId ?? "", c.entityId ? entityName(c.entityId) : "",
+          c.entityId, entityName(c.entityId),
         ];
       }),
     ),

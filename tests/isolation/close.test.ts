@@ -97,6 +97,11 @@ d("close-tools isolation (RLS + composite tenant FKs)", () => {
       withTenant(tenantA, (tx) =>
         tx.insert(schema.periodCloses).values({
           tenantId: tenantB,
+          // B's OWN company, so the row is internally consistent and the
+          // composite FK has no reason to complain: the only thing wrong with
+          // it is that tenant A is the one writing it. That leaves RLS as the
+          // only thing that can reject it, which is what this test is for.
+          entityId: fx.b.entityId,
           periodEnd: "2026-05-31",
           checklist: {},
           completedByClerkUserId: "attacker",

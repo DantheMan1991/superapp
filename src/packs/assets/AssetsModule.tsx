@@ -95,6 +95,20 @@ export async function AssetsModule({
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   const isOwner = ctx.role === "owner";
+  /**
+   * WHOSE ASSET, on a list that shows several companies' at once — the column
+   * the invoice and bill lists have had since slice 1b, and the fourth screen
+   * of this shape to need it (the Journal header, the close history, the
+   * payment rows).
+   *
+   * The pattern the dossier now names: a screen showing a document's OWN data
+   * is safe; one showing several companies' side by side has to say which is
+   * which. Only at two or more, so the single-company tenant's list is exactly
+   * what it was.
+   */
+  const showCompany = companies.length > 1;
+  const companyName = (entityId: string | null): string =>
+    (entityId && companies.find((c) => c.id === entityId)?.name) || "—";
 
   return (
     <div className="space-y-6">
@@ -140,6 +154,7 @@ export async function AssetsModule({
             <TableRow>
               <TableHead>Asset</TableHead>
               <TableHead>Kind</TableHead>
+              {showCompany && <TableHead>Company</TableHead>}
               <TableHead>Kept in</TableHead>
               <TableHead>Acquired</TableHead>
               <TableHead className="text-right">Cost</TableHead>
@@ -169,6 +184,15 @@ export async function AssetsModule({
                 <TableCell className="text-muted-foreground">
                   {assetKindLabel(asset.kind)}
                 </TableCell>
+                {showCompany && (
+                  <TableCell className="text-muted-foreground">
+                    {/* An em dash for an asset registered before the books were
+                        opened: `entity_id` is legitimately null when the tenant
+                        has no accounting, and inventing a company here would be
+                        a claim the row cannot support. */}
+                    {companyName(asset.entityId)}
+                  </TableCell>
+                )}
                 <TableCell className="text-muted-foreground">
                   {asset.parentId
                     ? (byId.get(asset.parentId)?.name ?? "—")

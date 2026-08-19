@@ -75,7 +75,15 @@ export function MarkRoundNormalButton({
   );
 }
 
-/** The same confirmation for a single lot, without opening anything. */
+/**
+ * The same confirmation for a single lot, without opening anything.
+ *
+ * **OUTLINED AND VERB-LABELLED, and both were found by driving it.** It was a
+ * ghost button reading "Normal", which sat in the same cell that shows a
+ * "Normal" BADGE once the lot has been checked — so the control you press and
+ * the state you reached looked nearly identical, and the row gave no clue which
+ * one you were looking at. "Mark normal" is an instruction; "Normal" is a fact.
+ */
 export function QuickNormalButton({
   livestockLotId,
   today,
@@ -102,8 +110,8 @@ export function QuickNormalButton({
   }
 
   return (
-    <Button variant="ghost" size="sm" onClick={submit} disabled={pending}>
-      Normal
+    <Button variant="outline" size="sm" onClick={submit} disabled={pending}>
+      Mark normal
     </Button>
   );
 }

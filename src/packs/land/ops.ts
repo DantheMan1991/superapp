@@ -15,6 +15,14 @@ import {
 } from "@/modules/accounting/core";
 import { defaultProductive, isTenure, isValidZoneUse } from "./vocabulary";
 import { zoneRest, dayBefore, daysOccupied, type ZoneRest } from "./core/rest";
+import {
+  asBoundary,
+  boundaryAreaSqM,
+  parseBoundary,
+  pointInBoundary,
+  type Boundary,
+  type Position,
+} from "./core/geo";
 
 /**
  * Land operations. Every function takes a `Tx` so the caller owns the
@@ -51,7 +59,8 @@ export class LandError extends Error {
       | "ALREADY_OCCUPIED"
       /** Distinct from ALREADY_OCCUPIED: moving them where they already are. */
       | "ALREADY_THERE"
-      | "INVALID_OCCUPANT",
+      | "INVALID_OCCUPANT"
+      | "INVALID_GEOMETRY",
     message: string,
   ) {
     super(message);
@@ -1219,4 +1228,111 @@ async function archiveMember(
   if (member) {
     await archiveDimensionMember(tx, ctx, { memberId: member.id });
   }
+}
+
+// ------------------------------------------------------------ boundaries ---
+
+/**
+ * Set (or clear) a parcel's boundary.
+ *
+ * **THE VALIDATION IS HERE, NOT IN THE ACTION**, because the input is a paste
+ * box: whatever a person had on the clipboard, which might be a county GIS
+ * export, a phone track, or the wrong file entirely. A rule that lived in the
+ * action could be called past by the next caller; here it cannot.
+ *
+ * `null` clears it, and that is a real thing to want — a boundary traced wrong
+ * is worse than none, because everything downstream treats it as measured.
+ *
+ * **Setting a boundary does NOT touch `area_acres`.** The declared figure comes
+ * from a deed or a county record and is what the rent and the tax are based on;
+ * the drawn one is what the fence encloses. Overwriting the first with the
+ * second would destroy the more authoritative number with the more recent one,
+ * and the whole value of having both is being able to see them disagree.
+ */
+export async function setParcelBoundary(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+  input: unknown,
+): Promise<LandParcel> {
+  requireWrite(ctx, "owner");
+  const existing = await getParcel(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `parcel ${id} not found`);
+
+  const geometry = boundaryOrThrow(input);
+  const rows = await tx
+    .update(schema.landParcels)
+    .set({ geometry, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landParcels.tenantId, ctx.tenantId),
+        eq(schema.landParcels.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/** Set (or clear) a zone's boundary. Same rules as the parcel's. */
+export async function setZoneBoundary(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+  input: unknown,
+): Promise<LandZone> {
+  requireWrite(ctx, "owner");
+  const existing = await getZone(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `zone ${id} not found`);
+
+  const geometry = boundaryOrThrow(input);
+  const rows = await tx
+    .update(schema.landZones)
+    .set({ geometry, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landZones.tenantId, ctx.tenantId),
+        eq(schema.landZones.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/** Parse-or-refuse, with the parser's own message — it is written for a person. */
+function boundaryOrThrow(input: unknown): Boundary | null {
+  if (input === null || input === undefined) return null;
+  const result = parseBoundary(input);
+  if (!result.ok) throw new LandError("INVALID_GEOMETRY", result.error);
+  return result.boundary;
+}
+
+/**
+ * Which zone is this point in?
+ *
+ * **The 10x data-entry win, and the reason geometry outranked weather in the
+ * slice order.** Standing in a paddock, a phone that knows where it is can fill
+ * the zone in rather than making somebody pick it off a list of two hundred.
+ * The screens that call this are slice 2a.2; it is here now because it is the
+ * read that geometry exists for, and building the column without it would be
+ * storing shapes for a map to look pretty with.
+ *
+ * Returns the SMALLEST match. Zones can legitimately overlap — a strip inside a
+ * paddock, a paddock inside a parcel-sized zone — and the smallest containing
+ * one is the most specific answer, which is what somebody standing on it means.
+ */
+export async function zoneAtPoint(
+  tx: Tx,
+  tenantId: string,
+  point: Position,
+): Promise<LandZone | null> {
+  const zones = await listZones(tx, tenantId, { status: "active" });
+  let best: { zone: LandZone; area: number } | null = null;
+  for (const zone of zones) {
+    const boundary = asBoundary(zone.geometry);
+    if (!boundary) continue;
+    if (!pointInBoundary(point, boundary)) continue;
+    const area = boundaryAreaSqM(boundary);
+    if (!best || area < best.area) best = { zone, area };
+  }
+  return best?.zone ?? null;
 }

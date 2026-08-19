@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
+import { asBoundary, boundaryAreaAcres } from "../src/packs/land/core/geo";
 import {
   LandError,
   PARCEL_DIMENSION,
@@ -26,6 +27,9 @@ import {
   listZones,
   retireParcel,
   retireZone,
+  setParcelBoundary,
+  setZoneBoundary,
+  zoneAtPoint,
   startZoneUse,
   updateParcel,
   updateZone,
@@ -1215,5 +1219,178 @@ d("land ops", () => {
 
     // An empty list is a configured answer, and must not mean "no filter".
     expect(await asOwner((tx) => listStructures(tx, tenantId, []))).toEqual([]);
+  });
+
+  // ---- boundaries (slice 2a.0) -------------------------------------------
+
+  describe("boundaries", () => {
+    /** ≈ 234.6 acres at 40°N — the same box the pure suite measures. */
+    const paddock = {
+      type: "Polygon",
+      coordinates: [
+        [
+          [-96.0, 40.0],
+          [-95.99, 40.0],
+          [-95.99, 40.01],
+          [-96.0, 40.01],
+          [-96.0, 40.0],
+        ],
+      ],
+    };
+
+    it("stores a boundary WITHOUT touching the declared acreage", async () => {
+      // The point of keeping both. The declared figure is the deed's and is
+      // what the rent and the tax are based on; overwriting it with a traced
+      // one would destroy the more authoritative number with the newer one.
+      const parcel = await newParcel("Boundary Farm", 240);
+      const saved = await asOwner((tx) =>
+        setParcelBoundary(tx, ownerCtx(), parcel.id, paddock),
+      );
+      expect(saved.areaAcres).toBe(240);
+      expect(saved.geometry).not.toBeNull();
+
+      const boundary = asBoundary(saved.geometry);
+      expect(boundary).not.toBeNull();
+      expect(boundaryAreaAcres(boundary!)).toBeCloseTo(234.56, 0);
+    });
+
+    it("takes a Feature or a string, because that is what people paste", async () => {
+      const parcel = await newParcel("Pasted Farm");
+      const saved = await asOwner((tx) =>
+        setParcelBoundary(
+          tx,
+          ownerCtx(),
+          parcel.id,
+          JSON.stringify({ type: "Feature", geometry: paddock }),
+        ),
+      );
+      // Whatever went in, a bare geometry comes out — the shape every reader
+      // in the pack expects.
+      expect((saved.geometry as { type: string }).type).toBe("Polygon");
+    });
+
+    it("refuses a shape it cannot use, with the reason", async () => {
+      // The rule lives in the ops layer rather than the action, so the next
+      // caller cannot get past it.
+      const parcel = await newParcel("Refused Farm");
+      await expect(
+        asOwner((tx) =>
+          setParcelBoundary(tx, ownerCtx(), parcel.id, {
+            type: "LineString",
+            coordinates: [
+              [-96, 40],
+              [-95.99, 40],
+            ],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_GEOMETRY" });
+
+      const after = await asOwner((tx) => getParcel(tx, tenantId, parcel.id));
+      expect(after?.geometry).toBeNull();
+    });
+
+    it("clears a boundary, because a wrong one is worse than none", async () => {
+      const parcel = await newParcel("Cleared Farm");
+      await asOwner((tx) => setParcelBoundary(tx, ownerCtx(), parcel.id, paddock));
+      const cleared = await asOwner((tx) =>
+        setParcelBoundary(tx, ownerCtx(), parcel.id, null),
+      );
+      expect(cleared.geometry).toBeNull();
+    });
+
+    it("is a DECISION, so staff cannot redraw the farm", async () => {
+      const parcel = await newParcel("Staffed Farm");
+      await expect(
+        asOwner((tx) => setParcelBoundary(tx, staffCtx(), parcel.id, paddock)),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("refuses a boundary for something that does not exist", async () => {
+      await expect(
+        asOwner((tx) => setZoneBoundary(tx, ownerCtx(), randomUUID(), paddock)),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+
+    it("finds which zone a point is standing in", async () => {
+      // The 10x data-entry win, and the read the column exists for.
+      const parcel = await newParcel("Point Farm");
+      const north = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "P-North" }),
+      );
+      const south = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "P-South" }),
+      );
+      await asOwner((tx) => setZoneBoundary(tx, ownerCtx(), north.id, paddock));
+      await asOwner((tx) =>
+        setZoneBoundary(tx, ownerCtx(), south.id, {
+          type: "Polygon",
+          coordinates: [
+            [
+              [-96.0, 39.98],
+              [-95.99, 39.98],
+              [-95.99, 39.99],
+              [-96.0, 39.99],
+              [-96.0, 39.98],
+            ],
+          ],
+        }),
+      );
+
+      const found = await asOwner((tx) =>
+        zoneAtPoint(tx, tenantId, [-95.995, 40.005]),
+      );
+      expect(found?.id).toBe(north.id);
+
+      // Ground nobody has drawn is not a match, and neither is open country.
+      expect(
+        await asOwner((tx) => zoneAtPoint(tx, tenantId, [-100, 45])),
+      ).toBeNull();
+    });
+
+    it("returns the SMALLEST zone containing the point", async () => {
+      // Zones legitimately overlap — a strip inside a paddock, a paddock inside
+      // a parcel-sized zone — and the most specific answer is what somebody
+      // standing on it means.
+      const parcel = await newParcel("Nested Farm");
+      const big = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "N-Whole" }),
+      );
+      const strip = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "N-Strip" }),
+      );
+      await asOwner((tx) =>
+        setZoneBoundary(tx, ownerCtx(), big.id, {
+          type: "Polygon",
+          coordinates: [
+            [
+              [-97.0, 41.0],
+              [-96.9, 41.0],
+              [-96.9, 41.1],
+              [-97.0, 41.1],
+              [-97.0, 41.0],
+            ],
+          ],
+        }),
+      );
+      await asOwner((tx) =>
+        setZoneBoundary(tx, ownerCtx(), strip.id, {
+          type: "Polygon",
+          coordinates: [
+            [
+              [-96.96, 41.04],
+              [-96.94, 41.04],
+              [-96.94, 41.06],
+              [-96.96, 41.06],
+              [-96.96, 41.04],
+            ],
+          ],
+        }),
+      );
+
+      const found = await asOwner((tx) =>
+        zoneAtPoint(tx, tenantId, [-96.95, 41.05]),
+      );
+      expect(found?.name).toBe("N-Strip");
+    });
   });
 });

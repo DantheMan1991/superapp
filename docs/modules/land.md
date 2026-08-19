@@ -23,7 +23,9 @@ the first act of building it. Agreed 2026-08-15:
 | --- | --- | --- |
 | **0** | **Places** — parcels, zones, dated zone use | **shipped 2026-08-15** |
 | **1** | **Occupancy + rest** — `land_occupancy`, rest days, grazing days, the paddock-count arithmetic | **shipped 2026-08-15** |
-| 2a | **Geometry** — GeoJSON polygons, area, point-in-polygon, the map | |
+| **2a.0** | **Boundaries** — GeoJSON in jsonb, spherical area, containment, paste-a-boundary | **shipped 2026-08-19** |
+| 2a.1 | **The map** — MapLibre over NAIP aerial, and DRAWING in the same slice | next |
+| 2a.2 | **Standing in a field** — point-in-polygon pre-fills the zone on the round and the move dialog | |
 | 2b | **Features** — points and lines: troughs, hydrants, wells, fences, lanes. The `assets` seam | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
@@ -31,7 +33,15 @@ the first act of building it. Agreed 2026-08-15:
 Weather is late deliberately and it is not a lapse: Open-Meteo serves history by
 lat/long, so a delayed start loses no data. Geometry is late because nothing is
 blocked on it and its top-ranked payoff — point-in-polygon pre-filling a zone on
-mobile — has no consumer until there are field forms to pre-fill.
+mobile — had no consumer until there were field forms to pre-fill. **There is one
+now**: `livestock` slice 1a shipped the daily round on 2026-08-19, which is the
+form 2a.2 pre-fills.
+
+**2a was split into three when it came to be built**, agreed 2026-08-19: the
+shapes and the arithmetic, then the map, then the pre-fill. The map and the
+DRAWING surface are deliberately one slice and not two — this farm's zones have
+no coordinates, so a map shipped without a way to draw would render an empty
+grey rectangle and prove nothing.
 
 **Never in `land`:** profit per acre (downstream of the allocation engine), the
 grazing wedge and dry-matter measurement, and every planner including water
@@ -39,6 +49,61 @@ layout. Operations first, planning second — and no planner before three
 examples exist.
 
 ## Build log
+
+### 2026-08-19 — Slice 2a.0: shapes and arithmetic, no map (`claude/land-geometry`)
+
+The first half of the geometry slice, and deliberately the half with no picture
+in it. `geometry jsonb` on parcels and zones, the math in
+`src/packs/land/core/geo.ts`, and a paste box to get a boundary in.
+
+- **GeoJSON in jsonb, math in JS, no PostGIS** — the design settled this and
+  building it confirmed the sizing: containment is ray casting and area is
+  spherical excess, both trivial at a few hundred polygons, and 10× this farm is
+  still a few hundred. PostGIS would have bought indexes nothing here needs and
+  cost an extension every environment has to carry.
+- **The area formula is SPHERICAL, and that is not fussiness.** A planar formula
+  over degrees is wrong by the cosine of the latitude — about 23% at 40°N, over
+  two acres on a ten-acre paddock — which is the difference between a computed
+  acreage that corrects the county's figure and one that quietly libels it.
+  Certified against an independently derived number, and against the property a
+  planar formula could not have: the same box measures smaller at 60°N than at
+  20°N.
+- **Winding order is ignored.** GeoJSON asks for counter-clockwise outer rings
+  and plenty of real files disagree; trusting it would make a valid boundary
+  measure negative, and a negative paddock is not a state anything here can
+  report on.
+- **`area_acres` IS NOT RECOMPUTED, and never will be.** The declared figure
+  comes from a deed or a county record and is what rent and tax are based on;
+  the boundary is what the fence encloses. They disagree for real reasons — an
+  easement, a creek, a deed written loosely — so the screens report the
+  difference and nothing corrects it. Same rule as `zoneCoverage`, which reports
+  undivided ground rather than refusing it.
+- **The entry path is a paste box, not the map**, and it is not a placeholder: a
+  county GIS export is more accurate than anything traced by hand, so this stays
+  the best route even after 2a.1. It accepts a Feature and a one-shape
+  FeatureCollection because that is what every real source emits, refuses a
+  multi-shape file by saying **how many** shapes are in it, names the type when
+  handed a LineString (troughs and fences are real, and they are 2b), and drops
+  the altitude a GPS export carries.
+- **The same parser and the same area formula run in the paste box**, as you
+  type. `core/geo.ts` is pure precisely so both sides can run it — the acreage
+  the dialog previews is the acreage that gets stored, not a client-side guess
+  at it.
+- **`zoneAtPoint` is here with no screen calling it yet**, which is a deliberate
+  exception to this repo's usual rule. It is the read the column exists for —
+  the 10× data-entry win — and shipping the shapes without it would be storing
+  geometry for a map to look pretty with. It returns the SMALLEST containing
+  zone, because zones legitimately overlap and the most specific answer is what
+  somebody standing on the ground means.
+- **Ray casting is half-open**, so a point on a fence line between two paddocks
+  lands in exactly one of them. Both answering "yes" would make the pre-fill
+  ambiguous exactly where people walk.
+- **Nothing validates that a zone's boundary sits inside its parcel's.** Same
+  decision as area: this pack reports, it does not enforce.
+- Migration `0158` is two nullable columns. Applied to **both** databases and
+  verified with `scripts/verify-rls.ts` before the PR was opened — RLS is
+  unchanged, since these are columns on tables that already carry it.
+- 25 pure tests, 8 ops tests.
 
 ### 2026-08-16 — "Where is it" needed a date too (`claude/current-needs-today`)
 
@@ -293,8 +358,8 @@ Platform-wide change; the reasoning is in
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `land_parcels` | One row per deed or lease | `tenant_id`, FORCE RLS (`land_parcels_superadmin_all`, `land_parcels_member_all`). CHECKs: `tenure` in `owned\|leased\|crop_share`; `status` in `active\|retired`; name non-blank; area null or **> 0** |
-| `land_zones` | Management units inside a parcel | Composite FK `land_zones_parcel_fk` on `(tenant_id, parcel_id)` → `(tenant_id, id)`, **RESTRICT**, so cross-tenant nesting is unrepresentable and a parcel cannot be deleted out from under its zones |
+| `land_parcels` | One row per deed or lease. **`geometry` jsonb since 2a.0**, nullable, unvalidated by the database — every reader goes through `asBoundary` | `tenant_id`, FORCE RLS (`land_parcels_superadmin_all`, `land_parcels_member_all`). CHECKs: `tenure` in `owned\|leased\|crop_share`; `status` in `active\|retired`; name non-blank; area null or **> 0** |
+| `land_zones` | Management units inside a parcel. **`geometry` jsonb since 2a.0**, same rules as the parcel's | Composite FK `land_zones_parcel_fk` on `(tenant_id, parcel_id)` → `(tenant_id, id)`, **RESTRICT**, so cross-tenant nesting is unrepresentable and a parcel cannot be deleted out from under its zones |
 | `land_zone_uses` | What a zone is for, over a date range | Composite FK to the zone, **CASCADE**. `ended_on` is **INCLUSIVE**; null means current. CHECK `ended_on >= started_on`; `use` matches `^[a-z][a-z0-9_]{0,62}$` (**format only**) |
 | `land_occupancy` | What was actually ON a zone, in what structure, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
 
@@ -318,6 +383,12 @@ rented ground, and retrofitting it means rewriting the report.
   something somewhere, `moveOccupant` takes it off wherever it was first
 - `src/packs/land/core/area.ts` — pure. Unit conversion, formatting, totals that
   report their unknowns, and parcel-vs-zone coverage
+- `src/packs/land/core/geo.ts` — pure. Parsing what somebody pasted, spherical
+  area, ray-casting containment, bbox and centroid, and the declared-vs-drawn
+  comparison. **Coordinates are [longitude, latitude]**, which reads backwards
+  to anyone used to saying it out loud
+- `src/packs/land/components/boundary-controls.tsx` — the paste box, which runs
+  the same parser and the same area formula the server will
 - `src/packs/land/core/rest.ts` — pure. Rest and grazing days from spans, the
   `paddocks = (rest ÷ graze) + 1` formula both directions, and the rotation
   finding. **The one file to read before changing anything about rest**
@@ -430,7 +501,39 @@ rented ground, and retrofitting it means rewriting the report.
   `packConfig.land.structureKinds` is where it comes from. See the 2026-08-16
   build log entry for what unfiltered looked like.
 
+- **A COMPUTED ACREAGE NEVER OVERWRITES A DECLARED ONE.** `area_acres` is what
+  the deed or the county says and is what rent and tax are based on; `geometry`
+  is what the fence encloses. Saving a boundary does not fill in a blank area
+  either. Report the difference, never correct it — the same rule as
+  `zoneCoverage`.
+- **Coordinates are `[longitude, latitude]`**, GeoJSON's order and every
+  exporter's. It reads backwards to anyone used to saying "lat/long", and the
+  classic paste error only fails loudly when the latitude exceeds 90 — which,
+  longitudes being what they are, is most of the United States.
+- **The geometry column is not validated by the database and cannot usefully
+  be.** jsonb has no shape constraint and a CHECK could only test for an object.
+  Every reader goes through `asBoundary`, which returns null for anything it
+  cannot read, so a bad row degrades to "no boundary" rather than a broken page.
+- **Winding order is ignored when measuring**, deliberately. Trusting it would
+  make a valid but clockwise boundary measure negative.
+
 ## Open items
+
+- **NOBODY HAS PASTED A BOUNDARY YET.** 2a.0 is type-checked, built and
+  covered, and neither the paste box nor the comparison has been used in a
+  browser.
+- **`zoneAtPoint` has no caller.** Written for slice 2a.2, where the daily round
+  and the move dialog pre-fill the zone from a phone's location. It is the one
+  thing in this pack shipped ahead of its consumer, and the build log says why.
+- **No map.** 2a.1, with drawing in the same slice — MapLibre over NAIP aerial,
+  confirmed with the founder 2026-08-19. Until then a boundary is a number and a
+  paragraph, never a picture.
+- **Nothing checks that a zone's boundary falls inside its parcel's**, by design
+  — but nothing reports a zone drawn on the wrong side of the county road
+  either, and that is a report this pack could honestly make.
+- **A boundary cannot be edited, only replaced or removed.** Fixing one corner
+  means pasting the whole shape again. The map slice is what makes that
+  reasonable rather than a gap worth closing twice.
 
 - ~~The owner write path has never been exercised in a browser~~ — **closed
   2026-08-15.** Driven on production: create a parcel, add a zone, declare a

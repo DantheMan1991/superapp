@@ -16,8 +16,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { setParcelBoundaryAction, setZoneBoundaryAction } from "../actions";
-import { boundaryAreaAcres, parseBoundary } from "../core/geo";
-import { formatArea, fromAcres, type AreaUnit } from "../core/area";
+import { boundaryAreaAcres, parseBoundary, type Boundary } from "../core/geo";
+import { formatArea, type AreaUnit } from "../core/area";
 
 /** Discriminated on purpose: `"acres" in preview` narrows badly across an
  * anonymous union, and the compiler was right to complain. */
@@ -43,19 +43,31 @@ export function BoundaryForm({
   name,
   declaredAcres,
   unit,
-  hasBoundary,
+  current,
 }: {
   target: "zone" | "parcel";
   id: string;
   name: string;
   declaredAcres: number | null;
   unit: AreaUnit;
-  hasBoundary: boolean;
+  /** The boundary already stored, so the box can show what is there. */
+  current: Boundary | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [draft, setDraft] = useState("");
+  const hasBoundary = current !== null;
+  /**
+   * **THE BOX OPENS SHOWING WHAT IS ALREADY THERE**, found by driving it: the
+   * button said "Replace boundary" and then presented an empty field, so the
+   * stored shape was invisible and unrecoverable — there is no other way to get
+   * a boundary back out of the app, and until the map ships there is no way to
+   * see one at all. Two decimal places short of the stored precision would be a
+   * lie, so it is printed whole.
+   */
+  const [draft, setDraft] = useState(() =>
+    current ? JSON.stringify(current) : "",
+  );
 
   /**
    * The SAME parser and the SAME area formula the server will run, in the box,
@@ -80,7 +92,9 @@ export function BoundaryForm({
         return;
       }
       toast.success(geojson ? "Boundary saved" : "Boundary removed");
-      setDraft("");
+      // Not "": the next open should still show what is stored, and after a
+      // REMOVE there is nothing stored to show.
+      setDraft(geojson ?? "");
       setOpen(false);
       router.refresh();
     });
@@ -143,9 +157,10 @@ export function BoundaryForm({
                 <p className="mt-1 text-muted-foreground">
                   You have {formatArea(declaredAcres, unit)} recorded
                   {difference !== null && Math.abs(difference) >= 0.0001
-                    ? `, a difference of ${
-                        difference > 0 ? "+" : "−"
-                      }${Math.abs(fromAcres(difference, unit)).toFixed(2)}`
+                    ? `, a difference of ${difference > 0 ? "+" : "−"}${formatArea(
+                        Math.abs(difference),
+                        unit,
+                      )}`
                     : ""}
                   . Both are kept; nothing is overwritten.
                 </p>

@@ -53,6 +53,15 @@ export async function searchLinkTargets(
   ctx: WorkCtxLike,
   query: string,
   enabledModules: ReadonlySet<string>,
+  /**
+   * The item doing the attaching, so it can be dropped from its own results.
+   *
+   * Optional because the search is reachable from surfaces that are not editing
+   * one particular item; when it IS one, `attachLink` refuses a self-link
+   * anyway and this stops the choice being offered. Same division of labour as
+   * every register picker in accounting: the engine refuses, the list mirrors.
+   */
+  excludeItemId?: string,
 ): Promise<LinkTargetGroup[]> {
   const trimmed = query.trim();
   // An empty query returns NOTHING rather than everything. This fires while
@@ -72,7 +81,17 @@ export async function searchLinkTargets(
             label: type.label,
             pluralLabel: type.pluralLabel,
             icon: type.icon,
-            results: results.slice(0, SEARCH_LIMIT),
+            results: results
+              .filter(
+                (r) =>
+                  !(
+                    excludeItemId !== undefined &&
+                    provider.slug === "work" &&
+                    type.type === "work_item" &&
+                    r.entityId === excludeItemId
+                  ),
+              )
+              .slice(0, SEARCH_LIMIT),
           };
         } catch (error) {
           // Its own section, not the picker. See the module header.
@@ -190,6 +209,26 @@ export async function attachLink(
       ),
     );
   if (!item) throw new WorkError("NOT_FOUND", "work not found");
+
+  /**
+   * NOTHING IS ABOUT ITSELF.
+   *
+   * Found by driving: the attach picker searches every enabled module INCLUDING
+   * Work, so an item's own title came back as a candidate and attaching it
+   * produced a chip on the item pointing at the item. Nothing refused it, and
+   * the result reads as though the work has a subject when it has only itself.
+   *
+   * The guard lives here rather than in the picker because the picker is a
+   * mirror: `attachLink` is reachable from any module through the Layer 0
+   * actions, and each of those would otherwise have to remember this.
+   */
+  if (
+    input.extensionSlug === "work" &&
+    input.entityType === "work_item" &&
+    input.entityId === input.itemId
+  ) {
+    throw new WorkError("SELF_LINK", "work cannot be about itself");
+  }
 
   await tx
     .insert(schema.workItemLinks)

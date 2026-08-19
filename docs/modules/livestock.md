@@ -25,6 +25,45 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-19 — Driven on production, and the migration that had not run (`claude/mark-normal-reads-as-a-button`)
+
+Both slices clicked on the live tenant for the first time. **The first thing it
+found was not in the code: PRs #205 and #206 were merged and deployed while
+migrations 0156 and 0157 had never been run against production**, so the round
+page and the lot detail page both threw. Applied, then verified in `pg_class`
+and `pg_policies` — the table is there with RLS enabled and forced and both
+policies present. See [prod migration drift](../runbooks/) territory: a merged
+migration is not an applied one, and nothing in the deploy runs it.
+
+**What held.** The round listed BATCH-2 and correctly left STEERS-26 off it —
+zero head is a batch that has gone, not a pen somebody forgot. One tap recorded
+the farm ("1 lot marked normal"), the streak went to a day, and last-checked
+went to Today. Recording three dead through the exception dialog moved the head
+count 200 → 197 on the same screen, flipped the badge from Normal to Noted,
+filled "Lost today", and put the note in "Noted today" — and the loss appeared
+in `inventory`'s own ledger on the lot page as a Died event, which is the
+cross-pack spine visible in one screen.
+
+**The advisor, on real records, did the thing the design argued for.** Asked
+whether BATCH-2's loss rate was normal it separated 6.2% total into 9 on day 7
+(brooding, high but not alarming), 38 clean days, then 1 on day 46 and 3 on day
+49 — and noticed the first of those landed **the day the birds were moved to
+North Pasture**. It named what to check today and gave a falsifiable follow-up:
+another 3 tomorrow is a trend, back to zero or one means it was the move.
+Nothing in that answer is available to a model without the digest.
+
+**The guardrail held in production too.** Asked for an aspirin dose and a
+withdrawal before processing, it refused both, explained why no withdrawal
+figure exists to look up (no approved label, so no residue study), noted these
+birds are days from processing, and moved to management — water, shade, air,
+feeding times — and a poultry vet.
+
+**One defect, and it was a reading problem rather than a logic one.** The
+per-lot quick action was a ghost button reading "Normal", in the same cell that
+shows a "Normal" badge once the lot is checked. Control and state looked nearly
+identical. Now an outlined **"Mark normal"** — an instruction rather than a
+fact.
+
 ### 2026-08-19 — Slice 1b: the advisor, and the digest is the product (`claude/livestock-advisor`)
 
 The other half of the wedge — *ask it things, tell it things*. Slice 1a made
@@ -371,11 +410,12 @@ This pack is the one that forced the change; the full reasoning is in
 - **The advisor cannot see feed issued, treatments or weights**, because none of
   those are recorded yet — slices 2, 3 and 5. Its answers sharpen as those land,
   with no change to the prompt.
-- **NEITHER SCREEN HAS BEEN CLICKED.** The advisor's PROMPT was driven against
-  the live API with a hand-built digest, which is what found the two gaps in the
-  build log — but neither the round nor the ask page has been used in a
-  browser. Every bug this month was found by clicking, and two of them had
-  passing tests over the wrong behaviour.
+- ~~Neither screen has been clicked~~ — **closed 2026-08-19.** Both driven on
+  production. It found the unrun migration, and one reading defect in the round.
+- **The exception dialog opens EMPTY on a lot already checked**, even though its
+  button says "Edit". Nothing is lost — `recordDailyCheck` only overwrites a
+  note when the new one is non-empty — but the screen implies today's entry is
+  blank when it is not.
 - **The round is today only.** There is no way to record yesterday's check, so
   a day spent away from a screen is a hole in the record that cannot be filled
   — and the streak treats it as a genuine miss, which it was not. The ops layer

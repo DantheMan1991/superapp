@@ -50,6 +50,33 @@ examples exist.
 
 ## Build log
 
+### 2026-08-19 — The box that would not show you what was in it (`claude/boundary-box-shows-what-is-there`)
+
+2a.0 driven on production, on Home Farm and Creek Paddock. **The arithmetic is
+right on real data**: a 120-acre boundary pasted against a 120-acre declared
+figure previewed at 119.995 acres — 0.004% out, which is the coordinate rounding
+and nothing else — and a deliberately small 6.4-acre boundary on the 8.25-acre
+Creek Paddock produced *"Measured 6.4001 acres · Recorded 8.25 acres · 22%
+apart"*, with the declared figure untouched in the header above it. Both refusal
+paths behaved: a LineString was refused **by name**, a three-feature file was
+refused by **count** (*"That file has 3 shapes in it"*), and Save stayed disabled
+for both.
+
+**What was wrong was the second visit.** "Replace boundary" opened an empty box.
+The stored shape was therefore invisible and unrecoverable — there is no other
+way to get a boundary out of the app, and until the map ships there is no way to
+*see* one at all. It is the same defect shape as `livestock`'s exception dialog
+opening blank on a lot already checked, found the same way, one day apart: **a
+button that says Edit or Replace must show what it is editing.**
+
+- The box now opens with the stored boundary in it, printed whole rather than
+  truncated — two decimal places short of the stored precision would be a lie.
+- After a save it holds what was saved; after a remove it is empty, because
+  there is nothing stored to show.
+- **The comparison line had no unit.** *"a difference of −0.01"* is a number
+  with nothing attached to it, on a screen whose entire subject is acres against
+  acres. It goes through `formatArea` now, like every other area in the pack.
+
 ### 2026-08-19 — Slice 2a.0: shapes and arithmetic, no map (`claude/land-geometry`)
 
 The first half of the geometry slice, and deliberately the half with no picture
@@ -519,9 +546,9 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
-- **NOBODY HAS PASTED A BOUNDARY YET.** 2a.0 is type-checked, built and
-  covered, and neither the paste box nor the comparison has been used in a
-  browser.
+- ~~Nobody has pasted a boundary yet~~ — **closed 2026-08-19.** Driven on
+  production; the measured acreage, the disagreement badge and both refusal
+  paths all behaved. It found the empty Replace box, now fixed.
 - **`zoneAtPoint` has no caller.** Written for slice 2a.2, where the daily round
   and the move dialog pre-fill the zone from a phone's location. It is the one
   thing in this pack shipped ahead of its consumer, and the build log says why.
@@ -532,8 +559,9 @@ rented ground, and retrofitting it means rewriting the report.
   — but nothing reports a zone drawn on the wrong side of the county road
   either, and that is a report this pack could honestly make.
 - **A boundary cannot be edited, only replaced or removed.** Fixing one corner
-  means pasting the whole shape again. The map slice is what makes that
-  reasonable rather than a gap worth closing twice.
+  means editing the GeoJSON in the box by hand — which is at least possible now
+  that the box shows it. The map slice is what makes this reasonable rather than
+  a gap worth closing twice.
 
 - ~~The owner write path has never been exercised in a browser~~ — **closed
   2026-08-15.** Driven on production: create a parcel, add a zone, declare a

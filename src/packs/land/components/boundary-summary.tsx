@@ -56,7 +56,7 @@ export function BoundarySummary({
             name={name}
             declaredAcres={declaredAcres}
             unit={unit}
-            hasBoundary={boundary !== null}
+            current={boundary}
           />
         )}
       </div>

@@ -1086,6 +1086,13 @@
       "when": 1787045989742,
       "tag": "0154_assets_entity",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1787135060836,
+      "tag": "0155_assets_storage_location",
+      "breakpoints": true
     }
   ]
 }

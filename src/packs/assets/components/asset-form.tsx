@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -64,6 +65,7 @@ export function AssetForm({
   ].sort();
 
   const [kindChoice, setKindChoice] = useState<string>(kindOptions[0] ?? "");
+  const [isStorageLocation, setIsStorageLocation] = useState(false);
   const [customKind, setCustomKind] = useState("");
 
   function submit(formData: FormData) {
@@ -87,6 +89,7 @@ export function AssetForm({
           : null,
         parentId: parentId === NO_PARENT ? null : parentId,
         entityId: String(formData.get("entityId") ?? "") || null,
+        isStorageLocation,
         notes: String(formData.get("notes") ?? ""),
       });
       // `in` rather than `result.error`: the action returns a UNION, and a
@@ -224,6 +227,21 @@ export function AssetForm({
                 </Select>
               </div>
             )}
+
+            <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="isStorageLocation">Things are kept here</Label>
+                <p className="text-muted-foreground text-xs">
+                  A freezer, a barn, a garage. Turn this on and it can be
+                  picked as a place stock is held.
+                </p>
+              </div>
+              <Switch
+                id="isStorageLocation"
+                checked={isStorageLocation}
+                onCheckedChange={setIsStorageLocation}
+              />
+            </div>
 
             <div className="grid gap-2">
               <Label htmlFor="notes">Notes</Label>

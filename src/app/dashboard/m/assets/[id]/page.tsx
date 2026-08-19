@@ -177,6 +177,7 @@ export default async function AssetDetailPage({
     parentId: asset.parentId,
     notes: asset.notes,
     assetAccountId: asset.assetAccountId,
+    isStorageLocation: asset.isStorageLocation,
     accumulatedLabel: formatCents(accumulated),
     bookValueLabel: formatCents(
       (asset.acquisitionCostCents ?? 0) - accumulated,

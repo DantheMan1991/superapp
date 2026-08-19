@@ -18,6 +18,7 @@ import {
   updateItem,
   lotAncestry,
   type InventoryCtx,
+  listLocations,
 } from "../src/packs/inventory/ops";
 import { balanceOfLot, balanceByItem } from "../src/packs/inventory/core/balances";
 
@@ -67,7 +68,14 @@ d("inventory ops", () => {
       // it is why this pack declares `assets` in `requires`.
       const asset = await tx
         .insert(schema.assets)
-        .values({ tenantId, kind: "equipment", name: "Chest freezer" })
+        .values({
+          tenantId,
+          kind: "equipment",
+          name: "Chest freezer",
+          // A freezer is `equipment`, exactly like a tractor — which is why
+          // "is it a place?" is a flag on the asset and not a kind rule.
+          isStorageLocation: true,
+        })
         .returning();
       freezerId = asset[0].id;
     });
@@ -77,6 +85,31 @@ d("inventory ops", () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
     });
+  });
+
+  it("offers only the places things are kept", async () => {
+    /**
+     * FOUND BY DRIVING, 2026-08-19: `listLocations` returned every active asset,
+     * so the "Where" picker offered a gate and a tractor as places to put
+     * chickens — a function whose name claimed a filter it never applied, which
+     * is the same defect `land`'s `listStructures` carried.
+     *
+     * A KIND FILTER CANNOT FIX THIS, and that is what the tractor below is for:
+     * it is `equipment`, exactly like the freezer. Any rule keyed on kind either
+     * admits it or excludes the freezer.
+     */
+    const tractorId = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.assets)
+        .values({ tenantId, kind: "equipment", name: "Tractor" })
+        .returning();
+      return rows[0].id;
+    });
+
+    const locations = await asOwner((tx) => listLocations(tx, tenantId));
+    const ids = locations.map((l) => l.id);
+    expect(ids).toContain(freezerId);
+    expect(ids).not.toContain(tractorId);
   });
 
   const lotMembers = () =>

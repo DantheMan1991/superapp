@@ -219,6 +219,12 @@ export interface AssetInput {
   inServiceOn?: string | null;
   /** Which fixed-asset account carries this asset's cost. */
   assetAccountId?: string | null;
+  /**
+   * Is this a place things are kept? Read by `inventory` for its location
+   * picker; see the column comment in `db/schema/assets.ts` for why it lives
+   * on the asset and not on a kind.
+   */
+  isStorageLocation?: boolean;
   depreciationMethod?: string;
   usefulLifeMonths?: number | null;
   salvageValueCents?: number | null;
@@ -275,6 +281,7 @@ export async function createAsset(
       acquisitionCostCents: input.acquisitionCostCents ?? null,
       inServiceOn: input.inServiceOn ?? null,
       assetAccountId: input.assetAccountId ?? null,
+      isStorageLocation: input.isStorageLocation ?? false,
       depreciationMethod: input.depreciationMethod ?? "none",
       usefulLifeMonths: input.usefulLifeMonths ?? null,
       salvageValueCents: input.salvageValueCents ?? null,
@@ -323,6 +330,9 @@ export async function updateAsset(
   if (input.inServiceOn !== undefined) patch.inServiceOn = input.inServiceOn;
   if (input.assetAccountId !== undefined) {
     patch.assetAccountId = input.assetAccountId;
+  }
+  if (input.isStorageLocation !== undefined) {
+    patch.isStorageLocation = input.isStorageLocation;
   }
   if (input.depreciationMethod !== undefined) {
     patch.depreciationMethod = input.depreciationMethod;

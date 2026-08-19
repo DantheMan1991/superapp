@@ -125,6 +125,8 @@ const createSchema = z.object({
    * in; it was a column nobody COULD fill in.
    */
   assetAccountId: z.string().uuid().nullable().optional(),
+  /** A place things are kept — `inventory` reads this for its location picker. */
+  isStorageLocation: z.boolean().optional(),
   notes: z.string().max(5000).optional(),
   inServiceOn: optionalDate.nullable(),
   depreciationMethod: z.enum(["none", "straight_line"]).optional(),

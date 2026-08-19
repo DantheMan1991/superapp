@@ -10,8 +10,10 @@ import {
   LivestockError,
   addIdentifier,
   createLivestockLot,
+  markRoundNormal,
   moveLotToZone,
   placeHead,
+  recordDailyCheck,
   removeHead,
   retireIdentifier,
   splitLivestockLot,
@@ -325,6 +327,102 @@ export async function retireIdentifierAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Record one lot's daily check, and any loss found while looking.
+ *
+ * NOT owner-gated, and that is the point of the slice: the round is walked by
+ * whoever is in the pens. `recordDailyCheck` is a `member` verb, and the loss
+ * it may carry goes through `removeHead`, which is one too.
+ */
+export async function recordDailyCheckAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      loggedOn: requiredDate,
+      status: z.enum(["normal", "attention"]).optional(),
+      notes: z.string().max(2000).optional(),
+      loss: z
+        .object({
+          head,
+          reason: z.enum(["death", "cull", "sold_live"]),
+          notes: z.string().max(2000).optional(),
+        })
+        .optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const log = await withTenant(
+      ctx.tenant.id,
+      (tx) => recordDailyCheck(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    // Audited because a check is a claim that somebody looked, and the
+    // mortality denominator rests on it. Identifiers only — no notes, which are
+    // free text about an animal and belong only in the row.
+    await logAudit({
+      action: "livestock.check.recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      meta: {
+        loggedOn: parsed.data.loggedOn,
+        status: log.status,
+        lostHead: parsed.data.loss?.head ?? 0,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * The one-tap round: everything not yet looked at today is normal.
+ *
+ * The ids come from the screen rather than being derived here on purpose — the
+ * person is confirming the list they can see. `markRoundNormal` still refuses
+ * to overwrite an exception, so a stale list cannot erase anything; the worst a
+ * page left open all afternoon can do is mark a lot that was already marked,
+ * which the conflict clause turns into nothing at all.
+ */
+export async function markRoundNormalAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotIds: z.array(z.string().uuid()).min(1).max(500),
+      loggedOn: requiredDate,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const logs = await withTenant(
+      ctx.tenant.id,
+      (tx) => markRoundNormal(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.round.recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "tenant",
+      targetId: ctx.tenant.id,
+      meta: { loggedOn: parsed.data.loggedOn, recorded: logs.length },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, recorded: logs.length };
   } catch (err) {
     return toResult(err);
   }

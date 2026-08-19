@@ -17,6 +17,12 @@
  * this is the first real test of whether composing beats duplicating, and the
  * answer is two tables instead of six.
  *
+ * Slice 1 adds a third, `livestock_daily_logs`, and it is the one thing no
+ * neighbour could hold: **the fact that somebody looked.** A ledger records
+ * what happened, and a day when nothing happened leaves it empty — which is
+ * indistinguishable from a day nobody walked the pens. See the table's own
+ * comment; that distinction is what the mortality denominator rests on.
+ *
  * Deliberately NOT here, each with a reason rather than an omission:
  *
  *   - **A head count column.** The count is the balance of
@@ -194,6 +200,89 @@ export const livestockIdentifiers = pgTable(
   ],
 );
 
+/**
+ * SOMEBODY LOOKED AT THESE ANIMALS TODAY.
+ *
+ * The whole table exists for one distinction: **"zero died" and "didn't check"
+ * are different facts.** Mortality is the number the broiler enterprise is
+ * judged on, and its denominator is only trustworthy if the days nothing
+ * happened are recorded as days nothing happened rather than as silence. A
+ * ledger cannot carry that — `inventory_movements.quantity` is CHECKed
+ * non-zero, and rightly so, because a zero-quantity movement is not an event.
+ *
+ * So the row IS the check. Its presence means a person looked on that date; its
+ * absence means nobody did. There is no `checked` boolean, because a row saying
+ * `checked = false` would be a record of an absence, which is what absence
+ * already is.
+ *
+ * **What is deliberately NOT a column here: the deaths.** Losses recorded
+ * during a round are `inventory_movements` like every other head event, joined
+ * to this by lot and date. Land's rule — *anything derivable from a record
+ * already being made must never become a second data entry* — applies to
+ * storage as well as to forms: a `deaths` column here would be a second number
+ * that has to agree with the ledger forever, and the first time they disagreed
+ * nobody would know which was right.
+ */
+export const livestockDailyLogs = pgTable(
+  "livestock_daily_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    /** The day that was checked, in the tenant's timezone. */
+    loggedOn: date("logged_on").notNull(),
+    /**
+     * `normal` | `attention`. CLOSED, and only two, because a third would be a
+     * severity scale nobody calibrates the same way twice. The notes carry what
+     * was seen; this carries whether it needs a person.
+     */
+    status: text("status").notNull().default("normal"),
+    notes: text("notes").notNull().default(""),
+    /**
+     * Clerk user id of whoever walked the pens. Not an FK — the platform has no
+     * users table, and the audit log already carries the same convention.
+     */
+    recordedBy: text("recorded_by").notNull().default(""),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_daily_logs_tenant_id_id_idx").on(t.tenantId, t.id),
+    /**
+     * ONE CHECK PER LOT PER DAY, enforced. Checking twice is not two facts, and
+     * the "all normal" round has to be safe to tap after entering an exception
+     * — which it is only because this constraint lets the round insert
+     * `ON CONFLICT DO NOTHING` and leave the exception standing.
+     */
+    uniqueIndex("livestock_daily_logs_tenant_lot_day_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+      t.loggedOn,
+    ),
+    // "What did we look at today", and "what has this lot's week looked like" —
+    // the two reads the log screen makes, one per index.
+    index("livestock_daily_logs_tenant_day_idx").on(t.tenantId, t.loggedOn),
+    foreignKey({
+      name: "livestock_daily_logs_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    check(
+      "livestock_daily_logs_status_valid",
+      sql`${t.status} in ('normal', 'attention')`,
+    ),
+  ],
+);
+
 export type LivestockLot = typeof livestockLots.$inferSelect;
 export type NewLivestockLot = typeof livestockLots.$inferInsert;
 export type LivestockIdentifier = typeof livestockIdentifiers.$inferSelect;
+export type LivestockDailyLog = typeof livestockDailyLogs.$inferSelect;

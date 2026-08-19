@@ -116,6 +116,34 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-19 — The day-one wedge is built, and it stores a fact no ledger could (`claude/livestock-daily-log`)
+
+- **Livestock slice 1a: the daily round.** The design named this the wedge for
+  the cold start, and building it turned up the one thing in this profile that
+  genuinely could not be composed out of a neighbour: **the fact that somebody
+  looked.** Every other record in four packs is something that happened — head
+  placed, head lost, a herd moved — and a day when nothing happened leaves all
+  of them empty. Empty is indistinguishable from nobody walking the pens, and
+  the mortality denominator the broiler enterprise is judged on rests on telling
+  those apart. So `livestock` gained a third table, and it holds exactly that.
+- **Slice 1 split in two.** The design's line is "daily log + advisory layer",
+  which is a table and a screen plus an AI surface with no schema at all. 1a is
+  the log; 1b is "ask it things", and it is next.
+- **The pack model kept paying.** The loss entered on the round is an
+  `inventory` movement, the paddock on the row comes from `land`, the head count
+  is the same fold `inventory`'s own pages use, and this pack still stores no
+  count of anything. The only new column is a status with two values.
+- **Land's rule generalised to storage.** *Anything derivable from a record
+  already being made must never become a second data entry* — a `deaths` column
+  on the check would have been a second number that must agree with the ledger
+  forever, so the round reads losses back out of it instead.
+- **The 10× target decided the shape of the screen, not the schema.** One tap
+  confirms the whole farm, exceptions cost a dialog, and the button cannot
+  overwrite an exception already entered. At ~14 pens today that is a
+  convenience; at ~30 it is the difference between a system used and one
+  abandoned in March.
+- Full build record in [livestock.md](livestock.md).
+
 ### 2026-08-15 — Animals go in a pen, not only on a paddock (`claude/occupancy-structures`)
 - Founder, after driving livestock: *"sometimes there is no structure. cattle
   just roam in the zone, but chickens are assigned to a pen."* Occupancy now
@@ -411,7 +439,7 @@ own words condensed, not reinterpreted.
 | Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–1 built**, [land.md](land.md) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
-| Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slice 0 built**, [livestock.md](livestock.md) |
+| Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slices 0–1a built**, [livestock.md](livestock.md) |
 | Gardens/crops | `crops` pack | **yes** | **done** — [category design](#category-design--crops--garden-brainstormed-2026-08-13) |
 | Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
 | Baking | `production` pack — shared run, separate template | no | **done** — same design |
@@ -1101,7 +1129,7 @@ this is used daily or abandoned in March.
 | # | Slice | Why here |
 | --- | --- | --- |
 | 0 | Lots + head ledger + occupancy (shared with `land`) | The spine. Nothing works without it, and seeing your animals on paddocks already beats nothing |
-| 1 | **Daily log + advisory layer** | The day-one wedge. Habit and cold start |
+| 1 | **Daily log + advisory layer** | The day-one wedge. Habit and cold start. **Split when built: 1a the log (shipped 2026-08-19), 1b the advisory** |
 | 2 | Feed + FCR (direct issue now, allocation seam for 10×) | Largest cash cost, and the broiler enterprise's verdict |
 | 3 | Health + withdrawal clock | Legal guardrail; useful at first use |
 | 4 | Breeding + genetics + registry | Needs a season of calving to pay off |

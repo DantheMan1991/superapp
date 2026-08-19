@@ -15,7 +15,8 @@ and [land.md](land.md) before changing anything about where animals are.
 | # | Slice | State |
 | --- | --- | --- |
 | **0** | **Lots + head ledger + occupancy** | **shipped 2026-08-15** |
-| 1 | Daily log + advisory layer — the day-one wedge | next |
+| **1a** | **Daily log — the round, and the check that is not a head event** | **shipped 2026-08-19** |
+| 1b | Advisory layer — ask and orient, anchored to this farm's own history | next |
 | 2 | Feed + FCR | |
 | 3 | Health + withdrawal clock | |
 | 4 | Breeding, genetics, registry, **and the breeding/market capital transfer** | |
@@ -23,6 +24,60 @@ and [land.md](land.md) before changing anything about where animals are.
 | 6 | Processing handoff → `production` | |
 
 ## Build log
+
+### 2026-08-19 — Slice 1: the round is one tap, and the row IS the check (`claude/livestock-daily-log`)
+
+The day-one wedge, and the first thing built in this pack that is not about
+animals arriving or leaving. The cold start is the constraint the design says
+outranks the schema: the pilot records nothing today, has no spreadsheet to
+replace and no habit to attach to, and every report this pack will ever produce
+— FCR, mortality by week, sire comparison — returns nothing at all until
+somebody has been entering things for a season.
+
+- **The whole table exists for one distinction: "zero died" and "didn't check"
+  are different facts.** A ledger cannot carry it. `inventory_movements.quantity`
+  is CHECKed non-zero, correctly — a zero-quantity movement is not an event — so
+  a day when nothing happened leaves the ledger empty, and empty is
+  indistinguishable from nobody having walked the pens. `livestock_daily_logs`
+  is that missing fact and nothing else: **the row's presence IS the check.**
+  There is no `checked` boolean, because a row saying `checked = false` would be
+  a record of an absence, which is what absence already is.
+- **The losses are NOT a column on it.** A loss entered during the round goes
+  through `removeHead` into inventory's ledger, in the same transaction, and the
+  round screen reads it back out with `movementsOnDate`. Land's rule — *anything
+  derivable from a record already being made must never become a second data
+  entry* — applies to storage as much as to forms: a `deaths` column here would
+  be a second number that has to agree with the ledger forever, and the first
+  time they disagreed nobody would know which was right.
+- **One tap for the whole farm.** "All normal" inserts a check for every lot not
+  yet looked at, `ON CONFLICT DO NOTHING` against the one-per-lot-per-day index.
+  That clause is what makes the button usable rather than dangerous: enter the
+  exception first, tap the button second, and **the exception survives** — in
+  the database, not in a read-then-write race.
+- **A loss forces `attention`, whatever the caller says.** Four dead birds
+  against a "normal" check is a contradiction, and the ops layer is where it has
+  to be impossible rather than the screen.
+- **The streak does not reset at breakfast.** It counts back from today when
+  today has an entry and from yesterday when it does not, and breaks on the
+  first missing day before that. A counter that dropped to zero every morning
+  would punish somebody for opening the app early, and a habit counter nobody
+  trusts is worse than none.
+- **The round is the lots with animals standing in them** — balance > 0. A
+  finished batch is not a pen somebody forgot; leaving them on would grow the
+  list by one every time a batch closed, and the first thing an unusable list
+  teaches is to stop tapping the button.
+- **Writes are `member`, and this is the table that proves the point of that
+  change.** Owner-only here would mean the check that distinguishes "zero died"
+  from "didn't check" simply never gets recorded, because the person in the pen
+  is not the owner.
+- **`attention` is a bookmark, not a severity.** Two values only. A third would
+  be a scale nobody calibrates the same way twice, and the notes carry what was
+  actually seen. It renders as "Noted" rather than "Needs a look", because a
+  live sale recorded on the round is not a problem.
+- Migration `0156` needed **no hand-reordering** — both its FK targets
+  (`tenants`, `livestock_lots`) already existed, which is the documented rule
+  working rather than the exception to it. `0157` carries the policies.
+- 17 new pure tests, 11 new ops tests, 4 new isolation tests.
 
 ### 2026-08-16 — You could not add cattle without leaving (`claude/counted-as`)
 
@@ -117,6 +172,7 @@ This pack is the one that forced the change; the full reasoning is in
 | --- | --- | --- |
 | `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed` |
 | `livestock_identifiers` | What an animal is called | Many per lot, typed and **date-ranged**. Composite FK to the lot, CASCADE. Indexed by value, because finding an animal by its tag happens in a chute |
+| `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
 
 **Everything else lives in a pack this one requires:**
 
@@ -139,10 +195,39 @@ This pack is the one that forced the change; the full reasoning is in
   death from a transfer needs the kinds too
 - `src/packs/land/ops.ts` → `currentZoneForOccupants` — added for this pack, and
   it lives in `land` because `land` owns that table
+- `src/packs/livestock/core/daily.ts` — pure. The round's arithmetic: streak,
+  progress, last-checked, and the losses read back out of the ledger
+- `src/packs/livestock/components/daily-round.tsx` — the one-tap button, the
+  per-lot quick confirm, and the exception dialog
+- `src/app/dashboard/m/livestock/log/page.tsx` — the round
+- `src/packs/inventory/ops.ts` → `movementsOnDate` — added for the round, so it
+  can show today's losses WITHOUT storing them
 - `src/db/schema/livestock.ts` · `drizzle/0138_*.sql` · `drizzle/0139_livestock_rls.sql`
+  · `drizzle/0156_*.sql` · `drizzle/0157_livestock_daily_logs_rls.sql`
 
 ## Decisions & gotchas
 
+- **THE ROW IS THE CHECK, and there is no `checked` column.** A daily log row
+  means somebody looked at that lot on that date; no row means nobody did. The
+  mortality denominator depends on the distinction, and a boolean that could be
+  `false` would be a record of an absence — which absence already is.
+- **Never add a deaths column to `livestock_daily_logs`.** Losses are
+  `inventory_movements` and always will be; the round reads them back by lot and
+  date. Two numbers for one fact is how a count starts disagreeing with its own
+  history, which is the property this whole pack is built to keep.
+- **The one-tap round cannot overwrite an exception**, and that is what makes it
+  safe to tap at all. `ON CONFLICT DO NOTHING` against the per-lot-per-day
+  unique index, in the database rather than a read-then-write check.
+- **A single check UPDATES rather than inserting a second row**, and a later
+  empty confirmation does not erase an earlier note. The evening walk-past must
+  not delete the morning's "left hind swollen".
+- **The streak grants today.** It runs back from today if today has an entry and
+  from yesterday if not. A habit counter that resets every morning is a counter
+  nobody keeps — and it still breaks on a genuinely missed day, so the number
+  means what it says.
+- **`attention` is a bookmark, not a severity.** Two values only, and the notes
+  carry what was seen. It renders as "Noted" because a live sale recorded on the
+  round is not a problem to be looked at.
 - **A pack may read another pack's tables ONLY through the pack that owns
   them.** Livestock never queries `land_occupancy` or `inventory_movements`
   directly; both reads are functions on the owning pack's ops. That is what
@@ -198,9 +283,27 @@ This pack is the one that forced the change; the full reasoning is in
   **settled 2026-08-15**, see the build log. Placing, losing, moving and tagging
   are chores and open to any member; creating, editing and splitting a lot stay
   with the owner.
-- **No daily log, and no advisory layer.** Slice 1, and the design names it the
-  day-one wedge: the founder records nothing today, so a tool that is only
-  valuable in year two never reaches year two.
+- ~~No daily log~~ — **shipped 2026-08-19** as slice 1a. **The advisory layer is
+  still missing**, and it is the other half of the wedge: the design's
+  "ask it things, tell it things" needs the ask side, which is slice 1b and
+  needs no new table.
+- **NOBODY HAS DRIVEN THE ROUND YET.** Every bug this month was found by
+  clicking, and two of them had passing tests over the wrong behaviour.
+- **The round is today only.** There is no way to record yesterday's check, so
+  a day spent away from a screen is a hole in the record that cannot be filled
+  — and the streak treats it as a genuine miss, which it was not. The ops layer
+  already takes any `loggedOn`; only the screen is fixed to today.
+- **Nothing knows what mortality to EXPECT.** The design wants deviation flagged
+  while it can still be acted on — first-week losses point at chick quality or
+  brooding, late ones at heat — but that needs a reference rate, which is the
+  advisory layer's job rather than a hardcoded table.
+- **No voice or natural-language entry.** The design ranks a spoken daily log as
+  the single best AI use in this pack because it attacks the thirty-taps-a-day
+  problem directly. Slice 1b at the earliest.
+- **Egg collection is not here.** Layers run the opposite rhythm to meat and the
+  design wants collection to be one number and one tap, but eggs entering stock
+  is a RECEIPT — `inventory` slice 1 — and building a second path into the
+  ledger from this pack would be the duplication the pack model exists to stop.
 - **One movement at a time.** "Move every pen to the next paddock" is one action
   in the design and twenty dialogs here. Purely additive, and urgent at 10×.
 - **No merge in the UI**, and none in this pack at all — `inventory.mergeLot`

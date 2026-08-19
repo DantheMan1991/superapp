@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Beef } from "lucide-react";
+import { Beef, ClipboardCheck } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -23,6 +24,8 @@ import { ageInDays, formatAge, formatRate, mortalityRate, summariseHead } from "
 import { labelFor } from "@/lib/packs/resolve";
 import { speciesFrom } from "./vocabulary";
 import { LivestockLotForm } from "./components/lot-controls";
+
+const BASE = "/dashboard/m/livestock";
 
 /**
  * The `livestock` pack's home: every animal lot, what is in it, and where it is.
@@ -88,15 +91,27 @@ export async function LivestockModule({
         title="Livestock"
         description={`Every animal is a ${lotWord.toLowerCase()}, and an individual is a ${lotWord.toLowerCase()} of one.`}
         actions={
-          // No longer gated on an item existing: the form can create one. A
-          // farm's first animal used to require a trip to Inventory first.
-          isOwner ? (
-            <LivestockLotForm
-              items={headItems.map((i) => ({ id: i.id, name: i.name }))}
-              speciesOptions={suggestedSpecies}
-              today={today}
-            />
-          ) : null
+          <div className="flex flex-wrap items-center gap-2">
+            {/* FIRST, and not owner-gated. The round is the daily act and the
+                lot form is the occasional one, so the order on the page is the
+                order of how often they are used — not the order they were
+                built in. */}
+            <Button asChild variant="outline">
+              <Link href={`${BASE}/log`}>
+                <ClipboardCheck className="mr-2 h-4 w-4" />
+                Daily round
+              </Link>
+            </Button>
+            {/* No longer gated on an item existing: the form can create one. A
+                farm's first animal used to require a trip to Inventory first. */}
+            {isOwner && (
+              <LivestockLotForm
+                items={headItems.map((i) => ({ id: i.id, name: i.name }))}
+                speciesOptions={suggestedSpecies}
+                today={today}
+              />
+            )}
+          </div>
         }
       />
 
@@ -136,7 +151,7 @@ export async function LivestockModule({
                   <TableCell>
                     <div className="flex items-center gap-2 font-medium">
                       <Link
-                        href={`/dashboard/m/livestock/${lot.id}`}
+                        href={`${BASE}/${lot.id}`}
                         className="hover:underline"
                       >
                         {inv?.code ?? "—"}

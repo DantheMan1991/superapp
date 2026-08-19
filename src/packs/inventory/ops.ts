@@ -508,6 +508,50 @@ export async function movementRowsForItem(
 }
 
 /**
+ * Movements against a set of lots on ONE day, keyed by lot.
+ *
+ * Written for `livestock`'s daily round, and deliberately here rather than
+ * there: the ledger is this pack's, and a neighbour that queried
+ * `inventory_movements` directly would be the leak the extension model forbids.
+ *
+ * It exists so the round can show what was recorded today WITHOUT storing it —
+ * the losses entered during a check are ordinary movements, and the log screen
+ * reads them back out of the ledger rather than keeping a second copy that has
+ * to agree with it forever.
+ */
+export async function movementsOnDate(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  occurredOn: string,
+): Promise<Map<string, { movementKind: string; quantity: number }[]>> {
+  const out = new Map<string, { movementKind: string; quantity: number }[]>();
+  if (lotIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      lotId: schema.inventoryMovements.lotId,
+      movementKind: schema.inventoryMovements.movementKind,
+      quantity: schema.inventoryMovements.quantity,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.lotId, lotIds),
+        eq(schema.inventoryMovements.occurredOn, occurredOn),
+      ),
+    );
+  for (const row of rows) {
+    if (!row.lotId) continue;
+    const entry = { movementKind: row.movementKind, quantity: row.quantity };
+    const list = out.get(row.lotId);
+    if (list) list.push(entry);
+    else out.set(row.lotId, [entry]);
+  }
+  return out;
+}
+
+/**
  * Movement KINDS and quantities for a set of lots.
  *
  * `MovementRow` deliberately carries only what a balance needs, and a balance

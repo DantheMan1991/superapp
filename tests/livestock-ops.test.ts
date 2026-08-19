@@ -4,18 +4,29 @@ import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
   addIdentifier,
+  checkedDaysSince,
+  checksOn,
   createLivestockLot,
   getLivestockLot,
+  lastCheckedByLot,
+  listChecksForLot,
   listIdentifiers,
+  markRoundNormal,
   moveLotToZone,
   placeHead,
+  recordDailyCheck,
   removeHead,
   retireIdentifier,
   splitLivestockLot,
   updateLivestockLot,
   type LivestockCtx,
 } from "../src/packs/livestock/ops";
-import { createItem, movementRowsForItem, LOT_DIMENSION } from "../src/packs/inventory/ops";
+import {
+  createItem,
+  movementKindsForLots,
+  movementRowsForItem,
+  LOT_DIMENSION,
+} from "../src/packs/inventory/ops";
 import { balanceByItem, balanceOfLot } from "../src/packs/inventory/core/balances";
 import {
   createParcel,
@@ -757,5 +768,246 @@ d("livestock ops", () => {
     // (GRAZERS) + 50 - 2 (STAFF-CHORES) + 10 (STAFF-DENIED, nothing denied
     // moved head).
     expect(total).toBe(579);
+  });
+
+  // ---- the daily round (slice 1) -----------------------------------------
+
+  /**
+   * A SEPARATE ITEM, deliberately. The head these tests place and lose must not
+   * change the item total the test above pins, or the two suites would be
+   * coupled through a number and the order they run in would matter.
+   */
+  describe("the daily round", () => {
+    let roundItemId: string;
+    let roundLotId: string;
+    let roundInventoryLotId: string;
+
+    beforeAll(async () => {
+      roundItemId = (
+        await asOwner((tx) =>
+          createItem(tx, ctx(), {
+            name: "Round birds",
+            stockingUnit: "head",
+            itemKind: "livestock",
+          }),
+        )
+      ).id;
+      const made = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: roundItemId,
+          code: "ROUND-1",
+          species: "poultry",
+        }),
+      );
+      roundLotId = made.lot.id;
+      roundInventoryLotId = made.inventoryLotId;
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: roundItemId,
+          inventoryLotId: roundInventoryLotId,
+          head: 70,
+          occurredOn: "2026-08-01",
+        }),
+      );
+    });
+
+    it("records that somebody looked, on a day nothing happened", async () => {
+      // THE ROW IS THE CHECK. This is the fact no ledger can carry, because a
+      // day when nothing happened leaves a ledger empty — and empty is
+      // indistinguishable from nobody having walked the pens.
+      const log = await asOwner((tx) =>
+        recordDailyCheck(tx, ctx(), {
+          livestockLotId: roundLotId,
+          loggedOn: "2026-08-10",
+        }),
+      );
+      expect(log.status).toBe("normal");
+      expect(log.loggedOn).toBe("2026-08-10");
+
+      const rows = await asOwner((tx) =>
+        movementRowsForItem(tx, tenantId, roundItemId),
+      );
+      // Nothing moved. A normal day is not a head event.
+      expect(balanceOfLot(rows, roundInventoryLotId)).toBe(70);
+    });
+
+    it("a loss entered on the round lands in INVENTORY's ledger, not here", async () => {
+      const log = await asOwner((tx) =>
+        recordDailyCheck(tx, ctx(), {
+          livestockLotId: roundLotId,
+          loggedOn: "2026-08-11",
+          loss: { head: 4, reason: "death" },
+          notes: "Heat, back corner",
+        }),
+      );
+      // The check itself carries no count — only that it was worth noting.
+      expect(log.status).toBe("attention");
+      expect(log.notes).toBe("Heat, back corner");
+      expect(Object.keys(log)).not.toContain("deaths");
+
+      const rows = await asOwner((tx) =>
+        movementRowsForItem(tx, tenantId, roundItemId),
+      );
+      expect(balanceOfLot(rows, roundInventoryLotId)).toBe(66);
+
+      // And it counts as mortality, which is the number the enterprise is
+      // judged on — 4 of 70.
+      const kinds = await asOwner((tx) =>
+        movementKindsForLots(tx, tenantId, [roundInventoryLotId]),
+      );
+      const summary = summariseHead(kinds.get(roundInventoryLotId) ?? []);
+      expect(summary.died).toBe(4);
+      expect(mortalityRate(summary)).toBeCloseTo(4 / 70, 5);
+    });
+
+    it("a loss forces `attention`, whatever the caller claims", async () => {
+      // Four dead birds against a "normal" check is a contradiction, and the
+      // ops layer is where it has to be impossible rather than the screen.
+      const log = await asOwner((tx) =>
+        recordDailyCheck(tx, ctx(), {
+          livestockLotId: roundLotId,
+          loggedOn: "2026-08-12",
+          status: "normal",
+          loss: { head: 1, reason: "death" },
+        }),
+      );
+      expect(log.status).toBe("attention");
+    });
+
+    it("checking twice in a day UPDATES rather than adding a second fact", async () => {
+      await asOwner((tx) =>
+        recordDailyCheck(tx, ctx(), {
+          livestockLotId: roundLotId,
+          loggedOn: "2026-08-13",
+          notes: "Left hind swollen",
+          status: "attention",
+        }),
+      );
+      const second = await asOwner((tx) =>
+        recordDailyCheck(tx, ctx(), {
+          livestockLotId: roundLotId,
+          loggedOn: "2026-08-13",
+          status: "normal",
+        }),
+      );
+      // The note SURVIVES a later empty confirmation. Otherwise the evening
+      // walk-past would erase the morning's observation.
+      expect(second.notes).toBe("Left hind swollen");
+      expect(second.status).toBe("normal");
+
+      const all = await asOwner((tx) =>
+        listChecksForLot(tx, tenantId, roundLotId),
+      );
+      expect(all.filter((c) => c.loggedOn === "2026-08-13")).toHaveLength(1);
+    });
+
+    it("the one-tap round marks only what has NOT been looked at", async () => {
+      const other = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: roundItemId,
+          code: "ROUND-2",
+          species: "poultry",
+        }),
+      );
+      // ROUND-1 is flagged first; the button must not touch it.
+      await asOwner((tx) =>
+        recordDailyCheck(tx, ctx(), {
+          livestockLotId: roundLotId,
+          loggedOn: "2026-08-14",
+          status: "attention",
+          notes: "Watch the water",
+        }),
+      );
+
+      const recorded = await asOwner((tx) =>
+        markRoundNormal(tx, ctx(), {
+          livestockLotIds: [roundLotId, other.lot.id],
+          loggedOn: "2026-08-14",
+        }),
+      );
+      // One insert, not two: the conflict clause is what makes the button safe
+      // to tap after entering an exception.
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0].livestockLotId).toBe(other.lot.id);
+
+      const checks = await asOwner((tx) => checksOn(tx, tenantId, "2026-08-14"));
+      expect(checks.get(roundLotId)?.status).toBe("attention");
+      expect(checks.get(roundLotId)?.notes).toBe("Watch the water");
+      expect(checks.get(other.lot.id)?.status).toBe("normal");
+    });
+
+    it("tapping the round twice records nothing the second time", async () => {
+      await asOwner((tx) =>
+        markRoundNormal(tx, ctx(), {
+          livestockLotIds: [roundLotId],
+          loggedOn: "2026-08-15",
+        }),
+      );
+      const again = await asOwner((tx) =>
+        markRoundNormal(tx, ctx(), {
+          livestockLotIds: [roundLotId],
+          loggedOn: "2026-08-15",
+        }),
+      );
+      expect(again).toHaveLength(0);
+    });
+
+    it("ignores a lot id that is not this tenant's", async () => {
+      // The ids arrive from a form. The composite FK would refuse a foreign one
+      // anyway, but with an error nobody could read.
+      const recorded = await asOwner((tx) =>
+        markRoundNormal(tx, ctx(), {
+          livestockLotIds: ["00000000-0000-0000-0000-000000000000"],
+          loggedOn: "2026-08-16",
+        }),
+      );
+      expect(recorded).toEqual([]);
+    });
+
+    it("STAFF may walk the round — this is the chore the slice exists for", async () => {
+      // Owner-only here would mean the check that separates "zero died" from
+      // "didn't check" simply never gets recorded. See src/lib/packs/authorize.ts.
+      const log = await withTenant(
+        tenantId,
+        (tx) =>
+          recordDailyCheck(tx, staffCtx(), {
+            livestockLotId: roundLotId,
+            loggedOn: "2026-08-17",
+            loss: { head: 1, reason: "death" },
+          }),
+        { role: "staff", userId: STAFF },
+      );
+      expect(log.status).toBe("attention");
+      expect(log.recordedBy).toBe(STAFF);
+    });
+
+    it("reports when each lot was last looked at", async () => {
+      const last = await asOwner((tx) => lastCheckedByLot(tx, tenantId));
+      expect(last.get(roundLotId)).toBe("2026-08-17");
+    });
+
+    it("gives the distinct days the round was walked, for the streak", async () => {
+      const days = await asOwner((tx) =>
+        checkedDaysSince(tx, tenantId, "2026-08-13"),
+      );
+      // Two lots were checked on the 14th; that is ONE day of habit, not two.
+      expect([...days].sort()).toEqual([
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-15",
+        "2026-08-17",
+      ]);
+    });
+
+    it("refuses a check against a lot that does not exist", async () => {
+      await expect(
+        asOwner((tx) =>
+          recordDailyCheck(tx, ctx(), {
+            livestockLotId: "00000000-0000-0000-0000-000000000000",
+            loggedOn: "2026-08-18",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
   });
 });

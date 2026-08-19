@@ -31,7 +31,11 @@ import {
   listZones,
 } from "@/packs/land/ops";
 import { structureKindsFrom } from "@/packs/land/vocabulary";
-import { getLivestockLot, listIdentifiers } from "@/packs/livestock/ops";
+import {
+  getLivestockLot,
+  listChecksForLot,
+  listIdentifiers,
+} from "@/packs/livestock/ops";
 import {
   ageInDays,
   formatAge,
@@ -44,6 +48,7 @@ import {
   SEX_LABELS,
   identifierKindLabel,
 } from "@/packs/livestock/vocabulary";
+import { formatLastChecked } from "@/packs/livestock/core/daily";
 import {
   IdentifierForm,
   MoveToZoneForm,
@@ -51,6 +56,7 @@ import {
   RemoveHeadForm,
   SplitHerdForm,
 } from "@/packs/livestock/components/lot-controls";
+import { LotCheckForm } from "@/packs/livestock/components/daily-round";
 
 export const dynamic = "force-dynamic";
 
@@ -87,14 +93,24 @@ export default async function LivestockLotPage({
         lot.inventoryLotId,
       );
       if (!inventoryLot) return null;
-      const [identifiers, movements, entries, zones, parcels, allZones, pack, landPack] =
-        await Promise.all([
+      const [
+        identifiers,
+        movements,
+        entries,
+        checks,
+        zones,
+        parcels,
+        allZones,
+        pack,
+        landPack,
+      ] = await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
           movementKindsForLots(tx, ctx.tenant.id, [lot.inventoryLotId]),
           listMovements(tx, ctx.tenant.id, {
             lotId: lot.inventoryLotId,
             limit: 25,
           }),
+          listChecksForLot(tx, ctx.tenant.id, lot.id),
           currentZoneForOccupants(
             tx,
             ctx.tenant.id,
@@ -122,6 +138,7 @@ export default async function LivestockLotPage({
         identifiers,
         movements: movements.get(lot.inventoryLotId) ?? [],
         entries,
+        checks,
         zone: zones.get(lot.inventoryLotId) ?? null,
         parcels,
         allZones,
@@ -139,6 +156,7 @@ export default async function LivestockLotPage({
     identifiers,
     movements,
     entries,
+    checks,
     zone,
     parcels,
     allZones,
@@ -327,6 +345,68 @@ export default async function LivestockLotPage({
                     {i.removedOn ?? (
                       <Badge variant="outline">current</Badge>
                     )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-medium">
+            Daily checks{" "}
+            <span className="font-normal text-muted-foreground">
+              {/* The lot's own answer to "when did anyone last look at these
+                  animals", which is the question the round screen asks about
+                  the whole farm. */}
+              · last {formatLastChecked(checks[0]?.loggedOn ?? null, today).toLowerCase()}
+            </span>
+          </h2>
+          {summary.balance > 0 && (
+            <LotCheckForm
+              livestockLotId={lot.id}
+              lotCode={inventoryLot.code}
+              today={today}
+              balance={summary.balance}
+              hasEntry={checks[0]?.loggedOn === today}
+            />
+          )}
+        </div>
+        {checks.length === 0 ? (
+          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+            Nobody has recorded a check on this lot yet. A day with no entry is
+            a day nobody looked — which is a different fact from a day when
+            nothing happened, and it is the difference the mortality rate above
+            depends on.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Day</TableHead>
+                <TableHead>How it was</TableHead>
+                <TableHead>Noted</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {checks.map((check) => (
+                <TableRow key={check.id}>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {check.loggedOn}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        check.status === "attention" ? "default" : "outline"
+                      }
+                    >
+                      {check.status === "attention" ? "Noted" : "Normal"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {check.notes || "—"}
                   </TableCell>
                 </TableRow>
               ))}

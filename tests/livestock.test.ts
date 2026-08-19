@@ -8,6 +8,13 @@ import {
   preferredIdentifier,
   summariseHead,
 } from "../src/packs/livestock/core/herd";
+import {
+  checkStreak,
+  daysSinceCheck,
+  formatLastChecked,
+  lossesOn,
+  roundProgress,
+} from "../src/packs/livestock/core/daily";
 import { breedHint } from "../src/packs/livestock/vocabulary";
 
 /**
@@ -197,5 +204,171 @@ describe("breedHint", () => {
     // to survive the same treatment or it only works for picker values.
     expect(breedHint("Cattle")).toBe("e.g. Angus");
     expect(breedHint("  POULTRY  ")).toBe("e.g. Cornish Cross");
+  });
+});
+
+/**
+ * The daily round.
+ *
+ * What is worth asserting here is not the arithmetic — it is the two places a
+ * defensible-looking answer would quietly destroy the habit the slice exists to
+ * build: a streak that resets every morning, and a "never checked" that renders
+ * as zero days.
+ */
+describe("checkStreak", () => {
+  it("counts consecutive days back from today", () => {
+    expect(
+      checkStreak(["2026-08-19", "2026-08-18", "2026-08-17"], "2026-08-19"),
+    ).toBe(3);
+  });
+
+  it("does NOT break because today has not been walked yet", () => {
+    // The whole point. At breakfast today has no entry, and a counter that
+    // dropped to zero every morning would be a counter nobody keeps — so the
+    // run is measured from yesterday when today is untouched.
+    expect(checkStreak(["2026-08-18", "2026-08-17"], "2026-08-19")).toBe(2);
+  });
+
+  it("breaks after two days of silence", () => {
+    // Yesterday is the furthest back the grace extends. A missed day is a
+    // missed day, and a streak that forgives them means nothing.
+    expect(checkStreak(["2026-08-17", "2026-08-16"], "2026-08-19")).toBe(0);
+  });
+
+  it("stops at the first gap rather than counting every entry", () => {
+    expect(
+      checkStreak(
+        ["2026-08-19", "2026-08-18", "2026-08-15", "2026-08-14"],
+        "2026-08-19",
+      ),
+    ).toBe(2);
+  });
+
+  it("ignores duplicate days and unsorted input", () => {
+    // The query returns distinct days, but the order is the database's choice
+    // and this must not depend on it.
+    expect(
+      checkStreak(
+        ["2026-08-18", "2026-08-19", "2026-08-18", "2026-08-17"],
+        "2026-08-19",
+      ),
+    ).toBe(3);
+  });
+
+  it("is zero when nothing has ever been recorded", () => {
+    expect(checkStreak([], "2026-08-19")).toBe(0);
+  });
+
+  it("crosses a month boundary", () => {
+    expect(
+      checkStreak(["2026-09-01", "2026-08-31", "2026-08-30"], "2026-09-01"),
+    ).toBe(3);
+  });
+});
+
+describe("roundProgress", () => {
+  const check = (livestockLotId: string, status = "normal") => ({
+    livestockLotId,
+    loggedOn: "2026-08-19",
+    status,
+  });
+
+  it("names the lots still to look at, not just how many", () => {
+    // `remaining` is what the "all normal" button acts on, so it has to be the
+    // exact set — a count could not tell it which lots to leave alone.
+    const progress = roundProgress(["a", "b", "c"], [check("b")]);
+    expect(progress).toEqual({
+      total: 3,
+      checked: 1,
+      remaining: ["a", "c"],
+      needsAttention: [],
+    });
+  });
+
+  it("separates a lot that was flagged from one that was never touched", () => {
+    // The distinction this slice is built on. A flagged lot has been looked at
+    // — it must not reappear in the list the one-tap button sweeps.
+    const progress = roundProgress(["a", "b"], [check("a", "attention")]);
+    expect(progress.remaining).toEqual(["b"]);
+    expect(progress.needsAttention).toEqual(["a"]);
+    expect(progress.checked).toBe(1);
+  });
+
+  it("ignores checks for lots that are not in the round", () => {
+    // A lot whose animals have all gone is off the list, but its check for
+    // today still exists and must not inflate the count.
+    const progress = roundProgress(["a"], [check("a"), check("gone")]);
+    expect(progress.total).toBe(1);
+    expect(progress.checked).toBe(1);
+  });
+
+  it("is empty and complete when there is nothing to check", () => {
+    expect(roundProgress([], [])).toEqual({
+      total: 0,
+      checked: 0,
+      remaining: [],
+      needsAttention: [],
+    });
+  });
+});
+
+describe("last checked", () => {
+  it("distinguishes never from today", () => {
+    // NULL IS NOT ZERO. A lot nobody has ever checked is the thing the round
+    // screen exists to surface, and "0 days ago" would read as the opposite.
+    expect(daysSinceCheck(null, "2026-08-19")).toBeNull();
+    expect(formatLastChecked(null, "2026-08-19")).toBe("Never");
+    expect(formatLastChecked("2026-08-19", "2026-08-19")).toBe("Today");
+  });
+
+  it("says yesterday rather than 1 day ago", () => {
+    expect(formatLastChecked("2026-08-18", "2026-08-19")).toBe("Yesterday");
+    expect(formatLastChecked("2026-08-16", "2026-08-19")).toBe("3 days ago");
+  });
+
+  it("treats a future-dated check as today rather than as negative days", () => {
+    // Possible across a timezone boundary at midnight. "-1 days ago" is
+    // nonsense; "Today" is at worst a few hours early.
+    expect(formatLastChecked("2026-08-20", "2026-08-19")).toBe("Today");
+  });
+});
+
+describe("lossesOn", () => {
+  const mv = (occurredOn: string, movementKind: string, quantity: number) => ({
+    occurredOn,
+    movementKind,
+    quantity,
+  });
+
+  it("adds up the day's losses from the LEDGER, not from the check", () => {
+    // The losses are not stored on the daily log, so this is how the round
+    // screen shows them. One number, read twice — never two kept in step.
+    expect(
+      lossesOn(
+        [
+          mv("2026-08-19", "death", -3),
+          mv("2026-08-19", "cull", -1),
+          mv("2026-08-18", "death", -9),
+        ],
+        "2026-08-19",
+      ),
+    ).toBe(4);
+  });
+
+  it("counts neither placements nor splits as losses", () => {
+    expect(
+      lossesOn(
+        [
+          mv("2026-08-19", "placement", 210),
+          mv("2026-08-19", "split_out", -70),
+          mv("2026-08-19", "sold_live", -2),
+        ],
+        "2026-08-19",
+      ),
+    ).toBe(0);
+  });
+
+  it("is zero on a day nothing was recorded", () => {
+    expect(lossesOn([mv("2026-08-18", "death", -3)], "2026-08-19")).toBe(0);
   });
 });

@@ -1,8 +1,12 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
-import type { LivestockIdentifier, LivestockLot } from "@/db/schema";
+import type {
+  LivestockDailyLog,
+  LivestockIdentifier,
+  LivestockLot,
+} from "@/db/schema";
 import {
   createItem,
   createLot as createInventoryLot,
@@ -549,4 +553,226 @@ export async function retireIdentifier(
     throw new LivestockError("NOT_FOUND", `identifier ${id} not found`);
   }
   return rows[0];
+}
+
+// ------------------------------------------------------------- daily round ---
+
+/**
+ * Record that somebody looked at a lot today, and what they found.
+ *
+ * **THE ROW IS THE CHECK.** Its presence means a person walked the pen on that
+ * date; its absence means nobody did. That distinction is the whole reason this
+ * table exists, because "zero died" and "didn't check" are different facts and
+ * the mortality denominator is only honest if they are told apart.
+ *
+ * A loss entered during the round goes to `inventory`'s ledger through
+ * `removeHead`, in the SAME transaction — never into a column here. The head
+ * count stays a balance, the log stays a record of attention, and neither has
+ * to be reconciled against the other because there is only ever one number.
+ *
+ * `member`, not `owner`. Walking the pens is the definition of a chore, and at
+ * 10x the person doing it is not the owner.
+ */
+export async function recordDailyCheck(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    livestockLotId: string;
+    loggedOn: string;
+    status?: "normal" | "attention";
+    notes?: string;
+    /** Head lost while looking. Optional, and the common answer is none. */
+    loss?: { head: number; reason: "death" | "cull" | "sold_live"; notes?: string };
+  },
+): Promise<LivestockDailyLog> {
+  requireWrite(ctx, "member");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId} not found`);
+  }
+
+  if (input.loss && input.loss.head > 0) {
+    const inventoryLot = await getInventoryLot(tx, ctx.tenantId, lot.inventoryLotId);
+    if (!inventoryLot) {
+      throw new LivestockError("LOT_INVALID", "that lot has no inventory record");
+    }
+    await removeHead(tx, ctx, {
+      itemId: inventoryLot.itemId,
+      inventoryLotId: inventoryLot.id,
+      head: input.loss.head,
+      reason: input.loss.reason,
+      occurredOn: input.loggedOn,
+      notes: input.loss.notes,
+    });
+  }
+
+  // A loss is by definition not a normal day, so the caller does not have to
+  // remember to say so. Recording four dead birds against a "normal" check
+  // would be a contradiction the screen should not be able to produce.
+  const status =
+    input.loss && input.loss.head > 0 ? "attention" : input.status ?? "normal";
+  const notes = input.notes?.trim() ?? "";
+
+  const rows = await tx
+    .insert(schema.livestockDailyLogs)
+    .values({
+      tenantId: ctx.tenantId,
+      livestockLotId: input.livestockLotId,
+      loggedOn: input.loggedOn,
+      status,
+      notes,
+      recordedBy: ctx.userId,
+    })
+    .onConflictDoUpdate({
+      target: [
+        schema.livestockDailyLogs.tenantId,
+        schema.livestockDailyLogs.livestockLotId,
+        schema.livestockDailyLogs.loggedOn,
+      ],
+      set: {
+        status,
+        // Looking twice in a day is one fact, so the second look UPDATES the
+        // first rather than adding a row. Notes only overwrite when the second
+        // check actually said something — otherwise a quick confirmation would
+        // erase the morning's "left hind leg swollen".
+        ...(notes ? { notes } : {}),
+        recordedBy: ctx.userId,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+  return rows[0];
+}
+
+/**
+ * The one-tap round: mark every lot that has NOT been looked at as normal.
+ *
+ * **IT CANNOT OVERWRITE AN EXCEPTION**, and that is not politeness, it is what
+ * makes the button usable. The design's rule is "one tap confirms all normal
+ * across the whole farm, and only exceptions are entered individually" — which
+ * only works if entering the exception first and tapping the button second is
+ * safe. ON CONFLICT DO NOTHING against the one-per-lot-per-day index is what
+ * guarantees that, in the database rather than in a read-then-write race.
+ *
+ * Returns the lots it actually recorded, so the screen can say "11 marked"
+ * without claiming credit for the three that were already done.
+ */
+export async function markRoundNormal(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { livestockLotIds: string[]; loggedOn: string },
+): Promise<LivestockDailyLog[]> {
+  requireWrite(ctx, "member");
+  if (input.livestockLotIds.length === 0) return [];
+
+  // Only this tenant's lots, and only ones that exist. The ids arrive from a
+  // form, so they are input rather than fact — the composite FK would refuse a
+  // foreign one anyway, but with an error nobody can read.
+  const lots = await tx.query.livestockLots.findMany({
+    where: and(
+      eq(schema.livestockLots.tenantId, ctx.tenantId),
+      inArray(schema.livestockLots.id, input.livestockLotIds),
+    ),
+    columns: { id: true },
+  });
+  if (lots.length === 0) return [];
+
+  return tx
+    .insert(schema.livestockDailyLogs)
+    .values(
+      lots.map((lot) => ({
+        tenantId: ctx.tenantId,
+        livestockLotId: lot.id,
+        loggedOn: input.loggedOn,
+        status: "normal",
+        recordedBy: ctx.userId,
+      })),
+    )
+    .onConflictDoNothing({
+      target: [
+        schema.livestockDailyLogs.tenantId,
+        schema.livestockDailyLogs.livestockLotId,
+        schema.livestockDailyLogs.loggedOn,
+      ],
+    })
+    .returning();
+}
+
+/** Every check made on one day, keyed by livestock lot. */
+export async function checksOn(
+  tx: Tx,
+  tenantId: string,
+  loggedOn: string,
+): Promise<Map<string, LivestockDailyLog>> {
+  const rows = await tx.query.livestockDailyLogs.findMany({
+    where: and(
+      eq(schema.livestockDailyLogs.tenantId, tenantId),
+      eq(schema.livestockDailyLogs.loggedOn, loggedOn),
+    ),
+  });
+  return new Map(rows.map((row) => [row.livestockLotId, row]));
+}
+
+/**
+ * When each lot was last looked at. One query, whatever the lot count.
+ *
+ * A lot with no entry at all is ABSENT from the map rather than mapped to null,
+ * because "never checked" is exactly what the round screen exists to surface
+ * and a null rendering as a date-shaped blank would hide it.
+ */
+export async function lastCheckedByLot(
+  tx: Tx,
+  tenantId: string,
+): Promise<Map<string, string>> {
+  const rows = await tx
+    .select({
+      livestockLotId: schema.livestockDailyLogs.livestockLotId,
+      lastCheckedOn: sql<string>`max(${schema.livestockDailyLogs.loggedOn})`,
+    })
+    .from(schema.livestockDailyLogs)
+    .where(eq(schema.livestockDailyLogs.tenantId, tenantId))
+    .groupBy(schema.livestockDailyLogs.livestockLotId);
+  return new Map(rows.map((row) => [row.livestockLotId, row.lastCheckedOn]));
+}
+
+/**
+ * The distinct days the round was walked at all, most recent first.
+ *
+ * FARM-WIDE, not per lot, because that is what the streak means here: the habit
+ * is "I did the rounds", and a day when eleven of fourteen pens were checked
+ * was still a day somebody went out. Per-lot strictness would break the streak
+ * on the pen that stood empty that week and teach people the counter is noise.
+ */
+export async function checkedDaysSince(
+  tx: Tx,
+  tenantId: string,
+  since: string,
+): Promise<string[]> {
+  const rows = await tx
+    .selectDistinct({ loggedOn: schema.livestockDailyLogs.loggedOn })
+    .from(schema.livestockDailyLogs)
+    .where(
+      and(
+        eq(schema.livestockDailyLogs.tenantId, tenantId),
+        gte(schema.livestockDailyLogs.loggedOn, since),
+      ),
+    );
+  return rows.map((row) => row.loggedOn);
+}
+
+/** One lot's recent checks, newest first — the history on its detail page. */
+export async function listChecksForLot(
+  tx: Tx,
+  tenantId: string,
+  livestockLotId: string,
+  limit = 14,
+): Promise<LivestockDailyLog[]> {
+  return tx.query.livestockDailyLogs.findMany({
+    where: and(
+      eq(schema.livestockDailyLogs.tenantId, tenantId),
+      eq(schema.livestockDailyLogs.livestockLotId, livestockLotId),
+    ),
+    orderBy: (l, { desc }) => [desc(l.loggedOn)],
+    limit,
+  });
 }

@@ -24,6 +24,18 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-19 — One read added for livestock's daily round (`claude/livestock-daily-log`)
+
+`movementsOnDate` — movements against a set of lots on one day, keyed by lot.
+It exists so `livestock`'s round can show what was lost today WITHOUT storing
+it: the losses entered during a check are ordinary movements in this ledger, and
+the round reads them back rather than keeping a copy that would have to agree
+with this table forever.
+
+It lives here, like `movementKindsForLots` before it, because the ledger is this
+pack's and a neighbour querying `inventory_movements` directly would be the leak
+the extension model forbids. Full reasoning in [livestock.md](livestock.md).
+
 ### 2026-08-19 — The location picker only offers places (`claude/assets-hold-stock`)
 
 `listLocations` filters on `assets.is_storage_location` now, so the *Where*

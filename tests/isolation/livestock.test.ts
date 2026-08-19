@@ -7,11 +7,12 @@ import { d } from "./_shared";
 /**
  * `livestock` RLS — the biology extension and the identifiers.
  *
- * Two tables, because the lot and the head ledger are `inventory`'s and
+ * Three tables, because the lot and the head ledger are `inventory`'s and
  * occupancy is `land`'s, and each of those is certified in its own file. What
  * is left to prove here is that the extension cannot straddle a tenant
- * boundary: a biology row on another tenant's inventory lot, and a tag on
- * another tenant's animal, are both UNREPRESENTABLE rather than merely refused.
+ * boundary: a biology row on another tenant's inventory lot, a tag on another
+ * tenant's animal, and a daily check claiming somebody walked another tenant's
+ * pens are all UNREPRESENTABLE rather than merely refused.
  *
  * `livestock_identifiers` gets its own policy pair rather than leaning on its
  * lot's, because it carries the official tag that puts a traceability chain
@@ -78,6 +79,21 @@ d("livestock tables (RLS)", () => {
         .returning();
       lotA = lots[0].id;
       lotB = lots[1].id;
+
+      await tx.insert(schema.livestockDailyLogs).values([
+        {
+          tenantId: tenantA,
+          livestockLotId: lots[0].id,
+          loggedOn: "2026-08-18",
+          notes: "Ours",
+        },
+        {
+          tenantId: tenantB,
+          livestockLotId: lots[1].id,
+          loggedOn: "2026-08-18",
+          notes: "Theirs",
+        },
+      ]);
 
       await tx.insert(schema.livestockIdentifiers).values([
         {
@@ -241,5 +257,67 @@ d("livestock tables (RLS)", () => {
         tx.select().from(schema.livestockIdentifiers),
       ),
     ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.livestockDailyLogs),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("a tenant sees only its own daily checks", async () => {
+    // The check is the claim that somebody walked the pens, and the mortality
+    // denominator rests on it. Another tenant's rounds must not be readable,
+    // countable, or contributory to anything here.
+    const mine = await asStaff((tx) => tx.select().from(schema.livestockDailyLogs));
+    expect(mine.map((l) => l.notes)).toEqual(["Ours"]);
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockDailyLogs),
+    );
+    expect(theirs.map((l) => l.notes)).toEqual(["Theirs"]);
+  });
+
+  it("cannot record a check against another tenant's animals", async () => {
+    // Unrepresentable rather than refused: the composite FK makes the row
+    // impossible even under `withSystem`, where RLS is not watching.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockDailyLogs).values({
+          tenantId: tenantA,
+          livestockLotId: lotB,
+          loggedOn: "2026-08-19",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a SECOND check on the same lot on the same day", async () => {
+    // One look is one fact. The unique index is also what lets the one-tap
+    // round insert ON CONFLICT DO NOTHING and leave an exception standing.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockDailyLogs).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          loggedOn: "2026-08-18",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a staff member can write a check, because the round is a chore", async () => {
+    // RLS answers only "whose rows are these". That the round is member-wide
+    // is the whole reason slice 1 is usable by whoever is in the pens.
+    const rows = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockDailyLogs)
+        .values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          loggedOn: "2026-08-19",
+          recordedBy: MATE,
+        })
+        .returning(),
+    );
+    expect(rows).toHaveLength(1);
   });
 });

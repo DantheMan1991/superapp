@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { USGS_IMAGERY, basemapFrom } from "../src/packs/land/core/basemap";
 import {
   AREA_UNITS,
   DEFAULT_AREA_UNIT,
@@ -298,5 +299,66 @@ describe("tenure", () => {
     expect(isTenure("owned")).toBe(true);
     expect(isTenure("handshake")).toBe(false);
     expect(isTenure("rented")).toBe(false);
+  });
+});
+
+describe("basemapFrom", () => {
+  it("defaults to the public-domain USGS imagery", () => {
+    // Not Esri's World Imagery, and that is a licensing decision rather than a
+    // technical one: NAIP orthoimagery is public domain, so every tenant can
+    // use it forever with attribution and no agreement.
+    expect(basemapFrom(undefined)).toEqual(USGS_IMAGERY);
+    expect(basemapFrom({})).toEqual(USGS_IMAGERY);
+    expect(basemapFrom("nonsense")).toEqual(USGS_IMAGERY);
+  });
+
+  it("takes a tenant's own imagery", () => {
+    // The profile is US-only; the pack is not. A tenant outside NAIP coverage
+    // has to be able to point at their own national imagery without a deploy.
+    const basemap = basemapFrom({
+      basemap: {
+        url: "https://tiles.example/{z}/{y}/{x}.png",
+        attribution: "Example National Mapping",
+        maxZoom: 18,
+      },
+    });
+    expect(basemap.url).toContain("{z}");
+    expect(basemap.attribution).toBe("Example National Mapping");
+    expect(basemap.maxZoom).toBe(18);
+  });
+
+  it("REFUSES imagery with no attribution, whole", () => {
+    // Both or neither. Attribution is the condition of use for every free
+    // imagery service worth pointing at, so a half-filled config falling back
+    // to a working-but-uncredited map is the one outcome to avoid.
+    expect(
+      basemapFrom({ basemap: { url: "https://tiles.example/{z}/{y}/{x}.png" } }),
+    ).toEqual(USGS_IMAGERY);
+    expect(
+      basemapFrom({
+        basemap: { url: "https://tiles.example/{z}/{y}/{x}.png", attribution: "  " },
+      }),
+    ).toEqual(USGS_IMAGERY);
+  });
+
+  it("refuses a url that is not a tile template", () => {
+    // Without `{z}` MapLibre requests the same image for every tile and the
+    // map looks broken in a way nobody would think to blame on config.
+    expect(
+      basemapFrom({
+        basemap: { url: "https://tiles.example/all.png", attribution: "Example" },
+      }),
+    ).toEqual(USGS_IMAGERY);
+  });
+
+  it("keeps the default zoom when the configured one is unusable", () => {
+    const basemap = basemapFrom({
+      basemap: {
+        url: "https://tiles.example/{z}/{y}/{x}.png",
+        attribution: "Example",
+        maxZoom: 99,
+      },
+    });
+    expect(basemap.maxZoom).toBe(USGS_IMAGERY.maxZoom);
   });
 });

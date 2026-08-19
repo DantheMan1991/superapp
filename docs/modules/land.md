@@ -24,8 +24,8 @@ the first act of building it. Agreed 2026-08-15:
 | **0** | **Places** — parcels, zones, dated zone use | **shipped 2026-08-15** |
 | **1** | **Occupancy + rest** — `land_occupancy`, rest days, grazing days, the paddock-count arithmetic | **shipped 2026-08-15** |
 | **2a.0** | **Boundaries** — GeoJSON in jsonb, spherical area, containment, paste-a-boundary | **shipped 2026-08-19** |
-| 2a.1 | **The map** — MapLibre over NAIP aerial, and DRAWING in the same slice | next |
-| 2a.2 | **Standing in a field** — point-in-polygon pre-fills the zone on the round and the move dialog | |
+| **2a.1** | **The map** — MapLibre over NAIP aerial, and DRAWING in the same slice | **shipped 2026-08-19** |
+| 2a.2 | **Standing in a field** — point-in-polygon pre-fills the zone on the round and the move dialog | next |
 | 2b | **Features** — points and lines: troughs, hydrants, wells, fences, lanes. The `assets` seam | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
@@ -49,6 +49,58 @@ layout. Operations first, planning second — and no planner before three
 examples exist.
 
 ## Build log
+
+### 2026-08-19 — Slice 2a.1: trace it on the picture (`claude/land-map`)
+
+The founder drove 2a.0 and gave the verdict the slice deserved: *"I don't
+understand pasting the json coordinates. That seems complicated. I was expecting
+to have a map pull up and be able to trace the parcels."* He was right. Nothing
+UNDER the paste box was wrong — the storage, the spherical acreage, the
+containment test and the comparison all survive untouched, and the map feeds the
+same two ops — but asking a farmer to produce a GeoJSON file he has no way to
+make is a developer's idea of an entry path.
+
+- **The map is the front door now; pasting is the side one.** The paste dialog
+  stays, because a county GIS export is more accurate than anything traced by
+  hand, but it is a second button rather than the only one.
+- **The basemap is USDA/USGS orthoimagery, and that is a LICENSING decision
+  rather than a technical one.** Esri's World Imagery is the obvious
+  alternative and serves better-looking tiles, but its terms are a licence a
+  commercial multi-tenant product would have to hold. The USGS service carries
+  NAIP, is public domain, and costs every future tenant nothing but attribution.
+  Verified live before shipping: it answers, serves 256px JPEG tiles, and
+  declares zoom 0–23. `USGSNAIPPlus` and the USDA APFO ImageServer were both
+  unreachable when checked, which is exactly why the URL is config-overridable
+  rather than a constant.
+- **`basemapFrom` takes both the URL and the attribution or neither.** Imagery
+  with no credit is the one combination that is never acceptable, so a
+  half-filled config falls back whole. A URL without `{z}` is refused too —
+  MapLibre would request one image for every tile and the map would look broken
+  in a way nobody would think to blame on config.
+- **The acreage moves as you trace**, through the same `boundaryAreaAcres` the
+  server runs. Not a preview of a guess: the number on screen while drawing is
+  the number that gets stored.
+- **A zone is drawn with its parcel and its sibling paddocks on the map.**
+  Ground is subdivided in relation to what is already there, and tracing a
+  paddock against a blank aerial is how you end up with paddocks that overlap.
+- **Self-intersecting polygons are refused while being drawn**
+  (`ValidateNotSelfIntersecting`). A figure-of-eight paddock has no area the
+  formula can trust, and refusing it at the pointer is kinder than storing a
+  shape whose acreage is quietly nonsense.
+- **Terra Draw, not mapbox-gl-draw**: the latter is unmaintained and painful
+  with MapLibre. Wired directly to `terra-draw` + its MapLibre adapter rather
+  than through the `@watergis` control, because this slice needs three buttons
+  in this product's voice, not a thirteen-mode toolbar.
+- **MapLibre and Terra Draw load through `await import()` inside an effect.**
+  Both touch `window` on construction, so a static import would break the server
+  render of every page carrying a map.
+- **Cold start is worse for a map than for a form**: a form with no data is
+  empty, a map with no data is a picture of the wrong place. It opens on the
+  continental US with a "find my location" button, which is the one-tap fix for
+  somebody standing on the ground in question.
+- 6 pure tests for the basemap config. The map itself is not unit-tested — it is
+  a canvas and an external tile service, and the parts worth certifying (parse,
+  area, containment) were certified in 2a.0 and are unchanged.
 
 ### 2026-08-19 — The box that would not show you what was in it (`claude/boundary-box-shows-what-is-there`)
 
@@ -414,6 +466,11 @@ rented ground, and retrofitting it means rewriting the report.
   area, ray-casting containment, bbox and centroid, and the declared-vs-drawn
   comparison. **Coordinates are [longitude, latitude]**, which reads backwards
   to anyone used to saying it out loud
+- `src/packs/land/components/boundary-map.tsx` — the map and the tracing.
+  MapLibre + Terra Draw, both loaded through `await import()` inside an effect
+  because they touch `window` on construction
+- `src/packs/land/core/basemap.ts` — pure. The imagery source, why it is the
+  public-domain one, and the both-or-neither config rule
 - `src/packs/land/components/boundary-controls.tsx` — the paste box, which runs
   the same parser and the same area formula the server will
 - `src/packs/land/core/rest.ts` — pure. Rest and grazing days from spans, the
@@ -552,9 +609,19 @@ rented ground, and retrofitting it means rewriting the report.
 - **`zoneAtPoint` has no caller.** Written for slice 2a.2, where the daily round
   and the move dialog pre-fill the zone from a phone's location. It is the one
   thing in this pack shipped ahead of its consumer, and the build log says why.
-- **No map.** 2a.1, with drawing in the same slice — MapLibre over NAIP aerial,
-  confirmed with the founder 2026-08-19. Until then a boundary is a number and a
-  paragraph, never a picture.
+- ~~No map~~ — **shipped 2026-08-19.** MapLibre over public-domain USDA/USGS
+  orthoimagery, with tracing, corner-dragging and live acreage.
+- **NOBODY HAS TRACED A BOUNDARY ON THE MAP YET.** It type-checks, lints and
+  builds; the drawing library is wired against its own type declarations rather
+  than a guess. None of that is a browser.
+- **No parcel-number lookup.** The founder's actual ask was *"type in the parcel
+  number and it auto traces the property"*. That needs a data source: a county
+  ArcGIS service (free, per-county integration), Regrid (nationwide, paid), or
+  FSA field boundaries the producer exports themselves from farmers.gov (free,
+  and already field-level rather than deed-level). Undecided, and it is 2a.1b.
+- **No address or place search.** With no boundary anywhere the map opens on the
+  continental US, and "find my location" is the only way in. Fine for a farmer
+  standing on the farm, useless at a desk three states away.
 - **Nothing checks that a zone's boundary falls inside its parcel's**, by design
   — but nothing reports a zone drawn on the wrong side of the county road
   either, and that is a report this pack could honestly make.

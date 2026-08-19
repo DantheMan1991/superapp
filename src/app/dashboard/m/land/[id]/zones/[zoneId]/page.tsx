@@ -28,6 +28,7 @@ import {
   getZone,
   listOccupancy,
   listZoneUses,
+  listZones,
 } from "@/packs/land/ops";
 import { zoneUseLabel } from "@/packs/land/vocabulary";
 import { areaUnitFrom, formatArea } from "@/packs/land/core/area";
@@ -74,20 +75,23 @@ export default async function ZoneDetailPage({
       // The zone must actually live on the parcel in the URL, or a guessed
       // path would render somebody's paddock under the wrong deed.
       if (!zone || zone.parcelId !== id) return null;
-      const [parcel, stays, uses, pack] = await Promise.all([
+      const [parcel, stays, uses, siblings, pack] = await Promise.all([
         getParcel(tx, ctx.tenant.id, id),
         listOccupancy(tx, ctx.tenant.id, zoneId),
         listZoneUses(tx, ctx.tenant.id, zoneId),
+        // Ground is subdivided in relation to what is already there, so the
+        // map draws the parcel and the neighbouring paddocks for reference.
+        listZones(tx, ctx.tenant.id, { parcelId: id, status: "active" }),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
       ]);
       if (!parcel) return null;
-      return { zone, parcel, stays, uses, pack };
+      return { zone, parcel, stays, uses, siblings, pack };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { zone, parcel, stays, uses, pack } = data;
+  const { zone, parcel, stays, uses, siblings, pack } = data;
 
   const unit = areaUnitFrom(pack.config);
   const zoneWord = labelFor(pack.labels, "zone", "Zone");
@@ -189,6 +193,13 @@ export default async function ZoneDetailPage({
         name={zone.name}
         declaredAcres={zone.areaAcres}
         geometry={zone.geometry}
+        context={[
+          { name: parcel.name, geometry: parcel.geometry },
+          ...siblings
+            .filter((sibling) => sibling.id !== zone.id)
+            .map((sibling) => ({ name: sibling.name, geometry: sibling.geometry })),
+        ]}
+        packConfig={pack.config}
         unit={unit}
         canEdit={ctx.role === "owner" && zone.status === "active"}
       />

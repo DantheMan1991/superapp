@@ -34,6 +34,67 @@ keying it on kind are in [assets.md](assets.md) — this pack only reads it.
 The function's name finally describes what it does, which is the whole of the
 defect `land` fixed for structures in August and this one inherited.
 
+### 2026-08-19 — Driven for the first time (no code change yet)
+
+Slice 0 was written, migrated against both databases and covered by 61 tests,
+and its own Open items said the obvious thing: *every bug found this week was
+found by clicking*. So it was clicked.
+
+**What holds up, and it is most of it.** The fold reconciles exactly: six ledger
+entries (+210, +210, −9, −70, +70, −1) sum to the 410 head on the card, and the
+three batches (200 + 70 + 140) sum to the same number by a different route. The
+split's −70/+70 nets to zero at item level, which is the property `livestock`
+depends on. Recording stock updates *Where it is* into a per-location split, and
+a location that returns to zero DISAPPEARS from that panel rather than showing
+"0 head" — the right call. The dialog explains the model in one line: *"Every
+quantity on this page is the sum of these, so nothing is counted twice and a
+correction is just another entry."*
+
+**FOUR OF THE EIGHT ACTIONS HAVE NO UI CALLER**, and only one of them is
+recorded as a known gap:
+
+| action | UI callers | consequence |
+| --- | --- | --- |
+| `updateItemAction` | **0** | an item cannot be renamed, and its purchase conversion cannot be corrected |
+| `archiveItemAction` | **0** | an item can never be retired; the list only grows |
+| `closeLotAction` | **0** | a batch can never be closed — B-2026-04-15 from April is still listed as open |
+| `mergeLotAction` | 0 | already recorded in Open items |
+
+The sharpest of these is `updateItem`. This dossier says the stocking unit
+**locks once anything has moved**, which implies it can be set right *before*
+then — but there is no screen to change it at any point, so an item created with
+the wrong unit is wrong for ever and the only remedy is a new item and a lost
+ledger. The ops layer and the actions are complete and tested; the screens expose
+half of them, and no test can see the difference.
+
+**`listLocations` returns EVERY active asset**, so the *Where* picker offered
+**Oak Row gate** and **Tractor** as places to put chickens. That is the shape
+land fixed on 2026-08-16 (*"A chest freezer was on the list of places to put
+chickens"*) — a function whose name claims a filter it never applies.
+
+**But land's remedy does not transfer, and that is the interesting part.** There
+the fix was a config-driven kinds filter defaulting to `building` +
+`infrastructure`. Here the real data defeats it: on the live tenant a **chest
+freezer and a tractor are both `equipment`**, and a **garage and a gate are both
+`building`**. A kinds filter either admits the tractor or excludes the freezer,
+and the freezer is the canonical inventory location — this pack's own header
+calls it one. So this needs a decision rather than a copy of the previous fix:
+
+- **Add storage kinds to the taxonomy.** `assets.kind` is deliberately open, and
+  the homestead profile already adds `chicken_tractor`, `hoop_house`, `coop` and
+  `barn` for structures. `freezer` / `cold_storage` would make a
+  `storageKindsFrom(config)` filter work exactly like `structureKindsFrom`.
+- **Or mark the asset itself as holding stock**, which survives a tenant whose
+  freezer is recorded as equipment and needs no vocabulary agreement.
+
+Unlike the accounting register pickers, **nothing refuses a bad location** — the
+engine accepts any asset — so this is a quality question rather than a correctness one,
+and it is why it was never going to fail a test.
+
+**Not tested on purpose:** negative stock. It is allowed by design and covered by
+tests, and deliberately creating a negative on the live tenant would leave a
+number somebody later reads as a fault.
+
 ### 2026-08-15 — Feeding out is a chore; a lot is still a decision (`claude/pack-write-levels`)
 
 Platform-wide change; the reasoning is in
@@ -142,8 +203,17 @@ without sitting on a shelf.
 
 ## Open items
 
-- **Nobody has driven slice 0 yet.** Written, migrated against both databases,
-  covered by 61 tests — but every bug found this week was found by clicking.
+- ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
+  production; the fold, the split, the location split and the return to zero all
+  reconcile. It found the two items below.
+- **Four of the eight actions have no UI caller**: `updateItem`, `archiveItem`,
+  `closeLot` and `mergeLot`. So an item cannot be renamed or retired and a batch
+  cannot be closed. `updateItem` is the one that stings: the stocking unit is
+  documented as locking after the first movement, which implies it can be fixed
+  before then, and no screen can fix it at all.
+- ~~`listLocations` returns every active asset~~ — **fixed the same day** with
+  `assets.is_storage_location`, a flag on the asset rather than a kind rule,
+  because a freezer and a tractor are both `equipment`. See [assets.md](assets.md).
 - ~~Writes are owner-only, and this pack is where that starts to hurt~~ —
   **settled 2026-08-15**, see `docs/modules/livestock.md` for the reasoning.
   Movements and merges are chores; items, lots, archiving and splits stay with

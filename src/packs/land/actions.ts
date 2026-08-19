@@ -15,6 +15,8 @@ import {
   endZoneUse,
   retireParcel,
   retireZone,
+  setParcelBoundary,
+  setZoneBoundary,
   startOccupancy,
   startZoneUse,
   updateParcel,
@@ -66,6 +68,10 @@ function toResult(err: unknown): { error: string } {
         return {
           error: "An occupant kind must be lowercase letters and underscores.",
         };
+      // The parser writes for a person — "that file has 12 shapes in it" — so
+      // its message reaches the screen unaltered.
+      case "INVALID_GEOMETRY":
+        return { error: err.message };
     }
   }
   console.error("land action failed", err);
@@ -463,6 +469,86 @@ export async function endZoneUseAction(input: unknown) {
       targetType: "land_zone_use",
       targetId: parsed.data.useId,
       meta: { endedOn: parsed.data.endedOn },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Paste a boundary onto a zone, or clear it.
+ *
+ * The GeoJSON arrives as TEXT and stays text all the way to `setZoneBoundary`,
+ * which parses it. Zod checks only that it is a string of sane length: a schema
+ * that tried to describe GeoJSON here would be a second, weaker copy of
+ * `parseBoundary`, and the first thing to drift.
+ */
+export async function setZoneBoundaryAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      // A county's field boundary runs to a few hundred KB at full precision.
+      geojson: z.string().max(2_000_000).nullable(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const zone = await withTenant(
+      ctx.tenant.id,
+      (tx) => setZoneBoundary(tx, landCtx(ctx), parsed.data.id, parsed.data.geojson),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: parsed.data.geojson
+        ? "land.zone.boundary_set"
+        : "land.zone.boundary_cleared",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_zone",
+      targetId: zone.id,
+      // Identifiers only. The boundary itself is the tenant's data and has no
+      // business in the platform-wide audit log.
+      meta: { hasBoundary: zone.geometry !== null },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** The same, for a parcel. */
+export async function setParcelBoundaryAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      geojson: z.string().max(2_000_000).nullable(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const parcel = await withTenant(
+      ctx.tenant.id,
+      (tx) => setParcelBoundary(tx, landCtx(ctx), parsed.data.id, parsed.data.geojson),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: parsed.data.geojson
+        ? "land.parcel.boundary_set"
+        : "land.parcel.boundary_cleared",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_parcel",
+      targetId: parcel.id,
+      meta: { hasBoundary: parcel.geometry !== null },
     });
     revalidatePath(BASE, "layout");
     return { ok: true };

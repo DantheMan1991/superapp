@@ -142,6 +142,31 @@ What it **does** break:
   without a human seeing it first is true by construction here.
 - Full build record in [livestock.md](livestock.md).
 
+### 2026-08-19 — Land 2a.0: the shapes, and the arithmetic that had to be spherical (`claude/land-geometry`)
+
+- **Geometry landed as `jsonb` on parcels and zones, with the math in JS** —
+  the design's settled answer, and building it confirmed the sizing rather than
+  straining it. The founder chose **MapLibre over NAIP aerial** for the map that
+  follows, so the US-only geodata assumption in this dossier is now a decision
+  rather than an acceptance.
+- **2a split into three**: the shapes and the arithmetic (this), the map with
+  drawing (2a.1), the standing-in-a-field pre-fill (2a.2). The map and the
+  drawing surface are one slice because the pilot's zones have no coordinates —
+  a map without a way to draw would render an empty grey rectangle.
+- **The design's "point-in-polygon is the biggest data-entry win" claim now has
+  a consumer.** When it was written, there was no field form to pre-fill.
+  `livestock` slice 1a shipped the daily round four days later, and that is the
+  form. `zoneAtPoint` is built and waiting for it.
+- **A planar area formula would have been wrong by 23% at this farm's
+  latitude** — over two acres on a ten-acre paddock. Worth recording in the
+  profile and not only in the pack, because every per-acre figure this profile
+  promises divides by that number.
+- **The declared acreage is never overwritten by the measured one.** A deed
+  figure and a fence line disagree for real reasons, and the profile's whole
+  accounting claim rests on ground that carries a cost object with a stable
+  area. Reported, never corrected.
+- Full build record in [land.md](land.md).
+
 ### 2026-08-19 — The day-one wedge is built, and it stores a fact no ledger could (`claude/livestock-daily-log`)
 
 - **Livestock slice 1a: the daily round.** The design named this the wedge for
@@ -462,7 +487,7 @@ own words condensed, not reinterpreted.
 
 | Category | Lands in | Farm-specific? | Brainstormed? |
 | --- | --- | :---: | :---: |
-| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–1 built**, [land.md](land.md) |
+| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–2a.0 built**, [land.md](land.md) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slices 0–1 built**, [livestock.md](livestock.md) |
@@ -883,7 +908,7 @@ reasoning behind each position lives in [land.md](land.md).
 | --- | --- | --- |
 | 0 | Parcels, zones, dated zone use | Everything spatial references it. Usable alone on day one |
 | 1 | Occupancy + rest | What `livestock` is blocked on, and the free feature this whole category was argued for |
-| 2a | Geometry — polygons, area, map | Nothing is blocked on it, and its best payoff needs field forms that do not exist |
+| 2a | Geometry — polygons, area, map | Nothing is blocked on it, and its best payoff needed field forms that did not exist — the daily round is now that form. **Split into 2a.0 shapes (shipped 2026-08-19), 2a.1 map + drawing, 2a.2 pre-fill** |
 | 2b | Features — points and lines | The `assets` seam. Needs 2a's primitives |
 | 3 | Weather + GDD | Cheap, and **backfillable** — Open-Meteo serves history by lat/long, so being late costs nothing |
 | 4 | Lease screens, hauls, payback warning | Deferred by this design already |

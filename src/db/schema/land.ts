@@ -27,11 +27,14 @@
  *
  * Deliberately NOT here yet, each because nothing would read it:
  *
- *   - **Geometry** (GeoJSON in jsonb, containment and area in JS — settled, no
- *     PostGIS). Slice 2, with points and lines as well as polygons.
- *   - **Centroid** lat/long for weather. It is derivable from geometry, so it
- *     arrives with the slice that has geometry to derive it from rather than as
- *     two columns nobody fills in.
+ *   - **Points and lines** — troughs, hydrants, wells, fences, lanes. Slice 2b,
+ *     and the `assets` seam: a fence has geometry from here and a cost, a life
+ *     and a service schedule from there. Polygons arrived in 2a as `geometry`
+ *     below; these need their own table, because a fence is not a boundary.
+ *   - **Centroid** lat/long for weather. Still not a column, and now for a
+ *     better reason than "later": it is DERIVED from `geometry` by
+ *     `centroid()`, so storing it would be a second copy to keep in step with
+ *     a boundary somebody redraws.
  *   - **Lease terms**, renewals and rent. `tenure` is here NOW because profit
  *     per acre computes differently on rented ground and retrofitting it means
  *     rewriting the report; the screens wait for a tenant who actually rents.
@@ -105,6 +108,28 @@ export const landParcels = pgTable(
       scale: 4,
       mode: "number",
     }),
+    /**
+     * The boundary, as GeoJSON — a Polygon, or a MultiPolygon for ground split
+     * by a road. **jsonb, not PostGIS**, settled in the Land category design:
+     * containment is ray casting and area is spherical excess, both trivial for
+     * a few hundred polygons, and 10x this farm is still a few hundred. The
+     * math lives in `src/packs/land/core/geo.ts`.
+     *
+     * NULLABLE, and the ordinary state. Ground is usable in this pack with no
+     * boundary at all — slice 0 shipped a year of paddock records without one —
+     * so this must never become required by the back door.
+     *
+     * **NOT VALIDATED BY THE DATABASE.** jsonb has no shape constraint, so
+     * every reader goes through `asBoundary`, which returns null for anything
+     * it cannot read. A CHECK here could only test for a JSON object, which is
+     * the part that was never in doubt.
+     *
+     * `area_acres` above stays the DECLARED figure and is not recomputed from
+     * this. They disagree for real reasons — an easement, a creek, a deed
+     * written loosely — and which one is right is the farmer's call. The screens
+     * report the difference; nothing corrects it.
+     */
+    geometry: jsonb("geometry"),
     /** Deed reference, lease number, county parcel ID. Free text — every county numbers differently. */
     identifier: text("identifier").notNull().default(""),
     /**
@@ -187,6 +212,28 @@ export const landZones = pgTable(
       scale: 4,
       mode: "number",
     }),
+    /**
+     * The boundary, as GeoJSON — a Polygon, or a MultiPolygon for ground split
+     * by a road. **jsonb, not PostGIS**, settled in the Land category design:
+     * containment is ray casting and area is spherical excess, both trivial for
+     * a few hundred polygons, and 10x this farm is still a few hundred. The
+     * math lives in `src/packs/land/core/geo.ts`.
+     *
+     * NULLABLE, and the ordinary state. Ground is usable in this pack with no
+     * boundary at all — slice 0 shipped a year of paddock records without one —
+     * so this must never become required by the back door.
+     *
+     * **NOT VALIDATED BY THE DATABASE.** jsonb has no shape constraint, so
+     * every reader goes through `asBoundary`, which returns null for anything
+     * it cannot read. A CHECK here could only test for a JSON object, which is
+     * the part that was never in doubt.
+     *
+     * `area_acres` above stays the DECLARED figure and is not recomputed from
+     * this. They disagree for real reasons — an easement, a creek, a deed
+     * written loosely — and which one is right is the farmer's call. The screens
+     * report the difference; nothing corrects it.
+     */
+    geometry: jsonb("geometry"),
     status: text("status").notNull().default("active"),
     notes: text("notes").notNull().default(""),
     metadata: jsonb("metadata").notNull().default({}),

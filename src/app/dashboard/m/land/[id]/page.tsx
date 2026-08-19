@@ -51,6 +51,7 @@ import {
 } from "@/packs/land/components/parcel-controls";
 import { ZoneForm } from "@/packs/land/components/zone-form";
 import { ZoneControls } from "@/packs/land/components/zone-controls";
+import { BoundarySummary } from "@/packs/land/components/boundary-summary";
 
 export const dynamic = "force-dynamic";
 
@@ -196,6 +197,16 @@ export default async function ParcelDetailPage({
             <ParcelControls parcel={view} unit={unit} zoneWord={zoneWord} />
           ) : null
         }
+      />
+
+      <BoundarySummary
+        target="parcel"
+        id={parcel.id}
+        name={parcel.name}
+        declaredAcres={parcel.areaAcres}
+        geometry={parcel.geometry}
+        unit={unit}
+        canEdit={isOwner && parcel.status === "active"}
       />
 
       <div className="grid gap-6 md:grid-cols-2">

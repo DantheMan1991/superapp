@@ -32,6 +32,7 @@ import {
 import { zoneUseLabel } from "@/packs/land/vocabulary";
 import { areaUnitFrom, formatArea } from "@/packs/land/core/area";
 import { daysOccupied, formatDays, zoneRest } from "@/packs/land/core/rest";
+import { BoundarySummary } from "@/packs/land/components/boundary-summary";
 import {
   DeleteOccupancy,
   EndOccupancy,
@@ -180,6 +181,16 @@ export default async function ZoneDetailPage({
             </div>
           ) : null
         }
+      />
+
+      <BoundarySummary
+        target="zone"
+        id={zone.id}
+        name={zone.name}
+        declaredAcres={zone.areaAcres}
+        geometry={zone.geometry}
+        unit={unit}
+        canEdit={ctx.role === "owner" && zone.status === "active"}
       />
 
       <div className="grid gap-6 md:grid-cols-3">

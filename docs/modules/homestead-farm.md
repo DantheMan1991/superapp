@@ -142,6 +142,24 @@ What it **does** break:
   without a human seeing it first is true by construction here.
 - Full build record in [livestock.md](livestock.md).
 
+### 2026-08-19 — Land 2a.1: the map, and a wrong front door replaced (`claude/land-map`)
+
+- **The founder drove 2a.0 and rejected its entry path**, correctly: *"I don't
+  understand pasting the json coordinates."* The lesson is worth keeping at
+  profile level, because it will recur in every pack this profile installs —
+  **the machinery being right does not make the door right.** Everything under
+  the paste box survived unchanged; only the way in was replaced.
+- **The basemap is public-domain USDA/USGS orthoimagery.** The design already
+  said NAIP and recorded US-only coverage as acceptable; building it turned that
+  into a licensing decision, since the good-looking alternative (Esri World
+  Imagery) is a licence a commercial multi-tenant product would have to hold.
+- **What the founder actually asked for is not finished.** "Type in the parcel
+  number and it auto traces the property" needs a parcel data source — a county
+  ArcGIS service (free, per-county), Regrid (nationwide, paid), or FSA field
+  boundaries the producer exports themselves. Recorded in [land.md](land.md) as
+  2a.1b, undecided.
+- Full build record in [land.md](land.md).
+
 ### 2026-08-19 — Land 2a.0: the shapes, and the arithmetic that had to be spherical (`claude/land-geometry`)
 
 - **Geometry landed as `jsonb` on parcels and zones, with the math in JS** —
@@ -487,7 +505,7 @@ own words condensed, not reinterpreted.
 
 | Category | Lands in | Farm-specific? | Brainstormed? |
 | --- | --- | :---: | :---: |
-| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–2a.0 built**, [land.md](land.md) |
+| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–2a.1 built**, [land.md](land.md) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slices 0–1 built**, [livestock.md](livestock.md) |

@@ -14,6 +14,42 @@
 
 ## Build log
 
+### 2026-08-18 — Driven for the first time, and the ICS feed holds up (no code change)
+
+The module was carried as compiled-and-tested. This is the record of somebody
+actually using it, and of two open items that turn out to be closed.
+
+- **The feed IS subscribed from a real device.** The Calendars page shows a
+  token named **Android, last used 8/18/2026** — the open item saying "nobody
+  has actually subscribed to this from a real phone yet" has been overtaken by
+  events. Leave the token alone; it is somebody's live calendar subscription.
+- **The `.ics` extension worry is answered in practice.** The route path has no
+  extension, but the response carries `Content-Type: text/calendar; charset=utf-8`
+  and `Content-Disposition: inline; filename="yosher.ics"`, and the Android
+  client has been polling it happily.
+- **THE GENERATOR IS RFC 5545 CORRECT WHERE IT IS EASIEST TO BE WRONG.** Tested
+  with a title built to break it — 106 characters containing both a comma and a
+  semicolon. The output:
+
+  ```
+  SUMMARY:Quarterly walkthrough\, roof and gutters\; bring the ladder\, the m
+   oisture meter and the north elevation notes
+  ```
+
+  Commas and semicolons escaped, and the line folded at 75 octets with a
+  leading-space continuation. Both are the details ICS writers usually miss, and
+  an unescaped comma would have made every client read the summary as a list.
+- Also exercised: the week grid, creating an event (landed in the right slot and
+  in the feed at `13:00Z` = 9am America/New_York), the calendars page, minting a
+  feed token, and revoking one.
+
+**One thing to decide, not a defect.** *Cancel event* is a single click, sits
+directly beside *Save* in the same dialog, and asks nothing. `cancelItem` is a
+SOFT cancel — it sets `cancelled_at`, so the row survives — but there is no
+un-cancel in the UI, so from a person's side one misclick removes an event with
+no way back. Accounting made every confirmation a real dialog on 2026-08-12;
+this is the same question, unanswered here.
+
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
@@ -868,10 +904,11 @@ them. If something does, the boundary was drawn wrong.
   and an indexed lookup per attempt, which is cheap for them and cheap for us,
   but nothing throttles it. The token is 32 random bytes so guessing is not a
   realistic threat; a burst limit is still the obvious next thing.
-- **The route path has no `.ics` extension.** The content type and
-  `Content-Disposition` filename are correct, and every client tested against
-  the spec should be fine — but some decide by extension, and nobody has
-  actually subscribed to this from a real phone yet.
+- ~~**The route path has no `.ics` extension.**~~ **Answered 2026-08-18**: a
+  real Android client has been subscribed and polling (the token's last-used
+  date proves it), and the response's `filename="yosher.ics"` is evidently
+  enough. Left here because a client that decides purely by path extension is
+  still imaginable; it is no longer unverified.
 - **The entity types still live at `src/modules/<slug>/mail/extension.ts`**,
   because that is where they were written when mail was the only consumer. The
   directory name now lies slightly. Moving them to `<slug>/links.ts` is a

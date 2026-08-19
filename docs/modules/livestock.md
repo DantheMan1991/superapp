@@ -16,8 +16,8 @@ and [land.md](land.md) before changing anything about where animals are.
 | --- | --- | --- |
 | **0** | **Lots + head ledger + occupancy** | **shipped 2026-08-15** |
 | **1a** | **Daily log — the round, and the check that is not a head event** | **shipped 2026-08-19** |
-| 1b | Advisory layer — ask and orient, anchored to this farm's own history | next |
-| 2 | Feed + FCR | |
+| **1b** | **Advisory layer — ask and orient, anchored to this farm's own history** | **shipped 2026-08-19** |
+| 2 | Feed + FCR | next |
 | 3 | Health + withdrawal clock | |
 | 4 | Breeding, genetics, registry, **and the breeding/market capital transfer** | |
 | 5 | Weights (tape formulas, sampling) | |
@@ -25,7 +25,52 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
-### 2026-08-19 — Slice 1: the round is one tap, and the row IS the check (`claude/livestock-daily-log`)
+### 2026-08-19 — Slice 1b: the advisor, and the digest is the product (`claude/livestock-advisor`)
+
+The other half of the wedge — *ask it things, tell it things*. Slice 1a made
+telling it things cheap; this makes asking possible on a farm with no history at
+all, which is the half that works on the day a tenant is created.
+
+- **No migration, and that is the slice.** The conversation lives in component
+  state, the facts are assembled per question inside `withTenant`, and nothing
+  is written. The pack-wide rule that *AI never produces a number entering the
+  books or an animal without a human seeing it first* is therefore true here by
+  construction rather than by discipline.
+- **The digest is the whole differentiation.** `core/digest.ts` builds what the
+  advisor is told about this farm: head, intake and losses per lot with the
+  DATES of each loss and the animal's age at it, where each group is and since
+  when, how long each paddock has rested, what stock is on hand, and how the
+  recording habit is going. A model without it is a worse search engine. The
+  design's AI thesis, now built: *the anchoring is the differentiation, not the
+  model.*
+- **DRIVING THE PROMPT AGAINST THE REAL API FOUND TWO GAPS, AND THE ADVISOR
+  NAMED THEM ITSELF.** Asked whether a loss rate was normal, it answered *"what
+  matters most is when the eight died, and your records don't capture that"* —
+  but they do; the digest was dropping the dates. Asked where a herd should go
+  next, it said the digest did not show when she moved onto the paddock. Both
+  are now carried, and the second answer changed completely: it correlated two
+  loss clusters with the paddock move sixteen days in, separated predation from
+  heat from flip, and told the founder what to look at today. **That is the
+  difference between a chatbot and this feature, in one before-and-after.**
+- **Where the line sits, and it is on the screen as well as in the prompt.**
+  Ask-and-orient is ungated and approximate. Compute-and-commit is refused: no
+  dose, no withdrawal period, no jurisdiction's inspection rule. Asked for a
+  penicillin dose and withdrawal it declined, explained what governs both (the
+  label, the dose and route actually used, extra-label use, a vet under a valid
+  relationship) and told the founder to record the treatment — which is the
+  right answer and is also slice 3's feature described.
+- **It never claims a fact it was not given.** With no pigs on record it said so
+  and answered from general husbandry, then said what to record so the next
+  answer would be about this farm. That behaviour is prompted, and it is the
+  reason the digest states its own caps out loud rather than truncating quietly.
+- **The classification stays this pack's.** `inventory.datedMovementsForLots`
+  returns dated rows and has no opinion about which are deaths; `headEffect`
+  decides, here, as it has since slice 0.
+- 14 new pure tests, 4 new ops tests. No new isolation tests, deliberately: the
+  slice adds no table, and every read it makes is already certified where it
+  lives.
+
+### 2026-08-19 — Slice 1a: the round is one tap, and the row IS the check (`claude/livestock-daily-log`)
 
 The day-one wedge, and the first thing built in this pack that is not about
 animals arriving or leaving. The cold start is the constraint the design says
@@ -200,6 +245,18 @@ This pack is the one that forced the change; the full reasoning is in
 - `src/packs/livestock/components/daily-round.tsx` — the one-tap button, the
   per-lot quick confirm, and the exception dialog
 - `src/app/dashboard/m/livestock/log/page.tsx` — the round
+- `src/packs/livestock/core/digest.ts` — pure. **What the advisor is told about
+  this farm.** Read this before changing anything about answer quality; the
+  model is not the variable, the digest is
+- `src/packs/livestock/ai/advisor.ts` — server-only. The system prompt and the
+  call. Never imported by a client component, so the prompt does not ship in the
+  public bundle
+- `src/packs/livestock/components/advisor-chat.tsx` — the ask screen
+- `src/app/dashboard/m/livestock/ask/page.tsx` — fetches almost nothing: the
+  digest is built per question, so an answer never comes from a snapshot taken
+  when the tab was opened
+- `src/packs/inventory/ops.ts` → `datedMovementsForLots` — added for the digest.
+  Dates matter to a diagnosis and not to a balance
 - `src/packs/inventory/ops.ts` → `movementsOnDate` — added for the round, so it
   can show today's losses WITHOUT storing them
 - `src/db/schema/livestock.ts` · `drizzle/0138_*.sql` · `drizzle/0139_livestock_rls.sql`
@@ -207,6 +264,26 @@ This pack is the one that forced the change; the full reasoning is in
 
 ## Decisions & gotchas
 
+- **The advisor WRITES NOTHING, and that is load-bearing.** Ask-and-orient is
+  ungated because it is reversible; anything that becomes a purchase order, a
+  ledger cost, a dose, a withdrawal date or a slaughter booking is
+  compute-and-commit and must be deterministic or human-confirmed. Keep that
+  file on the first side of the line — if a future slice needs the second, it
+  drafts for a person rather than acting.
+- **It must never state a dose, a withdrawal period, or a jurisdiction's
+  inspection rule as authoritative** — prompted, and repeated on the screen
+  under the input. Being confidently wrong there can put uninspectable meat in
+  somebody's freezer, which is worse than having no feature.
+- **The question is the only thing the browser sends.** Every fact comes from
+  `farmSnapshot`, inside `withTenant`, under RLS. Never build a digest from
+  client input — that is what makes it safe for an answer to sound certain
+  about the farm.
+- **When an answer is poor, look at the DIGEST before the prompt.** Twice now it
+  has been the digest, and both times the advisor said what it was missing when
+  asked. `formatSnapshot` is human-readable for exactly this reason.
+- **The digest states its own caps** — 40 lots, 40 zones, 5 loss events per lot,
+  with the omitted counts written into the text. Silent truncation would let an
+  advisor that saw 40 of 200 lots answer as though it saw all of them.
 - **THE ROW IS THE CHECK, and there is no `checked` column.** A daily log row
   means somebody looked at that lot on that date; no row means nobody did. The
   mortality denominator depends on the distinction, and a boolean that could be
@@ -283,23 +360,35 @@ This pack is the one that forced the change; the full reasoning is in
   **settled 2026-08-15**, see the build log. Placing, losing, moving and tagging
   are chores and open to any member; creating, editing and splitting a lot stay
   with the owner.
-- ~~No daily log~~ — **shipped 2026-08-19** as slice 1a. **The advisory layer is
-  still missing**, and it is the other half of the wedge: the design's
-  "ask it things, tell it things" needs the ask side, which is slice 1b and
-  needs no new table.
-- **NOBODY HAS DRIVEN THE ROUND YET.** Every bug this month was found by
-  clicking, and two of them had passing tests over the wrong behaviour.
+- ~~No daily log~~ — **shipped 2026-08-19** as slice 1a.
+- ~~No advisory layer~~ — **shipped 2026-08-19** as slice 1b.
+- **The advisor forgets on refresh.** The thread lives in component state, which
+  is what kept 1b migration-free. A question worth keeping — "what did it say
+  about the flip losses" — has to be copied out.
+- **Nothing rate-limits the advisor.** Every question is a model call on the
+  tenant's behalf, with no quota, cost cap or per-tenant counter. Fine for a
+  pilot with one farm; not fine for a hundred.
+- **The advisor cannot see feed issued, treatments or weights**, because none of
+  those are recorded yet — slices 2, 3 and 5. Its answers sharpen as those land,
+  with no change to the prompt.
+- **NEITHER SCREEN HAS BEEN CLICKED.** The advisor's PROMPT was driven against
+  the live API with a hand-built digest, which is what found the two gaps in the
+  build log — but neither the round nor the ask page has been used in a
+  browser. Every bug this month was found by clicking, and two of them had
+  passing tests over the wrong behaviour.
 - **The round is today only.** There is no way to record yesterday's check, so
   a day spent away from a screen is a hole in the record that cannot be filled
   — and the streak treats it as a genuine miss, which it was not. The ops layer
   already takes any `loggedOn`; only the screen is fixed to today.
-- **Nothing knows what mortality to EXPECT.** The design wants deviation flagged
-  while it can still be acted on — first-week losses point at chick quality or
-  brooding, late ones at heat — but that needs a reference rate, which is the
-  advisory layer's job rather than a hardcoded table.
+- **Nothing FLAGS a mortality rate that has gone wrong.** The advisor will say
+  so when asked — it called 11.4% at day 30 double the usual Cornish Cross
+  figure and separated predation from heat from flip by the dates — but nobody
+  is asked. The design wants deviation surfaced while it can still be acted on,
+  and that is a rule over the round, not a chat.
 - **No voice or natural-language entry.** The design ranks a spoken daily log as
   the single best AI use in this pack because it attacks the thirty-taps-a-day
-  problem directly. Slice 1b at the earliest.
+  problem directly. **Slice 1b shipped the ASK side only** — telling it things
+  in a sentence, from a tractor, is still unbuilt.
 - **Egg collection is not here.** Layers run the opposite rhythm to meat and the
   design wants collection to be one number and one tap, but eggs entering stock
   is a RECEIPT — `inventory` slice 1 — and building a second path into the

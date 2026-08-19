@@ -7,6 +7,7 @@ import {
   checkedDaysSince,
   checksOn,
   createLivestockLot,
+  farmSnapshot,
   getLivestockLot,
   lastCheckedByLot,
   listChecksForLot,
@@ -36,6 +37,7 @@ import {
   restByZone,
 } from "../src/packs/land/ops";
 import { summariseHead, mortalityRate } from "../src/packs/livestock/core/herd";
+import { formatSnapshot } from "../src/packs/livestock/core/digest";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -1008,6 +1010,138 @@ d("livestock ops", () => {
           }),
         ),
       ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+  });
+
+  // ---- the advisory digest (slice 1b) ------------------------------------
+
+  /**
+   * `farmSnapshot` is the advisory layer's whole differentiation: an answer
+   * anchored to this farm rather than to husbandry in general. It is also the
+   * fourth thing in this pack that reads across all three, so what is certified
+   * here is the composition — head and losses from `inventory`, the paddock
+   * from `land`, the check from this pack's own slice 1a.
+   */
+  describe("the farm snapshot", () => {
+    let snapItemId: string;
+    let snapLotId: string;
+
+    beforeAll(async () => {
+      snapItemId = (
+        await asOwner((tx) =>
+          createItem(tx, ctx(), {
+            name: "Snapshot cattle",
+            stockingUnit: "head",
+            itemKind: "livestock",
+          }),
+        )
+      ).id;
+      const made = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: snapItemId,
+          code: "SNAP-1",
+          species: "cattle",
+          breed: "Angus cross",
+          bornOn: "2026-02-01",
+        }),
+      );
+      snapLotId = made.lot.id;
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: snapItemId,
+          inventoryLotId: made.inventoryLotId,
+          head: 10,
+          occurredOn: "2026-02-01",
+        }),
+      );
+      await asOwner((tx) =>
+        removeHead(tx, ctx(), {
+          itemId: snapItemId,
+          inventoryLotId: made.inventoryLotId,
+          head: 1,
+          reason: "death",
+          occurredOn: "2026-06-01",
+        }),
+      );
+      await asOwner((tx) =>
+        moveLotToZone(tx, ctx(), {
+          livestockLotId: snapLotId,
+          zoneId,
+          startedOn: "2026-08-01",
+        }),
+      );
+      await asOwner((tx) =>
+        recordDailyCheck(tx, ctx(), {
+          livestockLotId: snapLotId,
+          loggedOn: "2026-08-19",
+        }),
+      );
+    });
+
+    it("anchors on this farm's own numbers, gathered across three packs", async () => {
+      const snapshot = await asOwner((tx) =>
+        farmSnapshot(tx, tenantId, {
+          today: "2026-08-19",
+          species: ["cattle", "swine", "poultry"],
+        }),
+      );
+      const snap = snapshot.lots.find((l) => l.code === "SNAP-1");
+      expect(snap).toBeDefined();
+      // inventory's ledger...
+      expect(snap!.head).toBe(9);
+      expect(snap!.intake).toBe(10);
+      expect(snap!.died).toBe(1);
+      // ...this pack's biology...
+      expect(snap!.species).toBe("cattle");
+      expect(snap!.breed).toBe("Angus cross");
+      expect(snap!.ageDays).toBe(199);
+      // ...land's occupancy, including WHEN the stay began, which is what
+      // makes "how long have they been on this ground" answerable...
+      expect(snap!.where).toBe("North Pasture");
+      expect(snap!.whereSince).toBe("2026-08-01");
+      // ...the loss with its date and the age it happened at, because timing
+      // implies cause...
+      expect(snap!.losses).toEqual([
+        { on: "2026-06-01", ageDays: 120, head: 1 },
+      ]);
+      // ...and slice 1a's check.
+      expect(snap!.lastCheckedOn).toBe("2026-08-19");
+      expect(snapshot.species).toEqual(["cattle", "swine", "poultry"]);
+    });
+
+    it("carries the ground and its rest, which is what 'where next' needs", async () => {
+      const snapshot = await asOwner((tx) =>
+        farmSnapshot(tx, tenantId, { today: "2026-08-19" }),
+      );
+      const zone = snapshot.zones.find((z) => z.name === "North Pasture");
+      expect(zone).toBeDefined();
+      expect(zone!.parcel).toBe("Home Farm");
+      // Somebody is standing on it, so it is occupied rather than rested — and
+      // "occupied" and "rested 0 days" are different facts.
+      expect(zone!.status).toBe("occupied");
+      expect(zone!.restDays).toBeNull();
+    });
+
+    it("lists only stock there is some of", async () => {
+      const snapshot = await asOwner((tx) =>
+        farmSnapshot(tx, tenantId, { today: "2026-08-19" }),
+      );
+      const cattle = snapshot.stock.find((s) => s.name === "Snapshot cattle");
+      expect(cattle).toEqual({ name: "Snapshot cattle", onHand: 9, unit: "head" });
+      expect(snapshot.stock.every((s) => s.onHand !== 0)).toBe(true);
+    });
+
+    it("renders to a digest a person could check the answer against", async () => {
+      // The format is deliberately human-readable: when an answer is wrong the
+      // first question is "what did it actually know", and only this makes that
+      // answerable.
+      const snapshot = await asOwner((tx) =>
+        farmSnapshot(tx, tenantId, { today: "2026-08-19" }),
+      );
+      const text = formatSnapshot(snapshot);
+      expect(text).toContain("**SNAP-1** — cattle");
+      expect(text).toContain("1 lost of 10 placed (10.0%)");
+      expect(text).toContain("on North Pasture");
     });
   });
 });

@@ -24,6 +24,16 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-19 — A second read, this one for the advisor (`claude/livestock-advisor`)
+
+`datedMovementsForLots` — movements for a set of lots, newest first, capped.
+`movementKindsForLots` drops the date because a BALANCE does not need one; a
+DIAGNOSIS does, and livestock's advisor needs to know that seven of eight birds
+died on days 22 and 27 rather than merely that eight died.
+
+It has no opinion about which kinds are deaths. That classification is
+`livestock`'s and stays there, as it has since its slice 0.
+
 ### 2026-08-19 — One read added for livestock's daily round (`claude/livestock-daily-log`)
 
 `movementsOnDate` — movements against a set of lots on one day, keyed by lot.

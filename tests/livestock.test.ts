@@ -15,6 +15,12 @@ import {
   lossesOn,
   roundProgress,
 } from "../src/packs/livestock/core/daily";
+import {
+  formatSnapshot,
+  starterQuestions,
+  type AdvisorLot,
+  type FarmSnapshot,
+} from "../src/packs/livestock/core/digest";
 import { breedHint } from "../src/packs/livestock/vocabulary";
 
 /**
@@ -370,5 +376,215 @@ describe("lossesOn", () => {
 
   it("is zero on a day nothing was recorded", () => {
     expect(lossesOn([mv("2026-08-18", "death", -3)], "2026-08-19")).toBe(0);
+  });
+});
+
+/**
+ * The farm digest.
+ *
+ * This is the advisory layer's whole differentiation — a model with no digest
+ * is a worse search engine — so what is worth asserting is that the digest
+ * never quietly misrepresents the farm: no silent truncation, no "0 days
+ * rested" for ground nobody has grazed, and an empty farm that says so instead
+ * of producing an answer-shaped void.
+ */
+const emptySnapshot: FarmSnapshot = {
+  today: "2026-08-19",
+  species: [],
+  lots: [],
+  lotsOmitted: 0,
+  zones: [],
+  zonesOmitted: 0,
+  stock: [],
+  streakDays: 0,
+  checkedToday: 0,
+};
+
+const lot = (over: Partial<AdvisorLot> = {}): AdvisorLot => ({
+  code: "B-1",
+  species: "poultry",
+  breed: "Cornish Cross",
+  sex: "mixed",
+  ageDays: 21,
+  head: 66,
+  intake: 70,
+  died: 4,
+  where: "Creek Paddock (Pen 3)",
+  whereSince: "2026-08-10",
+  losses: [{ on: "2026-08-14", ageDays: 16, head: 4 }],
+  lastCheckedOn: "2026-08-19",
+  ...over,
+});
+
+describe("formatSnapshot", () => {
+  it("tells the advisor plainly when there is nothing recorded", () => {
+    // The day-one case, and the one the advisory layer exists for. It must not
+    // read as an error or produce a digest that looks like a farm with zeros.
+    const text = formatSnapshot(emptySnapshot);
+    expect(text).toContain("NO animal lots recorded yet");
+    expect(text).toContain("general husbandry");
+  });
+
+  it("carries the loss RATE, not just the count", () => {
+    // "Is this normal" is the commonest orienting question and it needs a rate.
+    const text = formatSnapshot({ ...emptySnapshot, lots: [lot()] });
+    expect(text).toContain("4 lost of 70 placed (5.7%)");
+    expect(text).toContain("66 head");
+    expect(text).toContain("3w old");
+  });
+
+  it("says where they are, since when, and when they were last looked at", () => {
+    // "Since when" is what makes "where should they go next" answerable — the
+    // first draft of this digest omitted it and the advisor said so itself.
+    const text = formatSnapshot({ ...emptySnapshot, lots: [lot()] });
+    expect(text).toContain("on Creek Paddock (Pen 3) since 2026-08-10");
+    expect(text).toContain("last checked 2026-08-19");
+  });
+
+  it("dates the losses, and gives the age at each one", () => {
+    // TIMING IMPLIES CAUSE. First-week losses point at chick quality or
+    // brooding; late ones at heat and the leg and heart problems of fast
+    // growth. A total with no dates cannot tell those apart, and an advisor
+    // given one has to ask instead of answering.
+    const text = formatSnapshot({
+      ...emptySnapshot,
+      lots: [
+        lot({
+          losses: [
+            { on: "2026-08-14", ageDays: 16, head: 4 },
+            { on: "2026-07-31", ageDays: 2, head: 3 },
+          ],
+        }),
+      ],
+    });
+    expect(text).toContain("losses: 4 on 2026-08-14 (day 16), 3 on 2026-07-31 (day 2)");
+  });
+
+  it("omits the day number when the birth date is unknown", () => {
+    // Ordinary for bought-in stock. "day null" would be worse than no day.
+    const text = formatSnapshot({
+      ...emptySnapshot,
+      lots: [lot({ ageDays: null, losses: [{ on: "2026-08-14", ageDays: null, head: 2 }] })],
+    });
+    expect(text).toContain("losses: 2 on 2026-08-14");
+    expect(text).not.toContain("(day");
+  });
+
+  it("states 'never checked' and 'not on a paddock' rather than omitting them", () => {
+    // An advisor that cannot tell "no record" from "not applicable" answers
+    // confidently about animals nobody has looked at in a fortnight.
+    const text = formatSnapshot({
+      ...emptySnapshot,
+      lots: [lot({ where: null, lastCheckedOn: null })],
+    });
+    expect(text).toContain("not on a paddock");
+    expect(text).toContain("never checked");
+  });
+
+  it("omits the loss rate when nothing has been placed", () => {
+    // 0 of 0 is not 0%; it is unknown, and the same rule `mortalityRate`
+    // follows for the same reason.
+    const text = formatSnapshot({
+      ...emptySnapshot,
+      lots: [lot({ intake: 0, died: 0, head: 0 })],
+    });
+    expect(text).not.toContain("placed");
+  });
+
+  it("SAYS when the list was capped", () => {
+    // Silent truncation is the bug: an advisor that saw 40 of 200 lots must not
+    // answer as though it saw all of them.
+    const text = formatSnapshot({
+      ...emptySnapshot,
+      lots: [lot()],
+      lotsOmitted: 160,
+    });
+    expect(text).toContain("160 more lots NOT listed");
+  });
+
+  it("never reports rest days for ground that was never grazed", () => {
+    const text = formatSnapshot({
+      ...emptySnapshot,
+      zones: [
+        {
+          name: "New Paddock",
+          parcel: "Home Farm",
+          areaAcres: 4,
+          status: "never_grazed",
+          restDays: null,
+        },
+        {
+          name: "Creek",
+          parcel: "Home Farm",
+          areaAcres: 6,
+          status: "resting",
+          restDays: 14,
+        },
+        {
+          name: "Barn Lot",
+          parcel: "Home Farm",
+          areaAcres: null,
+          status: "occupied",
+          restDays: null,
+        },
+      ],
+    });
+    expect(text).toContain("**New Paddock** (Home Farm) · 4 ac · never grazed");
+    expect(text).toContain("rested 14 days");
+    expect(text).toContain("occupied now");
+    expect(text).not.toContain("rested 0 days");
+  });
+
+  it("reports the recording habit, because a stale record deserves a caveat", () => {
+    const text = formatSnapshot({
+      ...emptySnapshot,
+      lots: [lot(), lot({ code: "B-2" })],
+      checkedToday: 1,
+      streakDays: 11,
+    });
+    expect(text).toContain("1 of 2 listed lots checked today");
+    expect(text).toContain("11-day streak");
+  });
+});
+
+describe("starterQuestions", () => {
+  it("asks about a real lot first when there is one", () => {
+    const starters = starterQuestions({
+      species: ["poultry"],
+      sampleLotCode: "B-2026-04-15",
+      hasZones: true,
+    });
+    expect(starters[0]).toBe("Is the loss rate on B-2026-04-15 normal?");
+  });
+
+  it("is species-led, because the useful question differs per animal", () => {
+    expect(
+      starterQuestions({ species: ["swine"], sampleLotCode: null, hasZones: false }),
+    ).toEqual(["How much should a 3-month pig be eating?"]);
+    expect(
+      starterQuestions({ species: ["cattle"], sampleLotCode: null, hasZones: false }),
+    ).toEqual(["When should I wean the calves?"]);
+  });
+
+  it("falls back to general questions on a farm with nothing at all", () => {
+    // The advisory layer's whole claim is that it works before anything is
+    // recorded, so this is a first-class case rather than an empty state.
+    const starters = starterQuestions({
+      species: [],
+      sampleLotCode: null,
+      hasZones: false,
+    });
+    expect(starters.length).toBeGreaterThan(0);
+    expect(starters[0]).toContain("mortality");
+  });
+
+  it("never offers more than four", () => {
+    expect(
+      starterQuestions({
+        species: ["poultry", "swine", "cattle"],
+        sampleLotCode: "B-1",
+        hasZones: true,
+      }),
+    ).toHaveLength(4);
   });
 });

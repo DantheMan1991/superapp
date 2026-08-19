@@ -116,6 +116,32 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-19 — The advisor, and the proof that the anchoring is the product (`claude/livestock-advisor`)
+
+- **Livestock slice 1b: ask and orient.** The other half of the day-one wedge,
+  and the piece that works with nothing recorded at all — which is the whole
+  answer to the cold start this profile named as outranking the schema.
+- **The AI thesis this dossier named is now demonstrated rather than asserted.**
+  Given a digest of the farm's own records, the advisor answered "is this loss
+  rate normal" by correlating two loss clusters with the day the pen moved
+  paddock sixteen days in, separating predation from heat from flip and saying
+  what to check today. The same question with no digest gets a paragraph anybody
+  could have written. **The anchoring is the differentiation, not the model.**
+- **The advisor found the gaps in its own context.** Driven against the live
+  API, it twice said what it was missing — the DATES of the losses, and when the
+  herd moved onto its current ground. Both were in the database and neither was
+  in the digest. That is the debugging loop for every AI feature in this
+  profile: when an answer is poor, look at what it was told before touching the
+  prompt.
+- **The consequence-and-reversibility line held under a real test.** Asked for a
+  penicillin dose and withdrawal period it refused both, explained what governs
+  them, and told the founder to record the treatment — which is slice 3's
+  feature described by the thing that would not do slice 3's job.
+- **No migration.** The conversation is component state and nothing is written,
+  so the rule that AI never produces a number entering the books or an animal
+  without a human seeing it first is true by construction here.
+- Full build record in [livestock.md](livestock.md).
+
 ### 2026-08-19 — The day-one wedge is built, and it stores a fact no ledger could (`claude/livestock-daily-log`)
 
 - **Livestock slice 1a: the daily round.** The design named this the wedge for
@@ -439,7 +465,7 @@ own words condensed, not reinterpreted.
 | Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–1 built**, [land.md](land.md) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
-| Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slices 0–1a built**, [livestock.md](livestock.md) |
+| Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slices 0–1 built**, [livestock.md](livestock.md) |
 | Gardens/crops | `crops` pack | **yes** | **done** — [category design](#category-design--crops--garden-brainstormed-2026-08-13) |
 | Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
 | Baking | `production` pack — shared run, separate template | no | **done** — same design |
@@ -1129,7 +1155,7 @@ this is used daily or abandoned in March.
 | # | Slice | Why here |
 | --- | --- | --- |
 | 0 | Lots + head ledger + occupancy (shared with `land`) | The spine. Nothing works without it, and seeing your animals on paddocks already beats nothing |
-| 1 | **Daily log + advisory layer** | The day-one wedge. Habit and cold start. **Split when built: 1a the log (shipped 2026-08-19), 1b the advisory** |
+| 1 | **Daily log + advisory layer** | The day-one wedge. Habit and cold start. **Split when built: 1a the log, 1b the advisory — both shipped 2026-08-19** |
 | 2 | Feed + FCR (direct issue now, allocation seam for 10×) | Largest cash cost, and the broiler enterprise's verdict |
 | 3 | Health + withdrawal clock | Legal guardrail; useful at first use |
 | 4 | Breeding + genetics + registry | Needs a season of calving to pay off |

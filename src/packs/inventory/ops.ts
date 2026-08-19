@@ -552,6 +552,64 @@ export async function movementsOnDate(
 }
 
 /**
+ * Dated movements for a set of lots, newest first.
+ *
+ * `movementKindsForLots` deliberately drops the date, because a balance does
+ * not need one. **A diagnosis does.** The livestock design's rule is that
+ * timing implies cause — losses in the first week point at chick quality or
+ * brooding, losses in the last at heat and the leg and heart problems of fast
+ * growth — and a total with no dates cannot tell those apart.
+ *
+ * Capped rather than unbounded: at 10x these lots carry thousands of rows
+ * between them, and the caller wants the recent shape, not the archive.
+ */
+export async function datedMovementsForLots(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  limit = 200,
+): Promise<
+  Map<string, { occurredOn: string; movementKind: string; quantity: number }[]>
+> {
+  const out = new Map<
+    string,
+    { occurredOn: string; movementKind: string; quantity: number }[]
+  >();
+  if (lotIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      lotId: schema.inventoryMovements.lotId,
+      occurredOn: schema.inventoryMovements.occurredOn,
+      movementKind: schema.inventoryMovements.movementKind,
+      quantity: schema.inventoryMovements.quantity,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.lotId, lotIds),
+      ),
+    )
+    .orderBy(
+      desc(schema.inventoryMovements.occurredOn),
+      desc(schema.inventoryMovements.createdAt),
+    )
+    .limit(limit);
+  for (const row of rows) {
+    if (!row.lotId) continue;
+    const entry = {
+      occurredOn: row.occurredOn,
+      movementKind: row.movementKind,
+      quantity: row.quantity,
+    };
+    const list = out.get(row.lotId);
+    if (list) list.push(entry);
+    else out.set(row.lotId, [entry]);
+  }
+  return out;
+}
+
+/**
  * Movement KINDS and quantities for a set of lots.
  *
  * `MovementRow` deliberately carries only what a balance needs, and a balance

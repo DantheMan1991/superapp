@@ -43,6 +43,31 @@ actually using it, and of two open items that turn out to be closed.
   in the feed at `13:00Z` = 9am America/New_York), the calendars page, minting a
   feed token, and revoking one.
 
+**THE ATTENDEE PATH DOES WHAT THE COPY SAYS, and it is enforced by the
+database.** The event form promises *"Nobody is emailed yet — adding somebody
+puts the event on their calendar in Yosher"*, which sits awkwardly beside this
+module's rule that the CALENDAR, not the item, is the unit of sharing. Both are
+true, and `schedule_items_read` is why: `app_is_attendee(id)` is the FIRST
+branch of the policy, before any calendar test. Proved by reading the row back
+through RLS as each person, on the live tenant:
+
+| reader | `app_calendar_access` | `app_is_attendee` | sees it |
+| --- | --- | --- | --- |
+| the attendee (staff) | **null** | **true** | yes |
+| the organiser (owner) | write | false | yes |
+| a bystander in the same tenant | null | false | **no** |
+
+The attendee sees the event with **no access to the calendar it lives on**. Two
+things downstream make that work rather than merely permit it: `listRange`
+selects items with NO `calendar_id` filter — it leaves the question entirely to
+RLS, which is why an attendee-only row is even a candidate — and the grid falls
+back to a neutral colour (`colorOf.get(...) ?? "slate"`) for a calendar the
+reader cannot see. Either could have quietly dropped the row instead.
+
+The form is also honest about what it cannot know: adding somebody whose
+calendar you cannot read says *"Cannot see the calendar for … — they may or may
+not be free"* rather than showing a confident free/busy answer.
+
 **One thing to decide, not a defect.** *Cancel event* is a single click, sits
 directly beside *Save* in the same dialog, and asks nothing. `cancelItem` is a
 SOFT cancel — it sets `cancelled_at`, so the row survives — but there is no

@@ -11,16 +11,43 @@ import {
   createItem,
   createLot as createInventoryLot,
   getLot as getInventoryLot,
+  datedMovementsForLots,
+  listItems,
+  listLots as listInventoryLots,
+  movementKindsForLots,
+  onHandByItem,
   recordMovement,
   splitLot as splitInventoryLot,
   type InventoryCtx,
 } from "@/packs/inventory/ops";
 import {
+  currentZoneForOccupants,
+  listParcels,
+  listZones,
   moveOccupant,
+  restByZone,
   type LandCtx,
   type MoveResult,
 } from "@/packs/land/ops";
 import { isValidSlug } from "@/packs/inventory/vocabulary";
+import { addDays } from "@/lib/timezone";
+import { ageInDays, headEffect, summariseHead } from "./core/herd";
+import { checkStreak } from "./core/daily";
+import {
+  SNAPSHOT_LOT_CAP,
+  SNAPSHOT_ZONE_CAP,
+  type AdvisorLot,
+  type FarmSnapshot,
+} from "./core/digest";
+
+/** How far back the streak in the digest looks. Matches the round screen. */
+const SNAPSHOT_STREAK_DAYS = 90;
+
+/**
+ * Loss EVENTS carried per lot. Five is enough to show a shape — front-loaded,
+ * trickling, or one bad night — without turning the digest into a ledger.
+ */
+const SNAPSHOT_LOSS_EVENTS = 5;
 
 /**
  * Livestock operations.
@@ -775,4 +802,130 @@ export async function listChecksForLot(
     orderBy: (l, { desc }) => [desc(l.loggedOn)],
     limit,
   });
+}
+
+// ---------------------------------------------------------------- advisory ---
+
+/**
+ * Everything the advisor is allowed to know about this farm, in one read.
+ *
+ * **ASSEMBLED HERE, NEVER FROM THE BROWSER.** The question is the only thing a
+ * client sends; every fact in the answer comes from this function, inside
+ * `withTenant`, under RLS. That is the boundary that makes it safe for an
+ * answer to sound certain about the farm — and it is why the digest is built in
+ * the ops layer rather than passed in by the action.
+ *
+ * It composes all three packs, which is the point: the animals are this pack's,
+ * the head counts and the feed are `inventory`'s, and the ground and its rest
+ * are `land`'s. An advisor that could only see livestock rows would answer
+ * "where do I put them next" with a shrug.
+ */
+export async function farmSnapshot(
+  tx: Tx,
+  tenantId: string,
+  options: { today: string; species?: string[] },
+): Promise<FarmSnapshot> {
+  const { today } = options;
+  const allLots = await listLivestockLots(tx, tenantId);
+  const lots = allLots.slice(0, SNAPSHOT_LOT_CAP);
+  const inventoryLotIds = lots.map((l) => l.inventoryLotId);
+
+  const [
+    inventoryLots,
+    movements,
+    dated,
+    places,
+    lastChecked,
+    todaysChecks,
+    checkedDays,
+    zones,
+    parcels,
+    items,
+    onHand,
+  ] = await Promise.all([
+    listInventoryLots(tx, tenantId),
+    movementKindsForLots(tx, tenantId, inventoryLotIds),
+    datedMovementsForLots(tx, tenantId, inventoryLotIds),
+    currentZoneForOccupants(tx, tenantId, "livestock", inventoryLotIds, today),
+    lastCheckedByLot(tx, tenantId),
+    checksOn(tx, tenantId, today),
+    checkedDaysSince(tx, tenantId, addDays(today, -SNAPSHOT_STREAK_DAYS)),
+    listZones(tx, tenantId, { status: "active" }),
+    listParcels(tx, tenantId, { status: "active" }),
+    listItems(tx, tenantId, { status: "active" }),
+    onHandByItem(tx, tenantId),
+  ]);
+
+  const byInventoryLot = new Map(inventoryLots.map((l) => [l.id, l]));
+  const parcelNames = new Map(parcels.map((p) => [p.id, p.name]));
+  const shownZones = zones.slice(0, SNAPSHOT_ZONE_CAP);
+  const rest = await restByZone(
+    tx,
+    tenantId,
+    shownZones.map((z) => z.id),
+    today,
+  );
+
+  const advisorLots: AdvisorLot[] = lots.map((lot) => {
+    const summary = summariseHead(movements.get(lot.inventoryLotId) ?? []);
+    const place = places.get(lot.inventoryLotId);
+    // The CLASSIFICATION is this pack's, as it has been since slice 0 — what
+    // counts as a death is livestock's business and inventory has no opinion.
+    const losses = (dated.get(lot.inventoryLotId) ?? [])
+      .filter((m) => headEffect(m.movementKind) === "death")
+      .slice(0, SNAPSHOT_LOSS_EVENTS)
+      .map((m) => ({
+        on: m.occurredOn,
+        ageDays: ageInDays(lot.bornOn, m.occurredOn),
+        head: Math.abs(m.quantity),
+      }));
+    return {
+      code: byInventoryLot.get(lot.inventoryLotId)?.code ?? "—",
+      species: lot.species,
+      breed: lot.breed,
+      sex: lot.sex,
+      ageDays: ageInDays(lot.bornOn, today),
+      head: summary.balance,
+      intake: summary.intake,
+      died: summary.died,
+      where: place
+        ? place.structureName
+          ? `${place.zoneName} (${place.structureName})`
+          : place.zoneName
+        : null,
+      whereSince: place?.startedOn ?? null,
+      losses,
+      lastCheckedOn: lastChecked.get(lot.id) ?? null,
+    };
+  });
+
+  return {
+    today,
+    species: options.species ?? [],
+    lots: advisorLots,
+    lotsOmitted: allLots.length - lots.length,
+    zones: shownZones.map((zone) => {
+      const zoneRest = rest.get(zone.id);
+      return {
+        name: zone.name,
+        parcel: parcelNames.get(zone.parcelId) ?? "",
+        areaAcres: zone.areaAcres === null ? null : Number(zone.areaAcres),
+        status: zoneRest?.status ?? "never_grazed",
+        restDays: zoneRest?.restDays ?? null,
+      };
+    }),
+    zonesOmitted: zones.length - shownZones.length,
+    // Only what there is some of. A list of every item at zero is noise, and
+    // "we have no feed" is a claim this pack cannot make anyway until issues
+    // are recorded — inventory slice 1.
+    stock: items
+      .map((item) => ({
+        name: item.name,
+        onHand: onHand.get(item.id) ?? 0,
+        unit: item.stockingUnit,
+      }))
+      .filter((s) => s.onHand !== 0),
+    streakDays: checkStreak(checkedDays, today),
+    checkedToday: advisorLots.filter((_, i) => todaysChecks.has(lots[i].id)).length,
+  };
 }

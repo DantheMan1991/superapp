@@ -6,10 +6,19 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
+import { packContext } from "@/lib/packs/tenant-context";
+import { todayInTimezone } from "@/lib/timezone";
+import {
+  askAdvisor,
+  ADVISOR_HISTORY_MAX,
+  ADVISOR_QUESTION_MAX,
+} from "./ai/advisor";
+import { speciesFrom } from "./vocabulary";
 import {
   LivestockError,
   addIdentifier,
   createLivestockLot,
+  farmSnapshot,
   markRoundNormal,
   moveLotToZone,
   placeHead,
@@ -424,6 +433,81 @@ export async function markRoundNormalAction(input: unknown) {
     revalidatePath(BASE, "layout");
     return { ok: true, recorded: logs.length };
   } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Ask the advisor a question about this farm — livestock slice 1b.
+ *
+ * **THE QUESTION IS THE ONLY THING THE BROWSER SENDS.** Every fact in the
+ * answer comes from `farmSnapshot`, assembled inside `withTenant` under RLS. A
+ * client that lied about its history could at worst mislead its own advisor;
+ * it cannot reach another tenant's animals, because it never supplies a fact.
+ *
+ * It is a READ. Nothing here writes a record, and that is what makes the
+ * pack-wide rule — AI never produces a number that enters the books or an
+ * animal without a human seeing it first — true by construction here.
+ */
+export async function askAdvisorAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      question: z.string().trim().min(1).max(ADVISOR_QUESTION_MAX),
+      history: z
+        .array(
+          z.object({
+            role: z.enum(["user", "assistant"]),
+            content: z.string().min(1).max(20000),
+          }),
+        )
+        .max(ADVISOR_HISTORY_MAX)
+        .default([]),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Ask a shorter question." };
+
+  try {
+    const snapshot = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const pack = await packContext(
+          tx,
+          ctx.tenant.id,
+          ctx.tenant.industry,
+          PACK,
+        );
+        return farmSnapshot(tx, ctx.tenant.id, {
+          today: todayInTimezone(ctx.tenant.timezone),
+          species: speciesFrom(pack.config),
+        });
+      },
+      { role: ctx.role },
+    );
+
+    const answer = await askAdvisor({
+      snapshot,
+      history: parsed.data.history,
+      question: parsed.data.question,
+    });
+
+    // Identifiers only — never the question or the answer. What is worth
+    // recording is that this farm's records went to a model and when, not what
+    // somebody wondered about their cows.
+    await logAudit({
+      action: "livestock.advisor.asked",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "tenant",
+      targetId: ctx.tenant.id,
+      meta: { lots: snapshot.lots.length, turns: parsed.data.history.length },
+    });
+    return { ok: true, answer };
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("ANTHROPIC_API_KEY")) {
+      return { error: "The advisor is not configured on this deployment yet." };
+    }
     return toResult(err);
   }
 }

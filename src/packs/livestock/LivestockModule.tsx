@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Beef, ClipboardCheck } from "lucide-react";
+import { Beef, ClipboardCheck, Sparkles } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
@@ -100,6 +100,14 @@ export async function LivestockModule({
               <Link href={`${BASE}/log`}>
                 <ClipboardCheck className="mr-2 h-4 w-4" />
                 Daily round
+              </Link>
+            </Button>
+            {/* The other half of the wedge, and the only thing on this page
+                that works with nothing recorded at all. */}
+            <Button asChild variant="outline">
+              <Link href={`${BASE}/ask`}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Ask
               </Link>
             </Button>
             {/* No longer gated on an item existing: the form can create one. A

@@ -15,6 +15,38 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-18 — "Cost sits in" could never be saved (branch `claude/cost-sits-in-was-stripped`)
+
+Found by driving the company work on the live Test tenant: set **Cost sits in →
+1600 Equipment**, press Save, get "Saved" — and the column is still null. The
+cost saved; the account did not.
+
+- **`assetAccountId` was missing from the action's zod schema**, and **zod
+  strips what it does not declare**. So the Edit dialog sent the value, the
+  boundary dropped it silently, and `updateAsset` — which has always handled it
+  correctly — never saw it. The field could not be set from the UI at all, on
+  create or on edit.
+- **THIS IS THE EXPLANATION FOR THE ANOMALY THIS FILE RECORDED ON 2026-08-15**:
+  an asset with 6,706.78 of accumulated depreciation against a cost sitting on
+  no account. That was written up as a nullable column nobody had filled in. It
+  was a column nobody COULD fill in, and the Garage on the live tenant is still
+  in exactly that state.
+- **The schema is `.strict()` now**, so the next dropped field is a refusal
+  rather than a silence. Zod's default made the form right, the ops layer right,
+  and the value evaporate in between with nothing to grep for. A rejected
+  payload is unhelpful but it fails on the FIRST click rather than on a balance
+  sheet months later.
+- Both callers were checked against the declared fields before turning strictness
+  on — the edit dialog and the depreciation panel send only what is listed.
+- `tests/assets-ops.test.ts` gains the round-trip: created with an account,
+  cleared to null, set again.
+
+**The shape worth remembering:** `tsc` cannot see through a zod schema. Every
+type in the chain agreed — `AssetInput` declares the field, the form sends it,
+the ops layer writes it — and the one link with no type at all dropped it. The
+same blind spot as the dead column write in slice 1b, reached from the other
+end.
+
 ### 2026-08-17 — A fixed asset carries its own company (branch `claude/assets-carry-a-company`)
 
 The last thing [ADR 0010](../decisions/0010-entities-inside-a-tenant.md) listed

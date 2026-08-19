@@ -111,6 +111,20 @@ const createSchema = z.object({
    * to send one from. The composite FK refuses another tenant's company.
    */
   entityId: z.string().uuid().nullable().optional(),
+  /**
+   * Which fixed-asset account already carries this asset's cost.
+   *
+   * MISSING FROM THIS SCHEMA UNTIL 2026-08-18, and zod strips what it does not
+   * declare — so the Edit dialog's "Cost sits in" picker sent the value, the
+   * boundary dropped it silently, and `updateAsset` (which handles it
+   * perfectly) never saw it. The field could not be set from the UI at all.
+   *
+   * That is the explanation for the anomaly this dossier recorded on
+   * 2026-08-15: an asset with 6,706.78 of accumulated depreciation against a
+   * cost sitting on no account. It was not a nullable column nobody had filled
+   * in; it was a column nobody COULD fill in.
+   */
+  assetAccountId: z.string().uuid().nullable().optional(),
   notes: z.string().max(5000).optional(),
   inServiceOn: optionalDate.nullable(),
   depreciationMethod: z.enum(["none", "straight_line"]).optional(),
@@ -118,7 +132,18 @@ const createSchema = z.object({
   // a small business owns is written down over more than a century.
   usefulLifeMonths: z.number().int().min(1).max(1200).nullable().optional(),
   salvageValueCents: z.number().int().min(0).nullable().optional(),
-});
+})
+  /**
+   * STRICT, so the next dropped field is a refusal rather than a silence.
+   *
+   * Zod's default is to strip unknown keys, which is what let "Cost sits in"
+   * fail quietly for days: the form was right, the ops layer was right, and the
+   * value evaporated in between with nothing to grep for. A rejected payload
+   * says "Check the details and try again" — unhelpful, but it says SOMETHING,
+   * and it fails on the first click rather than on a balance sheet months
+   * later.
+   */
+  .strict();
 
 export async function createAssetAction(input: unknown) {
   const ctx = await requireTenant();

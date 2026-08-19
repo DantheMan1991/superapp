@@ -157,6 +157,11 @@ export const assets = pgTable(
      * account holds it. Found on the live tenant 2026-08-15 — an asset had
      * 6,706.78 of accumulated depreciation against a cost that was on no
      * account at all, which is a contra-asset with nothing behind it.
+     *
+     * THE CAUSE OF THAT, found on 2026-08-18: the field was missing from the
+     * action's zod schema, which strips what it does not declare, so "Cost sits
+     * in" could not be saved from the UI at all. Fixed, and the schema is
+     * `.strict()` now so the next dropped field refuses instead of vanishing.
      */
     assetAccountId: uuid("asset_account_id"),
     /**

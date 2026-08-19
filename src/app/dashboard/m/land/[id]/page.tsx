@@ -205,6 +205,11 @@ export default async function ParcelDetailPage({
         name={parcel.name}
         declaredAcres={parcel.areaAcres}
         geometry={parcel.geometry}
+        context={zones.map((zone) => ({
+          name: zone.name,
+          geometry: zone.geometry,
+        }))}
+        packConfig={pack.config}
         unit={unit}
         canEdit={isOwner && parcel.status === "active"}
       />

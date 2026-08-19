@@ -50,6 +50,36 @@ examples exist.
 
 ## Build log
 
+### 2026-08-19 — A white square with a working zoom control (`claude/map-needs-no-glyphs`)
+
+The map shipped and rendered nothing. Driven in the browser the moment it
+deployed, and the failure was worth the trip twice over.
+
+**The bug: a symbol layer in a style with no `glyphs`.** The context shapes
+carried a `text-field` so paddocks would be named on the map, and a MapLibre
+style cannot render text without a glyphs endpoint. `addLayer` threw inside the
+`load` handler — before `fitBounds` and before `setReady(true)` — so the result
+was a map at zoom 4 over the whole continental US, no boundary drawn, and a
+toolbar permanently disabled. **Nothing said so anywhere**: MapLibre reports
+through an `error` EVENT rather than an exception that reaches the console, and
+nothing was listening.
+
+- **The labels are gone, and that is a dependency decision rather than a
+  cosmetic one.** Glyphs mean a font service: another external host, another
+  thing to be down, another set of terms. Neighbours are dashed and the shape
+  being edited is solid green, which distinguishes them. Names return with 2b,
+  where a glyph source can be chosen deliberately.
+- **`map.on("error")` is wired now.** The first failure of this component was
+  invisible, and that must not be how the second one is found.
+- **`fitBounds` runs BEFORE the layers.** A failure adding one used to leave the
+  view over the whole country, which reads as "the imagery is broken" rather
+  than "a layer threw" — the diagnosis cost more than the fix.
+
+**Everything around the bug was fine, which is why it took evidence rather than
+a guess to find:** the tile service answered (24 requests, 200s, `image/jpeg`),
+CORS was fine, MapLibre itself constructed, and the attribution and zoom control
+rendered. The canvas was blank because the render never got past the throw.
+
 ### 2026-08-19 — Slice 2a.1: trace it on the picture (`claude/land-map`)
 
 The founder drove 2a.0 and gave the verdict the slice deserved: *"I don't
@@ -611,9 +641,9 @@ rented ground, and retrofitting it means rewriting the report.
   thing in this pack shipped ahead of its consumer, and the build log says why.
 - ~~No map~~ — **shipped 2026-08-19.** MapLibre over public-domain USDA/USGS
   orthoimagery, with tracing, corner-dragging and live acreage.
-- **NOBODY HAS TRACED A BOUNDARY ON THE MAP YET.** It type-checks, lints and
-  builds; the drawing library is wired against its own type declarations rather
-  than a guess. None of that is a browser.
+- **NOBODY HAS TRACED A BOUNDARY ON THE MAP YET.** The map itself is fixed and
+  verified to render; the DRAWING path — trace, drag a corner, save — has still
+  not been exercised in a browser.
 - **No parcel-number lookup.** The founder's actual ask was *"type in the parcel
   number and it auto traces the property"*. That needs a data source: a county
   ArcGIS service (free, per-county integration), Regrid (nationwide, paid), or

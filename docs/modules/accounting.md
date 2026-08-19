@@ -34,6 +34,8 @@ nothing saying the money had gone to an affiliate.
 
 **Third time this shape has come up** — the Journal header that named the tenant
 (slice 1), the close detail page that named no company (slice 4), and now this.
+(A fourth followed on 2026-08-18: the asset list, which showed several
+companies' assets with no column saying whose.)
 The pattern worth naming: **a screen that shows a document's own data is safe;
 one that shows a RELATIONSHIP to another company has to say which.** Every
 instance has been found by driving and none by a test, because the fixtures all

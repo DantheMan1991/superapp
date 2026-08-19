@@ -15,6 +15,29 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-18 — The asset list says whose (branch `claude/asset-list-names-the-company`)
+
+A Company column on the asset list, at two or more companies. The invoice and
+bill lists have had one since slice 1b; this list did not, so a two-company
+tenant saw four assets with no way to tell whose.
+
+- **Fourth screen of this shape**, after the Journal header that named the
+  tenant, the close detail page that named no company, and the payment rows that
+  named an account but not its owner. The rule, now written in
+  accounting.md: **a screen showing a document's OWN data is safe; one showing
+  several companies' side by side has to say which is which.**
+- An em dash rather than a guess when `entity_id` is null — that is a real state
+  for a tenant with no accounting (see `0154`), and inventing a company would be
+  a claim the row cannot support.
+- Only at two or more, so the single-company tenant's list is byte-identical.
+
+**Also verified on the live tenant this afternoon, both from the previous two
+PRs:** "Cost sits in" now saves (`1600 Equipment` on an Oak Row asset, which the
+stripped zod field had made impossible), and the disposal's **Money went into**
+picker offers `1030 Oak Row Checking` while excluding `1040 Test Operating` —
+the fifth instance of a control offering something the posting engine refuses,
+now closed and seen working.
+
 ### 2026-08-18 — "Cost sits in" could never be saved (branch `claude/cost-sits-in-was-stripped`)
 
 Found by driving the company work on the live Test tenant: set **Cost sits in →

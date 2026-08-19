@@ -316,7 +316,15 @@ async function enabledModuleSlugs(
   return new Set(rows.map((row) => row.moduleId));
 }
 
-const searchSchema = z.object({ query: z.string().max(200) });
+const searchSchema = z.object({
+  query: z.string().max(200),
+  /**
+   * The item being attached to, so its own row can be dropped from the results.
+   * Optional: the search is also reachable while composing, before there is an
+   * item to exclude.
+   */
+  itemId: z.string().uuid().optional(),
+});
 
 export async function searchLinkTargetsAction(
   input: unknown,
@@ -328,7 +336,13 @@ export async function searchLinkTargetsAction(
 
     const groups = await withWork(ctx, async (tx) => {
       const enabled = await enabledModuleSlugs(tx, ctx.tenantId);
-      return searchLinkTargets(tx, ctx, parsed.data.query, enabled);
+      return searchLinkTargets(
+        tx,
+        ctx,
+        parsed.data.query,
+        enabled,
+        parsed.data.itemId,
+      );
     });
     // No revalidate: a search changes nothing.
     return { ok: true, data: { groups } };

@@ -327,6 +327,38 @@ d("work ops", () => {
     expect(await asOwner((tx) => resolveLinks(tx, ownerCtx(), [itemId]))).toHaveLength(0);
   });
 
+  it("REFUSES work that is about itself", async () => {
+    /**
+     * FOUND BY DRIVING, 2026-08-18. The attach picker searches every enabled
+     * module including Work, so an item's own title came back as a candidate —
+     * and attaching it produced a chip on the item pointing at the item, with
+     * nothing refusing it. Work that is "about" itself is not a relationship;
+     * it is a row that reads as though it has a subject when it has only
+     * itself.
+     *
+     * The guard is in `attachLink` rather than in the picker because the picker
+     * is a mirror: Layer 0's shared actions reach this from any module, and
+     * each would otherwise have to remember. `searchLinkTargets` drops the item
+     * from its own results so the choice is not offered either.
+     */
+    const itemId = await asOwner((tx) =>
+      createItem(tx, ownerCtx(), { listId, title: "Its own subject" }),
+    );
+    await expect(
+      asOwner((tx) =>
+        attachLink(tx, ownerCtx(), {
+          itemId,
+          extensionSlug: "work",
+          entityType: "work_item",
+          entityId: itemId,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "SELF_LINK" });
+    expect(await asOwner((tx) => resolveLinks(tx, ownerCtx(), [itemId]))).toHaveLength(
+      0,
+    );
+  });
+
   it("resolves a work item through Work's own contributor", async () => {
     // The round trip the whole slice exists for: Work is the HOST rendering the
     // picker and the CONTRIBUTOR answering it, in two files that must not

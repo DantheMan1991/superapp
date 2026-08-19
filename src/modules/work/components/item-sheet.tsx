@@ -223,7 +223,9 @@ function LinkSection({
       return;
     }
     setSearching(true);
-    const result = await searchLinkTargetsAction({ query: trimmed });
+    // `itemId` so this item is not offered as its own subject. The server
+    // refuses a self-link regardless; this stops the choice appearing.
+    const result = await searchLinkTargetsAction({ query: trimmed, itemId });
     setSearching(false);
     if ("error" in result) {
       toast.error(result.error);

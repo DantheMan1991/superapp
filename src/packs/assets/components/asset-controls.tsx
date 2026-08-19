@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -43,6 +44,8 @@ export interface AssetDetailView {
   parentId: string | null;
   notes: string;
   assetAccountId: string | null;
+  /** A place things are kept — inventory's location picker reads it. */
+  isStorageLocation: boolean;
   /** Pre-formatted on the server; this component never formats money. */
   accumulatedLabel: string;
   bookValueLabel: string;
@@ -91,6 +94,9 @@ export function AssetControls({
     asset.assetAccountId ?? NO_ACCOUNT,
   );
   const [proceedsAccount, setProceedsAccount] = useState(NO_ACCOUNT);
+  const [isStorageLocation, setIsStorageLocation] = useState(
+    asset.isStorageLocation,
+  );
 
   function save(formData: FormData) {
     const kind = kindChoice === CUSTOM_KIND ? customKind : kindChoice;
@@ -107,6 +113,7 @@ export function AssetControls({
         parentId: parentChoice === NO_PARENT ? null : parentChoice,
         notes: String(formData.get("notes") ?? ""),
         assetAccountId: accountChoice === NO_ACCOUNT ? null : accountChoice,
+        isStorageLocation,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -286,6 +293,21 @@ export function AssetControls({
                   Yosher does not post it again — it needs to know where it
                   already sits so a disposal can take it back off.
                 </p>
+              </div>
+
+              <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="isStorageLocation">Things are kept here</Label>
+                  <p className="text-muted-foreground text-xs">
+                    A freezer, a barn, a garage. Turn this on and it can be
+                    picked as a place stock is held.
+                  </p>
+                </div>
+                <Switch
+                  id="isStorageLocation"
+                  checked={isStorageLocation}
+                  onCheckedChange={setIsStorageLocation}
+                />
               </div>
 
               <div className="grid gap-2">

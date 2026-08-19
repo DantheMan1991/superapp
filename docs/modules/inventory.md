@@ -24,6 +24,16 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-19 — The location picker only offers places (`claude/assets-hold-stock`)
+
+`listLocations` filters on `assets.is_storage_location` now, so the *Where*
+picker stops offering a gate and a tractor as somewhere to put chickens. The
+flag, the backfill and the reasoning for putting it on the asset rather than
+keying it on kind are in [assets.md](assets.md) — this pack only reads it.
+
+The function's name finally describes what it does, which is the whole of the
+defect `land` fixed for structures in August and this one inherited.
+
 ### 2026-08-15 — Feeding out is a chore; a lot is still a decision (`claude/pack-write-levels`)
 
 Platform-wide change; the reasoning is in

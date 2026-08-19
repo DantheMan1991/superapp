@@ -732,6 +732,19 @@ export async function lotsByItem(
 }
 
 /** Storage locations on offer: active assets. Locations ARE assets. */
+/**
+ * The places this business keeps things.
+ *
+ * ONLY ASSETS MARKED AS A PLACE THINGS ARE KEPT. It used to return every active
+ * asset, so the picker offered a gate and a tractor as somewhere to put
+ * chickens — a function whose name claimed a filter it never applied, which is
+ * the same defect `land`'s `listStructures` carried until 2026-08-16.
+ *
+ * The flag lives on the asset rather than here because a freezer is a place
+ * things live whatever pack is asking, and because KIND cannot answer it: a
+ * chest freezer and a tractor are both `equipment`. See the column comment in
+ * `db/schema/assets.ts`.
+ */
 export async function listLocations(
   tx: Tx,
   tenantId: string,
@@ -744,7 +757,11 @@ export async function listLocations(
     })
     .from(schema.assets)
     .where(
-      and(eq(schema.assets.tenantId, tenantId), eq(schema.assets.status, "active")),
+      and(
+        eq(schema.assets.tenantId, tenantId),
+        eq(schema.assets.status, "active"),
+        eq(schema.assets.isStorageLocation, true),
+      ),
     )
     .orderBy(asc(schema.assets.name));
 }

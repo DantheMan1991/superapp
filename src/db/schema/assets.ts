@@ -110,6 +110,22 @@ export const assets = pgTable(
      * used in the transaction that adds it.
      */
     status: text("status").notNull().default("active"),
+    /**
+     * IS THIS A PLACE THINGS ARE KEPT? A chest freezer, a garage, a barn — yes.
+     * A tractor or a gate — no.
+     *
+     * It lives on the ASSET rather than in `inventory`, even though inventory is
+     * the only reader today, because it is a property of the thing itself: a
+     * freezer is a place things live whatever pack is asking. The same division
+     * `land` makes by owning occupancy while `livestock` calls into it.
+     *
+     * WHY NOT A KIND FILTER, which is what `land` used for structures: the kinds
+     * do not separate these. On the live tenant a chest freezer and a tractor are
+     * BOTH `equipment`, and a garage and a gate are BOTH `building`, so any kind
+     * rule either admits the tractor or excludes the freezer — and the freezer is
+     * the canonical inventory location. Found by driving inventory on 2026-08-19.
+     */
+    isStorageLocation: boolean("is_storage_location").notNull().default(false),
     acquiredOn: date("acquired_on"),
     /**
      * Nullable on purpose. Plenty of what a business owns arrived without an

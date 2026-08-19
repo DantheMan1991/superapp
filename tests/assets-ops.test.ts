@@ -103,6 +103,40 @@ d("assets ops", () => {
     expect(members[0].isActive).toBe(true);
   });
 
+  it("keeps 'things are kept here', through create AND update", async () => {
+    /**
+     * The property `inventory` reads for its location picker. Same round-trip
+     * this file already runs for `assetAccountId`, and for the same reason: that
+     * field was declared everywhere, sent by the form, written by these ops —
+     * and silently dropped by a zod schema that did not name it. A column with
+     * no test asserting it survives the boundary is a column waiting to do that
+     * again.
+     */
+    const created = await asOwner((tx) =>
+      createAsset(tx, ownerCtx(), {
+        kind: "equipment",
+        name: "Walk-in cooler",
+        isStorageLocation: true,
+      }),
+    );
+    expect(created.isStorageLocation).toBe(true);
+
+    // The default is false: most things a business owns are not places.
+    const plain = await asOwner((tx) =>
+      createAsset(tx, ownerCtx(), { kind: "equipment", name: "Post driver" }),
+    );
+    expect(plain.isStorageLocation).toBe(false);
+
+    const turnedOn = await asOwner((tx) =>
+      updateAsset(tx, ownerCtx(), plain.id, { isStorageLocation: true }),
+    );
+    expect(turnedOn.isStorageLocation).toBe(true);
+    const turnedOff = await asOwner((tx) =>
+      updateAsset(tx, ownerCtx(), plain.id, { isStorageLocation: false }),
+    );
+    expect(turnedOff.isStorageLocation).toBe(false);
+  });
+
   it("keeps the account its cost sits in, through create AND update", async () => {
     /**
      * FOUND BY DRIVING, 2026-08-18. "Cost sits in" could not be saved from the

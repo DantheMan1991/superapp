@@ -15,6 +15,35 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-19 — A place things are kept is a property of the asset (`claude/assets-hold-stock`)
+
+The fix for the location picker the inventory drive found. Migration `0155`,
+applied to both databases.
+
+- **`assets.is_storage_location`**, and it lives on the ASSET rather than in
+  `inventory` even though inventory is its only reader today. A freezer is a
+  place things live whatever pack is asking — the same division `land` makes by
+  owning occupancy while `livestock` calls into it.
+- **WHY NOT A KIND FILTER, which is what `land` used for structures.** The kinds
+  do not separate these: on the live tenant a **chest freezer and a tractor are
+  both `equipment`**, and a **garage and a gate are both `building`**. Any rule
+  keyed on kind either admits the tractor or excludes the freezer, and the
+  freezer is the canonical inventory location. The test asserts exactly that by
+  putting a tractor and a freezer of the SAME kind on either side of the filter.
+- **The backfill has two halves**, because `false` everywhere would empty a
+  picker in use and give nobody a way to refill it. **Evidence** first — anything
+  already used as a location in the movement ledger IS one — then the same
+  default `land` chose for structures, `building` + `infrastructure`. On
+  production that marked the freezer (by evidence, against its kind), the garage
+  and a gate, and left the tractor off. The gate can now be unticked, which is
+  the point of a flag.
+- **A switch on the asset, in both the create form and the edit dialog** —
+  *"Things are kept here"*. Declared in the action's zod schema, which is
+  `.strict()` since 2026-08-18: an undeclared field would now be REFUSED rather
+  than silently dropped, which is how `assetAccountId` was lost for days.
+- `tests/assets-ops.test.ts` round-trips the flag through create and update, for
+  the reason that file already round-trips `assetAccountId`.
+
 ### 2026-08-18 — The asset list says whose (branch `claude/asset-list-names-the-company`)
 
 A Company column on the asset list, at two or more companies. The invoice and

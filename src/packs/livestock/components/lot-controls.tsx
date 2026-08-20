@@ -31,6 +31,7 @@ import {
   removeHeadAction,
   splitLivestockLotAction,
 } from "../actions";
+import { WhereAmIButton } from "@/packs/land/components/where-am-i";
 import {
   IDENTIFIER_KINDS,
   REMOVAL_REASONS,
@@ -617,7 +618,29 @@ export function MoveToZoneForm({
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="zone">Paddock</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="zone">Paddock</Label>
+                {/* **THE FIELD ANSWERS THE QUESTION.** Land's design ranked
+                    point-in-polygon above the map itself: somebody standing in
+                    a paddock should not be scrolling twenty names to find the
+                    one under their boots. It fills the picker in; it never
+                    submits. */}
+                <WhereAmIButton
+                  variant="ghost"
+                  onFound={(here) => {
+                    if (here.zoneId === currentZone?.id) {
+                      // Land refuses a move onto the paddock they are already
+                      // on, so filling it in would only produce an error.
+                      toast.info(
+                        `You are standing on ${here.zoneName}, which is where they already are.`,
+                      );
+                      return;
+                    }
+                    setZoneId(here.zoneId);
+                    toast.success(`You are on ${here.zoneName}.`);
+                  }}
+                />
+              </div>
               <Select value={zoneId} onValueChange={setZoneId}>
                 <SelectTrigger id="zone">
                   <SelectValue placeholder="Pick a paddock" />

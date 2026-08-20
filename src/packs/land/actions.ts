@@ -23,7 +23,9 @@ import {
   endZoneUse,
   retireParcel,
   retireZone,
+  getParcel,
   setParcelBoundary,
+  zoneAtPoint,
   setZoneBoundary,
   startOccupancy,
   startZoneUse,
@@ -695,6 +697,55 @@ export async function importParcelsAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, created: created.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Which paddock am I standing in?
+ *
+ * A READ, so any member may ask — the person walking the farm is exactly who
+ * this is for, and they are not usually the owner. It writes nothing and
+ * returns names, not geometry: the browser sent a coordinate and gets an
+ * answer, rather than downloading every boundary on the farm to work it out
+ * itself.
+ */
+export async function zoneAtPointAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      // Longitude first, as GeoJSON has it everywhere else in this pack.
+      lon: z.number().min(-180).max(180),
+      lat: z.number().min(-90).max(90),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "That location did not make sense." };
+
+  try {
+    const found = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const zone = await zoneAtPoint(tx, ctx.tenant.id, [
+          parsed.data.lon,
+          parsed.data.lat,
+        ]);
+        if (!zone) return null;
+        // The parcel's name travels with it, because "North Pasture" means
+        // little on a farm with two of them and the person is not at a desk.
+        const parcel = await getParcel(tx, ctx.tenant.id, zone.parcelId);
+        return {
+          zoneId: zone.id,
+          zoneName: zone.name,
+          parcelId: zone.parcelId,
+          parcelName: parcel?.name ?? "",
+          areaAcres: zone.areaAcres,
+        };
+      },
+      { role: ctx.role },
+    );
+    return { ok: true, zone: found };
   } catch (err) {
     return toResult(err);
   }

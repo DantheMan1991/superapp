@@ -1336,3 +1336,25 @@ export async function zoneAtPoint(
   }
   return best?.zone ?? null;
 }
+
+/**
+ * How many active zones have a boundary drawn.
+ *
+ * A COUNT rather than the rows, because the only caller needs to know whether
+ * "which paddock am I in" can answer at all — and loading every polygon on the
+ * farm to decide whether to render one button would be a strange way to find
+ * out.
+ */
+export async function mappedZoneCount(tx: Tx, tenantId: string): Promise<number> {
+  const rows = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.landZones)
+    .where(
+      and(
+        eq(schema.landZones.tenantId, tenantId),
+        eq(schema.landZones.status, "active"),
+        sql`${schema.landZones.geometry} is not null`,
+      ),
+    );
+  return rows[0]?.count ?? 0;
+}

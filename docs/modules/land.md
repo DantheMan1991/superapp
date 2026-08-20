@@ -26,7 +26,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2a.0** | **Boundaries** — GeoJSON in jsonb, spherical area, containment, paste-a-boundary | **shipped 2026-08-19** |
 | **2a.1** | **The map** — MapLibre over NAIP aerial, and DRAWING in the same slice | **shipped 2026-08-19** |
 | **2a.1b** | **Find my parcels** — the county's own boundary by parcel number or tax mailing address | **shipped 2026-08-19** |
-| 2a.2 | **Standing in a field** — point-in-polygon pre-fills the zone on the round and the move dialog | next |
+| **2a.2** | **Standing in a field** — point-in-polygon fills the paddock in for you | **shipped 2026-08-19** |
 | 2b | **Features** — points and lines: troughs, hydrants, wells, fences, lanes. The `assets` seam | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
@@ -50,6 +50,40 @@ layout. Operations first, planning second — and no planner before three
 examples exist.
 
 ## Build log
+
+### 2026-08-19 — Slice 2a.2: the field answers the question (`claude/which-paddock-am-i-in`)
+
+The read the whole geometry stack was ranked around. The Land design put
+point-in-polygon **above the map itself**: every other data-entry saving in this
+pack is a better form, and this one is the ground telling the app where you are.
+
+- **"Use where I am" on the livestock move dialog.** Standing in a paddock,
+  the picker fills itself in rather than making somebody scroll twenty names —
+  two hundred at 10x. It fills the field and never submits: GPS is good to a few
+  metres, a hand-traced boundary to a few more, and a fence line is exactly
+  where those errors meet.
+- **"Which paddock am I in?" on the Land page**, which navigates. The useful
+  thing on a phone is not a form to fill in but arriving at the right record
+  without reading a list.
+- **The button only appears once something is mapped** (`mappedZoneCount`).
+  Offering it against a farm with no boundaries would answer "not inside any
+  paddock" every single time.
+- **Off the mapped ground it says so, and never guesses the nearest.** A
+  nearest-match would quietly put animals on the wrong paddock, and the rest
+  clock is computed from that record.
+
+**THE OP ALREADY EXISTED AND I WROTE IT AGAIN.** `zoneAtPoint` shipped in 2a.0 —
+deliberately, with a comment saying the screens that would call it were 2a.2 —
+and this slice began by adding a near-identical `zonesAtPoint` beside it. Caught
+by its own test file failing to look wrong. The duplicate is gone and the
+original survives, including the better decision it already carried: **the
+SMALLEST containing zone wins**, because a strip inside a paddock is the more
+specific answer and is what somebody standing on it means. Now certified, along
+with a point off the mapped ground and a zone with no boundary at all.
+
+The lesson is cheap to state and was not free: **when a slice says a read is
+"for later", later has to search for it.** Three tests now cover behaviour that
+had one.
 
 ### 2026-08-19 — The finder worked and nothing linked to it (`claude/find-parcels-needs-a-door`)
 

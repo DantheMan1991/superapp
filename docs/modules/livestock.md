@@ -25,6 +25,23 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-19 — Animals are started here, and Inventory now says so (`claude/animals-live-in-livestock`)
+
+`Start a lot` on this page creates the inventory item, the batch and the biology
+in one transaction — it always has, including naming a brand-new "Counted as"
+item inline. What was missing was anywhere SAYING so: the founder, looking at
+"Broiler chicks" on the Inventory list beside his feed, asked which page he was
+supposed to add animals to.
+
+Fixed on the other side of the seam, because that is where the confusion lives.
+See [inventory.md](inventory.md) — a livestock-kind item now links here, and
+picking "Livestock" in Inventory's *Add an item* sends people to this page
+instead of letting them make a stock line with no animal behind it.
+
+**Both pages are right.** Market animals ARE inventory, which is exactly what
+makes cost per pen fall out of the same ledger as the feed. Inventory shows the
+stock line; this page shows the batches and their biology.
+
 ### 2026-08-19 — Driven on production, and the migration that had not run (`claude/mark-normal-reads-as-a-button`)
 
 Both slices clicked on the live tenant for the first time. **The first thing it

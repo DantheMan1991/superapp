@@ -142,6 +142,26 @@ What it **does** break:
   without a human seeing it first is true by construction here.
 - Full build record in [livestock.md](livestock.md).
 
+### 2026-08-19 — Land 2a.1b: ask the county, not the farmer (`claude/find-my-parcels`)
+
+- **The founder's original ask, answered three slices late**, and the delay is
+  the lesson: 2a.0 asked him to paste GeoJSON, 2a.1 asked him to trace by hand,
+  and both put the survey work on the person who already paid a county to do it.
+  *The data existed the whole time.* Worth carrying into every other pack in
+  this profile — before building an entry screen, ask who already holds the
+  record.
+- **Ohio publishes all 88 counties as one statewide service**, free and keyless,
+  so the pilot and every future Ohio client are covered by one integration.
+- **Searching by tax mailing address finds a whole farm at once** — nine parcels
+  across four roads and 462 acres in Knox County — because that is how a county
+  groups a holding. It carries no owner name, and for this purpose the mailing
+  address is the better handle anyway.
+- **The geometry got its strongest verification as a side effect.** The county's
+  acreage sits next to ours on nine real parcels and agrees within about 1% on
+  every one. Until now the spherical formula had only been checked against
+  polygons this codebase invented.
+- Full build record in [land.md](land.md).
+
 ### 2026-08-19 — Land 2a.1: the map, and a wrong front door replaced (`claude/land-map`)
 
 - **The founder drove 2a.0 and rejected its entry path**, correctly: *"I don't
@@ -505,7 +525,7 @@ own words condensed, not reinterpreted.
 
 | Category | Lands in | Farm-specific? | Brainstormed? |
 | --- | --- | :---: | :---: |
-| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–2a.1 built**, [land.md](land.md) |
+| Land | `land` pack — parcels, zones, geometry, area | no | **done** — [category design](#category-design--land-brainstormed-2026-08-13) · **slices 0–2a.1b built**, [land.md](land.md) |
 | Buildings | `assets` pack, `asset_kind = 'building'` | no | **done** — [category design](#category-design--assets-brainstormed-2026-08-13) |
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slices 0–1 built**, [livestock.md](livestock.md) |

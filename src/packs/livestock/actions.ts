@@ -25,11 +25,13 @@ import {
   deleteWeight,
   endFeedGroupMembership,
   farmSnapshot,
+  lastTreatmentOfProduct,
   markRoundNormal,
   moveLotToZone,
   placeHead,
   recordDailyCheck,
   recordFeedDraw,
+  recordTreatment,
   recordWeight,
   removeHead,
   retireIdentifier,
@@ -68,6 +70,7 @@ function toResult(err: unknown): { error: string } {
       case "LOT_INVALID":
       case "FEED_GROUP_INVALID":
       case "INVALID_WEIGHT":
+      case "INVALID_TREATMENT":
         return { error: err.message };
       case "INVALID_METHOD":
         return { error: "Pick how it was weighed." };
@@ -445,6 +448,128 @@ export async function markRoundNormalAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, recorded: logs.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------------------ treatments ---
+
+/**
+ * Record a treatment, and start its withdrawal clock.
+ *
+ * NOT owner-gated, and of everything in this pack that is the least negotiable:
+ * the person with the syringe knows what went in and when, and a treatment
+ * recorded days later by somebody who was not there is how a withdrawal period
+ * gets counted from the wrong date.
+ *
+ * **Audited with the product and both periods**, because this is the one record
+ * here that decides whether meat and milk can lawfully be sold, and "who entered
+ * that clock, and when" is a question somebody will eventually have to answer to
+ * an inspector rather than to themselves.
+ */
+export async function recordTreatmentAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const days = z.number().int().min(0).max(3650);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      treatedOn: requiredDate,
+      product: z.string().trim().min(1).max(200),
+      dose: z.string().max(200).optional(),
+      route: z.string().min(1).max(63),
+      headTreated: head.nullable().optional(),
+      meatWithdrawalDays: days.nullable().optional(),
+      milkWithdrawalDays: days.nullable().optional(),
+      withdrawalSource: z.enum(["label", "vet", "none_stated"]).optional(),
+      administeredBy: z.string().max(200).optional(),
+      notes: z.string().max(2000).optional(),
+      fromStock: z
+        .object({
+          itemId: z.string().uuid(),
+          quantity: z.number().positive().max(1_000_000).multipleOf(0.0001),
+          lotId: z.string().uuid().nullable().optional(),
+        })
+        .nullable()
+        .optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const treatment = await withTenant(
+      ctx.tenant.id,
+      (tx) => recordTreatment(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.treatment.recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      // The product and the clocks, never the notes — those are free text about
+      // an animal and belong only in the row.
+      meta: {
+        treatedOn: treatment.treatedOn,
+        product: treatment.product,
+        route: treatment.route,
+        meatWithdrawalDays: treatment.meatWithdrawalDays,
+        milkWithdrawalDays: treatment.milkWithdrawalDays,
+        withdrawalSource: treatment.withdrawalSource,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    // A treatment out of stock moves the ledger too.
+    if (parsed.data.fromStock) {
+      revalidatePath("/dashboard/m/inventory", "layout");
+    }
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * What this farm entered last time for the same product.
+ *
+ * **The only "default" the app offers anywhere**, and it is the farm's own
+ * record rather than the app's claim — the design forbids presenting a
+ * withdrawal number as authoritative, and a figure somebody here typed off a
+ * label three weeks ago is not the app asserting anything.
+ *
+ * A read, so no audit entry. It returns nothing at all when this farm has never
+ * recorded that product, which is the ordinary case and must stay silent rather
+ * than suggesting a zero.
+ */
+export async function lastTreatmentOfProductAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ product: z.string().trim().min(1).max(200) })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const previous = await withTenant(
+      ctx.tenant.id,
+      (tx) => lastTreatmentOfProduct(tx, ctx.tenant.id, parsed.data.product),
+      { role: ctx.role },
+    );
+    return {
+      ok: true,
+      previous: previous
+        ? {
+            treatedOn: previous.treatedOn,
+            dose: previous.dose,
+            route: previous.route,
+            meatWithdrawalDays: previous.meatWithdrawalDays,
+            milkWithdrawalDays: previous.milkWithdrawalDays,
+            withdrawalSource: previous.withdrawalSource,
+          }
+        : null,
+    };
   } catch (err) {
     return toResult(err);
   }

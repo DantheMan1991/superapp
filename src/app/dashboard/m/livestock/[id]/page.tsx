@@ -21,6 +21,7 @@ import {
 import {
   consumedByLot,
   getLot as getInventoryLot,
+  listItems,
   listMovements,
   movementKindsForLots,
 } from "@/packs/inventory/ops";
@@ -41,7 +42,9 @@ import {
   getLivestockLot,
   listChecksForLot,
   listIdentifiers,
+  listTreatmentsForLot,
   listWeightsForLot,
+  productsInUse,
   toWeighIns,
 } from "@/packs/livestock/ops";
 import {
@@ -72,7 +75,18 @@ import {
   SEX_LABELS,
   identifierKindLabel,
   tapeDivisorFrom,
+  treatmentRouteLabel,
 } from "@/packs/livestock/vocabulary";
+import {
+  WITHDRAWAL_SOURCE_LABELS,
+  WITHDRAWAL_SOURCE_NOTES,
+  blocksProcessing,
+  clearsOn,
+  describeWithdrawal,
+  formatWithdrawal,
+  lotWithdrawal,
+} from "@/packs/livestock/core/withdrawal";
+import { RecordTreatmentForm } from "@/packs/livestock/components/treatment-controls";
 import { formatLastChecked } from "@/packs/livestock/core/daily";
 import {
   IdentifierForm,
@@ -143,6 +157,9 @@ export default async function LivestockLotPage({
         allZones,
         weights,
         hauls,
+        treatments,
+        medicines,
+        products,
         landPack,
       ] = await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
@@ -182,6 +199,11 @@ export default async function LivestockLotPage({
           // after a trailer is 3-5% of shrink, not a loss, and the history
           // below marks it rather than quietly averaging it in.
           lastHauledOn(tx, ctx.tenant.id, "livestock", [lot.inventoryLotId]),
+          listTreatmentsForLot(tx, ctx.tenant.id, lot.id),
+          // Stock a treatment could come out of, so a sick pen carries its own
+          // expense through the same door feed does.
+          listItems(tx, ctx.tenant.id, { kind: "medicine", status: "active" }),
+          productsInUse(tx, ctx.tenant.id),
           // LAND's config, not this pack's. Which assets can hold animals is
           // land's question, and `structureKindsFrom` is land's answer to it —
           // this pack hands the config straight back rather than reading a key
@@ -208,6 +230,9 @@ export default async function LivestockLotPage({
         structures,
         weights,
         hauledOn: hauls.get(lot.inventoryLotId) ?? null,
+        treatments,
+        medicines,
+        products,
         labels: pack.labels,
         // The divisor for THIS lot's species, resolved once on the server so
         // the form knows whether a tape is even an option.
@@ -233,6 +258,9 @@ export default async function LivestockLotPage({
     structures,
     weights,
     hauledOn,
+    treatments,
+    medicines,
+    products,
     labels,
     tapeDivisor,
   } = data;
@@ -259,6 +287,25 @@ export default async function LivestockLotPage({
    * from one place and cannot disagree.
    */
   const weighIns = toWeighIns(weights, { tapeDivisor, lastHauledOn: hauledOn });
+
+  /**
+   * Both clocks, folded from the treatments rather than stored anywhere.
+   *
+   * The MEAT one leads on the card because it is the one that stops a trailer;
+   * milk is shown beside it whenever a treatment has a milk period at all, which
+   * for a beef or broiler lot is never and for a dairy cow is always.
+   */
+  const withdrawal = lotWithdrawal(treatments, today);
+  /**
+   * Show the milk line only when it SAYS SOMETHING DIFFERENT.
+   *
+   * For an unknown period both clocks read identically, and repeating the whole
+   * sentence underneath itself is the noise that teaches somebody to skim the
+   * card — which is the last card in this pack anybody should skim.
+   */
+  const showMilk =
+    withdrawal.milk.state !== withdrawal.meat.state ||
+    withdrawal.milk.clearsOn !== withdrawal.meat.clearsOn;
   const latest = feed?.weight.latest ?? null;
   const gain = feed?.weight.gain ?? null;
   const shrinkCount = feed?.weight.shrinkAffectedCount ?? 0;
@@ -310,6 +357,20 @@ export default async function LivestockLotPage({
               today={today}
             />
             {summary.balance > 0 && (
+              <RecordTreatmentForm
+                livestockLotId={lot.id}
+                lotCode={inventoryLot.code}
+                head={summary.balance}
+                today={today}
+                medicines={medicines.map((m) => ({
+                  id: m.id,
+                  name: m.name,
+                  unit: m.stockingUnit,
+                }))}
+                products={products}
+              />
+            )}
+            {summary.balance > 0 && (
               <RecordWeightForm
                 livestockLotId={lot.id}
                 lotCode={inventoryLot.code}
@@ -343,7 +404,7 @@ export default async function LivestockLotPage({
         }
       />
 
-      <div className="grid gap-6 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-6 md:grid-cols-3 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Head</CardTitle>
@@ -489,6 +550,52 @@ export default async function LivestockLotPage({
 
         <Card>
           <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              <span className="flex items-center gap-2">
+                Withdrawal
+                {/* The one badge in this pack that is a legal fact rather than a
+                    reading aid. `default` is the loud variant, and BOTH "under"
+                    and "not looked up" get it — to somebody about to load a
+                    trailer they mean the same thing.
+
+                    NOTHING AT ALL when nothing has ever been given: the card
+                    already says "Clear" once, and a badge repeating it is the
+                    noise that makes a real one easy to miss. */}
+                {withdrawal.treatmentCount > 0 && (
+                  <Badge
+                    variant={
+                      blocksProcessing(withdrawal.meat) ? "default" : "outline"
+                    }
+                    title={describeWithdrawal(withdrawal.meat)}
+                  >
+                    {formatWithdrawal(withdrawal.meat)}
+                  </Badge>
+                )}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-medium">
+              {withdrawal.meat.state === "under"
+                ? withdrawal.meat.clearsOn
+                : withdrawal.meat.state === "unknown"
+                  ? "—"
+                  : "Clear"}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {describeWithdrawal(withdrawal.meat)}
+            </p>
+            {showMilk && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Milk: {formatWithdrawal(withdrawal.milk).toLowerCase()} —{" "}
+                {describeWithdrawal(withdrawal.milk)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
             <CardTitle className="text-base">Where</CardTitle>
           </CardHeader>
           <CardContent>
@@ -611,6 +718,72 @@ export default async function LivestockLotPage({
           </Table>
         )}
       </div>
+
+      {treatments.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium">
+            Treatments{" "}
+            <span className="font-normal text-muted-foreground">
+              {/* The sentence as written. Lowercasing it mangled the product
+                  name — "penicillin g was given…" — which is the one word in it
+                  somebody needs to recognise. */}
+              · {formatWithdrawal(withdrawal.meat)} for meat
+            </span>
+          </h2>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>What</TableHead>
+                <TableHead>How</TableHead>
+                <TableHead className="text-right">Meat clear</TableHead>
+                <TableHead className="text-right">Milk clear</TableHead>
+                <TableHead>Noted</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {treatments.map((t) => (
+                <TableRow key={t.id}>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {t.treatedOn}
+                  </TableCell>
+                  <TableCell>
+                    <div className="font-medium">{t.product}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {[t.dose, t.administeredBy && `by ${t.administeredBy}`]
+                        .filter(Boolean)
+                        .join(" · ") || "—"}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {treatmentRouteLabel(t.route)}
+                    <div className="text-xs">
+                      {/* Provenance, as everywhere else in this pack. */}
+                      <span
+                        title={WITHDRAWAL_SOURCE_NOTES[t.withdrawalSource] ?? ""}
+                      >
+                        {WITHDRAWAL_SOURCE_LABELS[t.withdrawalSource] ??
+                          t.withdrawalSource}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {clearsOn(t.treatedOn, t.meatWithdrawalDays) ?? (
+                      <span className="text-muted-foreground">not looked up</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {clearsOn(t.treatedOn, t.milkWithdrawalDays) ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {t.notes || "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {weights.length > 0 && (
         <div className="space-y-3">

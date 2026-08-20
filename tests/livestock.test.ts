@@ -415,6 +415,7 @@ const lot = (over: Partial<AdvisorLot> = {}): AdvisorLot => ({
   lastCheckedOn: "2026-08-19",
   feed: null,
   weight: null,
+  withdrawal: null,
   ...over,
 });
 

@@ -9,6 +9,7 @@ import type {
   LivestockFeedGroupMember,
   LivestockIdentifier,
   LivestockLot,
+  LivestockTreatment,
   LivestockWeight,
 } from "@/db/schema";
 import {
@@ -57,6 +58,11 @@ import {
   type FeedQuantity,
   type MembershipSpan,
 } from "./core/feed";
+import {
+  WITHDRAWAL_SOURCES,
+  lotWithdrawal,
+  type LotWithdrawal,
+} from "./core/withdrawal";
 import {
   averageWeightLb,
   combinedConfidence,
@@ -117,7 +123,8 @@ export class LivestockError extends Error {
       | "LOT_INVALID"
       | "FEED_GROUP_INVALID"
       | "INVALID_METHOD"
-      | "INVALID_WEIGHT",
+      | "INVALID_WEIGHT"
+      | "INVALID_TREATMENT",
     message: string,
   ) {
     super(message);
@@ -843,6 +850,215 @@ export async function listChecksForLot(
   });
 }
 
+// ------------------------------------------------------------ treatments ---
+
+/**
+ * Record a treatment, and start its clock.
+ *
+ * `member`, and this is the least negotiable one in the pack: the person with
+ * the syringe is the person who knows what went in, and a treatment recorded
+ * three days later by somebody who was not there is how a withdrawal period ends
+ * up counted from the wrong date.
+ *
+ * **The product may come out of stock, and then the cost is `inventory`'s.** A
+ * bottle issued to the pen is an ordinary issue with the lot as consumer —
+ * exactly what feed does — so a sick pen carries its own expense without this
+ * table holding a second copy of the money. Null when the vet brought their own.
+ */
+export async function recordTreatment(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    livestockLotId: string;
+    treatedOn: string;
+    product: string;
+    dose?: string;
+    route: string;
+    headTreated?: number | null;
+    meatWithdrawalDays?: number | null;
+    milkWithdrawalDays?: number | null;
+    withdrawalSource?: string;
+    administeredBy?: string;
+    notes?: string;
+    /** Taking the product out of stock, when it came from stock. */
+    fromStock?: { itemId: string; quantity: number; lotId?: string | null } | null;
+  },
+): Promise<LivestockTreatment> {
+  requireWrite(ctx, "member");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId} not found`);
+  }
+  const product = input.product.trim();
+  if (!product) {
+    throw new LivestockError("INVALID_TREATMENT", "say what was given");
+  }
+  const route = input.route.trim().toLowerCase();
+  if (!isValidSlug(route)) {
+    throw new LivestockError("INVALID_TREATMENT", `invalid route: ${input.route}`);
+  }
+  const source = input.withdrawalSource ?? "label";
+  if (!WITHDRAWAL_SOURCES.includes(source as (typeof WITHDRAWAL_SOURCES)[number])) {
+    throw new LivestockError(
+      "INVALID_TREATMENT",
+      "say where the withdrawal period came from",
+    );
+  }
+  /**
+   * **A STATED SOURCE HAS TO STATE SOMETHING.** Claiming a period came off the
+   * label while leaving both clocks empty is the row that later reads as "clear"
+   * to somebody deciding whether to load a trailer. If neither was looked up,
+   * that is `none_stated`, which the clock treats as NOT clear.
+   */
+  if (
+    source !== "none_stated" &&
+    (input.meatWithdrawalDays ?? null) === null &&
+    (input.milkWithdrawalDays ?? null) === null
+  ) {
+    throw new LivestockError(
+      "INVALID_TREATMENT",
+      "give a meat or milk withdrawal, or say the period was not looked up",
+    );
+  }
+
+  let movementId: string | null = null;
+  if (input.fromStock && input.fromStock.quantity > 0) {
+    const movement = await issueStock(tx, asInventory(ctx), {
+      itemId: input.fromStock.itemId,
+      lotId: input.fromStock.lotId ?? null,
+      quantity: input.fromStock.quantity,
+      // The pen that got it. Same consumer column feed uses, which is what puts
+      // the cost on the animal without a second ledger.
+      issuedToLotId: lot.inventoryLotId,
+      occurredOn: input.treatedOn,
+      extensionSlug: "livestock",
+      notes: `Treated with ${product}`,
+    });
+    movementId = movement.id;
+  }
+
+  const rows = await tx
+    .insert(schema.livestockTreatments)
+    .values({
+      tenantId: ctx.tenantId,
+      livestockLotId: input.livestockLotId,
+      treatedOn: input.treatedOn,
+      product,
+      dose: input.dose?.trim() ?? "",
+      route,
+      headTreated: input.headTreated ?? null,
+      meatWithdrawalDays: input.meatWithdrawalDays ?? null,
+      milkWithdrawalDays: input.milkWithdrawalDays ?? null,
+      withdrawalSource: source,
+      administeredBy: input.administeredBy?.trim() ?? "",
+      notes: input.notes?.trim() ?? "",
+      inventoryMovementId: movementId,
+      recordedBy: ctx.userId,
+    })
+    .returning();
+  return rows[0];
+}
+
+/** One lot's treatments, newest first — the history on its detail page. */
+export async function listTreatmentsForLot(
+  tx: Tx,
+  tenantId: string,
+  livestockLotId: string,
+): Promise<LivestockTreatment[]> {
+  return tx.query.livestockTreatments.findMany({
+    where: and(
+      eq(schema.livestockTreatments.tenantId, tenantId),
+      eq(schema.livestockTreatments.livestockLotId, livestockLotId),
+    ),
+    orderBy: (t, { desc: byDesc }) => [byDesc(t.treatedOn), byDesc(t.createdAt)],
+  });
+}
+
+/** Every treatment across a set of lots, keyed by lot. One query for a list. */
+export async function treatmentsByLot(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<Map<string, LivestockTreatment[]>> {
+  const out = new Map<string, LivestockTreatment[]>();
+  if (lotIds.length === 0) return out;
+  const rows = await tx.query.livestockTreatments.findMany({
+    where: and(
+      eq(schema.livestockTreatments.tenantId, tenantId),
+      inArray(schema.livestockTreatments.livestockLotId, lotIds),
+    ),
+    orderBy: (t, { desc: byDesc }) => [byDesc(t.treatedOn)],
+  });
+  for (const row of rows) {
+    const list = out.get(row.livestockLotId);
+    if (list) list.push(row);
+    else out.set(row.livestockLotId, [row]);
+  }
+  return out;
+}
+
+/**
+ * Where every lot stands on both clocks, today.
+ *
+ * The read the livestock list and the daily round both make, because **a lot
+ * under withdrawal has to be visible where somebody is already looking** rather
+ * than only on a page they would have to think to open.
+ */
+export async function withdrawalByLot(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  today: string,
+): Promise<Map<string, LotWithdrawal>> {
+  const treatments = await treatmentsByLot(tx, tenantId, lotIds);
+  const out = new Map<string, LotWithdrawal>();
+  for (const [lotId, rows] of treatments) {
+    out.set(lotId, lotWithdrawal(rows, today));
+  }
+  return out;
+}
+
+/**
+ * What this farm entered last time for the same product, across every lot.
+ *
+ * **The only default the app offers, and it is the farm's own record.** The
+ * design asks for a default the user can override while forbidding the app from
+ * presenting a number as authoritative — a figure somebody here typed off a
+ * label three weeks ago satisfies both, where a built-in drug table would
+ * satisfy neither.
+ */
+export async function lastTreatmentOfProduct(
+  tx: Tx,
+  tenantId: string,
+  product: string,
+): Promise<LivestockTreatment | null> {
+  const wanted = product.trim();
+  if (!wanted) return null;
+  const rows = await tx.query.livestockTreatments.findMany({
+    where: and(
+      eq(schema.livestockTreatments.tenantId, tenantId),
+      sql`lower(${schema.livestockTreatments.product}) = lower(${wanted})`,
+    ),
+    orderBy: (t, { desc: byDesc }) => [byDesc(t.treatedOn), byDesc(t.createdAt)],
+    limit: 1,
+  });
+  return rows[0] ?? null;
+}
+
+/** Products this farm has used, most recent first — the picker's suggestions. */
+export async function productsInUse(
+  tx: Tx,
+  tenantId: string,
+  limit = 20,
+): Promise<string[]> {
+  const rows = await tx
+    .selectDistinct({ product: schema.livestockTreatments.product })
+    .from(schema.livestockTreatments)
+    .where(eq(schema.livestockTreatments.tenantId, tenantId))
+    .limit(limit);
+  return rows.map((r) => r.product);
+}
+
 // --------------------------------------------------------------- weights ---
 
 /**
@@ -1143,6 +1359,22 @@ export function toWeighIns(
  * many it left out, for the same reason the advisor's digest does.
  */
 export const FEED_DRAW_CAP = 500;
+
+/**
+ * Item kinds that are issued to a pen and are NOT feed.
+ *
+ * **A card reading "Fed" must not quietly include the penicillin.** Slice 3 puts
+ * medicine through the same door feed goes through — `issued_to_lot_id`, so a
+ * sick pen carries its own expense — and every figure in the feed report would
+ * otherwise absorb it silently: the cost per head, the pounds fed, and worst,
+ * the feed conversion ratio.
+ *
+ * An EXCLUSION rather than a whitelist of `feed`, deliberately. **Waste streams
+ * are real feed** and are recorded under whatever kind they were bought as —
+ * spent grain, garden culls, expired bakery — so listing what counts would drop
+ * the half of this farm's inputs the design is most insistent about.
+ */
+const NOT_FEED_KINDS = new Set(["medicine", "livestock", "supply"]);
 
 /**
  * "Everything ever recorded", as a date.
@@ -1694,7 +1926,11 @@ export async function feedReport(
           quantity: m.quantity,
         })),
       );
-      const fed = measured.get(lot.inventoryLotId) ?? [];
+      const consumed = measured.get(lot.inventoryLotId) ?? [];
+      // What was issued to this pen that is actually FEED. The medicine went
+      // through the same door and is reported beside the treatment that used
+      // it, not inside the feed figures.
+      const fed = consumed.filter((c) => !NOT_FEED_KINDS.has(c.itemKind));
       const inventoryLot = byInventoryLot.get(lot.inventoryLotId);
       return {
         lotId: lot.id,
@@ -1765,7 +2001,10 @@ export async function feedReport(
       const gainTo = gain.to.weighedOn;
       const measuredLb = toPoundsOfFeed(
         (fedDated.get(lot?.inventoryLotId ?? "") ?? []).filter(
-          (m) => m.occurredOn >= gainFrom && m.occurredOn <= gainTo,
+          (m) =>
+            !NOT_FEED_KINDS.has(m.itemKind) &&
+            m.occurredOn >= gainFrom &&
+            m.occurredOn <= gainTo,
         ),
       );
       const allocatedLb = toPoundsOfFeed(
@@ -1895,6 +2134,7 @@ export async function farmSnapshot(
     parcels,
     items,
     onHand,
+    withdrawals,
   ] = await Promise.all([
     listInventoryLots(tx, tenantId),
     movementKindsForLots(tx, tenantId, inventoryLotIds),
@@ -1907,6 +2147,13 @@ export async function farmSnapshot(
     listParcels(tx, tenantId, { status: "active" }),
     listItems(tx, tenantId, { status: "active" }),
     onHandByItem(tx, tenantId),
+    // The one fact in the digest with a legal edge. See `AdvisorLot.withdrawal`.
+    withdrawalByLot(
+      tx,
+      tenantId,
+      lots.map((l) => l.id),
+      today,
+    ),
   ]);
 
   /**
@@ -1971,6 +2218,19 @@ export async function farmSnapshot(
           cents: row.totalCents,
           centsPerHead: row.centsPerHead,
           provenance: row.provenance,
+        };
+      })(),
+      withdrawal: (() => {
+        const w = withdrawals.get(lot.id);
+        if (!w || w.treatmentCount === 0) return null;
+        const binding = w.meat.binding ?? w.milk.binding;
+        return {
+          meatState: w.meat.state,
+          meatClearsOn: w.meat.clearsOn,
+          milkState: w.milk.state,
+          milkClearsOn: w.milk.clearsOn,
+          product: binding?.product ?? null,
+          source: binding?.withdrawalSource ?? null,
         };
       })(),
       weight: (() => {

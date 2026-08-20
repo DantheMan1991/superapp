@@ -19,7 +19,12 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { listItems, listLots, movementKindsForLots } from "@/packs/inventory/ops";
 import { currentZoneForOccupants } from "@/packs/land/ops";
 import { slugLabel } from "@/packs/inventory/vocabulary";
-import { listLivestockLots } from "./ops";
+import { listLivestockLots, withdrawalByLot } from "./ops";
+import {
+  blocksProcessing,
+  describeWithdrawal,
+  formatWithdrawal,
+} from "./core/withdrawal";
 import { ageInDays, formatAge, formatRate, mortalityRate, summariseHead } from "./core/herd";
 import { labelFor } from "@/lib/packs/resolve";
 import { speciesFrom } from "./vocabulary";
@@ -61,7 +66,7 @@ export async function LivestockModule({
       const inventoryLotIds = lots.map((l) => l.inventoryLotId);
       // Three queries for the whole page, whatever the lot count: the spine
       // rows, where each lot is, and the movements behind every head figure.
-      const [inventoryLots, zones, movements] = await Promise.all([
+      const [inventoryLots, zones, movements, withdrawals] = await Promise.all([
         listLots(tx, ctx.tenant.id),
         currentZoneForOccupants(
           tx,
@@ -71,14 +76,23 @@ export async function LivestockModule({
           today,
         ),
         movementKindsForLots(tx, ctx.tenant.id, inventoryLotIds),
+        // A LOT UNDER WITHDRAWAL HAS TO BE VISIBLE WHERE SOMEBODY IS ALREADY
+        // LOOKING, not only on a page they would have to think to open.
+        withdrawalByLot(
+          tx,
+          ctx.tenant.id,
+          lots.map((l) => l.id),
+          today,
+        ),
       ]);
 
-      return { lots, pack, items, inventoryLots, zones, movements };
+      return { lots, pack, items, inventoryLots, zones, movements, withdrawals };
     },
     { role: ctx.role },
   );
 
-  const { lots, pack, items, inventoryLots, zones, movements } = data;
+  const { lots, pack, items, inventoryLots, zones, movements, withdrawals } =
+    data;
   const isOwner = ctx.role === "owner";
   const byId = new Map(inventoryLots.map((l) => [l.id, l]));
   const headItems = items.filter((i) => i.stockingUnit === "head");
@@ -152,6 +166,7 @@ export async function LivestockModule({
               <TableHead>Where</TableHead>
               <TableHead className="text-right">Age</TableHead>
               <TableHead className="text-right">Lost</TableHead>
+              <TableHead>Withdrawal</TableHead>
               <TableHead className="text-right">Head</TableHead>
             </TableRow>
           </TableHeader>
@@ -203,6 +218,27 @@ export async function LivestockModule({
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {formatRate(mortalityRate(summary))}
+                  </TableCell>
+                  <TableCell>
+                    {/* Nothing at all when nothing has been given — a column of
+                        "Clear" on a farm that has never treated anything is
+                        noise, and noise is what makes a real one invisible. */}
+                    {(() => {
+                      const w = withdrawals.get(lot.id);
+                      if (!w || w.treatmentCount === 0) {
+                        return <span className="text-muted-foreground">—</span>;
+                      }
+                      return (
+                        <Badge
+                          variant={
+                            blocksProcessing(w.meat) ? "default" : "outline"
+                          }
+                          title={describeWithdrawal(w.meat)}
+                        >
+                          {formatWithdrawal(w.meat)}
+                        </Badge>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
                     {/* An em dash before anything has been placed. "No animals"

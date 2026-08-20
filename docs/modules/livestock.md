@@ -18,12 +18,91 @@ and [land.md](land.md) before changing anything about where animals are.
 | **1a** | **Daily log — the round, and the check that is not a head event** | **shipped 2026-08-19** |
 | **1b** | **Advisory layer — ask and orient, anchored to this farm's own history** | **shipped 2026-08-19** |
 | **2** | **Feed + the allocation seam** (FCR itself waits on slice 5) | **shipped 2026-08-20** |
-| 3 | Health + withdrawal clock | next |
+| **3** | **Health + the withdrawal clock** | **shipped 2026-08-20** |
 | 4 | Breeding, genetics, registry, **and the breeding/market capital transfer** | |
 | **5** | **Weights (tape formulas, sampling) — and the FCR they unlock** | **shipped 2026-08-20** |
 | 6 | Processing handoff → `production` | |
 
 ## Build log
+
+### 2026-08-20 — Slice 3: the withdrawal clock, and an unknown is not a zero (`claude/the-withdrawal-clock`)
+
+The pack's legal guardrail, and the feature the advisor had twice refused a
+question by pointing at — a penicillin dose in slice 1b, an aspirin withdrawal
+on the production drive. Both times it said *record the treatment*, which was
+slice 3 described by the thing that could not do slice 3's job.
+
+- **THE VALUE IS THE CLOCK, NOT THE TREATMENT RECORD.** A note that a pen got
+  penicillin is a diary entry; the fact that those birds cannot go to a
+  processor until the 8th is a legal constraint, and it is the one thing in this
+  pack that can put uninspectable meat in somebody's freezer if it is wrong.
+- **TWO CLOCKS, MEAT AND MILK, NEVER MERGED.** The same injection routinely
+  clears milk in days and meat in weeks; one column with a type would force
+  whoever entered it to pick which truth to keep. Driven: on the 6th the milk
+  was saleable and the animal was not.
+- **AN UNKNOWN PERIOD IS NOT CLEARANCE, and that is the safety decision in the
+  slice.** A treatment recorded before anybody read the label leaves the lot in a
+  third state — `unknown` — that blocks exactly as a future date does. A screen
+  that said "clear" because a column was null would be the app inventing the most
+  dangerous number available to it. `blocksProcessing` is true for both, because
+  to somebody about to load a trailer they mean the same thing.
+- **NOTHING IS SUPPLIED BY THE APP.** There is no drug registry behind this and
+  there must not be a hardcoded one: periods vary by dose, route, species and
+  formulation, extra-label use extends them, and jurisdictions differ. The design
+  asks for *a default the user can override* while forbidding the app from
+  presenting a number as authoritative — so **the only default is what THIS FARM
+  entered last time for the same product**, labelled with the date it came from.
+  Driven: recording Penicillin G on a second lot offered *"You last recorded
+  Penicillin G on 2026-08-20"* and filled in nothing, because the first record
+  had no period either.
+- **A stated source has to state something.** Claiming a period came off the
+  label while leaving both clocks empty is the row that later reads as clear to
+  somebody loading a trailer, so the ops layer refuses it. If nobody looked, that
+  is `none_stated` — which blocks.
+- **The binding treatment is the one that clears LAST**, not the most recent. A
+  30-day product on the 1st outlasts a 2-day product on the 10th, and a clock
+  showing the latest treatment would clear the lot while the first was still in
+  the animal.
+- **Nothing is blocked in code yet, and that is honest rather than an
+  oversight.** The design says the lot cannot be PROCESSED and the milk cannot be
+  SOLD — and neither of those verbs exists: processing is slice 6, blocked on
+  `production`, and milk sale is `retail`. So the clock is loud on every screen
+  that shows the lot and sits in the advisor's digest, and **slice 6 must consult
+  it before booking anything**. A hard refusal wired to the wrong verb today —
+  `sold_live`, say, where a withdrawal legitimately follows the animal to another
+  farm — would be worse than none.
+- **A sick pen carries its own expense**, through the same door feed does: an
+  optional `issueStock` to the lot, with the movement id on the treatment. No
+  cents column here.
+- 20 new pure tests, 9 new ops tests, 6 new isolation tests. Migration `0166`
+  needed **no hand-reordering** — both composite FK targets already existed.
+  Seventh check, second time the answer was no. `0167` carries the policies.
+
+**THE CORRECTION SLICE 3 FORCED ON SLICE 2.** Medicine goes through
+`issued_to_lot_id` exactly as feed does, which meant the feed report silently
+absorbed it: the cost per head, the pounds fed, and worst of all the feed
+conversion ratio. `consumedByLotAndItem` and `consumedDatedByLots` now return the
+item's KIND and the report excludes medicine — an exclusion rather than a
+whitelist of `feed`, because waste streams are recorded under whatever kind they
+were bought as. A card reading "Fed" that included the penicillin would be wrong
+in the pack that owns the word.
+
+**Two reading defects, both found by clicking.** The Withdrawal card said
+"Clear" three times over for a lot nothing had ever been given — badge, headline
+and sentence — so the badge is now suppressed until something has been recorded,
+the same rule the list already followed. And the Treatments heading lowercased
+the whole sentence, turning the one word somebody needs to recognise into
+"penicillin g was given…".
+
+**The advisor answered the question it had been deflecting for three sessions.**
+Asked whether the processor could be booked for next week: *"HOGS-1: not next
+week. Your own record has a meat withdrawal until 2026-09-08 (Penicillin G, off
+the label — you looked it up). Next week is Aug 24–30, so any kill date then is
+inside it."* On the lot with no period looked up: *"Unknown is not cleared. Those
+birds can't go to a processor until someone reads the actual label on the bottle
+you used, at the dose and route you gave... I'm not going to put a number on
+it."* It quoted their record and still refused to supply one, which is exactly
+the line the prompt draws.
 
 ### 2026-08-20 — A weighing can be wrong, and now it can be put right (`claude/a-weighing-can-be-wrong`)
 
@@ -457,6 +536,7 @@ This pack is the one that forced the change; the full reasoning is in
 | `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
 | `livestock_feed_groups` | **A shared feeder** — a bin, a bulk bag, a trough | Holds the FEEDER, not the feed: no quantity, no cost, no balance. `status` in `active\|closed`; closed keeps reporting. Deliberately not an asset — a feeding group is a set of animals sharing a cost, so two bins feeding one flock are one group |
 | `livestock_feed_group_members` | Which lots eat from it, **between which dates** | The dates are the whole reason this is a table: head on any day is already in the ledger, but *when a pen went onto the bin* is not. `ended_on` INCLUSIVE, matching `land_occupancy` |
+| `livestock_treatments` | **What went into an animal, and when it is safe to eat** | TWO clocks — `meat_withdrawal_days` and `milk_withdrawal_days`, both nullable and never merged. `withdrawal_source` in `label\|vet\|none_stated` carries where the number came from; `none_stated` BLOCKS. `dose` is free text and nothing computes on it. Optional `inventory_movement_id` puts the cost on the pen |
 | `livestock_weights` | **What they weighed, and how anybody knows** | `method` open taxonomy (`scale`, `sample`, `tape`, `visual`). `sample_size` head went on the scale and together weighed `sample_weight_lb` — the AVERAGE is a division at read time and is never stored. A tape stores `heart_girth_in` + `body_length_in` and no pounds at all. CHECK: something must have been measured |
 | `livestock_feed_draws` | **This movement was feed drawn for that feeder** | A JOIN, not a second ledger. Composite FK to `inventory_movements`, which holds the quantity and the stamped cost. UNIQUE per movement — two rows would put one cost in two pots |
 
@@ -518,6 +598,12 @@ This pack is the one that forced the change; the full reasoning is in
 - `src/packs/inventory/ops.ts` → `datedMovementsForLots(…, null)` — **`limit:
   null` means every row**, because a running balance cannot start in the middle
   of a ledger. A cap is right for a digest and wrong for arithmetic
+- `src/packs/livestock/core/withdrawal.ts` — pure. **The clock, and the file
+  where being quietly wrong is a legal problem.** Read this before changing
+  anything about treatments; every function in it errs toward saying an animal is
+  still under a period
+- `src/packs/livestock/components/treatment-controls.tsx` — the form whose job is
+  to refuse to guess
 - `src/packs/livestock/core/weights.ts` — pure. **The tape formula, the gain, the
   shrink window and the confidence rule.** Read this before changing anything
   about FCR; nearly every function in it returns null on purpose
@@ -534,8 +620,38 @@ This pack is the one that forced the change; the full reasoning is in
   · `drizzle/0156_*.sql` · `drizzle/0157_livestock_daily_logs_rls.sql`
   · `drizzle/0162_*.sql` · `drizzle/0163_livestock_feed_rls.sql`
   · `drizzle/0164_*.sql` · `drizzle/0165_livestock_weights_rls.sql`
+  · `drizzle/0166_*.sql` · `drizzle/0167_livestock_treatments_rls.sql`
 
 ## Decisions & gotchas
+
+- **AN UNKNOWN WITHDRAWAL PERIOD IS NOT CLEARANCE.** A treatment recorded with
+  `none_stated` blocks exactly as a future date does, and `blocksProcessing` is
+  true for both. Never relax this into "no period means no wait": the null column
+  is the absence of a fact, and reading it as zero is the app inventing the most
+  dangerous number it has access to.
+- **NO DRUG REGISTRY, EVER.** Periods vary by dose, route, species, formulation
+  and jurisdiction, and extra-label use extends them. The only default offered
+  anywhere is what THIS farm entered last time for the same product, labelled
+  with its date. A built-in table would be confidently wrong on somebody's
+  actual bottle.
+- **A stated source has to state something.** `label` or `vet` with both clocks
+  empty is refused — that row would later read as clear.
+- **The binding treatment clears LAST, not most recently.** A long-withdrawal
+  product given first outlasts a short one given after it.
+- **NOTHING REFUSES AN ACTION ON WITHDRAWAL YET, because the actions it should
+  refuse do not exist.** Processing is slice 6 (blocked on `production`) and milk
+  sale is `retail`. **When slice 6 lands it must consult `blocksProcessing`
+  before booking anything** — that is the enforcement point this slice was built
+  for. Do not wire a refusal to `sold_live` in the meantime: a withdrawal
+  legitimately follows an animal sold live to another farm.
+- **MEDICINE IS NOT FEED, and the feed report has to keep excluding it.** Both go
+  through `issued_to_lot_id`, so `NOT_FEED_KINDS` is what stops the penicillin
+  landing in the cost per head and the FCR. It is an EXCLUSION rather than a
+  whitelist of `feed`, because waste streams are recorded under whatever kind
+  they were bought as.
+- **The withdrawal applies to the whole lot however many head were treated.**
+  `head_treated` is recorded, but nothing here can tell the three that were
+  injected from the thirty-seven that were not, and the form says so.
 
 - **FCR ARRIVED IN SLICE 5 AND IS STILL REFUSED MORE OFTEN THAN GIVEN.** Feed
   conversion is feed per pound of GAIN, so it needs two weighings — one number is
@@ -671,6 +787,22 @@ This pack is the one that forced the change; the full reasoning is in
   whether the target is new*, not *always reorder*.
 
 ## Open items
+
+- **The clock blocks nothing in code.** It is loud on the lot page, the livestock
+  list, the daily round and in the advisor's digest — and that is all it can be
+  until there is a processing action to refuse. Slice 6.
+- **A treatment cannot be corrected or removed.** Same gap weights had until
+  yesterday, and the same answer applies — a treatment recorded against the wrong
+  pen never happened — but it is worse here, because a wrong clock is a legal
+  record rather than a bad number. **Fix this before anybody relies on it.**
+- **`head_treated` is recorded and nothing reads it.** Written because the design
+  asks for it and because a partial treatment is a real thing; no screen or fold
+  uses it yet.
+- **No repeat or course support.** A five-day course of injections is five rows,
+  and the clock counts from the last of them only if somebody enters all five.
+- **Nothing warns that a withdrawal is about to expire**, or that one has just
+  cleared. Both are the deviation-surfacing the design wants and neither is a
+  rule anybody is asked about yet.
 
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-16.** Driven on
   production: record a loss (201 → 200, mortality 4.3% → 4.8%), add a visual

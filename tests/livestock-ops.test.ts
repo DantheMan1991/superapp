@@ -26,11 +26,13 @@ import {
   placeHead,
   recordDailyCheck,
   recordFeedDraw,
+  deleteWeight,
   recordWeight,
   removeHead,
   retireIdentifier,
   splitLivestockLot,
   updateLivestockLot,
+  updateWeight,
   type LivestockCtx,
 } from "../src/packs/livestock/ops";
 import {
@@ -1788,6 +1790,206 @@ d("livestock ops", () => {
       expect(row.weight.conversionBlockedBy).toMatch(/needs two/);
       // The one figure a single weighing CAN honestly produce.
       expect(row.weight.liveweightLb).toBe(100);
+    });
+
+    it("CORRECTS A WEIGHING IN PLACE — a measurement is not a ledger entry", async () => {
+      // 625 for a crate of ten broilers instead of 62.5. No such measurement
+      // ever happened, so there is nothing to compensate for and no corrective
+      // weighing that would mean anything.
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "FIXME-1",
+          species: "poultry",
+        }),
+      );
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: wItemId,
+          inventoryLotId: lot.inventoryLotId,
+          head: 100,
+          occurredOn: "2026-06-01",
+        }),
+      );
+      const wrong = await asOwner((tx) =>
+        recordWeight(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          weighedOn: "2026-07-01",
+          method: "sample",
+          sampleSize: 10,
+          sampleWeightLb: 625,
+        }),
+      );
+      const fixed = await asOwner((tx) =>
+        updateWeight(tx, ctx(), wrong.id, { sampleWeightLb: 62.5 }),
+      );
+      expect(fixed.id).toBe(wrong.id);
+      expect(fixed.sampleWeightLb).toBe(62.5);
+      // One row, not two. The wrong number is gone from the record and lives in
+      // the audit log.
+      const rows = await asOwner((tx) =>
+        listWeightsForLot(tx, tenantId, lot.lot.id),
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it("A SCALE READING CLEARS THE TAPE, and the data decides which", async () => {
+      // Not the method string — the taxonomy is open. A row carrying both would
+      // claim two measurements were taken, and one keeping a stale girth after
+      // being corrected to a scale reading would lie about what somebody did.
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "FIXME-2",
+          species: "swine",
+        }),
+      );
+      const taped = await asOwner((tx) =>
+        recordWeight(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          weighedOn: "2026-07-01",
+          method: "tape",
+          heartGirthIn: 40,
+          bodyLengthIn: 42,
+        }),
+      );
+      const scaled = await asOwner((tx) =>
+        updateWeight(tx, ctx(), taped.id, {
+          method: "scale",
+          sampleSize: 1,
+          sampleWeightLb: 174,
+        }),
+      );
+      expect(scaled.sampleWeightLb).toBe(174);
+      expect(scaled.heartGirthIn).toBeNull();
+      expect(scaled.bodyLengthIn).toBeNull();
+
+      // And back the other way — including the sample size, because a tape
+      // reads one animal and a ten carried over from a crate would divide the
+      // estimate by ten.
+      const retaped = await asOwner((tx) =>
+        updateWeight(tx, ctx(), taped.id, {
+          method: "tape",
+          heartGirthIn: 41,
+          bodyLengthIn: 43,
+        }),
+      );
+      expect(retaped.sampleWeightLb).toBeNull();
+      expect(retaped.sampleSize).toBe(1);
+    });
+
+    it("refuses a correction that would leave nothing measured", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "FIXME-3",
+          species: "poultry",
+        }),
+      );
+      const row = await asOwner((tx) =>
+        recordWeight(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          weighedOn: "2026-07-01",
+          method: "sample",
+          sampleSize: 10,
+          sampleWeightLb: 62.5,
+        }),
+      );
+      // The CHECK would refuse this too, with a constraint name nobody can
+      // read. The ops layer refuses it with a sentence.
+      await expect(
+        asOwner((tx) =>
+          updateWeight(tx, ctx(), row.id, { sampleWeightLb: null }),
+        ),
+      ).rejects.toThrow(/record what the scale said/);
+    });
+
+    it("REMOVES A WEIGHING THAT NEVER HAPPENED, and the gain follows", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "FIXME-4",
+          species: "poultry",
+        }),
+      );
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: wItemId,
+          inventoryLotId: lot.inventoryLotId,
+          head: 100,
+          occurredOn: "2026-06-01",
+        }),
+      );
+      for (const [on, lb] of [
+        ["2026-07-01", 10],
+        ["2026-07-15", 400],
+        ["2026-07-31", 30],
+      ] as const) {
+        await asOwner((tx) =>
+          recordWeight(tx, ctx(), {
+            livestockLotId: lot.lot.id,
+            weighedOn: on,
+            method: "sample",
+            sampleSize: 10,
+            sampleWeightLb: lb,
+          }),
+        );
+      }
+      // The duplicate in the middle is a whole order of magnitude out and would
+      // read as birds that grew to 40 lb and shrank back.
+      const rows = await asOwner((tx) =>
+        listWeightsForLot(tx, tenantId, lot.lot.id),
+      );
+      const bogus = rows.find((r) => r.weighedOn === "2026-07-15")!;
+      await asOwner((tx) => deleteWeight(tx, ctx(), bogus.id));
+
+      const left = await asOwner((tx) =>
+        listWeightsForLot(tx, tenantId, lot.lot.id),
+      );
+      expect(left.map((r) => r.weighedOn)).toEqual(["2026-07-01", "2026-07-31"]);
+      // Gain and conversion are folds over these rows, so removing one moves
+      // both — 1 lb to 3 lb across 30 days.
+      const gain = gainBetween(
+        toWeighIns(left, { tapeDivisor: null, lastHauledOn: null }),
+      )!;
+      expect(gain.gainLb).toBe(2);
+    });
+
+    it("refuses to correct or remove a weighing that is not this tenant's", async () => {
+      const nowhere = "00000000-0000-0000-0000-000000000000";
+      await expect(
+        asOwner((tx) => updateWeight(tx, ctx(), nowhere, { sampleWeightLb: 1 })),
+      ).rejects.toThrow(/not found/);
+      await expect(
+        asOwner((tx) => deleteWeight(tx, ctx(), nowhere)),
+      ).rejects.toThrow(/not found/);
+    });
+
+    it("STAFF may correct and remove — the person who typed it is standing there", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "FIXME-5",
+          species: "poultry",
+        }),
+      );
+      const row = await asOwner((tx) =>
+        recordWeight(tx, staffCtx(), {
+          livestockLotId: lot.lot.id,
+          weighedOn: "2026-07-01",
+          method: "sample",
+          sampleSize: 10,
+          sampleWeightLb: 625,
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          updateWeight(tx, staffCtx(), row.id, { sampleWeightLb: 62.5 }),
+        ),
+      ).resolves.toBeTruthy();
+      await expect(
+        asOwner((tx) => deleteWeight(tx, staffCtx(), row.id)),
+      ).resolves.toBeTruthy();
     });
 
     it("A HAUL IS A PARCEL CROSSING, and a walk is not", async () => {

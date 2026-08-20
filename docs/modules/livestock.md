@@ -25,6 +25,50 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-20 — A weighing can be wrong, and now it can be put right (`claude/a-weighing-can-be-wrong`)
+
+Slice 5's own first open item, closed the same day it was written. A mistyped
+crate weight was in the gain until somebody edited the database, which for a
+number the enterprise is judged on is not a gap that keeps.
+
+- **A MEASUREMENT IS NOT A LEDGER ENTRY, AND THAT DECIDES THE WHOLE SHAPE.**
+  Every quantity in `inventory` is corrected by a compensating movement, because
+  a movement is an EVENT: the feed really did leave the barn, and unwriting it
+  would be rewriting what happened. A weighing is an OBSERVATION — if somebody
+  typed 625 for a crate of ten broilers, no such measurement ever existed. There
+  is nothing to compensate for and no corrective weighing that would mean
+  anything, so `updateWeight` edits in place and `deleteWeight` removes. Same
+  call `land` already made for a stay entered by mistake: *correcting a record is
+  not rewriting history.*
+- **WHICH READING WINS IS DECIDED BY THE DATA, NOT THE METHOD STRING.** Supply a
+  scale weight and the tape columns clear; supply a girth and the scale column
+  does, and the sample size drops to one because a tape reads one animal. A row
+  carrying both would claim two measurements were taken. The method taxonomy is
+  open, so this could not be keyed on it.
+- **A delete, not a void flag.** A voided row is one every fold in this pack
+  would have to remember to exclude, and the only thing it preserves — that
+  somebody once typed a wrong number — is what `logAudit` is for. Both verbs are
+  `member`: the person who typed 625 is the person standing at the scale, and
+  making them fetch the owner to fix a digit is how a wrong number stays in.
+- **One form for recording and correcting**, because they are the same act done
+  twice. A separate edit dialog would drift from this one the first time a field
+  changed, and the fields are the interesting part — the method decides which of
+  them exist at all.
+- 6 new ops tests. No migration, no schema change.
+
+**Driven, and it found a claim that was true in the database and false on the
+screen.** The correction dialog said *"what it said before is kept in the audit
+log"*. It is — `logAudit` writes the old and new figures into `meta` — but
+**nothing in the app renders `meta`**, so a farmer was being pointed at a record
+they cannot open, and a superadmin at one they would have to query by hand. The
+copy now says what the correction actually does to their numbers instead, and
+the invisible-meta gap is an open item below.
+
+The rest held: 62.5 corrected to 68 moved the average from 6.25 to 6.8 lb, the
+gain from 0.129 to 0.144 lb/day and the conversion from 1.04 to 0.94 — one row
+throughout, never two. A bogus 45 lb broiler recorded and then removed left the
+other two weighings and their gain exactly as they were.
+
 ### 2026-08-20 — Slice 5: weights carry a method, and FCR stops being a dash (`claude/weights-carry-a-method`)
 
 Taken out of order, ahead of slice 3, for one reason: **a batch that goes to the
@@ -665,10 +709,16 @@ This pack is the one that forced the change; the full reasoning is in
   pack was given are imperial, and a column called `weight` that means different
   things per tenant is the bug the one-stocking-unit rule exists to prevent. A
   metric farm needs a conversion at the boundary, and nothing does it yet.
-- **A weighing cannot be corrected or removed.** A fat-fingered 625 lb crate of
-  broilers is in the gain until somebody edits the database. `recordWeight` is
-  insert-only, and unlike a movement there is no compensating entry that makes
-  sense for a measurement.
+- ~~A weighing cannot be corrected or removed~~ — **closed 2026-08-20.**
+  `updateWeight` edits in place and `deleteWeight` removes, because a measurement
+  is not a ledger entry: a weighing that was typed wrong never happened, so there
+  is nothing to compensate for. Both are `member`.
+- **NOTHING IN THE APP RENDERS `audit_log.meta`.** The correction action writes
+  the old and new figures into it, and `/admin/audit` shows only when, what,
+  who and which target — so the one place the previous number survives is a
+  column nobody can read without a query. That is a platform gap rather than a
+  livestock one, and it is why the correction dialog no longer promises a farmer
+  their old number is "in the audit log".
 - **No body condition score.** 1–9 on a cattle beast is the decision input the
   design names beside weight, and it is deliberately not in `livestock_weights` —
   it is not a weight, and every read that folds weights would have to remember to

@@ -922,6 +922,148 @@ export async function recordWeight(
   return rows[0];
 }
 
+/**
+ * Correct a weighing.
+ *
+ * **A MEASUREMENT IS NOT A LEDGER ENTRY, AND THIS IS THE DIFFERENCE.** Every
+ * quantity in `inventory` is corrected by a compensating movement, because a
+ * movement is an EVENT: the feed really did leave the barn, and unwriting it
+ * would be rewriting what happened. A weighing is an OBSERVATION. If somebody
+ * typed 625 lb for a crate of ten broilers, no such measurement ever existed —
+ * there is nothing to compensate for, and no "corrective weighing" that means
+ * anything. So this edits in place, exactly as `land.deleteOccupancy` removes a
+ * stay entered by mistake: correcting a record is not rewriting history.
+ *
+ * **The audit log is the history.** The previous values travel into it, so who
+ * changed a weight from what to what is answerable — which matters most on the
+ * farm where two people are recording.
+ *
+ * **WHICH READING WINS IS DECIDED BY THE DATA, NOT THE METHOD STRING.** Supply a
+ * scale weight and the tape columns are cleared; supply a girth and the scale
+ * column is. A row carrying both would claim two measurements were taken, and a
+ * row that kept a stale girth after being corrected to a scale reading would be
+ * a lie about what somebody actually did. The method taxonomy is open, so this
+ * cannot be keyed on it.
+ */
+export async function updateWeight(
+  tx: Tx,
+  ctx: LivestockCtx,
+  id: string,
+  input: {
+    weighedOn?: string;
+    method?: string;
+    sampleSize?: number;
+    sampleWeightLb?: number | null;
+    heartGirthIn?: number | null;
+    bodyLengthIn?: number | null;
+    notes?: string;
+  },
+): Promise<LivestockWeight> {
+  requireWrite(ctx, "member");
+  const existing = await tx.query.livestockWeights.findFirst({
+    where: and(
+      eq(schema.livestockWeights.tenantId, ctx.tenantId),
+      eq(schema.livestockWeights.id, id),
+    ),
+  });
+  if (!existing) {
+    throw new LivestockError("NOT_FOUND", `weighing ${id} not found`);
+  }
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.weighedOn !== undefined) patch.weighedOn = input.weighedOn;
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.method !== undefined) {
+    const method = input.method.trim().toLowerCase();
+    if (!isValidSlug(method)) {
+      throw new LivestockError("INVALID_METHOD", `invalid method: ${input.method}`);
+    }
+    patch.method = method;
+  }
+  if (input.sampleSize !== undefined) {
+    if (!Number.isInteger(input.sampleSize) || input.sampleSize < 1) {
+      throw new LivestockError(
+        "INVALID_WEIGHT",
+        "say how many head went on the scale — at least one",
+      );
+    }
+    patch.sampleSize = input.sampleSize;
+  }
+
+  const scale = input.sampleWeightLb ?? null;
+  const girth = input.heartGirthIn ?? null;
+  if (scale !== null) {
+    patch.sampleWeightLb = scale;
+    patch.heartGirthIn = null;
+    patch.bodyLengthIn = null;
+  } else if (girth !== null) {
+    if ((input.bodyLengthIn ?? null) === null) {
+      throw new LivestockError(
+        "INVALID_WEIGHT",
+        "a tape needs both the heart girth and the body length",
+      );
+    }
+    patch.heartGirthIn = girth;
+    patch.bodyLengthIn = input.bodyLengthIn;
+    patch.sampleWeightLb = null;
+    // A tape reads one animal, so a sample size carried over from a crate would
+    // divide the estimate by ten.
+    patch.sampleSize = 1;
+  } else if (
+    input.sampleWeightLb === null ||
+    input.heartGirthIn === null
+  ) {
+    // Explicitly clearing the only reading there was. The CHECK would refuse it
+    // with a constraint name; this refuses it with a sentence.
+    throw new LivestockError(
+      "INVALID_WEIGHT",
+      "record what the scale said, or the girth and length off the tape",
+    );
+  }
+
+  const rows = await tx
+    .update(schema.livestockWeights)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.livestockWeights.tenantId, ctx.tenantId),
+        eq(schema.livestockWeights.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Remove a weighing entered by mistake — a duplicate, or one recorded against
+ * the wrong pen.
+ *
+ * Deliberately a DELETE and not a void flag. A voided weighing is a row every
+ * fold in this pack would have to remember to exclude, and the thing it would
+ * preserve — that somebody once typed a wrong number — is what the audit log is
+ * for. Same call `land` makes for a stay entered by mistake.
+ */
+export async function deleteWeight(
+  tx: Tx,
+  ctx: LivestockCtx,
+  id: string,
+): Promise<LivestockWeight> {
+  requireWrite(ctx, "member");
+  const deleted = await tx
+    .delete(schema.livestockWeights)
+    .where(
+      and(
+        eq(schema.livestockWeights.tenantId, ctx.tenantId),
+        eq(schema.livestockWeights.id, id),
+      ),
+    )
+    .returning();
+  if (deleted.length === 0) {
+    throw new LivestockError("NOT_FOUND", `weighing ${id} not found`);
+  }
+  return deleted[0];
+}
+
 /** One lot's weighings, oldest first — the history on its detail page. */
 export async function listWeightsForLot(
   tx: Tx,

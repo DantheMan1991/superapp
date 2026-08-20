@@ -1,8 +1,11 @@
 import "server-only";
 import {
+  buildCurrencyUrl,
   buildLookupUrl,
   buildWhere,
   candidatesFrom,
+  currencyFrom,
+  type RecordCurrency,
   type LookupRequest,
   type ParcelCandidate,
   type ParcelSource,
@@ -74,4 +77,35 @@ export async function lookupParcels(
   }
 
   return { ok: true, candidates: candidatesFrom(source, payload) };
+}
+
+/**
+ * How current this county's records are, from the service rather than a note in
+ * a comment.
+ *
+ * Asked SEPARATELY from the search, and deliberately: the moment somebody most
+ * needs to know the data is three years old is when their parcel is not in it,
+ * and a search that returns nothing has no rows to read a date off. One extra
+ * request, cached for a day, so a zero-result search can still explain itself.
+ *
+ * Returns null rather than throwing. This is a footnote on a page, and a
+ * footnote must never be the reason the page fails.
+ */
+export async function lookupCurrency(
+  source: ParcelSource,
+  region: string,
+): Promise<RecordCurrency | null> {
+  const url = buildCurrencyUrl(source, region);
+  if (!url) return null;
+  try {
+    const response = await fetch(url, {
+      next: { revalidate: 86_400 },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) return null;
+    return currencyFrom(await response.json());
+  } catch {
+    return null;
+  }
 }

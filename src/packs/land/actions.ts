@@ -13,7 +13,7 @@ import {
   parcelSourceFrom,
   suggestedParcelName,
 } from "./core/parcel-lookup";
-import { lookupParcels } from "./parcel-lookup-service";
+import { lookupCurrency, lookupParcels } from "./parcel-lookup-service";
 import {
   LandError,
   createParcel,
@@ -607,7 +607,12 @@ export async function lookupParcelsAction(input: unknown) {
     return { error: "Pick which parcel service to search." };
   }
 
-  const result = await lookupParcels(source, parsed.data);
+  // Both together: the answer, and how old the answer is. The second matters
+  // most exactly when the first is empty.
+  const [result, currency] = await Promise.all([
+    lookupParcels(source, parsed.data),
+    lookupCurrency(source, parsed.data.region ?? ""),
+  ]);
   if (!result.ok) return { error: result.error };
 
   // The geometry is validated HERE rather than on import, so a candidate that
@@ -628,7 +633,7 @@ export async function lookupParcelsAction(input: unknown) {
     })
     .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
 
-  return { ok: true, candidates, attribution: source.attribution };
+  return { ok: true, candidates, attribution: source.attribution, currency };
 }
 
 /**

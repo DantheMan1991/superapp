@@ -3,8 +3,10 @@ import {
   MAX_CANDIDATES,
   OHIO_STATEWIDE,
   PARCEL_SOURCES,
+  buildCurrencyUrl,
   buildLookupUrl,
   buildWhere,
+  currencyFrom,
   candidatesFrom,
   escapeSqlLiteral,
   normaliseParcelNumber,
@@ -240,5 +242,55 @@ describe("the source registry", () => {
     expect(parcelRegionFrom({ parcelRegion: " Knox " })).toBe("Knox");
     expect(parcelRegionFrom({})).toBe("");
     expect(parcelRegionFrom(null)).toBe("");
+  });
+});
+
+describe("how old the records are", () => {
+  it("asks the service for the county's own min and max", () => {
+    // READ, never written down. A hardcoded date would itself go stale and
+    // then lie about staleness, which is worse than saying nothing.
+    const url = new URL(buildCurrencyUrl(OHIO_STATEWIDE, "Knox")!);
+    expect(url.searchParams.get("where")).toBe("County='Knox'");
+    const stats = JSON.parse(url.searchParams.get("outStatistics")!);
+    expect(stats.map((s: { outStatisticFieldName: string }) => s.outStatisticFieldName)).toEqual([
+      "oldest",
+      "newest",
+    ]);
+    expect(stats.every((s: { onStatisticField: string }) => s.onStatisticField === "CurrentTo")).toBe(true);
+  });
+
+  it("has nothing to ask when a source does not date its records", () => {
+    expect(buildCurrencyUrl({ ...OHIO_STATEWIDE, currencyField: null }, "Knox")).toBeNull();
+  });
+
+  it("reads ArcGIS epoch milliseconds as a date", () => {
+    // 2023-05-16, which is the real answer for all 41,757 Knox parcels.
+    const currency = currencyFrom({
+      features: [{ attributes: { oldest: 1684195200000, newest: 1684195200000 } }],
+    });
+    expect(currency).toEqual({
+      oldest: "2023-05-16",
+      newest: "2023-05-16",
+      uniform: true,
+    });
+  });
+
+  it("knows a snapshot from a range", () => {
+    // Uniform means one snapshot, which is what a county contribution looks
+    // like. A range means rows of different ages and the sentence has to change.
+    const currency = currencyFrom({
+      features: [{ attributes: { oldest: 1684195200000, newest: 1715731200000 } }],
+    });
+    expect(currency?.uniform).toBe(false);
+    expect(currency?.newest).toBe("2024-05-15");
+  });
+
+  it("says nothing rather than something wrong", () => {
+    // A footnote must never be the reason a page fails, or shows the word
+    // "null" in a sentence about how current somebody's records are.
+    expect(currencyFrom(null)).toBeNull();
+    expect(currencyFrom({ features: [] })).toBeNull();
+    expect(currencyFrom({ features: [{ attributes: { oldest: null, newest: null } }] })).toBeNull();
+    expect(currencyFrom({ features: [{ attributes: { oldest: "unknown" } }] })).toBeNull();
   });
 });

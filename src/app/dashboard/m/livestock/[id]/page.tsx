@@ -26,7 +26,7 @@ import {
   movementKindsForLots,
 } from "@/packs/inventory/ops";
 import { costPerUnit } from "@/packs/inventory/core/costing";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { movementKindLabel, slugLabel } from "@/packs/inventory/vocabulary";
 import {
   currentZoneForOccupants,
@@ -85,6 +85,7 @@ export default async function LivestockLotPage({
   await requireModuleEnabled(ctx.tenant.id, "livestock");
 
   const today = todayInTimezone(ctx.tenant.timezone);
+  const currencySymbol = ctx.tenant.currencySymbol;
 
   const data = await withTenant(
     ctx.tenant.id,
@@ -313,7 +314,7 @@ export default async function LivestockLotPage({
               {/* Zero is the honest answer once something HAS been fed and it
                   cost nothing on record; before that it is still zero, and the
                   line below says which. */}
-              {formatCents(feedCents)}
+              {formatMoney(feedCents, currencySymbol)}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {feedCents === 0
@@ -322,7 +323,7 @@ export default async function LivestockLotPage({
                     const perHead = costPerUnit(feedCents, summary.balance);
                     return perHead === null
                       ? "Feed issued to this lot."
-                      : `${formatCents(perHead)} a head at today's count.`;
+                      : `${formatMoney(perHead, currencySymbol)} a head at today's count.`;
                   })()}
             </p>
           </CardContent>
@@ -458,7 +459,7 @@ export default async function LivestockLotPage({
           <h2 className="text-sm font-medium">
             Fed in{" "}
             <span className="font-normal text-muted-foreground">
-              · {formatCents(feedCents)} total
+              · {formatMoney(feedCents, currencySymbol)} total
             </span>
           </h2>
           <Table>
@@ -484,7 +485,7 @@ export default async function LivestockLotPage({
                         comparing batches mean anything. */}
                     {movement.costCents === null
                       ? "—"
-                      : formatCents(movement.costCents)}
+                      : formatMoney(movement.costCents, currencySymbol)}
                   </TableCell>
                 </TableRow>
               ))}

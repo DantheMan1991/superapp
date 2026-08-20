@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +71,7 @@ export default async function InventoryItemPage({
   await requireModuleEnabled(ctx.tenant.id, "inventory");
 
   const today = todayInTimezone(ctx.tenant.timezone);
+  const currencySymbol = ctx.tenant.currencySymbol;
 
   const data = await withTenant(
     ctx.tenant.id,
@@ -167,6 +168,7 @@ export default async function InventoryItemPage({
                 locations={locationOptions}
                 consumers={consumerOptions}
                 unitSingular={unitSingular}
+                currencySymbol={currencySymbol}
                 today={today}
               />
             </div>
@@ -197,7 +199,7 @@ export default async function InventoryItemPage({
                     rather than to a card that would have to guess. */}
                 Averaging{" "}
                 <span className="font-medium tabular-nums">
-                  {formatCents(Math.round(costRate))}
+                  {formatMoney(Math.round(costRate), currencySymbol)}
                 </span>{" "}
                 a {unitSingular} across everything received.
               </p>
@@ -362,7 +364,7 @@ export default async function InventoryItemPage({
                         stored a cost on every receipt and issue and this table
                         listed neither, so a $340 delivery landed and the item
                         page never mentioned it. Found by driving it. */}
-                    {m.costCents === null ? "—" : formatCents(m.costCents)}
+                    {m.costCents === null ? "—" : formatMoney(m.costCents, currencySymbol)}
                   </TableCell>
                 </TableRow>
               ))}

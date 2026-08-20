@@ -3,7 +3,7 @@ import { Wrench } from "lucide-react";
 import { withTenant } from "@/db";
 import { listEntities } from "@/modules/accounting/core";
 import type { TenantContext } from "@/lib/auth";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +48,7 @@ export async function AssetsModule({
   const showDisposed = searchParams.disposed === "1";
 
   const currentPeriod = periodOf(todayInTimezone(ctx.tenant.timezone));
+  const currencySymbol = ctx.tenant.currencySymbol;
 
   const { rows, kinds, containers, companies, due } = await withTenant(
     ctx.tenant.id,
@@ -121,7 +122,7 @@ export async function AssetsModule({
               <PostAllDepreciation
                 through={currentPeriod}
                 assetsDue={due.assetsDue}
-                totalLabel={formatCents(due.totalCents)}
+                totalLabel={formatMoney(due.totalCents, currencySymbol)}
               />
               <AssetForm
                 containers={containers.map((c) => ({ id: c.id, name: c.name }))}
@@ -207,7 +208,7 @@ export async function AssetsModule({
                       apart. See the column comment in schema/assets.ts. */}
                   {asset.acquisitionCostCents === null
                     ? "—"
-                    : formatCents(asset.acquisitionCostCents)}
+                    : formatMoney(asset.acquisitionCostCents, currencySymbol)}
                 </TableCell>
               </TableRow>
             ))}

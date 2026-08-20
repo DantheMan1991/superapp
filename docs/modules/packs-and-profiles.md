@@ -11,6 +11,45 @@
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-19 — A profile can ask for a dollar sign (`claude/money-that-looks-like-money`)
+
+Founder, seeing *"Fed · 85.00"* on a livestock card: *"this should be a feature
+that you can turn on for the industry selection. for farming i definitely want
+it to show the dollar."*
+
+**`IndustryProfile.display` is a new third kind of thing a profile carries**,
+and it is worth being clear how it differs from the two that already existed:
+
+| What | How it reaches a tenant |
+| --- | --- |
+| `labels` | Resolved LIVE, every render. Fixing one helps every tenant at once |
+| `packConfig` | Handed to packs, read by the pack that owns the key |
+| **`display`** | **COPIED onto the tenant at install**, and never put back |
+
+The copy is the point. A label is presentation the profile owns; a display
+default is a suggestion the tenant may overrule, and a profile that re-asserted
+it on the next install would make "change the symbol" impossible to explain.
+`installProfile` therefore reads what is there first and only fills a null.
+
+**`tenants.currency_symbol` is platform-level, for the same reason `timezone`
+is.** Money shown two ways inside one workspace is worse than either way
+consistently, and a per-module setting guarantees exactly that — see
+[timezone.md](timezone.md) for the argument the first time it was made. It is
+presentation only: not a currency code, not a rate, and nothing converts
+anything.
+
+**`formatCents` stays symbol-free and stays right.** It was written for
+debit/credit columns whose headers carry the currency, where a symbol on every
+row is noise a bookkeeper reads past. `formatMoney(cents, symbol)` is for
+everywhere else — a card, a toast, a sentence — where there is no header and a
+bare number reads as a quantity. Applied across the farm packs (`assets`,
+`inventory`, `livestock`); accounting's grids are untouched, which was the
+founder's call when asked.
+
+**Existing tenants were backfilled** (`0161`). The installer runs at install,
+and the farm that wanted this most installed months ago — leaving it would have
+meant re-installing a profile to change a symbol.
+
 ### 2026-08-16 — The vocabulary editor was showing the wrong words (`claude/vocabulary-truth`)
 
 Both admin surfaces from the registry PR were driven for the first time. Both

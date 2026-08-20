@@ -6,7 +6,7 @@ import { schema, withTenant } from "@/db";
 import { listEntities } from "@/modules/accounting/core";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +77,7 @@ export default async function AssetDetailPage({
 
   // The tenant's today decides which periods are due, never the server's.
   const today = todayInTimezone(ctx.tenant.timezone);
+  const currencySymbol = ctx.tenant.currencySymbol;
   const currentPeriod = periodOf(today);
 
   const data = await withTenant(
@@ -144,15 +145,15 @@ export default async function AssetDetailPage({
     costLabel:
       asset.acquisitionCostCents === null
         ? "not recorded"
-        : formatCents(asset.acquisitionCostCents),
+        : formatMoney(asset.acquisitionCostCents, currencySymbol),
     postedToDateLabel: depreciation
-      ? formatCents(depreciation.postedToDateCents)
+      ? formatMoney(depreciation.postedToDateCents, currencySymbol)
       : null,
     bookValueLabel: depreciation
-      ? formatCents(depreciation.bookValueCents)
+      ? formatMoney(depreciation.bookValueCents, currencySymbol)
       : null,
     dueCount: depreciation?.due.length ?? 0,
-    dueTotalLabel: depreciation ? formatCents(dueTotal) : null,
+    dueTotalLabel: depreciation ? formatMoney(dueTotal, currencySymbol) : null,
     strandedCount: depreciation?.strandedCount ?? 0,
     catchUpPeriod: depreciation?.catchUpPeriod ?? null,
     currentPeriod,
@@ -178,9 +179,10 @@ export default async function AssetDetailPage({
     notes: asset.notes,
     assetAccountId: asset.assetAccountId,
     isStorageLocation: asset.isStorageLocation,
-    accumulatedLabel: formatCents(accumulated),
-    bookValueLabel: formatCents(
+    accumulatedLabel: formatMoney(accumulated, currencySymbol),
+    bookValueLabel: formatMoney(
       (asset.acquisitionCostCents ?? 0) - accumulated,
+      currencySymbol,
     ),
     // Mirrors postDisposal's own refusals, so the dialog can explain BEFORE
     // the button is pressed rather than after.
@@ -318,7 +320,7 @@ export default async function AssetDetailPage({
               <dd className="tabular-nums">
                 {asset.acquisitionCostCents === null
                   ? "—"
-                  : formatCents(asset.acquisitionCostCents)}
+                  : formatMoney(asset.acquisitionCostCents, currencySymbol)}
               </dd>
 
               <dt className="text-muted-foreground">Kept in</dt>

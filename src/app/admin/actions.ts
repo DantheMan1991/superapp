@@ -253,9 +253,22 @@ export async function installProfile(
     for (const slug of order) {
       if (await enableRow(tx, tenantId, slug, true)) switchedOn.push(slug);
     }
+    /**
+     * Presentation the profile suggests, COPIED onto the tenant rather than
+     * resolved live like labels are. A tenant must be able to change it
+     * afterwards without the profile putting it back on the next install — and
+     * it must not be overwritten here if somebody already chose one.
+     */
+    const existing = await tx.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+      columns: { currencySymbol: true },
+    });
+    const currencySymbol =
+      existing?.currencySymbol ?? profile.display?.currencySymbol ?? null;
+
     await tx
       .update(schema.tenants)
-      .set({ industry: profile.slug, updatedAt: new Date() })
+      .set({ industry: profile.slug, currencySymbol, updatedAt: new Date() })
       .where(eq(schema.tenants.id, tenantId));
   });
 

@@ -34,6 +34,33 @@ export function formatCents(cents: number): string {
 }
 
 /**
+ * Money with the tenant's symbol in front of it, when they have one.
+ *
+ * **`formatCents` STAYS SYMBOL-FREE AND IS STILL RIGHT.** It was written for
+ * debit/credit columns whose headers carry the currency, where a symbol on
+ * every row is noise a bookkeeper reads past. This is for everywhere else:
+ * a card saying "Fed · 85.00", a toast, a sentence — places with no header to
+ * carry it, where a bare number reads as a quantity.
+ *
+ * The symbol is a TENANT setting an industry profile suggests
+ * (`tenants.currency_symbol`), not a per-module choice, because money shown two
+ * ways inside one workspace is worse than either way consistently.
+ *
+ * Null or empty gives exactly `formatCents`, so the house style is what you get
+ * by doing nothing.
+ */
+export function formatMoney(cents: number, symbol: string | null): string {
+  const amount = formatCents(cents);
+  return symbol ? `${symbol}${amount}` : amount;
+}
+
+/** Accounting-style negatives, with the symbol inside the parentheses. */
+export function formatMoneySigned(cents: number, symbol: string | null): string {
+  const amount = formatMoney(Math.abs(cents), symbol);
+  return cents < 0 ? `(${amount})` : amount;
+}
+
+/**
  * Convert a Postgres bigint aggregate (arrives as string or number) to a
  * JS number, throwing rather than silently losing precision.
  */

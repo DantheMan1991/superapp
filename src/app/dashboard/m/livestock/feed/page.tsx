@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, Scale } from "lucide-react";
 import { withTenant } from "@/db";
+import { packContext } from "@/lib/packs/tenant-context";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { addDays, todayInTimezone } from "@/lib/timezone";
@@ -39,6 +40,12 @@ import {
   formatQuantities,
   unpricedNote,
 } from "@/packs/livestock/core/feed";
+import {
+  CONFIDENCE_NOTES,
+  WEIGHT_METHOD_NOTES,
+  formatLb,
+  formatRatio,
+} from "@/packs/livestock/core/weights";
 import { formatAge } from "@/packs/livestock/core/herd";
 import {
   AddLotToFeederForm,
@@ -71,10 +78,13 @@ const PERIODS: { key: string; label: string; days: number | null }[] = [
  * number becomes an allocated one — so the distinction is permanent rather than
  * a migration state.
  *
- * **AND THERE IS NO FCR ON THIS PAGE.** Feed conversion is feed per pound of
- * GAIN, gain needs weights, and weights are slice 5. Feed per head is here; the
- * page says in words what it cannot yet compute rather than dividing by
- * something plausible.
+ * **FEED CONVERSION ARRIVED WITH SLICE 5, AND IT IS STILL REFUSED MORE OFTEN
+ * THAN IT IS GIVEN.** It is pounds of feed per pound of GAIN, so it needs two
+ * weighings — one number is a weight, not a gain — and its window is each lot's
+ * own gain window rather than the period on the screen, because feed fed before
+ * anybody put a bird on a scale made gain nobody measured. Where there is no
+ * ratio the cell carries the reason rather than a blank, since for a farm's
+ * whole first season the reason is the useful part.
  */
 export default async function FeedPage({
   searchParams,
@@ -94,9 +104,18 @@ export default async function FeedPage({
   const data = await withTenant(
     ctx.tenant.id,
     async (tx) => {
+      // The pack's config first: the feed report needs the tape divisors to turn
+      // a girth and a length into a weight, and without them a herd measured by
+      // tape reaches the conversion with no weight at all.
+      const pack = await packContext(
+        tx,
+        ctx.tenant.id,
+        ctx.tenant.industry,
+        "livestock",
+      );
       const [report, lots, groups, items, locations, inventoryLots] =
         await Promise.all([
-          feedReport(tx, ctx.tenant.id, { from, to: today }),
+          feedReport(tx, ctx.tenant.id, { from, to: today, packConfig: pack.config }),
           listLivestockLots(tx, ctx.tenant.id),
           listFeedGroups(tx, ctx.tenant.id, { status: "active" }),
           listItems(tx, ctx.tenant.id, { status: "active" }),
@@ -161,6 +180,40 @@ export default async function FeedPage({
   const unpriced =
     report.lots.reduce((sum, row) => sum + row.unpricedMovements, 0) +
     report.groups.reduce((sum, group) => sum + group.unpricedDraws, 0);
+
+  /**
+   * The farm's own conversion, and it is a ratio of SUMS rather than an average
+   * of ratios.
+   *
+   * Averaging each pen's ratio would weight a pen of twelve the same as a pen of
+   * two hundred. Total feed over total gain is what the farm actually converted,
+   * and it is the figure a processor or a feed rep would recognise.
+   *
+   * **Measured only when every lot in it was measured at both ends.** One tape
+   * reading or one shared-feeder share makes the whole farm figure an estimate,
+   * because it is — and the badge saying so is the difference between a number
+   * to price against and a trend to watch.
+   */
+  const converted = report.lots
+    .map((row) => row.weight.conversion)
+    .filter((c): c is NonNullable<typeof c> => c !== null);
+  const anyWeighed = report.lots.some((row) => row.weight.weighInCount > 0);
+  const farmConversion =
+    converted.length === 0
+      ? null
+      : {
+          ratio:
+            Math.round(
+              (converted.reduce((sum, c) => sum + c.feedLb, 0) /
+                converted.reduce((sum, c) => sum + c.gainLb, 0)) *
+                100,
+            ) / 100,
+          feedLb: Math.round(converted.reduce((sum, c) => sum + c.feedLb, 0) * 10) / 10,
+          gainLb: Math.round(converted.reduce((sum, c) => sum + c.gainLb, 0) * 10) / 10,
+          confidence: converted.every((c) => c.confidence === "measured")
+            ? ("measured" as const)
+            : ("estimated" as const),
+        };
 
   /**
    * Only lots with animals standing in them can go onto a feeder. Offering a
@@ -309,15 +362,38 @@ export default async function FeedPage({
 
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Feed conversion</CardTitle>
+                <CardTitle className="text-base">
+                  <span className="flex items-center gap-2">
+                    Feed conversion
+                    {farmConversion && (
+                      <Badge
+                        variant={
+                          farmConversion.confidence === "measured"
+                            ? "outline"
+                            : "default"
+                        }
+                        title={CONFIDENCE_NOTES[farmConversion.confidence]}
+                      >
+                        {farmConversion.confidence === "measured"
+                          ? "Measured"
+                          : "Estimated"}
+                      </Badge>
+                    )}
+                  </span>
+                </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-medium">—</p>
+                <p className="text-2xl font-medium tabular-nums">
+                  {formatRatio(farmConversion?.ratio ?? null)}
+                </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {/* Said in words rather than divided into existence. */}
-                  Needs weights, and nothing has been weighed. Feed per head is
-                  below; feed per pound of gain is not a number this farm can
-                  produce yet.
+                  {/* Still said in words when it cannot be computed, rather
+                      than divided into existence. */}
+                  {farmConversion
+                    ? `${formatLb(farmConversion.feedLb)} of feed against ${formatLb(farmConversion.gainLb)} of gain, across every lot weighed twice in this period.`
+                    : anyWeighed
+                      ? "Nothing has been weighed twice yet. Gain needs two weighings — the second one turns this into a number."
+                      : "Needs weights, and nothing has been weighed. Feed per head is below; feed per pound of gain is not a number this farm can produce yet."}
                 </p>
               </CardContent>
             </Card>
@@ -360,6 +436,9 @@ export default async function FeedPage({
                   <TableHead className="text-right">A head now</TableHead>
                   <TableHead className="text-right">A head placed</TableHead>
                   <TableHead className="text-right">vs last batch</TableHead>
+                  <TableHead className="text-right">Weight</TableHead>
+                  <TableHead className="text-right">Gain a day</TableHead>
+                  <TableHead className="text-right">Feed : gain</TableHead>
                   <TableHead>How it is known</TableHead>
                 </TableRow>
               </TableHeader>
@@ -425,6 +504,47 @@ export default async function FeedPage({
                         </span>
                       )}
                     </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      <span
+                        title={
+                          row.weight.latest
+                            ? (WEIGHT_METHOD_NOTES[row.weight.latest.method] ?? "")
+                            : ""
+                        }
+                      >
+                        {formatLb(row.weight.latest?.averageLb ?? null)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {row.weight.gain === null
+                        ? "—"
+                        : `${row.weight.gain.adgLb} lb`}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {/* The number the enterprise is judged on, or the reason
+                          there is not one — never a blank. */}
+                      {row.weight.conversion ? (
+                        <span
+                          title={
+                            CONFIDENCE_NOTES[row.weight.conversion.confidence]
+                          }
+                          className={
+                            row.weight.conversion.confidence === "measured"
+                              ? undefined
+                              : "text-muted-foreground"
+                          }
+                        >
+                          {formatRatio(row.weight.conversion.ratio)}
+                        </span>
+                      ) : (
+                        <span
+                          className="text-muted-foreground"
+                          title={row.weight.conversionBlockedBy ?? ""}
+                        >
+                          —
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <span title={PROVENANCE_NOTES[row.provenance]}>
                         {row.provenance === "none" ? (
@@ -446,10 +566,21 @@ export default async function FeedPage({
                 ))}
               </TableBody>
             </Table>
-            <p className="text-xs text-muted-foreground">
-              {/* One place, said the same way on the lot page. */}
-              {FCR_NEEDS_WEIGHTS}
-            </p>
+            {!anyWeighed && (
+              <p className="text-xs text-muted-foreground">
+                {/* One place, said the same way on the lot page — and gone the
+                    moment it stops being true. */}
+                {FCR_NEEDS_WEIGHTS}
+              </p>
+            )}
+            {anyWeighed && (
+              <p className="text-xs text-muted-foreground">
+                Feed : gain is pounds of feed per pound of gain, over the period
+                between each lot&rsquo;s own first and last weighing — feed fed
+                before anything was weighed is left out, because the gain it
+                made was never measured.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">
               &ldquo;A head placed&rdquo; is the comparison figure: cost at
               today&rsquo;s count falls as birds die, which makes a bad batch

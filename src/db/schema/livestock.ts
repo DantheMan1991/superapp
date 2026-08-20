@@ -38,10 +38,12 @@
  *     deliberate placeholder and not the model: a single breed string thrown at
  *     a crossbred herd loses information irrecoverably, so nothing is allowed
  *     to compute on it.
- *   - **Health, withdrawal clocks, weights.** Slices 3 and 5. **Weights are why
- *     there is no FCR anywhere in this pack yet**: feed per head is answerable
- *     today, feed per pound of GAIN is not, and inventing a gain figure would
- *     produce the one number the broiler enterprise is judged on out of nothing.
+ *   - **Health and withdrawal clocks.** Slice 3.
+ *   - **A weight, a gain or an FCR on the lot.** Slice 5 adds
+ *     `livestock_weights`, and every one of those three is a FOLD over it. A
+ *     stored current weight would be a second source of truth the moment
+ *     somebody weighed again, and a stored FCR would be a number that stopped
+ *     agreeing with the feed it was divided from.
  *   - **A feed quantity or a feed cost on the lot.** Slice 2 adds three tables
  *     for the shared-feeder ALLOCATION and not one number about feed, because
  *     what was fed is already `inventory_movements` — measured when a bag went
@@ -53,7 +55,9 @@ import {
   date,
   foreignKey,
   index,
+  integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   timestamp,
@@ -466,6 +470,151 @@ export const livestockFeedDraws = pgTable(
   ],
 );
 
+/**
+ * WHAT AN ANIMAL WEIGHED, AND HOW ANYBODY KNOWS.
+ *
+ * **A weight is an observation carrying a METHOD, never a number on its own**,
+ * and the method is the whole reason this is a table rather than a column on the
+ * lot. A steer through a chute onto a certified scale and a steer measured with
+ * a tape around the heart girth produce the same shape of fact and deserve very
+ * different confidence — the design's rule is that broiler FCR from bagged feed
+ * against SAMPLED weights is *measured* and can be acted on, while cattle gain
+ * from a TAPE against allocated pasture cost is *estimated* and is a trend to
+ * watch. That distinction dies the moment both are stored as "weight".
+ *
+ * **THE OBSERVATION IS ABOUT THE LOT, AND AN INDIVIDUAL IS A LOT OF ONE.** So
+ * one shape covers both: `sample_size` head went on the scale and together they
+ * weighed `sample_weight_lb`. Ten broilers in a crate is `10`; a cow through a
+ * chute is `1`. The average per head is a DIVISION AT READ TIME and is never
+ * stored, for the same reason no balance in this pack is.
+ *
+ * **A TAPE RECORDS THE TAPE, NOT THE POUNDS.** `heart_girth_in` and
+ * `body_length_in` are what the person actually measured; the weight is computed
+ * from them by a formula that lives in the profile's config. Storing the
+ * computed pounds instead would bake today's formula into the record for ever,
+ * and a better formula could not be applied to last season's cattle. This is the
+ * opposite call from `inventory_movements.cost_cents`, deliberately: a cost is a
+ * transaction and must not move, while a measurement is an observation and its
+ * interpretation may improve.
+ *
+ * Deliberately NOT here:
+ *
+ *   - **A body condition score.** 1–9 on a cattle beast is a real decision input
+ *     and it is NOT a weight; putting it in this table would mean every read
+ *     that folds weights has to remember to exclude it. Its own table when
+ *     something needs it.
+ *   - **A target or a projected finish weight.** That is a plan, and intent and
+ *     fact are separate — `land` settled that rule and this pack inherits it.
+ *   - **Anything computed: average, gain, ADG, FCR.** All folds over these rows.
+ *
+ * **Pounds and inches, in the column names, on purpose.** The tape formulas this
+ * pack is given are imperial, and a column called `weight` that silently means
+ * different things per tenant is the bug the one-stocking-unit rule exists to
+ * prevent. A metric farm needs a conversion at the boundary, which is a real
+ * open item rather than a hidden default.
+ */
+export const livestockWeights = pgTable(
+  "livestock_weights",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    weighedOn: date("weighed_on").notNull(),
+    /**
+     * Open taxonomy (P1): 'scale', 'sample', 'tape', 'visual'. Format
+     * constrained, values never — a profile that knows about a walk-over weigher
+     * adds one without a migration to core.
+     *
+     * It is NOT a confidence level. `core/weights.ts` ranks these, because how
+     * far to trust a number is this pack's judgement and not a property of the
+     * string.
+     */
+    method: text("method").notNull(),
+    /**
+     * How many head were on the scale together. **Recorded so the system knows
+     * how far to trust the number** — ten birds out of a pen of two hundred is a
+     * different claim from one bird, and the design asks for it by name.
+     */
+    sampleSize: integer("sample_size").notNull().default(1),
+    /** What those `sample_size` head weighed IN TOTAL. Null for a tape reading. */
+    sampleWeightLb: numeric("sample_weight_lb", {
+      precision: 12,
+      scale: 3,
+      mode: "number",
+    }),
+    /** Heart girth, in inches. The tape's actual reading. */
+    heartGirthIn: numeric("heart_girth_in", {
+      precision: 8,
+      scale: 2,
+      mode: "number",
+    }),
+    /** Point of shoulder to pin bone, in inches. */
+    bodyLengthIn: numeric("body_length_in", {
+      precision: 8,
+      scale: 2,
+      mode: "number",
+    }),
+    notes: text("notes").notNull().default(""),
+    /** Clerk user id of whoever held the scale. Not an FK — the platform has no users table. */
+    recordedBy: text("recorded_by").notNull().default(""),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_weights_tenant_id_id_idx").on(t.tenantId, t.id),
+    // "What has this lot weighed over time" is the read, and it is always
+    // ordered by date.
+    index("livestock_weights_tenant_lot_day_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+      t.weighedOn,
+    ),
+    foreignKey({
+      name: "livestock_weights_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    check(
+      "livestock_weights_method_format",
+      sql`${t.method} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    // MORE THAN ONE ANIMAL, OR NONE OF THIS MEANS ANYTHING. A sample of zero
+    // would make the average a division by zero rather than an unknown.
+    check("livestock_weights_sample_positive", sql`${t.sampleSize} > 0`),
+    // A weighing weighs something. Negative and zero are both nonsense, and a
+    // zero would read as a dead-weight answer rather than a missing one.
+    check(
+      "livestock_weights_weight_positive",
+      sql`${t.sampleWeightLb} is null or ${t.sampleWeightLb} > 0`,
+    ),
+    check(
+      "livestock_weights_girth_positive",
+      sql`${t.heartGirthIn} is null or ${t.heartGirthIn} > 0`,
+    ),
+    check(
+      "livestock_weights_length_positive",
+      sql`${t.bodyLengthIn} is null or ${t.bodyLengthIn} > 0`,
+    ),
+    /**
+     * **SOMETHING HAS TO HAVE BEEN MEASURED.** Either the scale said a weight,
+     * or the tape said a girth. A row with neither is a record that somebody
+     * thought about weighing, which is not a fact this table is for.
+     */
+    check(
+      "livestock_weights_has_a_reading",
+      sql`${t.sampleWeightLb} is not null or ${t.heartGirthIn} is not null`,
+    ),
+  ],
+);
+
 export type LivestockLot = typeof livestockLots.$inferSelect;
 export type NewLivestockLot = typeof livestockLots.$inferInsert;
 export type LivestockIdentifier = typeof livestockIdentifiers.$inferSelect;
@@ -474,3 +623,4 @@ export type LivestockFeedGroup = typeof livestockFeedGroups.$inferSelect;
 export type LivestockFeedGroupMember =
   typeof livestockFeedGroupMembers.$inferSelect;
 export type LivestockFeedDraw = typeof livestockFeedDraws.$inferSelect;
+export type LivestockWeight = typeof livestockWeights.$inferSelect;

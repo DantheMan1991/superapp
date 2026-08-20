@@ -12,6 +12,8 @@ import {
   feedGroupMembers,
   feedReport,
   listFeedGroups,
+  listWeightsForLot,
+  toWeighIns,
   checksOn,
   createLivestockLot,
   farmSnapshot,
@@ -24,6 +26,7 @@ import {
   placeHead,
   recordDailyCheck,
   recordFeedDraw,
+  recordWeight,
   removeHead,
   retireIdentifier,
   splitLivestockLot,
@@ -42,11 +45,13 @@ import { balanceByItem, balanceOfLot } from "../src/packs/inventory/core/balance
 import {
   createParcel,
   createZone,
+  lastHauledOn,
   currentZoneForOccupants,
   occupantsInStructures,
   restByZone,
 } from "../src/packs/land/ops";
 import { summariseHead, mortalityRate } from "../src/packs/livestock/core/herd";
+import { gainBetween } from "../src/packs/livestock/core/weights";
 import { formatSnapshot } from "../src/packs/livestock/core/digest";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -1540,6 +1545,383 @@ d("livestock ops", () => {
         feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-07-31" }),
       );
       expect(report.groups.some((g) => g.group.id === binId)).toBe(true);
+    });
+  });
+  // ---- slice 5: weights, and the conversion they make possible -----------
+
+  describe("weights and feed conversion", () => {
+    let wItemId: string;
+    let wFeedId: string;
+    let lotId: string;
+    let invLotId: string;
+
+    beforeAll(async () => {
+      wItemId = (
+        await asOwner((tx) =>
+          createItem(tx, ctx(), {
+            name: "Weigh chicks",
+            stockingUnit: "head",
+            itemKind: "livestock",
+          }),
+        )
+      ).id;
+      wFeedId = (
+        await asOwner((tx) =>
+          createItem(tx, ctx(), {
+            name: "Weigh feed",
+            stockingUnit: "lb",
+            itemKind: "feed",
+          }),
+        )
+      ).id;
+      // 2,000 lb at $1,000 — a round 50 cents a pound, so every stamped cost
+      // below is checkable by eye.
+      await asOwner((tx) =>
+        receiveStock(tx, ctx(), {
+          itemId: wFeedId,
+          quantity: 2000,
+          costCents: 100_000,
+          occurredOn: "2026-05-31",
+        }),
+      );
+
+      const created = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "WEIGH-1",
+          species: "poultry",
+          bornOn: "2026-06-01",
+        }),
+      );
+      lotId = created.lot.id;
+      invLotId = created.inventoryLotId;
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: wItemId,
+          inventoryLotId: invLotId,
+          head: 100,
+          occurredOn: "2026-06-01",
+        }),
+      );
+    });
+
+    it("records the READING, not the pounds — a tape stays a tape", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "TAPE-1",
+          species: "swine",
+          bornOn: "2026-06-01",
+        }),
+      );
+      const row = await asOwner((tx) =>
+        recordWeight(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          weighedOn: "2026-08-01",
+          method: "tape",
+          heartGirthIn: 40,
+          bodyLengthIn: 42,
+        }),
+      );
+      expect(row.heartGirthIn).toBe(40);
+      expect(row.bodyLengthIn).toBe(42);
+      // No pounds stored anywhere. A better divisor tomorrow reweighs every
+      // animal ever measured, rather than only the next one.
+      expect(row.sampleWeightLb).toBeNull();
+
+      const [weighIn] = toWeighIns(
+        await asOwner((tx) => listWeightsForLot(tx, tenantId, lot.lot.id)),
+        { tapeDivisor: 400, lastHauledOn: null },
+      );
+      expect(weighIn.averageLb).toBe(168);
+      // And with no divisor for the species, the same row produces nothing.
+      const [noDivisor] = toWeighIns(
+        await asOwner((tx) => listWeightsForLot(tx, tenantId, lot.lot.id)),
+        { tapeDivisor: null, lastHauledOn: null },
+      );
+      expect(noDivisor.averageLb).toBeNull();
+    });
+
+    it("refuses a weighing that measured nothing", async () => {
+      await expect(
+        asOwner((tx) =>
+          recordWeight(tx, ctx(), {
+            livestockLotId: lotId,
+            weighedOn: "2026-08-01",
+            method: "sample",
+          }),
+        ),
+      ).rejects.toThrow(/record what the scale said/);
+    });
+
+    it("refuses half a tape reading", async () => {
+      await expect(
+        asOwner((tx) =>
+          recordWeight(tx, ctx(), {
+            livestockLotId: lotId,
+            weighedOn: "2026-08-01",
+            method: "tape",
+            heartGirthIn: 40,
+          }),
+        ),
+      ).rejects.toThrow(/both the heart girth and the body length/);
+    });
+
+    it("STAFF may weigh — catching ten birds is the definition of a chore", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "WEIGH-STAFF",
+          species: "poultry",
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          recordWeight(tx, staffCtx(), {
+            livestockLotId: lot.lot.id,
+            weighedOn: "2026-08-01",
+            method: "sample",
+            sampleSize: 10,
+            sampleWeightLb: 40,
+          }),
+        ),
+      ).resolves.toBeTruthy();
+    });
+
+    it("THE CONVERSION WINDOW IS THE GAIN WINDOW, NOT THE REPORT'S", async () => {
+      // The whole reason this is not a one-liner. Feed fed before anybody put a
+      // bird on a scale made gain nobody measured, so counting it would inflate
+      // the one number the enterprise is judged on — badly, for exactly the farm
+      // that starts weighing halfway through its first batch.
+      //
+      // 400 lb fed BEFORE the first weighing, 200 lb between the two.
+      await asOwner((tx) =>
+        issueStock(tx, ctx(), {
+          itemId: wFeedId,
+          quantity: 400,
+          issuedToLotId: invLotId,
+          occurredOn: "2026-06-15",
+        }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ctx(), {
+          itemId: wFeedId,
+          quantity: 200,
+          issuedToLotId: invLotId,
+          occurredOn: "2026-07-10",
+        }),
+      );
+      // 1 lb a bird on 1 July, 3 lb a bird on 31 July. 2 lb of gain across 100
+      // head is 200 lb — against the 200 lb fed inside that window, so 1.00 : 1.
+      await asOwner((tx) =>
+        recordWeight(tx, ctx(), {
+          livestockLotId: lotId,
+          weighedOn: "2026-07-01",
+          method: "sample",
+          sampleSize: 10,
+          sampleWeightLb: 10,
+        }),
+      );
+      await asOwner((tx) =>
+        recordWeight(tx, ctx(), {
+          livestockLotId: lotId,
+          weighedOn: "2026-07-31",
+          method: "sample",
+          sampleSize: 10,
+          sampleWeightLb: 30,
+        }),
+      );
+
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-06-01", to: "2026-08-31" }),
+      );
+      const row = report.lots.find((l) => l.code === "WEIGH-1")!;
+      expect(row.weight.gain!.gainLb).toBe(2);
+      expect(row.weight.gain!.adgLb).toBe(0.067);
+      // The 400 lb fed in June is NOT in it.
+      expect(row.weight.conversion!.feedLb).toBe(200);
+      expect(row.weight.conversion!.gainLb).toBe(200);
+      expect(row.weight.conversion!.ratio).toBe(1);
+      // Feed issued by name against a sampled scale weight: a number to act on.
+      expect(row.weight.conversion!.confidence).toBe("measured");
+    });
+
+    it("says WHY there is no conversion, in words the screen can print", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "WEIGH-ONCE",
+          species: "poultry",
+        }),
+      );
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: wItemId,
+          inventoryLotId: lot.inventoryLotId,
+          head: 50,
+          occurredOn: "2026-06-01",
+        }),
+      );
+      const before = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-06-01", to: "2026-08-31" }),
+      );
+      expect(
+        before.lots.find((l) => l.code === "WEIGH-ONCE")!.weight.conversionBlockedBy,
+      ).toMatch(/Nothing weighed/);
+
+      await asOwner((tx) =>
+        recordWeight(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          weighedOn: "2026-07-01",
+          method: "sample",
+          sampleSize: 10,
+          sampleWeightLb: 20,
+        }),
+      );
+      const after = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-06-01", to: "2026-08-31" }),
+      );
+      const row = after.lots.find((l) => l.code === "WEIGH-ONCE")!;
+      expect(row.weight.conversion).toBeNull();
+      // A refusal with no reason is indistinguishable from a bug, and this one
+      // fires on nearly every lot for a farm's whole first season.
+      expect(row.weight.conversionBlockedBy).toMatch(/needs two/);
+      // The one figure a single weighing CAN honestly produce.
+      expect(row.weight.liveweightLb).toBe(100);
+    });
+
+    it("A HAUL IS A PARCEL CROSSING, and a walk is not", async () => {
+      // Land's own definition, and the reason this is not "when did they last
+      // move": a rotational farm walks its herd daily, and a flag that fired
+      // every morning would be ignored inside a week.
+      const other = await asOwner((tx) =>
+        createParcel(tx, ctx(), { name: "Far Field", areaAcres: 20 }),
+      );
+      const farZone = await asOwner((tx) =>
+        createZone(tx, ctx(), {
+          parcelId: other.id,
+          name: "Far Paddock",
+          areaAcres: 5,
+        }),
+      );
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "HAUL-1",
+          species: "cattle",
+        }),
+      );
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: wItemId,
+          inventoryLotId: lot.inventoryLotId,
+          head: 10,
+          occurredOn: "2026-06-01",
+        }),
+      );
+
+      // Arrival, then a WALK to another zone on the same parcel.
+      const homeZone2 = await asOwner((tx) =>
+        createZone(tx, ctx(), { parcelId, name: "Second Paddock", areaAcres: 4 }),
+      );
+      await asOwner((tx) =>
+        moveLotToZone(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          zoneId,
+          startedOn: "2026-06-01",
+        }),
+      );
+      await asOwner((tx) =>
+        moveLotToZone(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          zoneId: homeZone2.id,
+          startedOn: "2026-06-10",
+        }),
+      );
+      const afterWalk = await asOwner((tx) =>
+        lastHauledOn(tx, tenantId, "livestock", [lot.inventoryLotId]),
+      );
+      expect(afterWalk.get(lot.inventoryLotId)).toBeUndefined();
+
+      // Now a HAUL — a different parcel.
+      await asOwner((tx) =>
+        moveLotToZone(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          zoneId: farZone.id,
+          startedOn: "2026-06-20",
+        }),
+      );
+      const afterHaul = await asOwner((tx) =>
+        lastHauledOn(tx, tenantId, "livestock", [lot.inventoryLotId]),
+      );
+      expect(afterHaul.get(lot.inventoryLotId)).toBe("2026-06-20");
+    });
+
+    it("KEEPS a shrink-affected weighing and leaves it out of the gain", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: wItemId,
+          code: "SHRINK-1",
+          species: "cattle",
+        }),
+      );
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: wItemId,
+          inventoryLotId: lot.inventoryLotId,
+          head: 10,
+          occurredOn: "2026-06-01",
+        }),
+      );
+      const away = await asOwner((tx) =>
+        createParcel(tx, ctx(), { name: "Hauled To", areaAcres: 30 }),
+      );
+      const awayZone = await asOwner((tx) =>
+        createZone(tx, ctx(), { parcelId: away.id, name: "Away", areaAcres: 6 }),
+      );
+      await asOwner((tx) =>
+        moveLotToZone(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          zoneId,
+          startedOn: "2026-06-01",
+        }),
+      );
+      await asOwner((tx) =>
+        moveLotToZone(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          zoneId: awayZone.id,
+          startedOn: "2026-07-20",
+        }),
+      );
+
+      for (const [on, lb] of [
+        ["2026-07-01", 4000],
+        ["2026-07-21", 3900],
+      ] as const) {
+        await asOwner((tx) =>
+          recordWeight(tx, ctx(), {
+            livestockLotId: lot.lot.id,
+            weighedOn: on,
+            method: "scale",
+            sampleSize: 10,
+            sampleWeightLb: lb,
+          }),
+        );
+      }
+
+      const hauls = await asOwner((tx) =>
+        lastHauledOn(tx, tenantId, "livestock", [lot.inventoryLotId]),
+      );
+      const weighIns = toWeighIns(
+        await asOwner((tx) => listWeightsForLot(tx, tenantId, lot.lot.id)),
+        { tapeDivisor: 300, lastHauledOn: hauls.get(lot.inventoryLotId) ?? null },
+      );
+      expect(weighIns).toHaveLength(2);
+      // Both kept. Deleting one would lose an observation somebody made.
+      expect(weighIns[1].shrinkAffected).toBe(true);
+      // And with only one usable weighing left, there is no gain to report —
+      // which beats reporting that ten cattle lost 100 lb on a trailer.
+      expect(gainBetween(weighIns)).toBeNull();
     });
   });
 });

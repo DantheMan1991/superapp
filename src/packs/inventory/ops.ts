@@ -1242,6 +1242,82 @@ export async function consumedByLotAndItem(
 }
 
 /**
+ * What was issued into each lot, **movement by movement, with its date**.
+ *
+ * `consumedByLotAndItem` aggregates, which is what a report of a fixed period
+ * wants. This does not, because `livestock`'s feed conversion needs a window
+ * that is DIFFERENT FOR EVERY LOT: feed conversion is feed per pound of gain,
+ * gain is measured between that lot's own first and last weighing, and feed fed
+ * before anybody put a bird on a scale produced gain nobody measured. Summing it
+ * into the ratio would inflate the one number the enterprise is judged on.
+ *
+ * So the caller gets the rows and does its own arithmetic per lot. One query
+ * whatever the lot count.
+ */
+export async function consumedDatedByLots(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<
+  Map<
+    string,
+    {
+      occurredOn: string;
+      unit: string;
+      /** Positive: how much was fed, not the ledger's negative sign. */
+      quantity: number;
+      costCents: number | null;
+    }[]
+  >
+> {
+  const out = new Map<
+    string,
+    {
+      occurredOn: string;
+      unit: string;
+      quantity: number;
+      costCents: number | null;
+    }[]
+  >();
+  if (lotIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      lotId: schema.inventoryMovements.issuedToLotId,
+      occurredOn: schema.inventoryMovements.occurredOn,
+      unit: schema.inventoryItems.stockingUnit,
+      quantity: schema.inventoryMovements.quantity,
+      costCents: schema.inventoryMovements.costCents,
+    })
+    .from(schema.inventoryMovements)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryItems.id, schema.inventoryMovements.itemId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.issuedToLotId, lotIds),
+      ),
+    );
+  for (const row of rows) {
+    if (!row.lotId) continue;
+    const entry = {
+      occurredOn: row.occurredOn,
+      unit: row.unit,
+      quantity: Math.abs(roundQuantity(row.quantity)),
+      costCents: row.costCents,
+    };
+    const list = out.get(row.lotId);
+    if (list) list.push(entry);
+    else out.set(row.lotId, [entry]);
+  }
+  return out;
+}
+
+/**
  * Specific movements, by id, with the item name and unit they are denominated
  * in.
  *

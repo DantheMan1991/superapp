@@ -9,9 +9,11 @@ import type {
   LivestockFeedGroupMember,
   LivestockIdentifier,
   LivestockLot,
+  LivestockWeight,
 } from "@/db/schema";
 import {
   consumedByLotAndItem,
+  consumedDatedByLots,
   createItem,
   createLot as createInventoryLot,
   getLot as getInventoryLot,
@@ -28,6 +30,7 @@ import {
 } from "@/packs/inventory/ops";
 import {
   currentZoneForOccupants,
+  lastHauledOn,
   listParcels,
   listZones,
   moveOccupant,
@@ -36,6 +39,8 @@ import {
   type MoveResult,
 } from "@/packs/land/ops";
 import { isValidSlug } from "@/packs/inventory/vocabulary";
+import { convert, getUnit } from "@/packs/inventory/core/units";
+import { tapeDivisorFrom } from "./vocabulary";
 import { addDays } from "@/lib/timezone";
 import { ageInDays, headEffect, summariseHead } from "./core/herd";
 import { checkStreak } from "./core/daily";
@@ -46,11 +51,24 @@ import {
   earliestSpanStart,
   feedReportRows,
   headDays,
+  headOnDays,
   mergeQuantities,
   type FeedLotRow,
   type FeedQuantity,
   type MembershipSpan,
 } from "./core/feed";
+import {
+  averageWeightLb,
+  combinedConfidence,
+  feedConversion,
+  feedPerLiveweightLb,
+  gainBetween,
+  isShrinkAffected,
+  latestWeighIn,
+  type FeedConversion,
+  type GainResult,
+  type WeighIn,
+} from "./core/weights";
 import {
   SNAPSHOT_LOT_CAP,
   SNAPSHOT_ZONE_CAP,
@@ -97,7 +115,9 @@ export class LivestockError extends Error {
       | "INVALID_IDENTIFIER"
       | "ITEM_REQUIRED"
       | "LOT_INVALID"
-      | "FEED_GROUP_INVALID",
+      | "FEED_GROUP_INVALID"
+      | "INVALID_METHOD"
+      | "INVALID_WEIGHT",
     message: string,
   ) {
     super(message);
@@ -823,6 +843,154 @@ export async function listChecksForLot(
   });
 }
 
+// --------------------------------------------------------------- weights ---
+
+/**
+ * Record what an animal weighed, and how anybody knows.
+ *
+ * `member`, and this is the clearest chore in the pack: catching ten birds and
+ * putting them in a crate is done by whoever is in the pen, and a weight that
+ * waits for the owner to be free is a weight taken on the wrong day.
+ *
+ * **The pack does not compute the pounds for a tape here.** The girth and the
+ * length are stored as measured and the weight is derived at read time, so a
+ * better formula — or a divisor a tenant corrects in their config — applies to
+ * every animal ever measured rather than only to the next one.
+ */
+export async function recordWeight(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    livestockLotId: string;
+    weighedOn: string;
+    method: string;
+    sampleSize?: number;
+    sampleWeightLb?: number | null;
+    heartGirthIn?: number | null;
+    bodyLengthIn?: number | null;
+    notes?: string;
+  },
+): Promise<LivestockWeight> {
+  requireWrite(ctx, "member");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId} not found`);
+  }
+  const method = input.method.trim().toLowerCase();
+  if (!isValidSlug(method)) {
+    throw new LivestockError("INVALID_METHOD", `invalid method: ${input.method}`);
+  }
+  const sampleSize = input.sampleSize ?? 1;
+  if (!Number.isInteger(sampleSize) || sampleSize < 1) {
+    throw new LivestockError(
+      "INVALID_WEIGHT",
+      "say how many head went on the scale — at least one",
+    );
+  }
+  // The same rule as the CHECK, refused here so the message is one a person
+  // can act on rather than a constraint name.
+  const hasScale = (input.sampleWeightLb ?? null) !== null;
+  const hasTape = (input.heartGirthIn ?? null) !== null;
+  if (!hasScale && !hasTape) {
+    throw new LivestockError(
+      "INVALID_WEIGHT",
+      "record what the scale said, or the girth and length off the tape",
+    );
+  }
+  if (hasTape && (input.bodyLengthIn ?? null) === null) {
+    throw new LivestockError(
+      "INVALID_WEIGHT",
+      "a tape needs both the heart girth and the body length",
+    );
+  }
+
+  const rows = await tx
+    .insert(schema.livestockWeights)
+    .values({
+      tenantId: ctx.tenantId,
+      livestockLotId: input.livestockLotId,
+      weighedOn: input.weighedOn,
+      method,
+      sampleSize,
+      sampleWeightLb: input.sampleWeightLb ?? null,
+      heartGirthIn: input.heartGirthIn ?? null,
+      bodyLengthIn: input.bodyLengthIn ?? null,
+      notes: input.notes?.trim() ?? "",
+      recordedBy: ctx.userId,
+    })
+    .returning();
+  return rows[0];
+}
+
+/** One lot's weighings, oldest first — the history on its detail page. */
+export async function listWeightsForLot(
+  tx: Tx,
+  tenantId: string,
+  livestockLotId: string,
+): Promise<LivestockWeight[]> {
+  return tx.query.livestockWeights.findMany({
+    where: and(
+      eq(schema.livestockWeights.tenantId, tenantId),
+      eq(schema.livestockWeights.livestockLotId, livestockLotId),
+    ),
+    orderBy: (w, { asc: byAsc }) => [byAsc(w.weighedOn), byAsc(w.createdAt)],
+  });
+}
+
+/** Every weighing across a set of lots, keyed by lot. One query for a report. */
+export async function weightsByLot(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<Map<string, LivestockWeight[]>> {
+  const out = new Map<string, LivestockWeight[]>();
+  if (lotIds.length === 0) return out;
+  const rows = await tx.query.livestockWeights.findMany({
+    where: and(
+      eq(schema.livestockWeights.tenantId, tenantId),
+      inArray(schema.livestockWeights.livestockLotId, lotIds),
+    ),
+    orderBy: (w, { asc: byAsc }) => [byAsc(w.weighedOn), byAsc(w.createdAt)],
+  });
+  for (const row of rows) {
+    const list = out.get(row.livestockLotId);
+    if (list) list.push(row);
+    else out.set(row.livestockLotId, [row]);
+  }
+  return out;
+}
+
+/**
+ * Turn stored observations into weigh-ins the pure layer can fold.
+ *
+ * The two things it adds are the two things a row cannot know on its own: the
+ * average per head (which needs the profile's tape divisor for that species) and
+ * whether the weighing sat in the shadow of a haul (which needs `land`).
+ */
+export function toWeighIns(
+  weights: LivestockWeight[],
+  options: { tapeDivisor: number | null; lastHauledOn: string | null },
+): WeighIn[] {
+  return weights.map((w) => ({
+    id: w.id,
+    weighedOn: w.weighedOn,
+    method: w.method,
+    averageLb: averageWeightLb(
+      {
+        id: w.id,
+        weighedOn: w.weighedOn,
+        method: w.method,
+        sampleSize: w.sampleSize,
+        sampleWeightLb: w.sampleWeightLb,
+        heartGirthIn: w.heartGirthIn,
+        bodyLengthIn: w.bodyLengthIn,
+      },
+      options.tapeDivisor,
+    ),
+    shrinkAffected: isShrinkAffected(w.weighedOn, options.lastHauledOn),
+  }));
+}
+
 // --------------------------------------------------------------- feeders ---
 
 /**
@@ -1153,10 +1321,39 @@ export interface FeedGroupReport {
   }[];
 }
 
+/**
+ * What weighing adds to a lot's feed row — and what it still refuses.
+ *
+ * `conversion` is the number the broiler enterprise is judged on and it is null
+ * far more often than not. `conversionBlockedBy` is why, in words a screen can
+ * print: **a refusal with no reason is indistinguishable from a bug**, and this
+ * one will be refused on nearly every lot for a farm's whole first season.
+ */
+export interface LotWeightSummary {
+  /** The most recent usable weighing in the period. */
+  latest: WeighIn | null;
+  /** Latest average per head times the head standing. What is walking about. */
+  liveweightLb: number | null;
+  gain: GainResult | null;
+  conversion: FeedConversion | null;
+  conversionBlockedBy: string | null;
+  /**
+   * Feed per pound of LIVEWEIGHT, which is NOT conversion — it counts the weight
+   * the animal arrived with as though the feed had made it. The only figure a
+   * first batch with a single weighing can honestly produce.
+   */
+  feedPerLiveweight: number | null;
+  weighInCount: number;
+  /** Weighings set aside because they sat in the shadow of a haul. */
+  shrinkAffectedCount: number;
+}
+
+export type FeedReportLot = FeedLotRow & { weight: LotWeightSummary };
+
 export interface FeedReport {
   from: string;
   to: string;
-  lots: FeedLotRow[];
+  lots: FeedReportLot[];
   groups: FeedGroupReport[];
   /** Draws beyond `FEED_DRAW_CAP`, said out loud rather than truncated silently. */
   drawsOmitted: number;
@@ -1177,21 +1374,39 @@ export interface FeedReport {
 export async function feedReport(
   tx: Tx,
   tenantId: string,
-  window: { from: string; to: string },
+  options: {
+    from: string;
+    to: string;
+    /**
+     * The installed profile's `livestock` config. Supplies the tape divisors, so
+     * a girth and a length become pounds — and without it a tape reading stays a
+     * tape reading rather than becoming a guess. See `tapeDivisorFrom`.
+     */
+    packConfig?: unknown;
+  },
 ): Promise<FeedReport> {
-  const { from, to } = window;
+  const { from, to } = options;
   const lots = await listLivestockLots(tx, tenantId);
   const inventoryLotIds = lots.map((l) => l.inventoryLotId);
+  const lotIds = lots.map((l) => l.id);
 
-  const [inventoryLots, movements, measured, groups] = await Promise.all([
-    listInventoryLots(tx, tenantId),
-    // Every dated head movement, uncapped for these lots: the head-day basis is
-    // a running balance and a truncated ledger would silently start it in the
-    // middle.
-    datedMovementsForLots(tx, tenantId, inventoryLotIds, Number.MAX_SAFE_INTEGER),
-    consumedByLotAndItem(tx, tenantId, inventoryLotIds, { from, to }),
-    listFeedGroups(tx, tenantId),
-  ]);
+  const [inventoryLots, movements, measured, fedDated, groups, weights, hauls] =
+    await Promise.all([
+      listInventoryLots(tx, tenantId),
+      // Every dated head movement, uncapped for these lots: the head-day basis
+      // is a running balance and a truncated ledger would silently start it in
+      // the middle.
+      datedMovementsForLots(tx, tenantId, inventoryLotIds, null),
+      consumedByLotAndItem(tx, tenantId, inventoryLotIds, { from, to }),
+      // Undated totals answer the report; feed conversion needs the dates,
+      // because its window is each lot's own gain window.
+      consumedDatedByLots(tx, tenantId, inventoryLotIds),
+      listFeedGroups(tx, tenantId),
+      weightsByLot(tx, tenantId, lotIds),
+      // WHEN THEY WERE LAST HAULED, from `land`, through land's own query. A
+      // weighing taken days after a trailer is shrink, not a loss.
+      lastHauledOn(tx, tenantId, "livestock", inventoryLotIds),
+    ]);
 
   const groupIds = groups.map((g) => g.id);
   const [membersByGroup, drawsByGroup] = await Promise.all([
@@ -1215,92 +1430,119 @@ export async function feedReport(
     ]),
   );
 
-  const allocatedCents = new Map<string, number>();
-  const allocatedQuantities = new Map<string, FeedQuantity[]>();
-  const groupReports: FeedGroupReport[] = [];
+  /**
+   * The allocation fold, over any window.
+   *
+   * **A FUNCTION RATHER THAN A LOOP, because feed conversion needs it run
+   * twice.** The report's window answers "what did this pen cost"; a lot's FCR
+   * needs the feed drawn between ITS OWN first and last weighing, which is a
+   * different window for every lot. Re-running the fold is exact — it is the
+   * same arithmetic over fewer draws — where pro-rating the annual figure by
+   * elapsed days would be a guess dressed as a number.
+   *
+   * No extra queries: the draws, the memberships and the head ledger are all
+   * already in hand.
+   */
+  function foldGroups(
+    windowFrom: string,
+    windowTo: string,
+  ): {
+    cents: Map<string, number>;
+    quantities: Map<string, FeedQuantity[]>;
+    reports: FeedGroupReport[];
+  } {
+    const cents = new Map<string, number>();
+    const quantities = new Map<string, FeedQuantity[]>();
+    const reports: FeedGroupReport[] = [];
 
-  for (const group of groups) {
-    const spansByLot = new Map<string, MembershipSpan[]>();
-    for (const member of membersByGroup.get(group.id) ?? []) {
-      const list = spansByLot.get(member.livestockLotId);
-      const span = { startedOn: member.startedOn, endedOn: member.endedOn };
-      if (list) list.push(span);
-      else spansByLot.set(member.livestockLotId, [span]);
-    }
-
-    /**
-     * Start the day-by-day walk at the first membership rather than at the
-     * window's start. Days before any lot was on this feeder contribute nothing
-     * to the basis by definition, and an "everything" window that began at the
-     * epoch would otherwise iterate a century of empty days per feeder.
-     */
-    const allSpans = [...spansByLot.values()].flat();
-    const earliest = earliestSpanStart(allSpans);
-    const groupFrom = earliest && earliest > from ? earliest : from;
-
-    // The basis: head × days, per member lot, over this window. Both halves come
-    // from records already being kept — the dates from the membership, the head
-    // from the ledger.
-    const shares = [...spansByLot.entries()].map(([lotId, spans]) => ({
-      key: lotId,
-      basis: headDays(headMovements.get(lotId) ?? [], spans, groupFrom, to),
-      days: daysOnFeed(spans, groupFrom, to),
-    }));
-
-    const draws = (drawsByGroup.get(group.id) ?? [])
-      .map((d) => movementById.get(d.inventoryMovementId))
-      .filter((m): m is NonNullable<typeof m> => Boolean(m))
-      .filter((m) => m.occurredOn >= from && m.occurredOn <= to);
-
-    const drawnCents = draws.reduce((sum, m) => sum + (m.costCents ?? 0), 0);
-    const unpricedDraws = draws.filter((m) => m.costCents === null).length;
-    const drawnQuantities = mergeQuantities(
-      draws.map((m) => ({ unit: m.unit, quantity: Math.abs(m.quantity) })),
-    );
-
-    const centsShare = allocateCents(drawnCents, shares);
-    // Quantity is allocated per UNIT, because pounds of grower and gallons of
-    // milk are not addable and a single split would have to pick one of them.
-    const quantityShares = new Map<string, FeedQuantity[]>();
-    for (const part of drawnQuantities) {
-      const split = allocateQuantity(part.quantity, shares);
-      for (const [lotId, quantity] of split) {
-        const list = quantityShares.get(lotId);
-        if (list) list.push({ unit: part.unit, quantity });
-        else quantityShares.set(lotId, [{ unit: part.unit, quantity }]);
+    for (const group of groups) {
+      const spansByLot = new Map<string, MembershipSpan[]>();
+      for (const member of membersByGroup.get(group.id) ?? []) {
+        const list = spansByLot.get(member.livestockLotId);
+        const span = { startedOn: member.startedOn, endedOn: member.endedOn };
+        if (list) list.push(span);
+        else spansByLot.set(member.livestockLotId, [span]);
       }
-    }
 
-    let allocated = 0;
-    for (const [lotId, cents] of centsShare) {
-      allocated += cents;
-      allocatedCents.set(lotId, (allocatedCents.get(lotId) ?? 0) + cents);
-    }
-    for (const [lotId, parts] of quantityShares) {
-      allocatedQuantities.set(lotId, [
-        ...(allocatedQuantities.get(lotId) ?? []),
-        ...parts,
-      ]);
-    }
+      /**
+       * Start the day-by-day walk at the first membership rather than at the
+       * window's start. Days before any lot was on this feeder contribute
+       * nothing to the basis by definition, and an "everything" window that
+       * began at the epoch would otherwise iterate a century of empty days per
+       * feeder.
+       */
+      const allSpans = [...spansByLot.values()].flat();
+      const earliest = earliestSpanStart(allSpans);
+      const groupFrom = earliest && earliest > windowFrom ? earliest : windowFrom;
 
-    groupReports.push({
-      group,
-      drawnCents,
-      drawnQuantities,
-      drawCount: draws.length,
-      unpricedDraws,
-      unallocatedCents: drawnCents - allocated,
-      members: shares.map((share) => ({
-        livestockLotId: share.key,
-        code:
-          byInventoryLot.get(lotById.get(share.key)?.inventoryLotId ?? "")?.code ??
-          "—",
-        headDays: share.basis,
-        daysOnFeed: share.days,
-        shareCents: centsShare.get(share.key) ?? 0,
-      })),
-    });
+      // The basis: head × days, per member lot, over this window. Both halves
+      // come from records already being kept — the dates from the membership,
+      // the head from the ledger.
+      const shares = [...spansByLot.entries()].map(([lotId, spans]) => ({
+        key: lotId,
+        basis: headDays(headMovements.get(lotId) ?? [], spans, groupFrom, windowTo),
+        days: daysOnFeed(spans, groupFrom, windowTo),
+      }));
+
+      const draws = (drawsByGroup.get(group.id) ?? [])
+        .map((d) => movementById.get(d.inventoryMovementId))
+        .filter((m): m is NonNullable<typeof m> => Boolean(m))
+        .filter((m) => m.occurredOn >= windowFrom && m.occurredOn <= windowTo);
+
+      const drawnCents = draws.reduce((sum, m) => sum + (m.costCents ?? 0), 0);
+      const unpricedDraws = draws.filter((m) => m.costCents === null).length;
+      const drawnQuantities = mergeQuantities(
+        draws.map((m) => ({ unit: m.unit, quantity: Math.abs(m.quantity) })),
+      );
+
+      const centsShare = allocateCents(drawnCents, shares);
+      // Quantity is allocated per UNIT, because pounds of grower and gallons of
+      // milk are not addable and a single split would have to pick one of them.
+      const quantityShares = new Map<string, FeedQuantity[]>();
+      for (const part of drawnQuantities) {
+        const split = allocateQuantity(part.quantity, shares);
+        for (const [lotId, quantity] of split) {
+          const list = quantityShares.get(lotId);
+          if (list) list.push({ unit: part.unit, quantity });
+          else quantityShares.set(lotId, [{ unit: part.unit, quantity }]);
+        }
+      }
+
+      let allocated = 0;
+      for (const [lotId, share] of centsShare) {
+        allocated += share;
+        cents.set(lotId, (cents.get(lotId) ?? 0) + share);
+      }
+      for (const [lotId, parts] of quantityShares) {
+        quantities.set(lotId, [...(quantities.get(lotId) ?? []), ...parts]);
+      }
+
+      reports.push({
+        group,
+        drawnCents,
+        drawnQuantities,
+        drawCount: draws.length,
+        unpricedDraws,
+        unallocatedCents: drawnCents - allocated,
+        members: shares.map((share) => ({
+          livestockLotId: share.key,
+          code:
+            byInventoryLot.get(lotById.get(share.key)?.inventoryLotId ?? "")?.code ??
+            "—",
+          headDays: share.basis,
+          daysOnFeed: share.days,
+          shareCents: centsShare.get(share.key) ?? 0,
+        })),
+      });
+    }
+    return { cents, quantities, reports };
   }
+
+  const {
+    cents: allocatedCents,
+    quantities: allocatedQuantities,
+    reports: groupReports,
+  } = foldGroups(from, to);
 
   const rows = feedReportRows(
     lots.map((lot) => {
@@ -1333,6 +1575,101 @@ export async function feedReport(
     }),
   );
 
+  /**
+   * The weight half, and the conversion it finally makes possible.
+   *
+   * **THE FCR WINDOW IS THE GAIN WINDOW, NOT THE REPORT'S.** Feed conversion is
+   * feed per pound of gain, and gain is only known between this lot's own first
+   * and last usable weighing. Feed fed before anybody put a bird on a scale
+   * produced gain nobody measured, so counting it would inflate the one number
+   * the enterprise is judged on — badly, for exactly the farm that starts
+   * weighing halfway through its first batch.
+   */
+  const lotsWithWeight = rows.map((row) => {
+    const lot = lotById.get(row.lotId);
+    const weighIns = toWeighIns(weights.get(row.lotId) ?? [], {
+      tapeDivisor: tapeDivisorFrom(options.packConfig, lot?.species ?? ""),
+      lastHauledOn: hauls.get(lot?.inventoryLotId ?? "") ?? null,
+    });
+    // Only weighings inside the report's period. Asking for the last 30 days
+    // and being answered with a gain measured in April is not the question.
+    const inWindow = weighIns.filter(
+      (w) => w.weighedOn >= from && w.weighedOn <= to,
+    );
+    const latest = latestWeighIn(inWindow);
+    const gain = gainBetween(inWindow);
+    const headMoves = headMovements.get(row.lotId) ?? [];
+
+    const liveweightLb =
+      latest && latest.averageLb !== null && row.head > 0
+        ? Math.round(latest.averageLb * row.head * 10) / 10
+        : null;
+
+    let conversion: FeedConversion | null = null;
+    let conversionBlockedBy: string | null = null;
+    if (!gain) {
+      const usable = inWindow.filter((w) => w.averageLb !== null);
+      conversionBlockedBy =
+        usable.length === 0
+          ? "Nothing weighed in this period."
+          : usable.length === 1
+            ? "One weighing. Feed per pound of GAIN needs two — weigh them again and this fills itself in."
+            : inWindow.some((w) => w.shrinkAffected)
+              ? "The weighings left are too close together, or too close to a haul, to measure gain from."
+              : "Two weighings on the same day cannot show a gain.";
+    } else {
+      // Feed drawn and issued between the two weighings, and nothing outside.
+      const gainFrom = gain.from.weighedOn;
+      const gainTo = gain.to.weighedOn;
+      const measuredLb = toPoundsOfFeed(
+        (fedDated.get(lot?.inventoryLotId ?? "") ?? []).filter(
+          (m) => m.occurredOn >= gainFrom && m.occurredOn <= gainTo,
+        ),
+      );
+      const allocatedLb = toPoundsOfFeed(
+        foldGroups(gainFrom, gainTo).quantities.get(row.lotId) ?? [],
+      );
+
+      // Head standing at the END of the gain window. The birds that died in the
+      // middle ate feed and produced no gain, which correctly makes the ratio
+      // worse — that is what "as-hatched" conversion means and why mortality
+      // shows up in it.
+      const headAtEnd = headOnDays(headMoves, gainTo, gainTo)[0] ?? 0;
+      const totalGainLb = gain.gainLb * headAtEnd;
+      conversion = feedConversion(
+        measuredLb + allocatedLb,
+        totalGainLb,
+        combinedConfidence(row.provenance, gain.measured),
+      );
+      if (!conversion) {
+        conversionBlockedBy =
+          totalGainLb <= 0
+            ? "They weighed less at the end than at the start, so there is no gain to divide into."
+            : "No feed recorded in pounds between the two weighings.";
+      }
+    }
+
+    // The first-batch answer, and NOT a conversion — see `feedPerLiveweightLb`.
+    const feedLbAll = toPoundsOfFeed(row.quantities);
+
+    return {
+      ...row,
+      weight: {
+        latest,
+        liveweightLb,
+        gain,
+        conversion,
+        conversionBlockedBy,
+        feedPerLiveweight:
+          liveweightLb === null
+            ? null
+            : feedPerLiveweightLb(feedLbAll, liveweightLb),
+        weighInCount: weighIns.length,
+        shrinkAffectedCount: weighIns.filter((w) => w.shrinkAffected).length,
+      },
+    };
+  });
+
   const drawTotal = [...drawsByGroup.values()].reduce(
     (sum, list) => sum + list.length,
     0,
@@ -1341,10 +1678,33 @@ export async function feedReport(
   return {
     from,
     to,
-    lots: rows,
+    lots: lotsWithWeight,
     groups: groupReports,
     drawsOmitted: drawTotal >= FEED_DRAW_CAP ? drawTotal - drawIds.length : 0,
   };
+}
+
+/**
+ * Feed quantities that are a MASS, in pounds. Anything else is skipped.
+ *
+ * **Feed conversion is pounds of feed per pound of gain, so both sides have to
+ * be a weight.** Surplus milk is real feed and is stocked in gallons, and there
+ * is no factor between gallons and pounds that does not depend on what is in the
+ * bucket — `inventory`'s own rule about conversions across dimensions. So a farm
+ * feeding mostly milk gets no conversion figure and is told why, which is better
+ * than a ratio with a density somebody guessed baked into it.
+ *
+ * Tons and kilograms DO convert, because those are the same dimension and the
+ * factor is exact.
+ */
+function toPoundsOfFeed(parts: { unit: string; quantity: number }[]): number {
+  let pounds = 0;
+  for (const part of parts) {
+    const unit = getUnit(part.unit);
+    if (!unit || unit.dimension !== "mass") continue;
+    pounds += convert(part.quantity, part.unit, "lb");
+  }
+  return pounds;
 }
 
 /** Small helper: the dated rows for one lot, or undefined. */
@@ -1374,7 +1734,7 @@ function dated(
 export async function farmSnapshot(
   tx: Tx,
   tenantId: string,
-  options: { today: string; species?: string[] },
+  options: { today: string; species?: string[]; packConfig?: unknown },
 ): Promise<FarmSnapshot> {
   const { today } = options;
   const allLots = await listLivestockLots(tx, tenantId);
@@ -1415,7 +1775,11 @@ export async function farmSnapshot(
    * two will disagree in front of the person who asked. The window is
    * everything, because a batch is judged over its life.
    */
-  const feed = await feedReport(tx, tenantId, { from: LEDGER_EPOCH, to: today });
+  const feed = await feedReport(tx, tenantId, {
+    from: LEDGER_EPOCH,
+    to: today,
+    packConfig: options.packConfig,
+  });
   const feedByLot = new Map(feed.lots.map((row) => [row.lotId, row]));
 
   const byInventoryLot = new Map(inventoryLots.map((l) => [l.id, l]));
@@ -1465,6 +1829,22 @@ export async function farmSnapshot(
           cents: row.totalCents,
           centsPerHead: row.centsPerHead,
           provenance: row.provenance,
+        };
+      })(),
+      weight: (() => {
+        const row = feedByLot.get(lot.id);
+        if (!row || row.weight.weighInCount === 0) return null;
+        return {
+          latestLb: row.weight.latest?.averageLb ?? null,
+          weighedOn: row.weight.latest?.weighedOn ?? null,
+          method: row.weight.latest?.method ?? null,
+          adgLb: row.weight.gain?.adgLb ?? null,
+          gainFrom: row.weight.gain?.from.weighedOn ?? null,
+          gainTo: row.weight.gain?.to.weighedOn ?? null,
+          gainDays: row.weight.gain?.days ?? null,
+          conversion: row.weight.conversion?.ratio ?? null,
+          conversionConfidence: row.weight.conversion?.confidence ?? null,
+          blockedBy: row.weight.conversionBlockedBy,
         };
       })(),
     };

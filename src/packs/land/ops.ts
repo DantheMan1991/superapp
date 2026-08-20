@@ -1231,6 +1231,73 @@ export async function currentZoneForOccupants(
 }
 
 /**
+ * When each occupant was last HAULED — moved to a zone on a different parcel.
+ *
+ * **A WALK IS NOT A HAUL, AND THE DIFFERENCE IS THE PARCEL BOUNDARY.** This
+ * pack's own design settles it: *a move between adjacent paddocks is a walk —
+ * daily, free. A move between parcels is a haul — fuel, labour, trailer time.*
+ * Nothing in this schema records which one happened, and nothing needs to: the
+ * parcel of the zone they left and the parcel of the zone they arrived on
+ * already say it.
+ *
+ * Written for `livestock`'s weights, and it is here because the record is
+ * land's. **Shrink will lie to weight data** — cattle drop 3–5% on a trailer and
+ * take days to put it back — so a weighing taken just after a haul must not read
+ * as a loss. A flag that fired on every daily paddock move instead would be
+ * ignored inside a week, which is why this cannot simply be "when did they last
+ * move".
+ *
+ * Null for an occupant that has only ever been on one parcel, which is most of
+ * them and is not a missing value.
+ */
+export async function lastHauledOn(
+  tx: Tx,
+  tenantId: string,
+  extensionSlug: string,
+  occupantIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (occupantIds.length === 0) return out;
+
+  const rows = await tx
+    .select({
+      occupantId: schema.landOccupancy.occupantId,
+      parcelId: schema.landZones.parcelId,
+      startedOn: schema.landOccupancy.startedOn,
+    })
+    .from(schema.landOccupancy)
+    .innerJoin(
+      schema.landZones,
+      and(
+        eq(schema.landZones.tenantId, schema.landOccupancy.tenantId),
+        eq(schema.landZones.id, schema.landOccupancy.zoneId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.landOccupancy.tenantId, tenantId),
+        eq(schema.landOccupancy.extensionSlug, extensionSlug),
+        inArray(schema.landOccupancy.occupantId, occupantIds),
+      ),
+    )
+    .orderBy(asc(schema.landOccupancy.startedOn), asc(schema.landOccupancy.createdAt));
+
+  // Walk each occupant's stays in order and remember the last time the parcel
+  // under them changed. The FIRST stay is an arrival rather than a haul —
+  // nobody hauled them from nowhere.
+  const previousParcel = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.occupantId) continue;
+    const before = previousParcel.get(row.occupantId);
+    if (before !== undefined && before !== row.parcelId) {
+      out.set(row.occupantId, row.startedOn);
+    }
+    previousParcel.set(row.occupantId, row.parcelId);
+  }
+  return out;
+}
+
+/**
  * What is currently in each of these structures — "what is in Pen 3".
  *
  * The read that happens standing in front of it, and it is here rather than in

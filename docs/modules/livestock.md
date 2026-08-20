@@ -20,10 +20,75 @@ and [land.md](land.md) before changing anything about where animals are.
 | **2** | **Feed + the allocation seam** (FCR itself waits on slice 5) | **shipped 2026-08-20** |
 | 3 | Health + withdrawal clock | next |
 | 4 | Breeding, genetics, registry, **and the breeding/market capital transfer** | |
-| 5 | Weights (tape formulas, sampling) | |
+| **5** | **Weights (tape formulas, sampling) — and the FCR they unlock** | **shipped 2026-08-20** |
 | 6 | Processing handoff → `production` | |
 
 ## Build log
+
+### 2026-08-20 — Slice 5: weights carry a method, and FCR stops being a dash (`claude/weights-carry-a-method`)
+
+Taken out of order, ahead of slice 3, for one reason: **a batch that goes to the
+processor unweighed can never have an FCR, and the pilot's broilers are days
+away.** Everything on the feed side shipped this morning; this is the other half
+of the division.
+
+- **A WEIGHT IS AN OBSERVATION CARRYING A METHOD**, and the method is why this is
+  a table rather than a column. A crate of ten on a scale and a tape round a
+  heart girth are the same shape of fact and deserve very different confidence —
+  the design's rule, now computable: feed measured against a scale is a number to
+  act on, anything with an estimate at either end is a trend to watch.
+- **A TAPE STORES THE TAPE.** `heart_girth_in` and `body_length_in` are what
+  somebody actually measured; the pounds are derived at read time through a
+  divisor that lives in the PROFILE. So a corrected divisor reweighs every animal
+  ever measured rather than only the next one — the opposite call from
+  `cost_cents`, deliberately, because a cost is a transaction and a measurement
+  is an interpretation.
+- **The divisor is config, not code.** A pack that knew a pig is 400 and a cow is
+  300 would know what a pig is. `tapeDivisorFrom` reads `packConfig`, poultry is
+  deliberately absent — nobody tapes a chicken — and the form does not offer the
+  method for a species with no divisor. Driven: Tape appears on a swine lot and
+  not on a poultry one.
+- **THE FCR WINDOW IS THE GAIN WINDOW, NOT THE REPORT'S**, and this is the
+  sharpest decision in the slice. Feed fed before anybody put a bird on a scale
+  made gain nobody measured, so counting it would inflate the number badly — for
+  exactly the farm that starts weighing halfway through its first batch, which is
+  every farm's first batch. `foldGroups` became a function so the allocation can
+  be re-run over each lot's own window; it is the same arithmetic over fewer
+  draws rather than a pro-rated guess.
+- **A HAUL LIES TO WEIGHT DATA, AND A WALK DOES NOT.** Cattle drop 3–5% on a
+  trailer and take days to put it back. `land.lastHauledOn` finds the last move
+  that CROSSED A PARCEL BOUNDARY — land's own definition of a haul — because a
+  flag that fired on every daily paddock move would be ignored inside a week.
+  A weighing within three days of one is kept, badged, and left out of the gain.
+- **Refusals outnumber answers, and each one says why.** No weighings, one
+  weighing, two on the same day, everything shrink-affected, a negative gain, no
+  feed recorded by weight: six paths, each returning null with a sentence the
+  screen prints in the cell. A blank would be indistinguishable from a bug, and
+  for a farm's whole first season the reason is the useful part.
+- **Feed per pound of LIVEWEIGHT is not FCR and is never called it.** It exists so
+  a first batch with one weighing gets something real, and it counts the weight
+  the animal arrived with as though the feed had made it — nearly true for a
+  chick, not true at all for a bought-in feeder steer.
+- 31 new pure tests, 7 new ops tests, 6 new isolation tests. Migration `0164`
+  needed **no hand-reordering** — its one composite FK targets `livestock_lots`,
+  which has existed since `0138`. Sixth time the rule was checked, first time the
+  answer was no. `0165` carries the policies.
+
+**Driven, and the advisor found the defect — for the third time it was the
+DIGEST rather than the prompt.** Given *"gaining 0.129 lb a day"* and nothing
+else, it noticed the figure was close to the latest weight divided by the bird's
+age and told the founder the gain was being read off hatch rather than off two
+weighings. It was not — the lot page says "over 39 days" — but nothing in the
+digest could prove it, so the objection was fair and the answer was wrong. The
+gain window now travels with the rate, and the same question came back: *"0.129
+lb a day — that's from your own records: 6.25 lb a head on 2026-08-18, measured
+against a weighing on 2026-07-10, 39 days apart."*
+
+It also did the thing this pack keeps being built for: said unprompted that a
+1.04 : 1 conversion *"usually means some of the feed they ate wasn't booked to
+PEN-1, not that they're doing something remarkable"* — which is exactly right
+about the test data, and is the mixed-provenance badge being reasoned from
+rather than merely displayed.
 
 ### 2026-08-20 — Slice 2: feed, and the seam that survives fifteen pens on one bin (`claude/feed-and-fcr`)
 
@@ -348,6 +413,7 @@ This pack is the one that forced the change; the full reasoning is in
 | `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
 | `livestock_feed_groups` | **A shared feeder** — a bin, a bulk bag, a trough | Holds the FEEDER, not the feed: no quantity, no cost, no balance. `status` in `active\|closed`; closed keeps reporting. Deliberately not an asset — a feeding group is a set of animals sharing a cost, so two bins feeding one flock are one group |
 | `livestock_feed_group_members` | Which lots eat from it, **between which dates** | The dates are the whole reason this is a table: head on any day is already in the ledger, but *when a pen went onto the bin* is not. `ended_on` INCLUSIVE, matching `land_occupancy` |
+| `livestock_weights` | **What they weighed, and how anybody knows** | `method` open taxonomy (`scale`, `sample`, `tape`, `visual`). `sample_size` head went on the scale and together weighed `sample_weight_lb` — the AVERAGE is a division at read time and is never stored. A tape stores `heart_girth_in` + `body_length_in` and no pounds at all. CHECK: something must have been measured |
 | `livestock_feed_draws` | **This movement was feed drawn for that feeder** | A JOIN, not a second ledger. Composite FK to `inventory_movements`, which holds the quantity and the stamped cost. UNIQUE per movement — two rows would put one cost in two pots |
 
 **Everything else lives in a pack this one requires:**
@@ -408,18 +474,47 @@ This pack is the one that forced the change; the full reasoning is in
 - `src/packs/inventory/ops.ts` → `datedMovementsForLots(…, null)` — **`limit:
   null` means every row**, because a running balance cannot start in the middle
   of a ledger. A cap is right for a digest and wrong for arithmetic
+- `src/packs/livestock/core/weights.ts` — pure. **The tape formula, the gain, the
+  shrink window and the confidence rule.** Read this before changing anything
+  about FCR; nearly every function in it returns null on purpose
+- `src/packs/livestock/vocabulary.ts` → `tapeDivisorFrom` — the profile's
+  girth² × length ÷ divisor, per species. Null means no estimate, never a default
+- `src/packs/land/ops.ts` → `lastHauledOn` — added for this slice, and it lives
+  in `land` because the record is land's. A haul is a PARCEL crossing; a walk to
+  the next paddock is not
+- `src/packs/inventory/ops.ts` → `consumedDatedByLots` — added for the FCR
+  window, which is different for every lot
+- `src/packs/livestock/components/weight-controls.tsx` — the form whose shape
+  changes with the method
 - `src/db/schema/livestock.ts` · `drizzle/0138_*.sql` · `drizzle/0139_livestock_rls.sql`
   · `drizzle/0156_*.sql` · `drizzle/0157_livestock_daily_logs_rls.sql`
   · `drizzle/0162_*.sql` · `drizzle/0163_livestock_feed_rls.sql`
+  · `drizzle/0164_*.sql` · `drizzle/0165_livestock_weights_rls.sql`
 
 ## Decisions & gotchas
 
-- **THERE IS NO FCR IN THIS PACK, AND THERE MUST NOT BE ONE UNTIL SLICE 5.**
-  Feed conversion is feed per pound of GAIN. Feed per head and feed cost per
-  head are answerable today and are NOT the same number; dividing feed by head,
-  or by an assumed finish weight, would manufacture the one figure the broiler
-  enterprise is judged on. The screens say what they cannot compute, in words,
-  and the advisor is told to as well.
+- **FCR ARRIVED IN SLICE 5 AND IS STILL REFUSED MORE OFTEN THAN GIVEN.** Feed
+  conversion is feed per pound of GAIN, so it needs two weighings — one number is
+  a weight, not a gain. Feed per head, feed cost per head and feed per pound of
+  LIVEWEIGHT are all answerable with less, and none of them is FCR. Never relax a
+  refusal into an approximation: the reason a screen gives is more useful than a
+  number it had to invent.
+- **THE FCR WINDOW IS THE GAIN WINDOW.** Feed fed before the first weighing made
+  gain nobody measured, and counting it inflates the ratio — worst for the farm
+  that starts weighing mid-batch, which is every farm's first batch. If a future
+  slice is tempted to use the report's period for both halves because it is one
+  query cheaper, that is the bug.
+- **A TAPE DIVISOR IS PROFILE CONFIG AND NULL MEANS NO ESTIMATE.** Never default
+  it. Weighing sheep as though they were pigs is worse than offering no figure,
+  and the form hides the method entirely when the species has no divisor.
+- **A HAUL IS A PARCEL CROSSING.** Not "they moved". A rotational farm walks its
+  herd daily, and a shrink warning on every one of those is a warning nobody
+  reads. Shrink-affected weighings are KEPT — deleting an observation somebody
+  made is not this pack's business — and left out of the gain.
+- **Nothing stores an average, a gain, an ADG or an FCR.** All four are folds
+  over `livestock_weights`, for the same reason the head count is a fold over the
+  ledger: a stored one stops agreeing with its own inputs the day somebody
+  weighs again.
 - **MEASURED AND ALLOCATED ARE DIFFERENT KINDS OF FACT, permanently.** A bag
   issued to a named lot is measured and its cost was stamped when it happened; a
   share of a shared feeder is spread by head × days at read time and is an
@@ -563,11 +658,29 @@ This pack is the one that forced the change; the full reasoning is in
   2026-08-20** with slice 2, and with no change to the prompt: the digest carries
   cost, cost per head and provenance, and the answer got sharper on its own.
   Treatments and weights are still slices 3 and 5.
-- ~~No feed or FCR~~ — **feed shipped 2026-08-20** as slice 2. **FCR did not**,
-  and deliberately: see Decisions.
-- **Feed conversion is unavailable until weights exist.** Slice 5. Everything
-  needed on the feed side is now recorded, so FCR is a division away — which is
-  exactly why the refusal has to be written down rather than assumed.
+- ~~No feed or FCR~~ — **both shipped 2026-08-20**, feed as slice 2 and weights
+  as slice 5. FCR is computed where two weighings exist and refused with a stated
+  reason everywhere else.
+- **Weights are POUNDS AND INCHES, in the column names.** The tape formulas this
+  pack was given are imperial, and a column called `weight` that means different
+  things per tenant is the bug the one-stocking-unit rule exists to prevent. A
+  metric farm needs a conversion at the boundary, and nothing does it yet.
+- **A weighing cannot be corrected or removed.** A fat-fingered 625 lb crate of
+  broilers is in the gain until somebody edits the database. `recordWeight` is
+  insert-only, and unlike a movement there is no compensating entry that makes
+  sense for a measurement.
+- **No body condition score.** 1–9 on a cattle beast is the decision input the
+  design names beside weight, and it is deliberately not in `livestock_weights` —
+  it is not a weight, and every read that folds weights would have to remember to
+  exclude it. Its own table when something needs it.
+- **The shrink window is three days for every species.** Cattle are where the
+  3–5% figure comes from; a broiler in a crate for twenty minutes is not shrunk
+  at all, and a pig is somewhere between. One constant is conservative rather
+  than right.
+- **Feed conversion counts head standing at the END of the gain window.** Birds
+  that died mid-window ate feed and produced no gain, which correctly worsens the
+  ratio — that is what "as-hatched" conversion means — but a lot SPLIT mid-window
+  has head transferred out, and that is not the same thing.
 - **A draw is allocated over the WHOLE report window, not over the period it was
   drawn for.** With lumpy draws and mid-window membership churn — a ton drawn on
   day 1, a pen joining on day 15 — the share is smeared across the window rather

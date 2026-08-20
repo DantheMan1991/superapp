@@ -87,3 +87,35 @@ const BREED_HINTS: Record<string, string> = {
 export function breedHint(species: string): string | undefined {
   return BREED_HINTS[species.trim().toLowerCase().replace(/\s+/g, "_")];
 }
+
+/**
+ * The divisor in the tape formula — **girth² × length ÷ this** — for one
+ * species, from the installed profile's `packConfig`.
+ *
+ * IT LIVES IN CONFIG FOR THE SAME REASON SPECIES DO. The number genuinely
+ * differs by animal (a pig is not a cow), and a pack that hardcoded 400 for
+ * swine and 300 for cattle would know what a pig is — the boundary ADR 0004
+ * draws. It is also the sort of figure a vet or an extension office will argue
+ * about, and config is where an argument can be settled per tenant.
+ *
+ * **Returns null for a species the profile says nothing about, and null means no
+ * estimate rather than a default.** A tape reading on an animal whose formula
+ * nobody supplied produces no weight at all, which is the honest answer — the
+ * alternative is quietly weighing sheep as though they were pigs.
+ *
+ * Total by construction, like `speciesFrom`: `tenant_modules.config` is jsonb
+ * with no shape constraint, so anything unreadable is "no divisor".
+ */
+export function tapeDivisorFrom(
+  config: unknown,
+  species: string,
+): number | null {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return null;
+  const divisors = (config as Record<string, unknown>).tapeDivisors;
+  if (!divisors || typeof divisors !== "object" || Array.isArray(divisors)) {
+    return null;
+  }
+  const key = species.trim().toLowerCase().replace(/\s+/g, "_");
+  const value = (divisors as Record<string, unknown>)[key];
+  return typeof value === "number" && value > 0 ? value : null;
+}

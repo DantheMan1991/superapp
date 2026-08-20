@@ -172,6 +172,27 @@ d("livestock tables (RLS)", () => {
       movementA = movements[0].id;
       movementB = movements[1].id;
 
+      await tx.insert(schema.livestockWeights).values([
+        {
+          tenantId: tenantA,
+          livestockLotId: lots[0].id,
+          weighedOn: '2026-08-19',
+          method: 'sample',
+          sampleSize: 10,
+          sampleWeightLb: 62.5,
+          notes: 'Ours',
+        },
+        {
+          tenantId: tenantB,
+          livestockLotId: lots[1].id,
+          weighedOn: '2026-08-19',
+          method: 'scale',
+          sampleSize: 1,
+          sampleWeightLb: 1150,
+          notes: 'Theirs',
+        },
+      ]);
+
       await tx.insert(schema.livestockFeedDraws).values([
         {
           tenantId: tenantA,
@@ -531,6 +552,119 @@ d("livestock tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.livestockFeedDraws),
+      ),
+    ).toHaveLength(0);
+  });
+  // ---- slice 5: weights ---------------------------------------------------
+
+  it("a tenant sees only its own weighings", async () => {
+    // These rows are the DENOMINATOR of the only number the broiler enterprise
+    // is judged on. A leak here would not merely expose data, it would let
+    // another farm's scale readings into this farm's feed conversion.
+    const mine = await asStaff((tx) => tx.select().from(schema.livestockWeights));
+    expect(mine.map((w) => w.notes)).toEqual(["Ours"]);
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockWeights),
+    );
+    expect(theirs.map((w) => w.notes)).toEqual(["Theirs"]);
+  });
+
+  it("cannot weigh another tenant's animals", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockWeights).values({
+          tenantId: tenantA,
+          livestockLotId: lotB,
+          weighedOn: "2026-08-20",
+          method: "sample",
+          sampleSize: 10,
+          sampleWeightLb: 40,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("REFUSES A WEIGHING THAT MEASURED NOTHING", async () => {
+    // Neither a scale reading nor a tape reading. A row like that is a record
+    // that somebody thought about weighing.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockWeights).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          weighedOn: "2026-08-20",
+          method: "visual",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a sample of nobody, and a weight of nothing", async () => {
+    // A sample size of zero would make the average a division by zero rather
+    // than an unknown; a zero weight reads as a dead-weight answer.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockWeights).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          weighedOn: "2026-08-20",
+          method: "sample",
+          sampleSize: 0,
+          sampleWeightLb: 40,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockWeights).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          weighedOn: "2026-08-20",
+          method: "scale",
+          sampleSize: 1,
+          sampleWeightLb: 0,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an invented method format", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockWeights).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          weighedOn: "2026-08-20",
+          method: "Guessed It",
+          sampleWeightLb: 40,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a staff member can weigh, because catching birds is a chore", async () => {
+    const rows = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockWeights)
+        .values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          weighedOn: "2026-08-21",
+          method: "sample",
+          sampleSize: 10,
+          sampleWeightLb: 62.5,
+          recordedBy: MATE,
+        })
+        .returning(),
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("weighings are default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.livestockWeights),
       ),
     ).toHaveLength(0);
   });

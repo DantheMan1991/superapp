@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -43,7 +45,14 @@ const NOT_CHOSEN = "";
  * alphabetically-first option and quietly recorded good pasture as a house
  * site; the lesson generalises to any dialog that asks a question.
  */
-export function ItemForm({ kindsInUse }: { kindsInUse: string[] }) {
+export function ItemForm({
+  kindsInUse,
+  livestockEnabled = false,
+}: {
+  kindsInUse: string[];
+  /** Only redirect somewhere this tenant actually has. */
+  livestockEnabled?: boolean;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -60,7 +69,20 @@ export function ItemForm({ kindsInUse }: { kindsInUse: string[] }) {
   const [unit, setUnit] = useState<string>(NOT_CHOSEN);
 
   const kind = kindChoice === CUSTOM_KIND ? customKind.trim() : kindChoice;
-  const canSubmit = Boolean(kind) && Boolean(unit);
+  /**
+   * **ANIMALS ARE NOT STARTED HERE, AND THE FORM HAS TO SAY SO.**
+   *
+   * Picking "Livestock" and pressing on produces an item with no batch and no
+   * biology — a half-thing that appears in the Livestock form's "Counted as"
+   * picker and nowhere else, looking like something went wrong. Nothing stopped
+   * it and nothing warned about it, and the founder asked which page he was
+   * supposed to use.
+   *
+   * `Start a lot` on the Livestock page makes all three in one transaction, so
+   * this sends people there rather than letting them build the broken half.
+   */
+  const redirectToLivestock = livestockEnabled && kind === "livestock";
+  const canSubmit = Boolean(kind) && Boolean(unit) && !redirectToLivestock;
 
   function submit(formData: FormData) {
     if (!canSubmit) return;
@@ -205,6 +227,35 @@ export function ItemForm({ kindsInUse }: { kindsInUse: string[] }) {
               <Textarea id="notes" name="notes" rows={2} maxLength={5000} />
             </div>
           </div>
+
+          {redirectToLivestock && (
+
+            <div className="rounded-md border border-dashed p-4 text-sm">
+
+              <p className="font-medium">Animals are started in Livestock.</p>
+
+              <p className="mt-1 text-muted-foreground">
+
+                Adding one here would make a stock line with no batch and no
+
+                breed, age or paddock behind it.{" "}
+
+                <Link href="/dashboard/m/livestock" className="underline">
+
+                  Start a lot
+
+                </Link>{" "}
+
+                instead — it creates the stock line, the batch and the animal
+
+                together, and it will let you name a new one as you go.
+
+              </p>
+
+            </div>
+
+          )}
+
 
           <DialogFooter>
             <Button type="submit" disabled={pending || !canSubmit}>

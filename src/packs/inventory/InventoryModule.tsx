@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { packContext } from "@/lib/packs/tenant-context";
+import { isModuleEnabled } from "@/lib/modules";
 import { labelFor } from "@/lib/packs/resolve";
 import { listItems, listKindsInUse, listLocations, onHandByItem } from "./ops";
 import { slugLabel } from "./vocabulary";
@@ -39,6 +40,13 @@ export async function InventoryModule({
   const kindParam = searchParams.kind;
   const kind = typeof kindParam === "string" ? kindParam : undefined;
   const showArchived = searchParams.archived === "1";
+
+  /**
+   * Only signpost a module this tenant actually has. Pointing somebody at a
+   * page that is not switched on is the "button that leads to a 404" mistake
+   * `land` made with its parcel finder a day ago.
+   */
+  const livestockEnabled = await isModuleEnabled(ctx.tenant.id, "livestock");
 
   const { items, onHand, kinds, locations, labels } = await withTenant(
     ctx.tenant.id,
@@ -68,7 +76,10 @@ export async function InventoryModule({
         description="What the business holds, where it is, and which batch it came from."
         actions={
           isOwner ? (
-            <ItemForm kindsInUse={kinds.map((k) => k.kind)} />
+            <ItemForm
+              kindsInUse={kinds.map((k) => k.kind)}
+              livestockEnabled={livestockEnabled}
+            />
           ) : null
         }
       />
@@ -114,6 +125,24 @@ export async function InventoryModule({
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {slugLabel(item.itemKind)}
+                    {/**
+                     * **ONE THING, TWO VIEWS — and the row has to say so.**
+                     * Market animals ARE inventory: head is a unit of measure
+                     * and a pen is a batch, which is exactly what makes cost
+                     * per pen fall out of the same ledger as the feed. But an
+                     * item called "Broiler chicks" sitting here beside the feed
+                     * reads as a duplicate of the Livestock page, and the
+                     * founder asked which one he was supposed to add animals
+                     * to. Nothing on either screen answered him.
+                     */}
+                    {item.itemKind === "livestock" && livestockEnabled && (
+                      <Link
+                        href="/dashboard/m/livestock"
+                        className="ml-2 text-xs underline hover:text-foreground"
+                      >
+                        managed in Livestock
+                      </Link>
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {item.storageRequirement

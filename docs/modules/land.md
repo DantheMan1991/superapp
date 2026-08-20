@@ -50,6 +50,44 @@ examples exist.
 
 ## Build log
 
+### 2026-08-19 — The map drew the ground and none of the boundaries (`claude/map-worker-loses-its-import`)
+
+Reported by the founder, tracing on the live map: *"it would mark where I
+clicked and there was no visible outline of the boundary."* The saved boundaries
+were not drawn either. The imagery, the zoom control, the attribution, the fit
+and the acreage badge were all correct — **only vector rendering was dead, and
+nothing anywhere said so.**
+
+**The cause is a bundler seam, not a map bug.** MapLibre v6 ships a module
+worker that does `import ... from "./maplibre-gl-shared.mjs"`. Next copies
+`maplibre-gl-worker.mjs` into `/_next/static/media/` under a content-hashed
+name, but does **not** emit the sibling chunk and does **not** rewrite the
+specifier — so the worker's own import 404s, returns the app's HTML shell, and
+the browser refuses it: *"non-JavaScript MIME type of text/html"*. That message
+had been in the console since the map first shipped and reads like noise.
+
+The worker then never starts. Raster tiles are decoded on the main thread so the
+map looks alive, while **every GeoJSON source silently never parses**. Measured
+on production before the fix: `isStyleLoaded()` false forever, both sources
+`isSourceLoaded()` false, `queryRenderedFeatures` returning 0 — and a plain red
+square added from the console never rendered either, which is what ruled out our
+data and our styling.
+
+- **`public/maplibre/` now serves the worker and its chunk**, with
+  `setWorkerUrl` pointing at it, so the relative import resolves against a path
+  we control. Copied by `scripts/copy-map-worker.ts` on `prebuild`/`predev` and
+  gitignored — a committed copy would drift from `maplibre-gl` on the next bump
+  and reproduce this exact bug wearing a different hat.
+- **`mjs` added to the proxy matcher.** `js(?!on)` does not match a `.mjs`
+  suffix, so both files were taking the middleware path for no reason.
+- Verified at the point of failure rather than by redeploying and hoping: the
+  worker returns 200 as JavaScript, its `./maplibre-gl-shared.mjs` resolves to
+  200 where it used to 404, and the module worker constructs with no error.
+
+**The lesson worth keeping: a raster map that renders is not evidence the map
+works.** Imagery and vectors travel different paths, and only one of them needs
+the worker.
+
 ### 2026-08-19 — A white square with a working zoom control (`claude/map-needs-no-glyphs`)
 
 The map shipped and rendered nothing. Driven in the browser the moment it

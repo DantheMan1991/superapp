@@ -97,9 +97,30 @@ export function BoundaryMap({
     let disposeMap: MapLibreMap | null = null;
 
     (async () => {
-      const [{ Map: MapLibre, AttributionControl, NavigationControl, LngLatBounds }] =
-        await Promise.all([import("maplibre-gl")]);
+      const [
+        {
+          Map: MapLibre,
+          AttributionControl,
+          NavigationControl,
+          LngLatBounds,
+          setWorkerUrl,
+        },
+      ] = await Promise.all([import("maplibre-gl")]);
       if (cancelled || !container.current) return;
+
+      /**
+       * **SERVE THE WORKER OURSELVES.** MapLibre's module worker imports a
+       * sibling chunk with a relative specifier; Next copies the worker into
+       * `/_next/static/media/` under a hashed name without emitting that
+       * sibling, so the import 404s into the HTML shell and the worker never
+       * starts. Raster tiles still draw on the main thread, which is why the
+       * map looked alive while every GeoJSON layer silently never rendered.
+       *
+       * `public/maplibre/` keeps the two files next to each other, so the
+       * relative import resolves. Copied by `scripts/copy-map-worker.ts` on
+       * prebuild and predev so it cannot drift from the installed version.
+       */
+      setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
       const instance = new MapLibre({
         container: container.current,

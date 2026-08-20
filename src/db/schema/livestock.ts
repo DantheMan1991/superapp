@@ -38,7 +38,14 @@
  *     deliberate placeholder and not the model: a single breed string thrown at
  *     a crossbred herd loses information irrecoverably, so nothing is allowed
  *     to compute on it.
- *   - **Health, withdrawal clocks, weights, feed.** Slices 2, 3 and 5.
+ *   - **Health, withdrawal clocks, weights.** Slices 3 and 5. **Weights are why
+ *     there is no FCR anywhere in this pack yet**: feed per head is answerable
+ *     today, feed per pound of GAIN is not, and inventing a gain figure would
+ *     produce the one number the broiler enterprise is judged on out of nothing.
+ *   - **A feed quantity or a feed cost on the lot.** Slice 2 adds three tables
+ *     for the shared-feeder ALLOCATION and not one number about feed, because
+ *     what was fed is already `inventory_movements` — measured when a bag went
+ *     to a named pen, allocated when a ton went into a bin serving fifteen.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -54,7 +61,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
-import { inventoryLots } from "./inventory";
+import { inventoryLots, inventoryMovements } from "./inventory";
 
 /**
  * The biology extension on an inventory lot. One row per lot, always.
@@ -282,7 +289,188 @@ export const livestockDailyLogs = pgTable(
   ],
 );
 
+/**
+ * A SHARED FEEDER — a bin, a bulk bag, a trough that serves several pens.
+ *
+ * **THE ALLOCATION SEAM, and the design calls it the single largest consequence
+ * of the 10x target.** At 1x a bag of feed goes to a pen and somebody knows
+ * which pen: that is a direct issue, `inventory_movements.issued_to_lot_id`, and
+ * it needs nothing here. At 10x feed arrives by the ton into a bin serving ~15
+ * pens, and no one will ever know which bird ate which pound. The cost must then
+ * be **allocated by head × days on feed rather than assigned**, and both paths
+ * have to exist at once because a farm runs bagged starter and bulk grower in
+ * the same season.
+ *
+ * What that means for this table: it holds the FEEDER, not the feed. There is no
+ * quantity here, no cost, and no balance — a draw from the bin is an ordinary
+ * `inventory` issue and stays the only record of what left. This is the thing
+ * the issue was drawn FOR.
+ *
+ * Deliberately NOT an asset. A storage location is an asset and a bin often is
+ * one, but a feeding group is a set of animals sharing a cost, which is a
+ * livestock fact: two bins feeding one flock are one group, and one bin split
+ * between the broilers and the layers is two.
+ */
+export const livestockFeedGroups = pgTable(
+  "livestock_feed_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** What a person calls it: "Broiler bin", "North trough". */
+    name: text("name").notNull(),
+    /** `active` | `closed`. Closed keeps reporting; it just stops being offered. */
+    status: text("status").notNull().default("active"),
+    notes: text("notes").notNull().default(""),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_feed_groups_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("livestock_feed_groups_tenant_status_idx").on(t.tenantId, t.status),
+    check(
+      "livestock_feed_groups_status_valid",
+      sql`${t.status} in ('active', 'closed')`,
+    ),
+    check(
+      "livestock_feed_groups_name_present",
+      sql`length(btrim(${t.name})) > 0`,
+    ),
+  ],
+);
+
+/**
+ * Which lots eat from a feeder, and BETWEEN WHICH DATES.
+ *
+ * **The dates are the whole reason this is a table rather than a column.** Head
+ * on hand is already recorded — the head ledger says how many birds stood in a
+ * pen on any day — so head is never re-entered here, following land's rule that
+ * anything derivable from a record already being made must not become a second
+ * data entry. What the ledger cannot know is *when a pen went onto that bin*: a
+ * batch brooded on bagged starter for two weeks before moving to bulk grower has
+ * head standing the whole time and is only on the bin for part of it.
+ *
+ * Date-ranged like `livestock_identifiers` and `land_occupancy`, and for the
+ * same reason: an ended membership is history that a report over last season
+ * still has to see. `ended_on` is the INCLUSIVE last day, matching land.
+ */
+export const livestockFeedGroupMembers = pgTable(
+  "livestock_feed_group_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    feedGroupId: uuid("feed_group_id").notNull(),
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    startedOn: date("started_on").notNull(),
+    /** Inclusive last day on the feeder. Null means they are still on it. */
+    endedOn: date("ended_on"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_feed_group_members_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    index("livestock_feed_group_members_tenant_group_idx").on(
+      t.tenantId,
+      t.feedGroupId,
+    ),
+    index("livestock_feed_group_members_tenant_lot_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+    ),
+    foreignKey({
+      name: "livestock_feed_group_members_group_fk",
+      columns: [t.tenantId, t.feedGroupId],
+      foreignColumns: [livestockFeedGroups.tenantId, livestockFeedGroups.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "livestock_feed_group_members_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    check(
+      "livestock_feed_group_members_range_ordered",
+      sql`${t.endedOn} is null or ${t.endedOn} >= ${t.startedOn}`,
+    ),
+  ],
+);
+
+/**
+ * A DRAW: this movement out of stock was feed taken for that feeder.
+ *
+ * **A JOIN, NOT A SECOND LEDGER, and that distinction is the point.** The
+ * quantity, the cost, the item, the date and the batch all live where they
+ * already live — one row in `inventory_movements`, stamped at the average when
+ * it happened exactly as a direct issue is. This table adds the one fact
+ * inventory could not hold without knowing what a feeding group is: which
+ * feeder the issue was drawn for.
+ *
+ * That is the same shape `livestock_lots` uses on the spine — inventory owns the
+ * quantity, livestock owns what it means — and it is why allocated cost can
+ * never disagree with the ledger it came from. Nothing here is summed; the
+ * allocation is a fold at read time in `core/feed.ts`.
+ *
+ * UNIQUE per movement: a draw belongs to one feeder or none. Two would put the
+ * same cost in two pots and quietly double the farm's feed bill.
+ */
+export const livestockFeedDraws = pgTable(
+  "livestock_feed_draws",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    feedGroupId: uuid("feed_group_id").notNull(),
+    /**
+     * The issue this draw is. CASCADE, because the association describes that
+     * movement and means nothing without it — though movements are corrected by
+     * another movement rather than deleted, so this should never fire.
+     */
+    inventoryMovementId: uuid("inventory_movement_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_feed_draws_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("livestock_feed_draws_tenant_movement_idx").on(
+      t.tenantId,
+      t.inventoryMovementId,
+    ),
+    index("livestock_feed_draws_tenant_group_idx").on(t.tenantId, t.feedGroupId),
+    foreignKey({
+      name: "livestock_feed_draws_group_fk",
+      columns: [t.tenantId, t.feedGroupId],
+      foreignColumns: [livestockFeedGroups.tenantId, livestockFeedGroups.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "livestock_feed_draws_movement_fk",
+      columns: [t.tenantId, t.inventoryMovementId],
+      foreignColumns: [inventoryMovements.tenantId, inventoryMovements.id],
+    }).onDelete("cascade"),
+  ],
+);
+
 export type LivestockLot = typeof livestockLots.$inferSelect;
 export type NewLivestockLot = typeof livestockLots.$inferInsert;
 export type LivestockIdentifier = typeof livestockIdentifiers.$inferSelect;
 export type LivestockDailyLog = typeof livestockDailyLogs.$inferSelect;
+export type LivestockFeedGroup = typeof livestockFeedGroups.$inferSelect;
+export type LivestockFeedGroupMember =
+  typeof livestockFeedGroupMembers.$inferSelect;
+export type LivestockFeedDraw = typeof livestockFeedDraws.$inferSelect;

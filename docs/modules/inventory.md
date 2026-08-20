@@ -24,6 +24,39 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-20 — Three reads and one flag, for livestock's feed report (`claude/feed-and-fcr`)
+
+Slice 1 gave `livestock` the costing loop. Its slice 2 turns that into the
+report the broiler enterprise is judged on, and needed this pack to answer three
+questions it could not before. All three live here for the reason
+`movementsOnDate` does: the ledger is this pack's, and a neighbour querying
+`inventory_movements` directly is the leak the extension model forbids.
+
+- **`consumedByLotAndItem`** — what was issued into each lot, broken down by
+  item and carrying its stocking unit, optionally windowed by date.
+  `consumedCostByLot` answers a card in one number; a report needs the QUANTITY
+  (and pounds of grower never add to gallons of surplus milk), and **how many of
+  those entries carried no price at all**. That last count is not an error tally
+  — spent grain and windfalls are real feed with no invoice, and the design is
+  explicit that a model insisting every input has a purchase price will be lied
+  to. A null cost is carried through as fed-but-not-spent and counted.
+- **`movementsByIds`** — rows behind a set of ids, with the item name and unit.
+  A shared-feeder draw is an ordinary issue in this ledger plus an association
+  row in `livestock`; what a feeding group IS has nothing to do with inventory,
+  so the caller arrives holding ids.
+- **`datedMovementsForLots(…, limit: null)` now means every row.** A running
+  balance day by day — what livestock's allocation divides by — cannot be
+  computed from the most recent 200 movements, because the opening balance would
+  silently start in the middle of the ledger. **A cap is right for a digest and
+  wrong for arithmetic**, and the default stays 200.
+- **`issueStock` takes an optional `extensionSlug`**, so a draw is attributable
+  to the pack that will explain it — the same reason every head event carries
+  one.
+
+Nothing about cost changed. A draw is stamped at the average exactly as a bag
+handed to a named pen is, which is what lets livestock's allocated figure be
+compared with its measured one without a reconciliation step.
+
 ### 2026-08-19 — A second read, this one for the advisor (`claude/livestock-advisor`)
 
 `datedMovementsForLots` — movements for a set of lots, newest first, capped.

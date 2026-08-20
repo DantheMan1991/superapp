@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -580,14 +580,20 @@ export async function movementsOnDate(
  * brooding, losses in the last at heat and the leg and heart problems of fast
  * growth — and a total with no dates cannot tell those apart.
  *
- * Capped rather than unbounded: at 10x these lots carry thousands of rows
- * between them, and the caller wants the recent shape, not the archive.
+ * Capped rather than unbounded by default: at 10x these lots carry thousands of
+ * rows between them, and the advisor wants the recent shape, not the archive.
+ *
+ * **`limit: null` MEANS EVERY ROW, AND SOME CALLERS NEED IT.** A running balance
+ * day by day — what `livestock`'s feed allocation divides by — cannot be
+ * computed from the most recent 200 movements, because the opening balance would
+ * silently start in the middle of the ledger. A cap is right for a digest and
+ * wrong for arithmetic.
  */
 export async function datedMovementsForLots(
   tx: Tx,
   tenantId: string,
   lotIds: string[],
-  limit = 200,
+  limit: number | null = 200,
 ): Promise<
   Map<string, { occurredOn: string; movementKind: string; quantity: number }[]>
 > {
@@ -596,7 +602,7 @@ export async function datedMovementsForLots(
     { occurredOn: string; movementKind: string; quantity: number }[]
   >();
   if (lotIds.length === 0) return out;
-  const rows = await tx
+  const query = tx
     .select({
       lotId: schema.inventoryMovements.lotId,
       occurredOn: schema.inventoryMovements.occurredOn,
@@ -613,8 +619,8 @@ export async function datedMovementsForLots(
     .orderBy(
       desc(schema.inventoryMovements.occurredOn),
       desc(schema.inventoryMovements.createdAt),
-    )
-    .limit(limit);
+    );
+  const rows = limit === null ? await query : await query.limit(limit);
   for (const row of rows) {
     if (!row.lotId) continue;
     const entry = {
@@ -1038,6 +1044,12 @@ export async function issueStock(
     issuedToLotId?: string | null;
     occurredOn: string;
     locationAssetId?: string | null;
+    /**
+     * Which feature drew it. A shared-feeder draw is `livestock`'s, and stamping
+     * it keeps the row attributable to the pack that will explain it — the same
+     * reason every head event carries the slug.
+     */
+    extensionSlug?: string;
     notes?: string;
   },
 ): Promise<InventoryMovement> {
@@ -1059,6 +1071,7 @@ export async function issueStock(
     occurredOn: input.occurredOn,
     costCents,
     issuedToLotId: input.issuedToLotId ?? null,
+    extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
 }
@@ -1123,6 +1136,171 @@ export async function consumedCostByLot(
     out.set(row.lotId, Number(row.cents));
   }
   return out;
+}
+
+/**
+ * What was issued into each lot, **broken down by item and carrying its unit**.
+ *
+ * `consumedCostByLot` answers "what did this pen cost" in one number, which is
+ * what a card wants. A feed REPORT wants more and cannot get it from a total:
+ * how much was fed (a quantity, in the unit the item is stocked in — pounds of
+ * grower and gallons of surplus milk never add), and how many of those entries
+ * carried no price at all.
+ *
+ * **THAT LAST COUNT IS NOT AN ERROR TALLY.** Spent grain, windfalls and expired
+ * bakery bread are real feed with no invoice, and the design is explicit that a
+ * model insisting every input has a purchase price will be lied to. A null cost
+ * is carried through as fed-but-not-spent and counted so the report can say so.
+ *
+ * One grouped query whatever the lot count, and an optional date window so the
+ * same read serves "this season" and "everything".
+ */
+export async function consumedByLotAndItem(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  window: { from?: string; to?: string } = {},
+): Promise<
+  Map<
+    string,
+    {
+      itemId: string;
+      itemName: string;
+      unit: string;
+      /** Positive: how much was fed, not the ledger's negative sign. */
+      quantity: number;
+      costCents: number;
+      unpricedMovements: number;
+    }[]
+  >
+> {
+  const out = new Map<
+    string,
+    {
+      itemId: string;
+      itemName: string;
+      unit: string;
+      quantity: number;
+      costCents: number;
+      unpricedMovements: number;
+    }[]
+  >();
+  if (lotIds.length === 0) return out;
+
+  const where = [
+    eq(schema.inventoryMovements.tenantId, tenantId),
+    inArray(schema.inventoryMovements.issuedToLotId, lotIds),
+  ];
+  if (window.from) {
+    where.push(gte(schema.inventoryMovements.occurredOn, window.from));
+  }
+  if (window.to) {
+    where.push(lte(schema.inventoryMovements.occurredOn, window.to));
+  }
+
+  const rows = await tx
+    .select({
+      lotId: schema.inventoryMovements.issuedToLotId,
+      itemId: schema.inventoryMovements.itemId,
+      itemName: schema.inventoryItems.name,
+      unit: schema.inventoryItems.stockingUnit,
+      quantity: sql<string>`sum(${schema.inventoryMovements.quantity})`,
+      costCents: sql<string>`coalesce(sum(${schema.inventoryMovements.costCents}), 0)`,
+      unpriced: sql<number>`count(*) filter (where ${schema.inventoryMovements.costCents} is null)::int`,
+    })
+    .from(schema.inventoryMovements)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryItems.id, schema.inventoryMovements.itemId),
+      ),
+    )
+    .where(and(...where))
+    .groupBy(
+      schema.inventoryMovements.issuedToLotId,
+      schema.inventoryMovements.itemId,
+      schema.inventoryItems.name,
+      schema.inventoryItems.stockingUnit,
+    );
+
+  for (const row of rows) {
+    if (!row.lotId) continue;
+    const entry = {
+      itemId: row.itemId,
+      itemName: row.itemName,
+      unit: row.unit,
+      quantity: Math.abs(roundQuantity(Number(row.quantity))),
+      costCents: Number(row.costCents),
+      unpricedMovements: row.unpriced,
+    };
+    const list = out.get(row.lotId);
+    if (list) list.push(entry);
+    else out.set(row.lotId, [entry]);
+  }
+  return out;
+}
+
+/**
+ * Specific movements, by id, with the item name and unit they are denominated
+ * in.
+ *
+ * Written for `livestock`'s shared-feeder draws, which are an ordinary issue in
+ * this ledger plus an association row in that pack. The association is
+ * livestock's — what a feeding group is has nothing to do with inventory — so
+ * the caller arrives holding ids and needs the rows behind them.
+ *
+ * Capped, and the cap is the caller's to state: a season of daily draws is
+ * hundreds of rows and a report should say what it left out rather than
+ * truncating quietly.
+ */
+export async function movementsByIds(
+  tx: Tx,
+  tenantId: string,
+  ids: string[],
+): Promise<
+  {
+    id: string;
+    itemId: string;
+    itemName: string;
+    unit: string;
+    occurredOn: string;
+    /** Signed as recorded: an issue is negative. */
+    quantity: number;
+    costCents: number | null;
+    notes: string;
+  }[]
+> {
+  if (ids.length === 0) return [];
+  return tx
+    .select({
+      id: schema.inventoryMovements.id,
+      itemId: schema.inventoryMovements.itemId,
+      itemName: schema.inventoryItems.name,
+      unit: schema.inventoryItems.stockingUnit,
+      occurredOn: schema.inventoryMovements.occurredOn,
+      quantity: schema.inventoryMovements.quantity,
+      costCents: schema.inventoryMovements.costCents,
+      notes: schema.inventoryMovements.notes,
+    })
+    .from(schema.inventoryMovements)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryItems.id, schema.inventoryMovements.itemId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.id, ids),
+      ),
+    )
+    .orderBy(
+      desc(schema.inventoryMovements.occurredOn),
+      desc(schema.inventoryMovements.createdAt),
+    );
 }
 
 /** Everything issued into one lot, newest first — the "what has this pen eaten" list. */

@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/table";
 import {
   consumedByLot,
-  consumedCostByLot,
   getLot as getInventoryLot,
   listMovements,
   movementKindsForLots,
@@ -36,10 +35,17 @@ import {
 } from "@/packs/land/ops";
 import { structureKindsFrom } from "@/packs/land/vocabulary";
 import {
+  LEDGER_EPOCH,
+  feedReport,
   getLivestockLot,
   listChecksForLot,
   listIdentifiers,
 } from "@/packs/livestock/ops";
+import {
+  PROVENANCE_LABELS,
+  PROVENANCE_NOTES,
+  formatQuantities,
+} from "@/packs/livestock/core/feed";
 import {
   ageInDays,
   formatAge,
@@ -118,9 +124,17 @@ export default async function LivestockLotPage({
             limit: 25,
           }),
           listChecksForLot(tx, ctx.tenant.id, lot.id),
-          // What has been fed into this pen — inventory's ledger, read through
-          // inventory's own op. This pack never queries that table directly.
-          consumedCostByLot(tx, ctx.tenant.id, [lot.inventoryLotId]),
+          /**
+           * What has been fed into this pen — and the FULL report rather than
+           * the direct-issue total alone.
+           *
+           * `consumedCostByLot` only sees feed issued to this lot BY NAME. Since
+           * slice 2 a lot can also carry a share of a shared feeder, and a card
+           * that showed only the measured half would read as the whole answer
+           * and quietly understate the pen. The screens must agree, so this page
+           * reads the same report the feed page does.
+           */
+          feedReport(tx, ctx.tenant.id, { from: LEDGER_EPOCH, to: today }),
           consumedByLot(tx, ctx.tenant.id, lot.inventoryLotId, 10),
           currentZoneForOccupants(
             tx,
@@ -150,7 +164,7 @@ export default async function LivestockLotPage({
         movements: movements.get(lot.inventoryLotId) ?? [],
         entries,
         checks,
-        feedCents: feedCost.get(lot.inventoryLotId) ?? 0,
+        feed: feedCost.lots.find((row) => row.lotId === lot.id) ?? null,
         fedIn,
         zone: zones.get(lot.inventoryLotId) ?? null,
         parcels,
@@ -170,7 +184,7 @@ export default async function LivestockLotPage({
     movements,
     entries,
     checks,
-    feedCents,
+    feed,
     fedIn,
     zone,
     parcels,
@@ -189,6 +203,9 @@ export default async function LivestockLotPage({
    */
   const isOwner = ctx.role === "owner";
   const structureWord = labelFor(labels, "structure", "Pen or barn");
+  // Measured plus allocated. The card says which, and the split is spelled out
+  // underneath whenever a shared feeder contributed.
+  const feedCents = feed?.totalCents ?? 0;
   const summary = summariseHead(movements);
   const rate = mortalityRate(summary);
   const preferred = preferredIdentifier(identifiers);
@@ -307,7 +324,25 @@ export default async function LivestockLotPage({
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Fed</CardTitle>
+            <CardTitle className="text-base">
+              <span className="flex items-center gap-2">
+                <Link href={`${BASE}/feed`} className="hover:underline">
+                  Fed
+                </Link>
+                {/* PROVENANCE ON THE NUMBER ITSELF. Measured and allocated are
+                    different kinds of fact and the design says the distinction
+                    is permanent, so the badge is beside the figure rather than
+                    in a footnote somewhere. */}
+                {feed && feed.provenance !== "none" && (
+                  <Badge
+                    variant={feed.provenance === "measured" ? "outline" : "default"}
+                    title={PROVENANCE_NOTES[feed.provenance]}
+                  >
+                    {PROVENANCE_LABELS[feed.provenance]}
+                  </Badge>
+                )}
+              </span>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-medium tabular-nums">
@@ -318,14 +353,27 @@ export default async function LivestockLotPage({
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {feedCents === 0
-                ? "Nothing issued to this lot yet."
+                ? "Nothing fed to this lot yet."
                 : (() => {
                     const perHead = costPerUnit(feedCents, summary.balance);
-                    return perHead === null
-                      ? "Feed issued to this lot."
-                      : `${formatMoney(perHead, currencySymbol)} a head at today's count.`;
+                    const quantity =
+                      feed && feed.quantities.length > 0
+                        ? formatQuantities(feed.quantities)
+                        : null;
+                    const rate =
+                      perHead === null
+                        ? "Fed to this lot."
+                        : `${formatMoney(perHead, currencySymbol)} a head at today's count.`;
+                    return quantity ? `${quantity} · ${rate}` : rate;
                   })()}
             </p>
+            {feed && feed.allocatedCents > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formatMoney(feed.measuredCents, currencySymbol)} issued by name,{" "}
+                {formatMoney(feed.allocatedCents, currencySymbol)} a share of a
+                shared feeder.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -457,9 +505,13 @@ export default async function LivestockLotPage({
       {fedIn.length > 0 && (
         <div className="space-y-3">
           <h2 className="text-sm font-medium">
-            Fed in{" "}
+            Fed in by name{" "}
             <span className="font-normal text-muted-foreground">
-              · {formatMoney(feedCents, currencySymbol)} total
+              {/* MEASURED ONLY. These are the issues that named this lot; a
+                  share of a shared feeder has no row of its own here, because
+                  it is a fold over the feeder's draws rather than a movement
+                  against this pen. */}
+              · {formatMoney(feed?.measuredCents ?? 0, currencySymbol)}
             </span>
           </h2>
           <Table>

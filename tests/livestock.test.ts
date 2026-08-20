@@ -413,6 +413,7 @@ const lot = (over: Partial<AdvisorLot> = {}): AdvisorLot => ({
   whereSince: "2026-08-10",
   losses: [{ on: "2026-08-14", ageDays: 16, head: 4 }],
   lastCheckedOn: "2026-08-19",
+  feed: null,
   ...over,
 });
 

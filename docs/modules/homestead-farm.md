@@ -116,6 +116,38 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-20 — Livestock slice 2: the 10× seam, built at 1× (`claude/feed-and-fcr`)
+
+- **The design's "single largest consequence of the 10× target" is now
+  built, and the pilot does not use it.** At 1× a bag goes to a pen and somebody
+  knows which pen; the allocation path exists for the day a ton arrives into a
+  bin serving fifteen pens. Both paths are live, and the screen tells a farm at
+  1× that having no shared feeder is the right answer at its size.
+- **PROVENANCE TURNED OUT TO BE THE FEATURE.** The design's line — *every
+  derived cost should carry its provenance; same report, different confidence* —
+  was written as a reporting nicety. Driven, it is what makes the report
+  credible: a pen reading "Both · $260.78" with the measured and allocated halves
+  spelled out is a number a person can argue with, and one reading "$260.78" is a
+  number they either accept or stop using.
+- **The cold start's other face: a report is only as good as what it refuses.**
+  FCR is the number this enterprise is judged on, weights are slice 5, and the
+  temptation to divide feed by head and call it conversion is exactly the failure
+  the profile's AI section warns about. The page says what it cannot compute, in
+  words, on the card where the number would have gone.
+- **The AI thesis held again, with no prompt change.** The digest gained feed
+  cost and its provenance; asked what a pen had cost and whether its conversion
+  was any good, the advisor gave the figure, called its own confidence *partial*,
+  named the assumption the shared-feeder split rests on, and refused the FCR —
+  *"it would be a number I made up wearing your farm's name"* — then said what to
+  record to get a real one. **The digest is the product**, third demonstration.
+- **Four defects, all found by clicking, none visible to a type or a test.**
+  A pen nothing had been fed read "$0.00 a head"; two pens placed the same day
+  were compared against each other as if they were a sequence; the draw picker
+  offered live chickens as something to tip into a feed bin; and an allocated
+  share was rendered to the gram. That is now five weeks running.
+- Full build record in [livestock.md](livestock.md), with the reads it needed in
+  [inventory.md](inventory.md).
+
 ### 2026-08-19 — The advisor, and the proof that the anchoring is the product (`claude/livestock-advisor`)
 
 - **Livestock slice 1b: ask and orient.** The other half of the day-one wedge,
@@ -1242,7 +1274,7 @@ this is used daily or abandoned in March.
 | --- | --- | --- |
 | 0 | Lots + head ledger + occupancy (shared with `land`) | The spine. Nothing works without it, and seeing your animals on paddocks already beats nothing |
 | 1 | **Daily log + advisory layer** | The day-one wedge. Habit and cold start. **Split when built: 1a the log, 1b the advisory — both shipped 2026-08-19** |
-| 2 | Feed + FCR (direct issue now, allocation seam for 10×) | Largest cash cost, and the broiler enterprise's verdict |
+| 2 | Feed + FCR (direct issue now, allocation seam for 10×) | Largest cash cost, and the broiler enterprise's verdict. **Feed and the allocation seam shipped 2026-08-20; FCR itself waits on slice 5, because gain needs weights and nothing may invent one** |
 | 3 | Health + withdrawal clock | Legal guardrail; useful at first use |
 | 4 | Breeding + genetics + registry | Needs a season of calving to pay off |
 | 5 | Weights (tape formulas, sampling) | Sharpens everything above |

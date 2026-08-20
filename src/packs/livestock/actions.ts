@@ -17,12 +17,17 @@ import { speciesFrom } from "./vocabulary";
 import {
   LivestockError,
   addIdentifier,
+  addLotToFeedGroup,
+  closeFeedGroup,
+  createFeedGroup,
   createLivestockLot,
+  endFeedGroupMembership,
   farmSnapshot,
   markRoundNormal,
   moveLotToZone,
   placeHead,
   recordDailyCheck,
+  recordFeedDraw,
   removeHead,
   retireIdentifier,
   splitLivestockLot,
@@ -57,6 +62,7 @@ function toResult(err: unknown): { error: string } {
       case "INVALID_IDENTIFIER":
         return { error: "A tag kind must be lowercase letters and underscores." };
       case "LOT_INVALID":
+      case "FEED_GROUP_INVALID":
         return { error: err.message };
     }
   }
@@ -432,6 +438,192 @@ export async function markRoundNormalAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, recorded: logs.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// --------------------------------------------------------------- feeders ---
+
+/**
+ * Create a shared feeder — the allocation seam's front door.
+ *
+ * Owner-gated, unlike everything else in this section: deciding that fifteen
+ * pens share one cost pot changes how this farm's largest cash cost is
+ * attributed, and it is done once rather than daily.
+ */
+export async function createFeedGroupAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      name: z.string().trim().min(1).max(200),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Give the feeder a name." };
+
+  try {
+    const group = await withTenant(
+      ctx.tenant.id,
+      (tx) => createFeedGroup(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.feed_group.created",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_feed_group",
+      targetId: group.id,
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, id: group.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function closeFeedGroupAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => closeFeedGroup(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.feed_group.closed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_feed_group",
+      targetId: parsed.data.id,
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Put a lot on a feeder, or take it off.
+ *
+ * NOT owner-gated, and the reasoning is `moveLotToZone`'s: this records that
+ * somebody moved birds onto a bin, which is a fact about the yard rather than a
+ * decision taken at the keyboard. The membership DATES are what the allocation
+ * divides by, so recording them late is worse than recording them by whoever was
+ * there.
+ */
+export async function addLotToFeedGroupAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      feedGroupId: z.string().uuid(),
+      livestockLotId: z.string().uuid(),
+      startedOn: requiredDate,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => addLotToFeedGroup(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.feed_group.lot_added",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_feed_group",
+      targetId: parsed.data.feedGroupId,
+      meta: {
+        livestockLotId: parsed.data.livestockLotId,
+        startedOn: parsed.data.startedOn,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function endFeedGroupMembershipAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ memberId: z.string().uuid(), endedOn: requiredDate })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => endFeedGroupMembership(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.feed_group.lot_removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_feed_group_member",
+      targetId: parsed.data.memberId,
+      meta: { endedOn: parsed.data.endedOn },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Draw feed for a shared feeder.
+ *
+ * A chore, at `member`, exactly like issuing a bag to a named pen — because that
+ * is what it is. The cost comes back so the toast can say what was stamped: it
+ * is the number that will be spread across the pens, and seeing it at the moment
+ * it is recorded is the only time anybody would notice it was wrong.
+ */
+export async function recordFeedDrawAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      feedGroupId: z.string().uuid(),
+      itemId: z.string().uuid(),
+      lotId: z.string().uuid().nullable().optional(),
+      quantity: z.number().positive().max(10_000_000).multipleOf(0.0001),
+      occurredOn: requiredDate,
+      locationAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => recordFeedDraw(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.feed_group.drawn",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_feed_group",
+      targetId: parsed.data.feedGroupId,
+      meta: { itemId: parsed.data.itemId, occurredOn: parsed.data.occurredOn },
+    });
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/inventory", "layout");
+    return { ok: true, costCents: result.costCents };
   } catch (err) {
     return toResult(err);
   }

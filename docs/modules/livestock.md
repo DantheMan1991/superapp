@@ -17,13 +17,85 @@ and [land.md](land.md) before changing anything about where animals are.
 | **0** | **Lots + head ledger + occupancy** | **shipped 2026-08-15** |
 | **1a** | **Daily log — the round, and the check that is not a head event** | **shipped 2026-08-19** |
 | **1b** | **Advisory layer — ask and orient, anchored to this farm's own history** | **shipped 2026-08-19** |
-| 2 | Feed + FCR | next |
-| 3 | Health + withdrawal clock | |
+| **2** | **Feed + the allocation seam** (FCR itself waits on slice 5) | **shipped 2026-08-20** |
+| 3 | Health + withdrawal clock | next |
 | 4 | Breeding, genetics, registry, **and the breeding/market capital transfer** | |
 | 5 | Weights (tape formulas, sampling) | |
 | 6 | Processing handoff → `production` | |
 
 ## Build log
+
+### 2026-08-20 — Slice 2: feed, and the seam that survives fifteen pens on one bin (`claude/feed-and-fcr`)
+
+The largest cash cost, and the first slice in this pack whose output is a
+REPORT rather than an entry screen. Inventory slice 1 had already closed the
+costing loop for a bag handed to a named pen; what was missing was the number
+that loop exists to produce, and the other half of the design's *"both paths
+must exist"*.
+
+- **THE SLICE IS THE ALLOCATION SEAM, and the design calls it the single
+  largest consequence of the 10× target.** At 1× a bag goes to a pen and
+  somebody knows which pen: that is `issued_to_lot_id`, it was already built,
+  and it needed nothing here. At 10× a ton arrives into a bin serving ~15 pens
+  and nobody will ever know which bird ate which pound, so the cost must be
+  **allocated by head × days on feed rather than assigned**. Three tables carry
+  that and not one number about feed.
+- **A DRAW IS AN ORDINARY ISSUE.** `recordFeedDraw` calls
+  `inventory.issueStock` with `issuedToLotId` null and stamps the cost at the
+  average exactly as a direct issue does; `livestock_feed_draws` is a JOIN table
+  saying that movement was drawn for that feeder. No second ledger, no second
+  cost, and the allocated figure can therefore never disagree with the delivery
+  it came from. Same shape as `livestock_lots` on the spine: inventory owns the
+  quantity, this pack owns what it means.
+- **HEAD IS NEVER RE-ENTERED.** The basis is head × days and head on any given
+  day is a running balance of the ledger the count on the lot page already
+  comes from. What the ledger cannot know is *when a pen went onto the bin* — a
+  batch brooded on bagged starter has head standing the whole time and is only
+  on the bin for part of it — so membership is date-ranged and that is the only
+  extra fact collected. Land's rule, applied to a report.
+- **PROVENANCE IS ON THE ROW, NOT IN A FOOTNOTE.** Measured / Allocated / Both,
+  with the reasoning in the tooltip. The design's rule is that every derived
+  cost carries its provenance and that at 10× the bagged number becomes an
+  allocated one, so this is permanent rather than transitional.
+- **NO FCR, SAID IN WORDS.** Feed conversion is feed per pound of GAIN, gain
+  needs weights, and weights are slice 5. The card reads "—" and the page says
+  what it cannot compute. `FCR_NEEDS_WEIGHTS` is one string in one place so the
+  feed page and the lot page cannot drift into implying different things.
+- **The pieces sum exactly to the pot**, by largest remainder. Unlike
+  `issueCostCents` — where the remainder is a real consequence of stamping each
+  issue as it happened — a pot divided in one act has nothing for a remainder to
+  be a fact about, and an allocated bill that is three cents off is checked once
+  and never trusted again.
+- **Cost that could not be allocated is REPORTED, never dropped.** Feed drawn
+  for a feeder no lot was on is money the farm spent; the banner names the
+  figure and says how to make it land. Driven: a $25.00 draw against an empty
+  bin, surfaced with the fix beside it.
+- **Waste streams stay representable.** Spent grain, surplus milk, garden culls
+  and expired bakery arrive with a null cost, are carried through as fed rather
+  than spent, and are COUNTED so the report can say so. The item picker for a
+  draw excludes only livestock — a whitelist of `feed` would have refused half
+  of what this farm actually feeds.
+- **The advisor can see feed now**, which closes one of this dossier's own open
+  items. Asked what PEN-1 had cost, it answered *"$260.78 so far, $2.61 a head.
+  That's cost, not pounds of feed"*, called its own confidence *partial* because
+  part of it is a shared-feeder share, named the assumption the split rests on
+  (a bird in one pen eats like a bird in the other), and refused the FCR: *"I'm
+  not going to hand you an estimated FCR, because it would be a number I made up
+  wearing your farm's name."* Then it said exactly what to record to get a real
+  one. No prompt change — the digest carries feed and its provenance, and that
+  is the whole of it.
+- 33 new pure tests, 13 new ops tests, 10 new isolation tests. Migration `0162`
+  **hand-reordered, sixth time**; `0163` carries the policies.
+
+**Driving it found four defects, and every one of them was a reading problem
+that types and tests could not see.**
+
+| What the screen said | Why it was wrong |
+| --- | --- |
+| `$0.00 a head` on a pen nothing had been fed | Reads as *feeding this batch cost nothing*. Same lie `mortalityRate` refuses when it returns null rather than 0% for an empty pen. Now an em dash |
+| `+$1.00 vs last batch` between two pens placed the same day | Two batches placed on one day are contemporaries, not a sequence — and the "previous" one had no feed recorded at all, so the delta was the whole of this batch's cost dressed as a regression. Now: strictly earlier, and it must have been fed |
+| **Broiler chicks offered as something to draw into a feed bin** | Both are inventory items and the ledger has no opinion; nothing would have refused issuing live birds out of stock and charging them to themselves. Third time this shape has appeared — after land's structures and inventory's locations |
+| `521.569 lb` of feed | An allocated quantity carries the full precision of the division. A share rendered as a measurement to the gram |
 
 ### 2026-08-19 — Animals are started here, and Inventory now says so (`claude/animals-live-in-livestock`)
 
@@ -274,6 +346,9 @@ This pack is the one that forced the change; the full reasoning is in
 | `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed` |
 | `livestock_identifiers` | What an animal is called | Many per lot, typed and **date-ranged**. Composite FK to the lot, CASCADE. Indexed by value, because finding an animal by its tag happens in a chute |
 | `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
+| `livestock_feed_groups` | **A shared feeder** — a bin, a bulk bag, a trough | Holds the FEEDER, not the feed: no quantity, no cost, no balance. `status` in `active\|closed`; closed keeps reporting. Deliberately not an asset — a feeding group is a set of animals sharing a cost, so two bins feeding one flock are one group |
+| `livestock_feed_group_members` | Which lots eat from it, **between which dates** | The dates are the whole reason this is a table: head on any day is already in the ledger, but *when a pen went onto the bin* is not. `ended_on` INCLUSIVE, matching `land_occupancy` |
+| `livestock_feed_draws` | **This movement was feed drawn for that feeder** | A JOIN, not a second ledger. Composite FK to `inventory_movements`, which holds the quantity and the stamped cost. UNIQUE per movement — two rows would put one cost in two pots |
 
 **Everything else lives in a pack this one requires:**
 
@@ -282,6 +357,7 @@ This pack is the one that forced the change; the full reasoning is in
 | How many head? | `inventory_movements`, folded by `core/herd.ts` |
 | Which batch, and what did it come from? | `inventory_lots` |
 | What did this pen cost? | `dimension_members`, synced by `inventory` |
+| What did it eat, and what did that cost? | `inventory_movements` — measured via `issued_to_lot_id`, allocated via a draw |
 | Which paddock are they on, and in what pen? | `land_occupancy`, via `land's own query |
 | How long has that paddock rested? | `land`, computed from the same record |
 
@@ -315,11 +391,70 @@ This pack is the one that forced the change; the full reasoning is in
   Dates matter to a diagnosis and not to a balance
 - `src/packs/inventory/ops.ts` → `movementsOnDate` — added for the round, so it
   can show today's losses WITHOUT storing them
+- `src/packs/livestock/core/feed.ts` — pure. **The allocation fold, and the
+  provenance rule.** Head day by day, head-days against a membership span,
+  largest-remainder split, and `FCR_NEEDS_WEIGHTS`. Read this before changing
+  anything about what a pen was charged
+- `src/packs/livestock/ops.ts` → `feedReport` — assembles it from three sources
+  and no fourth: this pack's feeders, `inventory`'s ledger, and the head balance
+  that is itself a fold of that ledger. Nothing stored, so re-running after a
+  correction gives the corrected answer
+- `src/app/dashboard/m/livestock/feed/page.tsx` — the report and the feeders
+- `src/packs/inventory/ops.ts` → `consumedByLotAndItem` — added for this report.
+  A total answers a card; a report needs the quantity, the unit it is
+  denominated in, and how many entries carried no price
+- `src/packs/inventory/ops.ts` → `movementsByIds` — added for the draws, which
+  are inventory rows this pack holds ids for
+- `src/packs/inventory/ops.ts` → `datedMovementsForLots(…, null)` — **`limit:
+  null` means every row**, because a running balance cannot start in the middle
+  of a ledger. A cap is right for a digest and wrong for arithmetic
 - `src/db/schema/livestock.ts` · `drizzle/0138_*.sql` · `drizzle/0139_livestock_rls.sql`
   · `drizzle/0156_*.sql` · `drizzle/0157_livestock_daily_logs_rls.sql`
+  · `drizzle/0162_*.sql` · `drizzle/0163_livestock_feed_rls.sql`
 
 ## Decisions & gotchas
 
+- **THERE IS NO FCR IN THIS PACK, AND THERE MUST NOT BE ONE UNTIL SLICE 5.**
+  Feed conversion is feed per pound of GAIN. Feed per head and feed cost per
+  head are answerable today and are NOT the same number; dividing feed by head,
+  or by an assumed finish weight, would manufacture the one figure the broiler
+  enterprise is judged on. The screens say what they cannot compute, in words,
+  and the advisor is told to as well.
+- **MEASURED AND ALLOCATED ARE DIFFERENT KINDS OF FACT, permanently.** A bag
+  issued to a named lot is measured and its cost was stamped when it happened; a
+  share of a shared feeder is spread by head × days at read time and is an
+  estimate. They are never merged into one unlabelled figure — the design's rule
+  is *same report, different confidence*, and at 10× the bagged number becomes an
+  allocated one, so this distinction gets larger rather than smaller.
+- **A DRAW IS AN ISSUE, AND `livestock_feed_draws` IS A JOIN.** The quantity and
+  the cost live in `inventory_movements` and only there. If a future slice is
+  tempted to put a quantity or a total on the draw row, that is the second
+  ledger this whole pack is built to avoid.
+- **Allocation never allocates a negative.** Inventory allows negative stock on
+  purpose, but a negative head count as a WEIGHT would hand a pen a negative
+  share of the feed bill. `headOnDays` clamps at zero.
+- **Cost that cannot be allocated is reported, not dropped.** A feeder no lot
+  was on still cost money. `allocateCents` returns an empty map rather than
+  spreading it over pens that were not there, and the caller must surface the
+  remainder — `feedReport` does, as `unallocatedCents`.
+- **The report walks day by day, so its window is clamped per feeder.**
+  `feedReport` starts each feeder's walk at its first membership rather than at
+  the window's start, which is what makes an "all time" report over
+  `LEDGER_EPOCH` cheap instead of a century of empty days per bin.
+- **Membership is `member`, creating a feeder is `owner`**, and the split is the
+  same one `moveLotToZone` makes: putting birds on a bin records a physical fact
+  done by whoever moved them, while deciding that fifteen pens share one cost pot
+  is a decision about how the farm's largest cash cost is attributed.
+- **A lot cannot be on one feeder twice.** Two open memberships would count the
+  same head twice in the basis and double that pen's share.
+- **A batch is compared with the previous batch of the same species, by cost per
+  head PLACED** — never per head standing, which falls as birds die and makes a
+  bad batch look cheaper the worse it goes. The previous batch must have started
+  strictly earlier and must have feed on record; two pens placed the same day are
+  contemporaries, not a sequence.
+- **Feed quantities are never added across units.** Pounds of grower and gallons
+  of surplus milk have no factor between them that does not depend on what is in
+  the bucket — `inventory`'s own rule. `mergeQuantities` returns a list.
 - **The advisor WRITES NOTHING, and that is load-bearing.** Ask-and-orient is
   ungated because it is reversible; anything that becomes a purchase order, a
   ledger cost, a dose, a withdrawal date or a slaughter booking is
@@ -424,11 +559,37 @@ This pack is the one that forced the change; the full reasoning is in
 - **Nothing rate-limits the advisor.** Every question is a model call on the
   tenant's behalf, with no quota, cost cap or per-tenant counter. Fine for a
   pilot with one farm; not fine for a hundred.
-- **The advisor cannot see feed issued, treatments or weights**, because none of
-  those are recorded yet — slices 2, 3 and 5. Its answers sharpen as those land,
-  with no change to the prompt.
+- ~~The advisor cannot see feed issued, treatments or weights~~ — **feed landed
+  2026-08-20** with slice 2, and with no change to the prompt: the digest carries
+  cost, cost per head and provenance, and the answer got sharper on its own.
+  Treatments and weights are still slices 3 and 5.
+- ~~No feed or FCR~~ — **feed shipped 2026-08-20** as slice 2. **FCR did not**,
+  and deliberately: see Decisions.
+- **Feed conversion is unavailable until weights exist.** Slice 5. Everything
+  needed on the feed side is now recorded, so FCR is a division away — which is
+  exactly why the refusal has to be written down rather than assumed.
+- **A draw is allocated over the WHOLE report window, not over the period it was
+  drawn for.** With lumpy draws and mid-window membership churn — a ton drawn on
+  day 1, a pen joining on day 15 — the share is smeared across the window rather
+  than tied to the days the feed was actually eaten. Narrowing the period is the
+  workaround and it is on the screen. The fix is per-draw windowing, and it needs
+  a decision about whether a draw covers the days before or after it.
+- **There is no way to correct a draw.** A draw recorded against the wrong
+  feeder, or for the wrong amount, has no edit and no reversal in the UI — the
+  movement underneath would take a correcting entry, which is inventory slice 2's
+  adjustments, but nothing unlinks the draw row.
+- **A feeder cannot be renamed**, and a closed one cannot be reopened.
+- **The feed report reads the whole ledger for every lot.** `datedMovementsForLots`
+  is uncapped here on purpose, which is right for a running balance and wrong at
+  a farm with years of history. `FEED_DRAW_CAP` bounds the draws and says so on
+  screen; the head movements are unbounded.
 - ~~Neither screen has been clicked~~ — **closed 2026-08-19.** Both driven on
   production. It found the unrun migration, and one reading defect in the round.
+- ~~Nobody has driven slice 2~~ — **closed 2026-08-20.** Driven end to end on
+  the `Hilltop Farm` tenant: a $500 delivery, $100 issued to PEN-1 by name, a
+  $200 draw split $160.78 / $39.22 across two pens on 41 and 20 days on feed, and
+  the same figures on the lot page. It found four reading defects, listed in the
+  build log.
 - **The exception dialog opens EMPTY on a lot already checked**, even though its
   button says "Edit". Nothing is lost — `recordDailyCheck` only overwrites a
   note when the new one is non-empty — but the screen implies today's entry is

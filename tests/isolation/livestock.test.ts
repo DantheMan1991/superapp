@@ -27,8 +27,13 @@ d("livestock tables (RLS)", () => {
   let tenantA: string;
   let tenantB: string;
   let lotA: string;
+  let invLotA: string;
   let invLotB: string;
   let lotB: string;
+  let feederA: string;
+  let feederB: string;
+  let movementA: string;
+  let movementB: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -64,6 +69,7 @@ d("livestock tables (RLS)", () => {
           { tenantId: tenantB, itemId: items[1].id, code: "B-1" },
         ])
         .returning();
+      invLotA = invLots[0].id;
       invLotB = invLots[1].id;
 
       const lots = await tx
@@ -107,6 +113,75 @@ d("livestock tables (RLS)", () => {
           livestockLotId: lotB,
           identifierKind: "official",
           value: "THEIRS-1",
+        },
+      ]);
+
+      // Slice 2. A feeder each side, one lot on each, and one draw each — an
+      // ordinary `inventory_movements` issue with nobody named, which is what
+      // makes its cost allocated rather than measured.
+      const feeders = await tx
+        .insert(schema.livestockFeedGroups)
+        .values([
+          { tenantId: tenantA, name: "Our bin" },
+          { tenantId: tenantB, name: "Their bin" },
+        ])
+        .returning();
+      feederA = feeders[0].id;
+      feederB = feeders[1].id;
+
+      await tx.insert(schema.livestockFeedGroupMembers).values([
+        {
+          tenantId: tenantA,
+          feedGroupId: feederA,
+          livestockLotId: lotA,
+          startedOn: "2026-08-01",
+        },
+        {
+          tenantId: tenantB,
+          feedGroupId: feederB,
+          livestockLotId: lotB,
+          startedOn: "2026-08-01",
+        },
+      ]);
+
+      const movements = await tx
+        .insert(schema.inventoryMovements)
+        .values([
+          {
+            tenantId: tenantA,
+            itemId: items[0].id,
+            lotId: invLotA,
+            quantity: -20,
+            movementKind: "issue",
+            occurredOn: "2026-08-10",
+            costCents: 1000,
+            extensionSlug: "livestock",
+          },
+          {
+            tenantId: tenantB,
+            itemId: items[1].id,
+            lotId: invLotB,
+            quantity: -20,
+            movementKind: "issue",
+            occurredOn: "2026-08-10",
+            costCents: 9999,
+            extensionSlug: "livestock",
+          },
+        ])
+        .returning();
+      movementA = movements[0].id;
+      movementB = movements[1].id;
+
+      await tx.insert(schema.livestockFeedDraws).values([
+        {
+          tenantId: tenantA,
+          feedGroupId: feederA,
+          inventoryMovementId: movementA,
+        },
+        {
+          tenantId: tenantB,
+          feedGroupId: feederB,
+          inventoryMovementId: movementB,
         },
       ]);
     });
@@ -319,5 +394,144 @@ d("livestock tables (RLS)", () => {
         .returning(),
     );
     expect(rows).toHaveLength(1);
+  });
+  // ---- slice 2: the feed tables ------------------------------------------
+
+  it("a tenant sees only its own feeders", async () => {
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.livestockFeedGroups),
+    );
+    expect(mine.map((g) => g.name)).toEqual(["Our bin"]);
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockFeedGroups),
+    );
+    expect(theirs.map((g) => g.name)).toEqual(["Their bin"]);
+  });
+
+  it("cannot put another tenant's animals on our feeder", async () => {
+    // Unrepresentable rather than refused: the composite FK makes the row
+    // impossible even under `withSystem`, where RLS is not watching. Without
+    // this, another tenant's head count could dilute our allocation basis.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockFeedGroupMembers).values({
+          tenantId: tenantA,
+          feedGroupId: feederA,
+          livestockLotId: lotB,
+          startedOn: "2026-08-19",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot put our animals on another tenant's feeder", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockFeedGroupMembers).values({
+          tenantId: tenantA,
+          feedGroupId: feederB,
+          livestockLotId: lotA,
+          startedOn: "2026-08-19",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a membership that ends before it starts", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockFeedGroupMembers).values({
+          tenantId: tenantA,
+          feedGroupId: feederA,
+          livestockLotId: lotA,
+          startedOn: "2026-08-19",
+          endedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("memberships and draws are protected in their own right", async () => {
+    const mine = await asOwner((tx) =>
+      tx.select().from(schema.livestockFeedGroupMembers),
+    );
+    expect(mine.every((m) => m.tenantId === tenantA)).toBe(true);
+    expect(mine).toHaveLength(1);
+    const theirDraws = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockFeedDraws),
+    );
+    expect(theirDraws.every((d) => d.tenantId === tenantB)).toBe(true);
+    expect(theirDraws).toHaveLength(1);
+  });
+
+  it("A DRAW CANNOT NAME ANOTHER TENANT'S MOVEMENT", async () => {
+    // The draw carries no money of its own — the cost is on the movement it
+    // points at. A cross-tenant pointer would put another farm's feed bill into
+    // this farm's allocation, and the composite FK is what forbids it.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockFeedDraws).values({
+          tenantId: tenantA,
+          feedGroupId: feederA,
+          inventoryMovementId: movementB,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a SECOND draw row for the same movement", async () => {
+    // Two rows would put the same cost in two pots and double the farm's feed
+    // bill without changing a single ledger entry.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockFeedDraws).values({
+          tenantId: tenantA,
+          feedGroupId: feederA,
+          inventoryMovementId: movementA,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a feeder with a blank name", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .insert(schema.livestockFeedGroups)
+          .values({ tenantId: tenantA, name: "   " }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a staff member can put a lot on a feeder and record a draw", async () => {
+    // Both are chores done by whoever moved the birds and opened the bin. RLS
+    // answers only "whose rows are these"; the pack's action layer is what keeps
+    // CREATING a feeder with the owner.
+    const rows = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockFeedGroupMembers)
+        .values({
+          tenantId: tenantA,
+          feedGroupId: feederA,
+          livestockLotId: lotA,
+          startedOn: "2026-08-20",
+        })
+        .returning(),
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("the feed tables are default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.livestockFeedGroups),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.livestockFeedDraws),
+      ),
+    ).toHaveLength(0);
   });
 });

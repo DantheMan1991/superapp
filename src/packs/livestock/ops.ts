@@ -1,20 +1,26 @@
 import "server-only";
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   LivestockDailyLog,
+  LivestockFeedDraw,
+  LivestockFeedGroup,
+  LivestockFeedGroupMember,
   LivestockIdentifier,
   LivestockLot,
 } from "@/db/schema";
 import {
+  consumedByLotAndItem,
   createItem,
   createLot as createInventoryLot,
   getLot as getInventoryLot,
   datedMovementsForLots,
+  issueStock,
   listItems,
   listLots as listInventoryLots,
   movementKindsForLots,
+  movementsByIds,
   onHandByItem,
   recordMovement,
   splitLot as splitInventoryLot,
@@ -33,6 +39,18 @@ import { isValidSlug } from "@/packs/inventory/vocabulary";
 import { addDays } from "@/lib/timezone";
 import { ageInDays, headEffect, summariseHead } from "./core/herd";
 import { checkStreak } from "./core/daily";
+import {
+  allocateCents,
+  allocateQuantity,
+  daysOnFeed,
+  earliestSpanStart,
+  feedReportRows,
+  headDays,
+  mergeQuantities,
+  type FeedLotRow,
+  type FeedQuantity,
+  type MembershipSpan,
+} from "./core/feed";
 import {
   SNAPSHOT_LOT_CAP,
   SNAPSHOT_ZONE_CAP,
@@ -78,7 +96,8 @@ export class LivestockError extends Error {
       | "INVALID_SEX"
       | "INVALID_IDENTIFIER"
       | "ITEM_REQUIRED"
-      | "LOT_INVALID",
+      | "LOT_INVALID"
+      | "FEED_GROUP_INVALID",
     message: string,
   ) {
     super(message);
@@ -804,6 +823,538 @@ export async function listChecksForLot(
   });
 }
 
+// --------------------------------------------------------------- feeders ---
+
+/**
+ * How many draws travel into one report before it stops reading them.
+ *
+ * A season of daily draws across a handful of bins is a few hundred rows; a
+ * report is not the archive. Stated rather than silent — the screen says how
+ * many it left out, for the same reason the advisor's digest does.
+ */
+export const FEED_DRAW_CAP = 500;
+
+/**
+ * "Everything ever recorded", as a date.
+ *
+ * A report over a whole batch's life needs a lower bound and there is no honest
+ * one — so this is a floor that predates any farm record rather than a guess at
+ * when the tenant started. The day-by-day walk never actually iterates from here:
+ * `feedReport` clamps each feeder's window to its first membership, because days
+ * before any lot was on a feeder contribute nothing to a head-day basis.
+ */
+export const LEDGER_EPOCH = "1900-01-01";
+
+export async function listFeedGroups(
+  tx: Tx,
+  tenantId: string,
+  filter: { status?: string } = {},
+): Promise<LivestockFeedGroup[]> {
+  const where = [eq(schema.livestockFeedGroups.tenantId, tenantId)];
+  if (filter.status) {
+    where.push(eq(schema.livestockFeedGroups.status, filter.status));
+  }
+  return tx.query.livestockFeedGroups.findMany({
+    where: and(...where),
+    orderBy: (g, { asc: byAsc }) => [byAsc(g.name)],
+  });
+}
+
+/**
+ * Create a shared feeder.
+ *
+ * `owner`, because deciding that fifteen pens share one cost pot is a decision
+ * about how this farm's money is attributed, not a chore in the yard. It is also
+ * rare — a bin is created once and fed from for years.
+ */
+export async function createFeedGroup(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { name: string; notes?: string },
+): Promise<LivestockFeedGroup> {
+  requireWrite(ctx, "owner");
+  const name = input.name.trim();
+  if (!name) {
+    throw new LivestockError("FEED_GROUP_INVALID", "give the feeder a name");
+  }
+  const rows = await tx
+    .insert(schema.livestockFeedGroups)
+    .values({
+      tenantId: ctx.tenantId,
+      name,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+/** Close a feeder. NOT a delete — last season's allocation still has to report. */
+export async function closeFeedGroup(
+  tx: Tx,
+  ctx: LivestockCtx,
+  id: string,
+): Promise<LivestockFeedGroup> {
+  requireWrite(ctx, "owner");
+  const rows = await tx
+    .update(schema.livestockFeedGroups)
+    .set({ status: "closed", updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.livestockFeedGroups.tenantId, ctx.tenantId),
+        eq(schema.livestockFeedGroups.id, id),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) {
+    throw new LivestockError("NOT_FOUND", `feed group ${id} not found`);
+  }
+  return rows[0];
+}
+
+/** Every membership, current and ended, keyed by feed group. */
+export async function feedGroupMembers(
+  tx: Tx,
+  tenantId: string,
+  feedGroupIds?: string[],
+): Promise<Map<string, LivestockFeedGroupMember[]>> {
+  const where = [eq(schema.livestockFeedGroupMembers.tenantId, tenantId)];
+  if (feedGroupIds) {
+    if (feedGroupIds.length === 0) return new Map();
+    where.push(
+      inArray(schema.livestockFeedGroupMembers.feedGroupId, feedGroupIds),
+    );
+  }
+  const rows = await tx.query.livestockFeedGroupMembers.findMany({
+    where: and(...where),
+    orderBy: (m, { asc: byAsc }) => [byAsc(m.startedOn)],
+  });
+  const out = new Map<string, LivestockFeedGroupMember[]>();
+  for (const row of rows) {
+    const list = out.get(row.feedGroupId);
+    if (list) list.push(row);
+    else out.set(row.feedGroupId, [row]);
+  }
+  return out;
+}
+
+/**
+ * Put a lot onto a feeder from a date.
+ *
+ * `member`, and deliberately the opposite level from creating the feeder. This
+ * records a physical fact — these birds now eat from that bin — done by whoever
+ * moved them, exactly as `moveLotToZone` records which paddock they walked onto.
+ * Both change how cost is attributed downstream; neither is a decision taken at
+ * the moment it is recorded.
+ *
+ * **Re-adding a lot that is already on the feeder is refused rather than
+ * silently doubling it.** Two open memberships would count the same head twice
+ * in the head-day basis and hand that pen twice its share of the bill.
+ */
+export async function addLotToFeedGroup(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { feedGroupId: string; livestockLotId: string; startedOn: string },
+): Promise<LivestockFeedGroupMember> {
+  requireWrite(ctx, "member");
+  const group = await tx.query.livestockFeedGroups.findFirst({
+    where: and(
+      eq(schema.livestockFeedGroups.tenantId, ctx.tenantId),
+      eq(schema.livestockFeedGroups.id, input.feedGroupId),
+    ),
+  });
+  if (!group) {
+    throw new LivestockError("NOT_FOUND", "that feeder does not exist");
+  }
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", "that lot does not exist");
+  }
+  const open = await tx.query.livestockFeedGroupMembers.findFirst({
+    where: and(
+      eq(schema.livestockFeedGroupMembers.tenantId, ctx.tenantId),
+      eq(schema.livestockFeedGroupMembers.feedGroupId, input.feedGroupId),
+      eq(schema.livestockFeedGroupMembers.livestockLotId, input.livestockLotId),
+      isNull(schema.livestockFeedGroupMembers.endedOn),
+    ),
+  });
+  if (open) {
+    throw new LivestockError(
+      "FEED_GROUP_INVALID",
+      "that lot is already on this feeder",
+    );
+  }
+
+  const rows = await tx
+    .insert(schema.livestockFeedGroupMembers)
+    .values({
+      tenantId: ctx.tenantId,
+      feedGroupId: input.feedGroupId,
+      livestockLotId: input.livestockLotId,
+      startedOn: input.startedOn,
+    })
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Take a lot off a feeder, on an INCLUSIVE last day.
+ *
+ * The same bound `land`'s occupancy uses, and it has to be: the two are read
+ * together the moment somebody asks what a pen cost while it stood on that
+ * paddock, and a half-open range in one of them would be off by a day forever.
+ */
+export async function endFeedGroupMembership(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { memberId: string; endedOn: string },
+): Promise<LivestockFeedGroupMember> {
+  requireWrite(ctx, "member");
+  const existing = await tx.query.livestockFeedGroupMembers.findFirst({
+    where: and(
+      eq(schema.livestockFeedGroupMembers.tenantId, ctx.tenantId),
+      eq(schema.livestockFeedGroupMembers.id, input.memberId),
+    ),
+  });
+  if (!existing) {
+    throw new LivestockError("NOT_FOUND", "that membership does not exist");
+  }
+  if (input.endedOn < existing.startedOn) {
+    throw new LivestockError(
+      "FEED_GROUP_INVALID",
+      `they went on the feeder on ${existing.startedOn}, so they cannot come off before that`,
+    );
+  }
+  const rows = await tx
+    .update(schema.livestockFeedGroupMembers)
+    .set({ endedOn: input.endedOn, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.livestockFeedGroupMembers.tenantId, ctx.tenantId),
+        eq(schema.livestockFeedGroupMembers.id, input.memberId),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Draw feed for a shared feeder — the OTHER half of the design's "both paths
+ * must exist".
+ *
+ * **IT IS AN ORDINARY ISSUE, and that is the whole design.** The quantity leaves
+ * stock through `inventory.issueStock` and the cost is stamped at the average as
+ * it stands right now, exactly as it is for a bag handed to a named pen. The
+ * only difference is who it was for: a direct issue names the lot, and this
+ * names a feeder, because at 10x nobody knows which bird ate which pound.
+ *
+ * So there is no second ledger and no second cost. This writes one association
+ * row saying that movement was drawn for this bin, and the allocation happens at
+ * read time in `core/feed.ts` where it can be re-run, re-explained, and never
+ * disagree with the delivery it came from.
+ *
+ * `member`: opening a bin is a chore.
+ */
+export async function recordFeedDraw(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    feedGroupId: string;
+    itemId: string;
+    lotId?: string | null;
+    quantity: number;
+    occurredOn: string;
+    locationAssetId?: string | null;
+    notes?: string;
+  },
+): Promise<{ draw: LivestockFeedDraw; costCents: number | null }> {
+  requireWrite(ctx, "member");
+  const group = await tx.query.livestockFeedGroups.findFirst({
+    where: and(
+      eq(schema.livestockFeedGroups.tenantId, ctx.tenantId),
+      eq(schema.livestockFeedGroups.id, input.feedGroupId),
+    ),
+  });
+  if (!group) {
+    throw new LivestockError("NOT_FOUND", "that feeder does not exist");
+  }
+
+  const movement = await issueStock(tx, asInventory(ctx), {
+    itemId: input.itemId,
+    lotId: input.lotId ?? null,
+    quantity: input.quantity,
+    // Null on purpose: NOBODY IS NAMED. That is what makes this an allocated
+    // cost rather than a measured one, and it is the fact the report reads.
+    issuedToLotId: null,
+    occurredOn: input.occurredOn,
+    locationAssetId: input.locationAssetId ?? null,
+    extensionSlug: "livestock",
+    notes: input.notes,
+  });
+
+  const rows = await tx
+    .insert(schema.livestockFeedDraws)
+    .values({
+      tenantId: ctx.tenantId,
+      feedGroupId: input.feedGroupId,
+      inventoryMovementId: movement.id,
+    })
+    .returning();
+
+  return { draw: rows[0], costCents: movement.costCents };
+}
+
+/** The draws recorded against a set of feeders, keyed by feeder. */
+export async function feedDrawsByGroup(
+  tx: Tx,
+  tenantId: string,
+  feedGroupIds: string[],
+  limit = FEED_DRAW_CAP,
+): Promise<Map<string, LivestockFeedDraw[]>> {
+  const out = new Map<string, LivestockFeedDraw[]>();
+  if (feedGroupIds.length === 0) return out;
+  const rows = await tx.query.livestockFeedDraws.findMany({
+    where: and(
+      eq(schema.livestockFeedDraws.tenantId, tenantId),
+      inArray(schema.livestockFeedDraws.feedGroupId, feedGroupIds),
+    ),
+    orderBy: (d, { desc: byDesc }) => [byDesc(d.createdAt)],
+    limit,
+  });
+  for (const row of rows) {
+    const list = out.get(row.feedGroupId);
+    if (list) list.push(row);
+    else out.set(row.feedGroupId, [row]);
+  }
+  return out;
+}
+
+// ------------------------------------------------------------ feed report ---
+
+export interface FeedGroupReport {
+  group: LivestockFeedGroup;
+  /** Draw cost inside the window, in cents. */
+  drawnCents: number;
+  drawnQuantities: FeedQuantity[];
+  drawCount: number;
+  /** Draws that carried no price — waste streams, or an invoice not yet in. */
+  unpricedDraws: number;
+  /**
+   * Cost that could not be allocated because no lot was on the feeder with head
+   * standing on any day of the window. **Reported, never dropped** — the farm
+   * paid for it.
+   */
+  unallocatedCents: number;
+  members: {
+    livestockLotId: string;
+    code: string;
+    headDays: number;
+    daysOnFeed: number;
+    shareCents: number;
+  }[];
+}
+
+export interface FeedReport {
+  from: string;
+  to: string;
+  lots: FeedLotRow[];
+  groups: FeedGroupReport[];
+  /** Draws beyond `FEED_DRAW_CAP`, said out loud rather than truncated silently. */
+  drawsOmitted: number;
+}
+
+/**
+ * Feed and what it cost, per lot — measured and allocated, kept apart.
+ *
+ * **THE NUMBER THE BROILER ENTERPRISE IS JUDGED ON**, and the reason the design
+ * puts feed at slice 2: it is the largest cash cost, and until this exists the
+ * app can say a pen held 210 birds and not what feeding them came to.
+ *
+ * Assembled from three sources and no fourth: this pack's feeders and their
+ * membership dates, `inventory`'s ledger for every quantity and every cent, and
+ * the head balance that is itself a fold of that same ledger. Nothing is stored,
+ * so re-running it after a correction gives the corrected answer.
+ */
+export async function feedReport(
+  tx: Tx,
+  tenantId: string,
+  window: { from: string; to: string },
+): Promise<FeedReport> {
+  const { from, to } = window;
+  const lots = await listLivestockLots(tx, tenantId);
+  const inventoryLotIds = lots.map((l) => l.inventoryLotId);
+
+  const [inventoryLots, movements, measured, groups] = await Promise.all([
+    listInventoryLots(tx, tenantId),
+    // Every dated head movement, uncapped for these lots: the head-day basis is
+    // a running balance and a truncated ledger would silently start it in the
+    // middle.
+    datedMovementsForLots(tx, tenantId, inventoryLotIds, Number.MAX_SAFE_INTEGER),
+    consumedByLotAndItem(tx, tenantId, inventoryLotIds, { from, to }),
+    listFeedGroups(tx, tenantId),
+  ]);
+
+  const groupIds = groups.map((g) => g.id);
+  const [membersByGroup, drawsByGroup] = await Promise.all([
+    feedGroupMembers(tx, tenantId, groupIds),
+    feedDrawsByGroup(tx, tenantId, groupIds),
+  ]);
+
+  const drawIds = [...drawsByGroup.values()].flat().map((d) => d.inventoryMovementId);
+  const drawMovements = await movementsByIds(tx, tenantId, drawIds);
+  const movementById = new Map(drawMovements.map((m) => [m.id, m]));
+
+  const byInventoryLot = new Map(inventoryLots.map((l) => [l.id, l]));
+  const lotById = new Map(lots.map((l) => [l.id, l]));
+  const headMovements = new Map(
+    lots.map((lot) => [
+      lot.id,
+      (dated(movements, lot.inventoryLotId) ?? []).map((m) => ({
+        occurredOn: m.occurredOn,
+        quantity: m.quantity,
+      })),
+    ]),
+  );
+
+  const allocatedCents = new Map<string, number>();
+  const allocatedQuantities = new Map<string, FeedQuantity[]>();
+  const groupReports: FeedGroupReport[] = [];
+
+  for (const group of groups) {
+    const spansByLot = new Map<string, MembershipSpan[]>();
+    for (const member of membersByGroup.get(group.id) ?? []) {
+      const list = spansByLot.get(member.livestockLotId);
+      const span = { startedOn: member.startedOn, endedOn: member.endedOn };
+      if (list) list.push(span);
+      else spansByLot.set(member.livestockLotId, [span]);
+    }
+
+    /**
+     * Start the day-by-day walk at the first membership rather than at the
+     * window's start. Days before any lot was on this feeder contribute nothing
+     * to the basis by definition, and an "everything" window that began at the
+     * epoch would otherwise iterate a century of empty days per feeder.
+     */
+    const allSpans = [...spansByLot.values()].flat();
+    const earliest = earliestSpanStart(allSpans);
+    const groupFrom = earliest && earliest > from ? earliest : from;
+
+    // The basis: head × days, per member lot, over this window. Both halves come
+    // from records already being kept — the dates from the membership, the head
+    // from the ledger.
+    const shares = [...spansByLot.entries()].map(([lotId, spans]) => ({
+      key: lotId,
+      basis: headDays(headMovements.get(lotId) ?? [], spans, groupFrom, to),
+      days: daysOnFeed(spans, groupFrom, to),
+    }));
+
+    const draws = (drawsByGroup.get(group.id) ?? [])
+      .map((d) => movementById.get(d.inventoryMovementId))
+      .filter((m): m is NonNullable<typeof m> => Boolean(m))
+      .filter((m) => m.occurredOn >= from && m.occurredOn <= to);
+
+    const drawnCents = draws.reduce((sum, m) => sum + (m.costCents ?? 0), 0);
+    const unpricedDraws = draws.filter((m) => m.costCents === null).length;
+    const drawnQuantities = mergeQuantities(
+      draws.map((m) => ({ unit: m.unit, quantity: Math.abs(m.quantity) })),
+    );
+
+    const centsShare = allocateCents(drawnCents, shares);
+    // Quantity is allocated per UNIT, because pounds of grower and gallons of
+    // milk are not addable and a single split would have to pick one of them.
+    const quantityShares = new Map<string, FeedQuantity[]>();
+    for (const part of drawnQuantities) {
+      const split = allocateQuantity(part.quantity, shares);
+      for (const [lotId, quantity] of split) {
+        const list = quantityShares.get(lotId);
+        if (list) list.push({ unit: part.unit, quantity });
+        else quantityShares.set(lotId, [{ unit: part.unit, quantity }]);
+      }
+    }
+
+    let allocated = 0;
+    for (const [lotId, cents] of centsShare) {
+      allocated += cents;
+      allocatedCents.set(lotId, (allocatedCents.get(lotId) ?? 0) + cents);
+    }
+    for (const [lotId, parts] of quantityShares) {
+      allocatedQuantities.set(lotId, [
+        ...(allocatedQuantities.get(lotId) ?? []),
+        ...parts,
+      ]);
+    }
+
+    groupReports.push({
+      group,
+      drawnCents,
+      drawnQuantities,
+      drawCount: draws.length,
+      unpricedDraws,
+      unallocatedCents: drawnCents - allocated,
+      members: shares.map((share) => ({
+        livestockLotId: share.key,
+        code:
+          byInventoryLot.get(lotById.get(share.key)?.inventoryLotId ?? "")?.code ??
+          "—",
+        headDays: share.basis,
+        daysOnFeed: share.days,
+        shareCents: centsShare.get(share.key) ?? 0,
+      })),
+    });
+  }
+
+  const rows = feedReportRows(
+    lots.map((lot) => {
+      const summary = summariseHead(
+        (dated(movements, lot.inventoryLotId) ?? []).map((m) => ({
+          movementKind: m.movementKind,
+          quantity: m.quantity,
+        })),
+      );
+      const fed = measured.get(lot.inventoryLotId) ?? [];
+      const inventoryLot = byInventoryLot.get(lot.inventoryLotId);
+      return {
+        lotId: lot.id,
+        code: inventoryLot?.code ?? "—",
+        species: lot.species,
+        ageDays: ageInDays(lot.bornOn, to),
+        head: summary.balance,
+        intake: summary.intake,
+        // `opened_on` is when the batch started; `born_on` is the fallback for a
+        // lot created before anything was placed into it.
+        startedOn: inventoryLot?.openedOn ?? lot.bornOn ?? null,
+        measuredCents: fed.reduce((sum, f) => sum + f.costCents, 0),
+        measuredQuantities: mergeQuantities(
+          fed.map((f) => ({ unit: f.unit, quantity: f.quantity })),
+        ),
+        allocatedCents: allocatedCents.get(lot.id) ?? 0,
+        allocatedQuantities: mergeQuantities(allocatedQuantities.get(lot.id) ?? []),
+        unpricedMovements: fed.reduce((sum, f) => sum + f.unpricedMovements, 0),
+      };
+    }),
+  );
+
+  const drawTotal = [...drawsByGroup.values()].reduce(
+    (sum, list) => sum + list.length,
+    0,
+  );
+
+  return {
+    from,
+    to,
+    lots: rows,
+    groups: groupReports,
+    drawsOmitted: drawTotal >= FEED_DRAW_CAP ? drawTotal - drawIds.length : 0,
+  };
+}
+
+/** Small helper: the dated rows for one lot, or undefined. */
+function dated(
+  map: Map<string, { occurredOn: string; movementKind: string; quantity: number }[]>,
+  lotId: string,
+) {
+  return map.get(lotId);
+}
+
 // ---------------------------------------------------------------- advisory ---
 
 /**
@@ -856,6 +1407,17 @@ export async function farmSnapshot(
     onHandByItem(tx, tenantId),
   ]);
 
+  /**
+   * Feed, from slice 2, and it is the same read the feed report makes.
+   *
+   * Deliberately not a cheaper approximation: an advisor asked "is this batch
+   * costing more than the last one" must see the figure the screen shows, or the
+   * two will disagree in front of the person who asked. The window is
+   * everything, because a batch is judged over its life.
+   */
+  const feed = await feedReport(tx, tenantId, { from: LEDGER_EPOCH, to: today });
+  const feedByLot = new Map(feed.lots.map((row) => [row.lotId, row]));
+
   const byInventoryLot = new Map(inventoryLots.map((l) => [l.id, l]));
   const parcelNames = new Map(parcels.map((p) => [p.id, p.name]));
   const shownZones = zones.slice(0, SNAPSHOT_ZONE_CAP);
@@ -896,6 +1458,15 @@ export async function farmSnapshot(
       whereSince: place?.startedOn ?? null,
       losses,
       lastCheckedOn: lastChecked.get(lot.id) ?? null,
+      feed: (() => {
+        const row = feedByLot.get(lot.id);
+        if (!row || row.totalCents === 0) return null;
+        return {
+          cents: row.totalCents,
+          centsPerHead: row.centsPerHead,
+          provenance: row.provenance,
+        };
+      })(),
     };
   });
 

@@ -4,7 +4,14 @@ import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
   addIdentifier,
+  addLotToFeedGroup,
   checkedDaysSince,
+  closeFeedGroup,
+  createFeedGroup,
+  endFeedGroupMembership,
+  feedGroupMembers,
+  feedReport,
+  listFeedGroups,
   checksOn,
   createLivestockLot,
   farmSnapshot,
@@ -16,6 +23,7 @@ import {
   moveLotToZone,
   placeHead,
   recordDailyCheck,
+  recordFeedDraw,
   removeHead,
   retireIdentifier,
   splitLivestockLot,
@@ -24,8 +32,10 @@ import {
 } from "../src/packs/livestock/ops";
 import {
   createItem,
+  issueStock,
   movementKindsForLots,
   movementRowsForItem,
+  receiveStock,
   LOT_DIMENSION,
 } from "../src/packs/inventory/ops";
 import { balanceByItem, balanceOfLot } from "../src/packs/inventory/core/balances";
@@ -1142,6 +1152,394 @@ d("livestock ops", () => {
       expect(text).toContain("**SNAP-1** — cattle");
       expect(text).toContain("1 lost of 10 placed (10.0%)");
       expect(text).toContain("on North Pasture");
+    });
+  });
+  // ---- slice 2: feed, and the allocation seam ----------------------------
+
+  describe("feed and the shared-feeder allocation", () => {
+    let feedItemId: string;
+    let binId: string;
+    let lotBig: { lot: { id: string }; inventoryLotId: string };
+    let lotSmall: { lot: { id: string }; inventoryLotId: string };
+
+    beforeAll(async () => {
+      // A real feed item with a priced delivery behind it, so the rate every
+      // draw is stamped at is a known 50 cents a pound rather than a guess.
+      feedItemId = (
+        await asOwner((tx) =>
+          createItem(tx, ctx(), {
+            name: "Grower crumble",
+            stockingUnit: "lb",
+            itemKind: "feed",
+          }),
+        )
+      ).id;
+      await asOwner((tx) =>
+        receiveStock(tx, ctx(), {
+          itemId: feedItemId,
+          newLotCode: "FEED-DEL-1",
+          quantity: 1000,
+          costCents: 50_000,
+          occurredOn: "2026-06-30",
+        }),
+      );
+
+      lotBig = await newLot("FEED-A");
+      lotSmall = await newLot("FEED-B");
+      for (const [lot, head] of [
+        [lotBig, 100],
+        [lotSmall, 50],
+      ] as const) {
+        await asOwner((tx) =>
+          placeHead(tx, ctx(), {
+            itemId,
+            inventoryLotId: lot.inventoryLotId,
+            head,
+            occurredOn: "2026-07-01",
+          }),
+        );
+      }
+
+      binId = (
+        await asOwner((tx) => createFeedGroup(tx, ctx(), { name: "Broiler bin" }))
+      ).id;
+      for (const lot of [lotBig, lotSmall]) {
+        await asOwner((tx) =>
+          addLotToFeedGroup(tx, ctx(), {
+            feedGroupId: binId,
+            livestockLotId: lot.lot.id,
+            startedOn: "2026-07-01",
+          }),
+        );
+      }
+    });
+
+    it("A DRAW IS AN ORDINARY ISSUE — no second ledger, and no second cost", async () => {
+      const before = await asOwner((tx) =>
+        movementRowsForItem(tx, tenantId, feedItemId),
+      );
+      const { costCents } = await asOwner((tx) =>
+        recordFeedDraw(tx, ctx(), {
+          feedGroupId: binId,
+          itemId: feedItemId,
+          quantity: 200,
+          occurredOn: "2026-07-10",
+        }),
+      );
+      // Stamped at the average as it stands: 200 lb at 50 cents.
+      expect(costCents).toBe(10_000);
+
+      const after = await asOwner((tx) =>
+        movementRowsForItem(tx, tenantId, feedItemId),
+      );
+      expect(balanceByItem(after).get(feedItemId)).toBe(
+        balanceByItem(before).get(feedItemId)! - 200,
+      );
+
+      const movement = await asOwner((tx) =>
+        tx.query.inventoryMovements.findFirst({
+          where: and(
+            eq(schema.inventoryMovements.itemId, feedItemId),
+            eq(schema.inventoryMovements.occurredOn, "2026-07-10"),
+          ),
+        }),
+      );
+      // NOBODY IS NAMED, and that is what makes the cost allocated rather than
+      // measured. The association lives in this pack's own table.
+      expect(movement!.issuedToLotId).toBeNull();
+      expect(movement!.extensionSlug).toBe("livestock");
+      const draw = await asOwner((tx) =>
+        tx.query.livestockFeedDraws.findFirst({
+          where: eq(schema.livestockFeedDraws.inventoryMovementId, movement!.id),
+        }),
+      );
+      expect(draw!.feedGroupId).toBe(binId);
+    });
+
+    it("spreads that draw by HEAD × DAYS, and the shares sum to the pot", async () => {
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-07-10" }),
+      );
+      const bin = report.groups.find((g) => g.group.id === binId)!;
+      expect(bin.drawnCents).toBe(10_000);
+
+      const big = bin.members.find((m) => m.livestockLotId === lotBig.lot.id)!;
+      const small = bin.members.find((m) => m.livestockLotId === lotSmall.lot.id)!;
+      // Ten days on feed each; 100 head against 50.
+      expect(big.daysOnFeed).toBe(10);
+      expect(big.headDays).toBe(1000);
+      expect(small.headDays).toBe(500);
+      expect(big.shareCents + small.shareCents).toBe(10_000);
+      expect(big.shareCents).toBe(6_667);
+      expect(small.shareCents).toBe(3_333);
+      // Nothing was left over, so nothing is reported unallocated.
+      expect(bin.unallocatedCents).toBe(0);
+
+      const row = report.lots.find((l) => l.code === "FEED-A")!;
+      expect(row.allocatedCents).toBe(6_667);
+      expect(row.provenance).toBe("allocated");
+      expect(row.quantities).toEqual([{ unit: "lb", quantity: 133.3333 }]);
+      // 6,667 cents over the 100 head placed.
+      expect(row.centsPerHeadPlaced).toBe(67);
+    });
+
+    it("A LOT THAT JOINED LATE PAYS FOR THE DAYS IT WAS THERE", async () => {
+      // The reason membership is date-ranged at all. A batch brooded on bagged
+      // starter for a week is not on the bin for that week, and its head count
+      // says nothing about when it went on.
+      const lateBin = (
+        await asOwner((tx) => createFeedGroup(tx, ctx(), { name: "Late bin" }))
+      ).id;
+      const early = await newLot("FEED-C");
+      const late = await newLot("FEED-D");
+      for (const entry of [early, late]) {
+        await asOwner((tx) =>
+          placeHead(tx, ctx(), {
+            itemId,
+            inventoryLotId: entry.inventoryLotId,
+            head: 100,
+            occurredOn: "2026-07-01",
+          }),
+        );
+      }
+      await asOwner((tx) =>
+        addLotToFeedGroup(tx, ctx(), {
+          feedGroupId: lateBin,
+          livestockLotId: early.lot.id,
+          startedOn: "2026-07-01",
+        }),
+      );
+      await asOwner((tx) =>
+        addLotToFeedGroup(tx, ctx(), {
+          feedGroupId: lateBin,
+          livestockLotId: late.lot.id,
+          startedOn: "2026-07-06",
+        }),
+      );
+      await asOwner((tx) =>
+        recordFeedDraw(tx, ctx(), {
+          feedGroupId: lateBin,
+          itemId: feedItemId,
+          quantity: 300,
+          occurredOn: "2026-07-10",
+        }),
+      );
+
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-07-10" }),
+      );
+      const bin = report.groups.find((g) => g.group.id === lateBin)!;
+      const first = bin.members.find((m) => m.livestockLotId === early.lot.id)!;
+      const second = bin.members.find((m) => m.livestockLotId === late.lot.id)!;
+      expect(first.daysOnFeed).toBe(10);
+      expect(second.daysOnFeed).toBe(5);
+      expect(first.headDays).toBe(1000);
+      expect(second.headDays).toBe(500);
+      // Same head, two thirds against one third, purely because of five days.
+      expect(first.shareCents).toBe(10_000);
+      expect(second.shareCents).toBe(5_000);
+    });
+
+    it("REPORTS COST IT COULD NOT ALLOCATE rather than dropping it", async () => {
+      // Feed drawn for a bin no lot is on is money the farm spent. A report that
+      // silently lost it would add up while being wrong.
+      const orphan = (
+        await asOwner((tx) => createFeedGroup(tx, ctx(), { name: "Empty bin" }))
+      ).id;
+      await asOwner((tx) =>
+        recordFeedDraw(tx, ctx(), {
+          feedGroupId: orphan,
+          itemId: feedItemId,
+          quantity: 40,
+          occurredOn: "2026-07-11",
+        }),
+      );
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-07-11" }),
+      );
+      const bin = report.groups.find((g) => g.group.id === orphan)!;
+      expect(bin.drawnCents).toBe(2_000);
+      expect(bin.unallocatedCents).toBe(2_000);
+      expect(bin.members).toEqual([]);
+    });
+
+    it("keeps MEASURED and ALLOCATED apart on a lot that has both", async () => {
+      await asOwner((tx) =>
+        issueStock(tx, ctx(), {
+          itemId: feedItemId,
+          quantity: 20,
+          issuedToLotId: lotSmall.inventoryLotId,
+          occurredOn: "2026-07-12",
+        }),
+      );
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-07-12" }),
+      );
+      const row = report.lots.find((l) => l.code === "FEED-B")!;
+      expect(row.measuredCents).toBe(1_000);
+      expect(row.allocatedCents).toBeGreaterThan(0);
+      expect(row.totalCents).toBe(row.measuredCents + row.allocatedCents);
+      // The design's rule: same report, different confidence, and permanently
+      // so — at 10× the bagged number becomes an allocated one.
+      expect(row.provenance).toBe("mixed");
+    });
+
+    it("COUNTS UNPRICED FEED AS FED, NOT AS FREE", async () => {
+      // Spent grain, surplus milk, garden culls, expired bakery. A model that
+      // insists every input has a purchase price will be lied to.
+      const wasteItemId = (
+        await asOwner((tx) =>
+          createItem(tx, ctx(), {
+            name: "Spent brewery grain",
+            stockingUnit: "lb",
+            itemKind: "feed",
+          }),
+        )
+      ).id;
+      await asOwner((tx) =>
+        receiveStock(tx, ctx(), {
+          itemId: wasteItemId,
+          quantity: 500,
+          costCents: null,
+          occurredOn: "2026-07-13",
+        }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ctx(), {
+          itemId: wasteItemId,
+          quantity: 100,
+          issuedToLotId: lotBig.inventoryLotId,
+          occurredOn: "2026-07-13",
+        }),
+      );
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-07-13" }),
+      );
+      const row = report.lots.find((l) => l.code === "FEED-A")!;
+      expect(row.unpricedMovements).toBe(1);
+      // The quantity is real and carried; the money is not invented.
+      expect(
+        row.quantities.find((q) => q.unit === "lb")!.quantity,
+      ).toBeGreaterThan(200);
+    });
+
+    it("refuses to put the same lot on a feeder twice", async () => {
+      // Two open memberships would count the same head twice in the basis and
+      // hand that pen double its share of the bill.
+      await expect(
+        asOwner((tx) =>
+          addLotToFeedGroup(tx, ctx(), {
+            feedGroupId: binId,
+            livestockLotId: lotBig.lot.id,
+            startedOn: "2026-07-20",
+          }),
+        ),
+      ).rejects.toThrow(/already on this feeder/);
+    });
+
+    it("refuses to take a lot off before it went on", async () => {
+      const members = await asOwner((tx) =>
+        feedGroupMembers(tx, tenantId, [binId]),
+      );
+      const member = members
+        .get(binId)!
+        .find((m) => m.livestockLotId === lotSmall.lot.id)!;
+      await expect(
+        asOwner((tx) =>
+          endFeedGroupMembership(tx, ctx(), {
+            memberId: member.id,
+            endedOn: "2026-06-01",
+          }),
+        ),
+      ).rejects.toThrow(/cannot come off before/);
+    });
+
+    it("stops the clock on the INCLUSIVE last day, like land's occupancy", async () => {
+      const stopBin = (
+        await asOwner((tx) => createFeedGroup(tx, ctx(), { name: "Stop bin" }))
+      ).id;
+      const entry = await newLot("FEED-E");
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId,
+          inventoryLotId: entry.inventoryLotId,
+          head: 10,
+          occurredOn: "2026-07-01",
+        }),
+      );
+      const member = await asOwner((tx) =>
+        addLotToFeedGroup(tx, ctx(), {
+          feedGroupId: stopBin,
+          livestockLotId: entry.lot.id,
+          startedOn: "2026-07-01",
+        }),
+      );
+      await asOwner((tx) =>
+        endFeedGroupMembership(tx, ctx(), {
+          memberId: member.id,
+          endedOn: "2026-07-03",
+        }),
+      );
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-07-31" }),
+      );
+      const bin = report.groups.find((g) => g.group.id === stopBin)!;
+      // The 1st, 2nd and 3rd. Three days, not two.
+      expect(bin.members[0].daysOnFeed).toBe(3);
+      expect(bin.members[0].headDays).toBe(30);
+    });
+
+    it("STAFF may draw and put lots on feeders — both are chores", async () => {
+      const entry = await newLot("FEED-F");
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId,
+          inventoryLotId: entry.inventoryLotId,
+          head: 10,
+          occurredOn: "2026-07-01",
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          addLotToFeedGroup(tx, staffCtx(), {
+            feedGroupId: binId,
+            livestockLotId: entry.lot.id,
+            startedOn: "2026-07-15",
+          }),
+        ),
+      ).resolves.toBeTruthy();
+      await expect(
+        asOwner((tx) =>
+          recordFeedDraw(tx, staffCtx(), {
+            feedGroupId: binId,
+            itemId: feedItemId,
+            quantity: 10,
+            occurredOn: "2026-07-15",
+          }),
+        ),
+      ).resolves.toBeTruthy();
+    });
+
+    it("STAFF may NOT create or close a feeder — that is a decision about cost", async () => {
+      await expect(
+        asOwner((tx) => createFeedGroup(tx, staffCtx(), { name: "Nope" })),
+      ).rejects.toThrow(/only an owner/);
+      await expect(
+        asOwner((tx) => closeFeedGroup(tx, staffCtx(), binId)),
+      ).rejects.toThrow(/only an owner/);
+    });
+
+    it("a closed feeder stops being offered and keeps reporting", async () => {
+      const closed = await asOwner((tx) => closeFeedGroup(tx, ctx(), binId));
+      expect(closed.status).toBe("closed");
+      const active = await asOwner((tx) =>
+        listFeedGroups(tx, tenantId, { status: "active" }),
+      );
+      expect(active.some((g) => g.id === binId)).toBe(false);
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-07-31" }),
+      );
+      expect(report.groups.some((g) => g.group.id === binId)).toBe(true);
     });
   });
 });

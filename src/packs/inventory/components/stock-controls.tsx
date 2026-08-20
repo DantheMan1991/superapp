@@ -164,10 +164,13 @@ export function MovementForm({
   lots,
   locations,
   consumers,
+  unitSingular,
   today,
 }: {
   itemId: string;
   unitLabel: string;
+  /** "pound", not "pounds" — a price is per one of them. */
+  unitSingular: string;
   lots: LotOption[];
   locations: LocationOption[];
   /**
@@ -315,7 +318,7 @@ export function MovementForm({
                 <p className="text-xs text-muted-foreground">
                   {/* The total on the ticket, not a rate. The per-unit figure
                       is derived from it and never stored. */}
-                  The whole delivery, not the price per {unitLabel}. Leave it
+                  The whole delivery, not the price per {unitSingular}. Leave it
                   empty if the invoice has not arrived — the stock still counts.
                 </p>
               </div>

@@ -172,6 +172,25 @@ d("livestock tables (RLS)", () => {
       movementA = movements[0].id;
       movementB = movements[1].id;
 
+      await tx.insert(schema.livestockTreatments).values([
+        {
+          tenantId: tenantA,
+          livestockLotId: lots[0].id,
+          treatedOn: '2026-08-01',
+          product: 'Ours',
+          route: 'water',
+          meatWithdrawalDays: 10,
+        },
+        {
+          tenantId: tenantB,
+          livestockLotId: lots[1].id,
+          treatedOn: '2026-08-01',
+          product: 'Theirs',
+          route: 'injection',
+          meatWithdrawalDays: 21,
+        },
+      ]);
+
       await tx.insert(schema.livestockWeights).values([
         {
           tenantId: tenantA,
@@ -665,6 +684,104 @@ d("livestock tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.livestockWeights),
+      ),
+    ).toHaveLength(0);
+  });
+  // ---- slice 3: treatments ------------------------------------------------
+
+  it("a tenant sees only its own treatments", async () => {
+    // These rows decide whether meat and milk can lawfully be sold. A leak in
+    // one direction puts this farm's animals under a withdrawal that does not
+    // apply; a leak in the other makes a treated lot read as clear.
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.livestockTreatments),
+    );
+    expect(mine.map((t) => t.product)).toEqual(["Ours"]);
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockTreatments),
+    );
+    expect(theirs.map((t) => t.product)).toEqual(["Theirs"]);
+  });
+
+  it("cannot treat another tenant's animals", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockTreatments).values({
+          tenantId: tenantA,
+          livestockLotId: lotB,
+          treatedOn: "2026-08-20",
+          product: "Penicillin G",
+          route: "injection",
+          meatWithdrawalDays: 10,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a withdrawal clock running backwards", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockTreatments).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          treatedOn: "2026-08-20",
+          product: "Penicillin G",
+          route: "injection",
+          meatWithdrawalDays: -1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a nameless product and an invented source", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockTreatments).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          treatedOn: "2026-08-20",
+          product: "   ",
+          route: "water",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockTreatments).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          treatedOn: "2026-08-20",
+          product: "X",
+          route: "water",
+          withdrawalSource: "i_reckon",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a staff member can record a treatment, because they gave it", async () => {
+    const rows = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockTreatments)
+        .values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          treatedOn: "2026-08-21",
+          product: "Penicillin G",
+          route: "injection",
+          meatWithdrawalDays: 10,
+          recordedBy: MATE,
+        })
+        .returning(),
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("treatments are default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.livestockTreatments),
       ),
     ).toHaveLength(0);
   });

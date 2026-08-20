@@ -24,7 +24,13 @@ import {
   checksOn,
   lastCheckedByLot,
   listLivestockLots,
+  withdrawalByLot,
 } from "@/packs/livestock/ops";
+import {
+  blocksProcessing,
+  describeWithdrawal,
+  formatWithdrawal,
+} from "@/packs/livestock/core/withdrawal";
 import { summariseHead } from "@/packs/livestock/core/herd";
 import {
   checkStreak,
@@ -80,6 +86,7 @@ export default async function DailyRoundPage() {
         checks,
         lastChecked,
         checkedDays,
+        withdrawals,
       ] = await Promise.all([
         listLots(tx, ctx.tenant.id),
         movementKindsForLots(tx, ctx.tenant.id, inventoryLotIds),
@@ -88,6 +95,14 @@ export default async function DailyRoundPage() {
         checksOn(tx, ctx.tenant.id, today),
         lastCheckedByLot(tx, ctx.tenant.id),
         checkedDaysSince(tx, ctx.tenant.id, addDays(today, -STREAK_WINDOW_DAYS)),
+        // The round is the screen somebody opens every morning, which makes it
+        // the right place to notice that a pen cannot go anywhere yet.
+        withdrawalByLot(
+          tx,
+          ctx.tenant.id,
+          lots.map((l) => l.id),
+          today,
+        ),
       ]);
       return {
         lots,
@@ -98,6 +113,7 @@ export default async function DailyRoundPage() {
         checks,
         lastChecked,
         checkedDays,
+        withdrawals,
       };
     },
     { role: ctx.role },
@@ -112,6 +128,7 @@ export default async function DailyRoundPage() {
     checks,
     lastChecked,
     checkedDays,
+    withdrawals,
   } = data;
   const byInventoryLot = new Map(inventoryLots.map((l) => [l.id, l]));
 
@@ -139,6 +156,7 @@ export default async function DailyRoundPage() {
         zone: zones.get(lot.inventoryLotId) ?? null,
         check: checks.get(lot.id) ?? null,
         lastCheckedOn: lastChecked.get(lot.id) ?? null,
+        withdrawal: withdrawals.get(lot.id) ?? null,
       };
     })
     .filter((row) => row.balance > 0);
@@ -260,6 +278,18 @@ export default async function DailyRoundPage() {
                     <div className="text-xs text-muted-foreground">
                       {slugLabel(row.lot.species)}
                     </div>
+                    {row.withdrawal &&
+                      blocksProcessing(row.withdrawal.meat) && (
+                        <Badge
+                          variant="default"
+                          className="mt-1"
+                          title={describeWithdrawal(row.withdrawal.meat)}
+                        >
+                          {/* Only when it BLOCKS. A "clear" badge on every row
+                              would be the noise that hides this one. */}
+                          Withdrawal · {formatWithdrawal(row.withdrawal.meat)}
+                        </Badge>
+                      )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {row.zone ? row.zone.zoneName : "—"}

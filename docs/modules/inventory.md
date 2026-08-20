@@ -24,6 +24,21 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-20 — The consumption reads now say what KIND was consumed (`claude/the-withdrawal-clock`)
+
+`consumedByLotAndItem` and `consumedDatedByLots` return `itemKind`, and neither
+has an opinion about what it means.
+
+**`livestock` slice 3 put medicine through the same door feed goes through** —
+`issued_to_lot_id`, so a sick pen carries its own expense — and that silently
+broke a number in the pack next door: the feed report absorbed the penicillin
+into cost per head, pounds fed, and the feed conversion ratio. A card reading
+"Fed" that includes the medicine is wrong in the pack that owns the word.
+
+The classification stays the CALLER's, exactly as `movementKindsForLots` leaves
+the death-versus-transfer decision to `livestock`. This pack knows an item has a
+kind; what counts as feed is somebody else's judgement.
+
 ### 2026-08-20 — One more read, and its window is different for every lot (`claude/weights-carry-a-method`)
 
 `consumedDatedByLots` — what was issued into each lot, movement by movement,

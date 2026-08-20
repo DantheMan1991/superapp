@@ -12,8 +12,10 @@ import {
   feedGroupMembers,
   feedReport,
   listFeedGroups,
+  lastTreatmentOfProduct,
   listWeightsForLot,
   toWeighIns,
+  withdrawalByLot,
   checksOn,
   createLivestockLot,
   farmSnapshot,
@@ -26,6 +28,7 @@ import {
   placeHead,
   recordDailyCheck,
   recordFeedDraw,
+  recordTreatment,
   deleteWeight,
   recordWeight,
   removeHead,
@@ -36,6 +39,7 @@ import {
   type LivestockCtx,
 } from "../src/packs/livestock/ops";
 import {
+  consumedCostByLot,
   createItem,
   issueStock,
   movementKindsForLots,
@@ -1549,6 +1553,232 @@ d("livestock ops", () => {
       expect(report.groups.some((g) => g.group.id === binId)).toBe(true);
     });
   });
+  // ---- slice 3: treatments and the withdrawal clock ----------------------
+
+  describe("treatments and the withdrawal clock", () => {
+    let tItemId: string;
+    let medicineId: string;
+    let lotId: string;
+    let invLotId: string;
+
+    beforeAll(async () => {
+      tItemId = (
+        await asOwner((tx) =>
+          createItem(tx, ctx(), {
+            name: "Treat chicks",
+            stockingUnit: "head",
+            itemKind: "livestock",
+          }),
+        )
+      ).id;
+      medicineId = (
+        await asOwner((tx) =>
+          createItem(tx, ctx(), {
+            name: "Penicillin G",
+            stockingUnit: "floz",
+            itemKind: "medicine",
+          }),
+        )
+      ).id;
+      await asOwner((tx) =>
+        receiveStock(tx, ctx(), {
+          itemId: medicineId,
+          quantity: 100,
+          costCents: 20_000,
+          occurredOn: "2026-06-01",
+        }),
+      );
+      const created = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "TREAT-1",
+          species: "cattle",
+        }),
+      );
+      lotId = created.lot.id;
+      invLotId = created.inventoryLotId;
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId: tItemId,
+          inventoryLotId: invLotId,
+          head: 10,
+          occurredOn: "2026-06-01",
+        }),
+      );
+    });
+
+    it("starts both clocks, and they run to different dates", async () => {
+      await asOwner((tx) =>
+        recordTreatment(tx, ctx(), {
+          livestockLotId: lotId,
+          treatedOn: "2026-08-01",
+          product: "Penicillin G",
+          dose: "1 cc per 100 lb",
+          route: "injection",
+          meatWithdrawalDays: 10,
+          milkWithdrawalDays: 4,
+          withdrawalSource: "label",
+        }),
+      );
+      const map = await asOwner((tx) =>
+        withdrawalByLot(tx, tenantId, [lotId], "2026-08-06"),
+      );
+      const w = map.get(lotId)!;
+      // On the 6th the milk is saleable and the animal is not.
+      expect(w.meat.state).toBe("under");
+      expect(w.meat.clearsOn).toBe("2026-08-11");
+      expect(w.milk.state).toBe("clear");
+    });
+
+    it("REFUSES A STATED SOURCE WITH NOTHING STATED", async () => {
+      // Claiming a period came off the label while leaving both clocks empty is
+      // the row that later reads as "clear" to somebody loading a trailer.
+      await expect(
+        asOwner((tx) =>
+          recordTreatment(tx, ctx(), {
+            livestockLotId: lotId,
+            treatedOn: "2026-08-01",
+            product: "Mystery",
+            route: "water",
+            withdrawalSource: "label",
+          }),
+        ),
+      ).rejects.toThrow(/give a meat or milk withdrawal/);
+    });
+
+    it("ACCEPTS 'not looked up', AND IT BLOCKS", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "TREAT-UNKNOWN",
+          species: "cattle",
+        }),
+      );
+      await asOwner((tx) =>
+        recordTreatment(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          treatedOn: "2026-08-01",
+          product: "Something the vet left",
+          route: "injection",
+          withdrawalSource: "none_stated",
+        }),
+      );
+      const map = await asOwner((tx) =>
+        withdrawalByLot(tx, tenantId, [lot.lot.id], "2026-12-01"),
+      );
+      // Months later, and still not clear — because nobody looked.
+      expect(map.get(lot.lot.id)!.meat.state).toBe("unknown");
+    });
+
+    it("PUTS THE COST ON THE PEN through inventory, not a column here", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "TREAT-COST",
+          species: "cattle",
+        }),
+      );
+      const treatment = await asOwner((tx) =>
+        recordTreatment(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          treatedOn: "2026-08-01",
+          product: "Penicillin G",
+          route: "injection",
+          meatWithdrawalDays: 10,
+          fromStock: { itemId: medicineId, quantity: 5 },
+        }),
+      );
+      // The money is on the movement, and this table only points at it.
+      expect(treatment.inventoryMovementId).not.toBeNull();
+      const consumed = await asOwner((tx) =>
+        consumedCostByLot(tx, tenantId, [lot.inventoryLotId]),
+      );
+      // 5 fluid ounces out of a 100 floz, $200 bottle.
+      expect(consumed.get(lot.inventoryLotId)).toBe(1_000);
+    });
+
+    it("MEDICINE IS NOT FEED, and the feed report knows it", async () => {
+      // The correction slice 3 forces: medicine goes through the same door feed
+      // does, and a card reading "Fed" that quietly included the penicillin
+      // would be wrong in the pack that owns the word.
+      const report = await asOwner((tx) =>
+        feedReport(tx, tenantId, { from: "2026-06-01", to: "2026-12-31" }),
+      );
+      const row = report.lots.find((l) => l.code === "TREAT-COST")!;
+      expect(row.measuredCents).toBe(0);
+      expect(row.quantities).toEqual([]);
+      expect(row.provenance).toBe("none");
+    });
+
+    it("suggests what THIS FARM entered last time, and nothing otherwise", async () => {
+      const previous = await asOwner((tx) =>
+        lastTreatmentOfProduct(tx, tenantId, "penicillin g"),
+      );
+      expect(previous?.meatWithdrawalDays).toBe(10);
+      expect(
+        await asOwner((tx) => lastTreatmentOfProduct(tx, tenantId, "Draxxin")),
+      ).toBeNull();
+    });
+
+    it("refuses a malformed route and an invented source", async () => {
+      await expect(
+        asOwner((tx) =>
+          recordTreatment(tx, ctx(), {
+            livestockLotId: lotId,
+            treatedOn: "2026-08-01",
+            product: "X",
+            route: "In The Water",
+            meatWithdrawalDays: 1,
+          }),
+        ),
+      ).rejects.toThrow(/invalid route/);
+      await expect(
+        asOwner((tx) =>
+          recordTreatment(tx, ctx(), {
+            livestockLotId: lotId,
+            treatedOn: "2026-08-01",
+            product: "X",
+            route: "water",
+            meatWithdrawalDays: 1,
+            withdrawalSource: "i_reckon",
+          }),
+        ),
+      ).rejects.toThrow(/where the withdrawal period came from/);
+    });
+
+    it("STAFF may treat — the person with the syringe is the one who knows", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "TREAT-STAFF",
+          species: "cattle",
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          recordTreatment(tx, staffCtx(), {
+            livestockLotId: lot.lot.id,
+            treatedOn: "2026-08-01",
+            product: "Penicillin G",
+            route: "injection",
+            meatWithdrawalDays: 10,
+          }),
+        ),
+      ).resolves.toBeTruthy();
+    });
+
+    it("reaches the advisor's digest as a legal fact", async () => {
+      const snapshot = await asOwner((tx) =>
+        farmSnapshot(tx, tenantId, { today: "2026-08-06" }),
+      );
+      const lot = snapshot.lots.find((l) => l.code === "TREAT-1")!;
+      expect(lot.withdrawal?.meatState).toBe("under");
+      expect(lot.withdrawal?.meatClearsOn).toBe("2026-08-11");
+      const text = formatSnapshot(snapshot);
+      expect(text).toContain("MEAT WITHDRAWAL until 2026-08-11");
+    });
+  });
+
   // ---- slice 5: weights, and the conversion they make possible -----------
 
   describe("weights and feed conversion", () => {

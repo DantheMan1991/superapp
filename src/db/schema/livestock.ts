@@ -38,7 +38,11 @@
  *     deliberate placeholder and not the model: a single breed string thrown at
  *     a crossbred herd loses information irrecoverably, so nothing is allowed
  *     to compute on it.
- *   - **Health and withdrawal clocks.** Slice 3.
+ *   - **A "under withdrawal" flag on the lot.** Slice 3 adds
+ *     `livestock_treatments`, and whether a lot is clear is a FOLD over
+ *     `treated_on + days`. A stored flag would stop agreeing with its own inputs
+ *     the moment somebody corrected a period, and this is the one number in the
+ *     pack where being quietly wrong is a legal problem.
  *   - **A weight, a gain or an FCR on the lot.** Slice 5 adds
  *     `livestock_weights`, and every one of those three is a FOLD over it. A
  *     stored current weight would be a second source of truth the moment
@@ -615,6 +619,167 @@ export const livestockWeights = pgTable(
   ],
 );
 
+/**
+ * WHAT WENT INTO AN ANIMAL, AND WHEN IT IS SAFE TO EAT.
+ *
+ * **The value of this table is the withdrawal clock, not the treatment record.**
+ * A note that a pen got penicillin is a diary entry; the fact that those birds
+ * cannot go to a processor until the 30th is a legal constraint, and it is the
+ * one thing in this pack that can put uninspectable meat in somebody's freezer
+ * if it is wrong.
+ *
+ * **TWO CLOCKS, BECAUSE MEAT AND MILK DIFFER FOR THE SAME PRODUCT.** Not one
+ * number with a type — the same injection routinely clears milk in 4 days and
+ * meat in 21, and a single column would force whoever entered it to pick which
+ * truth to keep. Both are nullable: a product with no meat withdrawal really
+ * does have none, and that is different from nobody having looked it up, which
+ * is what `withdrawal_source` is for.
+ *
+ * **NOTHING HERE IS SUPPLIED BY THE APP.** There is no drug registry behind this
+ * and there must not be a hardcoded one: withdrawal periods vary by dose, route,
+ * species and formulation, extra-label use extends them, and jurisdictions
+ * differ. The design's rule is that the app **must never present a number as
+ * authoritative**, so every figure in this row was typed by a person reading a
+ * label or repeating a vet, and `withdrawal_source` records which. The only
+ * "default" offered anywhere is what THIS farm entered last time for the same
+ * product — its own record rather than the app's claim.
+ *
+ * **A dose is free text, and nothing computes on it.** "1 cc per 100 lb",
+ * "5 ml", "one scoop per 20 gallons" — real doses are written the way the label
+ * writes them, and parsing them into a number would produce a figure this app
+ * would then be tempted to reason with. Same call as `breed`.
+ *
+ * Deliberately NOT here:
+ *
+ *   - **The cost.** A treatment that used something out of stock issues it
+ *     through `inventory`, exactly as feed does, and the money lives on the
+ *     movement. A cents column here would be a second place for it to disagree.
+ *   - **A "withdrawn" flag or a cleared date.** Both are folds over
+ *     `treated_on + days`, and a stored one stops agreeing with its own inputs
+ *     the moment somebody corrects the period.
+ *   - **A diagnosis.** What was wrong with the animal is a note; turning it into
+ *     a taxonomy invites the app to look like it knows veterinary medicine.
+ */
+export const livestockTreatments = pgTable(
+  "livestock_treatments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    /** The day it was given. The clock counts from here. */
+    treatedOn: date("treated_on").notNull(),
+    /** What was given, as written on the bottle. Free text — there is no registry. */
+    product: text("product").notNull(),
+    /** As the label writes it. Nothing computes on this. */
+    dose: text("dose").notNull().default(""),
+    /**
+     * Open taxonomy (P1): 'oral', 'water', 'injection', 'topical',
+     * 'intramammary'. Format constrained, values never — route matters because
+     * it changes the withdrawal, and a profile may know routes this pack does
+     * not.
+     */
+    route: text("route").notNull(),
+    /**
+     * How many head were treated.
+     *
+     * **The whole lot is the normal case in poultry**, where it goes in the
+     * water and nobody can treat one bird. Recorded rather than assumed, because
+     * three injected cows out of forty is also normal — but see the table's own
+     * note: the WITHDRAWAL still applies to the whole lot either way, since
+     * nothing here can tell the three from the thirty-seven.
+     */
+    headTreated: numeric("head_treated", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }),
+    /** Days before the meat is saleable. Null means none stated for meat. */
+    meatWithdrawalDays: integer("meat_withdrawal_days"),
+    /** Days before the milk is saleable. Null means none stated for milk. */
+    milkWithdrawalDays: integer("milk_withdrawal_days"),
+    /**
+     * Where those numbers came from: 'label' | 'vet' | 'none_stated'.
+     *
+     * **PROVENANCE, for the same reason feed cost carries it.** A period read off
+     * the bottle and one a vet gave for extra-label use are different kinds of
+     * claim, and `none_stated` is the honest record of a treatment given before
+     * anybody looked the period up — which is exactly the row somebody needs to
+     * come back to before booking a processor.
+     */
+    withdrawalSource: text("withdrawal_source").notNull().default("label"),
+    /** Who put it in the animal. Free text: often a vet who has no login here. */
+    administeredBy: text("administered_by").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    /**
+     * The `inventory_movements` row that took the product out of stock, when it
+     * came from stock. Null for a vet's own supply, or a bottle nobody counts.
+     *
+     * A JOIN, not a cost column — same shape as `livestock_feed_draws`.
+     */
+    inventoryMovementId: uuid("inventory_movement_id"),
+    /** Clerk user id of whoever recorded it. Not an FK — the platform has no users table. */
+    recordedBy: text("recorded_by").notNull().default(""),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_treatments_tenant_id_id_idx").on(t.tenantId, t.id),
+    // "Is this lot clear" is the read, and it is always by lot and date.
+    index("livestock_treatments_tenant_lot_day_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+      t.treatedOn,
+    ),
+    // "What did we give last time" — the suggestion that saves somebody
+    // re-reading a label they already read.
+    index("livestock_treatments_tenant_product_idx").on(t.tenantId, t.product),
+    foreignKey({
+      name: "livestock_treatments_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "livestock_treatments_movement_fk",
+      columns: [t.tenantId, t.inventoryMovementId],
+      foreignColumns: [inventoryMovements.tenantId, inventoryMovements.id],
+    }),
+    check(
+      "livestock_treatments_route_format",
+      sql`${t.route} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "livestock_treatments_product_present",
+      sql`length(btrim(${t.product})) > 0`,
+    ),
+    check(
+      "livestock_treatments_source_valid",
+      sql`${t.withdrawalSource} in ('label', 'vet', 'none_stated')`,
+    ),
+    // A withdrawal of zero days is a real answer — plenty of products have
+    // none — but a negative one is a clock running backwards.
+    check(
+      "livestock_treatments_meat_days_valid",
+      sql`${t.meatWithdrawalDays} is null or ${t.meatWithdrawalDays} >= 0`,
+    ),
+    check(
+      "livestock_treatments_milk_days_valid",
+      sql`${t.milkWithdrawalDays} is null or ${t.milkWithdrawalDays} >= 0`,
+    ),
+    check(
+      "livestock_treatments_head_positive",
+      sql`${t.headTreated} is null or ${t.headTreated} > 0`,
+    ),
+  ],
+);
+
 export type LivestockLot = typeof livestockLots.$inferSelect;
 export type NewLivestockLot = typeof livestockLots.$inferInsert;
 export type LivestockIdentifier = typeof livestockIdentifiers.$inferSelect;
@@ -624,3 +789,4 @@ export type LivestockFeedGroupMember =
   typeof livestockFeedGroupMembers.$inferSelect;
 export type LivestockFeedDraw = typeof livestockFeedDraws.$inferSelect;
 export type LivestockWeight = typeof livestockWeights.$inferSelect;
+export type LivestockTreatment = typeof livestockTreatments.$inferSelect;

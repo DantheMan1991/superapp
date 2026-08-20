@@ -116,6 +116,36 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-20 — Livestock slice 3: the guardrail, and the third state (`claude/the-withdrawal-clock`)
+
+- **The design said "a default the user can override" and "never present a number
+  as authoritative", and those two pull against each other.** Resolved by making
+  the only default the farm's OWN previous entry for the same product, labelled
+  with its date. A built-in drug table would satisfy the first and violate the
+  second, and would be confidently wrong on somebody's actual bottle.
+- **The design named two states and the build needed three.** Clear and under a
+  period are not enough: a treatment given before anybody read the label is
+  neither, and calling it clear is the app inventing the most dangerous number it
+  has access to. `unknown` blocks exactly as a date does, and the screens say
+  *"an unknown is not a zero"*.
+- **A guardrail with nothing to guard, deliberately.** The clock cannot refuse
+  anything today because processing is slice 6 and milk sale is `retail`. Wiring
+  a refusal to the nearest available verb would have been worse than none — a
+  withdrawal legitimately follows an animal sold live to another farm. The clock
+  is loud everywhere instead, and slice 6 inherits the enforcement point.
+- **PROVENANCE, A FOURTH TIME.** Feed cost carries measured-versus-allocated,
+  weights carry their method, conversion carries both, and now a withdrawal
+  carries whether it came off a label, from a vet, or from nobody. The profile's
+  rule that *every derived cost should carry its provenance* turned out to
+  generalise past cost entirely.
+- **One pack's slice broke a number in another's**, and it is the first time that
+  has happened here: medicine issued to a pen landed inside "Fed". Caught because
+  the feed figures were driven immediately after. The fix is a kind exclusion in
+  `livestock`, not a filter in `inventory` — the classification belongs to
+  whoever owns the word.
+- Full build record in [livestock.md](livestock.md), with the read it needed in
+  [inventory.md](inventory.md).
+
 ### 2026-08-20 — Livestock slice 5: the enterprise gets its verdict (`claude/weights-carry-a-method`)
 
 - **Taken out of order, and the reason is a deadline rather than a preference.**
@@ -1303,7 +1333,7 @@ this is used daily or abandoned in March.
 | 0 | Lots + head ledger + occupancy (shared with `land`) | The spine. Nothing works without it, and seeing your animals on paddocks already beats nothing |
 | 1 | **Daily log + advisory layer** | The day-one wedge. Habit and cold start. **Split when built: 1a the log, 1b the advisory — both shipped 2026-08-19** |
 | 2 | Feed + FCR (direct issue now, allocation seam for 10×) | Largest cash cost, and the broiler enterprise's verdict. **Feed and the allocation seam shipped 2026-08-20; FCR itself waits on slice 5, because gain needs weights and nothing may invent one** |
-| 3 | Health + withdrawal clock | Legal guardrail; useful at first use |
+| 3 | Health + withdrawal clock | Legal guardrail; useful at first use. **Shipped 2026-08-20** |
 | 4 | Breeding + genetics + registry | Needs a season of calving to pay off |
 | 5 | Weights (tape formulas, sampling) | Sharpens everything above. **Shipped 2026-08-20, ahead of 3 and 4: a batch processed unweighed can never have an FCR** |
 | 6 | Processing handoff → `production` | Blocked on that pack |

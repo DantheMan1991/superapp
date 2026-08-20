@@ -48,6 +48,41 @@ export function identifierKindLabel(kind: string): string {
 }
 
 /**
+ * How a treatment went in. Open taxonomy — the format is constrained, the
+ * values are not.
+ *
+ * **The route is not decoration: it changes the withdrawal period.** The same
+ * product given in the water and given by injection clears at different times,
+ * which is why it sits beside the dose rather than in the notes.
+ */
+export const TREATMENT_ROUTES = [
+  "water",
+  "feed",
+  "oral",
+  "injection",
+  "topical",
+  "intramammary",
+] as const;
+
+export const TREATMENT_ROUTE_LABELS: Record<string, string> = {
+  water: "In the water",
+  feed: "In the feed",
+  oral: "By mouth",
+  injection: "Injection",
+  topical: "On the skin",
+  intramammary: "Intramammary",
+};
+
+export function treatmentRouteLabel(route: string): string {
+  return TREATMENT_ROUTE_LABELS[route] ?? slugToWords(route);
+}
+
+function slugToWords(slug: string): string {
+  const words = slug.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
  * Species suggestions from the installed profile's `packConfig`.
  *
  * TOTAL BY CONSTRUCTION: `tenant_modules.config` is jsonb with no shape

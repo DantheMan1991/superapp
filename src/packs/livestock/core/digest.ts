@@ -110,6 +110,25 @@ export interface AdvisorLot {
     conversionConfidence: string | null;
     blockedBy: string | null;
   } | null;
+  /**
+   * Where this lot stands on the withdrawal clock, and where the number came
+   * from.
+   *
+   * **The only field in the digest with a legal edge.** Null when nothing has
+   * been given, which is most lots. `unknown` is not clearance and the prompt
+   * says so — a treatment recorded with no period looked up is the row somebody
+   * has to resolve before a trailer moves, and an advisor that read the absence
+   * as "clear" would be inventing the most dangerous number available to it.
+   */
+  withdrawal: {
+    meatState: string;
+    meatClearsOn: string | null;
+    milkState: string;
+    milkClearsOn: string | null;
+    /** The treatment doing the blocking, so the answer can name it. */
+    product: string | null;
+    source: string | null;
+  } | null;
 }
 
 export interface AdvisorZone {
@@ -215,6 +234,24 @@ export function formatSnapshot(snapshot: FarmSnapshot): string {
             : `${(lot.feed.centsPerHead / 100).toFixed(2)} a head`;
         lines.push(
           `  - feed: ${(lot.feed.cents / 100).toFixed(2)}${perHead ? `, ${perHead}` : ""} (${lot.feed.provenance})`,
+        );
+      }
+      if (lot.withdrawal) {
+        const w = lot.withdrawal;
+        const meat =
+          w.meatState === "under"
+            ? `MEAT WITHDRAWAL until ${w.meatClearsOn}`
+            : w.meatState === "unknown"
+              ? "MEAT WITHDRAWAL UNKNOWN — a treatment was given and nobody looked the period up"
+              : "meat clear";
+        const milk =
+          w.milkState === "under"
+            ? `milk withdrawal until ${w.milkClearsOn}`
+            : w.milkState === "unknown"
+              ? "milk withdrawal unknown"
+              : null;
+        lines.push(
+          `  - withdrawal: ${[meat, milk].filter(Boolean).join(" · ")}${w.product ? ` (${w.product}${w.source ? `, ${w.source}` : ""})` : ""}`,
         );
       }
       if (lot.weight) {

@@ -1166,6 +1166,16 @@ export async function consumedByLotAndItem(
     {
       itemId: string;
       itemName: string;
+      /**
+       * The ITEM'S KIND, returned so the caller can decide what it means.
+       *
+       * This op has no opinion about which issues are feed — `livestock`'s
+       * report does, because a card reading "Fed" that quietly included the
+       * penicillin would be wrong in the pack that owns the word. Same seam as
+       * `movementKindsForLots`: typed and unclassified out, classified by the
+       * caller.
+       */
+      itemKind: string;
       unit: string;
       /** Positive: how much was fed, not the ledger's negative sign. */
       quantity: number;
@@ -1179,6 +1189,7 @@ export async function consumedByLotAndItem(
     {
       itemId: string;
       itemName: string;
+      itemKind: string;
       unit: string;
       quantity: number;
       costCents: number;
@@ -1203,6 +1214,7 @@ export async function consumedByLotAndItem(
       lotId: schema.inventoryMovements.issuedToLotId,
       itemId: schema.inventoryMovements.itemId,
       itemName: schema.inventoryItems.name,
+      itemKind: schema.inventoryItems.itemKind,
       unit: schema.inventoryItems.stockingUnit,
       quantity: sql<string>`sum(${schema.inventoryMovements.quantity})`,
       costCents: sql<string>`coalesce(sum(${schema.inventoryMovements.costCents}), 0)`,
@@ -1221,6 +1233,7 @@ export async function consumedByLotAndItem(
       schema.inventoryMovements.issuedToLotId,
       schema.inventoryMovements.itemId,
       schema.inventoryItems.name,
+      schema.inventoryItems.itemKind,
       schema.inventoryItems.stockingUnit,
     );
 
@@ -1229,6 +1242,7 @@ export async function consumedByLotAndItem(
     const entry = {
       itemId: row.itemId,
       itemName: row.itemName,
+      itemKind: row.itemKind,
       unit: row.unit,
       quantity: Math.abs(roundQuantity(Number(row.quantity))),
       costCents: Number(row.costCents),
@@ -1263,6 +1277,7 @@ export async function consumedDatedByLots(
     string,
     {
       occurredOn: string;
+      itemKind: string;
       unit: string;
       /** Positive: how much was fed, not the ledger's negative sign. */
       quantity: number;
@@ -1274,6 +1289,7 @@ export async function consumedDatedByLots(
     string,
     {
       occurredOn: string;
+      itemKind: string;
       unit: string;
       quantity: number;
       costCents: number | null;
@@ -1284,6 +1300,7 @@ export async function consumedDatedByLots(
     .select({
       lotId: schema.inventoryMovements.issuedToLotId,
       occurredOn: schema.inventoryMovements.occurredOn,
+      itemKind: schema.inventoryItems.itemKind,
       unit: schema.inventoryItems.stockingUnit,
       quantity: schema.inventoryMovements.quantity,
       costCents: schema.inventoryMovements.costCents,
@@ -1306,6 +1323,7 @@ export async function consumedDatedByLots(
     if (!row.lotId) continue;
     const entry = {
       occurredOn: row.occurredOn,
+      itemKind: row.itemKind,
       unit: row.unit,
       quantity: Math.abs(roundQuantity(row.quantity)),
       costCents: row.costCents,

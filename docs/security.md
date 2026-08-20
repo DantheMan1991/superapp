@@ -169,6 +169,14 @@ it. Do not introduce a second key; do not hand-roll crypto.
 `logAudit()` takes actions, ids and coarse metadata. Never a message body, an
 amount that reveals a balance, a filename that reveals a client, a token.
 
+**`meta` IS RENDERED, so this rule has teeth it did not have before.** Since
+2026-08-20 `/admin/audit` shows what each action recorded, under the action —
+and a correction shows what it moved from and to. Anything put in `meta` is now
+readable by a superadmin on one page rather than sitting in a column nobody
+opened. That is the point: an audit trail nobody can read is not one. It also
+means a careless `meta` is now a visible leak rather than a latent one, so the
+rule above is checked at the call site, not at the renderer.
+
 **S10 — Financial mutations audit inside their own transaction.**
 Use `logAuditInTx()`. A ledger change must not be able to commit unaudited, and
 an audit failure must roll the mutation back. `logAudit()` swallows errors by

@@ -895,12 +895,15 @@ This pack is the one that forced the change; the full reasoning is in
   `updateWeight` edits in place and `deleteWeight` removes, because a measurement
   is not a ledger entry: a weighing that was typed wrong never happened, so there
   is nothing to compensate for. Both are `member`.
-- **NOTHING IN THE APP RENDERS `audit_log.meta`.** The correction action writes
-  the old and new figures into it, and `/admin/audit` shows only when, what,
-  who and which target — so the one place the previous number survives is a
-  column nobody can read without a query. That is a platform gap rather than a
-  livestock one, and it is why the correction dialog no longer promises a farmer
-  their old number is "in the audit log".
+- ~~Nothing in the app renders `audit_log.meta`~~ — **closed 2026-08-20**, and
+  it was a platform gap rather than a livestock one. `/admin/audit` now shows
+  what each action recorded, and a correction shows what MOVED: the weight
+  corrected in this pack reads `sample weight lb: 62.5 → 68` and the withdrawal
+  clock reads `meat withdrawal days: 21 → 28`. See
+  [architecture.md](../architecture.md). The correction dialogs still do not
+  promise a farmer their old value is "in the audit log" — it is a superadmin
+  page, and pointing somebody at a screen they cannot open is the thing that was
+  wrong with the original copy.
 - **No body condition score.** 1–9 on a cattle beast is the decision input the
   design names beside weight, and it is deliberately not in `livestock_weights` —
   it is not a weight, and every read that folds weights would have to remember to

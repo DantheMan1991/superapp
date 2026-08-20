@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { withTenant } from "@/db";
+import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
@@ -21,6 +22,7 @@ import {
   closeFeedGroup,
   createFeedGroup,
   createLivestockLot,
+  deleteWeight,
   endFeedGroupMembership,
   farmSnapshot,
   markRoundNormal,
@@ -32,6 +34,7 @@ import {
   removeHead,
   retireIdentifier,
   splitLivestockLot,
+  updateWeight,
   type LivestockCtx,
 } from "./ops";
 
@@ -496,6 +499,121 @@ export async function recordWeightAction(input: unknown) {
         weighedOn: weight.weighedOn,
         method: weight.method,
         sampleSize: weight.sampleSize,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Correct a weighing.
+ *
+ * Same level as recording one, because it is the same act done twice — the
+ * person who typed 625 for a 62.5 lb crate is the person standing there with the
+ * scale, and making them fetch the owner to fix a digit is how a wrong number
+ * stays in the record.
+ *
+ * **The audit entry carries what it WAS**, which is the whole history a
+ * measurement needs: the row is corrected in place because no such measurement
+ * ever existed, and the log is where "who changed this, from what" lives.
+ */
+export async function updateWeightAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const measurement = z.number().positive().max(100_000).multipleOf(0.001);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      weighedOn: requiredDate.optional(),
+      method: z.string().min(1).max(63).optional(),
+      sampleSize: z.number().int().positive().max(100_000).optional(),
+      sampleWeightLb: measurement.nullable().optional(),
+      heartGirthIn: measurement.nullable().optional(),
+      bodyLengthIn: measurement.nullable().optional(),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  const { id, ...patch } = parsed.data;
+  try {
+    const { before, after } = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const before = await tx.query.livestockWeights.findFirst({
+          where: and(
+            eq(schema.livestockWeights.tenantId, ctx.tenant.id),
+            eq(schema.livestockWeights.id, id),
+          ),
+        });
+        const after = await updateWeight(tx, ctxOf(ctx), id, patch);
+        return { before, after };
+      },
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.weight.corrected",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_weight",
+      targetId: id,
+      // Figures and dates, never the notes — those are free text about an
+      // animal and belong only in the row.
+      meta: {
+        was: before
+          ? {
+              weighedOn: before.weighedOn,
+              method: before.method,
+              sampleSize: before.sampleSize,
+              sampleWeightLb: before.sampleWeightLb,
+              heartGirthIn: before.heartGirthIn,
+              bodyLengthIn: before.bodyLengthIn,
+            }
+          : null,
+        now: {
+          weighedOn: after.weighedOn,
+          method: after.method,
+          sampleSize: after.sampleSize,
+          sampleWeightLb: after.sampleWeightLb,
+          heartGirthIn: after.heartGirthIn,
+          bodyLengthIn: after.bodyLengthIn,
+        },
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Remove a weighing entered by mistake. The audit entry keeps what it said. */
+export async function deleteWeightAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const removed = await withTenant(
+      ctx.tenant.id,
+      (tx) => deleteWeight(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.weight.removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: removed.livestockLotId,
+      meta: {
+        weighedOn: removed.weighedOn,
+        method: removed.method,
+        sampleSize: removed.sampleSize,
+        sampleWeightLb: removed.sampleWeightLb,
       },
     });
     revalidatePath(BASE, "layout");

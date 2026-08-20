@@ -56,7 +56,10 @@ import {
   formatLb,
   isMeasuredMethod,
 } from "@/packs/livestock/core/weights";
-import { RecordWeightForm } from "@/packs/livestock/components/weight-controls";
+import {
+  RecordWeightForm,
+  RemoveWeightButton,
+} from "@/packs/livestock/components/weight-controls";
 import {
   ageInDays,
   formatAge,
@@ -629,6 +632,7 @@ export default async function LivestockLotPage({
                 <TableHead className="text-right">A head</TableHead>
                 <TableHead className="text-right">The whole lot</TableHead>
                 <TableHead>Noted</TableHead>
+                <TableHead className="text-right"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -662,6 +666,34 @@ export default async function LivestockLotPage({
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {row.notes || "—"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {/* CORRECT for a number typed wrong, REMOVE for a
+                          weighing that never happened. A measurement is not a
+                          ledger entry, so neither is a compensating row. */}
+                      <div className="flex items-center justify-end">
+                        <RecordWeightForm
+                          livestockLotId={lot.id}
+                          lotCode={inventoryLot.code}
+                          head={summary.balance}
+                          today={today}
+                          tapeAvailable={tapeDivisor !== null}
+                          existing={{
+                            id: row.id,
+                            weighedOn: row.weighedOn,
+                            method: row.method,
+                            sampleSize: row.sampleSize,
+                            sampleWeightLb: row.sampleWeightLb,
+                            heartGirthIn: row.heartGirthIn,
+                            bodyLengthIn: row.bodyLengthIn,
+                            notes: row.notes,
+                          }}
+                        />
+                        <RemoveWeightButton
+                          weightId={row.id}
+                          weighedOn={row.weighedOn}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

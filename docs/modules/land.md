@@ -51,6 +51,22 @@ examples exist.
 
 ## Build log
 
+### 2026-08-20 — `deleteOccupancy` turned out to be a precedent (`claude/a-weighing-can-be-wrong`)
+
+No code change here. Recorded because `livestock`'s weights copied this pack's
+call and its reasoning verbatim: *remove a stay entered by mistake — correcting a
+record is not rewriting history.*
+
+The distinction is worth having written down once, because both packs will keep
+meeting it. An EVENT is corrected by a compensating entry — the feed really did
+leave the barn, and unwriting it would rewrite what happened. An OBSERVATION or
+an intention is corrected in place — a stay somebody keyed against the wrong
+paddock, or a weighing typed as 625 instead of 62.5, never happened at all, and
+there is no compensating row that would mean anything.
+
+`inventory_movements` is the first kind. `land_occupancy` and
+`livestock_weights` are the second.
+
 ### 2026-08-20 — A haul is a parcel crossing, and this pack is the one that knows (`claude/weights-carry-a-method`)
 
 `lastHauledOn` — when each occupant last moved to a zone on a DIFFERENT parcel.

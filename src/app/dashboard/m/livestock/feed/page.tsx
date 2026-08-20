@@ -473,6 +473,16 @@ export default async function FeedPage({
                       {row.totalCents === 0
                         ? "—"
                         : formatMoney(row.totalCents, currencySymbol)}
+                      {/* WHAT HAS LEFT, under what was spent. A pen processed
+                          out still ate the feed — the total is right — but the
+                          money is in the freezer now, and a report that only
+                          showed the total would have it in both places. */}
+                      {row.releasedCents > 0 && (
+                        <div className="text-xs text-muted-foreground">
+                          {formatMoney(row.remainingCents, currencySymbol)} left
+                          on the lot
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {row.centsPerHead === null
@@ -584,7 +594,10 @@ export default async function FeedPage({
             <p className="text-xs text-muted-foreground">
               &ldquo;A head placed&rdquo; is the comparison figure: cost at
               today&rsquo;s count falls as birds die, which makes a bad batch
-              look cheaper the worse it goes.
+              look cheaper the worse it goes. It is over the whole bill, because
+              what a batch cost to raise does not change when some of it is
+              processed and sold on &mdash; while &ldquo;a head now&rdquo; is
+              over what the lot is still carrying.
             </p>
           </div>
         </>

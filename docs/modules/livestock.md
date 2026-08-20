@@ -25,6 +25,49 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-20 — The pen stopped charging itself for cost that left with the meat (`claude/cost-that-left-with-the-meat`)
+
+**Found by driving `production` slice 0 on the live app**, on a pen with real
+feed on it — which the dev tenant could not show, because nothing there had ever
+been fed.
+
+BATCH-2 carried **$141.67 of feed across 197 birds — 72 cents a head**. A run
+took 100 of them and **$43.15** into the freezer. The Fed card then read
+**$141.67 · $1.46 a head**: the numerator sat still while the denominator
+halved, so a pen that had just sent most of its cost to the freezer read as
+twice as expensive. Read literally, the farm had paid for that feed twice.
+
+**Nothing in the ledger was wrong.** `inventory`'s `lotCarried` had known the
+released figure since the day production shipped. This pack simply had no
+concept of cost LEAVING a lot — and was right not to, because until that week
+nothing could take any out.
+
+- **`FeedLotInput` gains `releasedCents`, `FeedLotRow` gains
+  `remainingCents`**, fed from `inventory`'s `carriedCostByLot` — through
+  inventory's own query, because the ledger is its table.
+- **`centsPerHead` is now over what the pen STILL CARRIES.** That is the number
+  that was wrong. `centsPerHeadPlaced` deliberately keeps the gross total: it is
+  the batch-against-batch comparison, and what a batch cost to raise does not
+  change because some of it was processed and sold on.
+- **The Fed card headline stays the full bill**, because the feed WAS fed and
+  that is what the word means. A line underneath says how much left with what
+  was processed and how much is still on the lot. The feed report's Cost column
+  gained the same second line.
+- **`releasedCents` is NOT windowed by the report's period**, unlike everything
+  else on the row. What a pen is still carrying is a fact about now; answering
+  "the last 30 days" with cost handed to the freezer in April would be worse
+  than useless.
+- **Not clamped at zero.** A negative remainder would mean more cost left than
+  was ever recorded going in — a real disagreement somebody should see, not a
+  number to tidy away.
+- **The allocated share can never be released, and the card now says so.** Only
+  cost stamped on a movement can travel; a share of a shared feeder is worked
+  out at read time and was never money on the ledger. That is the
+  measured-versus-allocated line this pack draws everywhere else, drawn once
+  more — and it is why a run carried $85.00 of that pen's $141.67 rather than
+  all of it.
+- 4 new pure tests, 1 new ops test. No migration, no schema change.
+
 ### 2026-08-20 — Slice 6: the clock finally refuses something (`claude/a-run-lands-in-stock`)
 
 Built from the other side, by `production` slice 0. This pack's own Open items
@@ -770,6 +813,16 @@ This pack is the one that forced the change; the full reasoning is in
   over `livestock_weights`, for the same reason the head count is a fold over the
   ledger: a stored one stops agreeing with its own inputs the day somebody
   weighs again.
+- **COST CAN LEAVE A LOT NOW, AND EVERY FEED FIGURE HAS TO KNOW IT.** Before
+  `production` shipped, "what was fed to this pen" and "what this pen is still
+  carrying" were the same number. They are not any more. `centsPerHead` nets off
+  what has been released; `centsPerHeadPlaced` deliberately does not. If a future
+  slice adds a third per-head figure, decide which of those two it is before
+  writing it.
+- **ONLY STAMPED COST CAN BE RELEASED.** `releasedCents` is the sum of cost on a
+  lot's outgoing movements. An allocated share of a shared feeder was never on a
+  movement, so it cannot leave and stays with the pen — which is also the reason
+  a production run carries less than the Fed card's headline.
 - **MEASURED AND ALLOCATED ARE DIFFERENT KINDS OF FACT, permanently.** A bag
   issued to a named lot is measured and its cost was stamped when it happened; a
   share of a shared feeder is spread by head × days at read time and is an

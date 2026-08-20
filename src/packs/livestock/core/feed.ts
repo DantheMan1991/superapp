@@ -355,10 +355,38 @@ export interface FeedLotInput {
   allocatedQuantities: FeedQuantity[];
   /** Issues into this lot that carried no price at all — see `unpricedNote`. */
   unpricedMovements: number;
+  /**
+   * **COST THAT HAS ALREADY LEFT THIS LOT, carrying stock with it.**
+   *
+   * Added 2026-08-20, and it exists because `production` shipped. Until then
+   * nothing could take cost OUT of a pen, so "what was fed to this lot" and
+   * "what this lot is still carrying" were the same number and this pack was
+   * right not to distinguish them. The moment a run carried 100 birds and
+   * $43.15 into the freezer, they stopped being the same number — and the card
+   * went on showing the whole bill against the 97 birds left, which reads as
+   * the farm having paid for the feed twice.
+   *
+   * Only what was STAMPED can leave: it is the sum of the cost on this lot's
+   * outgoing movements, which `inventory` folds in `lotCarried`. The allocated
+   * share of a shared feeder is worked out at read time and was never on a
+   * movement, so it cannot be released and stays with the pen — the
+   * measured/allocated line this pack draws everywhere else, drawn once more.
+   */
+  releasedCents: number;
 }
 
 export interface FeedLotRow extends FeedLotInput {
   totalCents: number;
+  /**
+   * What is still on the pen: everything fed, less what has already left with
+   * stock. Equal to `totalCents` until something is processed out.
+   *
+   * **NOT CLAMPED AT ZERO.** A lot whose whole balance has been processed
+   * carries nothing and reads as such; a negative would mean more cost left than
+   * was ever recorded going in, which is a real disagreement somebody should
+   * see rather than a number to tidy away.
+   */
+  remainingCents: number;
   quantities: FeedQuantity[];
   provenance: FeedProvenance;
   /** Null rather than zero when there is nothing to divide by. */
@@ -415,12 +443,29 @@ export function feedReportRows(lots: FeedLotInput[]): FeedLotRow[] {
     return {
       ...lot,
       totalCents,
+      remainingCents: totalCents - lot.releasedCents,
       quantities: mergeQuantities([
         ...lot.measuredQuantities,
         ...lot.allocatedQuantities,
       ]),
       provenance: provenanceOf(lot.measuredCents, lot.allocatedCents),
-      centsPerHead: perUnit(totalCents, lot.head),
+      /**
+       * **AT TODAY'S COUNT, OVER WHAT THE PEN STILL CARRIES — both halves, or
+       * the figure lies in a new direction.**
+       *
+       * The old version divided the WHOLE bill by the head standing, which was
+       * right while the only way to lose head was to lose birds. Process a
+       * hundred of them and the numerator stays put while the denominator
+       * halves, so a pen that just sent most of its cost to the freezer reads as
+       * having got twice as expensive. Netting the released cost off first is
+       * what keeps this number meaning "what each bird standing here is
+       * carrying".
+       *
+       * `centsPerHeadPlaced` deliberately keeps the GROSS total: it is the
+       * batch-against-batch comparison, and what a batch cost to raise does not
+       * change because some of it has been sold on.
+       */
+      centsPerHead: perUnit(totalCents - lot.releasedCents, lot.head),
       centsPerHeadPlaced: perUnit(totalCents, lot.intake),
       vsPreviousCents: null,
       previousCode: null,

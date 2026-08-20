@@ -22,7 +22,9 @@ import {
   type InventoryCtx,
 } from "../src/packs/inventory/ops";
 import {
+  LEDGER_EPOCH,
   createLivestockLot,
+  feedReport,
   placeHead,
   recordTreatment,
   type LivestockCtx,
@@ -593,6 +595,79 @@ d("production ops", () => {
     expect(detail!.inputs[0].costCents).toBeNull();
     expect(detail!.unpricedInputs).toBe(1);
     expect(detail!.potCents).toBe(0);
+  });
+
+  it("STOPS THE PEN CLAIMING COST THAT LEFT WITH THE MEAT", async () => {
+    /**
+     * **THE DEFECT FOUND BY DRIVING SLICE 0 ON THE LIVE APP, 2026-08-20.**
+     *
+     * BATCH-2 carried $141.67 of feed across 197 birds — 72 cents a head. A run
+     * took 100 of them, and $43.15, into the freezer. The lot page went on
+     * showing the whole $141.67 against the 97 birds left: **$1.46 a head**,
+     * twice as expensive, because the numerator sat still while the denominator
+     * halved. Read literally, the farm had paid for that feed twice.
+     *
+     * This is the cross-pack half of the fix, and it needs the real ledger: the
+     * pure test in `livestock-feed.test.ts` proves the fold, and only this
+     * proves that `production` stamping a cost on the way out is what
+     * `feedReport` reads back as released.
+     */
+    const pen = await penWithCost("PEN-RELEASE", 200);
+    const birds = await meatItem("Released birds");
+
+    const before = await asOwner((tx) =>
+      feedReport(tx, tenantId, { from: LEDGER_EPOCH, to: TODAY }),
+    );
+    const rowBefore = before.lots.find((l) => l.lotId === pen.livestockLotId)!;
+    expect(rowBefore.totalCents).toBe(40_000);
+    expect(rowBefore.releasedCents).toBe(0);
+    expect(rowBefore.remainingCents).toBe(40_000);
+    // $400 over 200 birds standing.
+    expect(rowBefore.centsPerHead).toBe(200);
+
+    const run = await asOwner((tx) =>
+      startRun(tx, ownerCtx(), { code: "KILL-RELEASE", startedOn: TODAY }),
+    );
+    await asOwner((tx) =>
+      addRunInput(
+        tx,
+        ownerCtx(),
+        {
+          runId: run.id,
+          itemId: pen.itemId,
+          lotId: pen.inventoryLotId,
+          quantity: 100,
+          weightLb: 600,
+          occurredOn: TODAY,
+        },
+        TODAY,
+      ),
+    );
+    await asOwner((tx) =>
+      addRunOutput(tx, ownerCtx(), {
+        runId: run.id,
+        itemId: birds.id,
+        quantity: 360,
+      }),
+    );
+    await asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY));
+
+    const after = await asOwner((tx) =>
+      feedReport(tx, tenantId, { from: LEDGER_EPOCH, to: TODAY }),
+    );
+    const rowAfter = after.lots.find((l) => l.lotId === pen.livestockLotId)!;
+
+    // The feed was still fed, so the bill is unchanged...
+    expect(rowAfter.totalCents).toBe(40_000);
+    // ...but half of it is in the freezer now.
+    expect(rowAfter.releasedCents).toBe(20_000);
+    expect(rowAfter.remainingCents).toBe(20_000);
+    expect(rowAfter.head).toBe(100);
+    // **THE NUMBER THAT WAS WRONG.** $200 over the 100 standing, not $400.
+    expect(rowAfter.centsPerHead).toBe(200);
+    // And the comparison figure does not budge: what this batch cost to raise
+    // is not changed by some of it being processed and sold on.
+    expect(rowAfter.centsPerHeadPlaced).toBe(rowBefore.centsPerHeadPlaced);
   });
 
   it("refuses to finish a run with nothing to land", async () => {

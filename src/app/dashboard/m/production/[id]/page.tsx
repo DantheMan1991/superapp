@@ -253,6 +253,27 @@ export default async function ProductionRunPage({
                 ? `${detail.unpricedInputs} of ${inputs.length} carried no price at all — real stock with no invoice behind it, not an error.`
                 : "What the batches that went in had accumulated, stamped as they left."}
             </p>
+            {/**
+             * **WHY THIS CAN BE LESS THAN THE BATCH APPEARS TO HAVE COST.**
+             *
+             * Found by driving on a real pen: its own page showed $141.67 of
+             * feed and the run carried $43.15, with nothing anywhere to get from
+             * one figure to the other. Only cost that was STAMPED on a movement
+             * can travel — an estimate worked out at read time was never money
+             * on the ledger, and turning it into a stamped receipt here would
+             * make an estimate permanent.
+             *
+             * Deliberately worded without naming what the estimate is OF. A
+             * shared feeder is `livestock`'s idea and this pack must not know
+             * what one is; the batch's own page says that half, in the words of
+             * the pack that owns the distinction.
+             */}
+            {inputs.length > 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Only cost stamped on the ledger travels. Anything a batch carries
+                as an estimate stays with the batch.
+              </p>
+            )}
           </CardContent>
         </Card>
 

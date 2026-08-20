@@ -128,8 +128,46 @@ export function BoundaryMap({
       instance.addControl(new NavigationControl({ showCompass: false }), "top-right");
       instance.addControl(new AttributionControl({ compact: true }), "bottom-right");
 
+      /**
+       * Fit to what we know: this shape, else its neighbours, else the country
+       * — which is the honest "we do not know where your farm is".
+       */
+      const fitToKnownGround = (
+        target: MapLibreMap,
+        Bounds: typeof LngLatBounds,
+      ) => {
+        const bounds = new Bounds();
+        let any = false;
+        const walk = (boundary: Boundary) => {
+          const polygons =
+            boundary.type === "Polygon"
+              ? [boundary.coordinates]
+              : boundary.coordinates;
+          for (const rings of polygons) {
+            for (const [lon, lat] of rings[0] ?? []) {
+              bounds.extend([lon, lat]);
+              any = true;
+            }
+          }
+        };
+        if (current) walk(current);
+        else context.forEach((shape) => walk(shape.boundary));
+        if (any) target.fitBounds(bounds, { padding: 48, animate: false });
+      };
+
+      // **MAPLIBRE ERRORS ARE EVENTS, NOT EXCEPTIONS**, and without this they
+      // are silent: the first time this map failed it rendered a white square
+      // with a working zoom control and said nothing anywhere.
+      instance.on("error", (event) => {
+        console.error("boundary map", event.error ?? event);
+      });
+
       instance.on("load", () => {
         if (cancelled) return;
+        // Fit BEFORE the layers. A failure adding one used to leave the map
+        // over the whole continental US, which reads as "the imagery is
+        // broken" rather than "a layer threw".
+        fitToKnownGround(instance, LngLatBounds);
 
         instance.addSource("context", {
           type: "geojson",
@@ -159,21 +197,20 @@ export function BoundaryMap({
             "line-dasharray": [2, 2],
           },
         });
-        instance.addLayer({
-          id: "context-label",
-          type: "symbol",
-          source: "context",
-          layout: {
-            "text-field": ["get", "name"],
-            "text-size": 12,
-          },
-          paint: {
-            "text-color": "#ffffff",
-            "text-halo-color": "rgba(0,0,0,0.7)",
-            "text-halo-width": 1.5,
-          },
-        });
-
+        /**
+         * **NO LABELS ON THE CONTEXT SHAPES, AND THAT IS A DEPENDENCY DECISION.**
+         * A `text-field` needs a `glyphs` endpoint in the style, which means a
+         * font service — another external host, another thing to be down, and
+         * another set of terms. Adding a symbol layer without one throws inside
+         * the load handler, which is exactly how this map first shipped: a white
+         * square with a working zoom control, no boundary, and a dead toolbar,
+         * because the throw happened before `fitBounds` and `setReady`.
+         *
+         * The neighbours are dashed and the shape being edited is solid green,
+         * which is enough to tell them apart. Names come back with 2b, when
+         * points and lines need rendering anyway and a glyph source can be
+         * chosen deliberately.
+         */
         instance.addSource("saved", { type: "geojson", data: savedFeature() });
         instance.addLayer({
           id: "saved-fill",
@@ -187,26 +224,6 @@ export function BoundaryMap({
           source: "saved",
           paint: { "line-color": "#34d399", "line-width": 2.5 },
         });
-
-        // Fit to what we know: this shape, else its neighbours, else the
-        // country — which is the honest "we do not know where your farm is".
-        const bounds = new LngLatBounds();
-        let any = false;
-        const walk = (boundary: Boundary) => {
-          const polygons =
-            boundary.type === "Polygon"
-              ? [boundary.coordinates]
-              : boundary.coordinates;
-          for (const rings of polygons) {
-            for (const [lon, lat] of rings[0] ?? []) {
-              bounds.extend([lon, lat]);
-              any = true;
-            }
-          }
-        };
-        if (current) walk(current);
-        else context.forEach((shape) => walk(shape.boundary));
-        if (any) instance.fitBounds(bounds, { padding: 48, animate: false });
 
         setReady(true);
       });

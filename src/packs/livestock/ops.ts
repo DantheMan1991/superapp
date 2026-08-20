@@ -14,6 +14,7 @@ import type {
   LivestockWeight,
 } from "@/db/schema";
 import {
+  carriedCostByLot,
   consumedByLotAndItem,
   consumedDatedByLots,
   createItem,
@@ -1940,7 +1941,16 @@ export async function feedReport(
   const inventoryLotIds = lots.map((l) => l.inventoryLotId);
   const lotIds = lots.map((l) => l.id);
 
-  const [inventoryLots, movements, measured, fedDated, groups, weights, hauls] =
+  const [
+    inventoryLots,
+    movements,
+    measured,
+    fedDated,
+    groups,
+    weights,
+    hauls,
+    carried,
+  ] =
     await Promise.all([
       listInventoryLots(tx, tenantId),
       // Every dated head movement, uncapped for these lots: the head-day basis
@@ -1956,6 +1966,19 @@ export async function feedReport(
       // WHEN THEY WERE LAST HAULED, from `land`, through land's own query. A
       // weighing taken days after a trailer is shrink, not a loss.
       lastHauledOn(tx, tenantId, "livestock", inventoryLotIds),
+      /**
+       * **WHAT HAS ALREADY LEFT EACH PEN CARRYING COST**, from `inventory`,
+       * through inventory's own query — the ledger is its table and a read of
+       * `inventory_movements` from here would be the leak the extension model
+       * forbids.
+       *
+       * Added the day `production` shipped. Until a run could take 100 birds and
+       * $43.15 into the freezer, nothing could take cost OUT of a pen, and this
+       * report was right to treat "fed to this lot" and "carried by this lot" as
+       * one number. They stopped being one number, and the card went on showing
+       * the whole bill against the birds still standing.
+       */
+      carriedCostByLot(tx, tenantId, inventoryLotIds),
     ]);
 
   const groupIds = groups.map((g) => g.id);
@@ -2125,6 +2148,15 @@ export async function feedReport(
         allocatedCents: allocatedCents.get(lot.id) ?? 0,
         allocatedQuantities: mergeQuantities(allocatedQuantities.get(lot.id) ?? []),
         unpricedMovements: fed.reduce((sum, f) => sum + f.unpricedMovements, 0),
+        /**
+         * **DELIBERATELY NOT WINDOWED BY THE REPORT'S PERIOD.** What a pen is
+         * still carrying is a fact about now, not about the last 30 days: asking
+         * for a month and being told a pen carries cost it handed to the freezer
+         * in April would be worse than useless. The measured and allocated
+         * figures above ARE windowed, because "what did this pen eat this month"
+         * is exactly that question.
+         */
+        releasedCents: carried.get(lot.inventoryLotId)?.releasedCents ?? 0,
       };
     }),
   );

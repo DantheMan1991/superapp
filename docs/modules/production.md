@@ -30,6 +30,40 @@ lot.
 
 ## Build log
 
+### 2026-08-20 — Driven on the live app, and it found what the dev tenant could not (`claude/cost-that-left-with-the-meat`)
+
+Slice 0 driven on the `Test` tenant against **a pen with real feed on it** —
+BATCH-2, 197 Cornish Cross at 7 weeks, $141.67 fed. Everything the slice claims
+held up:
+
+| | |
+| --- | --- |
+| Yield | **75.7%** — 468.0 lb out of 618.0 lb in |
+| Cost carried | **$43.15** = $85.00 stamped feed × 100/197 head |
+| Split | $39.74 + $3.41 = **$43.15 exactly** |
+| Landed | Two *Made here* batches, receipts carrying the cost |
+| Head | 97 standing, `Processed −100`, **mortality still 6.2%** |
+| Guard | *"BATCH-2 — Cannot be processed until 2026-09-03, after Tylan 50."* |
+
+**And it found a defect this pack caused in the pack next door.** With the cost
+gone to the freezer, `livestock`'s Fed card went on showing the whole $141.67
+against the 97 birds left — 72 cents a head became **$1.46 a head**, because the
+numerator sat still while the denominator halved. The fix is in
+[livestock.md](livestock.md); what belongs here is the rule it establishes:
+
+> **Once cost can leave a lot, every figure derived from "what this lot cost"
+> has to say which side of the departure it is on.** `production` created that
+> possibility, so `production` owns the consequence.
+
+The second half was quieter and is a boundary decision. The run carried $85.00
+of that pen's $141.67 because the other $56.67 is an *allocated* estimate that
+was never stamped on a movement — correct, and completely unexplained on screen.
+The Cost in card now says **"Only cost stamped on the ledger travels. Anything a
+batch carries as an estimate stays with the batch."** Deliberately worded
+without naming what the estimate is OF: a shared feeder is `livestock`'s idea
+and this pack must not know what one is, so the batch's own page says that half
+in the words of the pack that owns the distinction.
+
 ### 2026-08-20 — Slice 0: the run model, and the clock that finally refuses (`claude/a-run-lands-in-stock`)
 
 The pack that makes profit-per-pen answerable. Before this, a pen accumulated
@@ -253,6 +287,12 @@ byproduct NRV and labour cost (slice 3), cut sheets and recipes (slices 1 and 2
 - **AN INPUT REQUIRES A BATCH**, unlike almost everything else in `inventory`.
   The clock is a property of a pen and the accumulated cost is a property of a
   lot; an input with no lot could be guarded by nothing and costed by nothing.
+- **ONLY STAMPED COST TRAVELS, and the screen has to say so.** A batch can carry
+  cost that was never posted to a movement — `livestock` spreads a shared
+  feeder's bill by head × days at read time. That estimate cannot cross into
+  stock, because stamping it on a receipt would make an estimate permanent. The
+  consequence is that a run carries less than the batch's own page appears to
+  say, and the Cost in card explains it in neutral words.
 - **THE COST IS STAMPED TWICE AND DERIVED NEVER.** Once on the movement that
   takes stock out, once on the receipt that puts it back. Recomputing either
   later would make last month's batch move under its own feet, which is the rule

@@ -25,7 +25,6 @@ import {
   listMovements,
   movementKindsForLots,
 } from "@/packs/inventory/ops";
-import { costPerUnit } from "@/packs/inventory/core/costing";
 import { formatMoney } from "@/lib/money";
 import { movementKindLabel, slugLabel } from "@/packs/inventory/vocabulary";
 import {
@@ -487,7 +486,14 @@ export default async function LivestockLotPage({
               {feedCents === 0
                 ? "Nothing fed to this lot yet."
                 : (() => {
-                    const perHead = costPerUnit(feedCents, summary.balance);
+                    /**
+                     * **PER HEAD OVER WHAT THE PEN STILL CARRIES.** The fold
+                     * nets off cost that has left with the meat; dividing the
+                     * whole bill by the birds still standing made a pen that had
+                     * just been processed read as twice as expensive. See
+                     * `core/feed.ts`.
+                     */
+                    const perHead = feed?.centsPerHead ?? null;
                     const quantity =
                       feed && feed.quantities.length > 0
                         ? formatQuantities(feed.quantities)
@@ -499,11 +505,43 @@ export default async function LivestockLotPage({
                     return quantity ? `${quantity} · ${rate}` : rate;
                   })()}
             </p>
+            {/**
+             * **WHERE THE MONEY WENT, once some of it has left.**
+             *
+             * Found by driving `production` slice 0 on a real pen: 100 of 197
+             * birds went into a run carrying $43.15, and this card went on
+             * showing the whole $141.67 against the 97 that were left. Nothing
+             * in the ledger was wrong — the card simply had no idea cost could
+             * leave a lot, because until that week it could not.
+             *
+             * The headline stays the full bill, because the feed WAS fed and
+             * that is what "Fed" means. The line below says how much of it is
+             * still standing in the pen.
+             */}
+            {feed && feed.releasedCents > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {formatMoney(feed.releasedCents, currencySymbol)} left with what
+                was processed ·{" "}
+                <span className="font-medium">
+                  {formatMoney(feed.remainingCents, currencySymbol)}
+                </span>{" "}
+                still on this lot.
+              </p>
+            )}
             {feed && feed.allocatedCents > 0 && (
               <p className="mt-1 text-xs text-muted-foreground">
                 {formatMoney(feed.measuredCents, currencySymbol)} issued by name,{" "}
                 {formatMoney(feed.allocatedCents, currencySymbol)} a share of a
-                shared feeder.
+                shared feeder
+                {/* THE HALF THAT EXPLAINS THE OTHER SCREEN. Only stamped cost
+                    can travel: an allocated share is worked out at read time
+                    and was never on a movement, so a run carries the measured
+                    part and leaves this behind. Said here, in the pack that
+                    owns the distinction, rather than in `production`, which has
+                    no business knowing what a shared feeder is. */}
+                {feed.releasedCents > 0
+                  ? " — a share is an estimate, so it stays with the pen rather than travelling with the meat."
+                  : "."}
               </p>
             )}
           </CardContent>

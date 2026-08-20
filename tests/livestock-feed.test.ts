@@ -254,14 +254,62 @@ describe("feedReportRows", () => {
     allocatedCents: 0,
     allocatedQuantities: [],
     unpricedMovements: 0,
+    releasedCents: 0,
   };
 
   it("divides by head placed as well as by head standing", () => {
     const [row] = feedReportRows([base]);
     expect(row.totalCents).toBe(20_000);
+    expect(row.remainingCents).toBe(20_000);
     // 200 cents a head at today's count of 190, 100 a head over the 200 placed.
     expect(row.centsPerHead).toBe(105);
     expect(row.centsPerHeadPlaced).toBe(100);
+  });
+
+  it("STOPS CHARGING THE BIRDS STILL STANDING FOR COST THAT LEFT WITH THE MEAT", () => {
+    /**
+     * **FOUND BY DRIVING PRODUCTION SLICE 0 ON A REAL PEN, 2026-08-20.** BATCH-2
+     * had $141.67 of feed on 197 birds — 72 cents a head. A run took 100 of them
+     * and $43.15 into the freezer, and the card went on showing the whole
+     * $141.67 against the 97 left: **$1.46 a head**, twice as expensive, because
+     * the numerator sat still while the denominator halved.
+     *
+     * The feed was still fed, so `totalCents` is unchanged and so is the
+     * per-head-PLACED comparison — what a batch cost to raise does not change
+     * because some of it was sold on. What changes is what the pen is still
+     * carrying.
+     */
+    const [row] = feedReportRows([
+      { ...base, head: 100, releasedCents: 10_000 },
+    ]);
+    expect(row.totalCents).toBe(20_000);
+    expect(row.remainingCents).toBe(10_000);
+    // $100 left over 100 birds standing, not $200 over 100.
+    expect(row.centsPerHead).toBe(100);
+    // Unchanged: the batch still cost $200 to raise 200 birds.
+    expect(row.centsPerHeadPlaced).toBe(100);
+  });
+
+  it("says nothing rather than zero once a pen has been processed out entirely", () => {
+    // Everything fed has left with the meat and no birds remain. "Nothing left
+    // on this pen" is the truth; "$0.00 a head" would read as free.
+    const [row] = feedReportRows([
+      { ...base, head: 0, releasedCents: 20_000 },
+    ]);
+    expect(row.remainingCents).toBe(0);
+    expect(row.centsPerHead).toBeNull();
+  });
+
+  it("does not clamp a released figure that exceeds what went in", () => {
+    // A correction on a receipt after stock has left. A negative here is a real
+    // disagreement somebody should see, not a number to tidy away.
+    const [row] = feedReportRows([
+      { ...base, releasedCents: 25_000 },
+    ]);
+    expect(row.remainingCents).toBe(-5_000);
+    // And it refuses to state a per-head figure rather than showing a negative
+    // one, because `perUnit` returns null for a non-positive amount.
+    expect(row.centsPerHead).toBeNull();
   });
 
   it("returns null rather than zero when there is nothing to divide by", () => {

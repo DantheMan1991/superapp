@@ -107,6 +107,50 @@ export function lotCost(
   return { consumedCents, purchasedCents };
 }
 
+export interface LotCarriedCost extends LotCost {
+  /**
+   * What has already LEFT this lot carrying a cost — feed issued out of a
+   * delivery, head taken out of a pen by a production run.
+   */
+  releasedCents: number;
+  /** Everything spent on the lot, less everything that has already left it. */
+  remainingCents: number;
+}
+
+/**
+ * `lotCost`, plus what has gone back out again.
+ *
+ * **THE REASON THIS EXISTS IS PARTIAL PROCESSING, and it is a real farm week.**
+ * A pen of broilers costs $1,000 in chicks and feed. Half of them are processed
+ * on Saturday and carry $500 into the freezer. A fortnight later the rest go —
+ * and if the run pro-rates the GROSS accumulated cost again, the second half
+ * takes 100% of a total that never went down, and the pen has cost $1,500. The
+ * ledger is not wrong; the fold was.
+ *
+ * `remainingCents` is what is still standing in the lot, and it is what a
+ * production run must pro-rate against. It can go negative in principle — a
+ * correction on a receipt after stock has left — and is left as it falls rather
+ * than clamped, because a negative here is a real disagreement somebody should
+ * see rather than a number to tidy away.
+ */
+export function lotCarried(
+  ownMovements: CostedMovement[],
+  consumedMovements: CostedMovement[],
+): LotCarriedCost {
+  const base = lotCost(ownMovements, consumedMovements);
+  let releasedCents = 0;
+  for (const movement of ownMovements) {
+    if (movement.costCents === null) continue;
+    if (movement.quantity >= 0) continue;
+    releasedCents += movement.costCents;
+  }
+  return {
+    ...base,
+    releasedCents,
+    remainingCents: base.purchasedCents + base.consumedCents - releasedCents,
+  };
+}
+
 /**
  * Cost per head, or per anything.
  *

@@ -21,9 +21,55 @@ and [land.md](land.md) before changing anything about where animals are.
 | **3** | **Health + the withdrawal clock** | **shipped 2026-08-20** |
 | 4 | Breeding, genetics, registry, **and the breeding/market capital transfer** | |
 | **5** | **Weights (tape formulas, sampling) — and the FCR they unlock** | **shipped 2026-08-20** |
-| 6 | Processing handoff → `production` | |
+| **6** | **Processing handoff → `production`** | **shipped 2026-08-20** |
 
 ## Build log
+
+### 2026-08-20 — Slice 6: the clock finally refuses something (`claude/a-run-lands-in-stock`)
+
+Built from the other side, by `production` slice 0. This pack's own Open items
+have said the same thing since the clock shipped — *"the clock blocks nothing in
+code… and that is all it can be until there is a processing action to refuse"* —
+and there is one now.
+
+- **THE SLOT, NOT A DEPENDENCY.** `production` must not require this pack (a
+  bakery running runs over purchased flour is a legitimate composition) and this
+  pack must not require `production` (a farm that never processes anything still
+  has a clock). So production NAMES an extension point in
+  `production/core/handler.ts` and `livestock/run-handler.ts` FILLS it. The two
+  meet in `src/packs/run-handlers.ts`, which is the only file that knows both
+  exist — the same layer, and the same justification, as `src/packs/index.ts`.
+  First real use of P5 in the repo.
+- **THE REFUSAL IS VERBATIM.** The handler hands back `describeWithdrawal`'s own
+  sentence and `production` repeats it: *"PEN-DRUG — Cannot be processed until
+  2026-09-05, after Penicillin G."* A withdrawal message is a legal statement
+  about whether meat may lawfully be sold, and the pack that does not own the
+  clock has no standing to reword it. **`unknown` blocks exactly as `under`
+  does, and there is no override** — a farm that genuinely knows the period
+  enters it, which is the same act and leaves a record instead of a hole.
+- **HEAD STILL LEAVES THROUGH `removeHead`.** That is why `consume` is on the
+  handler rather than done in `production`: a run writing its own head movement
+  would be the parallel counter this pack was built to avoid. The movement still
+  carries `extension_slug = 'livestock'`, because the slug says which pack owns
+  the record and not which one pressed the button.
+- **A fourth removal reason, `processed`, AND IT IS NOT IN THE PICKER.**
+  `REMOVAL_REASONS` is the full set the folds classify; `HAND_REMOVAL_REASONS` is
+  what a person may choose, and it is the three it always was. Offering
+  `processed` on the lot page would be a way to empty a pen without landing the
+  meat, carrying the cost or consulting the clock.
+- **`processed` is a REMOVAL in `core/herd.ts`, and getting that wrong would have
+  moved the one number the broiler enterprise lives on.** Unrecognised kinds fall
+  through to `transfer`; a transfer IN inflates mortality's denominator, and
+  classing it as a death would make a successful batch read as a catastrophic
+  one. Birds that reach the killing cone are the batch succeeding.
+- **`removeHead` now takes a cost and returns its movement.** The pen's
+  accumulated cost — chicks, feed and medicine, net of anything already processed
+  out — is pro-rated by the head being taken and stamped on the way out, exactly
+  as `issueStock` stamps a bag of feed. That is what carries the pen into the
+  freezer and makes profit-per-pen answerable. Null for everything a person
+  records by hand: a bird that died took no stamped cost anywhere.
+- No migration, no schema change in this pack. Full build record in
+  [production.md](production.md).
 
 ### 2026-08-20 — A clock can be wrong, and now it can be put right (`claude/correct-the-clock`)
 
@@ -649,6 +695,10 @@ This pack is the one that forced the change; the full reasoning is in
   still under a period
 - `src/packs/livestock/components/treatment-controls.tsx` — the form whose job is
   to refuse to guess
+- `src/packs/livestock/run-handler.ts` — **the enforcement point.** Fills the
+  slot `production/core/handler.ts` declares: claims this pack's lots, blocks on
+  the meat clock, and takes head out through `removeHead`. Read
+  [production.md](production.md) before changing its shape
 - `src/packs/livestock/core/weights.ts` — pure. **The tape formula, the gain, the
   shrink window and the confidence rule.** Read this before changing anything
   about FCR; nearly every function in it returns null on purpose
@@ -683,12 +733,12 @@ This pack is the one that forced the change; the full reasoning is in
   empty is refused — that row would later read as clear.
 - **The binding treatment clears LAST, not most recently.** A long-withdrawal
   product given first outlasts a short one given after it.
-- **NOTHING REFUSES AN ACTION ON WITHDRAWAL YET, because the actions it should
-  refuse do not exist.** Processing is slice 6 (blocked on `production`) and milk
-  sale is `retail`. **When slice 6 lands it must consult `blocksProcessing`
-  before booking anything** — that is the enforcement point this slice was built
-  for. Do not wire a refusal to `sold_live` in the meantime: a withdrawal
-  legitimately follows an animal sold live to another farm.
+- **THE MEAT CLOCK NOW REFUSES A PRODUCTION RUN, and that is its only
+  enforcement point.** `livestock/run-handler.ts` consults `blocksProcessing`
+  before a run may consume a pen, exactly as this section promised it would.
+  **Do not wire a refusal to `sold_live`**: a withdrawal legitimately follows an
+  animal sold live to another farm. The MILK clock still refuses nothing —
+  selling milk is `retail`, and it does not exist.
 - **MEDICINE IS NOT FEED, and the feed report has to keep excluding it.** Both go
   through `issued_to_lot_id`, so `NOT_FEED_KINDS` is what stops the penicillin
   landing in the cost per head and the FCR. It is an EXCLUSION rather than a
@@ -833,9 +883,10 @@ This pack is the one that forced the change; the full reasoning is in
 
 ## Open items
 
-- **The clock blocks nothing in code.** It is loud on the lot page, the livestock
-  list, the daily round and in the advisor's digest — and that is all it can be
-  until there is a processing action to refuse. Slice 6.
+- ~~The clock blocks nothing in code~~ — **closed 2026-08-20** for meat. A
+  production run against a blocked pen is refused with the reason and the
+  clearing date; see the build log and [production.md](production.md). The MILK
+  clock still blocks nothing, and cannot until `retail` exists.
 - ~~A treatment cannot be corrected or removed~~ — **closed 2026-08-20.**
   `updateTreatment` edits in place and `deleteTreatment` removes, validated
   against the merged row so a correction cannot leave a treatment reading as

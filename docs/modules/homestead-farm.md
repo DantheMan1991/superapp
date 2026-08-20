@@ -116,6 +116,38 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-20 — Production slice 0: the run, and the money that follows the meat (`claude/a-run-lands-in-stock`)
+- **Fifth pack to ship, and the one that closes the profile's own thesis.** A pen
+  accumulated chicks, feed and medicine and then the animals simply stopped being
+  counted; nothing carried what they had cost into the freezer. *Every farm
+  activity posts a cost to a cost object* described nothing for meat until now.
+- **A run is two acts and the gap between them is WIP.** Starting takes the
+  inputs out of stock; finishing lands the outputs with the input cost split
+  across them. Forced rather than chosen — the split cannot be known until every
+  box is off the line, and `inventory` stamps a receipt once.
+- **The yield is folded and refuses more often than it answers.** Five of six
+  outcomes in `core/yield.ts` are refusals, each because the alternative is
+  confidently wrong in a stated direction. No stored factor anywhere: the design
+  and `inventory`'s units file both say a baked-in live-to-hanging ratio is an
+  unauditable fudge, and this is the place that was promised instead.
+- **THE WITHDRAWAL CLOCK REFUSES SOMETHING FOR THE FIRST TIME**, which is what
+  `livestock` slice 3 was built a slice early for. It needed a mechanism the repo
+  did not have: `production` must not require `livestock` and `livestock` must
+  not require `production`, so production names a slot and livestock fills it —
+  **the first real use of P5**. Head still leaves through `removeHead`.
+- **Condemnations decided and DEFERRED to slice 1, with the reason written
+  down.** A condemnation arrives on the kill sheet from a party who is not this
+  farm, and a `condemned_head` column here would make the yield wrong in a new
+  way — the condemned animal's live weight is in the denominator and nothing
+  short of per-animal weights takes it out. Slice 0 states its denominator
+  plainly and refuses to adjust it.
+- **Driven on `Hilltop Farm` before the PR** — 50 birds at 312 lb live, 218 lb
+  of whole broilers out, **69.9%**, landed as a made-here batch, pen to 0 head
+  with mortality still 0.0%. HOGS-1 refused with its clearing date. It found
+  five defects, one of which had a passing test over the wrong behaviour
+  (a pen with no recorded cost stamped $0.00, which says the birds were free).
+- Dossier: [production.md](production.md).
+
 ### 2026-08-20 — Livestock slice 3: the guardrail, and the third state (`claude/the-withdrawal-clock`)
 
 - **The design said "a default the user can override" and "never present a number

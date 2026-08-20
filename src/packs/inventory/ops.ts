@@ -15,7 +15,13 @@ import {
 import { isLotSource, isValidSlug } from "./vocabulary";
 import { isKnownUnit, roundQuantity } from "./core/units";
 import type { MovementRow } from "./core/balances";
-import { averageCostRate, issueCostCents } from "./core/costing";
+import {
+  averageCostRate,
+  issueCostCents,
+  lotCarried,
+  type CostedMovement,
+  type LotCarriedCost,
+} from "./core/costing";
 
 /**
  * Inventory operations. Every function takes a `Tx` so the caller owns the
@@ -971,6 +977,17 @@ export async function receiveStock(
     costCents?: number | null;
     occurredOn: string;
     locationAssetId?: string | null;
+    /**
+     * Where the new lot came from, when one is being created. Defaults to
+     * `purchased`, which is what a delivery is.
+     *
+     * **`produced` IS WHY THIS IS A PARAMETER.** A run's outputs are made here,
+     * not bought, and the lot's own column comment says slice 3 cannot infer
+     * that retroactively — so the pack landing the boxes has to be able to say
+     * so at the moment it lands them.
+     */
+    source?: string;
+    extensionSlug?: string;
     notes?: string;
   },
 ): Promise<{ movement: InventoryMovement; lotId: string | null }> {
@@ -994,7 +1011,7 @@ export async function receiveStock(
     const lot = await createLot(tx, ctx, {
       itemId: input.itemId,
       code: newLotCode,
-      source: "purchased",
+      source: input.source ?? "purchased",
       openedOn: input.occurredOn,
     });
     lotId = lot.id;
@@ -1008,6 +1025,7 @@ export async function receiveStock(
     movementKind: "receipt",
     occurredOn: input.occurredOn,
     costCents: input.costCents ?? null,
+    extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
   return { movement, lotId };
@@ -1395,6 +1413,118 @@ export async function movementsByIds(
       desc(schema.inventoryMovements.occurredOn),
       desc(schema.inventoryMovements.createdAt),
     );
+}
+
+/**
+ * What each of these lots has cost, and what has already left carrying some of
+ * it. One pair of queries whatever the lot count.
+ *
+ * **ADDED FOR `production`, AND IT LIVES HERE FOR THE REASON EVERY OTHER
+ * NEIGHBOUR READ DOES**: the ledger is this pack's, and a pack querying
+ * `inventory_movements` directly is the leak the extension model forbids.
+ *
+ * A run consuming a pen needs the pen's ACCUMULATED cost — chicks plus feed plus
+ * medicine — rather than the item average, which would price a bird at what the
+ * chick cost and throw away eight weeks of feed. It also needs it net of
+ * anything already processed out, or a pen split across two kill days is charged
+ * for one and a half pens. `core/costing.ts` explains the arithmetic; this only
+ * fetches the rows.
+ */
+export async function carriedCostByLot(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<Map<string, LotCarriedCost>> {
+  const out = new Map<string, LotCarriedCost>();
+  if (lotIds.length === 0) return out;
+
+  const [own, consumed] = await Promise.all([
+    tx
+      .select({
+        lotId: schema.inventoryMovements.lotId,
+        quantity: schema.inventoryMovements.quantity,
+        costCents: schema.inventoryMovements.costCents,
+        movementKind: schema.inventoryMovements.movementKind,
+      })
+      .from(schema.inventoryMovements)
+      .where(
+        and(
+          eq(schema.inventoryMovements.tenantId, tenantId),
+          inArray(schema.inventoryMovements.lotId, lotIds),
+        ),
+      ),
+    tx
+      .select({
+        lotId: schema.inventoryMovements.issuedToLotId,
+        quantity: schema.inventoryMovements.quantity,
+        costCents: schema.inventoryMovements.costCents,
+        movementKind: schema.inventoryMovements.movementKind,
+      })
+      .from(schema.inventoryMovements)
+      .where(
+        and(
+          eq(schema.inventoryMovements.tenantId, tenantId),
+          inArray(schema.inventoryMovements.issuedToLotId, lotIds),
+        ),
+      ),
+  ]);
+
+  const ownByLot = new Map<string, CostedMovement[]>();
+  for (const row of own) {
+    if (!row.lotId) continue;
+    const list = ownByLot.get(row.lotId);
+    if (list) list.push(row);
+    else ownByLot.set(row.lotId, [row]);
+  }
+  const consumedByLotId = new Map<string, CostedMovement[]>();
+  for (const row of consumed) {
+    if (!row.lotId) continue;
+    const list = consumedByLotId.get(row.lotId);
+    if (list) list.push(row);
+    else consumedByLotId.set(row.lotId, [row]);
+  }
+
+  for (const lotId of lotIds) {
+    out.set(
+      lotId,
+      lotCarried(ownByLot.get(lotId) ?? [], consumedByLotId.get(lotId) ?? []),
+    );
+  }
+  return out;
+}
+
+/**
+ * What is standing in each of these lots — the fold, summed in SQL.
+ *
+ * `onHandByItem` answers the same question one grain coarser. A run pro-rating
+ * a pen's cost needs the LOT's balance, and needs it before it takes anything
+ * out, because the share it carries is the head taken over the head standing.
+ */
+export async function balanceByLots(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (lotIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      lotId: schema.inventoryMovements.lotId,
+      quantity: sql<string>`sum(${schema.inventoryMovements.quantity})`,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.lotId, lotIds),
+      ),
+    )
+    .groupBy(schema.inventoryMovements.lotId);
+  for (const row of rows) {
+    if (!row.lotId) continue;
+    out.set(row.lotId, roundQuantity(Number(row.quantity)));
+  }
+  return out;
 }
 
 /** Everything issued into one lot, newest first — the "what has this pen eaten" list. */

@@ -152,8 +152,19 @@ rules as any other table — `tenant_id`, FORCE RLS, isolation test. See
 [security.md §4](security.md).
 
 **P5 — Declared extension points.** A core module or pack names a slot; others
-fill it. This is the one that does not exist yet and will be needed first for
-nav contributions and entity-type registration.
+fill it. **First built 2026-08-20**, by `production` slice 0: `production` cannot
+require `livestock` (a bakery running runs over purchased flour is a legitimate
+composition) and `livestock` cannot require `production` (a farm that never
+processes anything still has a withdrawal clock), yet a run must consult that
+clock and must take head out through `livestock`'s own verb. So
+[production/core/handler.ts](../src/packs/production/core/handler.ts) declares
+the slot — **types only, so filling it drags nothing into a bundle** —
+`livestock/run-handler.ts` fills it, and
+[run-handlers.ts](../src/packs/run-handlers.ts) is the ONLY file that knows both
+packs exist. That last part is the pattern: **a registry may know several packs
+exist; no individual pack may**, which is the same rule `src/packs/index.ts`
+already lives by. Still needed for nav contributions and entity-type
+registration.
 
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's

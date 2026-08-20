@@ -31,3 +31,4 @@ export * from "./assets";
 export * from "./land";
 export * from "./inventory";
 export * from "./livestock";
+export * from "./production";

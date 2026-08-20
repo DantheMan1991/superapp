@@ -25,7 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { markRoundNormalAction, recordDailyCheckAction } from "../actions";
-import { REMOVAL_REASONS, REMOVAL_REASON_LABELS } from "../vocabulary";
+import { HAND_REMOVAL_REASONS, REMOVAL_REASON_LABELS } from "../vocabulary";
 
 /**
  * The one tap the whole slice is built around.
@@ -142,7 +142,7 @@ export function LotCheckForm({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [reason, setReason] = useState<string>(REMOVAL_REASONS[0]);
+  const [reason, setReason] = useState<string>(HAND_REMOVAL_REASONS[0]);
 
   function submit(formData: FormData) {
     const lost = Number(formData.get("lost") ?? NO_LOSS);
@@ -215,7 +215,7 @@ export function LotCheckForm({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {REMOVAL_REASONS.map((r) => (
+                    {HAND_REMOVAL_REASONS.map((r) => (
                       <SelectItem key={r} value={r}>
                         {REMOVAL_REASON_LABELS[r]}
                       </SelectItem>

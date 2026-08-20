@@ -71,6 +71,15 @@ export const homesteadFarm: IndustryProfile = {
         swine: 400,
       },
     },
+    /**
+     * What a run on this farm is. The pack has no list of its own on purpose —
+     * one that knew what "butchering" was would know what industry it was in,
+     * which is the boundary ADR 0004 draws. A tenant with a kind nobody listed
+     * types it, and the format check is the only thing that has an opinion.
+     */
+    production: {
+      runKinds: ["butchering", "baking", "milling", "processing"],
+    },
     land: {
       areaUnit: "acre",
       /**

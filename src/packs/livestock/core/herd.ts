@@ -22,7 +22,21 @@ export type HeadEffect = "intake" | "death" | "removal" | "transfer";
 
 const INTAKE = new Set(["placement", "receipt", "birth", "hatched"]);
 const DEATH = new Set(["death", "died", "mortality"]);
-const REMOVAL = new Set(["cull", "sold_live", "issue", "slaughtered"]);
+/**
+ * **`processed` IS A REMOVAL, AND GETTING THAT WRONG MOVES THE ONE NUMBER THE
+ * BROILER ENTERPRISE LIVES ON.** Head leaving for a production run has not died
+ * and has not moved to another lot: unrecognised kinds fall through to
+ * `transfer`, and a transfer OUT would leave mortality's denominator intact
+ * while a transfer IN would inflate it. Birds that reach the killing cone are
+ * the batch succeeding, not the batch losing anything.
+ */
+const REMOVAL = new Set([
+  "cull",
+  "sold_live",
+  "issue",
+  "slaughtered",
+  "processed",
+]);
 
 export function headEffect(movementKind: string): HeadEffect {
   if (INTAKE.has(movementKind)) return "intake";

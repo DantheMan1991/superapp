@@ -9,14 +9,24 @@
  */
 
 /** Reasons head leaves other than by moving to another lot. CLOSED — each means something different. */
-export const REMOVAL_REASONS = ["death", "cull", "sold_live"] as const;
+export const REMOVAL_REASONS = ["death", "cull", "sold_live", "processed"] as const;
 export type RemovalReason = (typeof REMOVAL_REASONS)[number];
 
 export const REMOVAL_REASON_LABELS: Record<RemovalReason, string> = {
   death: "Died",
   cull: "Culled",
   sold_live: "Sold live",
+  processed: "Processed",
 };
+
+/**
+ * Reasons a PERSON picks on the lot page. `processed` is deliberately not one
+ * of them: head leaves for a run through `production`, which is the only place
+ * that also lands the meat, carries the cost across and consults the withdrawal
+ * clock. Offering it here would give somebody a way to empty a pen that does
+ * none of those three things.
+ */
+export const HAND_REMOVAL_REASONS = ["death", "cull", "sold_live"] as const;
 
 export const SEXES = ["male", "female", "mixed"] as const;
 export const SEX_LABELS: Record<string, string> = {

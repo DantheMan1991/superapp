@@ -1,0 +1,121 @@
+/**
+ * What a lot cost. PURE — no imports, no database.
+ *
+ * **COST IS A LEDGER, NOT A COLUMN**, exactly as quantity is. Nothing stores an
+ * average, a valuation or a running total; every figure here is a fold over the
+ * movements `core/balances.ts` already folds for quantity. The same property
+ * follows: a cost can never silently disagree with the movements it came from.
+ *
+ * **THIS IS LAYER TWO OF THREE, AND THE THIRD IS NOT HERE.** The design splits
+ * inventory into quantities (always on), cost accumulation (always on — "cost
+ * per finished hog is wanted regardless of tax basis") and financial
+ * presentation (basis-dependent, derived at read time, per ADR 0007). This file
+ * is the middle layer. **Nothing in this slice posts to the ledger**: no 1300,
+ * no 5000, no journal line. Slice 3 does that through the existing basis lens
+ * rather than by writing a second set of numbers that must agree forever.
+ *
+ * Money is integer CENTS throughout, the house convention. The only division in
+ * the file is the average, and where its result is stored the rounding is
+ * stated rather than hidden.
+ */
+
+export interface CostedMovement {
+  /** Signed, in the item's stocking unit. */
+  quantity: number;
+  /** Total money for this movement, not a rate. Null when it carried no cost. */
+  costCents: number | null;
+  movementKind: string;
+}
+
+/**
+ * Cents per stocking unit, unrounded.
+ *
+ * **AVERAGE COST, WHICH THE DESIGN SAYS IS FINE FOR FUNGIBLE THINGS** — feed,
+ * seed, cartons. It is emphatically NOT fine for specific identity (meat from
+ * animal #47, where traceability forbids averaging) and there is no such thing
+ * for raised stock with no purchase basis. Both are lots of their own, and both
+ * are the reason this returns a rate for an ITEM rather than pretending one
+ * number values everything.
+ *
+ * Unrounded on purpose: rounding belongs at the moment a number is stored, once,
+ * not at every step of a fold.
+ */
+export function averageCostRate(movements: CostedMovement[]): number | null {
+  let quantity = 0;
+  let cents = 0;
+  for (const movement of movements) {
+    // Only what came IN with a price. An issue's cost is derived from this
+    // average, so folding issues back in would be circular.
+    if (movement.costCents === null) continue;
+    if (movement.quantity <= 0) continue;
+    quantity += movement.quantity;
+    cents += movement.costCents;
+  }
+  if (quantity <= 0) return null;
+  return cents / quantity;
+}
+
+/**
+ * What to stamp on an issue.
+ *
+ * **STAMPED AT ISSUE, NEVER DERIVED LATER, AND THAT IS THE WHOLE POINT.** If a
+ * pen's feed cost were computed from today's average, then buying feed next
+ * month would retroactively change what that pen cost last month — and every
+ * FCR comparison across batches would shift under its own feet. The cost of a
+ * thing is what it cost when it happened.
+ *
+ * The rounding remainder is real and stays in the item: issue 3 lots of a
+ * 100-cent, 3-unit delivery and the pieces sum to 99. That is ordinary average
+ * costing, it does not compound, and it is visible because the receipts and the
+ * issues are both on the ledger to compare.
+ */
+export function issueCostCents(rate: number | null, quantity: number): number | null {
+  if (rate === null) return null;
+  return Math.round(rate * Math.abs(quantity));
+}
+
+export interface LotCost {
+  /** Everything issued INTO this lot — feed eaten by this pen. */
+  consumedCents: number;
+  /** What the lot's own contents were bought for. */
+  purchasedCents: number;
+}
+
+/**
+ * What has been spent on one lot.
+ *
+ * Two numbers rather than one total, because they answer different questions
+ * and adding them would answer neither: **`purchasedCents` is what this batch
+ * cost to buy** (a delivery of feed, a box of chicks) and **`consumedCents` is
+ * what was fed into it** (that feed, issued to this pen). A pen of broilers has
+ * both — the chicks and their feed — and a lot of feed has only the first.
+ */
+export function lotCost(
+  ownMovements: CostedMovement[],
+  consumedMovements: CostedMovement[],
+): LotCost {
+  let purchasedCents = 0;
+  for (const movement of ownMovements) {
+    if (movement.costCents === null) continue;
+    if (movement.quantity <= 0) continue;
+    purchasedCents += movement.costCents;
+  }
+  let consumedCents = 0;
+  for (const movement of consumedMovements) {
+    consumedCents += movement.costCents ?? 0;
+  }
+  return { consumedCents, purchasedCents };
+}
+
+/**
+ * Cost per head, or per anything.
+ *
+ * Returns null rather than zero when there is nothing to divide by. **A pen
+ * showing $0.00 per bird because the count is zero reads as "free", which is
+ * the opposite of "not known yet"** — the same rule `mortalityRate` follows in
+ * `livestock`.
+ */
+export function costPerUnit(cents: number, units: number): number | null {
+  if (units <= 0) return null;
+  return Math.round(cents / units);
+}

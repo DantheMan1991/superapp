@@ -15,6 +15,7 @@ import {
 import { isLotSource, isValidSlug } from "./vocabulary";
 import { isKnownUnit, roundQuantity } from "./core/units";
 import type { MovementRow } from "./core/balances";
+import { averageCostRate, issueCostCents } from "./core/costing";
 
 /**
  * Inventory operations. Every function takes a `Tx` so the caller owns the
@@ -46,6 +47,7 @@ export class InventoryError extends Error {
       | "LOT_INVALID"
       | "LOT_CYCLE"
       | "ZERO_QUANTITY"
+      | "INVALID_COST"
       | "INSUFFICIENT",
     message: string,
   ) {
@@ -409,6 +411,10 @@ export interface MovementInput {
   quantity: number;
   movementKind: string;
   occurredOn: string;
+  /** Total money for this movement, in cents. Never a rate. */
+  costCents?: number | null;
+  /** Which lot consumed it — a pen of broilers eating a delivery of feed. */
+  issuedToLotId?: string | null;
   extensionSlug?: string;
   notes?: string;
 }
@@ -451,6 +457,18 @@ export async function recordMovement(
       );
     }
   }
+  if (input.issuedToLotId) {
+    // The CONSUMING lot is deliberately unconstrained as to item: feed is not
+    // the same item as the birds that eat it, and that difference is the whole
+    // point of the column. It only has to exist and be this tenant's.
+    const consumer = await getLot(tx, ctx.tenantId, input.issuedToLotId);
+    if (!consumer) {
+      throw new InventoryError("LOT_INVALID", "that consuming lot does not exist");
+    }
+  }
+  if (input.costCents !== undefined && input.costCents !== null && input.costCents < 0) {
+    throw new InventoryError("INVALID_COST", "a cost cannot be negative");
+  }
 
   const rows = await tx
     .insert(schema.inventoryMovements)
@@ -462,6 +480,8 @@ export async function recordMovement(
       quantity,
       movementKind: kind,
       occurredOn: input.occurredOn,
+      costCents: input.costCents ?? null,
+      issuedToLotId: input.issuedToLotId ?? null,
       extensionSlug: input.extensionSlug?.trim() || "inventory",
       notes: input.notes?.trim() ?? "",
     })
@@ -912,4 +932,212 @@ export async function recentMovements(
       desc(schema.inventoryMovements.createdAt),
     )
     .limit(limit);
+}
+
+// -------------------------------------------------- receipts and issues ---
+
+/**
+ * Feed in. A delivery, with what it cost.
+ *
+ * **THE MOVEMENT THAT PUTS MONEY ON THE FARM.** Slice 0 could say a pen held
+ * 210 birds; nothing anywhere could say what anything cost. This is the first
+ * half of the loop the profile's whole thesis rests on — *every farm activity
+ * posts a cost to a cost object* — and `issueStock` is the other half.
+ *
+ * The cost is the TOTAL for the delivery, because that is the number on the
+ * ticket. A rate is derived from it; storing the rate instead would bake a
+ * division into the record.
+ *
+ * Creates the lot when given a code, for the same reason `livestock` does:
+ * requiring the batch to exist first meant leaving the screen to make it, and
+ * a delivery IS a batch.
+ */
+export async function receiveStock(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    itemId: string;
+    /** An existing batch, or `newLotCode` to start one. */
+    lotId?: string;
+    newLotCode?: string;
+    quantity: number;
+    /** Total, in cents. Null when the price is not known yet. */
+    costCents?: number | null;
+    occurredOn: string;
+    locationAssetId?: string | null;
+    notes?: string;
+  },
+): Promise<{ movement: InventoryMovement; lotId: string | null }> {
+  requireWrite(ctx, "member");
+  if (input.quantity <= 0) {
+    throw new InventoryError("ZERO_QUANTITY", "a receipt has to be a positive quantity");
+  }
+
+  let lotId = input.lotId ?? null;
+  const newLotCode = input.newLotCode?.trim();
+  if (newLotCode) {
+    if (lotId) {
+      throw new InventoryError(
+        "LOT_INVALID",
+        "give either an existing batch or a name for a new one",
+      );
+    }
+    // `createLot` is owner-only because a lot is a cost object. Receiving into
+    // an EXISTING batch stays a chore, which is the common case once a farm is
+    // running.
+    const lot = await createLot(tx, ctx, {
+      itemId: input.itemId,
+      code: newLotCode,
+      source: "purchased",
+      openedOn: input.occurredOn,
+    });
+    lotId = lot.id;
+  }
+
+  const movement = await recordMovement(tx, ctx, {
+    itemId: input.itemId,
+    lotId,
+    locationAssetId: input.locationAssetId ?? null,
+    quantity: Math.abs(input.quantity),
+    movementKind: "receipt",
+    occurredOn: input.occurredOn,
+    costCents: input.costCents ?? null,
+    notes: input.notes,
+  });
+  return { movement, lotId };
+}
+
+/**
+ * Feed out, and to whom.
+ *
+ * **THE HALF THAT CLOSES THE LOOP.** `issuedToLotId` is what turns a bag of
+ * feed leaving the barn into a cost carried by a pen of broilers, which is what
+ * makes "what did this pen cost" a query rather than a feature. Without it an
+ * issue is just stock disappearing.
+ *
+ * **The cost is stamped here, at the average as it stands right now**, and
+ * never derived later. If a pen's feed cost were computed from today's average,
+ * buying feed next month would retroactively change what that pen cost last
+ * month, and every FCR comparison across batches would move under its own feet.
+ * See `core/costing.ts` for the rounding remainder this leaves and why it is
+ * ordinary.
+ *
+ * Consuming nothing is allowed — feed spoiled, stock thrown out — so the
+ * consumer is optional. What is NOT allowed is inventing a cost: an item with
+ * no priced receipts issues at null, and the screens say so rather than showing
+ * a confident zero.
+ */
+export async function issueStock(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    itemId: string;
+    lotId?: string | null;
+    quantity: number;
+    /** The lot that ate it. Null for waste, or stock leaving for any other reason. */
+    issuedToLotId?: string | null;
+    occurredOn: string;
+    locationAssetId?: string | null;
+    notes?: string;
+  },
+): Promise<InventoryMovement> {
+  requireWrite(ctx, "member");
+  if (input.quantity <= 0) {
+    throw new InventoryError("ZERO_QUANTITY", "an issue has to be a positive quantity");
+  }
+
+  const rate = await itemCostRate(tx, ctx.tenantId, input.itemId);
+  const costCents = issueCostCents(rate, input.quantity);
+
+  return recordMovement(tx, ctx, {
+    itemId: input.itemId,
+    lotId: input.lotId ?? null,
+    locationAssetId: input.locationAssetId ?? null,
+    // Signed OUT. The ledger's sign is the only thing that decides a balance.
+    quantity: -Math.abs(input.quantity),
+    movementKind: "issue",
+    occurredOn: input.occurredOn,
+    costCents,
+    issuedToLotId: input.issuedToLotId ?? null,
+    notes: input.notes,
+  });
+}
+
+/**
+ * Cents per stocking unit for an item, from everything ever received.
+ *
+ * Computed, never stored — the same reasoning as every other balance in this
+ * pack. An average that lived in a column would be a second number to keep in
+ * step with the movements that produced it.
+ */
+export async function itemCostRate(
+  tx: Tx,
+  tenantId: string,
+  itemId: string,
+): Promise<number | null> {
+  const rows = await tx
+    .select({
+      quantity: schema.inventoryMovements.quantity,
+      costCents: schema.inventoryMovements.costCents,
+      movementKind: schema.inventoryMovements.movementKind,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        eq(schema.inventoryMovements.itemId, itemId),
+      ),
+    );
+  return averageCostRate(rows);
+}
+
+/**
+ * What was issued INTO each of these lots, in cents.
+ *
+ * One query whatever the lot count, because the caller is a list: the livestock
+ * page wants feed cost against every pen at once, and a per-lot round trip is
+ * how a page with twenty pens becomes a page with twenty-one queries.
+ */
+export async function consumedCostByLot(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (lotIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      lotId: schema.inventoryMovements.issuedToLotId,
+      cents: sql<string>`coalesce(sum(${schema.inventoryMovements.costCents}), 0)`,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.issuedToLotId, lotIds),
+      ),
+    )
+    .groupBy(schema.inventoryMovements.issuedToLotId);
+  for (const row of rows) {
+    if (!row.lotId) continue;
+    out.set(row.lotId, Number(row.cents));
+  }
+  return out;
+}
+
+/** Everything issued into one lot, newest first — the "what has this pen eaten" list. */
+export async function consumedByLot(
+  tx: Tx,
+  tenantId: string,
+  lotId: string,
+  limit = 50,
+): Promise<InventoryMovement[]> {
+  return tx.query.inventoryMovements.findMany({
+    where: and(
+      eq(schema.inventoryMovements.tenantId, tenantId),
+      eq(schema.inventoryMovements.issuedToLotId, lotId),
+    ),
+    orderBy: (m, { desc: byDesc }) => [byDesc(m.occurredOn), byDesc(m.createdAt)],
+    limit,
+  });
 }

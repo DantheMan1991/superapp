@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { formatCents } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,12 +26,14 @@ import {
 } from "@/components/ui/select";
 import {
   createLotAction,
-  recordMovementAction,
+  issueStockAction,
+  receiveStockAction,
   splitLotAction,
 } from "../actions";
 import { LOT_SOURCES, LOT_SOURCE_LABELS } from "../vocabulary";
 
 const NO_LOT = "__none__";
+const NO_CONSUMER = "__nobody__";
 const NO_LOCATION = "__none__";
 
 export interface LotOption {
@@ -160,12 +163,19 @@ export function MovementForm({
   unitLabel,
   lots,
   locations,
+  consumers,
   today,
 }: {
   itemId: string;
   unitLabel: string;
   lots: LotOption[];
   locations: LocationOption[];
+  /**
+   * Lots that can EAT this — pens, mostly, and deliberately across every item.
+   * Feed is not the same item as the birds that eat it, and that difference is
+   * the whole reason the loop closes.
+   */
+  consumers: { id: string; label: string }[];
   today: string;
 }) {
   const router = useRouter();
@@ -183,20 +193,49 @@ export function MovementForm({
     const locationId = String(formData.get("locationAssetId") ?? NO_LOCATION);
 
     startTransition(async () => {
-      const result = await recordMovementAction({
-        itemId,
-        lotId: lotId === NO_LOT ? null : lotId,
-        locationAssetId: locationId === NO_LOCATION ? null : locationId,
-        quantity: direction === "in" ? Math.abs(raw) : -Math.abs(raw),
-        movementKind: direction === "in" ? "receipt" : "issue",
-        occurredOn: String(formData.get("occurredOn") ?? today),
-        notes: String(formData.get("notes") ?? ""),
-      });
+      /**
+       * **THE SAME DOOR, NOT A SECOND ONE.** Slice 1 could have added "Receive"
+       * and "Use" buttons beside this and left three ways to move stock. It
+       * routes through the form people already know instead: In carries a
+       * price, Out carries who ate it.
+       */
+      const money = String(formData.get("cost") ?? "").trim();
+      const consumedBy = String(formData.get("issuedToLotId") ?? NO_CONSUMER);
+      const result =
+        direction === "in"
+          ? await receiveStockAction({
+              itemId,
+              lotId: lotId === NO_LOT ? undefined : lotId,
+              quantity: Math.abs(raw),
+              // Dollars in, cents stored. Rounding here rather than in the
+              // action keeps the boundary integer-only.
+              costCents: money ? Math.round(Number(money) * 100) : null,
+              occurredOn: String(formData.get("occurredOn") ?? today),
+              locationAssetId: locationId === NO_LOCATION ? null : locationId,
+              notes: String(formData.get("notes") ?? ""),
+            })
+          : await issueStockAction({
+              itemId,
+              lotId: lotId === NO_LOT ? null : lotId,
+              quantity: Math.abs(raw),
+              issuedToLotId: consumedBy === NO_CONSUMER ? null : consumedBy,
+              occurredOn: String(formData.get("occurredOn") ?? today),
+              locationAssetId: locationId === NO_LOCATION ? null : locationId,
+              notes: String(formData.get("notes") ?? ""),
+            });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success(direction === "in" ? "Stock recorded in" : "Stock recorded out");
+      // The stamped cost is worth saying out loud: it is what the pen was
+      // charged, and it will not change when the next delivery arrives.
+      const charged =
+        direction === "out" && "costCents" in result && result.costCents
+          ? ` · ${formatCents(result.costCents)}`
+          : "";
+      toast.success(
+        (direction === "in" ? "Stock recorded in" : "Stock recorded out") + charged,
+      );
       setOpen(false);
       router.refresh();
     });
@@ -261,6 +300,51 @@ export function MovementForm({
                 />
               </div>
             </div>
+
+            {direction === "in" ? (
+              <div className="grid gap-2">
+                <Label htmlFor="cost">What it cost</Label>
+                <Input
+                  id="cost"
+                  name="cost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="340.00"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {/* The total on the ticket, not a rate. The per-unit figure
+                      is derived from it and never stored. */}
+                  The whole delivery, not the price per {unitLabel}. Leave it
+                  empty if the invoice has not arrived — the stock still counts.
+                </p>
+              </div>
+            ) : (
+              consumers.length > 0 && (
+                <div className="grid gap-2">
+                  <Label htmlFor="issuedToLotId">Fed to</Label>
+                  <Select name="issuedToLotId" defaultValue={NO_CONSUMER}>
+                    <SelectTrigger id="issuedToLotId">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_CONSUMER}>Nothing — waste or sold</SelectItem>
+                      {consumers.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    This is what makes &ldquo;what did this pen cost&rdquo; a
+                    question with an answer. The cost is worked out now, at
+                    today&rsquo;s average, and does not move when the next
+                    delivery arrives.
+                  </p>
+                </div>
+              )
+            )}
 
             {lots.length > 0 && (
               <div className="grid gap-2">

@@ -24,6 +24,7 @@ import {
 import {
   getItem,
   listLocations,
+  listItems,
   listLots,
   listMovements,
   movementRowsForItem,
@@ -74,19 +75,24 @@ export default async function InventoryItemPage({
     async (tx) => {
       const item = await getItem(tx, ctx.tenant.id, id);
       if (!item) return null;
-      const [lots, rows, movements, locations] = await Promise.all([
-        listLots(tx, ctx.tenant.id, { itemId: id }),
-        movementRowsForItem(tx, ctx.tenant.id, id),
-        listMovements(tx, ctx.tenant.id, { itemId: id, limit: 25 }),
-        listLocations(tx, ctx.tenant.id),
-      ]);
-      return { item, lots, rows, movements, locations };
+      const [lots, rows, movements, locations, allLots, allItems] =
+        await Promise.all([
+          listLots(tx, ctx.tenant.id, { itemId: id }),
+          movementRowsForItem(tx, ctx.tenant.id, id),
+          listMovements(tx, ctx.tenant.id, { itemId: id, limit: 25 }),
+          listLocations(tx, ctx.tenant.id),
+          // Anything that can EAT this, which is deliberately every open lot
+          // on the farm: feed is not the same item as the birds that eat it.
+          listLots(tx, ctx.tenant.id),
+          listItems(tx, ctx.tenant.id, { status: "active" }),
+        ]);
+      return { item, lots, rows, movements, locations, allLots, allItems };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { item, lots, rows, movements, locations } = data;
+  const { item, lots, rows, movements, locations, allLots, allItems } = data;
 
   /**
    * Recording stock in and out is a chore and is ungated. Starting a batch or
@@ -109,6 +115,18 @@ export default async function InventoryItemPage({
       balanceLabel: formatQuantity(balanceOfLot(rows, l.id), unit),
     }));
   const locationOptions = locations.map((l) => ({ id: l.id, name: l.name }));
+  /**
+   * The lots feed can be fed TO. Named with their item, because "B-2026-04-15"
+   * alone does not say whether it is a pen of broilers or a pallet of cartons.
+   * This item's own lots are left out — stock does not consume itself.
+   */
+  const itemNames = new Map(allItems.map((i) => [i.id, i.name]));
+  const consumerOptions = allLots
+    .filter((l) => l.status === "open" && l.itemId !== item.id)
+    .map((l) => ({
+      id: l.id,
+      label: `${l.code} · ${itemNames.get(l.itemId) ?? "—"}`,
+    }));
 
   return (
     <div className="space-y-6">
@@ -142,6 +160,7 @@ export default async function InventoryItemPage({
                 unitLabel={unitLabel}
                 lots={lotOptions}
                 locations={locationOptions}
+                consumers={consumerOptions}
                 today={today}
               />
             </div>

@@ -13,6 +13,8 @@ import {
   createItem,
   createLot,
   mergeLot,
+  issueStock,
+  receiveStock,
   recordMovement,
   splitLot,
   updateItem,
@@ -54,6 +56,8 @@ function toResult(err: unknown): { error: string } {
         return { error: err.message };
       case "LOT_CYCLE":
         return { error: err.message };
+      case "INVALID_COST":
+        return { error: "A cost cannot be negative." };
       case "ZERO_QUANTITY":
         return { error: "Enter a quantity other than zero." };
       case "INSUFFICIENT":
@@ -340,6 +344,105 @@ export async function recordMovementAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, id: movement.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Feed in — a delivery, with what it cost.
+ *
+ * `member`, because unloading a feed truck is a chore. Starting a NEW batch
+ * inside it is owner-only and enforced one layer down by `createLot`, which is
+ * where the rule belongs: a lot is a cost object.
+ */
+export async function receiveStockAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      itemId: z.string().uuid(),
+      lotId: z.string().uuid().optional(),
+      newLotCode: z.string().min(1).max(120).optional(),
+      quantity: z.number().positive().max(1_000_000_000),
+      // Cents, and an integer: money that arrives as 12.5 cents is money that
+      // has already been divided somewhere it should not have been.
+      costCents: z.number().int().min(0).max(1_000_000_000_000).nullable().optional(),
+      occurredOn: requiredDate,
+      locationAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => receiveStock(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.stock.received",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_item",
+      targetId: parsed.data.itemId,
+      meta: {
+        quantity: parsed.data.quantity,
+        costCents: parsed.data.costCents ?? null,
+        lotId: result.lotId,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, lotId: result.lotId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Feed out, and to which pen.
+ *
+ * The cost is NOT taken from the caller: it is stamped from the item's average
+ * at this moment, inside the transaction. A client that could name the cost of
+ * an issue could quietly rewrite what a pen cost.
+ */
+export async function issueStockAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      itemId: z.string().uuid(),
+      lotId: z.string().uuid().nullable().optional(),
+      quantity: z.number().positive().max(1_000_000_000),
+      issuedToLotId: z.string().uuid().nullable().optional(),
+      occurredOn: requiredDate,
+      locationAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const movement = await withTenant(
+      ctx.tenant.id,
+      (tx) => issueStock(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.stock.issued",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_item",
+      targetId: parsed.data.itemId,
+      meta: {
+        quantity: parsed.data.quantity,
+        issuedToLotId: parsed.data.issuedToLotId ?? null,
+        costCents: movement.costCents,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, costCents: movement.costCents };
   } catch (err) {
     return toResult(err);
   }

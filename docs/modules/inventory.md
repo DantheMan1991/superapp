@@ -16,8 +16,8 @@ this dossier is the build record.
 | # | Slice | State |
 | --- | --- | --- |
 | **0** | **Items + units + locations + on-hand ledger + the lot spine** | **shipped 2026-08-15** |
-| 1 | Receipts and issues — closes the `livestock` costing loop | next |
-| 2 | Adjustments, physical counts, expiry/FEFO | |
+| **1** | **Receipts and issues** — closes the `livestock` costing loop | **shipped 2026-08-19** |
+| 2 | Adjustments, physical counts, expiry/FEFO | next |
 | 3 | Valuation + COGS posting, basis-aware | |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
@@ -33,6 +33,54 @@ died on days 22 and 27 rather than merely that eight died.
 
 It has no opinion about which kinds are deaths. That classification is
 `livestock`'s and stays there, as it has since its slice 0.
+
+### 2026-08-19 — Slice 1: the first money on the farm (`claude/feed-in-feed-out`)
+
+Slice 0 could say a pen held 210 birds. Nothing anywhere could say what anything
+cost. This is the slice the profile's whole thesis rests on — *every farm
+activity posts a cost to a cost object* — and until now that sentence described
+nothing.
+
+**Two columns on the ledger, and that is the whole schema change.**
+`cost_cents` is what a movement cost, as a TOTAL rather than a rate, because
+"$340 for 12 bags" is the number on the ticket and a rate is derived from it.
+`issued_to_lot_id` is **which lot ate it** — the join that closes the loop, and
+the reason a pen of broilers can be charged for a delivery of feed that is a
+different item entirely.
+
+**THE ISSUE COST IS STAMPED, NEVER DERIVED LATER, and that is the sharpest
+decision here.** If a pen's feed cost were computed from today's average, then
+buying dearer feed next month would retroactively change what that pen cost last
+month, and every FCR comparison between batches would move under its own feet.
+Certified: issue at a 10-cent average, buy in feed at 90, and the first issue
+still reads 100 cents while the next reads 500.
+
+**THIS IS LAYER TWO OF THREE. Nothing here posts to the ledger.** The design
+splits inventory into quantities (always on), cost accumulation (always on —
+cost per finished hog is wanted whatever the tax basis) and financial
+presentation (basis-dependent, derived at read time). No 1300, no 5000, no
+journal line: slice 3 does that through the lens ADR 0007 already established,
+rather than writing a second set of numbers that must agree forever.
+
+- **Cost is a fold, never a column.** No stored average, no stored valuation —
+  the same discipline the quantity balance follows, and for the same reason.
+- **The average ignores issues**, or it would be circular: an issue's cost came
+  from the average, so folding it back in would make the rate depend on how much
+  had been used.
+- **Unpriced stock is not free.** Raised stock has no purchase basis and an
+  invoice can be late; both arrive as null and are excluded from the average
+  rather than dragging it down.
+- **A rounding remainder is real and does not compound.** 100 cents over 3
+  units, issued singly, sums to 99. That is ordinary average costing, and it is
+  visible because receipts and issues are both on the ledger.
+- **THE SAME DOOR, NOT A SECOND ONE.** This could have added "Receive" and "Use"
+  buttons and left three ways to move stock. It extends the form people already
+  know instead: In carries a price, Out carries who ate it.
+- **The cost lands on the animal.** The livestock lot page gained a **Fed** card
+  and a "Fed in" list, read through `inventory`'s ops rather than its tables.
+  That is the pack seam doing the thing it was built for, visible on one screen.
+- 15 new pure tests, 7 new ops tests. Migration `0159` is additive and needed no
+  hand-reordering — its FK target `inventory_lots` already existed.
 
 ### 2026-08-19 — One read added for livestock's daily round (`claude/livestock-daily-log`)
 
@@ -169,13 +217,18 @@ Platform-wide change; the reasoning is in
 | --- | --- | --- |
 | `inventory_items` | A kind of thing held | `tenant_id`, FORCE RLS. One `stocking_unit`, and the balance is kept only in it. `purchase_unit` + `purchase_unit_qty` are an ENTRY convenience, never a second balance |
 | `inventory_lots` | **The spine.** A batch, with lineage | Composite FKs to the item and to a parent lot (self-referential, RESTRICT). `source` in `purchased\|raised\|produced` — recorded now because slice 3 cannot infer it retroactively. CHECK: a lot is not its own parent |
-| `inventory_movements` | **The ledger.** Every quantity change | Composite FKs to item, lot and **`assets`** (the location). `quantity` is signed and CHECKed non-zero. FORCE RLS in its own right — it is the traceability chain |
+| `inventory_movements` | **The ledger.** Every quantity change, and what it cost | Composite FKs to item, lot and **`assets`** (the location). `quantity` is signed and CHECKed non-zero. FORCE RLS in its own right — it is the traceability chain |
 
 Lots mirror into **`dimension_members`** with `dimension_type = 'lot'`, in the
 same transaction as the write.
 
-**Not columns, deliberately** — each would have no reader today: cost and
-valuation (slice 3, and basis-aware per ADR 0007), expiry and FEFO (slice 2),
+`cost_cents` (total, never a rate) and `issued_to_lot_id` (which lot ate it)
+arrived in slice 1. Both are nullable and null is ordinary — a transfer, a count
+and every head event `livestock` writes carry no money at all.
+
+**Not columns, deliberately** — each would have no reader today: VALUATION and
+the posting to 1300/5000 (slice 3, basis-aware per ADR 0007 — slice 1
+accumulates cost, it does not present it), expiry and FEFO (slice 2),
 reorder points and capacity (slice 5), and commitments — a pre-sold half is
 never inventory, it goes from a commitment against a live animal to delivered
 without sitting on a shelf.
@@ -228,6 +281,10 @@ without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
+- **`recordMovementAction` no longer has a UI caller** since slice 1 routed the
+  form through `receiveStock`/`issueStock`. The ops primitive underneath is used
+  by both and by `livestock`; the ACTION is now dead at the boundary and should
+  either gain a caller in slice 2 (adjustments) or go.
 - **Four of the eight actions have no UI caller**: `updateItem`, `archiveItem`,
   `closeLot` and `mergeLot`. So an item cannot be renamed or retired and a batch
   cannot be closed. `updateItem` is the one that stings: the stocking unit is

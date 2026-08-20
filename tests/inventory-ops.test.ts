@@ -21,6 +21,13 @@ import {
   listLocations,
 } from "../src/packs/inventory/ops";
 import { balanceOfLot, balanceByItem } from "../src/packs/inventory/core/balances";
+import {
+  consumedByLot,
+  consumedCostByLot,
+  issueStock,
+  itemCostRate,
+  receiveStock,
+} from "../src/packs/inventory/ops";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -567,5 +574,182 @@ d("inventory ops", () => {
       }),
     );
     expect(movement.quantity).toBe(12.3456);
+  });
+
+  // ---- slice 1: receipts, issues, and the loop they close -----------------
+
+  describe("receipts and issues", () => {
+    it("puts money on the farm, and the rate falls out of the ledger", async () => {
+      const feed = await newItem("Layer pellets");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          newLotCode: "DELIVERY-1",
+          quantity: 600,
+          costCents: 34_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      // 34000 cents over 600 lb. Computed, never stored — the same rule the
+      // quantity balance follows.
+      const rate = await asOwner((tx) => itemCostRate(tx, tenantId, feed.id));
+      expect(rate).toBeCloseTo(56.6667, 3);
+    });
+
+    it("STAMPS the issue cost, so a later delivery cannot rewrite what a pen cost", async () => {
+      // The sharpest property in this slice. If cost were derived at read time,
+      // buying dearer feed next month would retroactively change last month's
+      // pen and every FCR comparison would move under its own feet.
+      const feed = await newItem("Broiler crumble");
+      const pen = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: feed.id, code: "PEN-COST-1" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          newLotCode: "CHEAP",
+          quantity: 100,
+          costCents: 1_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      const issued = await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          quantity: 10,
+          issuedToLotId: pen.id,
+          occurredOn: "2026-08-02",
+        }),
+      );
+      expect(issued.costCents).toBe(100);
+
+      // Now buy dearer feed. The stamped issue does not move.
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          newLotCode: "DEAR",
+          quantity: 100,
+          costCents: 9_000,
+          occurredOn: "2026-08-03",
+        }),
+      );
+      const after = await asOwner((tx) => consumedCostByLot(tx, tenantId, [pen.id]));
+      expect(after.get(pen.id)).toBe(100);
+
+      // But the NEXT issue costs at the new average — 10000 cents over 200 lb.
+      const later = await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          quantity: 10,
+          issuedToLotId: pen.id,
+          occurredOn: "2026-08-04",
+        }),
+      );
+      expect(later.costCents).toBe(500);
+    });
+
+    it("feeds one item's stock to a lot of a DIFFERENT item, which is the whole point", async () => {
+      // Feed is not the same item as the birds that eat it. The consuming lot
+      // is deliberately unconstrained as to item for exactly this reason.
+      const feed = await newItem("Grower ration");
+      const birds = await newItem("Broiler chicks", "head");
+      const pen = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: birds.id, code: "PEN-MIXED" }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          newLotCode: "MIX-DELIVERY",
+          quantity: 200,
+          costCents: 10_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          quantity: 50,
+          issuedToLotId: pen.id,
+          occurredOn: "2026-08-02",
+        }),
+      );
+
+      const cost = await asOwner((tx) => consumedCostByLot(tx, tenantId, [pen.id]));
+      expect(cost.get(pen.id)).toBe(2_500);
+
+      const eaten = await asOwner((tx) => consumedByLot(tx, tenantId, pen.id));
+      expect(eaten).toHaveLength(1);
+      expect(eaten[0].itemId).toBe(feed.id);
+      // The BIRD lot's own quantity is untouched: feeding a pen does not
+      // change how many birds are in it.
+      const rows = await asOwner((tx) => movementRowsForItem(tx, tenantId, birds.id));
+      expect(balanceOfLot(rows, pen.id)).toBe(0);
+    });
+
+    it("issues at no cost when nothing priced has ever arrived", async () => {
+      // Raised stock has no purchase basis. Inventing a zero would report a
+      // pen as free, which is worse than reporting nothing.
+      const eggs = await newItem("Eggs", "dozen");
+      const issued = await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: eggs.id,
+          quantity: 2,
+          occurredOn: "2026-08-02",
+        }),
+      );
+      expect(issued.costCents).toBeNull();
+    });
+
+    it("takes the quantity out of stock, signed, like every other movement", async () => {
+      const feed = await newItem("Scratch grain");
+      const received = await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          newLotCode: "SCRATCH-1",
+          quantity: 500,
+          costCents: 20_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: feed.id,
+          lotId: received.lotId,
+          quantity: 120,
+          occurredOn: "2026-08-02",
+        }),
+      );
+      const rows = await asOwner((tx) => movementRowsForItem(tx, tenantId, feed.id));
+      expect(balanceOfLot(rows, received.lotId!)).toBe(380);
+    });
+
+    it("refuses a negative cost", async () => {
+      const feed = await newItem("Refusal feed");
+      await expect(
+        asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: feed.id,
+            newLotCode: "BAD-COST",
+            quantity: 10,
+            costCents: -1,
+            occurredOn: "2026-08-01",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_COST" });
+    });
+
+    it("refuses to feed a lot that does not exist", async () => {
+      const feed = await newItem("Ghost feed");
+      await expect(
+        asOwner((tx) =>
+          issueStock(tx, ownerCtx(), {
+            itemId: feed.id,
+            quantity: 5,
+            issuedToLotId: "00000000-0000-0000-0000-000000000000",
+            occurredOn: "2026-08-02",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "LOT_INVALID" });
+    });
   });
 });

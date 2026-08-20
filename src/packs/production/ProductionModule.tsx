@@ -1,0 +1,203 @@
+import Link from "next/link";
+import { Factory } from "lucide-react";
+import { withTenant } from "@/db";
+import type { TenantContext } from "@/lib/auth";
+import { todayInTimezone } from "@/lib/timezone";
+import { formatMoney } from "@/lib/money";
+import { PageHeader } from "@/components/app/page-header";
+import { EmptyState } from "@/components/app/empty-state";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
+import { listLocations } from "@/packs/inventory/ops";
+import { listRuns, runSummaries } from "./ops";
+import {
+  RUN_STATUS_LABELS,
+  runKindsFrom,
+  slugLabel,
+  type RunStatus,
+} from "./vocabulary";
+import { YIELD_REFUSALS, formatLb, formatRatio } from "./core/yield";
+import { StartRunForm } from "./components/run-controls";
+
+const BASE = "/dashboard/m/production";
+
+/**
+ * The `production` pack's home: every run, and what came out of it.
+ *
+ * **THE YIELD COLUMN IS THE PAGE.** Everything else here is bookkeeping that
+ * another pack could have done; *690 lb out of 1,150 lb in* is the number no
+ * farm app produces and every farm argues about — and the design is explicit
+ * that it varies by processor, which is real money essentially nobody measures.
+ * So it is on the LIST, where somebody comparing two kill days can see both,
+ * rather than buried on a detail page.
+ *
+ * A run with a missing weight shows the reason instead of a percentage. That is
+ * the rule this pack inherited from `livestock`'s feed conversion: never relax a
+ * refusal into an approximation, because the reason a screen gives is more
+ * useful than a number it had to invent.
+ */
+export async function ProductionModule({
+  ctx,
+  searchParams,
+}: {
+  ctx: TenantContext;
+  searchParams: Record<string, string | string[] | undefined>;
+}) {
+  const statusParam = searchParams.status;
+  const status = typeof statusParam === "string" ? statusParam : undefined;
+  const today = todayInTimezone(ctx.tenant.timezone);
+  const currencySymbol = ctx.tenant.currencySymbol;
+
+  const { runs, summaries, pack, locations } = await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const [runs, pack, locations] = await Promise.all([
+        listRuns(tx, ctx.tenant.id, { status }),
+        packContext(tx, ctx.tenant.id, ctx.tenant.industry, "production"),
+        listLocations(tx, ctx.tenant.id),
+      ]);
+      const summaries = await runSummaries(
+        tx,
+        ctx.tenant.id,
+        runs.map((r) => r.id),
+      );
+      return { runs, summaries, pack, locations };
+    },
+    { role: ctx.role },
+  );
+
+  const isOwner = ctx.role === "owner";
+  const runWord = labelFor(pack.labels, "productionRun", "Run");
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Production"
+        description={`What went in, what came out, and the yield between them. Every ${runWord.toLowerCase()} lands its outputs in Inventory carrying the cost of what it consumed.`}
+        actions={
+          isOwner ? (
+            <StartRunForm
+              runWord={runWord}
+              kindOptions={runKindsFrom(pack.config)}
+              locations={locations.map((l) => ({ id: l.id, name: l.name }))}
+              today={today}
+            />
+          ) : null
+        }
+      />
+
+      {runs.length === 0 ? (
+        <EmptyState
+          panel
+          icon={<Factory className="h-5 w-5" />}
+          /* NEVER PLURALISE A LABEL. The word is the tenant's to rename, and
+             the profile renames this one to "Batch" — which came out of the
+             naive `+ "s"` as "No batchs yet" on the first screen anybody
+             looked at. Every other pack keeps these words singular for
+             exactly this reason. */
+          title="Nothing made here yet"
+          description={
+            isOwner
+              ? `Start one on the day it happens. What goes in leaves stock and takes its cost with it; what comes out lands in Inventory when you finish, carrying that cost. The ratio between the two is measured, never assumed.`
+              : `An owner starts a ${runWord.toLowerCase()}. Once they do, what went in and what came out show up here.`
+          }
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{runWord}</TableHead>
+              <TableHead>Kind</TableHead>
+              <TableHead>Started</TableHead>
+              <TableHead className="text-right">In</TableHead>
+              <TableHead className="text-right">Out</TableHead>
+              <TableHead className="text-right">Yield</TableHead>
+              <TableHead className="text-right">Cost in</TableHead>
+              <TableHead>State</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {runs.map((run) => {
+              const summary = summaries.get(run.id);
+              const result = summary?.yieldResult;
+              return (
+                <TableRow key={run.id}>
+                  <TableCell>
+                    <Link
+                      href={`${BASE}/${run.id}`}
+                      className="font-medium hover:underline"
+                    >
+                      {run.code}
+                    </Link>
+                    {run.performedBy && (
+                      <div className="text-xs text-muted-foreground">
+                        {run.performedBy}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {slugLabel(run.runKind)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground tabular-nums">
+                    {run.startedOn}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {result?.yield ? formatLb(result.yield.inLb) : "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {result?.yield ? formatLb(result.yield.outLb) : "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {/* The refusal is a TITLE rather than a second column: it is
+                        a sentence, and eight of them down a list would drown the
+                        runs that do have a number. The detail page spells it
+                        out. */}
+                    {result?.yield ? (
+                      <span className="font-medium">
+                        {formatRatio(result.yield.ratio)}
+                      </span>
+                    ) : (
+                      <span
+                        className="text-muted-foreground"
+                        title={
+                          result?.refusedBecause
+                            ? YIELD_REFUSALS[result.refusedBecause]
+                            : undefined
+                        }
+                      >
+                        —
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {summary && summary.potCents > 0
+                      ? formatMoney(summary.potCents, currencySymbol)
+                      : "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        run.status === "complete" ? "outline" : "default"
+                      }
+                    >
+                      {RUN_STATUS_LABELS[run.status as RunStatus] ?? run.status}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}

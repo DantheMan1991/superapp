@@ -3,6 +3,7 @@ import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
+  InventoryMovement,
   LivestockDailyLog,
   LivestockFeedDraw,
   LivestockFeedGroup,
@@ -394,20 +395,40 @@ export async function removeHead(
     itemId: string;
     inventoryLotId: string;
     head: number;
-    reason: "death" | "cull" | "sold_live";
+    /**
+     * **`processed` IS NOT OFFERED TO A PERSON, and that is deliberate.** Head
+     * leaving for a run goes through `production`, which is the only caller that
+     * also lands the meat, carries the pen's cost across with it and consults
+     * the withdrawal clock first. A picker offering it here would be a way to
+     * empty a pen that does none of those three things — so the action layer
+     * accepts the other three and this is reachable only through the run
+     * handler.
+     */
+    reason: "death" | "cull" | "sold_live" | "processed";
     occurredOn: string;
     locationAssetId?: string | null;
+    /**
+     * What leaves with them, in cents. Null for everything a person records by
+     * hand: a bird that died did not take a stamped cost anywhere, and inventing
+     * one would put money on a movement nothing releases it from.
+     */
+    costCents?: number | null;
     notes?: string;
   },
-): Promise<void> {
+): Promise<InventoryMovement> {
   requireWrite(ctx, "member");
-  await recordMovement(tx, asInventory(ctx), {
+  return recordMovement(tx, asInventory(ctx), {
     itemId: input.itemId,
     lotId: input.inventoryLotId,
     locationAssetId: input.locationAssetId ?? null,
     quantity: -Math.abs(input.head),
     movementKind: input.reason,
     occurredOn: input.occurredOn,
+    costCents: input.costCents ?? null,
+    // STILL LIVESTOCK'S EVENT even when a run asked for it. The slug says which
+    // pack owns the record, not which one pressed the button — and a pen's head
+    // ledger that suddenly read `production` for the one movement that empties
+    // it would be the parallel counter this pack exists to avoid.
     extensionSlug: "livestock",
     notes: input.notes,
   });

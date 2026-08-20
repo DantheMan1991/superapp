@@ -221,7 +221,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     description:
       "Turning inputs into outputs at a yield, with the cost carried through to what comes out.",
     category: "pack",
-    status: "coming_soon",
+    // `available` from slice 0 (2026-08-20): the run model, and outputs landing
+    // in `inventory` carrying the input lot's cost. Cut sheets and the legal
+    // machinery follow in slice 1, recipes in slice 2.
+    status: "available",
     sortOrder: 250,
   },
   {

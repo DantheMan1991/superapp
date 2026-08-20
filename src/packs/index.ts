@@ -3,6 +3,7 @@ import { AssetsModule } from "./assets/AssetsModule";
 import { LandModule } from "./land/LandModule";
 import { InventoryModule } from "./inventory/InventoryModule";
 import { LivestockModule } from "./livestock/LivestockModule";
+import { ProductionModule } from "./production/ProductionModule";
 
 /**
  * Layer 2a registry: slug → how the pack behaves.
@@ -13,11 +14,11 @@ import { LivestockModule } from "./livestock/LivestockModule";
  * happens at the shell layer in `src/lib/features.ts`, which is Layer 0 and is
  * allowed to know both exist.
  *
- * `assets`, `land`, `inventory` and `livestock` are built; the other three are
- * DECLARED AND UNBUILT. That is not a placeholder state: a declared pack has a
- * real dependency graph,
- * installs with a profile, and shows as an empty slot in the admin registry —
- * exactly how `scheduling` and `work` were carried before they shipped. Each
+ * `assets`, `land`, `inventory`, `livestock` and `production` are built; the
+ * other two are DECLARED AND UNBUILT. That is not a placeholder state: a
+ * declared pack has a real dependency graph, installs with a profile, and
+ * shows as an empty slot in the admin registry — exactly how `scheduling` and
+ * `work` were carried before they shipped. Each
  * grows a `src/packs/<slug>/` directory and a `Component` when it is built.
  *
  * The designs these come from live in docs/modules/homestead-farm.md.
@@ -164,6 +165,15 @@ export const packRegistry: Record<string, PackDefinition> = {
     name: "Production",
     icon: "factory",
     requires: ["inventory"],
+    labels: [
+      {
+        key: "productionRun",
+        fallback: "Run",
+        describes:
+          "One pass of turning things into other things — a processing day, a bake, a milling. A farm says batch; a shop says job.",
+      },
+    ],
+    Component: ProductionModule,
   },
 
   /** Channels, price lists, orders. Sells what inventory holds. */

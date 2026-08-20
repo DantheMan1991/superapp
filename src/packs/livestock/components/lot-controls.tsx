@@ -34,7 +34,7 @@ import {
 import { WhereAmIButton } from "@/packs/land/components/where-am-i";
 import {
   IDENTIFIER_KINDS,
-  REMOVAL_REASONS,
+  HAND_REMOVAL_REASONS,
   REMOVAL_REASON_LABELS,
   SEXES,
   SEX_LABELS,
@@ -395,7 +395,7 @@ export function RemoveHeadForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {REMOVAL_REASONS.map((r) => (
+                  {HAND_REMOVAL_REASONS.map((r) => (
                     <SelectItem key={r} value={r}>
                       {REMOVAL_REASON_LABELS[r]}
                     </SelectItem>

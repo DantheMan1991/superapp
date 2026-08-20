@@ -24,6 +24,41 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-20 — Two reads and a `source`, so a run can land its boxes (`claude/a-run-lands-in-stock`)
+
+`production` slice 0 needed three things from this pack, and all three live
+here for the reason `movementsOnDate` does: the ledger is this pack's, and a
+neighbour querying `inventory_movements` directly is the leak the extension
+model forbids.
+
+- **`carriedCostByLot`** — what a lot has cost, and **what has already left it
+  carrying some of that**. `consumedCostByLot` answers "what was fed to this
+  pen"; a run consuming the pen needs the whole accumulated figure — chicks plus
+  feed plus medicine — because pricing a bird at what the chick cost throws away
+  eight weeks of feed. **`remainingCents` is the new idea, and it exists because
+  of an ordinary farm fortnight**: half a $1,000 pen processed on Saturday and
+  the rest a fortnight later. The accumulated total never goes down, so
+  pro-rating the gross twice charges $1,500 for a $1,000 pen. Netting the
+  released cost off first makes the two halves sum. Folded in
+  `core/costing.ts` as `lotCarried`; `lotCost` is untouched.
+- **`balanceByLots`** — the fold per LOT, summed in SQL. `onHandByItem` answers
+  the same question one grain coarser, and a run pro-rating a pen needs the
+  pen's balance *before* it takes anything out.
+- **`receiveStock` takes a `source` and an `extensionSlug`.** It hardcoded
+  `purchased`, which is right for a delivery and wrong for a box of meat: an
+  output is **`produced`**, and this pack's own column comment says slice 3
+  cannot infer that retroactively. The slug follows `issueStock`'s, for the same
+  reason — a row should be attributable to the pack that will explain it.
+
+**Nothing about cost changed.** An output's receipt is stamped once, when it
+lands, exactly as an issue is — which is what lets a run completed in August
+still say what it cost after feed prices move in October.
+
+**One thing to know if you are reading `averageCostRate` and worrying:** a
+`processed` movement carries a cost on a NEGATIVE quantity, and the average
+ignores anything that did not come in with a price. Stamping cost on the way out
+cannot move the item average, and that was checked rather than assumed.
+
 ### 2026-08-20 — The consumption reads now say what KIND was consumed (`claude/the-withdrawal-clock`)
 
 `consumedByLotAndItem` and `consumedDatedByLots` return `itemKind`, and neither
@@ -351,7 +386,12 @@ same transaction as the write.
 
 `cost_cents` (total, never a rate) and `issued_to_lot_id` (which lot ate it)
 arrived in slice 1. Both are nullable and null is ordinary — a transfer, a count
-and every head event `livestock` writes carry no money at all.
+and most head events `livestock` writes carry no money at all.
+
+**Since 2026-08-20 a movement can carry a cost on the way OUT as well as in.**
+`production` stamps a pen's share of its accumulated cost on the `processed`
+movement that empties it, which is the same discipline `issueStock` follows.
+`averageCostRate` is unaffected: it counts only what came in with a price.
 
 **Not columns, deliberately** — each would have no reader today: VALUATION and
 the posting to 1300/5000 (slice 3, basis-aware per ADR 0007 — slice 1
@@ -386,7 +426,10 @@ without sitting on a shelf.
 - **Live-to-hanging is a production YIELD, not a unit conversion.** A steer goes
   in at 1,150 lb and hangs at 690. Modelling that as a factor bakes an
   unauditable fudge into the books and every carcass is quietly wrong. It
-  belongs to `production`; inventory must have no opinion on it.
+  belongs to `production`; inventory must have no opinion on it. **Since
+  2026-08-20 that is a place rather than a promise** — `production/core/yield.ts`
+  measures it per run and refuses to state one when the weights are not all
+  there. See [production.md](production.md).
 - **Merge records lineage in the MOVEMENTS, not in `parent_lot_id`**, and the
   asymmetry with split is deliberate. A single parent pointer cannot express
   "these three batches became that one", and pointing the merged lots at the

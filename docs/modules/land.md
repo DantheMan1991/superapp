@@ -50,6 +50,35 @@ examples exist.
 
 ## Build log
 
+### 2026-08-19 — Tracing works; "Move the corners" had no corners (`claude/corners-need-selecting`)
+
+The map finally drove end to end, and the two halves came out differently.
+
+**Tracing and saving are verified on production.** Clicking four corners on
+Creek Paddock drew the shape live, the readout ran alongside it — *"4.6502 acres
+· −3.5998 acres against the 8.25 acres recorded"* — and Save stored exactly the
+figure the screen had been showing: the header changed to *"measures 4.6502
+acres"*, the badge to *"4.6502 acres traced"*, the comparison to *"44% apart"*,
+and the declared 8.25 acres in the page header did not move. Client and server
+run the same `boundaryAreaAcres`, and this is what that buys.
+
+**"Move the corners" entered a mode with nothing to grab.** Terra Draw's select
+mode only means *clicking a shape would select it*; the draggable vertices
+belong to a SELECTED feature. So the button loaded the boundary, switched the
+toolbar, and left a map that looked identical — with no hint that you were
+supposed to click your own paddock first.
+
+- `selectFeature(id, "select")` after seeding, so the corners are there the
+  moment the mode opens.
+- The banner now speaks for the edit path too: *"Drag a corner to move it, or a
+  midpoint to add one."* It previously only knew how to explain a fresh trace.
+
+**A note on how this was found, because it nearly was not.** Clicking the button
+by screen coordinate did nothing and produced no error, which read like a dead
+handler; clicking the same button by element worked immediately. The coordinate
+mapping was the lie, not the code. When a control appears inert in a driven
+browser, click it by element before believing it.
+
 ### 2026-08-19 — The map drew the ground and none of the boundaries (`claude/map-worker-loses-its-import`)
 
 Reported by the founder, tracing on the live map: *"it would mark where I
@@ -679,9 +708,9 @@ rented ground, and retrofitting it means rewriting the report.
   thing in this pack shipped ahead of its consumer, and the build log says why.
 - ~~No map~~ — **shipped 2026-08-19.** MapLibre over public-domain USDA/USGS
   orthoimagery, with tracing, corner-dragging and live acreage.
-- **NOBODY HAS TRACED A BOUNDARY ON THE MAP YET.** The map itself is fixed and
-  verified to render; the DRAWING path — trace, drag a corner, save — has still
-  not been exercised in a browser.
+- ~~Nobody has traced a boundary on the map yet~~ — **closed 2026-08-19.**
+  Traced and saved on production; the stored acreage matched the live readout
+  exactly. Corner-dragging is fixed but has not itself been driven since.
 - **No parcel-number lookup.** The founder's actual ask was *"type in the parcel
   number and it auto traces the property"*. That needs a data source: a county
   ArcGIS service (free, per-county integration), Regrid (nationwide, paid), or

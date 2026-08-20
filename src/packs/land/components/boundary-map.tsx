@@ -79,6 +79,8 @@ export function BoundaryMap({
   const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<Mode>("view");
   const [drawnAcres, setDrawnAcres] = useState<number | null>(null);
+  /** Editing an existing shape reads differently from tracing a new one. */
+  const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState(false);
 
   /** The saved shape, drawn as a plain layer whenever we are not editing it. */
@@ -330,6 +332,22 @@ export function BoundaryMap({
           toast.error("That boundary cannot be edited on the map — redraw it.");
         }
         instanceDraw.setMode("select");
+
+        /**
+         * **AND SELECT IT, WHICH IS WHAT MAKES THE CORNERS APPEAR.** Select
+         * mode on its own only means "clicking a shape would select it" — the
+         * draggable vertices belong to a SELECTED feature. Without this the
+         * button called "Move the corners" put you in a mode with no corners
+         * on screen and no hint that you were supposed to click the paddock
+         * first. Found by driving it: the mode changed, the toolbar changed,
+         * and the map looked identical.
+         */
+        const [seeded] = instanceDraw
+          .getSnapshot()
+          .filter((f) => f.geometry?.type === "Polygon");
+        if (seeded?.id !== undefined) {
+          instanceDraw.selectFeature(seeded.id, "select");
+        }
       } else {
         instanceDraw.setMode("polygon");
       }
@@ -352,6 +370,7 @@ export function BoundaryMap({
 
       draw.current = instanceDraw;
       setDrawnAcres(seed ? boundaryAreaAcres(seed) : null);
+      setEditing(seed !== null);
       setMode("draw");
     },
     [],
@@ -361,6 +380,7 @@ export function BoundaryMap({
     draw.current?.stop();
     draw.current = null;
     setDrawnAcres(null);
+    setEditing(false);
     setMode("view");
   }, []);
 
@@ -422,6 +442,15 @@ export function BoundaryMap({
             <div className="pointer-events-auto rounded-md bg-background/95 px-3 py-2 text-sm shadow">
               {drawnAcres === null ? (
                 <span>Click each corner. Click the first one again to close it.</span>
+              ) : editing ? (
+                <span className="flex items-center gap-2">
+                  <span className="font-medium tabular-nums">
+                    {formatArea(drawnAcres, unit)}
+                  </span>
+                  <span className="text-muted-foreground">
+                    Drag a corner to move it, or a midpoint to add one.
+                  </span>
+                </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <span className="font-medium tabular-nums">

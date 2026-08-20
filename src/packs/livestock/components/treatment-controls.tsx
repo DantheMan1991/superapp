@@ -24,8 +24,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  deleteTreatmentAction,
   lastTreatmentOfProductAction,
   recordTreatmentAction,
+  updateTreatmentAction,
 } from "../actions";
 import { TREATMENT_ROUTES, treatmentRouteLabel } from "../vocabulary";
 import { WITHDRAWAL_SOURCE_LABELS } from "../core/withdrawal";
@@ -36,6 +38,104 @@ export interface MedicineOption {
   id: string;
   name: string;
   unit: string;
+}
+
+/**
+ * Remove a treatment entered by mistake — a duplicate, or one against the wrong
+ * pen.
+ *
+ * **THE STOCK ISSUE STAYS, AND THE DIALOG SAYS SO.** The medicine really did
+ * leave the shelf: that is an event in `inventory`'s ledger, and unwriting it
+ * would rewrite what happened. Telling somebody afterwards, via a cost on the
+ * pen they cannot explain, is the version of this that loses trust.
+ */
+export function RemoveTreatmentButton({
+  treatmentId,
+  product,
+  treatedOn,
+  fromStock,
+}: {
+  treatmentId: string;
+  product: string;
+  treatedOn: string;
+  /** Whether this treatment took the product out of stock. */
+  fromStock: boolean;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  function submit() {
+    startTransition(async () => {
+      const result = await deleteTreatmentAction({ id: treatmentId });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(
+        result.keptStockIssue
+          ? "Removed — the stock that went out is still on the pen"
+          : "Removed",
+      );
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          Remove
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            Remove the {product} from {treatedOn}?
+          </DialogTitle>
+          <DialogDescription>
+            For a treatment that never happened — a duplicate, or one recorded
+            against the wrong pen. If a date or a period was simply typed wrong,
+            correct it instead. This changes the withdrawal clock, which is what
+            decides whether these can be processed.
+          </DialogDescription>
+        </DialogHeader>
+        {fromStock && (
+          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+            {/* Said before, not after. */}
+            <span className="font-medium text-foreground">
+              The stock that went out stays on the pen.
+            </span>{" "}
+            The medicine really did leave the shelf, so removing this record does
+            not put it back — correct that side with an adjustment in Inventory.
+          </p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Keep it
+          </Button>
+          <Button variant="destructive" onClick={submit} disabled={pending}>
+            {pending ? "Removing…" : "Remove"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export interface ExistingTreatment {
+  id: string;
+  treatedOn: string;
+  product: string;
+  dose: string;
+  route: string;
+  headTreated: number | null;
+  meatWithdrawalDays: number | null;
+  milkWithdrawalDays: number | null;
+  withdrawalSource: string;
+  administeredBy: string;
+  notes: string;
 }
 
 /**
@@ -62,6 +162,7 @@ export function RecordTreatmentForm({
   today,
   medicines,
   products,
+  existing,
   trigger,
 }: {
   livestockLotId: string;
@@ -72,18 +173,41 @@ export function RecordTreatmentForm({
   medicines: MedicineOption[];
   /** Products this farm has used before — a datalist, not a closed list. */
   products: string[];
+  /**
+   * The treatment being CORRECTED, if this is a correction.
+   *
+   * One form for both, as the weight form does. The stock picker disappears in
+   * correction mode: the medicine already left the shelf, and that is
+   * `inventory`'s event to adjust rather than a field this form may rewrite.
+   */
+  existing?: ExistingTreatment;
   trigger?: React.ReactNode;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [route, setRoute] = useState<string>("water");
-  const [source, setSource] = useState<string>("label");
+  const [route, setRoute] = useState<string>(existing?.route ?? "water");
+  const [source, setSource] = useState<string>(
+    existing?.withdrawalSource ?? "label",
+  );
   const [stockItem, setStockItem] = useState<string>(NO_STOCK);
-  const [product, setProduct] = useState("");
-  const [meatDays, setMeatDays] = useState("");
-  const [milkDays, setMilkDays] = useState("");
+  const [product, setProduct] = useState(existing?.product ?? "");
+  const [meatDays, setMeatDays] = useState(
+    existing?.meatWithdrawalDays === null ||
+      existing?.meatWithdrawalDays === undefined
+      ? ""
+      : String(existing.meatWithdrawalDays),
+  );
+  const [milkDays, setMilkDays] = useState(
+    existing?.milkWithdrawalDays === null ||
+      existing?.milkWithdrawalDays === undefined
+      ? ""
+      : String(existing.milkWithdrawalDays),
+  );
   const [suggestion, setSuggestion] = useState<string | null>(null);
+  // Unique per dialog: the lot page carries the header's form and one correction
+  // form per row, and duplicate ids would point every label at the first.
+  const fieldId = existing ? existing.id : livestockLotId;
 
   /**
    * When the product loses focus, offer what this farm entered last time.
@@ -94,6 +218,10 @@ export function RecordTreatmentForm({
    * knowing something about the drug.
    */
   function offerPrevious(name: string) {
+    // Not while correcting. The figures on screen ARE this farm's record, and
+    // quietly replacing them with an older entry for the same product is the
+    // opposite of what somebody opening a correction wants.
+    if (existing) return;
     const wanted = name.trim();
     if (!wanted) return;
     startTransition(async () => {
@@ -142,32 +270,40 @@ export function RecordTreatmentForm({
     }
 
     const quantity = Number(String(formData.get("stockQuantity") ?? "0"));
+    const fields = {
+      treatedOn: String(formData.get("treatedOn") ?? today),
+      product: name,
+      dose: String(formData.get("dose") ?? ""),
+      route,
+      headTreated: Number(formData.get("headTreated") ?? 0) || null,
+      meatWithdrawalDays: meat,
+      milkWithdrawalDays: milk,
+      withdrawalSource: source,
+      administeredBy: String(formData.get("administeredBy") ?? ""),
+      notes: String(formData.get("notes") ?? ""),
+    };
+
     startTransition(async () => {
-      const result = await recordTreatmentAction({
-        livestockLotId,
-        treatedOn: String(formData.get("treatedOn") ?? today),
-        product: name,
-        dose: String(formData.get("dose") ?? ""),
-        route,
-        headTreated: Number(formData.get("headTreated") ?? 0) || null,
-        meatWithdrawalDays: meat,
-        milkWithdrawalDays: milk,
-        withdrawalSource: source,
-        administeredBy: String(formData.get("administeredBy") ?? ""),
-        notes: String(formData.get("notes") ?? ""),
-        fromStock:
-          stockItem === NO_STOCK || !quantity || quantity <= 0
-            ? null
-            : { itemId: stockItem, quantity },
-      });
+      const result = existing
+        ? await updateTreatmentAction({ id: existing.id, ...fields })
+        : await recordTreatmentAction({
+            livestockLotId,
+            ...fields,
+            fromStock:
+              stockItem === NO_STOCK || !quantity || quantity <= 0
+                ? null
+                : { itemId: stockItem, quantity },
+          });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
       toast.success(
         source === "none_stated"
-          ? "Recorded — look the withdrawal up before these go anywhere"
-          : "Recorded",
+          ? `${existing ? "Corrected" : "Recorded"} — look the withdrawal up before these go anywhere`
+          : existing
+            ? "Corrected"
+            : "Recorded",
       );
       setOpen(false);
       router.refresh();
@@ -180,31 +316,32 @@ export function RecordTreatmentForm({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button variant="outline" size="sm">
-            Treat
+          <Button variant={existing ? "ghost" : "outline"} size="sm">
+            {existing ? "Correct" : "Treat"}
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <form action={submit}>
           <DialogHeader>
-            <DialogTitle>Treat {lotCode}</DialogTitle>
+            <DialogTitle>
+              {existing ? "Correct this treatment" : `Treat ${lotCode}`}
+            </DialogTitle>
             <DialogDescription>
-              The withdrawal is the point of this record: until it clears, these
-              cannot be processed and their milk cannot be sold. Read the periods
-              off the label in front of you — this app does not know them and
-              will not guess.
+              {existing
+                ? "A treatment record is an observation, not a ledger entry: if a date or a period was typed wrong, no such record ever happened. Changing one moves the withdrawal clock, which is what decides whether these can be processed."
+                : "The withdrawal is the point of this record: until it clears, these cannot be processed and their milk cannot be sold. Read the periods off the label in front of you — this app does not know them and will not guess."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor={`product-${livestockLotId}`}>What was given</Label>
+                <Label htmlFor={`product-${fieldId}`}>What was given</Label>
                 <Input
-                  id={`product-${livestockLotId}`}
+                  id={`product-${fieldId}`}
                   name="product"
-                  list={`products-${livestockLotId}`}
+                  list={`products-${fieldId}`}
                   required
                   maxLength={200}
                   autoFocus
@@ -215,19 +352,19 @@ export function RecordTreatmentForm({
                 />
                 {/* Suggestions, not a closed list — the next bottle this farm
                     buys will not be on it. */}
-                <datalist id={`products-${livestockLotId}`}>
+                <datalist id={`products-${fieldId}`}>
                   {products.map((p) => (
                     <option key={p} value={p} />
                   ))}
                 </datalist>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor={`treated-${livestockLotId}`}>When</Label>
+                <Label htmlFor={`treated-${fieldId}`}>When</Label>
                 <Input
-                  id={`treated-${livestockLotId}`}
+                  id={`treated-${fieldId}`}
                   name="treatedOn"
                   type="date"
-                  defaultValue={today}
+                  defaultValue={existing?.treatedOn ?? today}
                   required
                 />
               </div>
@@ -235,18 +372,19 @@ export function RecordTreatmentForm({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor={`dose-${livestockLotId}`}>Dose</Label>
+                <Label htmlFor={`dose-${fieldId}`}>Dose</Label>
                 <Input
-                  id={`dose-${livestockLotId}`}
+                  id={`dose-${fieldId}`}
                   name="dose"
                   maxLength={200}
+                  defaultValue={existing?.dose}
                   placeholder="e.g. 1 cc per 100 lb"
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor={`route-${livestockLotId}`}>How</Label>
+                <Label htmlFor={`route-${fieldId}`}>How</Label>
                 <Select value={route} onValueChange={setRoute}>
-                  <SelectTrigger id={`route-${livestockLotId}`}>
+                  <SelectTrigger id={`route-${fieldId}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -263,11 +401,11 @@ export function RecordTreatmentForm({
             <div className="rounded-md border p-3">
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor={`meat-${livestockLotId}`}>
+                  <Label htmlFor={`meat-${fieldId}`}>
                     Meat withdrawal (days)
                   </Label>
                   <Input
-                    id={`meat-${livestockLotId}`}
+                    id={`meat-${fieldId}`}
                     type="number"
                     min="0"
                     step="1"
@@ -277,11 +415,11 @@ export function RecordTreatmentForm({
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor={`milk-${livestockLotId}`}>
+                  <Label htmlFor={`milk-${fieldId}`}>
                     Milk withdrawal (days)
                   </Label>
                   <Input
-                    id={`milk-${livestockLotId}`}
+                    id={`milk-${fieldId}`}
                     type="number"
                     min="0"
                     step="1"
@@ -292,11 +430,11 @@ export function RecordTreatmentForm({
                 </div>
               </div>
               <div className="mt-3 grid gap-2">
-                <Label htmlFor={`source-${livestockLotId}`}>
+                <Label htmlFor={`source-${fieldId}`}>
                   Where those came from
                 </Label>
                 <Select value={source} onValueChange={setSource}>
-                  <SelectTrigger id={`source-${livestockLotId}`}>
+                  <SelectTrigger id={`source-${fieldId}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -324,25 +462,26 @@ export function RecordTreatmentForm({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor={`headtreated-${livestockLotId}`}>
+                <Label htmlFor={`headtreated-${fieldId}`}>
                   How many treated
                 </Label>
                 <Input
-                  id={`headtreated-${livestockLotId}`}
+                  id={`headtreated-${fieldId}`}
                   name="headTreated"
                   type="number"
                   min="0"
                   step="1"
                   max={head > 0 ? head : undefined}
-                  defaultValue={head > 0 ? head : undefined}
+                  defaultValue={existing?.headTreated ?? (head > 0 ? head : undefined)}
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor={`by-${livestockLotId}`}>Given by</Label>
+                <Label htmlFor={`by-${fieldId}`}>Given by</Label>
                 <Input
-                  id={`by-${livestockLotId}`}
+                  id={`by-${fieldId}`}
                   name="administeredBy"
                   maxLength={200}
+                  defaultValue={existing?.administeredBy}
                   placeholder="e.g. Dr Ames"
                 />
               </div>
@@ -355,7 +494,7 @@ export function RecordTreatmentForm({
               thirty-seven that were not.
             </p>
 
-            {medicines.length > 0 && (
+            {!existing && medicines.length > 0 && (
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor={`stock-${livestockLotId}`}>Out of stock</Label>
@@ -393,12 +532,13 @@ export function RecordTreatmentForm({
             )}
 
             <div className="grid gap-2">
-              <Label htmlFor={`tnotes-${livestockLotId}`}>Notes</Label>
+              <Label htmlFor={`tnotes-${fieldId}`}>Notes</Label>
               <Textarea
-                id={`tnotes-${livestockLotId}`}
+                id={`tnotes-${fieldId}`}
                 name="notes"
                 rows={2}
                 maxLength={2000}
+                defaultValue={existing?.notes}
                 placeholder="Two coughing at the shade end."
               />
             </div>
@@ -406,7 +546,7 @@ export function RecordTreatmentForm({
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Record"}
+              {pending ? "Saving…" : existing ? "Correct" : "Record"}
             </Button>
           </DialogFooter>
         </form>

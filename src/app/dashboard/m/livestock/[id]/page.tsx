@@ -86,7 +86,10 @@ import {
   formatWithdrawal,
   lotWithdrawal,
 } from "@/packs/livestock/core/withdrawal";
-import { RecordTreatmentForm } from "@/packs/livestock/components/treatment-controls";
+import {
+  RecordTreatmentForm,
+  RemoveTreatmentButton,
+} from "@/packs/livestock/components/treatment-controls";
 import { formatLastChecked } from "@/packs/livestock/core/daily";
 import {
   IdentifierForm,
@@ -739,6 +742,7 @@ export default async function LivestockLotPage({
                 <TableHead className="text-right">Meat clear</TableHead>
                 <TableHead className="text-right">Milk clear</TableHead>
                 <TableHead>Noted</TableHead>
+                <TableHead className="text-right"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -777,6 +781,41 @@ export default async function LivestockLotPage({
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {t.notes || "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {/* CORRECT for a period or a date typed wrong, REMOVE for a
+                        treatment that never happened. Both move the clock, and
+                        the clock is what decides whether these can be
+                        processed. */}
+                    <div className="flex items-center justify-end">
+                      <RecordTreatmentForm
+                        livestockLotId={lot.id}
+                        lotCode={inventoryLot.code}
+                        head={summary.balance}
+                        today={today}
+                        medicines={[]}
+                        products={products}
+                        existing={{
+                          id: t.id,
+                          treatedOn: t.treatedOn,
+                          product: t.product,
+                          dose: t.dose,
+                          route: t.route,
+                          headTreated: t.headTreated,
+                          meatWithdrawalDays: t.meatWithdrawalDays,
+                          milkWithdrawalDays: t.milkWithdrawalDays,
+                          withdrawalSource: t.withdrawalSource,
+                          administeredBy: t.administeredBy,
+                          notes: t.notes,
+                        }}
+                      />
+                      <RemoveTreatmentButton
+                        treatmentId={t.id}
+                        product={t.product}
+                        treatedOn={t.treatedOn}
+                        fromStock={t.inventoryMovementId !== null}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

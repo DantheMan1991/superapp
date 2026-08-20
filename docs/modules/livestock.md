@@ -25,6 +25,51 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-20 — A clock can be wrong, and now it can be put right (`claude/correct-the-clock`)
+
+Slice 3's own first open item, closed the same day — and the reason it could not
+wait is in the item itself: a wrong feed figure costs a bad decision, a wrong
+withdrawal clock is a legal record and the row somebody reads before loading a
+trailer.
+
+- **THE SAME CALL WEIGHTS MADE, FOR THE SAME REASON.** A treatment record is an
+  OBSERVATION, not a ledger entry: if somebody typed 10 days where the label said
+  21, no such record ever existed and there is nothing to compensate for. So
+  `updateTreatment` edits in place and `deleteTreatment` removes. Third table in
+  this pack to land on that distinction, after `land_occupancy` and
+  `livestock_weights`.
+- **THE VALIDATION RUNS AGAINST THE MERGED ROW, NOT THE PATCH.** Clearing the
+  only period a treatment had, while its source still says "off the label",
+  produces exactly the row that later reads as CLEAR to somebody about to book a
+  processor. Refused — but the same clearing is allowed when the source is
+  changed to `none_stated` in the same edit, because that state blocks.
+- **THE STOCK ISSUE OUTLIVES THE TREATMENT, and the dialog says so BEFORE the
+  button.** The medicine really did leave the shelf: that is an event in
+  `inventory`'s ledger, and unwriting it would rewrite what happened — the rule a
+  movement exists under. So the record goes, the cost stays on the pen, and the
+  screen names the loose end rather than letting somebody find it later as a cost
+  they cannot explain. The toast repeats it: *"Removed — the stock that went out
+  is still on the pen."*
+- **Correcting never offers a previous entry.** The figures on screen ARE this
+  farm's record; quietly replacing them with an older entry for the same product
+  is the opposite of what somebody opening a correction wants. The
+  last-time-you-used-this suggestion fires only when recording something new.
+- **The stock picker disappears in correction mode**, for the same reason: the
+  medicine already left the shelf, and adjusting that is `inventory`'s job.
+- 5 new ops tests. No migration, no schema change.
+
+**Driven, and it caught me repeating yesterday's mistake.** The correction dialog
+said *"What it said before is kept"* — the same overpromise the weight form
+carried, pointing a farmer at `audit_log.meta`, which nothing in the app renders.
+Rewritten to say what the correction actually does to the clock.
+
+The rest held. 21 days corrected to 28 moved the clearance from 2026-09-15 and
+the countdown from 19 days to 26, one row throughout. A second treatment recorded
+on the same lot showed the binding rule working on real data — Draxxin clearing
+2026-09-06 did not displace Penicillin G clearing 2026-09-15 — and removing the
+Draxxin row left its 6 fl oz stock issue standing in the ledger, exactly as the
+dialog warned.
+
 ### 2026-08-20 — Slice 3: the withdrawal clock, and an unknown is not a zero (`claude/the-withdrawal-clock`)
 
 The pack's legal guardrail, and the feature the advisor had twice refused a
@@ -791,10 +836,15 @@ This pack is the one that forced the change; the full reasoning is in
 - **The clock blocks nothing in code.** It is loud on the lot page, the livestock
   list, the daily round and in the advisor's digest — and that is all it can be
   until there is a processing action to refuse. Slice 6.
-- **A treatment cannot be corrected or removed.** Same gap weights had until
-  yesterday, and the same answer applies — a treatment recorded against the wrong
-  pen never happened — but it is worse here, because a wrong clock is a legal
-  record rather than a bad number. **Fix this before anybody relies on it.**
+- ~~A treatment cannot be corrected or removed~~ — **closed 2026-08-20.**
+  `updateTreatment` edits in place and `deleteTreatment` removes, validated
+  against the merged row so a correction cannot leave a treatment reading as
+  clear. **The stock issue is deliberately not removed with it** — the medicine
+  left the shelf, and that is `inventory`'s event to adjust.
+- **Removing a treatment leaves an orphaned cost on the pen.** By design, and the
+  dialog says so — but there is no adjustment screen in `inventory` yet to
+  correct the other side with, so somebody who removes a from-stock treatment is
+  told about a fix they cannot currently make. Inventory slice 2.
 - **`head_treated` is recorded and nothing reads it.** Written because the design
   asks for it and because a partial treatment is a real thing; no screen or fold
   uses it yet.

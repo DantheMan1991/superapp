@@ -20,6 +20,7 @@ import { listParcels, mappedZoneCount, zoneCountsByParcel } from "./ops";
 import { TENURE_LABELS, isTenure } from "./vocabulary";
 import { PARCEL_SOURCES, parcelSourceFrom } from "./core/parcel-lookup";
 import { WhereAmIShortcut } from "./components/where-am-i";
+import { CombineParcelsBar } from "./components/combine-parcels";
 
 const BASE = "/dashboard/m/land";
 import {
@@ -129,6 +130,22 @@ export async function LandModule({
           ) : null
         }
       />
+
+      {/* Two deeds are frequently one block of ground, and a zone belongs to
+          exactly one parcel — so combining is what makes a fence line that
+          crosses a deed boundary drawable at all. */}
+      {isOwner && parcels.length > 1 && (
+        <CombineParcelsBar
+          unit={unit}
+          parcels={parcels.map((parcel) => ({
+            id: parcel.id,
+            name: parcel.name,
+            identifier: parcel.identifier,
+            areaAcres: parcel.areaAcres,
+            zoneCount: zoneCounts.get(parcel.id) ?? 0,
+          }))}
+        />
+      )}
 
       {parcels.length === 0 ? (
         <EmptyState

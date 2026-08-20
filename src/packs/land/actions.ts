@@ -16,6 +16,7 @@ import {
 import { lookupCurrency, lookupParcels } from "./parcel-lookup-service";
 import {
   LandError,
+  combineParcels,
   createParcel,
   createZone,
   deleteOccupancy,
@@ -80,6 +81,8 @@ function toResult(err: unknown): { error: string } {
         };
       // The parser writes for a person — "that file has 12 shapes in it" — so
       // its message reaches the screen unaltered.
+      case "INVALID_COMBINE":
+        return { error: err.message };
       case "INVALID_GEOMETRY":
         return { error: err.message };
     }
@@ -751,6 +754,53 @@ export async function zoneAtPointAction(input: unknown) {
       { role: ctx.role },
     );
     return { ok: true, zone: found };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Combine several parcels into one block of ground.
+ *
+ * OWNER, because it retires cost objects and moves paddocks between them —
+ * every part of it is a decision about how the books are grouped, not a chore.
+ */
+export async function combineParcelsAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      survivorId: z.string().uuid(),
+      absorbedIds: z.array(z.string().uuid()).min(1).max(50),
+      name: z.string().min(1).max(200).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Pick at least two parcels to combine." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => combineParcels(tx, landCtx(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.parcels.combined",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_parcel",
+      targetId: result.parcel.id,
+      meta: {
+        absorbed: parsed.data.absorbedIds,
+        zonesMoved: result.zonesMoved,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return {
+      ok: true,
+      absorbed: result.absorbed,
+      zonesMoved: result.zonesMoved,
+      name: result.parcel.name,
+    };
   } catch (err) {
     return toResult(err);
   }

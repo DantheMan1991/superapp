@@ -50,4 +50,17 @@ export interface IndustryProfile {
    * boundary has been broken.
    */
   packConfig?: Record<string, unknown>;
+  /**
+   * Platform-level presentation this industry wants, applied to the TENANT at
+   * install rather than resolved live.
+   *
+   * Copied rather than read through, unlike `labels`: these settle onto columns
+   * every module reads — `tenants.currency_symbol` today — and a tenant must be
+   * able to change one afterwards without the profile silently putting it back.
+   * A label is presentation the profile owns; this is a default it suggests.
+   */
+  display?: {
+    /** "$", "£", or omitted for the house style of no symbol at all. */
+    currencySymbol?: string;
+  };
 }

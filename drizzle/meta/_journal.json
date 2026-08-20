@@ -1121,6 +1121,20 @@
       "when": 1787217521820,
       "tag": "0159_odd_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1787221874491,
+      "tag": "0160_magenta_colossus",
+      "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 1787222416045,
+      "tag": "0161_farm_tenants_get_a_dollar",
+      "breakpoints": true
     }
   ]
 }

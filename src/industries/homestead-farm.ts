@@ -36,6 +36,14 @@ export const homesteadFarm: IndustryProfile = {
     lot: "Lot",
     productionRun: "Batch",
   },
+  /**
+   * A farmer is not reading a ledger all day. "Fed · 85.00" on a card has no
+   * column header to say it is money, so this profile asks for the symbol —
+   * which accounting's own debit/credit grids still go without.
+   */
+  display: {
+    currencySymbol: "$",
+  },
   packConfig: {
     /**
      * Each pack reads its own key. Values are defaults for a new tenant, not

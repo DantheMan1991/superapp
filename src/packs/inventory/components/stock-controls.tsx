@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { formatCents } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -165,12 +165,15 @@ export function MovementForm({
   locations,
   consumers,
   unitSingular,
+  currencySymbol,
   today,
 }: {
   itemId: string;
   unitLabel: string;
   /** "pound", not "pounds" — a price is per one of them. */
   unitSingular: string;
+  /** The tenant's symbol, or null for the house style of none. */
+  currencySymbol: string | null;
   lots: LotOption[];
   locations: LocationOption[];
   /**
@@ -234,7 +237,7 @@ export function MovementForm({
       // charged, and it will not change when the next delivery arrives.
       const charged =
         direction === "out" && "costCents" in result && result.costCents
-          ? ` · ${formatCents(result.costCents)}`
+          ? ` · ${formatMoney(result.costCents, currencySymbol)}`
           : "";
       toast.success(
         (direction === "in" ? "Stock recorded in" : "Stock recorded out") + charged,

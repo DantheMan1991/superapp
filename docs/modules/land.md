@@ -51,6 +51,45 @@ examples exist.
 
 ## Build log
 
+### 2026-08-19 — Two deeds, one block of ground (`claude/two-deeds-one-block`)
+
+Founder, after importing five parcels from the county: *"I would like the
+ability to select multiple properties and combine them. Yes they are 2 different
+parcels, but I would like them combined."* Two adjacent 4.12-acre deeds on Paige
+Rd, farmed as one.
+
+**The constraint that forces this is not tidiness.** A zone belongs to exactly
+one parcel — composite FK — so a fence line crossing a deed boundary is a
+paddock this app cannot draw at all. Combining is what makes the operational
+unit representable, and both legal units stay in the record.
+
+- **It ABSORBS into a survivor rather than creating a new parcel.** The survivor
+  keeps its id, its `dimension_member`, its zones and every journal line ever
+  tagged to it. Creating a third parcel and retiring both originals would be
+  easier to write and would strand the reporting history of both.
+- **The absorbed parcels are RETIRED, never deleted** — the pack's standing
+  rule. Ground that carried cost for six years does not stop having done so
+  because two deeds are now worked together.
+- **PADDOCKS MOVE FIRST, and that is the sharpest trap in the operation.**
+  `retireParcel` retires a parcel's zones, so a paddock left behind would be
+  silently lost ground. Certified.
+- **The geometry becomes a MultiPolygon and the shared edge is NOT dissolved.**
+  A true union needs a polygon-clipping library and buys one cosmetic thing: no
+  seam where the deeds meet. It is also WRONG for the ordinary case — this
+  farm's parcels sit across four roads, and non-adjacent ground has no union to
+  take. A MultiPolygon is exact either way: `boundaryAreaSqM` sums the parts and
+  `pointInBoundary` tests each.
+- **Both parcel numbers are kept**, joined with `+`. The county still bills
+  these separately and always will; losing the numbers would make the combined
+  parcel impossible to reconcile against the record it came from.
+- **An unmeasured part poisons the total**, per `totalArea`'s rule. Storing 4.12
+  for a parcel whose other half has never been measured would put a confidently
+  wrong divisor into every per-acre figure — null is the honest answer, and the
+  measured boundary still reports on the page.
+- The dialog states all three invisible effects before they happen: what moves,
+  what is retired, and that retirement is currently one-way.
+- 6 new ops tests.
+
 ### 2026-08-19 — A search that finds four of your five parcels is not broken, it is old (`claude/how-old-is-this-record`)
 
 The founder searched his tax mailing address and got four parcels back. The
@@ -945,7 +984,11 @@ rented ground, and retrofitting it means rewriting the report.
   set it. The query param works and nothing renders a toggle.
 - **A retired zone cannot be un-retired**, and neither can a parcel. Retirement
   is deliberately not a delete, but it is currently also not reversible, which is
-  a harsher rule than intended for what is often a mis-click.
+  a harsher rule than intended for what is often a mis-click — and it now also
+  means **a combine cannot be undone**. The dialog says so; reversing a
+  retirement is worth more than it was.
+- **Combining does not merge notes or dissolve the seam** between adjacent
+  deeds. Both are cosmetic against a boundary that already measures correctly.
 - **No bulk entry.** Twenty paddocks is twenty dialogs. The design's *schema at
   10×, UI at 1×* rule says this is correct for now and that a grid is purely
   additive — but 200 paddocks is the number that makes it urgent.

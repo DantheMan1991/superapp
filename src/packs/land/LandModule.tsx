@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table";
 import { listParcels, zoneCountsByParcel } from "./ops";
 import { TENURE_LABELS, isTenure } from "./vocabulary";
-import { parcelSourceFrom } from "./core/parcel-lookup";
+import { PARCEL_SOURCES, parcelSourceFrom } from "./core/parcel-lookup";
 
 const BASE = "/dashboard/m/land";
 import {
@@ -74,7 +74,14 @@ export async function LandModule({
   );
 
   const unit = areaUnitFrom(config);
-  const hasParcelSource = parcelSourceFrom(config) !== null;
+  /**
+   * **THE BUTTON MUST FOLLOW THE PAGE, NOT THE CONFIG.** This was gated on a
+   * PINNED source while `/land/find` itself falls back to letting the person
+   * pick one — so on a tenant with no `packConfig` the page worked perfectly
+   * and nothing linked to it. Found by driving it: the only way in was typing
+   * the URL. The condition is now the same one the page uses.
+   */
+  const hasParcelSource = parcelSourceFrom(config) !== null || PARCEL_SOURCES.length > 0;
   const parcelWord = labelFor(labels, "parcel", "Parcel");
   const zoneWord = labelFor(labels, "zone", "Zone");
   const zonesWord = `${zoneWord}s`;

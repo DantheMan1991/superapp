@@ -51,6 +51,33 @@ examples exist.
 
 ## Build log
 
+### 2026-08-19 — The finder worked and nothing linked to it (`claude/find-parcels-needs-a-door`)
+
+2a.1b driven on production against real Knox County records, and it did the
+whole job: a mailing-address search returned **nine parcels across four roads**,
+ticking one showed *"1 chosen, 41.02 acres"*, and importing it produced a parcel
+whose boundary is the county's own survey drawn over aerial imagery — an
+irregular shape with a notch in the south end, following the actual field edges.
+The page then read:
+
+> Measured **41.0189 acres** · Recorded 41.02 acres · *Close enough to the
+> recorded figure. Both are kept as they are.*
+
+**Three one-thousandths of a percent from the assessor's figure**, on ground
+this codebase had never seen.
+
+**The defect was that nobody could get there.** The "Find my parcels" button was
+gated on a PINNED `packConfig` source, while the page itself falls back to
+letting the person choose one — so on a tenant with no config, which is every
+tenant today, the feature worked perfectly and had no door. The only way in was
+typing the URL. The button now uses the same condition the page does.
+
+**A pattern worth naming, because this is the second time in two days:** a
+capability and its entry point drifted apart — the livestock daily round shipped
+with `attention` meaning one thing in the ops layer and another on the badge, and
+here a page and its button disagreed about when the feature exists. Both were
+invisible to types and tests, and both took thirty seconds to find by clicking.
+
 ### 2026-08-19 — Slice 2a.1b: the county already drew it (`claude/find-my-parcels`)
 
 Three slices in, the founder's original ask finally gets answered: *"type in the
@@ -781,9 +808,10 @@ rented ground, and retrofitting it means rewriting the report.
   exactly. Corner-dragging is fixed but has not itself been driven since.
 - ~~No parcel-number lookup~~ — **shipped 2026-08-19** for Ohio, by number and
   by tax mailing address.
-- **NOBODY HAS RUN THE FINDER IN A BROWSER.** The lookup itself is proven
-  against live Knox County data through this pack's own code; the screen around
-  it is not.
+- ~~Nobody has run the finder in a browser~~ — **closed 2026-08-19.** Driven on
+  production against real Knox County records: nine parcels found, one imported,
+  its boundary measuring within 0.003% of the county's figure. It found the
+  missing entry point, now fixed.
 - **Ohio only.** `PARCEL_SOURCES` has one entry. Every other state needs either
   its own statewide service added to the registry or the paid nationwide route
   (Regrid, which has an owner-name search Ohio's data cannot offer).

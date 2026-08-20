@@ -21,6 +21,7 @@ import {
   parseBoundary,
   pointInBoundary,
   type Boundary,
+  type LinearRing,
   type Position,
 } from "./core/geo";
 
@@ -60,7 +61,9 @@ export class LandError extends Error {
       /** Distinct from ALREADY_OCCUPIED: moving them where they already are. */
       | "ALREADY_THERE"
       | "INVALID_OCCUPANT"
-      | "INVALID_GEOMETRY",
+      | "INVALID_GEOMETRY"
+      /** Fewer than two parcels, or one that cannot take part. */
+      | "INVALID_COMBINE",
     message: string,
   ) {
     super(message);
@@ -256,6 +259,170 @@ export async function retireParcel(
 
   await archiveMember(tx, ctx, PARCEL_DIMENSION, id);
   return { parcel: rows[0], zonesRetired: zones.length };
+}
+
+
+/**
+ * Combine several parcels into one operational block.
+ *
+ * **TWO DEEDS, ONE PIECE OF GROUND.** The founder imported five parcels from
+ * the county and immediately wanted two of them to be one: same road, adjacent,
+ * farmed as a unit. The model calls a parcel the LEGAL unit and it is right to
+ * — but the thing that forces the issue is not tidiness, it is that a zone
+ * belongs to exactly one parcel. A fence line that crosses a deed boundary is
+ * a paddock this app could not draw.
+ *
+ * **It ABSORBS into a survivor rather than creating a new parcel.** The
+ * survivor keeps its id, its `dimension_member`, its zones and every journal
+ * line ever tagged to it. Creating a new parcel and retiring both originals
+ * would be tidier to write and would strand the reporting history of both.
+ *
+ * **The absorbed parcels are RETIRED, never deleted** — the pack's standing
+ * rule. Ground that carried cost and revenue for six years does not stop having
+ * done so because two deeds are now farmed together, and every line tagged with
+ * it still has to report.
+ *
+ * **The geometry becomes a MultiPolygon, and the shared edge is NOT dissolved.**
+ * A true union needs a polygon-clipping library and would buy one cosmetic
+ * thing: no seam where the two deeds meet. It would also be WRONG for the
+ * ordinary case — this farm's parcels are spread across four roads, and
+ * non-adjacent ground has no union to take. A MultiPolygon is exact either way:
+ * `boundaryAreaSqM` sums the parts and `pointInBoundary` tests each of them.
+ */
+export async function combineParcels(
+  tx: Tx,
+  ctx: LandCtx,
+  input: { survivorId: string; absorbedIds: string[]; name?: string },
+): Promise<{ parcel: LandParcel; absorbed: number; zonesMoved: number }> {
+  requireWrite(ctx, "owner");
+
+  const absorbedIds = [...new Set(input.absorbedIds)].filter(
+    (id) => id !== input.survivorId,
+  );
+  if (absorbedIds.length === 0) {
+    throw new LandError("INVALID_COMBINE", "pick at least two parcels to combine");
+  }
+
+  const survivor = await getParcel(tx, ctx.tenantId, input.survivorId);
+  if (!survivor) {
+    throw new LandError("NOT_FOUND", `parcel ${input.survivorId} not found`);
+  }
+
+  const absorbed: LandParcel[] = [];
+  for (const id of absorbedIds) {
+    const parcel = await getParcel(tx, ctx.tenantId, id);
+    if (!parcel) throw new LandError("NOT_FOUND", `parcel ${id} not found`);
+    if (parcel.status !== "active") {
+      // Absorbing retired ground would resurrect it sideways, without going
+      // through the un-retire this pack does not have.
+      throw new LandError(
+        "INVALID_COMBINE",
+        `${parcel.name} is retired and cannot be combined`,
+      );
+    }
+    absorbed.push(parcel);
+  }
+
+  /**
+   * Every polygon from every parcel, flattened into one MultiPolygon.
+   *
+   * A parcel with no boundary contributes nothing rather than blocking the
+   * combine: most ground in this pack has no geometry for most of its life, and
+   * refusing would make the feature unusable exactly where it is most wanted.
+   */
+  const polygons: LinearRing[][] = [];
+  for (const parcel of [survivor, ...absorbed]) {
+    const boundary = asBoundary(parcel.geometry);
+    if (!boundary) continue;
+    if (boundary.type === "Polygon") polygons.push(boundary.coordinates);
+    else polygons.push(...boundary.coordinates);
+  }
+  const geometry: Boundary | null =
+    polygons.length === 0
+      ? null
+      : polygons.length === 1
+        ? { type: "Polygon", coordinates: polygons[0] }
+        : { type: "MultiPolygon", coordinates: polygons };
+
+  /**
+   * Declared acreage adds up, and an unknown one poisons the total.
+   *
+   * `totalArea`'s rule, applied here: if any part has never been measured the
+   * sum is not the area of the whole, and storing it as though it were would
+   * put a confidently wrong divisor into every per-acre figure. Null is the
+   * honest answer, and the measured boundary still reports on the page.
+   */
+  const areas = [survivor, ...absorbed].map((parcel) => parcel.areaAcres);
+  const areaAcres: number | null = areas.some((area) => area === null)
+    ? null
+    : Math.round(
+        areas.reduce<number>((sum, area) => sum + (area ?? 0), 0) * 10_000,
+      ) / 10_000;
+
+  /**
+   * Both parcel numbers, kept.
+   *
+   * The county still knows these as separate deeds and always will — the tax
+   * bill arrives twice. Losing the numbers would make the combined parcel
+   * impossible to reconcile against the record it came from.
+   */
+  const identifiers = [survivor, ...absorbed]
+    .map((parcel) => parcel.identifier.trim())
+    .filter((identifier) => identifier !== "");
+  const identifier = [...new Set(identifiers)].join(" + ");
+
+  // The zones move FIRST: retiring a parcel retires its zones, and a paddock
+  // that survived the combine as "retired" would be a silent loss of ground.
+  let zonesMoved = 0;
+  for (const parcel of absorbed) {
+    const zones = await listZones(tx, ctx.tenantId, {
+      parcelId: parcel.id,
+      status: "active",
+    });
+    for (const zone of zones) {
+      await tx
+        .update(schema.landZones)
+        .set({ parcelId: survivor.id, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.landZones.tenantId, ctx.tenantId),
+            eq(schema.landZones.id, zone.id),
+          ),
+        );
+      zonesMoved += 1;
+    }
+  }
+
+  for (const parcel of absorbed) {
+    await retireParcel(tx, ctx, parcel.id);
+  }
+
+  const rows = await tx
+    .update(schema.landParcels)
+    .set({
+      name: input.name?.trim() || survivor.name,
+      geometry,
+      areaAcres,
+      identifier,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.landParcels.tenantId, ctx.tenantId),
+        eq(schema.landParcels.id, survivor.id),
+      ),
+    )
+    .returning();
+
+  // The cost object keeps its id and gains the new name, so every journal line
+  // already tagged to this parcel follows it.
+  await upsertDimensionMember(tx, ctx, {
+    dimensionType: PARCEL_DIMENSION,
+    packEntityId: rows[0].id,
+    displayName: rows[0].name,
+  });
+
+  return { parcel: rows[0], absorbed: absorbed.length, zonesMoved };
 }
 
 // ------------------------------------------------------------------ zones ---

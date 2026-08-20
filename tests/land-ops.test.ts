@@ -8,6 +8,7 @@ import {
   LandError,
   PARCEL_DIMENSION,
   ZONE_DIMENSION,
+  combineParcels,
   completedStayDays,
   createParcel,
   createZone,
@@ -1467,5 +1468,148 @@ d("land ops", () => {
       expect(found?.name).not.toBe("U-Nothing");
     });
 
+  });
+
+  describe("combining parcels", () => {
+    const square = (west: number, south: number) => ({
+      type: "Polygon" as const,
+      coordinates: [
+        [
+          [west, south],
+          [west + 0.01, south],
+          [west + 0.01, south + 0.01],
+          [west, south + 0.01],
+          [west, south],
+        ],
+      ],
+    });
+
+    it("absorbs into a survivor that keeps its id and its history", async () => {
+      // **TWO DEEDS, ONE BLOCK OF GROUND.** The survivor keeps its id, so every
+      // journal line already tagged to it follows the combined parcel — which
+      // is why this absorbs rather than creating a third parcel.
+      const keep = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), {
+          name: "Paige North",
+          areaAcres: 4.12,
+          identifier: "4900588001",
+        }),
+      );
+      const gone = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), {
+          name: "Paige South",
+          areaAcres: 4.12,
+          identifier: "4900588002",
+        }),
+      );
+      await asOwner((tx) => setParcelBoundary(tx, ownerCtx(), keep.id, square(-82.5, 40.4)));
+      await asOwner((tx) => setParcelBoundary(tx, ownerCtx(), gone.id, square(-82.49, 40.4)));
+
+      const result = await asOwner((tx) =>
+        combineParcels(tx, ownerCtx(), {
+          survivorId: keep.id,
+          absorbedIds: [gone.id],
+          name: "Paige Farm",
+        }),
+      );
+
+      expect(result.parcel.id).toBe(keep.id);
+      expect(result.parcel.name).toBe("Paige Farm");
+      expect(result.absorbed).toBe(1);
+      // Both numbers survive: the county still bills these separately and
+      // always will.
+      expect(result.parcel.identifier).toBe("4900588001 + 4900588002");
+      // Declared acreage adds up.
+      expect(result.parcel.areaAcres).toBe(8.24);
+
+      // The geometry is a MultiPolygon of both, NOT a dissolved union — which
+      // is also the only correct answer for parcels that do not touch.
+      const boundary = asBoundary(result.parcel.geometry);
+      expect(boundary?.type).toBe("MultiPolygon");
+      expect(boundary?.type === "MultiPolygon" && boundary.coordinates).toHaveLength(2);
+
+      const absorbed = await asOwner((tx) => getParcel(tx, tenantId, gone.id));
+      expect(absorbed?.status).toBe("retired");
+    });
+
+    it("MOVES the paddocks across rather than retiring them with their parcel", async () => {
+      // The sharpest trap in this operation: `retireParcel` retires a parcel's
+      // zones, so a paddock that stayed behind would be silently lost ground.
+      const keep = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), { name: "Keep Side" }),
+      );
+      const gone = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), { name: "Gone Side" }),
+      );
+      const paddock = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: gone.id, name: "Travelling Paddock" }),
+      );
+
+      const result = await asOwner((tx) =>
+        combineParcels(tx, ownerCtx(), { survivorId: keep.id, absorbedIds: [gone.id] }),
+      );
+      expect(result.zonesMoved).toBe(1);
+
+      const moved = await asOwner((tx) => getZone(tx, tenantId, paddock.id));
+      expect(moved?.parcelId).toBe(keep.id);
+      expect(moved?.status).toBe("active");
+    });
+
+    it("refuses to state an area when one part has never been measured", async () => {
+      // `totalArea`'s rule: an unknown poisons the sum. Storing 4.12 for a
+      // combined parcel whose other half is unmeasured would put a confidently
+      // wrong divisor into every per-acre figure.
+      const keep = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), { name: "Measured", areaAcres: 4.12 }),
+      );
+      const gone = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), { name: "Unmeasured" }),
+      );
+      const result = await asOwner((tx) =>
+        combineParcels(tx, ownerCtx(), { survivorId: keep.id, absorbedIds: [gone.id] }),
+      );
+      expect(result.parcel.areaAcres).toBeNull();
+    });
+
+    it("needs at least two, and ignores the survivor listed twice", async () => {
+      const only = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), { name: "Alone" }),
+      );
+      await expect(
+        asOwner((tx) =>
+          combineParcels(tx, ownerCtx(), {
+            survivorId: only.id,
+            absorbedIds: [only.id],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_COMBINE" });
+    });
+
+    it("refuses to absorb ground that is already retired", async () => {
+      // It would resurrect it sideways, without going through the un-retire
+      // this pack does not have.
+      const keep = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), { name: "Live Ground" }),
+      );
+      const dead = await asOwner((tx) =>
+        createParcel(tx, ownerCtx(), { name: "Sold Ground" }),
+      );
+      await asOwner((tx) => retireParcel(tx, ownerCtx(), dead.id));
+      await expect(
+        asOwner((tx) =>
+          combineParcels(tx, ownerCtx(), { survivorId: keep.id, absorbedIds: [dead.id] }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_COMBINE" });
+    });
+
+    it("is the owner's decision, not a chore", async () => {
+      const a = await asOwner((tx) => createParcel(tx, ownerCtx(), { name: "A side" }));
+      const b = await asOwner((tx) => createParcel(tx, ownerCtx(), { name: "B side" }));
+      await expect(
+        asOwner((tx) =>
+          combineParcels(tx, staffCtx(), { survivorId: a.id, absorbedIds: [b.id] }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
   });
 });

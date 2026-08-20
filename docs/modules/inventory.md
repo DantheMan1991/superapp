@@ -34,6 +34,38 @@ died on days 22 and 27 rather than merely that eight died.
 It has no opinion about which kinds are deaths. That classification is
 `livestock`'s and stays there, as it has since its slice 0.
 
+### 2026-08-19 — The page that owns the money never mentioned it (`claude/the-page-that-never-mentions-money`)
+
+Slice 1 driven on production, and the loop closed on the first try: a
+600 lb delivery at $340, 150 lb issued to BATCH-2, and the toast came back
+**"Stock recorded out · 85.00"** — 150 at 56.67 cents, stamped. The livestock lot
+page then showed a **Fed** card at 85.00 and *"0.43 a head at today's count"*,
+with a *Fed in* row carrying the same figure. Feed bought, fed to a pen, carried
+by the animal, across three packs and two screens.
+
+**The defect: the item page never showed a cost anywhere.** Recent entries had
+When / What happened / Where / Amount and no money at all, so a $340 delivery
+landed and the page that owns it said nothing. Same shape as the round's
+`attention` badge and the parcel finder's missing button — a capability stored
+and never surfaced, invisible to types and tests, thirty seconds to find by
+clicking.
+
+- A **Cost** column on Recent entries, showing the stamped figure per movement.
+- The **average paid** on the On hand card — *"Averaging 56.67 a pound across
+  everything received"*. That is cost ACCUMULATION, deliberately not valuation:
+  what the stock on hand is worth is basis-dependent and belongs to slice 3, not
+  to a card that would have to guess.
+- *"the price per pounds"* now reads *per pound*. `unitLabel` is the plural and
+  a price is per one of them.
+
+**Not changed, and worth a decision rather than a quiet fix: no currency symbol
+anywhere.** `formatCents` is deliberately symbol-free because it was built for
+debit/credit columns whose headers carry the currency. On a card reading
+*"Fed · 85.00 · 0.43 a head"* there is no header to carry it, and the number
+reads as a quantity. That is an app-wide design-system question — accounting's
+own reports say *"1,234.56 overdue"* — so changing it in one pack would make the
+app inconsistent rather than better.
+
 ### 2026-08-19 — Slice 1: the first money on the farm (`claude/feed-in-feed-out`)
 
 Slice 0 could say a pen held 210 birds. Nothing anywhere could say what anything

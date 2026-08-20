@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
+import { formatCents } from "@/lib/money";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +25,7 @@ import {
 import {
   getItem,
   listLocations,
+  itemCostRate,
   listItems,
   listLots,
   listMovements,
@@ -75,7 +77,7 @@ export default async function InventoryItemPage({
     async (tx) => {
       const item = await getItem(tx, ctx.tenant.id, id);
       if (!item) return null;
-      const [lots, rows, movements, locations, allLots, allItems] =
+      const [lots, rows, movements, locations, allLots, allItems, costRate] =
         await Promise.all([
           listLots(tx, ctx.tenant.id, { itemId: id }),
           movementRowsForItem(tx, ctx.tenant.id, id),
@@ -85,14 +87,16 @@ export default async function InventoryItemPage({
           // on the farm: feed is not the same item as the birds that eat it.
           listLots(tx, ctx.tenant.id),
           listItems(tx, ctx.tenant.id, { status: "active" }),
+          itemCostRate(tx, ctx.tenant.id, id),
         ]);
-      return { item, lots, rows, movements, locations, allLots, allItems };
+      return { item, lots, rows, movements, locations, allLots, allItems, costRate };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { item, lots, rows, movements, locations, allLots, allItems } = data;
+  const { item, lots, rows, movements, locations, allLots, allItems, costRate } =
+    data;
 
   /**
    * Recording stock in and out is a chore and is ungated. Starting a batch or
@@ -102,6 +106,7 @@ export default async function InventoryItemPage({
   const isOwner = ctx.role === "owner";
   const unit = item.stockingUnit;
   const unitLabel = getUnit(unit)?.plural ?? unit;
+  const unitSingular = getUnit(unit)?.singular ?? unit;
   const locationNames = new Map(locations.map((l) => [l.id, l.name]));
 
   const total = rows.reduce((sum, r) => sum + r.quantity, 0);
@@ -161,6 +166,7 @@ export default async function InventoryItemPage({
                 lots={lotOptions}
                 locations={locationOptions}
                 consumers={consumerOptions}
+                unitSingular={unitSingular}
                 today={today}
               />
             </div>
@@ -182,6 +188,20 @@ export default async function InventoryItemPage({
                 ? "Nothing recorded yet. Every number here is the sum of what you enter."
                 : `From ${rows.length} ${rows.length === 1 ? "entry" : "entries"}.`}
             </p>
+            {costRate !== null && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {/* **COST ACCUMULATION, NOT VALUATION.** This is the average
+                    paid across everything received — the rate an issue is
+                    stamped at. What the stock ON HAND is worth is a different
+                    question, it is basis-dependent, and it belongs to slice 3
+                    rather than to a card that would have to guess. */}
+                Averaging{" "}
+                <span className="font-medium tabular-nums">
+                  {formatCents(Math.round(costRate))}
+                </span>{" "}
+                a {unitSingular} across everything received.
+              </p>
+            )}
             {total < 0 && (
               // Deliberately reported rather than prevented. Stock goes
               // negative when Monday's delivery is entered on Wednesday, and
@@ -311,6 +331,7 @@ export default async function InventoryItemPage({
                 <TableHead>What happened</TableHead>
                 <TableHead>Where</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -335,6 +356,13 @@ export default async function InventoryItemPage({
                   <TableCell className="text-right tabular-nums">
                     {m.quantity > 0 ? "+" : ""}
                     {formatQuantity(m.quantity, unit)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {/* **THE PAGE THAT OWNS THE MONEY HAS TO SHOW IT.** Slice 1
+                        stored a cost on every receipt and issue and this table
+                        listed neither, so a $340 delivery landed and the item
+                        page never mentioned it. Found by driving it. */}
+                    {m.costCents === null ? "—" : formatCents(m.costCents)}
                   </TableCell>
                 </TableRow>
               ))}

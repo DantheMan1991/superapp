@@ -34,6 +34,37 @@ died on days 22 and 27 rather than merely that eight died.
 It has no opinion about which kinds are deaths. That classification is
 `livestock`'s and stays there, as it has since its slice 0.
 
+### 2026-08-19 — "Where do I add livestock, both pages or one?" (`claude/animals-live-in-livestock`)
+
+The founder's question after driving slice 1, and it is a fair one that neither
+screen answered: *"the inventory versus the livestock page. Where do i add
+livestock. to both? just one?"*
+
+**The answer is Livestock, always** — `Start a lot` creates the stock line, the
+batch and the biology in one transaction. But an item called "Broiler chicks"
+sitting in this list beside the feed reads as a duplicate of the Livestock page,
+and nothing anywhere said otherwise.
+
+**Both pages are right and the model is not the problem.** Market animals ARE
+inventory — head is a unit of measure, a pen is a batch — and that is precisely
+what makes cost per pen fall out of the same ledger as the feed bought for it.
+Inventory shows the STOCK LINE ("Broiler chicks · 407 head"); Livestock shows
+the BATCHES with their biology. One thing, two questions.
+
+- **The row now says so.** A livestock-kind item carries a *managed in
+  Livestock* link, gated on the pack actually being switched on — pointing at a
+  module a tenant does not have is the mistake `land` made with its parcel
+  finder the day before.
+- **The trap is closed.** Picking "Livestock" as a kind in *Add an item*
+  produced an item with no batch and no biology: a half-thing that shows up in
+  the Livestock form's "Counted as" picker and nowhere else, looking like a
+  fault. Choosing it now explains that animals are started in Livestock, links
+  there, and disables the submit rather than letting somebody build the broken
+  half.
+
+**The pattern, third time this week:** the model was right, the screen was
+silent, and a person had to ask. Types and tests cannot see the difference.
+
 ### 2026-08-19 — The page that owns the money never mentioned it (`claude/the-page-that-never-mentions-money`)
 
 Slice 1 driven on production, and the loop closed on the first try: a

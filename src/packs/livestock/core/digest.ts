@@ -52,6 +52,25 @@ export interface AdvisorLot {
    */
   losses: { on: string; ageDays: number | null; head: number }[];
   lastCheckedOn: string | null;
+  /**
+   * What has been fed into this lot, and HOW THAT IS KNOWN.
+   *
+   * Null when nothing has been fed on record. The provenance travels with the
+   * number because the two are different claims: a bag issued to this pen by name
+   * is measured, and a share of a bin serving fifteen pens is an estimate spread
+   * by head × days. An advisor told only "$412" would speak about both with the
+   * same confidence, and the second one does not deserve it.
+   *
+   * **THERE IS NO FCR HERE, AND THE PROMPT SAYS WHY.** Feed per pound of gain
+   * needs weights and nothing has been weighed; a model handed feed and head
+   * would otherwise be one plausible step from inventing the number the whole
+   * enterprise is judged on.
+   */
+  feed: {
+    cents: number;
+    centsPerHead: number | null;
+    provenance: string;
+  } | null;
 }
 
 export interface AdvisorZone {
@@ -147,6 +166,18 @@ export function formatSnapshot(snapshot: FarmSnapshot): string {
         lot.lastCheckedOn ? `last checked ${lot.lastCheckedOn}` : "never checked",
       ].filter((b): b is string => Boolean(b));
       lines.push(`- ${bits.join(" · ")}`);
+      if (lot.feed) {
+        // Money without a symbol, because the tenant's currency is not this
+        // file's business and the advisor is told the farm's own units of
+        // account nowhere else either.
+        const perHead =
+          lot.feed.centsPerHead === null
+            ? null
+            : `${(lot.feed.centsPerHead / 100).toFixed(2)} a head`;
+        lines.push(
+          `  - feed: ${(lot.feed.cents / 100).toFixed(2)}${perHead ? `, ${perHead}` : ""} (${lot.feed.provenance})`,
+        );
+      }
       if (lot.losses.length > 0) {
         const when = lot.losses
           .map(
@@ -160,6 +191,12 @@ export function formatSnapshot(snapshot: FarmSnapshot): string {
     if (snapshot.lotsOmitted > 0) {
       lines.push(
         `- …and ${snapshot.lotsOmitted} more lots NOT listed here. Say so if the question depends on them.`,
+      );
+    }
+    if (snapshot.lots.some((lot) => lot.feed)) {
+      lines.push(
+        "",
+        "Feed above is COST, not conversion. **Nothing on this farm has been weighed**, so feed conversion ratio and feed per pound of gain cannot be computed — say that plainly rather than estimating one. `measured` means issued to that lot by name; `allocated` means a share of a shared feeder spread by head × days, which is an estimate and should be spoken about as one.",
       );
     }
   }

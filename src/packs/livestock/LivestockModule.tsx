@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Beef, ClipboardCheck, Sparkles } from "lucide-react";
+import { Beef, ClipboardCheck, Scale, Sparkles } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
@@ -100,6 +100,15 @@ export async function LivestockModule({
               <Link href={`${BASE}/log`}>
                 <ClipboardCheck className="mr-2 h-4 w-4" />
                 Daily round
+              </Link>
+            </Button>
+            {/* Slice 2. Not daily — feed is looked at when a batch is being
+                judged against the last one, which is why it sits after the
+                round rather than beside it. */}
+            <Button asChild variant="outline">
+              <Link href={`${BASE}/feed`}>
+                <Scale className="mr-2 h-4 w-4" />
+                Feed
               </Link>
             </Button>
             {/* The other half of the wedge, and the only thing on this page

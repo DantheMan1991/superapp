@@ -13,6 +13,7 @@ import {
   feedReport,
   listFeedGroups,
   lastTreatmentOfProduct,
+  listTreatmentsForLot,
   listWeightsForLot,
   toWeighIns,
   withdrawalByLot,
@@ -28,7 +29,9 @@ import {
   placeHead,
   recordDailyCheck,
   recordFeedDraw,
+  deleteTreatment,
   recordTreatment,
+  updateTreatment,
   deleteWeight,
   recordWeight,
   removeHead,
@@ -1744,6 +1747,173 @@ d("livestock ops", () => {
           }),
         ),
       ).rejects.toThrow(/where the withdrawal period came from/);
+    });
+
+    it("CORRECTS A PERIOD IN PLACE, and the clock moves with it", async () => {
+      // 10 days typed where the label said 21. No such record ever existed, so
+      // there is nothing to compensate for.
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "FIXWD-1",
+          species: "cattle",
+        }),
+      );
+      const wrong = await asOwner((tx) =>
+        recordTreatment(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          treatedOn: "2026-08-01",
+          product: "Penicillin G",
+          route: "injection",
+          meatWithdrawalDays: 10,
+        }),
+      );
+      const before = await asOwner((tx) =>
+        withdrawalByLot(tx, tenantId, [lot.lot.id], "2026-08-15"),
+      );
+      expect(before.get(lot.lot.id)!.meat.state).toBe("clear");
+
+      await asOwner((tx) =>
+        updateTreatment(tx, ctx(), wrong.id, { meatWithdrawalDays: 21 }),
+      );
+      const after = await asOwner((tx) =>
+        withdrawalByLot(tx, tenantId, [lot.lot.id], "2026-08-15"),
+      );
+      // A lot that read as clear on the 15th is now under until the 22nd.
+      expect(after.get(lot.lot.id)!.meat.state).toBe("under");
+      expect(after.get(lot.lot.id)!.meat.clearsOn).toBe("2026-08-22");
+      // One row, not two.
+      const rows = await asOwner((tx) =>
+        listTreatmentsForLot(tx, tenantId, lot.lot.id),
+      );
+      expect(rows).toHaveLength(1);
+    });
+
+    it("VALIDATES THE MERGED ROW, not the patch", async () => {
+      // Clearing the only period a treatment had, while its source still says
+      // "off the label", produces exactly the row that reads as clear to
+      // somebody about to load a trailer.
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "FIXWD-2",
+          species: "cattle",
+        }),
+      );
+      const row = await asOwner((tx) =>
+        recordTreatment(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          treatedOn: "2026-08-01",
+          product: "Penicillin G",
+          route: "injection",
+          meatWithdrawalDays: 21,
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          updateTreatment(tx, ctx(), row.id, { meatWithdrawalDays: null }),
+        ),
+      ).rejects.toThrow(/give a meat or milk withdrawal/);
+
+      // ...but the same clearing IS allowed when the source says nobody looked,
+      // because that state blocks rather than clears.
+      await expect(
+        asOwner((tx) =>
+          updateTreatment(tx, ctx(), row.id, {
+            meatWithdrawalDays: null,
+            withdrawalSource: "none_stated",
+          }),
+        ),
+      ).resolves.toBeTruthy();
+      const after = await asOwner((tx) =>
+        withdrawalByLot(tx, tenantId, [lot.lot.id], "2027-01-01"),
+      );
+      expect(after.get(lot.lot.id)!.meat.state).toBe("unknown");
+    });
+
+    it("REMOVES THE RECORD AND LEAVES THE STOCK ISSUE STANDING", async () => {
+      // The medicine really did leave the shelf. Unwriting that would rewrite
+      // inventory's history, which is the rule a movement exists under.
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "FIXWD-3",
+          species: "cattle",
+        }),
+      );
+      const treatment = await asOwner((tx) =>
+        recordTreatment(tx, ctx(), {
+          livestockLotId: lot.lot.id,
+          treatedOn: "2026-08-01",
+          product: "Penicillin G",
+          route: "injection",
+          meatWithdrawalDays: 21,
+          fromStock: { itemId: medicineId, quantity: 4 },
+        }),
+      );
+      const costBefore = await asOwner((tx) =>
+        consumedCostByLot(tx, tenantId, [lot.inventoryLotId]),
+      );
+      expect(costBefore.get(lot.inventoryLotId)).toBe(800);
+
+      const removed = await asOwner((tx) =>
+        deleteTreatment(tx, ctx(), treatment.id),
+      );
+      // The caller is told there is a loose end, so the screen can say so.
+      expect(removed.inventoryMovementId).not.toBeNull();
+
+      // The record is gone and the clock with it...
+      expect(
+        await asOwner((tx) => listTreatmentsForLot(tx, tenantId, lot.lot.id)),
+      ).toHaveLength(0);
+      const wd = await asOwner((tx) =>
+        withdrawalByLot(tx, tenantId, [lot.lot.id], "2026-08-05"),
+      );
+      expect(wd.get(lot.lot.id)).toBeUndefined();
+      // ...and the cost is still on the pen.
+      const costAfter = await asOwner((tx) =>
+        consumedCostByLot(tx, tenantId, [lot.inventoryLotId]),
+      );
+      expect(costAfter.get(lot.inventoryLotId)).toBe(800);
+    });
+
+    it("refuses to correct or remove a treatment that is not this tenant's", async () => {
+      const nowhere = "00000000-0000-0000-0000-000000000000";
+      await expect(
+        asOwner((tx) =>
+          updateTreatment(tx, ctx(), nowhere, { meatWithdrawalDays: 1 }),
+        ),
+      ).rejects.toThrow(/not found/);
+      await expect(
+        asOwner((tx) => deleteTreatment(tx, ctx(), nowhere)),
+      ).rejects.toThrow(/not found/);
+    });
+
+    it("STAFF may correct and remove — same hands, same day", async () => {
+      const lot = await asOwner((tx) =>
+        createLivestockLot(tx, ctx(), {
+          itemId: tItemId,
+          code: "FIXWD-4",
+          species: "cattle",
+        }),
+      );
+      const row = await asOwner((tx) =>
+        recordTreatment(tx, staffCtx(), {
+          livestockLotId: lot.lot.id,
+          treatedOn: "2026-08-01",
+          product: "Penicillin G",
+          route: "injection",
+          meatWithdrawalDays: 10,
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          updateTreatment(tx, staffCtx(), row.id, { meatWithdrawalDays: 21 }),
+        ),
+      ).resolves.toBeTruthy();
+      await expect(
+        asOwner((tx) => deleteTreatment(tx, staffCtx(), row.id)),
+      ).resolves.toBeTruthy();
     });
 
     it("STAFF may treat — the person with the syringe is the one who knows", async () => {

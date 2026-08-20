@@ -959,6 +959,161 @@ export async function recordTreatment(
   return rows[0];
 }
 
+/**
+ * Correct a treatment.
+ *
+ * **A TREATMENT RECORD IS AN OBSERVATION, SO THIS EDITS IN PLACE** — the same
+ * call `updateWeight` makes and the same one `land.deleteOccupancy` made before
+ * it: if somebody typed 10 days where the label said 21, no such record ever
+ * existed and there is nothing to compensate for. Correcting a record is not
+ * rewriting history.
+ *
+ * **AND IT IS THE HIGHEST-STAKES EDIT IN THE APP.** A wrong feed figure costs a
+ * bad decision; a wrong withdrawal clock is a legal record, and the row somebody
+ * reads before loading a trailer. The validation below therefore runs against
+ * the MERGED row rather than the patch — clearing the only period a treatment
+ * had while leaving its source saying "off the label" would produce exactly the
+ * row that reads as clear.
+ *
+ * **The stock link is not editable here.** The medicine really did leave the
+ * shelf; that is an `inventory` event and its correction is an adjustment in
+ * that pack, not a column this one may quietly rewrite.
+ */
+export async function updateTreatment(
+  tx: Tx,
+  ctx: LivestockCtx,
+  id: string,
+  input: {
+    treatedOn?: string;
+    product?: string;
+    dose?: string;
+    route?: string;
+    headTreated?: number | null;
+    meatWithdrawalDays?: number | null;
+    milkWithdrawalDays?: number | null;
+    withdrawalSource?: string;
+    administeredBy?: string;
+    notes?: string;
+  },
+): Promise<LivestockTreatment> {
+  requireWrite(ctx, "member");
+  const existing = await tx.query.livestockTreatments.findFirst({
+    where: and(
+      eq(schema.livestockTreatments.tenantId, ctx.tenantId),
+      eq(schema.livestockTreatments.id, id),
+    ),
+  });
+  if (!existing) {
+    throw new LivestockError("NOT_FOUND", `treatment ${id} not found`);
+  }
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.treatedOn !== undefined) patch.treatedOn = input.treatedOn;
+  if (input.dose !== undefined) patch.dose = input.dose.trim();
+  if (input.administeredBy !== undefined) {
+    patch.administeredBy = input.administeredBy.trim();
+  }
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.headTreated !== undefined) patch.headTreated = input.headTreated;
+  if (input.product !== undefined) {
+    const product = input.product.trim();
+    if (!product) {
+      throw new LivestockError("INVALID_TREATMENT", "say what was given");
+    }
+    patch.product = product;
+  }
+  if (input.route !== undefined) {
+    const route = input.route.trim().toLowerCase();
+    if (!isValidSlug(route)) {
+      throw new LivestockError("INVALID_TREATMENT", `invalid route: ${input.route}`);
+    }
+    patch.route = route;
+  }
+  if (input.withdrawalSource !== undefined) {
+    if (
+      !WITHDRAWAL_SOURCES.includes(
+        input.withdrawalSource as (typeof WITHDRAWAL_SOURCES)[number],
+      )
+    ) {
+      throw new LivestockError(
+        "INVALID_TREATMENT",
+        "say where the withdrawal period came from",
+      );
+    }
+    patch.withdrawalSource = input.withdrawalSource;
+  }
+  if (input.meatWithdrawalDays !== undefined) {
+    patch.meatWithdrawalDays = input.meatWithdrawalDays;
+  }
+  if (input.milkWithdrawalDays !== undefined) {
+    patch.milkWithdrawalDays = input.milkWithdrawalDays;
+  }
+
+  // THE MERGED ROW, not the patch. See the note above.
+  const source = (patch.withdrawalSource ?? existing.withdrawalSource) as string;
+  const meat =
+    input.meatWithdrawalDays !== undefined
+      ? input.meatWithdrawalDays
+      : existing.meatWithdrawalDays;
+  const milk =
+    input.milkWithdrawalDays !== undefined
+      ? input.milkWithdrawalDays
+      : existing.milkWithdrawalDays;
+  if (source !== "none_stated" && meat === null && milk === null) {
+    throw new LivestockError(
+      "INVALID_TREATMENT",
+      "give a meat or milk withdrawal, or say the period was not looked up",
+    );
+  }
+
+  const rows = await tx
+    .update(schema.livestockTreatments)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.livestockTreatments.tenantId, ctx.tenantId),
+        eq(schema.livestockTreatments.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Remove a treatment entered by mistake — a duplicate, or one recorded against
+ * the wrong pen.
+ *
+ * **THE STOCK ISSUE IS NOT REMOVED WITH IT, AND THAT IS THE POINT.** The
+ * medicine really did leave the shelf: that is an EVENT in `inventory`'s ledger,
+ * and unwriting it would rewrite what happened — the exact rule that makes a
+ * movement correctable only by another movement. So the treatment record goes,
+ * the cost stays on the pen, and the caller has to say so on screen rather than
+ * letting somebody discover it later.
+ *
+ * Returns the row, including its movement id, so the caller knows whether there
+ * is a loose end to mention.
+ */
+export async function deleteTreatment(
+  tx: Tx,
+  ctx: LivestockCtx,
+  id: string,
+): Promise<LivestockTreatment> {
+  requireWrite(ctx, "member");
+  const deleted = await tx
+    .delete(schema.livestockTreatments)
+    .where(
+      and(
+        eq(schema.livestockTreatments.tenantId, ctx.tenantId),
+        eq(schema.livestockTreatments.id, id),
+      ),
+    )
+    .returning();
+  if (deleted.length === 0) {
+    throw new LivestockError("NOT_FOUND", `treatment ${id} not found`);
+  }
+  return deleted[0];
+}
+
 /** One lot's treatments, newest first — the history on its detail page. */
 export async function listTreatmentsForLot(
   tx: Tx,

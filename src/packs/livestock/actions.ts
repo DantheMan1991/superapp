@@ -22,6 +22,7 @@ import {
   closeFeedGroup,
   createFeedGroup,
   createLivestockLot,
+  deleteTreatment,
   deleteWeight,
   endFeedGroupMembership,
   farmSnapshot,
@@ -36,6 +37,7 @@ import {
   removeHead,
   retireIdentifier,
   splitLivestockLot,
+  updateTreatment,
   updateWeight,
   type LivestockCtx,
 } from "./ops";
@@ -526,6 +528,124 @@ export async function recordTreatmentAction(input: unknown) {
       revalidatePath("/dashboard/m/inventory", "layout");
     }
     return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Correct a treatment.
+ *
+ * Same level as recording one, because it is the same act done twice — and
+ * because the person who typed 10 where the label said 21 is the person holding
+ * the bottle.
+ *
+ * **THE AUDIT ENTRY MATTERS MORE HERE THAN ANYWHERE ELSE IN THE APP.** A
+ * withdrawal clock is a legal record: "who changed that date, from what, and
+ * when" is a question that may one day be asked by an inspector rather than by
+ * the person who changed it. Both clocks and the source travel, before and
+ * after.
+ */
+export async function updateTreatmentAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const days = z.number().int().min(0).max(3650);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      treatedOn: requiredDate.optional(),
+      product: z.string().trim().min(1).max(200).optional(),
+      dose: z.string().max(200).optional(),
+      route: z.string().min(1).max(63).optional(),
+      headTreated: head.nullable().optional(),
+      meatWithdrawalDays: days.nullable().optional(),
+      milkWithdrawalDays: days.nullable().optional(),
+      withdrawalSource: z.enum(["label", "vet", "none_stated"]).optional(),
+      administeredBy: z.string().max(200).optional(),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  const { id, ...patch } = parsed.data;
+  try {
+    const { before, after } = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const before = await tx.query.livestockTreatments.findFirst({
+          where: and(
+            eq(schema.livestockTreatments.tenantId, ctx.tenant.id),
+            eq(schema.livestockTreatments.id, id),
+          ),
+        });
+        const after = await updateTreatment(tx, ctxOf(ctx), id, patch);
+        return { before, after };
+      },
+      { role: ctx.role },
+    );
+    const clocks = (t: typeof after) => ({
+      treatedOn: t.treatedOn,
+      product: t.product,
+      route: t.route,
+      meatWithdrawalDays: t.meatWithdrawalDays,
+      milkWithdrawalDays: t.milkWithdrawalDays,
+      withdrawalSource: t.withdrawalSource,
+    });
+    await logAudit({
+      action: "livestock.treatment.corrected",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_treatment",
+      targetId: id,
+      // Clocks and identifiers, never the notes.
+      meta: { was: before ? clocks(before) : null, now: clocks(after) },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Remove a treatment entered by mistake.
+ *
+ * **The stock issue is deliberately left standing** — the medicine really did
+ * leave the shelf, and that is `inventory`'s event to correct with an
+ * adjustment. The result says whether there was one, so the screen can tell
+ * somebody rather than letting them find out from a cost they cannot explain.
+ */
+export async function deleteTreatmentAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const removed = await withTenant(
+      ctx.tenant.id,
+      (tx) => deleteTreatment(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.treatment.removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: removed.livestockLotId,
+      meta: {
+        treatedOn: removed.treatedOn,
+        product: removed.product,
+        meatWithdrawalDays: removed.meatWithdrawalDays,
+        milkWithdrawalDays: removed.milkWithdrawalDays,
+        withdrawalSource: removed.withdrawalSource,
+        // Recorded because the movement OUTLIVES the treatment, and this is the
+        // only place that fact is written down.
+        keptMovementId: removed.inventoryMovementId,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, keptStockIssue: removed.inventoryMovementId !== null };
   } catch (err) {
     return toResult(err);
   }

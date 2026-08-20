@@ -1392,5 +1392,80 @@ d("land ops", () => {
       );
       expect(found?.name).toBe("N-Strip");
     });
+
+    it("returns the SMALLEST zone when they overlap, which is the specific answer", async () => {
+      // A strip inside a paddock is the ordinary overlap: both contain the
+      // point, and somebody standing on it means the strip. Returning the
+      // larger one would pre-fill the wrong paddock on the move dialog, which
+      // is worse than pre-filling nothing.
+      const parcel = await newParcel("Overlap Farm");
+      const whole = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "O-Whole" }),
+      );
+      const strip = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "O-Strip" }),
+      );
+      await asOwner((tx) =>
+        setZoneBoundary(tx, ownerCtx(), whole.id, {
+          type: "Polygon",
+          coordinates: [
+            [
+              [-97.5, 42.0],
+              [-97.4, 42.0],
+              [-97.4, 42.1],
+              [-97.5, 42.1],
+              [-97.5, 42.0],
+            ],
+          ],
+        }),
+      );
+      await asOwner((tx) =>
+        setZoneBoundary(tx, ownerCtx(), strip.id, {
+          type: "Polygon",
+          coordinates: [
+            [
+              [-97.47, 42.04],
+              [-97.46, 42.04],
+              [-97.46, 42.06],
+              [-97.47, 42.06],
+              [-97.47, 42.04],
+            ],
+          ],
+        }),
+      );
+
+      const found = await asOwner((tx) =>
+        zoneAtPoint(tx, tenantId, [-97.465, 42.05]),
+      );
+      expect(found?.name).toBe("O-Strip");
+
+      // And a point inside only the larger one still answers with it.
+      const outside = await asOwner((tx) =>
+        zoneAtPoint(tx, tenantId, [-97.42, 42.02]),
+      );
+      expect(outside?.name).toBe("O-Whole");
+    });
+
+    it("answers NULL off the mapped ground rather than guessing the nearest", async () => {
+      // "Not inside any paddock" is a fact the person can act on — trace the
+      // boundary. A nearest-match would quietly put animals on the wrong
+      // ground, and the rest clock is computed from that record.
+      const found = await asOwner((tx) => zoneAtPoint(tx, tenantId, [0, 0]));
+      expect(found).toBeNull();
+    });
+
+    it("ignores a zone with no boundary drawn", async () => {
+      // Most zones have none for most of this pack's life, and a zone without
+      // geometry must never match a point — it has no ground to be inside of.
+      const parcel = await newParcel("Unmapped Farm");
+      await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "U-Nothing" }),
+      );
+      const found = await asOwner((tx) =>
+        zoneAtPoint(tx, tenantId, [-97.465, 42.05]),
+      );
+      expect(found?.name).not.toBe("U-Nothing");
+    });
+
   });
 });

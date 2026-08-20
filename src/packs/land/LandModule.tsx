@@ -16,9 +16,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listParcels, zoneCountsByParcel } from "./ops";
+import { listParcels, mappedZoneCount, zoneCountsByParcel } from "./ops";
 import { TENURE_LABELS, isTenure } from "./vocabulary";
 import { PARCEL_SOURCES, parcelSourceFrom } from "./core/parcel-lookup";
+import { WhereAmIShortcut } from "./components/where-am-i";
 
 const BASE = "/dashboard/m/land";
 import {
@@ -51,21 +52,23 @@ export async function LandModule({
 }) {
   const showRetired = searchParams.retired === "1";
 
-  const { parcels, zoneCounts, labels, config } = await withTenant(
+  const { parcels, zoneCounts, mapped, labels, config } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [parcels, zoneCounts, pack] = await Promise.all([
+      const [parcels, zoneCounts, mapped, pack] = await Promise.all([
         listParcels(tx, ctx.tenant.id, {
           // Retired ground stays in the books forever but is noise in the list,
           // so it is opt-in rather than filtered out of existence.
           status: showRetired ? undefined : "active",
         }),
         zoneCountsByParcel(tx, ctx.tenant.id),
+        mappedZoneCount(tx, ctx.tenant.id),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
       ]);
       return {
         parcels,
         zoneCounts,
+        mapped,
         labels: pack.labels,
         config: pack.config,
       };
@@ -74,6 +77,8 @@ export async function LandModule({
   );
 
   const unit = areaUnitFrom(config);
+  /** No boundaries, no answer — see the button below. */
+  const hasGeometry = mapped > 0;
   /**
    * **THE BUTTON MUST FOLLOW THE PAGE, NOT THE CONFIG.** This was gated on a
    * PINNED source while `/land/find` itself falls back to letting the person
@@ -101,6 +106,14 @@ export async function LandModule({
         actions={
           isOwner ? (
             <div className="flex flex-wrap items-center gap-2">
+              {/* Only useful once something is mapped, and honest about it:
+                  offering it against a farm with no boundaries would answer
+                  "not inside any paddock" every time. */}
+              {hasGeometry && (
+                <WhereAmIShortcut
+                  zoneHref={(zoneId) => `${BASE}/zones/${zoneId}`}
+                />
+              )}
               {/* Only when a source covers this tenant. A button that leads to
                   a 404 is worse than no button. */}
               {hasParcelSource && (

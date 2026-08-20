@@ -286,6 +286,18 @@ scripts/               migrate, seed, create-app-role, probes
 
 - **Audit** — `logAudit()` for general sensitive actions; `logAuditInTx()` for
   financial mutations, so the mutation and its audit row commit together.
+  **Reading it back: `src/lib/audit-detail.ts`** turns `meta` into readable
+  pairs for `/admin/audit`, and diffs a `{ was, now }` correction down to the
+  fields that MOVED — `meat withdrawal days: 21 → 28`. It is deliberately
+  generic and defensive, because `meta` is jsonb written by 200+ call sites and
+  a malformed blob must not take down the page a superadmin uses to find out
+  what happened.
+  **There is a SECOND describer and it is not a duplicate.**
+  `modules/accounting/history/format.ts` → `describeAuditMeta` is a curated
+  whitelist producing prose for the CLIENT-facing record-history panel on an
+  invoice or a bill ("INV-1042 · 3 lines · 5 days before due"). Different
+  audience, different job: completeness wins on the superadmin page, polish wins
+  on the client one. Do not unify them into a key-value dump.
 - **Encryption** — `encryptSecret()` / `decryptSecret()`, AES-256-GCM, one key.
 - **Billing** — Stripe webhook plus a server→Stripe reconcile on billing page
   load, which covers missed events and local development.

@@ -282,6 +282,10 @@ const eslintConfig = defineConfig([
   },
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    // MapLibre's worker and its 480KB sibling chunk, copied verbatim from
+    // node_modules into public/ by scripts/copy-map-worker.ts. Vendor code we
+    // do not edit — linting it produced 1,081 warnings and no information.
+    "public/maplibre/**",
     // Default ignores of eslint-config-next:
     ".next/**",
     "out/**",

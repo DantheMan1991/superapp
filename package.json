@@ -27,7 +27,10 @@
     "mail:probe-grant": "tsx scripts/jmap-grant-probe.ts",
     "docs:extract-text": "tsx --conditions react-server scripts/extract-document-text.ts",
     "test": "vitest run",
-    "test:isolation": "vitest run tests/isolation"
+    "test:isolation": "vitest run tests/isolation",
+    "copy:map-worker": "tsx scripts/copy-map-worker.ts",
+    "prebuild": "tsx scripts/copy-map-worker.ts",
+    "predev": "tsx scripts/copy-map-worker.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",

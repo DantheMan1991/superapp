@@ -50,3 +50,7 @@ next-env.d.ts
 # copy it, and docs/security.md §5 defines it as "names and shapes, never values".
 # The broad .env* rules above catch it by accident, so opt it back in.
 !.env.example
+
+# MapLibre's worker + its sibling chunk, copied from node_modules by
+# scripts/copy-map-worker.ts on prebuild/predev. Generated, never edited.
+/public/maplibre/

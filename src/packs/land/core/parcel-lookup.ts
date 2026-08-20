@@ -54,6 +54,12 @@ export interface ParcelSource {
   situsField: string | null;
   /** The county's own acreage, which becomes the DECLARED figure. */
   areaField: string | null;
+  /**
+   * When the county's contribution was last refreshed. Null when the service
+   * does not say — and a service that does not say is one whose age nobody can
+   * report, which is worth knowing about it.
+   */
+  currencyField: string | null;
   attribution: string;
 }
 
@@ -76,6 +82,7 @@ export const OHIO_STATEWIDE: ParcelSource = {
   mailingField: "MailAddressAll",
   situsField: "SitusAddressAll",
   areaField: "LandArea",
+  currencyField: "CurrentTo",
   attribution: "Ohio statewide parcels (OGRIP)",
 };
 
@@ -297,4 +304,74 @@ export function suggestedParcelName(candidate: ParcelCandidate): string {
   const situs = candidate.situsAddress?.replace(/^0\s+/, "").trim();
   if (situs) return situs;
   return `Parcel ${candidate.parcelNumber}`;
+}
+
+// ------------------------------------------------------------- currency ---
+
+/**
+ * How old the records are, asked of the service itself.
+ *
+ * **THE SEARCH THAT FINDS FOUR OF YOUR FIVE PARCELS IS NOT BROKEN — IT IS
+ * OLD.** Ohio aggregates from 88 counties on its own cadence, and every Knox
+ * parcel in the statewide layer is a single snapshot: 41,757 rows, all dated
+ * 2023-05-16. A parcel split off its parent since then does not exist in the
+ * state's copy at all, and the parent still carries the previous owner's
+ * mailing address. Reported by the founder, whose own 19-acre split was
+ * invisible for exactly that reason.
+ *
+ * So the date is READ, never written down. The moment Ohio refreshes Knox, the
+ * message moves with it and nothing here needs changing — which is the only
+ * version of this worth building, since a hardcoded date would itself go stale
+ * and lie about staleness.
+ */
+export function buildCurrencyUrl(source: ParcelSource, region: string): string | null {
+  if (!source.currencyField) return null;
+  const statistics = [
+    { statisticType: "min", onStatisticField: source.currencyField, outStatisticFieldName: "oldest" },
+    { statisticType: "max", onStatisticField: source.currencyField, outStatisticFieldName: "newest" },
+  ];
+  const params = new URLSearchParams({
+    where: source.regionField
+      ? `${source.regionField}='${escapeSqlLiteral(region.trim())}'`
+      : "1=1",
+    outStatistics: JSON.stringify(statistics),
+    f: "json",
+  });
+  return `${source.url}/query?${params.toString()}`;
+}
+
+export interface RecordCurrency {
+  /** `YYYY-MM-DD`. */
+  oldest: string;
+  newest: string;
+  /** True when every row carries the same date — a single snapshot. */
+  uniform: boolean;
+}
+
+/** ArcGIS returns dates as epoch milliseconds, in JSON and in GeoJSON alike. */
+function asIsoDate(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value).toISOString().slice(0, 10);
+  }
+  // Some services hand back a formatted string. Take it only if it looks like
+  // a date, rather than showing somebody the word "null" in a sentence about
+  // how current their records are.
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+  return null;
+}
+
+export function currencyFrom(payload: unknown): RecordCurrency | null {
+  if (!payload || typeof payload !== "object") return null;
+  const features = (payload as Record<string, unknown>).features;
+  if (!Array.isArray(features) || features.length === 0) return null;
+  const attributes = (features[0] as Record<string, unknown>)?.attributes;
+  if (!attributes || typeof attributes !== "object") return null;
+
+  const stats = attributes as Record<string, unknown>;
+  const oldest = asIsoDate(stats.oldest);
+  const newest = asIsoDate(stats.newest);
+  if (!oldest || !newest) return null;
+  return { oldest, newest, uniform: oldest === newest };
 }

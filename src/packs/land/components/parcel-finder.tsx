@@ -71,6 +71,11 @@ export function ParcelFinder({
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [attribution, setAttribution] = useState("");
+  const [currency, setCurrency] = useState<{
+    oldest: string;
+    newest: string;
+    uniform: boolean;
+  } | null>(null);
   const [searching, startSearch] = useTransition();
   const [importing, startImport] = useTransition();
 
@@ -83,6 +88,7 @@ export function ParcelFinder({
       }
       setCandidates(result.candidates ?? []);
       setAttribution(result.attribution ?? "");
+      setCurrency(result.currency ?? null);
       // Nothing pre-ticked. Every row here is a guess about what somebody owns,
       // and a pre-ticked guess is how land nobody owns ends up in the books.
       setChosen(new Set());
@@ -120,6 +126,32 @@ export function ParcelFinder({
       router.refresh();
     });
   }
+
+
+  /**
+   * **A SEARCH THAT FINDS FOUR OF YOUR FIVE PARCELS IS NOT BROKEN — IT IS OLD.**
+   * Every Knox County parcel in Ohio's statewide layer is one snapshot from
+   * 2023-05-16, so a parcel split off its parent since then is not in the state
+   * copy at all and the parent still carries the previous owner's address. The
+   * founder's own 19-acre split was invisible for exactly that reason, and
+   * without this line it reads as a bug in the search.
+   *
+   * The date is READ from the service on every search, so it moves the moment
+   * the county's contribution is refreshed.
+   */
+  const currencyNote = currency ? (
+    <p className="text-xs text-muted-foreground">
+      {source?.regionLabel ?? "County"} records here are as of{" "}
+      <span className="font-medium">
+        {currency.uniform
+          ? currency.newest
+          : `${currency.oldest} to ${currency.newest}`}
+      </span>
+      . Anything split, sold or re-parcelled since then will be missing, or will
+      still show its previous owner — search the parent parcel number and adjust
+      the boundary, or trace it on the map.
+    </p>
+  ) : null;
 
   const chosenAcres = (candidates ?? [])
     .filter((c) => chosen.has(c.parcelNumber))
@@ -208,11 +240,15 @@ export function ParcelFinder({
       </div>
 
       {candidates !== null && candidates.length === 0 && (
-        <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-          Nothing matched. Check the {(source?.regionLabel ?? "county").toLowerCase()}, and try fewer
-          words — the county stores addresses in its own way and a partial one
-          matches more.
-        </p>
+        <div className="space-y-3 rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+          <p>
+            Nothing matched. Check the{" "}
+            {(source?.regionLabel ?? "county").toLowerCase()}, and try fewer
+            words — the county stores addresses in its own way and a partial one
+            matches more.
+          </p>
+          {currencyNote}
+        </div>
       )}
 
       {candidates !== null && candidates.length > 0 && (
@@ -288,6 +324,7 @@ export function ParcelFinder({
           {attribution && (
             <p className="text-xs text-muted-foreground">Source: {attribution}</p>
           )}
+          {currencyNote}
           <p className="text-xs text-muted-foreground">
             Tick only the ground that is yours. This searches by where the tax
             bill goes, which groups a holding well and is not proof of ownership

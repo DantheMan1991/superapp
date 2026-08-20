@@ -51,6 +51,45 @@ examples exist.
 
 ## Build log
 
+### 2026-08-19 — A search that finds four of your five parcels is not broken, it is old (`claude/how-old-is-this-record`)
+
+The founder searched his tax mailing address and got four parcels back. The
+fifth — 19 acres on Paige Rd, on his screen in the auditor's own record — did
+not appear.
+
+**It is not in Ohio's data at all.** The statewide layer holds only its parent,
+`4900583000`, at 50.27 acres, still carrying the PREVIOUS owner's mailing
+address in Amelia. His `49-00583.001` is a split off that parent, and the `.001`
+suffix is exactly how a Knox split is numbered. It happened after the state's
+snapshot.
+
+**And the snapshot is a single day.** Asked for the oldest and newest record
+dates across the county: 41,757 Knox parcels, `oldest: 2023-05-16`,
+`newest: 2023-05-16`. Ohio aggregates from 88 counties on its own cadence and
+Knox's last contribution was that day. Franklin is 2023-09-26; Wayne is
+2023-07-28. **Every county is its own snapshot with its own age.**
+
+- **The finder now says so**, on the results and — more importantly — on the
+  empty state, because the moment somebody most needs to know the data is three
+  years old is when their parcel is not in it.
+- **The date is READ, never written down.** `CurrentTo` is queried per county on
+  every search, so the message moves the moment Ohio refreshes Knox and nothing
+  here needs changing. A hardcoded date would itself go stale and then lie about
+  staleness.
+- **Asked as a separate request from the search**, deliberately: a search that
+  returns nothing has no rows to read a date off, and that is precisely the case
+  the line exists for. Cached for a day.
+- **It returns null rather than throwing.** A footnote must never be the reason
+  a page fails, nor show the word "null" in a sentence about how current
+  somebody's records are.
+- The message also says what to do: search the parent parcel number and adjust
+  the boundary, or trace it on the map.
+
+**The general lesson, and it outlives this pack:** when a feature reads somebody
+else's data, its age is part of the answer. Without the date, stale source data
+is indistinguishable from a broken search — and the person debugs the wrong
+thing, which is exactly what happened here.
+
 ### 2026-08-19 — Slice 2a.2: the field answers the question (`claude/which-paddock-am-i-in`)
 
 The read the whole geometry stack was ranked around. The Land design put
@@ -846,6 +885,10 @@ rented ground, and retrofitting it means rewriting the report.
   production against real Knox County records: nine parcels found, one imported,
   its boundary measuring within 0.003% of the county's figure. It found the
   missing entry point, now fixed.
+- **Ohio's parcel data is a per-county snapshot, and Knox's is from
+  2023-05-16.** Anything split or sold since is missing or shows its previous
+  owner. The finder reports the date; it cannot fix it. Regrid, the paid route,
+  refreshes far more often and is the answer if this bites across clients.
 - **Ohio only.** `PARCEL_SOURCES` has one entry. Every other state needs either
   its own statewide service added to the registry or the paid nationwide route
   (Regrid, which has an owner-name search Ohio's data cannot offer).

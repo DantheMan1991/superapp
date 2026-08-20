@@ -35,6 +35,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   check,
   date,
   foreignKey,
@@ -282,6 +283,39 @@ export const inventoryMovements = pgTable(
      */
     movementKind: text("movement_kind").notNull(),
     occurredOn: date("occurred_on").notNull(),
+    /**
+     * **WHAT THIS MOVEMENT COST, AS A TOTAL — never a rate.**
+     *
+     * A delivery is "$340 for 12 bags", and that is the fact. A unit cost is
+     * derived from it, which means storing one instead would bake a division
+     * and its rounding into the record rather than into the report.
+     *
+     * Nullable, and null is ordinary: a transfer between freezers, a count
+     * adjustment and every head event `livestock` writes carry no money at all.
+     * Integer cents, the house convention.
+     *
+     * **THIS IS COST ACCUMULATION, NOT THE BOOKS.** No journal line is written
+     * from this column in this slice. Financial presentation — inventory as an
+     * asset, COGS at sale, versus inputs expensed when paid — is basis-dependent
+     * and derived at read time through the lens ADR 0007 already established.
+     * Two ledgers that must agree forever is the bug class that ADR exists to
+     * refuse.
+     */
+    costCents: bigint("cost_cents", { mode: "number" }),
+    /**
+     * **WHICH LOT ATE IT.** The join that closes the livestock costing loop.
+     *
+     * `lot_id` above says where the quantity came FROM — a delivery of feed.
+     * This says what consumed it — a pen of broilers. Both are inventory lots,
+     * because a pen IS one: the design's "the LOT is the cost object, not the
+     * item" is what makes "what did this pen cost" a query rather than a
+     * feature.
+     *
+     * Null for anything not consumed by a lot: feed thrown away, stock sold,
+     * a transfer. RESTRICT rather than CASCADE — deleting a pen must not
+     * silently erase the record of what was fed to it.
+     */
+    issuedToLotId: uuid("issued_to_lot_id"),
     /** Which feature wrote it. `livestock` will pass its own; not a foreign key. */
     extensionSlug: text("extension_slug").notNull().default("inventory"),
     notes: text("notes").notNull().default(""),
@@ -303,6 +337,16 @@ export const inventoryMovements = pgTable(
       t.tenantId,
       t.locationAssetId,
     ),
+    // "What did this pen cost" reads this way round.
+    index("inventory_movements_tenant_consumer_idx").on(
+      t.tenantId,
+      t.issuedToLotId,
+    ),
+    foreignKey({
+      name: "inventory_movements_consumer_fk",
+      columns: [t.tenantId, t.issuedToLotId],
+      foreignColumns: [inventoryLots.tenantId, inventoryLots.id],
+    }),
     foreignKey({
       name: "inventory_movements_item_fk",
       columns: [t.tenantId, t.itemId],
@@ -320,6 +364,12 @@ export const inventoryMovements = pgTable(
       foreignColumns: [assets.tenantId, assets.id],
     }),
     check("inventory_movements_quantity_nonzero", sql`${t.quantity} <> 0`),
+    // Money paid is never negative. A credit note is its own movement, not a
+    // receipt that owes you something.
+    check(
+      "inventory_movements_cost_not_negative",
+      sql`${t.costCents} is null or ${t.costCents} >= 0`,
+    ),
     check(
       "inventory_movements_kind_format",
       sql`${t.movementKind} ~ '^[a-z][a-z0-9_]{0,62}$'`,

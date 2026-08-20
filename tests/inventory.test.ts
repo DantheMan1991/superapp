@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  averageCostRate,
+  costPerUnit,
+  issueCostCents,
+  lotCost,
+} from "../src/packs/inventory/core/costing";
+import {
   UnitError,
   convert,
   formatQuantity,
@@ -301,5 +307,109 @@ describe("vocabulary", () => {
     // migration — and the UI must not render a raw slug when it does.
     expect(movementKindLabel("receipt")).toBe("Received");
     expect(movementKindLabel("weighed_out")).toBe("Weighed out");
+  });
+});
+
+/**
+ * Costing — layer two of three, and the one that closes the livestock loop.
+ *
+ * The tests that matter here are the ones where a defensible implementation is
+ * quietly wrong: an average that folds its own issues back in, a cost that
+ * moves under a pen after the fact, and a zero that reads as "free".
+ */
+describe("averageCostRate", () => {
+  const receipt = (quantity: number, costCents: number | null) => ({
+    quantity,
+    costCents,
+    movementKind: "receipt",
+  });
+
+  it("is cents per stocking unit across everything received", () => {
+    // 12 bags at 50 lb = 600 lb for $340. 34000 / 600 cents per lb.
+    expect(averageCostRate([receipt(600, 34_000)])).toBeCloseTo(56.6667, 3);
+  });
+
+  it("does NOT fold issues back in, which would be circular", () => {
+    // An issue's own cost was derived from this average. Counting it again
+    // would make the rate depend on how much had been used, which is nonsense.
+    const rate = averageCostRate([
+      receipt(600, 34_000),
+      { quantity: -200, costCents: 11_333, movementKind: "issue" },
+    ]);
+    expect(rate).toBeCloseTo(56.6667, 3);
+  });
+
+  it("ignores stock that arrived with no price", () => {
+    // Raised stock has no purchase basis at all, and a delivery whose invoice
+    // has not arrived has none yet. Treating either as free would drag the
+    // average down and quietly understate every pen.
+    expect(averageCostRate([receipt(600, 34_000), receipt(400, null)])).toBeCloseTo(
+      56.6667,
+      3,
+    );
+  });
+
+  it("is null when nothing priced has ever arrived", () => {
+    // Not zero. "Free" and "not known" are different, and only one of them
+    // should ever reach a screen.
+    expect(averageCostRate([])).toBeNull();
+    expect(averageCostRate([receipt(600, null)])).toBeNull();
+  });
+});
+
+describe("issueCostCents", () => {
+  it("rounds once, at the moment it is stored", () => {
+    expect(issueCostCents(56.6667, 200)).toBe(11_333);
+  });
+
+  it("costs an issue the same whichever direction the quantity is signed", () => {
+    // The ledger stores issues negative; the cost of using 200 lb does not
+    // depend on that convention.
+    expect(issueCostCents(56.6667, -200)).toBe(issueCostCents(56.6667, 200));
+  });
+
+  it("has no cost to stamp when nothing priced has arrived", () => {
+    expect(issueCostCents(null, 200)).toBeNull();
+  });
+
+  it("leaves a remainder that does not compound", () => {
+    // 100 cents over 3 units, issued one at a time, sums to 99. That is
+    // ordinary average costing — the point is that it is one cent, not one
+    // cent per issue forever.
+    const rate = averageCostRate([{ quantity: 3, costCents: 100, movementKind: "receipt" }]);
+    const pieces = [1, 1, 1].map((q) => issueCostCents(rate, q) ?? 0);
+    expect(pieces).toEqual([33, 33, 33]);
+    expect(pieces.reduce((a, b) => a + b, 0)).toBe(99);
+  });
+});
+
+describe("lotCost", () => {
+  it("keeps what a batch cost to buy apart from what was fed into it", () => {
+    // A pen has both — the chicks and their feed — and adding them into one
+    // number would answer neither question.
+    const own = [{ quantity: 210, costCents: 39_000, movementKind: "receipt" }];
+    const eaten = [
+      { quantity: -200, costCents: 11_333, movementKind: "issue" },
+      { quantity: -150, costCents: 8_500, movementKind: "issue" },
+    ];
+    expect(lotCost(own, eaten)).toEqual({
+      purchasedCents: 39_000,
+      consumedCents: 19_833,
+    });
+  });
+
+  it("counts an unpriced issue as nothing rather than refusing to total", () => {
+    expect(
+      lotCost([], [{ quantity: -10, costCents: null, movementKind: "issue" }]),
+    ).toEqual({ purchasedCents: 0, consumedCents: 0 });
+  });
+});
+
+describe("costPerUnit", () => {
+  it("divides, and refuses to divide by nothing", () => {
+    expect(costPerUnit(19_833, 200)).toBe(99);
+    // A pen showing $0.00 a bird because the count is zero reads as "free",
+    // which is the opposite of "not known yet".
+    expect(costPerUnit(19_833, 0)).toBeNull();
   });
 });

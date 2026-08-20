@@ -142,6 +142,29 @@ What it **does** break:
   without a human seeing it first is true by construction here.
 - Full build record in [livestock.md](livestock.md).
 
+### 2026-08-19 — Inventory slice 1: the first money on the farm (`claude/feed-in-feed-out`)
+
+- **The profile's thesis stops being a sentence.** *Every farm activity posts a
+  cost to a cost object* has been the argument for this whole build, and until
+  today nothing on the farm cost anything: beautiful ground, counted birds, and
+  no money anywhere. Feed in with a price, feed out to a pen, and "what did this
+  pen cost" became a query.
+- **Two columns did it.** `cost_cents` on the movement and `issued_to_lot_id` —
+  which lot ate it. The second is the whole loop: a pen of broilers charged for
+  a delivery of feed that is a different item entirely, joined by the lot that
+  the design named the cost object three months ago.
+- **Cost is stamped at issue, never derived later**, or a later delivery would
+  rewrite what an earlier batch cost and every FCR comparison would be
+  meaningless. This is the same class of decision as `land`'s "rest is what
+  happened, not what is planned".
+- **Layer two of three, and the third stays out.** No posting to 1300 or 5000
+  in this slice — presentation is basis-dependent and derived at read time per
+  ADR 0007. Cost accumulation is always on; how it appears in the books is not
+  this slice's business.
+- **`livestock` slice 2 (feed + FCR) is unblocked**, which the design calls the
+  broiler enterprise's verdict.
+- Full build record in [inventory.md](inventory.md).
+
 ### 2026-08-19 — Land 2a.1b: ask the county, not the farmer (`claude/find-my-parcels`)
 
 - **The founder's original ask, answered three slices late**, and the delay is
@@ -532,7 +555,7 @@ own words condensed, not reinterpreted.
 | Gardens/crops | `crops` pack | **yes** | **done** — [category design](#category-design--crops--garden-brainstormed-2026-08-13) |
 | Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
 | Baking | `production` pack — shared run, separate template | no | **done** — same design |
-| Retail | `inventory` (**slice 0 built**, [inventory.md](inventory.md)) + `retail` packs | no | **done** — [inventory](#category-design--inventory-brainstormed-2026-08-13) · [retail](#category-design--retail-brainstormed-2026-08-13) |
+| Retail | `inventory` (**slices 0–1 built**, [inventory.md](inventory.md)) + `retail` packs | no | **done** — [inventory](#category-design--inventory-brainstormed-2026-08-13) · [retail](#category-design--retail-brainstormed-2026-08-13) |
 | Marketing | core CRM + email; thin pack at most | no | first pass |
 | Accounting | **core module, already built** — seed + config | — | first pass |
 | Communication | **core email + CRM, already built** | — | not yet |

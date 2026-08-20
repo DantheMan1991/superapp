@@ -19,10 +19,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  consumedByLot,
+  consumedCostByLot,
   getLot as getInventoryLot,
   listMovements,
   movementKindsForLots,
 } from "@/packs/inventory/ops";
+import { costPerUnit } from "@/packs/inventory/core/costing";
+import { formatCents } from "@/lib/money";
 import { movementKindLabel, slugLabel } from "@/packs/inventory/vocabulary";
 import {
   currentZoneForOccupants,
@@ -98,6 +102,8 @@ export default async function LivestockLotPage({
         movements,
         entries,
         checks,
+        feedCost,
+        fedIn,
         zones,
         parcels,
         allZones,
@@ -111,6 +117,10 @@ export default async function LivestockLotPage({
             limit: 25,
           }),
           listChecksForLot(tx, ctx.tenant.id, lot.id),
+          // What has been fed into this pen — inventory's ledger, read through
+          // inventory's own op. This pack never queries that table directly.
+          consumedCostByLot(tx, ctx.tenant.id, [lot.inventoryLotId]),
+          consumedByLot(tx, ctx.tenant.id, lot.inventoryLotId, 10),
           currentZoneForOccupants(
             tx,
             ctx.tenant.id,
@@ -139,6 +149,8 @@ export default async function LivestockLotPage({
         movements: movements.get(lot.inventoryLotId) ?? [],
         entries,
         checks,
+        feedCents: feedCost.get(lot.inventoryLotId) ?? 0,
+        fedIn,
         zone: zones.get(lot.inventoryLotId) ?? null,
         parcels,
         allZones,
@@ -157,6 +169,8 @@ export default async function LivestockLotPage({
     movements,
     entries,
     checks,
+    feedCents,
+    fedIn,
     zone,
     parcels,
     allZones,
@@ -243,7 +257,7 @@ export default async function LivestockLotPage({
         }
       />
 
-      <div className="grid gap-6 md:grid-cols-4">
+      <div className="grid gap-6 md:grid-cols-5">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Head</CardTitle>
@@ -286,6 +300,30 @@ export default async function LivestockLotPage({
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {lot.bornOn ? `Born ${lot.bornOn}` : "Birth date not recorded."}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Fed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-medium tabular-nums">
+              {/* Zero is the honest answer once something HAS been fed and it
+                  cost nothing on record; before that it is still zero, and the
+                  line below says which. */}
+              {formatCents(feedCents)}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {feedCents === 0
+                ? "Nothing issued to this lot yet."
+                : (() => {
+                    const perHead = costPerUnit(feedCents, summary.balance);
+                    return perHead === null
+                      ? "Feed issued to this lot."
+                      : `${formatCents(perHead)} a head at today's count.`;
+                  })()}
             </p>
           </CardContent>
         </Card>
@@ -414,6 +452,46 @@ export default async function LivestockLotPage({
           </Table>
         )}
       </div>
+
+      {fedIn.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium">
+            Fed in{" "}
+            <span className="font-normal text-muted-foreground">
+              · {formatCents(feedCents)} total
+            </span>
+          </h2>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead className="text-right">Quantity</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {fedIn.map((movement) => (
+                <TableRow key={movement.id}>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {movement.occurredOn}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {Math.abs(movement.quantity)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {/* The cost stamped when it was issued. It does not move
+                        when the next delivery arrives, which is what makes
+                        comparing batches mean anything. */}
+                    {movement.costCents === null
+                      ? "—"
+                      : formatCents(movement.costCents)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {entries.length > 0 && (
         <div className="space-y-3">

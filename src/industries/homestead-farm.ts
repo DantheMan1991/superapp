@@ -51,6 +51,25 @@ export const homesteadFarm: IndustryProfile = {
      */
     livestock: {
       species: ["cattle", "swine", "poultry"],
+      /**
+       * The divisor in the tape formula — **heart girth² × body length ÷ this**
+       * — per species, in inches and pounds.
+       *
+       * Here rather than in the pack because the number is an animal fact, not
+       * a software one: a pig is 400 and a cow is 300 by long convention, and a
+       * pack that knew that would know what a pig is. It is also the figure an
+       * extension office will argue about, so a tenant can settle the argument
+       * in `tenant_modules.config` without a deploy.
+       *
+       * **Poultry is deliberately absent.** Nobody tapes a chicken — they go on
+       * a scale in tens — and a divisor here would offer a measurement method
+       * that does not exist for the bird, which the form would then have to
+       * explain away.
+       */
+      tapeDivisors: {
+        cattle: 300,
+        swine: 400,
+      },
     },
     land: {
       areaUnit: "acre",

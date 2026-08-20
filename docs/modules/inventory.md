@@ -24,6 +24,22 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-20 — One more read, and its window is different for every lot (`claude/weights-carry-a-method`)
+
+`consumedDatedByLots` — what was issued into each lot, movement by movement,
+with its date. `consumedByLotAndItem` aggregates over a fixed period, which is
+what a report wants; **feed conversion needs a window that differs per lot.**
+
+Conversion is feed per pound of GAIN, gain is measured between that lot's own
+first and last weighing, and feed fed before anybody put a bird on a scale
+produced gain nobody measured. Summing it into the ratio would inflate the one
+number the enterprise is judged on — worst for the farm that starts weighing
+halfway through its first batch, which is every farm's first batch. So the caller
+gets the rows and does its own arithmetic per lot.
+
+Still one query whatever the lot count, and still no opinion here about what any
+of it means. Full reasoning in [livestock.md](livestock.md).
+
 ### 2026-08-20 — Three reads and one flag, for livestock's feed report (`claude/feed-and-fcr`)
 
 Slice 1 gave `livestock` the costing loop. Its slice 2 turns that into the

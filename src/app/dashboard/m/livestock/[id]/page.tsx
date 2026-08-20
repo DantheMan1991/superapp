@@ -29,6 +29,7 @@ import { formatMoney } from "@/lib/money";
 import { movementKindLabel, slugLabel } from "@/packs/inventory/vocabulary";
 import {
   currentZoneForOccupants,
+  lastHauledOn,
   listParcels,
   listStructures,
   listZones,
@@ -40,12 +41,22 @@ import {
   getLivestockLot,
   listChecksForLot,
   listIdentifiers,
+  listWeightsForLot,
+  toWeighIns,
 } from "@/packs/livestock/ops";
 import {
   PROVENANCE_LABELS,
   PROVENANCE_NOTES,
   formatQuantities,
 } from "@/packs/livestock/core/feed";
+import {
+  WEIGHT_METHOD_LABELS,
+  WEIGHT_METHOD_NOTES,
+  describeSample,
+  formatLb,
+  isMeasuredMethod,
+} from "@/packs/livestock/core/weights";
+import { RecordWeightForm } from "@/packs/livestock/components/weight-controls";
 import {
   ageInDays,
   formatAge,
@@ -57,6 +68,7 @@ import {
 import {
   SEX_LABELS,
   identifierKindLabel,
+  tapeDivisorFrom,
 } from "@/packs/livestock/vocabulary";
 import { formatLastChecked } from "@/packs/livestock/core/daily";
 import {
@@ -104,6 +116,18 @@ export default async function LivestockLotPage({
         lot.inventoryLotId,
       );
       if (!inventoryLot) return null;
+      /**
+       * The pack's config first, on its own, because the feed report needs it.
+       * The TAPE DIVISORS live in it: without them a herd measured by tape has
+       * no weight at all, and the conversion below would silently report on a
+       * lot it could not weigh.
+       */
+      const pack = await packContext(
+        tx,
+        ctx.tenant.id,
+        ctx.tenant.industry,
+        "livestock",
+      );
       const [
         identifiers,
         movements,
@@ -114,7 +138,8 @@ export default async function LivestockLotPage({
         zones,
         parcels,
         allZones,
-        pack,
+        weights,
+        hauls,
         landPack,
       ] = await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
@@ -134,7 +159,11 @@ export default async function LivestockLotPage({
            * and quietly understate the pen. The screens must agree, so this page
            * reads the same report the feed page does.
            */
-          feedReport(tx, ctx.tenant.id, { from: LEDGER_EPOCH, to: today }),
+          feedReport(tx, ctx.tenant.id, {
+            from: LEDGER_EPOCH,
+            to: today,
+            packConfig: pack.config,
+          }),
           consumedByLot(tx, ctx.tenant.id, lot.inventoryLotId, 10),
           currentZoneForOccupants(
             tx,
@@ -145,7 +174,11 @@ export default async function LivestockLotPage({
           ),
           listParcels(tx, ctx.tenant.id, { status: "active" }),
           listZones(tx, ctx.tenant.id, { status: "active" }),
-          packContext(tx, ctx.tenant.id, ctx.tenant.industry, "livestock"),
+          listWeightsForLot(tx, ctx.tenant.id, lot.id),
+          // WHEN THEY WERE LAST HAULED, from `land`. A weighing taken days
+          // after a trailer is 3-5% of shrink, not a loss, and the history
+          // below marks it rather than quietly averaging it in.
+          lastHauledOn(tx, ctx.tenant.id, "livestock", [lot.inventoryLotId]),
           // LAND's config, not this pack's. Which assets can hold animals is
           // land's question, and `structureKindsFrom` is land's answer to it —
           // this pack hands the config straight back rather than reading a key
@@ -170,7 +203,12 @@ export default async function LivestockLotPage({
         parcels,
         allZones,
         structures,
+        weights,
+        hauledOn: hauls.get(lot.inventoryLotId) ?? null,
         labels: pack.labels,
+        // The divisor for THIS lot's species, resolved once on the server so
+        // the form knows whether a tape is even an option.
+        tapeDivisor: tapeDivisorFrom(pack.config, lot.species),
       };
     },
     { role: ctx.role },
@@ -190,7 +228,10 @@ export default async function LivestockLotPage({
     parcels,
     allZones,
     structures,
+    weights,
+    hauledOn,
     labels,
+    tapeDivisor,
   } = data;
 
   /**
@@ -206,6 +247,19 @@ export default async function LivestockLotPage({
   // Measured plus allocated. The card says which, and the split is spelled out
   // underneath whenever a shared feeder contributed.
   const feedCents = feed?.totalCents ?? 0;
+
+  /**
+   * The weighings, with the two things a stored row cannot know: the average per
+   * head (which needs this species' tape divisor) and whether the weighing sat
+   * in the shadow of a haul (which needs `land`). `feedReport` has already done
+   * exactly this fold, so the numbers on this card and on the feed page come
+   * from one place and cannot disagree.
+   */
+  const weighIns = toWeighIns(weights, { tapeDivisor, lastHauledOn: hauledOn });
+  const latest = feed?.weight.latest ?? null;
+  const gain = feed?.weight.gain ?? null;
+  const shrinkCount = feed?.weight.shrinkAffectedCount ?? 0;
+  const weighedOnLabel = latest ? `weighed ${latest.weighedOn}` : "";
   const summary = summariseHead(movements);
   const rate = mortalityRate(summary);
   const preferred = preferredIdentifier(identifiers);
@@ -252,6 +306,17 @@ export default async function LivestockLotPage({
               inventoryLotId={inventoryLot.id}
               today={today}
             />
+            {summary.balance > 0 && (
+              <RecordWeightForm
+                livestockLotId={lot.id}
+                lotCode={inventoryLot.code}
+                head={summary.balance}
+                today={today}
+                // No divisor for this species means a tape produces no weight,
+                // so the method is not offered rather than offered and useless.
+                tapeAvailable={tapeDivisor !== null}
+              />
+            )}
             {isOwner && summary.balance > 0 && (
               <SplitHerdForm
                 livestockLotId={lot.id}
@@ -275,7 +340,7 @@ export default async function LivestockLotPage({
         }
       />
 
-      <div className="grid gap-6 md:grid-cols-5">
+      <div className="grid gap-6 md:grid-cols-3 xl:grid-cols-6">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Head</CardTitle>
@@ -372,6 +437,48 @@ export default async function LivestockLotPage({
                 {formatMoney(feed.measuredCents, currencySymbol)} issued by name,{" "}
                 {formatMoney(feed.allocatedCents, currencySymbol)} a share of a
                 shared feeder.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              <span className="flex items-center gap-2">
+                Weight
+                {/* THE METHOD, BESIDE THE NUMBER. A crate on a scale and a tape
+                    round the girth are different claims, and the badge is the
+                    only thing on the card that says which one this is. */}
+                {latest && (
+                  <Badge
+                    variant={
+                      isMeasuredMethod(latest.method) ? "outline" : "default"
+                    }
+                    title={WEIGHT_METHOD_NOTES[latest.method] ?? ""}
+                  >
+                    {WEIGHT_METHOD_LABELS[latest.method] ?? latest.method}
+                  </Badge>
+                )}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-medium tabular-nums">
+              {formatLb(latest?.averageLb ?? null)}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {!latest
+                ? "Nothing weighed yet. Feed per pound of gain starts the day something is."
+                : gain
+                  ? `A head, ${weighedOnLabel}. Gaining ${gain.adgLb} lb a day over ${gain.days} days.`
+                  : `A head, ${weighedOnLabel}. One more weighing and this shows a daily gain.`}
+            </p>
+            {shrinkCount > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {shrinkCount === 1
+                  ? "1 weighing set aside — taken too close to a haul."
+                  : `${shrinkCount} weighings set aside — taken too close to a haul.`}
               </p>
             )}
           </CardContent>
@@ -501,6 +608,78 @@ export default async function LivestockLotPage({
           </Table>
         )}
       </div>
+
+      {weights.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium">
+            Weighings{" "}
+            <span className="font-normal text-muted-foreground">
+              {feed?.weight.conversion
+                ? `· ${feed.weight.conversion.ratio} lb of feed per lb of gain`
+                : feed?.weight.conversionBlockedBy
+                  ? `· ${feed.weight.conversionBlockedBy}`
+                  : ""}
+            </span>
+          </h2>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>How</TableHead>
+                <TableHead className="text-right">A head</TableHead>
+                <TableHead className="text-right">The whole lot</TableHead>
+                <TableHead>Noted</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[...weighIns].reverse().map((w) => {
+                const row = weights.find((x) => x.id === w.id)!;
+                return (
+                  <TableRow key={w.id}>
+                    <TableCell className="tabular-nums text-muted-foreground">
+                      {w.weighedOn}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {/* The sample size, in words, because the design asks for
+                          it to be recorded so somebody knows how far to trust
+                          the number — which only pays off if it is shown. */}
+                      {describeSample(w.method, row.sampleSize, summary.balance)}
+                      {w.shrinkAffected && (
+                        <Badge variant="outline" className="ml-2">
+                          near a haul
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatLb(w.averageLb)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {w.averageLb === null || summary.balance <= 0
+                        ? "—"
+                        : formatLb(
+                            Math.round(w.averageLb * summary.balance * 10) / 10,
+                          )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {row.notes || "—"}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+          {feed?.weight.conversion && (
+            <p className="text-xs text-muted-foreground">
+              {/* The confidence, said out loud. Feed measured against a scale is
+                  a number to act on; anything with an estimate at either end is
+                  a trend to watch. */}
+              {feed.weight.conversion.confidence === "measured"
+                ? "Feed issued to this lot by name, against weights off a scale. A number to act on."
+                : "Some part of this is an estimate — a share of a shared feeder, or a weight from a tape or an eye. A trend to watch rather than a figure to price against."}
+            </p>
+          )}
+        </div>
+      )}
 
       {fedIn.length > 0 && (
         <div className="space-y-3">

@@ -71,6 +71,45 @@ export interface AdvisorLot {
     centsPerHead: number | null;
     provenance: string;
   } | null;
+  /**
+   * What they weigh, what they are gaining, and what that costs in feed.
+   *
+   * Null when nothing has been weighed, which is the ordinary case for a farm in
+   * its first season and must not read as "they weigh nothing".
+   *
+   * **`conversion` is null far more often than it is set**, and `blockedBy` says
+   * why in the same words the screen uses. That is deliberate: an advisor told
+   * only that FCR is absent will reach for a rule of thumb and present it as the
+   * farm's own, whereas one told *"one weighing — gain needs two"* gives the
+   * instruction that fixes it.
+   */
+  weight: {
+    latestLb: number | null;
+    weighedOn: string | null;
+    method: string | null;
+    /** Pounds per head per day, between the first and last weighing. */
+    adgLb: number | null;
+    /**
+     * **THE WINDOW THE GAIN WAS MEASURED OVER, and it is not optional.**
+     *
+     * Driven against the real API, the advisor was given "gaining 0.129 lb a
+     * day", noticed it was close to the latest weight divided by the bird's age,
+     * and told the founder the figure was being read off hatch rather than off
+     * two weighings. It was not — but nothing in the digest could prove
+     * otherwise, so the objection was reasonable and the answer was wrong.
+     *
+     * Third time this shape has appeared: the dates of the losses, then when the
+     * herd moved onto its ground, now this. **When an answer is poor, the digest
+     * is the first place to look.**
+     */
+    gainFrom: string | null;
+    gainTo: string | null;
+    gainDays: number | null;
+    /** Pounds of feed per pound of gain. */
+    conversion: number | null;
+    conversionConfidence: string | null;
+    blockedBy: string | null;
+  } | null;
 }
 
 export interface AdvisorZone {
@@ -178,6 +217,27 @@ export function formatSnapshot(snapshot: FarmSnapshot): string {
           `  - feed: ${(lot.feed.cents / 100).toFixed(2)}${perHead ? `, ${perHead}` : ""} (${lot.feed.provenance})`,
         );
       }
+      if (lot.weight) {
+        const w = lot.weight;
+        const bits = [
+          w.latestLb === null
+            ? null
+            : `${w.latestLb} lb a head${w.weighedOn ? ` on ${w.weighedOn}` : ""}${w.method ? ` (${w.method})` : ""}`,
+          w.adgLb === null
+            ? null
+            : `gaining ${w.adgLb} lb a day, measured between two weighings ${w.gainFrom} and ${w.gainTo} (${w.gainDays} days)`,
+          w.conversion === null
+            ? null
+            : `${w.conversion} lb of feed per lb of gain (${w.conversionConfidence})`,
+        ].filter((b): b is string => Boolean(b));
+        if (bits.length > 0) lines.push(`  - weight: ${bits.join(" · ")}`);
+        // The refusal travels with the reason, so the answer can give the
+        // instruction rather than substituting a breed average for this farm's
+        // own number.
+        if (w.conversion === null && w.blockedBy) {
+          lines.push(`  - no feed conversion for this lot: ${w.blockedBy}`);
+        }
+      }
       if (lot.losses.length > 0) {
         const when = lot.losses
           .map(
@@ -193,10 +253,15 @@ export function formatSnapshot(snapshot: FarmSnapshot): string {
         `- …and ${snapshot.lotsOmitted} more lots NOT listed here. Say so if the question depends on them.`,
       );
     }
-    if (snapshot.lots.some((lot) => lot.feed)) {
+    if (snapshot.lots.some((lot) => lot.feed || lot.weight)) {
+      const anyWeighed = snapshot.lots.some((lot) => lot.weight);
       lines.push(
         "",
-        "Feed above is COST, not conversion. **Nothing on this farm has been weighed**, so feed conversion ratio and feed per pound of gain cannot be computed — say that plainly rather than estimating one. `measured` means issued to that lot by name; `allocated` means a share of a shared feeder spread by head × days, which is an estimate and should be spoken about as one.",
+        `Feed above is COST. \`measured\` means issued to that lot by name; \`allocated\` means a share of a shared feeder spread by head × days, which is an estimate and should be spoken about as one. ${
+          anyWeighed
+            ? "Feed conversion, where it is given, is pounds of feed per pound of GAIN over the period between that lot's first and last weighing. Where it is absent the reason is stated — repeat the reason rather than substituting a breed average and calling it this farm's."
+            : "**Nothing on this farm has been weighed**, so feed conversion and feed per pound of gain cannot be computed at all — say that plainly rather than estimating one."
+        }`,
       );
     }
   }

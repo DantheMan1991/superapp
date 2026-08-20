@@ -51,6 +51,25 @@ examples exist.
 
 ## Build log
 
+### 2026-08-20 — A haul is a parcel crossing, and this pack is the one that knows (`claude/weights-carry-a-method`)
+
+`lastHauledOn` — when each occupant last moved to a zone on a DIFFERENT parcel.
+Added for `livestock`'s weights, and here because the record is this pack's.
+
+**Shrink will lie to weight data**: cattle drop 3–5% on a trailer and take days
+to put it back, so a weighing taken just after a move must not read as a loss.
+The obvious version of that guard — "when did they last move" — would fire every
+morning on a rotational farm and be ignored inside a week. This design's own
+sentence settles it instead: *a move between adjacent paddocks is a walk — daily,
+free. A move between parcels is a haul.*
+
+**Nothing new is stored.** The walk-versus-haul distinction was designed as a
+movement kind on a future movement event, and it turns out the existing rows
+already carry it: the parcel of the zone they left and the parcel of the zone
+they arrived on. The op walks each occupant's stays in order and remembers the
+last time the ground underneath them changed parcel. A first stay is an arrival
+rather than a haul — nobody hauled them from nowhere.
+
 ### 2026-08-19 — Two deeds, one block of ground (`claude/two-deeds-one-block`)
 
 Founder, after importing five parcels from the county: *"I would like the

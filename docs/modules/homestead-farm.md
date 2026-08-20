@@ -116,6 +116,34 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-20 — Livestock slice 5: the enterprise gets its verdict (`claude/weights-carry-a-method`)
+
+- **Taken out of order, and the reason is a deadline rather than a preference.**
+  Slice 3 was next; a batch that goes to the processor unweighed can never have
+  an FCR, and the pilot's broilers are days away. Slices are an ordering of
+  value, not a queue.
+- **THE PROFILE'S PROVENANCE RULE IS NOW ONE FUNCTION.** *Broiler FCR from bagged
+  feed against sampled weights is measured and can be acted on; cattle gain from
+  a tape against allocated pasture cost is estimated and is a trend to watch* —
+  written a week ago as a design principle, and now `combinedConfidence`, with
+  the badge it produces on every conversion on the screen.
+- **The tape divisor went in the PROFILE, not the pack**, which is the first time
+  `packConfig` has carried a number that changes an answer rather than a word or
+  a list. A pack that knew a pig is 400 and a cow is 300 would know what a pig
+  is; poultry has no divisor because nobody tapes a chicken, and the form
+  silently stops offering the method.
+- **What the app refuses is now most of what it does here.** Six separate reasons
+  a conversion is not given, each printed where the number would have been. For a
+  farm's first season the reason is the useful part, and *"one weighing — gain
+  needs two"* is an instruction where a blank cell is a shrug.
+- **The advisor found the defect again, and again it was the digest.** Third time:
+  the dates of the losses, then when the herd moved onto its ground, now the
+  window a daily gain was measured over. **When an answer is poor, look at what
+  it was told before touching the prompt** — that debugging loop has now paid for
+  itself three times, and it is the single most transferable thing in this build.
+- Full build record in [livestock.md](livestock.md), with the reads it needed in
+  [inventory.md](inventory.md) and [land.md](land.md).
+
 ### 2026-08-20 — Livestock slice 2: the 10× seam, built at 1× (`claude/feed-and-fcr`)
 
 - **The design's "single largest consequence of the 10× target" is now
@@ -1277,7 +1305,7 @@ this is used daily or abandoned in March.
 | 2 | Feed + FCR (direct issue now, allocation seam for 10×) | Largest cash cost, and the broiler enterprise's verdict. **Feed and the allocation seam shipped 2026-08-20; FCR itself waits on slice 5, because gain needs weights and nothing may invent one** |
 | 3 | Health + withdrawal clock | Legal guardrail; useful at first use |
 | 4 | Breeding + genetics + registry | Needs a season of calving to pay off |
-| 5 | Weights (tape formulas, sampling) | Sharpens everything above |
+| 5 | Weights (tape formulas, sampling) | Sharpens everything above. **Shipped 2026-08-20, ahead of 3 and 4: a batch processed unweighed can never have an FCR** |
 | 6 | Processing handoff → `production` | Blocked on that pack |
 
 Images ride along with slice 0 — cheap, and high satisfaction early.

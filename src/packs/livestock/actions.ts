@@ -28,6 +28,7 @@ import {
   placeHead,
   recordDailyCheck,
   recordFeedDraw,
+  recordWeight,
   removeHead,
   retireIdentifier,
   splitLivestockLot,
@@ -63,7 +64,10 @@ function toResult(err: unknown): { error: string } {
         return { error: "A tag kind must be lowercase letters and underscores." };
       case "LOT_INVALID":
       case "FEED_GROUP_INVALID":
+      case "INVALID_WEIGHT":
         return { error: err.message };
+      case "INVALID_METHOD":
+        return { error: "Pick how it was weighed." };
     }
   }
   // Errors thrown by the packs this one composes reach here too, and their
@@ -443,6 +447,64 @@ export async function markRoundNormalAction(input: unknown) {
   }
 }
 
+// --------------------------------------------------------------- weights ---
+
+/**
+ * Record a weighing.
+ *
+ * NOT owner-gated. Catching ten birds and putting them in a crate is the
+ * definition of a chore, and a weight that waits for the owner to be free is a
+ * weight taken on the wrong day — which for a broiler at seven weeks is most of
+ * the information gone.
+ *
+ * The action validates SHAPE; whether a tape reading is complete, or a sample
+ * size makes sense, is `recordWeight`'s, so the rule has one home.
+ */
+export async function recordWeightAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const measurement = z.number().positive().max(100_000).multipleOf(0.001);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      weighedOn: requiredDate,
+      method: z.string().min(1).max(63),
+      sampleSize: z.number().int().positive().max(100_000).optional(),
+      sampleWeightLb: measurement.nullable().optional(),
+      heartGirthIn: measurement.nullable().optional(),
+      bodyLengthIn: measurement.nullable().optional(),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const weight = await withTenant(
+      ctx.tenant.id,
+      (tx) => recordWeight(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    // The method and the sample size, never the notes — those are free text
+    // about an animal and belong only in the row.
+    await logAudit({
+      action: "livestock.weight.recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      meta: {
+        weighedOn: weight.weighedOn,
+        method: weight.method,
+        sampleSize: weight.sampleSize,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
 // --------------------------------------------------------------- feeders ---
 
 /**
@@ -673,6 +735,10 @@ export async function askAdvisorAction(input: unknown) {
         return farmSnapshot(tx, ctx.tenant.id, {
           today: todayInTimezone(ctx.tenant.timezone),
           species: speciesFrom(pack.config),
+          // The whole config, not just the species: the tape divisors live in
+          // it too, and without them a herd measured by tape reaches the
+          // advisor with no weight at all.
+          packConfig: pack.config,
         });
       },
       { role: ctx.role },

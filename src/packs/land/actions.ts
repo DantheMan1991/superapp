@@ -6,6 +6,14 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
+import { packContext } from "@/lib/packs/tenant-context";
+import { asBoundary, boundaryAreaAcres } from "./core/geo";
+import {
+  parcelSourceById,
+  parcelSourceFrom,
+  suggestedParcelName,
+} from "./core/parcel-lookup";
+import { lookupParcels } from "./parcel-lookup-service";
 import {
   LandError,
   createParcel,
@@ -552,6 +560,141 @@ export async function setParcelBoundaryAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Search the public parcel record. READ-ONLY — it writes nothing and creates
+ * nothing, which is why it is a `member` verb while importing is the owner's.
+ *
+ * The SOURCE comes from the tenant's pack config and is resolved against a
+ * closed registry; the only thing that travels from the browser is what
+ * somebody typed into a box. There is no path here from user input to a URL.
+ */
+export async function lookupParcelsAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      kind: z.enum(["parcel_number", "mailing_address"]),
+      query: z.string().min(1).max(200),
+      region: z.string().max(80).optional(),
+      /**
+       * Which public service to ask. **An ID, never a URL** — it is resolved
+       * against `PARCEL_SOURCES` below, so the browser can choose BETWEEN
+       * sources and can never introduce one. That distinction is the whole
+       * SSRF defence.
+       */
+      sourceId: z.string().max(60).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the search and try again." };
+
+  const pack = await withTenant(
+    ctx.tenant.id,
+    (tx) => packContext(tx, ctx.tenant.id, ctx.tenant.industry, PACK),
+    { role: ctx.role },
+  );
+  // The tenant's pinned source wins; otherwise whatever the person picked, and
+  // both go through the registry.
+  const source =
+    parcelSourceFrom(pack.config) ?? parcelSourceById(parsed.data.sourceId);
+  if (!source) {
+    return { error: "Pick which parcel service to search." };
+  }
+
+  const result = await lookupParcels(source, parsed.data);
+  if (!result.ok) return { error: result.error };
+
+  // The geometry is validated HERE rather than on import, so a candidate that
+  // could never become a boundary is never offered as one.
+  const candidates = result.candidates
+    .map((candidate) => {
+      const boundary = asBoundary(candidate.geometry);
+      if (!boundary) return null;
+      return {
+        parcelNumber: candidate.parcelNumber,
+        situsAddress: candidate.situsAddress,
+        mailingAddress: candidate.mailingAddress,
+        declaredAcres: candidate.declaredAcres,
+        measuredAcres: boundaryAreaAcres(boundary),
+        suggestedName: suggestedParcelName(candidate),
+        geojson: JSON.stringify(boundary),
+      };
+    })
+    .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
+
+  return { ok: true, candidates, attribution: source.attribution };
+}
+
+/**
+ * Turn chosen candidates into parcels, each with its boundary.
+ *
+ * OWNER, because every row here becomes a parcel and therefore a cost object —
+ * the same reason `createParcel` is owner-only on its own. One transaction for
+ * the lot: importing four parcels and failing on the third must not leave two
+ * behind with nothing said about the rest.
+ *
+ * **The county's acreage lands in `area_acres` as the DECLARED figure**, not as
+ * truth. The boundary is measured separately and the two are compared on the
+ * page, which is the whole discipline of this pack applied to somebody else's
+ * data: report the difference, correct nothing.
+ */
+export async function importParcelsAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      parcels: z
+        .array(
+          z.object({
+            name: z.string().min(1).max(200),
+            parcelNumber: z.string().min(1).max(120),
+            declaredAcres: z.number().positive().max(1_000_000).nullable(),
+            geojson: z.string().min(2).max(2_000_000),
+          }),
+        )
+        .min(1)
+        .max(50),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the selection and try again." };
+
+  try {
+    const created = await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const ids: string[] = [];
+        for (const row of parsed.data.parcels) {
+          const parcel = await createParcel(tx, landCtx(ctx), {
+            name: row.name,
+            areaAcres: row.declaredAcres,
+            // The number that found it, kept where a person would look for it.
+            identifier: row.parcelNumber,
+          });
+          await setParcelBoundary(tx, landCtx(ctx), parcel.id, JSON.parse(row.geojson));
+          ids.push(parcel.id);
+        }
+        return ids;
+      },
+      { role: ctx.role },
+    );
+
+    await logAudit({
+      action: "land.parcels.imported",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "tenant",
+      targetId: ctx.tenant.id,
+      meta: {
+        count: created.length,
+        parcelNumbers: parsed.data.parcels.map((p) => p.parcelNumber),
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, created: created.length };
   } catch (err) {
     return toResult(err);
   }

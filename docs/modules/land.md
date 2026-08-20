@@ -25,6 +25,7 @@ the first act of building it. Agreed 2026-08-15:
 | **1** | **Occupancy + rest** — `land_occupancy`, rest days, grazing days, the paddock-count arithmetic | **shipped 2026-08-15** |
 | **2a.0** | **Boundaries** — GeoJSON in jsonb, spherical area, containment, paste-a-boundary | **shipped 2026-08-19** |
 | **2a.1** | **The map** — MapLibre over NAIP aerial, and DRAWING in the same slice | **shipped 2026-08-19** |
+| **2a.1b** | **Find my parcels** — the county's own boundary by parcel number or tax mailing address | **shipped 2026-08-19** |
 | 2a.2 | **Standing in a field** — point-in-polygon pre-fills the zone on the round and the move dialog | next |
 | 2b | **Features** — points and lines: troughs, hydrants, wells, fences, lanes. The `assets` seam | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
@@ -49,6 +50,68 @@ layout. Operations first, planning second — and no planner before three
 examples exist.
 
 ## Build log
+
+### 2026-08-19 — Slice 2a.1b: the county already drew it (`claude/find-my-parcels`)
+
+Three slices in, the founder's original ask finally gets answered: *"type in the
+parcel number and it auto traces the property."* 2a.0 asked him to paste GeoJSON
+he had no way to make and 2a.1 asked him to trace by hand — both still put the
+work on the farmer. **The county did the survey. Ask the county.**
+
+**Ohio publishes every county's parcels as one statewide service**, free, public
+and keyless, so this covers Knox County and the other 87 without per-county
+work. Verified against real Knox data before a line of UI was written: 40 of 40
+parcels parsed by `core/geo.ts`, centroids landing where they should.
+
+**Two searches, because two questions.** By parcel number when you are holding
+the tax bill; by TAX MAILING ADDRESS when you want the whole farm at once. Ohio
+carries no owner name — only where the bill goes — and for this purpose that is
+better than a name, because it is how the county groups a holding. One address
+in Knox County returns **nine parcels across four roads and 462 acres**.
+
+**The best evidence this slice produced was accidental.** Running that search
+through our own code puts the county's acreage next to ours, parcel by parcel:
+
+| County | Measured here |
+| ---: | ---: |
+| 25.05 | 24.6670 |
+| 67.99 | 67.3777 |
+| 126.52 | 125.4095 |
+| 107.78 | 107.0568 |
+| 63.08 | 64.0969 |
+| 41.02 | 41.0189 |
+
+Nine parcels, every one inside about 1%. The spherical area formula from 2a.0
+had only ever been checked against polygons this codebase invented; it now
+agrees with a county assessor's independent figures on real ground. **That is
+the strongest verification the geometry has had.**
+
+- **The county's acreage becomes the DECLARED figure**, never the truth. It
+  lands in `area_acres` and the boundary is measured separately, so the
+  comparison built in 2a.0 works from the first second on imported ground.
+- **Nothing is pre-ticked.** Mailing address groups by where the bill goes, so a
+  trust, an LLC or a farm manager's address pulls in ground that is not yours.
+  Every row is a proposal; the person chooses. Same discipline as the rest of
+  the pack.
+- **The number on the bill is not the number in the database.** Ohio stores
+  `2900403000`; auditors print `29-004-03-000`. Both sides normalise, or a
+  farmer typing his own parcel number correctly finds nothing at all.
+- **A county's `0` acres means "never measured", not "no land".** Stored as
+  null, because a zero would land in every per-acre divisor downstream.
+- **`O'Brien Rd` is an ordinary Ohio address**, so the where-clause escaping is
+  a correctness fix before it is a security one.
+- **The source registry is CLOSED, and that is the SSRF defence.** The obvious
+  next feature — paste your own county's service URL — is a server-side fetch of
+  an attacker-chosen address. A fixed list means the question never arises: a
+  caller chooses BETWEEN sources by id and can never introduce one.
+- **ArcGIS reports failure with HTTP 200.** A bad field name comes back as
+  `{error:{message}}` with an OK status, so trusting the status alone would turn
+  every query mistake into "no parcels found" and send somebody looking for
+  their farm in the wrong county.
+- **The source is picked in the UI rather than configured**, because
+  `packConfig` still has no editing surface — the same gap `assets` records for
+  its depreciation accounts. A pinned config value wins when one exists.
+- 23 pure tests.
 
 ### 2026-08-19 — Tracing works; "Move the corners" had no corners (`claude/corners-need-selecting`)
 
@@ -563,6 +626,11 @@ rented ground, and retrofitting it means rewriting the report.
   area, ray-casting containment, bbox and centroid, and the declared-vs-drawn
   comparison. **Coordinates are [longitude, latitude]**, which reads backwards
   to anyone used to saying it out loud
+- `src/packs/land/core/parcel-lookup.ts` — pure. The source registry, the
+  where-clause building and the candidate mapping
+- `src/packs/land/parcel-lookup-service.ts` — the only outward fetch in this
+  pack. Server-side, closed registry, fifteen-second timeout
+- `src/packs/land/components/parcel-finder.tsx` · `src/app/dashboard/m/land/find/page.tsx`
 - `src/packs/land/components/boundary-map.tsx` — the map and the tracing.
   MapLibre + Terra Draw, both loaded through `await import()` inside an effect
   because they touch `window` on construction
@@ -711,11 +779,20 @@ rented ground, and retrofitting it means rewriting the report.
 - ~~Nobody has traced a boundary on the map yet~~ — **closed 2026-08-19.**
   Traced and saved on production; the stored acreage matched the live readout
   exactly. Corner-dragging is fixed but has not itself been driven since.
-- **No parcel-number lookup.** The founder's actual ask was *"type in the parcel
-  number and it auto traces the property"*. That needs a data source: a county
-  ArcGIS service (free, per-county integration), Regrid (nationwide, paid), or
-  FSA field boundaries the producer exports themselves from farmers.gov (free,
-  and already field-level rather than deed-level). Undecided, and it is 2a.1b.
+- ~~No parcel-number lookup~~ — **shipped 2026-08-19** for Ohio, by number and
+  by tax mailing address.
+- **NOBODY HAS RUN THE FINDER IN A BROWSER.** The lookup itself is proven
+  against live Knox County data through this pack's own code; the screen around
+  it is not.
+- **Ohio only.** `PARCEL_SOURCES` has one entry. Every other state needs either
+  its own statewide service added to the registry or the paid nationwide route
+  (Regrid, which has an owner-name search Ohio's data cannot offer).
+- **No FSA import.** Field boundaries a producer exports themselves from
+  farmers.gov are already paddock-level, which is the half this lookup does not
+  reach — it returns deed parcels, and paddocks inside them are still traced by
+  hand.
+- **A second import of the same parcel makes a second parcel.** Nothing matches
+  on the county number to offer an update instead.
 - **No address or place search.** With no boundary anywhere the map opens on the
   continental US, and "find my location" is the only way in. Fine for a farmer
   standing on the farm, useless at a desk three states away.

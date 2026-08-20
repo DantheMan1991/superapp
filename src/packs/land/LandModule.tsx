@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { Map } from "lucide-react";
+import { Map, Search } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,9 @@ import {
 } from "@/components/ui/table";
 import { listParcels, zoneCountsByParcel } from "./ops";
 import { TENURE_LABELS, isTenure } from "./vocabulary";
+import { parcelSourceFrom } from "./core/parcel-lookup";
+
+const BASE = "/dashboard/m/land";
 import {
   areaUnitFrom,
   formatArea,
@@ -70,6 +74,7 @@ export async function LandModule({
   );
 
   const unit = areaUnitFrom(config);
+  const hasParcelSource = parcelSourceFrom(config) !== null;
   const parcelWord = labelFor(labels, "parcel", "Parcel");
   const zoneWord = labelFor(labels, "zone", "Zone");
   const zonesWord = `${zoneWord}s`;
@@ -86,7 +91,23 @@ export async function LandModule({
             ? `${parcels.length} ${parcels.length === 1 ? parcelWord.toLowerCase() : `${parcelWord.toLowerCase()}s`} · ${formatAreaTotal(total, unit)}`
             : "The ground the business holds, and what each part of it is for."
         }
-        actions={isOwner ? <ParcelForm unit={unit} /> : null}
+        actions={
+          isOwner ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Only when a source covers this tenant. A button that leads to
+                  a 404 is worse than no button. */}
+              {hasParcelSource && (
+                <Button asChild variant="outline">
+                  <Link href={`${BASE}/find`}>
+                    <Search className="mr-2 h-4 w-4" />
+                    Find my parcels
+                  </Link>
+                </Button>
+              )}
+              <ParcelForm unit={unit} />
+            </div>
+          ) : null
+        }
       />
 
       {parcels.length === 0 ? (

@@ -4,6 +4,7 @@ import { LandModule } from "./land/LandModule";
 import { InventoryModule } from "./inventory/InventoryModule";
 import { LivestockModule } from "./livestock/LivestockModule";
 import { ProductionModule } from "./production/ProductionModule";
+import { RetailModule } from "./retail/RetailModule";
 
 /**
  * Layer 2a registry: slug → how the pack behaves.
@@ -14,8 +15,8 @@ import { ProductionModule } from "./production/ProductionModule";
  * happens at the shell layer in `src/lib/features.ts`, which is Layer 0 and is
  * allowed to know both exist.
  *
- * `assets`, `land`, `inventory`, `livestock` and `production` are built; the
- * other two are DECLARED AND UNBUILT. That is not a placeholder state: a
+ * `assets`, `land`, `inventory`, `livestock`, `production` and `retail` are
+ * built; `crops` alone is DECLARED AND UNBUILT. That is not a placeholder state: a
  * declared pack has a real dependency graph, installs with a profile, and
  * shows as an empty slot in the admin registry — exactly how `scheduling` and
  * `work` were carried before they shipped. Each
@@ -176,12 +177,34 @@ export const packRegistry: Record<string, PackDefinition> = {
     Component: ProductionModule,
   },
 
-  /** Channels, price lists, orders. Sells what inventory holds. */
+  /**
+   * Channels, price lists, orders. Sells what inventory holds.
+   *
+   * Requires `inventory` because a price is a price OF something, and that
+   * something is an item. Deliberately NOT `production`: a shop reselling what
+   * it bought in is a legitimate composition, and the commitment machinery that
+   * genuinely needs a production run is slice 3.
+   */
   retail: {
     slug: "retail",
     name: "Retail",
     icon: "store",
     requires: ["inventory"],
+    labels: [
+      {
+        key: "channel",
+        fallback: "Channel",
+        describes:
+          "Somewhere the business sells — a market stall, the farm gate, a shop, a wholesale account.",
+      },
+      {
+        key: "marketDay",
+        fallback: "Market day",
+        describes:
+          "One day of selling at a channel. A grower says market day; a shop says trading day.",
+      },
+    ],
+    Component: RetailModule,
   },
 };
 

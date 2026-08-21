@@ -233,7 +233,10 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     description:
       "Selling what you have — channels, price lists, orders and what actually moved.",
     category: "pack",
-    status: "coming_soon",
+    // `available` from slice 0 (2026-08-20): channels, per-item-per-channel
+    // price lists, and what a day of selling cost. The till, stockouts and
+    // payments follow in slices 1 and 2.
+    status: "available",
     sortOrder: 260,
   },
 ];

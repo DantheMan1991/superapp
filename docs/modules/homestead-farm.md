@@ -116,6 +116,25 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-20 — Retail slice 0: the revenue half finally starts (`claude/what-a-market-day-costs`)
+- **Sixth pack to ship, and the first on the revenue side.** Every other pack in
+  this profile answers what something COST; until now nothing could say what
+  anything sold for, so profit per enterprise was half a sentence.
+- **A price is not a property of a thing.** The same pound is one price at a
+  stall and another at the gate, and neither is *the* price — so price lives on
+  (channel, item) and the channel list exists from day one with one entry on it.
+- **A price change is a NEW ROW from a day, never an edit**, which is what lets
+  a margin report ask what was charged in June. No `effective_to`: a price runs
+  until the next one starts, and the gap is arithmetic rather than a fact.
+- **A price set ahead does not apply today** and is reported as coming.
+- **What a day of selling cost, with the hours OUTSIDE the money.** If own hours
+  count as zero then every market is profitable and the dud is invisible — which
+  is the exact argument the design wants this table to settle.
+- Driven on the dev tenant: whole broilers at $5.50 with $6.00 queued for
+  October, and a market day at $53.00 over 10 person-hours — $5.30 an hour. It
+  found one reading defect: the date was the link and the channel name was not.
+- Dossier: [retail.md](retail.md).
+
 ### 2026-08-20 — Inventory slice 2: the slice that lets somebody be wrong (`claude/counting-what-is-actually-there`)
 - **Three packs were waiting on this one thing.** A treatment removed left an
   orphaned cost with no way to correct it, a feed draw could not be reversed, a

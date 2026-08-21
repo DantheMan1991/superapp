@@ -80,6 +80,22 @@ export const homesteadFarm: IndustryProfile = {
     production: {
       runKinds: ["butchering", "baking", "milling", "processing"],
     },
+    /**
+     * Where this farm sells. All direct-to-consumer today — one farmers market
+     * with more coming, a farm store run both attended and on the honour system,
+     * and no wholesale yet. `wholesale` is listed anyway: it costs nothing, and
+     * it is the channel whose eligibility guardrail has to be right before the
+     * first pallet leaves.
+     */
+    retail: {
+      channelKinds: [
+        "farmers_market",
+        "farm_store",
+        "honour_system",
+        "online",
+        "wholesale",
+      ],
+    },
     land: {
       areaUnit: "acre",
       /**

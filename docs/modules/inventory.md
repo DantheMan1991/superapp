@@ -689,11 +689,24 @@ commitment against a live animal to delivered without sitting on a shelf.
      makes the receipt's own entry non-duplicative.
   3. **Then the movement postings**: receipt debits inventory, issue credits it
      against COGS, adjustment against the variance account. Transfers, splits
-     and merges post NOTHING — they move cost within one account.
-  4. **Idempotency is the movement id**, so one movement is one entry forever
+     and merges post NOTHING — they move cost within one account. **A movement
+     posts exactly what `carriedValue` says it carries, and where that is null
+     it posts nothing** — which is what keeps the ledger and the valuation
+     screen provably the same view, and what removes any need for a
+     goods-received-not-invoiced account.
+  4. **The cash-basis lens, per
+     [ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md) — and this is
+     not optional polish.** Perpetual is the first thing in this build that
+     capitalises, and ADR 0007 passes non-AR/AP entries through untouched, so
+     without this a "cash basis" report expenses feed when it is CONSUMED
+     rather than when it is PAID FOR, and shows an inventory asset a cash-basis
+     farmer does not have. Most small farms file on cash. **The trap named in
+     that ADR is the `accountIds` filter**, which runs before substitution and
+     will silently under-report.
+  5. **Idempotency is the movement id**, so one movement is one entry forever
      and a replayed write cannot double-post.
   The account resolver and the `MACHINE_SOURCES` seam this needs are already
-  built and tested; what is missing is the link.
+  built and tested; what is missing is the link and the lens.
 - **A TRANSFER IS TWO ROWS WITH NOTHING JOINING THEM**, and driving slice 3a is
   what showed the cost. `transferStock` writes a leg at each end and records no
   pairing, so nothing can void, correct or even *identify* a transfer as one
@@ -704,6 +717,12 @@ commitment against a live animal to delivered without sitting on a shelf.
   on the movement, written by `transferStock` and shared by both rows, is the
   fix; the pair would then also be voidable together the way an intercompany
   pair is (ADR 0010 slice 2 already argues this shape for the ledger).
+- **The valuation screen is basis-blind and does not say so.** It reports
+  accumulated cost, which is right and always on — but a cash-basis tenant
+  reading "$463 on hand" will not find that figure in their financial
+  statements, because on their basis it is not an asset
+  ([ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md)). The card should
+  say which basis it is and is not.
 - **A valuation cannot be exported.** The figure is on a screen and an
   accountant will want it as a file, with the as-of date and the unvalued count
   in it — an export that carried the total alone would strip the caveat, which

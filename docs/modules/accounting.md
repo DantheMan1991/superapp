@@ -13,6 +13,52 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-21 — The pass-through rule that was an observation (branch `claude/what-the-shelf-is-worth`)
+
+**[ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md): inventory is not
+an asset on a cash basis.** Design only — no code in this change; the rules land
+with `inventory` slice 3b.
+
+[ADR 0007](../decisions/0007-cash-basis-reporting.md) says everything that is
+not an invoice or a bill *"is already cash-dated and passes through untouched"*.
+**That was never a decision. It was an observation that, at the time, happened to
+be true** — and it was written down as a rule, so nothing failed when it stopped
+holding.
+
+Perpetual inventory is the first thing in this build that capitalises. Traced
+through the lens as it stands, a feed purchase comes out wrong twice over: the
+bill's `1300` line is re-recognised as an ASSET at the payment date, because
+`cash-basis.ts` builds recognition from every non-control line and does not care
+about account type
+([cash-basis.ts:247](../../src/modules/accounting/core/cash-basis.ts:247)); and
+the consumption entry `Dr 5000 / Cr 1300` has no AR/AP leg, so it passes through.
+The result is a report labelled cash basis that **expenses feed when it is
+consumed rather than when it is paid for** — and most small farms file on cash,
+where feed is deducted when purchased.
+
+Three rules, in the ADR:
+
+1. **Substitute, never drop.** An inventory line becomes its consumption
+   account. Dropping one leg unbalances the entry — a bank-imported cash
+   purchase is `Dr 1300 / Cr Cash`. `opening_balance` is the one exception: the
+   line collapses against Opening Balance Equity, because inventing a purchase
+   in the opening period is worse than the asset was.
+2. **Drop a stock-movement entry whole**, by `source`, the same one-line shape
+   as the existing invoice/bill exclusion. Both legs go together, so balance
+   holds — and it prevents shrinkage being **deducted twice**, once when the
+   feed was paid for and again when it spoiled.
+3. **A movement posts exactly what the valuation says it carries**, and nothing
+   where that is null. Accrual-side, and it is what removes any need for a
+   goods-received-not-invoiced account.
+
+The accrual path stays byte-identical; every rule is inside the `cash` branch.
+
+**The implementation trap, named in the ADR because it will look like a rounding
+difference:** `getBalances` filters `accountIds` inside the query
+([balances.ts:89](../../src/modules/accounting/core/balances.ts:89)), before
+anything is substituted — so a cash-basis report asking only for the expense
+account would filter out the `1300` lines that were about to become it.
+
 ### 2026-08-21 — Who may cause a posting (branch `claude/what-the-shelf-is-worth`)
 
 **`postEntry` no longer asks only WHO is posting; it asks WHAT produced the

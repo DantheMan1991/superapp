@@ -13,6 +13,97 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-21 — The pass-through rule that was an observation (branch `claude/what-the-shelf-is-worth`)
+
+**[ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md): inventory is not
+an asset on a cash basis.** Design only — no code in this change; the rules land
+with `inventory` slice 3b.
+
+[ADR 0007](../decisions/0007-cash-basis-reporting.md) says everything that is
+not an invoice or a bill *"is already cash-dated and passes through untouched"*.
+**That was never a decision. It was an observation that, at the time, happened to
+be true** — and it was written down as a rule, so nothing failed when it stopped
+holding.
+
+Perpetual inventory is the first thing in this build that capitalises. Traced
+through the lens as it stands, a feed purchase comes out wrong twice over: the
+bill's `1300` line is re-recognised as an ASSET at the payment date, because
+`cash-basis.ts` builds recognition from every non-control line and does not care
+about account type
+([cash-basis.ts:247](../../src/modules/accounting/core/cash-basis.ts:247)); and
+the consumption entry `Dr 5000 / Cr 1300` has no AR/AP leg, so it passes through.
+The result is a report labelled cash basis that **expenses feed when it is
+consumed rather than when it is paid for** — and most small farms file on cash,
+where feed is deducted when purchased.
+
+Three rules, in the ADR:
+
+1. **Substitute, never drop.** An inventory line becomes its consumption
+   account. Dropping one leg unbalances the entry — a bank-imported cash
+   purchase is `Dr 1300 / Cr Cash`. `opening_balance` is the one exception: the
+   line collapses against Opening Balance Equity, because inventing a purchase
+   in the opening period is worse than the asset was.
+2. **Drop a stock-movement entry whole**, by `source`, the same one-line shape
+   as the existing invoice/bill exclusion. Both legs go together, so balance
+   holds — and it prevents shrinkage being **deducted twice**, once when the
+   feed was paid for and again when it spoiled.
+3. **A movement posts exactly what the valuation says it carries**, and nothing
+   where that is null. Accrual-side, and it is what removes any need for a
+   goods-received-not-invoiced account.
+
+The accrual path stays byte-identical; every rule is inside the `cash` branch.
+
+**The implementation trap, named in the ADR because it will look like a rounding
+difference:** `getBalances` filters `accountIds` inside the query
+([balances.ts:89](../../src/modules/accounting/core/balances.ts:89)), before
+anything is substituted — so a cash-basis report asking only for the expense
+account would filter out the `1300` lines that were about to become it.
+
+### 2026-08-21 — Who may cause a posting (branch `claude/what-the-shelf-is-worth`)
+
+**`postEntry` no longer asks only WHO is posting; it asks WHAT produced the
+entry.** See [ADR 0011](../decisions/0011-machine-posted-entries.md).
+
+`requireOwnerRole(ctx)` at the one posted-entry call site became
+`requirePostingRight(ctx, input.source)`. An ordinary journal is still an
+owner's decision and a plain `manual` entry from staff is still refused. A small
+explicit set — `MACHINE_SOURCES` in `core/guards.ts` — posts without the owner
+check.
+
+**Why this module had to change for a pack.** `inventory` slice 3 makes stock
+movements post, and those movements are deliberately not owner-level:
+`livestock` settled the write levels on 2026-08-15 ("movements and merges are
+chores"), `retail`'s till exists so a **staff member** sells at a market stall,
+and production runs are recorded by whoever ran them. Under the old rule, adding
+perpetual posting would silently have made feeding animals, selling at a market
+and processing a batch all owner-only — three deliberate decisions reversed, and
+features already live broken. The check was firing after the decision it was
+meant to influence had already been made and authorised elsewhere; all it could
+have produced is a half-written transaction, the movement recorded and the
+journal line refused.
+
+**What makes it safe, in three layers.** `source` is absent from
+`entryInputSchema`, so nothing over the wire can name one; it defaults to
+`manual`, so a caller that forgets gets the STRICTER rule; and
+`journal_entry_source` is a Postgres ENUM, so a source cannot be invented at a
+call site, only chosen. A test meant to assert that a made-up source is refused
+**could not be written — it does not compile.** The day `source` becomes
+client-settable, this becomes a privilege escalation and the check has to move.
+
+**An expert still never posts**, machine-sourced or not, and every other guard
+is untouched: closed periods, balance, active accounts, entity postability. The
+audit row records the staff member who caused it rather than a borrowed owner —
+ADR 0011 rejected elevating `ctx.role` precisely because that would make the
+trail lie.
+
+`depreciation` is a machine source by every argument in the ADR and is
+deliberately NOT in the set: it runs from an owner's screen today, and loosening
+a rule no caller is asking about only widens what has to be reasoned about
+later.
+
+8 tests in `tests/ledger.test.ts` pin the boundary — including the ones that
+prove what did NOT change. Migration `0176` adds the three enum values.
+
 ### 2026-08-17 — A payment row that would not say whose account it was (branch `claude/payment-rows-name-the-company`)
 
 Found while finishing the drive of the mirror case. The invoice's payment row

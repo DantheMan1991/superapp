@@ -39,6 +39,13 @@ import {
   type CostedMovement,
   type LotCarriedCost,
 } from "./core/costing";
+import {
+  carriedValue,
+  valuationTotal,
+  valueLine,
+  type ValuationMethod,
+  type ValuationTotal,
+} from "./core/valuation";
 
 /**
  * Inventory operations. Every function takes a `Tx` so the caller owns the
@@ -74,7 +81,8 @@ export class InventoryError extends Error {
       | "INVALID_REASON"
       | "COUNT_CLOSED"
       | "COUNT_INVALID"
-      | "INSUFFICIENT",
+      | "INSUFFICIENT"
+      | "LEDGER_ACCOUNTS",
     message: string,
   ) {
     super(message);
@@ -1464,9 +1472,17 @@ export async function carriedCostByLot(
   tx: Tx,
   tenantId: string,
   lotIds: string[],
+  /**
+   * Value the lot as it stood on this date. **The filter is on the MOVEMENTS,
+   * not the lot** — a pen created in June has eaten more by August, and a
+   * balance sheet dated June must not see August's feed. Omitted means all of
+   * it, which is what every caller before valuation wanted.
+   */
+  asOf?: string,
 ): Promise<Map<string, LotCarriedCost>> {
   const out = new Map<string, LotCarriedCost>();
   if (lotIds.length === 0) return out;
+  const upTo = asOf ? lte(schema.inventoryMovements.occurredOn, asOf) : undefined;
 
   const [own, consumed] = await Promise.all([
     tx
@@ -1481,6 +1497,7 @@ export async function carriedCostByLot(
         and(
           eq(schema.inventoryMovements.tenantId, tenantId),
           inArray(schema.inventoryMovements.lotId, lotIds),
+          upTo,
         ),
       ),
     tx
@@ -1495,6 +1512,7 @@ export async function carriedCostByLot(
         and(
           eq(schema.inventoryMovements.tenantId, tenantId),
           inArray(schema.inventoryMovements.issuedToLotId, lotIds),
+          upTo,
         ),
       ),
   ]);
@@ -2241,6 +2259,195 @@ export async function stockAtLocation(
     }))
     .filter((row) => row.onHand !== 0)
     .sort((a, b) => (a.itemName < b.itemName ? -1 : 1));
+}
+
+// ------------------------------------------------------------- valuation ---
+
+export interface ValuationRow {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  lotId: string | null;
+  lotCode: string | null;
+  /** The lot's provenance — `purchased`, `raised` or `produced`. */
+  lotSource: string | null;
+  quantity: number;
+  valueCents: number | null;
+  method: ValuationMethod;
+}
+
+export interface StockValuation {
+  rows: ValuationRow[];
+  total: ValuationTotal;
+  /** The date everything here is as of. */
+  asOf: string;
+}
+
+/**
+ * **WHAT THE SHELF IS WORTH, AS OF A DATE.**
+ *
+ * A balance sheet is always as of a day, so this is too — and `asOf` filters the
+ * MOVEMENTS rather than the lots, because a lot created in June holds different
+ * stock in July than it did in June. Passing no date values everything, which is
+ * what a stock list on screen wants.
+ *
+ * **THE THREE QUERIES ARE DELIBERATELY NOT ONE.** Quantity on hand, a lot's
+ * carried cost and an item's average rate are three different folds over the
+ * same table with three different shapes — the first groups by (item, lot), the
+ * second needs movements issued INTO a lot as well as its own, and the third
+ * counts only what came in with a price. Fusing them into one clever query
+ * produced, in an earlier draft, an average that quietly included issues and was
+ * therefore circular.
+ *
+ * Zero-balance lines are dropped, the same rule `stockAtLocation` follows: a lot
+ * that went in and came out is not "0 lb worth nothing", it is not there.
+ */
+export async function valueStock(
+  tx: Tx,
+  tenantId: string,
+  opts: { asOf?: string; itemId?: string } = {},
+): Promise<StockValuation> {
+  const dateFilter = opts.asOf
+    ? lte(schema.inventoryMovements.occurredOn, opts.asOf)
+    : undefined;
+  const itemFilter = opts.itemId
+    ? eq(schema.inventoryMovements.itemId, opts.itemId)
+    : undefined;
+
+  const rows = await tx
+    .select({
+      itemId: schema.inventoryMovements.itemId,
+      itemName: schema.inventoryItems.name,
+      unit: schema.inventoryItems.stockingUnit,
+      lotId: schema.inventoryMovements.lotId,
+      lotCode: schema.inventoryLots.code,
+      lotSource: schema.inventoryLots.source,
+      quantity: sql<string>`sum(${schema.inventoryMovements.quantity})`,
+    })
+    .from(schema.inventoryMovements)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryItems.id, schema.inventoryMovements.itemId),
+      ),
+    )
+    .leftJoin(
+      schema.inventoryLots,
+      and(
+        eq(schema.inventoryLots.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryLots.id, schema.inventoryMovements.lotId),
+      ),
+    )
+    .where(
+      and(eq(schema.inventoryMovements.tenantId, tenantId), dateFilter, itemFilter),
+    )
+    .groupBy(
+      schema.inventoryMovements.itemId,
+      schema.inventoryItems.name,
+      schema.inventoryItems.stockingUnit,
+      schema.inventoryMovements.lotId,
+      schema.inventoryLots.code,
+      schema.inventoryLots.source,
+    );
+
+  const standing = rows
+    .map((row) => ({ ...row, quantity: roundQuantity(Number(row.quantity)) }))
+    .filter((row) => row.quantity !== 0);
+
+  const lotIds = [
+    ...new Set(
+      standing.map((r) => r.lotId).filter((id): id is string => id !== null),
+    ),
+  ];
+  const itemIds = [...new Set(standing.map((r) => r.itemId))];
+
+  const [carried, rates] = await Promise.all([
+    carriedCostByLot(tx, tenantId, lotIds, opts.asOf),
+    averageRatesForItems(tx, tenantId, itemIds, opts.asOf),
+  ]);
+
+  const valued: ValuationRow[] = standing
+    .map((row) => {
+      const line = valueLine({
+        quantity: row.quantity,
+        // `carriedValue`, NEVER `remainingCents` directly — a lot nobody
+        // costed and a lot whose cost has all been released both fold to zero,
+        // and only the first must come out unvalued.
+        carriedCents: row.lotId
+          ? (() => {
+              const cost = carried.get(row.lotId);
+              return cost ? carriedValue(cost) : null;
+            })()
+          : null,
+        averageRate: rates.get(row.itemId) ?? null,
+      });
+      return {
+        itemId: row.itemId,
+        itemName: row.itemName,
+        unit: row.unit,
+        lotId: row.lotId,
+        lotCode: row.lotCode,
+        lotSource: row.lotSource,
+        quantity: row.quantity,
+        valueCents: line.valueCents,
+        method: line.method,
+      };
+    })
+    .sort((a, b) =>
+      a.itemName === b.itemName
+        ? (a.lotCode ?? "").localeCompare(b.lotCode ?? "")
+        : a.itemName.localeCompare(b.itemName),
+    );
+
+  return {
+    rows: valued,
+    total: valuationTotal(valued),
+    asOf: opts.asOf ?? "",
+  };
+}
+
+/**
+ * The average cost rate for several items at once, as of a date.
+ *
+ * `itemCostRate` answers this for one item and is the shape every caller before
+ * valuation needed. A stock list asks for fifty at a time, and fifty round trips
+ * to compute fifty averages is the query pattern that makes a page crawl.
+ */
+export async function averageRatesForItems(
+  tx: Tx,
+  tenantId: string,
+  itemIds: string[],
+  asOf?: string,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (itemIds.length === 0) return out;
+  const rows = await tx
+    .select({
+      itemId: schema.inventoryMovements.itemId,
+      quantity: schema.inventoryMovements.quantity,
+      costCents: schema.inventoryMovements.costCents,
+      movementKind: schema.inventoryMovements.movementKind,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.itemId, itemIds),
+        asOf ? lte(schema.inventoryMovements.occurredOn, asOf) : undefined,
+      ),
+    );
+  const byItem = new Map<string, CostedMovement[]>();
+  for (const row of rows) {
+    const list = byItem.get(row.itemId);
+    if (list) list.push(row);
+    else byItem.set(row.itemId, [row]);
+  }
+  for (const itemId of itemIds) {
+    const rate = averageCostRate(byItem.get(itemId) ?? []);
+    if (rate !== null) out.set(itemId, rate);
+  }
+  return out;
 }
 
 /** Everything issued into one lot, newest first — the "what has this pen eaten" list. */

@@ -37,6 +37,8 @@ import {
   transferStock,
   recordCountLine,
   startCount,
+  valueStock,
+  averageRatesForItems,
 } from "../src/packs/inventory/ops";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -102,6 +104,216 @@ d("inventory ops", () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
     });
+  });
+
+// ---- slice 3: valuation -----------------------------------------------
+
+  it("values a lot at what it CARRIED, not at the item's average", async () => {
+    /**
+     * The ordering the lot spine exists for. Two batches of the same item at
+     * very different prices: averaging them would report both at the same
+     * number and lose the one fact traceability is for.
+     */
+    const item = await newItem("Two batches");
+    const cheap = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), { itemId: item.id, code: "CHEAP", source: "purchased" }),
+    );
+    const dear = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), { itemId: item.id, code: "DEAR", source: "purchased" }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: cheap.id,
+        quantity: 100,
+        costCents: 10_000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: dear.id,
+        quantity: 100,
+        costCents: 50_000,
+        occurredOn: "2026-08-02",
+      }),
+    );
+
+    const valuation = await asOwner((tx) => valueStock(tx, tenantId, { itemId: item.id }));
+    const byCode = new Map(valuation.rows.map((r) => [r.lotCode, r]));
+    expect(byCode.get("CHEAP")!.valueCents).toBe(10_000);
+    expect(byCode.get("DEAR")!.valueCents).toBe(50_000);
+    expect(byCode.get("CHEAP")!.method).toBe("carried");
+    // The average across both is $3.00/lb; neither lot is valued at it.
+    expect(byCode.get("CHEAP")!.valueCents).not.toBe(30_000);
+    expect(valuation.total.valueCents).toBe(60_000);
+    expect(valuation.total.incomplete).toBe(false);
+  });
+
+  it("REFUSES TO VALUE A RAISED LOT NOBODY COSTED, and says how much of it there is", async () => {
+    /**
+     * Eggs, or a calf you bred. There is no purchase basis and nobody entered a
+     * cost, so there is no honest number — and a total that quietly called it
+     * zero would understate the farm by an unknown amount while looking
+     * complete.
+     */
+    const item = await newItem("Eggs", "dozen");
+    const lot = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), { itemId: item.id, code: "AUG-EGGS", source: "raised" }),
+    );
+    await asOwner((tx) =>
+      recordMovement(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: lot.id,
+        quantity: 30,
+        movementKind: "receipt",
+        occurredOn: "2026-08-05",
+      }),
+    );
+
+    const valuation = await asOwner((tx) => valueStock(tx, tenantId, { itemId: item.id }));
+    expect(valuation.rows).toHaveLength(1);
+    expect(valuation.rows[0].valueCents).toBeNull();
+    expect(valuation.rows[0].method).toBe("none");
+    expect(valuation.rows[0].lotSource).toBe("raised");
+    expect(valuation.total.valueCents).toBe(0);
+    expect(valuation.total.incomplete).toBe(true);
+    expect(valuation.total.unvaluedLines).toBe(1);
+    expect(valuation.total.unvaluedQuantity).toBe(30);
+  });
+
+  it("values lot-less stock at the item's average", async () => {
+    const item = await newItem("No batches");
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 40,
+        costCents: 10_020,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const valuation = await asOwner((tx) => valueStock(tx, tenantId, { itemId: item.id }));
+    expect(valuation.rows[0].method).toBe("average");
+    expect(valuation.rows[0].valueCents).toBe(10_020);
+  });
+
+  it("VALUES THE SHELF AS IT STOOD ON A DATE, feed and all", async () => {
+    /**
+     * The property a balance sheet rests on. This pen ate in August; a June
+     * valuation must not see that feed, and an August one must.
+     */
+    const feed = await newItem("Dated feed");
+    const birds = await newItem("Dated birds", "head");
+    const pen = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), { itemId: birds.id, code: "PEN-DATED", source: "raised" }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: birds.id,
+        lotId: pen.id,
+        quantity: 50,
+        costCents: 20_000,
+        occurredOn: "2026-06-01",
+      }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: feed.id,
+        quantity: 200,
+        costCents: 40_000,
+        occurredOn: "2026-07-01",
+      }),
+    );
+    await asOwner((tx) =>
+      issueStock(tx, ownerCtx(), {
+        itemId: feed.id,
+        quantity: 100,
+        issuedToLotId: pen.id,
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    const june = await asOwner((tx) =>
+      valueStock(tx, tenantId, { asOf: "2026-06-30", itemId: birds.id }),
+    );
+    expect(june.rows[0].valueCents).toBe(20_000);
+
+    const august = await asOwner((tx) =>
+      valueStock(tx, tenantId, { asOf: "2026-08-31", itemId: birds.id }),
+    );
+    // The chicks, plus the $200 of feed that went into them.
+    expect(august.rows[0].valueCents).toBe(40_000);
+  });
+
+  it("drops a lot that went in and came out rather than valuing it at nothing", async () => {
+    // Same rule `stockAtLocation` follows: it is not "0 lb worth nothing", it
+    // is not there.
+    const item = await newItem("In and out");
+    const lot = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), { itemId: item.id, code: "GONE", source: "purchased" }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: lot.id,
+        quantity: 20,
+        costCents: 5_000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      issueStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: lot.id,
+        quantity: 20,
+        occurredOn: "2026-08-02",
+      }),
+    );
+    const valuation = await asOwner((tx) => valueStock(tx, tenantId, { itemId: item.id }));
+    expect(valuation.rows.filter((r) => r.lotCode === "GONE")).toHaveLength(0);
+  });
+
+  it("averageRatesForItems answers for many items in one query", async () => {
+    const a = await newItem("Rate A");
+    const b = await newItem("Rate B");
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: a.id,
+        quantity: 10,
+        costCents: 5_000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: b.id,
+        quantity: 4,
+        costCents: 1_000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const rates = await asOwner((tx) =>
+      averageRatesForItems(tx, tenantId, [a.id, b.id]),
+    );
+    expect(rates.get(a.id)).toBe(500);
+    expect(rates.get(b.id)).toBe(250);
+  });
+
+  it("leaves an item with no priced receipt OUT of the rate map", async () => {
+    // Absent, not zero — the map's caller turns a missing rate into "cannot
+    // value", and a 0 here would turn it into "free".
+    const item = await newItem("Never priced");
+    await asOwner((tx) =>
+      recordMovement(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 5,
+        movementKind: "receipt",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const rates = await asOwner((tx) => averageRatesForItems(tx, tenantId, [item.id]));
+    expect(rates.has(item.id)).toBe(false);
   });
 
   // ---- slice 2: adjustments, counts, expiry -----------------------------

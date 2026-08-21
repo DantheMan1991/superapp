@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Boxes, ClipboardList } from "lucide-react";
+import { Boxes, ClipboardList, Coins } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { PageHeader } from "@/components/app/page-header";
@@ -106,6 +106,15 @@ export async function InventoryModule({
               <Link href="/dashboard/m/inventory/counts">
                 <ClipboardList className="mr-2 h-4 w-4" />
                 Counting
+              </Link>
+            </Button>
+            {/* Not owner-gated either. What stock is worth is a question a
+                bookkeeper asks far more often than an owner does, and the
+                figure is a read over movements they can already see. */}
+            <Button asChild variant="outline">
+              <Link href="/dashboard/m/inventory/value">
+                <Coins className="mr-2 h-4 w-4" />
+                What it is worth
               </Link>
             </Button>
             {isOwner && (

@@ -169,5 +169,32 @@ export function slugLabel(slug: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/**
+ * How a line of stock got its number, in words.
+ *
+ * **THE LABELS ARE LOAD-BEARING, not decoration.** One of these three is a
+ * measurement, one is an average over a fungible item, and one is an admission
+ * that nobody knows — and a reader looking at a balance sheet figure is entitled
+ * to be told which. Flattening them to a single "Valued" column would put the
+ * measured and the guessed-at side by side looking identical.
+ */
+export const VALUATION_METHOD_NOTES: Record<
+  "carried" | "average" | "none",
+  { label: string; note: string }
+> = {
+  carried: {
+    label: "This batch",
+    note: "What went into this batch and has not left it",
+  },
+  average: {
+    label: "Average",
+    note: "No batch, so the item's average of what came in priced",
+  },
+  none: {
+    label: "No cost recorded",
+    note: "Raised with no purchase price, and nothing entered against it",
+  },
+};
+
 export const ITEM_STATUSES = ["active", "archived"] as const;
 export const LOT_STATUSES = ["open", "closed"] as const;

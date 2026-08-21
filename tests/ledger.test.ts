@@ -114,6 +114,180 @@ d("core ledger platform", () => {
     });
   });
 
+// ------------------------------------------------- machine-posted entries
+
+  describe("machine-posted entries (ADR 0011)", () => {
+    /**
+     * **THIS IS A PRIVILEGE BOUNDARY AND IT IS A SET OF STRINGS.** Adding a
+     * source to `MACHINE_SOURCES` is a one-line diff that grants unowned
+     * posting rights to a whole class of entries, so what it does and — more
+     * importantly — what it does NOT do is pinned here.
+     */
+    let expenseId: string;
+    let cashId: string;
+
+    beforeAll(async () => {
+      const accounts = await withTenant(tenantId, (tx) =>
+        tx.select().from(schema.accounts).where(eq(schema.accounts.tenantId, tenantId)),
+      );
+      expenseId = accounts.find((a) => a.code === "5000")!.id;
+      cashId = accounts.find((a) => a.accountType === "asset")!.id;
+    });
+
+    it("lets STAFF post an entry a machine source produced", async () => {
+      /**
+       * The whole reason the seam exists. A staff member issuing feed was
+       * already authorised by the pack's write level; refusing here would only
+       * produce a half-written transaction — the movement recorded, the
+       * journal line refused.
+       */
+      const { entry } = await withTenant(tenantId, (tx) =>
+        postEntry(tx, staff, {
+          entityId,
+          status: "posted",
+          entryDate: "2026-03-01",
+          source: "inventory_issue",
+          idempotencyKey: `${STAMP}-machine-staff`,
+          lines: pair(expenseId, cashId, 500),
+        }),
+      );
+      expect(entry.status).toBe("posted");
+      expect(entry.source).toBe("inventory_issue");
+    });
+
+    it("STILL REFUSES A PLAIN JOURNAL FROM STAFF", async () => {
+      // The rule that was loosened must not have been deleted.
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-02",
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("treats an UNNAMED source as manual, and so as owner-only", async () => {
+      /**
+       * The fail-safe direction. `source` defaults to "manual", so a future
+       * caller that forgets to name itself gets the STRICTER rule rather than
+       * the looser one.
+       */
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-03",
+            source: undefined,
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("refuses a source that is real but NOT in the machine set", async () => {
+      /**
+       * `bank_import` is a legitimate source and still an owner's business.
+       * Being machine-produced is not the test — being produced by an act the
+       * operational layer already authorised is.
+       *
+       * Note what could NOT be written here: a made-up source like
+       * `"inventory"`. `entry_source` is a Postgres ENUM, so an invented value
+       * fails to compile rather than reaching this check — which is a large
+       * part of why ADR 0011's set is safe to have at all.
+       */
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-04",
+            source: "bank_import",
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("NEVER LETS AN EXPERT POST, machine source or not", async () => {
+      /**
+       * An outside accountant is read plus close-review by definition. The
+       * loosening is for the people doing the work, not for the one reviewing
+       * it — an accountant issuing feed is not a thing that should happen.
+       */
+      const expert: LedgerCtx = { tenantId, userId: "expert-user", role: "expert" };
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, expert, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-05",
+            source: "inventory_issue",
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("still refuses a machine entry into a CLOSED period", async () => {
+      /**
+       * The seam moves WHO may post, and nothing else. Every other guard the
+       * ledger has still runs — a closed period is still closed, and a staff
+       * member cannot reopen one by coming through a pack.
+       */
+      await withTenant(tenantId, (tx) =>
+        setClosedThrough(tx, owner, { entityId, date: "2026-04-30" }),
+      );
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-04-15",
+            source: "inventory_issue",
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
+      await withTenant(tenantId, (tx) =>
+        setClosedThrough(tx, owner, { entityId, date: null }),
+      );
+    });
+
+    it("still refuses an UNBALANCED machine entry", async () => {
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-06",
+            source: "inventory_issue",
+            lines: [{ accountId: expenseId, amountCents: 500 }],
+          }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("records the staff member who caused it, rather than an owner", async () => {
+      // The audit trail must say what is true. ADR 0011 rejected elevating the
+      // pack's role precisely so this row is not a lie.
+      const { entry } = await withTenant(tenantId, (tx) =>
+        postEntry(tx, staff, {
+          entityId,
+          status: "posted",
+          entryDate: "2026-03-07",
+          source: "inventory_receipt",
+          idempotencyKey: `${STAMP}-machine-audit`,
+          lines: pair(expenseId, cashId, 500),
+        }),
+      );
+      expect(entry.createdByClerkUserId).toBe("staff-user");
+    });
+  });
+
   // ---------------------------------------------------------------- trigger
 
   describe("DB balance trigger (raw SQL backstop)", () => {

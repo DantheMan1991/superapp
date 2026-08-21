@@ -1,8 +1,21 @@
 import "server-only";
-import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  sql,
+} from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
+  InventoryCount,
+  InventoryCountLine,
   InventoryItem,
   InventoryLot,
   InventoryMovement,
@@ -12,7 +25,11 @@ import {
   listDimensionMembers,
   upsertDimensionMember,
 } from "@/modules/accounting/core";
-import { isLotSource, isValidSlug } from "./vocabulary";
+import {
+  COUNT_VARIANCE_REASON,
+  isLotSource,
+  isValidSlug,
+} from "./vocabulary";
 import { isKnownUnit, roundQuantity } from "./core/units";
 import type { MovementRow } from "./core/balances";
 import {
@@ -54,6 +71,9 @@ export class InventoryError extends Error {
       | "LOT_CYCLE"
       | "ZERO_QUANTITY"
       | "INVALID_COST"
+      | "INVALID_REASON"
+      | "COUNT_CLOSED"
+      | "COUNT_INVALID"
       | "INSUFFICIENT",
     message: string,
   ) {
@@ -286,6 +306,8 @@ export interface LotInput {
   source?: string;
   parentLotId?: string | null;
   openedOn?: string | null;
+  /** When this batch stops being good. A batch fact, never an item one. */
+  expiresOn?: string | null;
   notes?: string;
 }
 
@@ -314,6 +336,7 @@ export async function createLot(
       source,
       parentLotId: input.parentLotId ?? null,
       openedOn: input.openedOn ?? null,
+      expiresOn: input.expiresOn ?? null,
       notes: input.notes?.trim() ?? "",
     })
     .returning();
@@ -421,6 +444,8 @@ export interface MovementInput {
   costCents?: number | null;
   /** Which lot consumed it — a pen of broilers eating a delivery of feed. */
   issuedToLotId?: string | null;
+  /** Why, when the kind does not already say. Open taxonomy; see the column. */
+  reason?: string | null;
   extensionSlug?: string;
   notes?: string;
 }
@@ -475,6 +500,10 @@ export async function recordMovement(
   if (input.costCents !== undefined && input.costCents !== null && input.costCents < 0) {
     throw new InventoryError("INVALID_COST", "a cost cannot be negative");
   }
+  const reason = input.reason?.trim().toLowerCase() || null;
+  if (reason !== null && !isValidSlug(reason)) {
+    throw new InventoryError("INVALID_REASON", `invalid reason: ${input.reason}`);
+  }
 
   const rows = await tx
     .insert(schema.inventoryMovements)
@@ -488,6 +517,7 @@ export async function recordMovement(
       occurredOn: input.occurredOn,
       costCents: input.costCents ?? null,
       issuedToLotId: input.issuedToLotId ?? null,
+      reason,
       extensionSlug: input.extensionSlug?.trim() || "inventory",
       notes: input.notes?.trim() ?? "",
     })
@@ -1524,6 +1554,536 @@ export async function balanceByLots(
     if (!row.lotId) continue;
     out.set(row.lotId, roundQuantity(Number(row.quantity)));
   }
+  return out;
+}
+
+
+// ------------------------------------------- adjustments, counts, expiry ---
+
+/**
+ * Put the ledger right, and say why.
+ *
+ * **THE REASON IS THE POINT, NOT THE CORRECTION.** The design says it plainly:
+ * *reasons are a diagnostic rather than a correction — sustained feed shrinkage
+ * is not an accounting problem, it is a rodent problem.* One spoiled bag is a
+ * wasted bag; the same reason four months running is a freezer that is not
+ * holding temperature. Neither is visible if the reason lives in free text, and
+ * that is the whole justification for a column.
+ *
+ * **`quantity` IS SIGNED HERE, unlike `receiveStock` and `issueStock`**, which
+ * both take a positive number and decide the sign themselves. An adjustment
+ * genuinely goes either way and the caller is the only one who knows which:
+ * finding ten pounds nobody had recorded and losing ten to a rat are the same
+ * act against the same column.
+ *
+ * **A NEGATIVE ADJUSTMENT RELEASES COST AT THE AVERAGE; A POSITIVE ONE CARRIES
+ * NONE.** Stock that spoils really did cost money, and stamping it is what makes
+ * the loss show up as a number somebody will act on — the same rule
+ * `issueStock` follows, for the same reason. Stock that turns up was never
+ * bought, so it arrives at null rather than at a price the farm did not pay.
+ * That leaves the item's average where it was: `averageCostRate` counts only
+ * what came in WITH a price, which is exactly how raised stock is already
+ * treated.
+ */
+export async function adjustStock(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    itemId: string;
+    lotId?: string | null;
+    /** SIGNED. Negative is stock going away, positive is stock turning up. */
+    quantity: number;
+    /** Open taxonomy. See `SUGGESTED_ADJUSTMENT_REASONS`. */
+    reason: string;
+    occurredOn: string;
+    locationAssetId?: string | null;
+    extensionSlug?: string;
+    notes?: string;
+  },
+): Promise<InventoryMovement> {
+  requireWrite(ctx, "member");
+  const quantity = roundQuantity(input.quantity);
+  if (quantity === 0) {
+    throw new InventoryError(
+      "ZERO_QUANTITY",
+      "an adjustment of nothing is not a correction",
+    );
+  }
+
+  let costCents: number | null = null;
+  if (quantity < 0) {
+    const rate = await itemCostRate(tx, ctx.tenantId, input.itemId);
+    costCents = issueCostCents(rate, quantity);
+  }
+
+  return recordMovement(tx, ctx, {
+    itemId: input.itemId,
+    lotId: input.lotId ?? null,
+    locationAssetId: input.locationAssetId ?? null,
+    quantity,
+    movementKind: "adjustment",
+    occurredOn: input.occurredOn,
+    costCents,
+    reason: input.reason,
+    extensionSlug: input.extensionSlug,
+    notes: input.notes,
+  });
+}
+
+/**
+ * How often each reason has come up, newest window first — the diagnostic the
+ * reason column exists for.
+ *
+ * Deliberately returns COUNTS AND QUANTITIES rather than a verdict. Whether
+ * four spoilage entries in four months is a rodent problem or a bad summer is
+ * not a judgement this pack is in a position to make; showing the pattern is.
+ */
+export async function adjustmentReasons(
+  tx: Tx,
+  tenantId: string,
+  window: { from: string; to: string },
+): Promise<
+  { reason: string; entries: number; itemsAffected: number; costCents: number }[]
+> {
+  const rows = await tx
+    .select({
+      reason: schema.inventoryMovements.reason,
+      entries: sql<string>`count(*)`,
+      itemsAffected: sql<string>`count(distinct ${schema.inventoryMovements.itemId})`,
+      costCents: sql<string>`coalesce(sum(${schema.inventoryMovements.costCents}), 0)`,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        eq(schema.inventoryMovements.movementKind, "adjustment"),
+        gte(schema.inventoryMovements.occurredOn, window.from),
+        lte(schema.inventoryMovements.occurredOn, window.to),
+      ),
+    )
+    .groupBy(schema.inventoryMovements.reason);
+  return rows
+    .filter((r): r is typeof r & { reason: string } => r.reason !== null)
+    .map((r) => ({
+      reason: r.reason,
+      entries: Number(r.entries),
+      itemsAffected: Number(r.itemsAffected),
+      costCents: Number(r.costCents),
+    }))
+    .sort((a, b) => b.entries - a.entries || (a.reason < b.reason ? -1 : 1));
+}
+
+/**
+ * Batches with an expiry date, soonest first — the FEFO view.
+ *
+ * **FIRST EXPIRED, FIRST OUT, AND IT IS A SUGGESTION.** The design asks for two
+ * views that prevent loss — *oldest first* and *expiring soon* — and this
+ * answers both, because sorted-by-expiry IS oldest-first for anything that
+ * expires. Nothing anywhere refuses an issue from a later batch: the person
+ * holding the scoop can see which bag is already open and this cannot.
+ *
+ * **Batches that have gone to zero are dropped.** An empty batch cannot expire
+ * into a loss, and a list padded with them is a list nobody reads. A batch with
+ * no expiry date is not here at all — that is not the same as "does not expire",
+ * and the screen says which.
+ */
+export async function expiringLots(
+  tx: Tx,
+  tenantId: string,
+  options: { onOrBefore?: string; limit?: number } = {},
+): Promise<
+  {
+    lot: InventoryLot;
+    itemName: string;
+    unit: string;
+    balance: number;
+  }[]
+> {
+  const where = [
+    eq(schema.inventoryLots.tenantId, tenantId),
+    isNotNull(schema.inventoryLots.expiresOn),
+  ];
+  if (options.onOrBefore) {
+    where.push(lte(schema.inventoryLots.expiresOn, options.onOrBefore));
+  }
+  const lots = await tx
+    .select({
+      lot: schema.inventoryLots,
+      itemName: schema.inventoryItems.name,
+      unit: schema.inventoryItems.stockingUnit,
+    })
+    .from(schema.inventoryLots)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.inventoryLots.tenantId),
+        eq(schema.inventoryItems.id, schema.inventoryLots.itemId),
+      ),
+    )
+    .where(and(...where))
+    .orderBy(asc(schema.inventoryLots.expiresOn))
+    .limit(options.limit ?? 100);
+
+  const balances = await balanceByLots(
+    tx,
+    tenantId,
+    lots.map((l) => l.lot.id),
+  );
+  return lots
+    .map((row) => ({ ...row, balance: balances.get(row.lot.id) ?? 0 }))
+    // A batch that is not there cannot go off. Zero AND negative: a negative is
+    // a temporary disagreement, not stock sitting in a freezer going bad.
+    .filter((row) => row.balance > 0);
+}
+
+// --------------------------------------------------------------- counts ---
+
+export async function listCounts(
+  tx: Tx,
+  tenantId: string,
+  filter: { status?: string } = {},
+): Promise<InventoryCount[]> {
+  const where = [eq(schema.inventoryCounts.tenantId, tenantId)];
+  if (filter.status) where.push(eq(schema.inventoryCounts.status, filter.status));
+  return tx.query.inventoryCounts.findMany({
+    where: and(...where),
+    orderBy: (c, { desc: byDesc }) => [byDesc(c.countedOn), byDesc(c.createdAt)],
+  });
+}
+
+export async function getCount(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+): Promise<InventoryCount | null> {
+  const row = await tx.query.inventoryCounts.findFirst({
+    where: and(
+      eq(schema.inventoryCounts.tenantId, tenantId),
+      eq(schema.inventoryCounts.id, id),
+    ),
+  });
+  return row ?? null;
+}
+
+/**
+ * Start a count.
+ *
+ * **`member`, deliberately, and it is the clearest case in the pack.** Counting
+ * a freezer is the definition of a chore: it is done by whoever was sent to do
+ * it, standing in the cold with a clipboard. Nothing here creates a cost object.
+ */
+export async function startCount(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    countedOn: string;
+    locationAssetId?: string | null;
+    countedBy?: string;
+    notes?: string;
+  },
+): Promise<InventoryCount> {
+  requireWrite(ctx, "member");
+  const rows = await tx
+    .insert(schema.inventoryCounts)
+    .values({
+      tenantId: ctx.tenantId,
+      countedOn: input.countedOn,
+      locationAssetId: input.locationAssetId ?? null,
+      countedBy: input.countedBy?.trim() ?? "",
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+async function draftCountOrThrow(
+  tx: Tx,
+  ctx: InventoryCtx,
+  countId: string,
+): Promise<InventoryCount> {
+  const count = await getCount(tx, ctx.tenantId, countId);
+  if (!count) throw new InventoryError("NOT_FOUND", "that count no longer exists");
+  if (count.status !== "draft") {
+    // A posted count has already written its variances. Changing a line now
+    // would mean either rewriting a movement or leaving a variance that no
+    // longer matches the line that produced it.
+    throw new InventoryError(
+      "COUNT_CLOSED",
+      "this count is posted — its variances are already in the ledger",
+    );
+  }
+  return count;
+}
+
+/**
+ * Record what is actually on one shelf.
+ *
+ * Upserts on (count, item, lot): counting the same batch twice in one walk and
+ * getting two answers is a question for the person holding the clipboard, not
+ * two variances for the ledger to average.
+ */
+export async function recordCountLine(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    countId: string;
+    itemId: string;
+    lotId?: string | null;
+    /** What is there. ZERO IS A REAL ANSWER and posts a variance. */
+    countedQuantity: number;
+    notes?: string;
+  },
+): Promise<InventoryCountLine> {
+  requireWrite(ctx, "member");
+  await draftCountOrThrow(tx, ctx, input.countId);
+  const item = await getItem(tx, ctx.tenantId, input.itemId);
+  if (!item) throw new InventoryError("ITEM_INVALID", "that item does not exist");
+  if (input.lotId) {
+    const lot = await getLot(tx, ctx.tenantId, input.lotId);
+    if (!lot) throw new InventoryError("LOT_INVALID", "that lot does not exist");
+    if (lot.itemId !== input.itemId) {
+      throw new InventoryError(
+        "LOT_INVALID",
+        "that lot belongs to a different item",
+      );
+    }
+  }
+  const countedQuantity = roundQuantity(input.countedQuantity);
+  if (countedQuantity < 0) {
+    throw new InventoryError(
+      "COUNT_INVALID",
+      "record what you counted, not the difference — a count cannot be negative",
+    );
+  }
+
+  const existing = await tx.query.inventoryCountLines.findFirst({
+    where: and(
+      eq(schema.inventoryCountLines.tenantId, ctx.tenantId),
+      eq(schema.inventoryCountLines.countId, input.countId),
+      eq(schema.inventoryCountLines.itemId, input.itemId),
+      input.lotId
+        ? eq(schema.inventoryCountLines.lotId, input.lotId)
+        : isNull(schema.inventoryCountLines.lotId),
+    ),
+  });
+  if (existing) {
+    const updated = await tx
+      .update(schema.inventoryCountLines)
+      .set({
+        countedQuantity,
+        notes: input.notes?.trim() ?? existing.notes,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.inventoryCountLines.tenantId, ctx.tenantId),
+          eq(schema.inventoryCountLines.id, existing.id),
+        ),
+      )
+      .returning();
+    return updated[0];
+  }
+
+  const rows = await tx
+    .insert(schema.inventoryCountLines)
+    .values({
+      tenantId: ctx.tenantId,
+      countId: input.countId,
+      itemId: input.itemId,
+      lotId: input.lotId ?? null,
+      countedQuantity,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+export async function removeCountLine(
+  tx: Tx,
+  ctx: InventoryCtx,
+  id: string,
+): Promise<InventoryCountLine> {
+  requireWrite(ctx, "member");
+  const existing = await tx.query.inventoryCountLines.findFirst({
+    where: and(
+      eq(schema.inventoryCountLines.tenantId, ctx.tenantId),
+      eq(schema.inventoryCountLines.id, id),
+    ),
+  });
+  if (!existing) throw new InventoryError("NOT_FOUND", "that line is gone");
+  await draftCountOrThrow(tx, ctx, existing.countId);
+  const rows = await tx
+    .delete(schema.inventoryCountLines)
+    .where(
+      and(
+        eq(schema.inventoryCountLines.tenantId, ctx.tenantId),
+        eq(schema.inventoryCountLines.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+export async function countLines(
+  tx: Tx,
+  tenantId: string,
+  countId: string,
+): Promise<InventoryCountLine[]> {
+  return tx.query.inventoryCountLines.findMany({
+    where: and(
+      eq(schema.inventoryCountLines.tenantId, tenantId),
+      eq(schema.inventoryCountLines.countId, countId),
+    ),
+    orderBy: (l, { asc: byAsc }) => [byAsc(l.createdAt)],
+  });
+}
+
+export interface CountPosting {
+  count: InventoryCount;
+  /** Lines whose count matched the ledger exactly. No movement written. */
+  agreed: number;
+  /** Lines that wrote an adjustment. */
+  adjusted: number;
+  /** Net variance, in the items' own units — NOT summed across items. */
+  variances: { itemId: string; itemName: string; unit: string; variance: number }[];
+}
+
+/**
+ * Post the count: every disagreement becomes an adjustment, in one transaction.
+ *
+ * **THE VARIANCE IS THE OUTPUT, and `count_variance` is its reason.** That keeps
+ * it separate from spoilage and shrinkage in the diagnostic, which matters: a
+ * count variance means the record drifted, while spoilage means stock was
+ * destroyed, and treating them as one number would hide both.
+ *
+ * **A LINE THAT AGREES WRITES NOTHING.** A movement of zero is refused by the
+ * ledger anyway, and a row saying "nothing happened" in the one table that has
+ * to reconcile is noise. The line still records that it was counted and what was
+ * expected, which is the useful half.
+ *
+ * **`expected` IS STAMPED HERE**, at the moment of posting, and never recomputed
+ * — see the column comment. It is what the ledger believed when somebody
+ * disagreed with it, and a backdated movement tomorrow must not silently
+ * restate a variance that has already been posted.
+ */
+export async function postCount(
+  tx: Tx,
+  ctx: InventoryCtx,
+  countId: string,
+  postedOn: string,
+): Promise<CountPosting> {
+  requireWrite(ctx, "member");
+  const count = await draftCountOrThrow(tx, ctx, countId);
+  const lines = await countLines(tx, ctx.tenantId, countId);
+  if (lines.length === 0) {
+    throw new InventoryError(
+      "COUNT_INVALID",
+      "count something before posting — an empty count has nothing to reconcile",
+    );
+  }
+
+  const items = await itemsByIds(
+    tx,
+    ctx.tenantId,
+    lines.map((l) => l.itemId),
+  );
+  const lotBalances = await balanceByLots(
+    tx,
+    ctx.tenantId,
+    lines.map((l) => l.lotId).filter((id): id is string => id !== null),
+  );
+  const itemBalances = await onHandByItem(tx, ctx.tenantId);
+
+  let agreed = 0;
+  let adjusted = 0;
+  const varianceByItem = new Map<string, number>();
+
+  for (const line of lines) {
+    // A lot's balance for a lot line; the whole item's for a line with no lot,
+    // because that is what "how much of this is there" means when nobody tracks
+    // it in batches.
+    const expected = line.lotId
+      ? (lotBalances.get(line.lotId) ?? 0)
+      : (itemBalances.get(line.itemId) ?? 0);
+    const variance = roundQuantity(line.countedQuantity - expected);
+
+    let movementId: string | null = null;
+    if (variance !== 0) {
+      const movement = await adjustStock(tx, ctx, {
+        itemId: line.itemId,
+        lotId: line.lotId,
+        quantity: variance,
+        reason: COUNT_VARIANCE_REASON,
+        occurredOn: postedOn,
+        locationAssetId: count.locationAssetId,
+        notes: line.notes,
+      });
+      movementId = movement.id;
+      adjusted += 1;
+      varianceByItem.set(
+        line.itemId,
+        roundQuantity((varianceByItem.get(line.itemId) ?? 0) + variance),
+      );
+    } else {
+      agreed += 1;
+    }
+
+    await tx
+      .update(schema.inventoryCountLines)
+      .set({
+        expectedQuantity: expected,
+        inventoryMovementId: movementId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.inventoryCountLines.tenantId, ctx.tenantId),
+          eq(schema.inventoryCountLines.id, line.id),
+        ),
+      );
+  }
+
+  const posted = await tx
+    .update(schema.inventoryCounts)
+    .set({ status: "posted", postedOn, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.inventoryCounts.tenantId, ctx.tenantId),
+        eq(schema.inventoryCounts.id, countId),
+      ),
+    )
+    .returning();
+
+  return {
+    count: posted[0],
+    agreed,
+    adjusted,
+    // Never summed across items: pounds of feed and dozens of eggs have no
+    // total between them, which is this pack's oldest rule.
+    variances: [...varianceByItem].map(([itemId, variance]) => ({
+      itemId,
+      itemName: items.get(itemId)?.name ?? "—",
+      unit: items.get(itemId)?.stockingUnit ?? "each",
+      variance,
+    })),
+  };
+}
+
+async function itemsByIds(
+  tx: Tx,
+  tenantId: string,
+  itemIds: string[],
+): Promise<Map<string, InventoryItem>> {
+  const out = new Map<string, InventoryItem>();
+  const unique = [...new Set(itemIds)];
+  if (unique.length === 0) return out;
+  const rows = await tx.query.inventoryItems.findMany({
+    where: and(
+      eq(schema.inventoryItems.tenantId, tenantId),
+      inArray(schema.inventoryItems.id, unique),
+    ),
+  });
+  for (const row of rows) out.set(row.id, row);
   return out;
 }
 

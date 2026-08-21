@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
+  InventoryError,
   LOT_DIMENSION,
   archiveItem,
   closeLot,
@@ -22,11 +23,18 @@ import {
 } from "../src/packs/inventory/ops";
 import { balanceOfLot, balanceByItem } from "../src/packs/inventory/core/balances";
 import {
+  adjustStock,
+  adjustmentReasons,
   consumedByLot,
   consumedCostByLot,
+  countLines,
+  expiringLots,
   issueStock,
   itemCostRate,
+  postCount,
   receiveStock,
+  recordCountLine,
+  startCount,
 } from "../src/packs/inventory/ops";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -92,6 +100,425 @@ d("inventory ops", () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
     });
+  });
+
+  // ---- slice 2: adjustments, counts, expiry -----------------------------
+
+  it("stamps a NEGATIVE adjustment at the average and a positive one at nothing", async () => {
+    /**
+     * **THE ASYMMETRY IS THE DECISION.** Stock that spoils really did cost
+     * money, and stamping it is what turns a loss into a number somebody acts
+     * on — the same rule `issueStock` follows. Stock that turns up was never
+     * bought, so it arrives at null rather than at a price the farm did not pay.
+     */
+    const item = await newItem("Adjust me");
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 100,
+        costCents: 20_000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    const lost = await asOwner((tx) =>
+      adjustStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: -10,
+        reason: "spoilage",
+        occurredOn: "2026-08-20",
+      }),
+    );
+    // $2.00 a pound, ten pounds gone.
+    expect(lost.costCents).toBe(2_000);
+    expect(lost.reason).toBe("spoilage");
+    expect(lost.movementKind).toBe("adjustment");
+
+    const found = await asOwner((tx) =>
+      adjustStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 5,
+        reason: "found",
+        occurredOn: "2026-08-20",
+      }),
+    );
+    expect(found.costCents).toBeNull();
+
+    // AND THE AVERAGE HAS NOT MOVED. It counts only what came in WITH a price,
+    // so five pounds nobody paid for cannot quietly make the feed look cheaper.
+    expect(await asOwner((tx) => itemCostRate(tx, tenantId, item.id))).toBe(200);
+  });
+
+  it("refuses an adjustment of nothing, and a reason that is not a slug", async () => {
+    const item = await newItem("Adjust refusals");
+    await expect(
+      asOwner((tx) =>
+        adjustStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 0,
+          reason: "spoilage",
+          occurredOn: "2026-08-20",
+        }),
+      ),
+    ).rejects.toThrow(InventoryError);
+    await expect(
+      asOwner((tx) =>
+        adjustStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: -1,
+          reason: "Rodent Damage!",
+          occurredOn: "2026-08-20",
+        }),
+      ),
+    ).rejects.toThrow(InventoryError);
+  });
+
+  it("groups adjustment reasons, which is the whole point of the column", async () => {
+    // The design: sustained shrinkage is not an accounting problem, it is a
+    // rodent problem. One entry is a wasted bag; the pattern is the diagnostic.
+    const item = await newItem("Diagnostic feed");
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 1000,
+        costCents: 100_000,
+        occurredOn: "2026-05-01",
+      }),
+    );
+    for (const month of ["2026-06-10", "2026-07-10", "2026-08-10"]) {
+      await asOwner((tx) =>
+        adjustStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: -20,
+          reason: "shrinkage",
+          occurredOn: month,
+        }),
+      );
+    }
+    await asOwner((tx) =>
+      adjustStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: -5,
+        reason: "spoilage",
+        occurredOn: "2026-08-11",
+      }),
+    );
+
+    const reasons = await asOwner((tx) =>
+      adjustmentReasons(tx, tenantId, { from: "2026-01-01", to: "2026-12-31" }),
+    );
+    const shrinkage = reasons.find((r) => r.reason === "shrinkage");
+    expect(shrinkage?.entries).toBe(3);
+    // 20 lb at $1.00 a pound, three times.
+    expect(shrinkage?.costCents).toBe(6_000);
+    // Most frequent first, so the pattern is what somebody sees.
+    expect(reasons[0].reason).toBe("shrinkage");
+  });
+
+  it("posts a count as variances, and writes NOTHING for a shelf that agrees", async () => {
+    /**
+     * **THE SLICE'S POINT.** The design: *the record and reality will disagree,
+     * and counting is how that is discovered.*
+     *
+     * A movement of zero is refused by the ledger anyway, and a row saying
+     * "nothing happened" in the one table that has to reconcile is noise.
+     */
+    const short = await newItem("Counted short");
+    const exact = await newItem("Counted exactly");
+    const over = await newItem("Counted over");
+    for (const item of [short, exact, over]) {
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 100,
+          costCents: 10_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+    }
+
+    const count = await asOwner((tx) =>
+      startCount(tx, ownerCtx(), {
+        countedOn: "2026-08-20",
+        countedBy: "Sarah",
+      }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: short.id,
+        countedQuantity: 92,
+      }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: exact.id,
+        countedQuantity: 100,
+      }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: over.id,
+        countedQuantity: 103,
+      }),
+    );
+
+    const posted = await asOwner((tx) =>
+      postCount(tx, ownerCtx(), count.id, "2026-08-20"),
+    );
+    expect(posted.count.status).toBe("posted");
+    expect(posted.agreed).toBe(1);
+    expect(posted.adjusted).toBe(2);
+
+    // Variances are per item and NEVER summed: −8 lb and +3 lb of different
+    // things have no total between them.
+    const byItem = new Map(posted.variances.map((v) => [v.itemId, v.variance]));
+    expect(byItem.get(short.id)).toBe(-8);
+    expect(byItem.get(over.id)).toBe(3);
+    expect(byItem.has(exact.id)).toBe(false);
+
+    // The ledger now agrees with the shelf.
+    const onHand = await asOwner((tx) => onHandByItem(tx, tenantId));
+    expect(onHand.get(short.id)).toBe(92);
+    expect(onHand.get(exact.id)).toBe(100);
+    expect(onHand.get(over.id)).toBe(103);
+
+    const lines = await asOwner((tx) => countLines(tx, tenantId, count.id));
+    const agreedLine = lines.find((l) => l.itemId === exact.id)!;
+    // It records that it was counted and what was expected — the useful half —
+    // without putting a "nothing happened" row in the ledger.
+    expect(agreedLine.expectedQuantity).toBe(100);
+    expect(agreedLine.inventoryMovementId).toBeNull();
+    const shortLine = lines.find((l) => l.itemId === short.id)!;
+    expect(shortLine.expectedQuantity).toBe(100);
+    expect(shortLine.inventoryMovementId).not.toBeNull();
+  });
+
+  it("counts a shelf found EMPTY, which is a real answer", async () => {
+    // Zero is a count; a line nobody got to is a line that does not exist. The
+    // difference is the reason `counted_quantity` is NOT NULL.
+    const item = await newItem("Gone entirely");
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 40,
+        costCents: 4_000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const count = await asOwner((tx) =>
+      startCount(tx, ownerCtx(), { countedOn: "2026-08-20" }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: item.id,
+        countedQuantity: 0,
+      }),
+    );
+    const posted = await asOwner((tx) =>
+      postCount(tx, ownerCtx(), count.id, "2026-08-20"),
+    );
+    expect(posted.adjusted).toBe(1);
+    expect(posted.variances[0].variance).toBe(-40);
+    const onHand = await asOwner((tx) => onHandByItem(tx, tenantId));
+    expect(onHand.get(item.id)).toBe(0);
+  });
+
+  it("counts a BATCH against that batch's balance, not the item's", async () => {
+    const item = await newItem("Batched");
+    const a = await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        newLotCode: "COUNT-A",
+        quantity: 60,
+        costCents: 6_000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        newLotCode: "COUNT-B",
+        quantity: 40,
+        costCents: 4_000,
+        occurredOn: "2026-08-02",
+      }),
+    );
+
+    const count = await asOwner((tx) =>
+      startCount(tx, ownerCtx(), { countedOn: "2026-08-20" }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: item.id,
+        lotId: a.lotId,
+        countedQuantity: 55,
+      }),
+    );
+    const posted = await asOwner((tx) =>
+      postCount(tx, ownerCtx(), count.id, "2026-08-20"),
+    );
+    // Against COUNT-A's 60, not the item's 100.
+    expect(posted.variances[0].variance).toBe(-5);
+    const onHand = await asOwner((tx) => onHandByItem(tx, tenantId));
+    expect(onHand.get(item.id)).toBe(95);
+  });
+
+  it("counting the same shelf twice replaces the answer rather than doubling it", async () => {
+    const item = await newItem("Recounted");
+    const count = await asOwner((tx) =>
+      startCount(tx, ownerCtx(), { countedOn: "2026-08-20" }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: item.id,
+        countedQuantity: 10,
+      }),
+    );
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: item.id,
+        countedQuantity: 12,
+      }),
+    );
+    const lines = await asOwner((tx) => countLines(tx, tenantId, count.id));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].countedQuantity).toBe(12);
+  });
+
+  it("refuses to post an empty count, or to touch one already posted", async () => {
+    const item = await newItem("Posted once");
+    const count = await asOwner((tx) =>
+      startCount(tx, ownerCtx(), { countedOn: "2026-08-20" }),
+    );
+    await expect(
+      asOwner((tx) => postCount(tx, ownerCtx(), count.id, "2026-08-20")),
+    ).rejects.toThrow(/nothing to reconcile/);
+
+    await asOwner((tx) =>
+      recordCountLine(tx, ownerCtx(), {
+        countId: count.id,
+        itemId: item.id,
+        countedQuantity: 3,
+      }),
+    );
+    await asOwner((tx) => postCount(tx, ownerCtx(), count.id, "2026-08-20"));
+
+    // A posted count has already written its variances. Changing a line now
+    // would mean rewriting a movement, which the ledger never does.
+    await expect(
+      asOwner((tx) =>
+        recordCountLine(tx, ownerCtx(), {
+          countId: count.id,
+          itemId: item.id,
+          countedQuantity: 4,
+        }),
+      ),
+    ).rejects.toThrow(/already in the ledger/);
+    await expect(
+      asOwner((tx) => postCount(tx, ownerCtx(), count.id, "2026-08-21")),
+    ).rejects.toThrow(InventoryError);
+  });
+
+  it("a count is a CHORE — staff can walk it and post it", async () => {
+    // The clearest `member` case in the pack: counting a freezer is done by
+    // whoever was sent, standing in the cold with a clipboard.
+    const item = await newItem("Staff counted");
+    const count = await withTenant(
+      tenantId,
+      (tx) => startCount(tx, staffCtx(), { countedOn: "2026-08-20" }),
+      { role: "staff", userId: STAFF },
+    );
+    await withTenant(
+      tenantId,
+      (tx) =>
+        recordCountLine(tx, staffCtx(), {
+          countId: count.id,
+          itemId: item.id,
+          countedQuantity: 7,
+        }),
+      { role: "staff", userId: STAFF },
+    );
+    const posted = await withTenant(
+      tenantId,
+      (tx) => postCount(tx, staffCtx(), count.id, "2026-08-20"),
+      { role: "staff", userId: STAFF },
+    );
+    expect(posted.adjusted).toBe(1);
+  });
+
+  it("lists batches by expiry, soonest first, and drops the empty ones", async () => {
+    /**
+     * FEFO — first EXPIRED, first out. **A batch that is not there cannot go off
+     * into a loss**, and a list padded with empties is a list nobody reads.
+     */
+    const item = await newItem("Perishable");
+    const soon = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), {
+        itemId: item.id,
+        code: "GOES-FIRST",
+        expiresOn: "2026-09-01",
+      }),
+    );
+    const later = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), {
+        itemId: item.id,
+        code: "GOES-LATER",
+        expiresOn: "2026-12-01",
+      }),
+    );
+    const emptied = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), {
+        itemId: item.id,
+        code: "ALL-GONE",
+        expiresOn: "2026-08-25",
+      }),
+    );
+    const undated = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), { itemId: item.id, code: "NO-DATE" }),
+    );
+
+    for (const lot of [soon, later, emptied, undated]) {
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 10,
+          costCents: 1_000,
+          occurredOn: "2026-08-01",
+        }),
+      );
+    }
+    // This one has been used up entirely.
+    await asOwner((tx) =>
+      issueStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: emptied.id,
+        quantity: 10,
+        occurredOn: "2026-08-10",
+      }),
+    );
+
+    const rows = await asOwner((tx) => expiringLots(tx, tenantId));
+    const codes = rows.map((r) => r.lot.code);
+    expect(codes).toEqual(["GOES-FIRST", "GOES-LATER"]);
+    // A batch with no date is not "does not expire" — it is simply not on this
+    // list, and the screen says which.
+    expect(codes).not.toContain("NO-DATE");
+    expect(codes).not.toContain("ALL-GONE");
+    expect(rows[0].balance).toBe(10);
+    expect(rows[0].itemName).toBe("Perishable");
+
+    const beforeOctober = await asOwner((tx) =>
+      expiringLots(tx, tenantId, { onOrBefore: "2026-10-01" }),
+    );
+    expect(beforeOctober.map((r) => r.lot.code)).toEqual(["GOES-FIRST"]);
   });
 
   it("offers only the places things are kept", async () => {

@@ -25,14 +25,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  adjustStockAction,
   createLotAction,
   issueStockAction,
   receiveStockAction,
   splitLotAction,
 } from "../actions";
-import { LOT_SOURCES, LOT_SOURCE_LABELS } from "../vocabulary";
+import {
+  ADJUSTMENT_REASON_LABELS,
+  ADJUSTMENT_REASON_NOTES,
+  LOT_SOURCES,
+  LOT_SOURCE_LABELS,
+  SUGGESTED_ADJUSTMENT_REASONS,
+} from "../vocabulary";
 
 const NO_LOT = "__none__";
+const CUSTOM_REASON = "__custom__";
 const NO_CONSUMER = "__nobody__";
 const NO_LOCATION = "__none__";
 
@@ -66,6 +74,7 @@ export function LotForm({
         code: String(formData.get("code") ?? ""),
         source: String(formData.get("source") ?? "purchased"),
         openedOn: String(formData.get("openedOn") ?? today),
+        expiresOn: String(formData.get("expiresOn") ?? "") || null,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -135,6 +144,17 @@ export function LotForm({
               </div>
             </div>
             <div className="grid gap-2">
+              <Label htmlFor="expiresOn">Good until</Label>
+              <Input id="expiresOn" name="expiresOn" type="date" />
+              <p className="text-xs text-muted-foreground">
+                {/* Blank covers two different things and the pack does not try
+                    to tell them apart: nobody has dated it, and it does not go
+                    off. Baling twine is honestly blank. */}
+                Optional. When it is set, this batch shows up under what is going
+                off soon and gets used first.
+              </p>
+            </div>
+            <div className="grid gap-2">
               <Label htmlFor="lot-notes">Notes</Label>
               <Textarea id="lot-notes" name="notes" rows={2} maxLength={5000} />
             </div>
@@ -186,7 +206,18 @@ export function MovementForm({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [direction, setDirection] = useState<"in" | "out">("in");
+  /**
+   * **A THIRD DOOR ON THE SAME FORM, NOT A SECOND FORM.** Slice 1 made the point
+   * already: adding a separate "Adjust" button would leave three ways to move
+   * stock and a person guessing which one this is. In carries a price, Out
+   * carries who ate it, and Adjust carries a REASON — the one thing an
+   * adjustment is for.
+   */
+  const [direction, setDirection] = useState<"in" | "out" | "adjust">("in");
+  const [reason, setReason] = useState<string>(SUGGESTED_ADJUSTMENT_REASONS[0]);
+  // Which way an adjustment goes. Both are ordinary: a rat and a miscount are
+  // the same act against the same column in opposite directions.
+  const [adjustUp, setAdjustUp] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function submit(formData: FormData) {
@@ -207,8 +238,30 @@ export function MovementForm({
        */
       const money = String(formData.get("cost") ?? "").trim();
       const consumedBy = String(formData.get("issuedToLotId") ?? NO_CONSUMER);
+      const chosenReason =
+        reason === CUSTOM_REASON
+          ? String(formData.get("customReason") ?? "")
+              .trim()
+              .toLowerCase()
+              .replace(/\s+/g, "_")
+          : reason;
+
       const result =
-        direction === "in"
+        direction === "adjust"
+          ? await adjustStockAction({
+              itemId,
+              lotId: lotId === NO_LOT ? null : lotId,
+              // SIGNED here and only here. The form asks for a positive number
+              // and a direction, because "how much" and "which way" are two
+              // questions and a minus sign typed into a box is not an answer to
+              // either.
+              quantity: adjustUp ? Math.abs(raw) : -Math.abs(raw),
+              reason: chosenReason,
+              occurredOn: String(formData.get("occurredOn") ?? today),
+              locationAssetId: locationId === NO_LOCATION ? null : locationId,
+              notes: String(formData.get("notes") ?? ""),
+            })
+          : direction === "in"
           ? await receiveStockAction({
               itemId,
               lotId: lotId === NO_LOT ? undefined : lotId,
@@ -235,13 +288,22 @@ export function MovementForm({
       }
       // The stamped cost is worth saying out loud: it is what the pen was
       // charged, and it will not change when the next delivery arrives.
+      // The stamped cost is worth saying out loud on the way out AND on a
+      // downward adjustment: spoilage that cost $42 is a number somebody acts
+      // on, and "Adjusted" on its own is not.
       const charged =
-        direction === "out" && "costCents" in result && result.costCents
+        direction !== "in" && "costCents" in result && result.costCents
           ? ` · ${formatMoney(result.costCents, currencySymbol)}`
           : "";
-      toast.success(
-        (direction === "in" ? "Stock recorded in" : "Stock recorded out") + charged,
-      );
+      const headline =
+        direction === "in"
+          ? "Stock recorded in"
+          : direction === "out"
+            ? "Stock recorded out"
+            : adjustUp
+              ? "Adjusted up"
+              : "Adjusted down";
+      toast.success(headline + charged);
       setOpen(false);
       router.refresh();
     });
@@ -280,6 +342,14 @@ export function MovementForm({
               >
                 Out
               </Button>
+              <Button
+                type="button"
+                variant={direction === "adjust" ? "default" : "outline"}
+                onClick={() => setDirection("adjust")}
+                className="flex-1"
+              >
+                Adjust
+              </Button>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -307,6 +377,70 @@ export function MovementForm({
               </div>
             </div>
 
+            {direction === "adjust" && (
+              <>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={!adjustUp ? "default" : "outline"}
+                    onClick={() => setAdjustUp(false)}
+                    className="flex-1"
+                  >
+                    Less than the record says
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={adjustUp ? "default" : "outline"}
+                    onClick={() => setAdjustUp(true)}
+                    className="flex-1"
+                  >
+                    More
+                  </Button>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="reason">Why</Label>
+                  <Select value={reason} onValueChange={setReason}>
+                    <SelectTrigger id="reason">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SUGGESTED_ADJUSTMENT_REASONS.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {ADJUSTMENT_REASON_LABELS[r]}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={CUSTOM_REASON}>
+                        Something else…
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {reason === CUSTOM_REASON ? (
+                    <Input
+                      name="customReason"
+                      maxLength={63}
+                      required
+                      placeholder="e.g. dropped in the mud"
+                    />
+                  ) : (
+                    /* THE REASON IS A DIAGNOSTIC, and the note is what says so
+                       at the moment somebody picks one. Sustained shrinkage is
+                       not an accounting problem, it is a rodent problem — and
+                       nobody learns that from a screen that just took the
+                       number. */
+                    <p className="text-xs text-muted-foreground">
+                      {ADJUSTMENT_REASON_NOTES[reason]}
+                    </p>
+                  )}
+                </div>
+                {!adjustUp && (
+                  <p className="text-xs text-muted-foreground">
+                    What it cost comes off with it, at the average paid. Stock
+                    that turns up carries nothing, because nobody paid for it.
+                  </p>
+                )}
+              </>
+            )}
+
             {direction === "in" ? (
               <div className="grid gap-2">
                 <Label htmlFor="cost">What it cost</Label>
@@ -325,7 +459,7 @@ export function MovementForm({
                   empty if the invoice has not arrived — the stock still counts.
                 </p>
               </div>
-            ) : (
+            ) : direction === "out" ? (
               consumers.length > 0 && (
                 <div className="grid gap-2">
                   <Label htmlFor="issuedToLotId">Fed to</Label>
@@ -350,7 +484,7 @@ export function MovementForm({
                   </p>
                 </div>
               )
-            )}
+            ) : null}
 
             {lots.length > 0 && (
               <div className="grid gap-2">

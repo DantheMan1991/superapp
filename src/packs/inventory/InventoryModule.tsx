@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Boxes } from "lucide-react";
+import { Boxes, ClipboardList } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { PageHeader } from "@/components/app/page-header";
@@ -16,9 +16,18 @@ import {
 import { packContext } from "@/lib/packs/tenant-context";
 import { isModuleEnabled } from "@/lib/modules";
 import { labelFor } from "@/lib/packs/resolve";
-import { listItems, listKindsInUse, listLocations, onHandByItem } from "./ops";
+import {
+  expiringLots,
+  listItems,
+  listKindsInUse,
+  listLocations,
+  onHandByItem,
+} from "./ops";
 import { slugLabel } from "./vocabulary";
 import { formatQuantity } from "./core/units";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { todayInTimezone } from "@/lib/timezone";
 import { ItemForm } from "./components/item-form";
 
 /**
@@ -48,10 +57,20 @@ export async function InventoryModule({
    */
   const livestockEnabled = await isModuleEnabled(ctx.tenant.id, "livestock");
 
-  const { items, onHand, kinds, locations, labels } = await withTenant(
+  const today = todayInTimezone(ctx.tenant.timezone);
+  /**
+   * **HOW FAR AHEAD "SOON" IS.** Six weeks: long enough that a freezer full of
+   * meat can still be sold or eaten rather than binned, short enough that the
+   * panel is not a list of everything the business owns.
+   */
+  const horizon = new Date(Date.parse(`${today}T00:00:00Z`) + 42 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+
+  const { items, onHand, kinds, locations, labels, expiring } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [items, onHand, kinds, locations, pack] = await Promise.all([
+      const [items, onHand, kinds, locations, pack, expiring] = await Promise.all([
         listItems(tx, ctx.tenant.id, {
           kind,
           status: showArchived ? undefined : "active",
@@ -60,8 +79,11 @@ export async function InventoryModule({
         listKindsInUse(tx, ctx.tenant.id),
         listLocations(tx, ctx.tenant.id),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "inventory"),
+        // FIRST EXPIRED, FIRST OUT. A suggestion and never an enforcement:
+        // the person holding the scoop can see which bag is already open.
+        expiringLots(tx, ctx.tenant.id, { onOrBefore: horizon, limit: 12 }),
       ]);
-      return { items, onHand, kinds, locations, labels: pack.labels };
+      return { items, onHand, kinds, locations, labels: pack.labels, expiring };
     },
     { role: ctx.role },
   );
@@ -75,14 +97,82 @@ export async function InventoryModule({
         title="Inventory"
         description="What the business holds, where it is, and which batch it came from."
         actions={
-          isOwner ? (
-            <ItemForm
-              kindsInUse={kinds.map((k) => k.kind)}
-              livestockEnabled={livestockEnabled}
-            />
-          ) : null
+          <div className="flex flex-wrap items-center gap-2">
+            {/* FIRST, and NOT owner-gated. Counting is the chore and adding an
+                item is the occasional decision, so the order on the page is how
+                often each is used rather than the order they were built in —
+                the call `livestock` made for its daily round. */}
+            <Button asChild variant="outline">
+              <Link href="/dashboard/m/inventory/counts">
+                <ClipboardList className="mr-2 h-4 w-4" />
+                Counting
+              </Link>
+            </Button>
+            {isOwner && (
+              <ItemForm
+                kindsInUse={kinds.map((k) => k.kind)}
+                livestockEnabled={livestockEnabled}
+              />
+            )}
+          </div>
         }
       />
+
+      {expiring.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Going off soon</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>What</TableHead>
+                  <TableHead>Batch</TableHead>
+                  <TableHead className="text-right">On hand</TableHead>
+                  <TableHead className="text-right">Good until</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {expiring.map((row) => (
+                  <TableRow key={row.lot.id}>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`/dashboard/m/inventory/${row.lot.itemId}`}
+                        className="hover:underline"
+                      >
+                        {row.itemName}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {row.lot.code}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatQuantity(row.balance, row.unit)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums ${
+                        row.lot.expiresOn && row.lot.expiresOn < today
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {row.lot.expiresOn}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <p className="mt-3 text-xs text-muted-foreground">
+              {/* The design asks for the two views that prevent loss — oldest
+                  first, and expiring soon. Sorted by date IS both. */}
+              Soonest first. Use these before the rest; nothing here refuses a
+              later batch, because you can see which one is already open and
+              this cannot.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {items.length === 0 ? (
         <EmptyState

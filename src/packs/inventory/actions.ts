@@ -8,6 +8,11 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
 import {
   InventoryError,
+  adjustStock,
+  postCount,
+  recordCountLine,
+  removeCountLine,
+  startCount,
   archiveItem,
   closeLot,
   createItem,
@@ -60,6 +65,13 @@ function toResult(err: unknown): { error: string } {
         return { error: "A cost cannot be negative." };
       case "ZERO_QUANTITY":
         return { error: "Enter a quantity other than zero." };
+      case "INVALID_REASON":
+        return { error: "Use lowercase letters, numbers and underscores." };
+      // Both are written for a person where they are thrown, and both are about
+      // what the person is holding rather than about the data.
+      case "COUNT_CLOSED":
+      case "COUNT_INVALID":
+        return { error: err.message };
       case "INSUFFICIENT":
         return { error: err.message };
     }
@@ -182,6 +194,7 @@ const lotSchema = z.object({
   code: z.string().min(1).max(120),
   source: z.enum(["purchased", "raised", "produced"]).optional(),
   openedOn: optionalDate.nullable(),
+  expiresOn: optionalDate.nullable(),
   notes: z.string().max(5000).optional(),
 });
 
@@ -443,6 +456,176 @@ export async function issueStockAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, costCents: movement.costCents };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------- adjustments, counts, expiry ---
+
+/**
+ * Put the ledger right, and say why.
+ *
+ * `member`: correcting what is on a shelf is a chore, done by whoever noticed.
+ * The reason is REQUIRED, and that is the whole slice — an adjustment with no
+ * reason is a number nobody can learn anything from later.
+ */
+export async function adjustStockAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      itemId: z.string().uuid(),
+      lotId: z.string().uuid().nullable().optional(),
+      // SIGNED, unlike a receipt or an issue. Both directions are ordinary.
+      quantity: quantity.refine((n) => n !== 0, "an adjustment cannot be zero"),
+      reason: z.string().min(1).max(63),
+      occurredOn: requiredDate,
+      locationAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const movement = await withTenant(
+      ctx.tenant.id,
+      (tx) => adjustStock(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.stock.adjusted",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_item",
+      targetId: parsed.data.itemId,
+      // The reason and the size, never the notes — those are free text about
+      // what somebody found and belong only in the row.
+      meta: {
+        reason: movement.reason,
+        quantity: movement.quantity,
+        costCents: movement.costCents,
+        occurredOn: movement.occurredOn,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, costCents: movement.costCents };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function startCountAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      countedOn: requiredDate,
+      locationAssetId: z.string().uuid().nullable().optional(),
+      countedBy: z.string().max(200).optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const count = await withTenant(
+      ctx.tenant.id,
+      (tx) => startCount(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true, countId: count.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function recordCountLineAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      countId: z.string().uuid(),
+      itemId: z.string().uuid(),
+      lotId: z.string().uuid().nullable().optional(),
+      // ZERO IS A REAL ANSWER: a shelf walked and found empty posts a variance.
+      countedQuantity: z.number().finite().min(0).multipleOf(0.0001),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => recordCountLine(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function removeCountLineAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => removeCountLine(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Post the count.
+ *
+ * **THE RESULT CARRIES THE NUMBERS BACK so the toast can say what happened to
+ * the ledger.** How many shelves agreed is the reassuring half and how many did
+ * not is the actionable one, and "Saved" would say neither — the mistake this
+ * pack corrected on the page that owned the money and never mentioned it.
+ */
+export async function postCountAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ countId: z.string().uuid(), postedOn: requiredDate })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => postCount(tx, ctxOf(ctx), parsed.data.countId, parsed.data.postedOn),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.count.posted",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_count",
+      targetId: parsed.data.countId,
+      meta: {
+        postedOn: parsed.data.postedOn,
+        agreed: result.agreed,
+        adjusted: result.adjusted,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    // A count that moved head is a count `livestock` needs to re-read.
+    revalidatePath("/dashboard/m/livestock", "layout");
+    return { ok: true, agreed: result.agreed, adjusted: result.adjusted };
   } catch (err) {
     return toResult(err);
   }

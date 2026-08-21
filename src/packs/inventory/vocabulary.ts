@@ -85,6 +85,77 @@ export function movementKindLabel(kind: string): string {
   return MOVEMENT_KIND_LABELS[kind] ?? slugLabel(kind);
 }
 
+/**
+ * **THE REASON AN ADJUSTMENT HAPPENED, and it is a diagnostic rather than a
+ * correction.** The design's own line: *sustained feed shrinkage is not an
+ * accounting problem, it is a rodent problem.*
+ *
+ * SUGGESTIONS, NOT A CONSTRAINT — `inventory_movements.reason` is an open
+ * taxonomy and the database checks only the format. Ordered by how often a farm
+ * reaches for them, NOT alphabetically, for the reason `land` paid for once:
+ * sorting put `building_site` at the top of a picker and made it the default
+ * answer for a paddock.
+ *
+ * Every one of these is industry-neutral on purpose. A bakery loses flour to
+ * spillage and a workshop loses fasteners to breakage; neither needs its own
+ * vocabulary, and a pack that shipped `rodent_damage` would be naming an
+ * industry.
+ */
+export const SUGGESTED_ADJUSTMENT_REASONS = [
+  "spoilage",
+  "shrinkage",
+  "damage",
+  "found",
+  "waste",
+  "personal_use",
+  "theft",
+  "correction",
+] as const;
+
+export const ADJUSTMENT_REASON_LABELS: Record<string, string> = {
+  spoilage: "Went off",
+  shrinkage: "Shrinkage",
+  damage: "Damaged",
+  found: "Found",
+  waste: "Thrown away",
+  personal_use: "Taken for the house",
+  theft: "Missing",
+  correction: "Correcting an entry",
+  count_variance: "Found by counting",
+};
+
+export const ADJUSTMENT_REASON_NOTES: Record<string, string> = {
+  spoilage: "It went bad. Once is a wasted bag; every month is a freezer or a barn that is not keeping things.",
+  shrinkage: "Gone, and nobody knows where. The reason worth watching: a pattern here is usually vermin, spillage or a leaking bin.",
+  damage: "Broken, torn or spilled in handling.",
+  found: "It was there and the record did not know. Arrives at no cost, because nobody paid for it.",
+  waste: "Deliberately thrown away — past its date, or not fit to sell.",
+  personal_use: "Taken out of the business for the household. Not a loss, but not a sale either.",
+  theft: "Believed taken. Kept separate from shrinkage because one is a suspicion and the other is a gap.",
+  correction: "An entry was wrong and this puts it right. Prefer counting, which records what is actually there.",
+  count_variance: "The difference a physical count found between the record and the shelf.",
+};
+
+/**
+ * The reason a posted count writes. **Separate from `shrinkage` on purpose**: a
+ * count variance means the record drifted, while shrinkage means stock actually
+ * went missing, and one number covering both would hide each of them.
+ */
+export const COUNT_VARIANCE_REASON = "count_variance";
+
+export function adjustmentReasonLabel(reason: string): string {
+  return ADJUSTMENT_REASON_LABELS[reason] ?? slugLabel(reason);
+}
+
+/** A count is being walked, or it has been posted. CLOSED — there is no third state. */
+export const COUNT_STATUSES = ["draft", "posted"] as const;
+export type CountStatus = (typeof COUNT_STATUSES)[number];
+
+export const COUNT_STATUS_LABELS: Record<CountStatus, string> = {
+  draft: "Being counted",
+  posted: "Posted",
+};
+
 /** Mirrors the `_format` CHECKs. Kept in sync by tests/inventory.test.ts. */
 export const SLUG_FORMAT = /^[a-z][a-z0-9_]{0,62}$/;
 

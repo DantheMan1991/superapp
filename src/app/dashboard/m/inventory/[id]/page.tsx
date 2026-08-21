@@ -39,6 +39,7 @@ import { formatQuantity, getUnit } from "@/packs/inventory/core/units";
 import {
   LOT_SOURCE_LABELS,
   isLotSource,
+  adjustmentReasonLabel,
   movementKindLabel,
   slugLabel,
 } from "@/packs/inventory/vocabulary";
@@ -270,6 +271,7 @@ export default async function InventoryItemPage({
                 <TableHead>Batch</TableHead>
                 <TableHead>From</TableHead>
                 <TableHead>Started</TableHead>
+                <TableHead>Good until</TableHead>
                 <TableHead className="text-right">On hand</TableHead>
                 <TableHead className="w-20" />
               </TableRow>
@@ -297,6 +299,18 @@ export default async function InventoryItemPage({
                     </TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">
                       {lot.openedOn ?? "—"}
+                    </TableCell>
+                    <TableCell
+                      className={`tabular-nums ${
+                        /* Past its date AND still on the shelf is the only
+                           combination worth colouring: an empty batch cannot go
+                           off into a loss. */
+                        lot.expiresOn && lot.expiresOn < today && balance > 0
+                          ? "text-destructive"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {lot.expiresOn ?? "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatQuantity(balance, unit)}
@@ -344,6 +358,19 @@ export default async function InventoryItemPage({
                   </TableCell>
                   <TableCell>
                     {movementKindLabel(m.movementKind)}
+                    {/**
+                     * **THE REASON, BESIDE THE ENTRY.** Found by clicking: the
+                     * ledger said "Adjusted · −20 pounds · $10.00" and nothing
+                     * at all about why, on the one screen somebody looks at
+                     * when they wonder where the feed went. The reason is the
+                     * whole point of an adjustment; a row that hides it is a row
+                     * that turned a diagnostic back into a correction.
+                     */}
+                    {m.reason && (
+                      <div className="text-xs text-muted-foreground">
+                        {adjustmentReasonLabel(m.reason)}
+                      </div>
+                    )}
                     {m.notes && (
                       <div className="text-xs text-muted-foreground">
                         {m.notes}

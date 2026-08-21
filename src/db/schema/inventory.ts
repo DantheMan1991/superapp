@@ -28,7 +28,7 @@
  *   - **Cost and valuation.** Slice 3, and basis-aware: ADR 0007 already
  *     derives cash basis at read time and explicitly rejected a second stored
  *     ledger. Inventory valuation is the same problem and gets the same answer.
- *   - **Expiry / FEFO** (slice 2), **reorder points and capacity** (slice 5).
+ *   - **Reorder points and capacity** (slice 5).
  *   - **Commitments** — a pre-sold half is never inventory. It goes from a
  *     commitment against a live animal to delivered without ever sitting on a
  *     shelf, so it is not an item balance and does not belong here.
@@ -188,6 +188,25 @@ export const inventoryLots = pgTable(
     parentLotId: uuid("parent_lot_id"),
     status: text("status").notNull().default("open"),
     openedOn: date("opened_on"),
+    /**
+     * **WHEN THIS BATCH STOPS BEING GOOD, and it is on the LOT rather than the
+     * item because a batch expires and a kind of thing does not.** Two
+     * deliveries of the same feed bought a month apart go off a month apart.
+     *
+     * Null is ordinary and covers two different situations the pack does not
+     * try to tell apart: nobody has recorded a date, and the thing does not
+     * expire at all. Baling twine and a chest freezer's worth of beef are both
+     * honestly null, and a screen that demanded a date would be asking a
+     * question with no answer.
+     *
+     * **FEFO — first EXPIRED, first out — is the useful order for perishables**,
+     * not FIFO. Meat has a practical freezer life, eggs a sell-by, feed goes
+     * mouldy in humidity, vaccines expire outright. It is a suggestion on a
+     * screen and never an enforcement: the pack will not refuse to issue from a
+     * later batch, because the person holding the scoop can see which bag is
+     * open and this cannot.
+     */
+    expiresOn: date("expires_on"),
     notes: text("notes").notNull().default(""),
     metadata: jsonb("metadata").notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -202,6 +221,8 @@ export const inventoryLots = pgTable(
     index("inventory_lots_tenant_item_idx").on(t.tenantId, t.itemId),
     index("inventory_lots_tenant_parent_idx").on(t.tenantId, t.parentLotId),
     index("inventory_lots_tenant_status_idx").on(t.tenantId, t.status),
+    // "What is going off soon" reads this way round, across every item at once.
+    index("inventory_lots_tenant_expires_idx").on(t.tenantId, t.expiresOn),
     foreignKey({
       name: "inventory_lots_item_fk",
       columns: [t.tenantId, t.itemId],
@@ -316,6 +337,21 @@ export const inventoryMovements = pgTable(
      * silently erase the record of what was fed to it.
      */
     issuedToLotId: uuid("issued_to_lot_id"),
+    /**
+     * **WHY THE QUANTITY CHANGED, when the kind does not already say.**
+     *
+     * An open taxonomy (P1) and, on an adjustment, the whole point of the row.
+     * The design is blunt about what it is for: *reasons are a diagnostic rather
+     * than a correction — sustained feed shrinkage is not an accounting problem,
+     * it is a rodent problem.* A `spoilage` that happens once is a wasted bag;
+     * the same reason four months running is a freezer that is not holding
+     * temperature, and neither is visible if the reason lives in free text.
+     *
+     * Null for everything that explains itself. A receipt is a delivery, an
+     * issue is feeding, and inventing a reason for them would be noise in the
+     * column that has to stay readable.
+     */
+    reason: text("reason"),
     /** Which feature wrote it. `livestock` will pass its own; not a foreign key. */
     extensionSlug: text("extension_slug").notNull().default("inventory"),
     notes: text("notes").notNull().default(""),
@@ -341,6 +377,13 @@ export const inventoryMovements = pgTable(
     index("inventory_movements_tenant_consumer_idx").on(
       t.tenantId,
       t.issuedToLotId,
+    ),
+    // "Is the same thing going wrong every month" — the diagnostic the reason
+    // column exists for, and it reads by reason and date rather than by item.
+    index("inventory_movements_tenant_reason_idx").on(
+      t.tenantId,
+      t.reason,
+      t.occurredOn,
     ),
     foreignKey({
       name: "inventory_movements_consumer_fk",
@@ -374,6 +417,190 @@ export const inventoryMovements = pgTable(
       "inventory_movements_kind_format",
       sql`${t.movementKind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
     ),
+    check(
+      "inventory_movements_reason_format",
+      sql`${t.reason} is null or ${t.reason} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+  ],
+);
+
+/**
+ * **A PHYSICAL COUNT: what is actually on the shelf, against what the ledger
+ * thought.**
+ *
+ * The design's line is that *the record and reality will disagree, and counting
+ * is how that is discovered.* Everything else in this pack is derived from
+ * events; this is the one place a human walks into a freezer and reports a fact
+ * the ledger had no way to know.
+ *
+ * **Two acts, like a production run, and for the same reason.** Counting a
+ * freezer takes an hour and is done a shelf at a time, so the lines are recorded
+ * as they are found and POSTING is a separate, deliberate act that writes the
+ * variances into the ledger in one transaction. A count half-posted would leave
+ * some shelves reconciled and others not, with nothing to say which.
+ *
+ * **A count NEVER edits a movement.** It writes new ones. That is the rule the
+ * whole ledger rests on: what happened, happened, and a disagreement is another
+ * event rather than a rewrite of an old one.
+ */
+export const inventoryCounts = pgTable(
+  "inventory_counts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    countedOn: date("counted_on").notNull(),
+    /**
+     * The place being counted. **Null means everywhere**, which is the honest
+     * answer for a small operation counting the whole barn in one go, and is
+     * different from counting a named freezer and finding it empty.
+     */
+    locationAssetId: uuid("location_asset_id"),
+    /** `draft` while the shelves are being walked; `posted` once the variances are in the ledger. */
+    status: text("status").notNull().default("draft"),
+    /** Who walked it. Free text, like a run's crew: not everyone has a login. */
+    countedBy: text("counted_by").notNull().default(""),
+    postedOn: date("posted_on"),
+    notes: text("notes").notNull().default(""),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("inventory_counts_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("inventory_counts_tenant_status_idx").on(t.tenantId, t.status),
+    index("inventory_counts_tenant_date_idx").on(t.tenantId, t.countedOn),
+    foreignKey({
+      name: "inventory_counts_location_fk",
+      columns: [t.tenantId, t.locationAssetId],
+      foreignColumns: [assets.tenantId, assets.id],
+    }),
+    check(
+      "inventory_counts_status_valid",
+      sql`${t.status} in ('draft', 'posted')`,
+    ),
+    // Posted means BOTH: a status with no date, or a date with no status, is a
+    // half-finished post.
+    check(
+      "inventory_counts_posted_together",
+      sql`(${t.status} = 'posted') = (${t.postedOn} is not null)`,
+    ),
+    check(
+      "inventory_counts_posted_after_counted",
+      sql`${t.postedOn} is null or ${t.postedOn} >= ${t.countedOn}`,
+    ),
+  ],
+);
+
+/**
+ * One line of a count: this batch of this item, in this place, and how much of
+ * it is actually there.
+ *
+ * **`expected_quantity` IS STORED, and it is the only stored derivation in this
+ * pack.** Everything else is folded because a fold can never disagree with its
+ * inputs — but what the ledger THOUGHT was on the shelf at the moment somebody
+ * counted it is a historical fact that the fold stops being able to reproduce
+ * the instant anybody backdates a movement. Recomputing it later would silently
+ * restate a variance that was already posted, which is exactly the second-set-of-
+ * numbers problem the ledger exists to avoid. Same reasoning as
+ * `production_runs.cost_basis`.
+ *
+ * **Zero is a real count and null is not.** A shelf walked and found empty is
+ * `counted_quantity = 0` and posts a variance; a line nobody got to is a line
+ * that does not exist. That is why the column is NOT NULL and why lines are
+ * added rather than pre-generated for every item.
+ */
+export const inventoryCountLines = pgTable(
+  "inventory_count_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    countId: uuid("count_id").notNull(),
+    itemId: uuid("item_id").notNull(),
+    /**
+     * Which batch was counted. Null for an item nobody tracks in batches — the
+     * same rule the ledger itself follows.
+     */
+    lotId: uuid("lot_id"),
+    /** What is actually there, in the item's stocking unit. Zero is a real answer. */
+    countedQuantity: numeric("counted_quantity", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
+    /** What the ledger thought, stamped at POST time. Null until then. */
+    expectedQuantity: numeric("expected_quantity", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }),
+    /** The adjustment this line wrote. Null until posted, and null when there was no variance. */
+    inventoryMovementId: uuid("inventory_movement_id"),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("inventory_count_lines_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("inventory_count_lines_tenant_count_idx").on(t.tenantId, t.countId),
+    // ONE LINE PER BATCH PER COUNT. Counting the same shelf twice in one walk
+    // and getting two answers is a question for the person holding the
+    // clipboard, not two variances for the ledger to average.
+    /**
+     * ONE LINE PER BATCH PER COUNT.
+     *
+     * **It does NOT hold for a line with no lot, and the ops layer is what
+     * closes that.** Postgres treats two nulls as distinct, so an item nobody
+     * tracks in batches could be counted twice by the database's reckoning;
+     * `NULLS NOT DISTINCT` would fix it and this drizzle version cannot emit it,
+     * and hand-writing the index in a custom migration would drift the snapshot
+     * — which this repo has paid for before. `recordCountLine` upserts on the
+     * same key instead, including the null case.
+     */
+    uniqueIndex("inventory_count_lines_unique_target_idx").on(
+      t.tenantId,
+      t.countId,
+      t.itemId,
+      t.lotId,
+    ),
+    foreignKey({
+      name: "inventory_count_lines_count_fk",
+      columns: [t.tenantId, t.countId],
+      foreignColumns: [inventoryCounts.tenantId, inventoryCounts.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "inventory_count_lines_item_fk",
+      columns: [t.tenantId, t.itemId],
+      foreignColumns: [inventoryItems.tenantId, inventoryItems.id],
+    }),
+    foreignKey({
+      name: "inventory_count_lines_lot_fk",
+      columns: [t.tenantId, t.lotId],
+      foreignColumns: [inventoryLots.tenantId, inventoryLots.id],
+    }),
+    foreignKey({
+      name: "inventory_count_lines_movement_fk",
+      columns: [t.tenantId, t.inventoryMovementId],
+      foreignColumns: [inventoryMovements.tenantId, inventoryMovements.id],
+    }),
+    // A count of a negative amount is not a count. Somebody who means "the
+    // ledger is 10 too high" records the count they took, not the difference.
+    check(
+      "inventory_count_lines_counted_not_negative",
+      sql`${t.countedQuantity} >= 0`,
+    ),
   ],
 );
 
@@ -383,3 +610,7 @@ export type InventoryLot = typeof inventoryLots.$inferSelect;
 export type NewInventoryLot = typeof inventoryLots.$inferInsert;
 export type InventoryMovement = typeof inventoryMovements.$inferSelect;
 export type NewInventoryMovement = typeof inventoryMovements.$inferInsert;
+export type InventoryCount = typeof inventoryCounts.$inferSelect;
+export type NewInventoryCount = typeof inventoryCounts.$inferInsert;
+export type InventoryCountLine = typeof inventoryCountLines.$inferSelect;
+export type NewInventoryCountLine = typeof inventoryCountLines.$inferInsert;

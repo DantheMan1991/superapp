@@ -116,6 +116,30 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-20 — Inventory slice 2: the slice that lets somebody be wrong (`claude/counting-what-is-actually-there`)
+- **Three packs were waiting on this one thing.** A treatment removed left an
+  orphaned cost with no way to correct it, a feed draw could not be reversed, a
+  run input could not be taken off — all the same missing verb. Until now the app
+  could record what happened and never that the record had drifted.
+- **The reason is a diagnostic, not a correction**, which is the design's own
+  line about rodents. `reason` is a column so it can be grouped, and the counting
+  page leads with *what keeps happening* rather than with the list of counts.
+- **A negative adjustment releases cost at the average; a positive one carries
+  none.** Spoilage really cost money; stock that turns up was never bought, and
+  the item average does not move for it.
+- **A count is two acts and posting writes every variance at once.** A line that
+  agrees writes nothing — there is no event in "nothing happened" — and
+  `expected_quantity` is stamped at post time because a backdated movement
+  tomorrow must not restate a variance that has already posted.
+- **The count form deliberately hides what the ledger expects.** A number on the
+  screen is the fastest way to make a count agree with a record that is wrong.
+- **Expiry is on the LOT and FEFO is a suggestion.** Nothing refuses an issue
+  from a later batch; the person holding the scoop can see which bag is open.
+- Driven on the dev tenant: 20 lb of spoilage at $10.00, a count of 315 against
+  330 posting −15 lb at $7.50, and the two reasons sitting apart on the panel.
+  It found one defect — the ledger row said "Adjusted" and never why.
+- Dossier: [inventory.md](inventory.md).
+
 ### 2026-08-20 — Production slice 0: the run, and the money that follows the meat (`claude/a-run-lands-in-stock`)
 - **Fifth pack to ship, and the one that closes the profile's own thesis.** A pen
   accumulated chicks, feed and medicine and then the animals simply stopped being

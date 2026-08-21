@@ -17,12 +17,85 @@ this dossier is the build record.
 | --- | --- | --- |
 | **0** | **Items + units + locations + on-hand ledger + the lot spine** | **shipped 2026-08-15** |
 | **1** | **Receipts and issues** — closes the `livestock` costing loop | **shipped 2026-08-19** |
-| 2 | Adjustments, physical counts, expiry/FEFO | next |
-| 3 | Valuation + COGS posting, basis-aware | |
+| **2** | **Adjustments, physical counts, expiry/FEFO** | **shipped 2026-08-20** |
+| 3 | Valuation + COGS posting, basis-aware | next |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
 ## Build log
+
+### 2026-08-20 — Slice 2: counting what is actually there, and saying why (`claude/counting-what-is-actually-there`)
+
+The slice that lets somebody be WRONG. Everything before this could record what
+happened; nothing could record that the record had drifted, and three packs had
+open items saying so — a treatment removed left an orphaned cost with no way to
+correct it, a feed draw could not be reversed, a run input could not be taken
+off. All of them were waiting on the same missing thing.
+
+**THE REASON IS THE POINT, AND IT IS A DIAGNOSTIC RATHER THAN A CORRECTION.**
+The design says it outright: *sustained feed shrinkage is not an accounting
+problem, it is a rodent problem.* So `inventory_movements.reason` is a column
+rather than free text, `adjustmentReasons` groups it, and the counting page
+leads with **what keeps happening** rather than with the list of counts. One
+spoiled bag is a wasted bag; the same reason four months running is a freezer
+that is not holding temperature, and nobody sees that in a ledger.
+
+**A NEGATIVE ADJUSTMENT RELEASES COST AT THE AVERAGE; A POSITIVE ONE CARRIES
+NONE.** Stock that spoils really did cost money, and stamping it is what turns a
+loss into a number somebody acts on — the same rule `issueStock` follows. Stock
+that turns up was never bought, so it arrives at null rather than at a price the
+farm did not pay, and the item average does not move: `averageCostRate` counts
+only what came in WITH a price, which is how raised stock is already treated.
+
+**A COUNT IS TWO ACTS, LIKE A RUN, AND FOR THE SAME REASON.** Counting a freezer
+takes an hour and is done a shelf at a time, so lines are recorded as they are
+found and POSTING writes every variance in one transaction. Half a posted count
+would leave some shelves reconciled and others not with nothing to say which.
+
+- **A line that agrees writes NOTHING.** A movement of zero is refused by the
+  ledger anyway, and a row meaning "nothing happened" in the one table that has
+  to reconcile is noise. The line still records that it was counted and what was
+  expected, which is the useful half.
+- **`expected_quantity` IS STORED, and it is the only stored derivation in the
+  pack.** What the ledger believed at the moment somebody disagreed with it is a
+  historical fact the fold stops being able to reproduce as soon as anybody
+  backdates a movement — and recomputing it would silently restate a variance
+  that has already posted. Same reasoning as `production_runs.cost_basis`.
+- **`count_variance` is its own reason, separate from `shrinkage`.** One means
+  the record drifted; the other means stock actually went missing. A single
+  number covering both would hide each of them.
+- **The form does NOT show what the ledger expects.** A count is worth nothing
+  if the screen tells the person with the clipboard what to write: they will see
+  92, find 88, and write 92. The comparison is the OUTPUT of counting.
+- **Zero is a real count; a shelf nobody got to is not a line.** That distinction
+  is why `counted_quantity` is NOT NULL and why lines are added rather than
+  pre-generated for every item.
+
+**EXPIRY IS ON THE LOT, AND FEFO IS A SUGGESTION.** A batch goes off; a kind of
+thing does not, and two deliveries of the same feed bought a month apart go off a
+month apart. `expiringLots` answers both views the design asks for — *oldest
+first* and *expiring soon* — because sorted-by-expiry is the same list. **Nothing
+refuses an issue from a later batch**: the person holding the scoop can see which
+bag is already open and this cannot. Batches at zero are dropped, because a batch
+that is not there cannot go off into a loss.
+
+**Driven on the dev tenant, and it found one defect.** 20 lb of spoilage came off
+Grower crumble at $10.00 (the $0.50 average, unmoved), a count of 315 against a
+record of 330 posted a −15 lb variance at $7.50, and the two reasons sat apart on
+the diagnostic panel — drift told from loss, which is the whole argument for
+keeping them separate. **The ledger row said "Adjusted" and nothing about why**,
+on the one screen somebody opens when they wonder where the feed went; the
+reason now renders under the kind. A row that hides the reason turns the
+diagnostic back into a correction.
+
+- 11 new ops tests, 4 new pure tests, 8 new isolation tests. Migration `0170`
+  **hand-reordered — ninth check, fourth time the answer was yes**; `0171` is the
+  RLS pair.
+- **`recordMovementAction` still has no UI caller.** Adjustments got their own
+  action rather than reusing it, because an adjustment has a required reason and
+  a signed quantity and routing it through the generic primitive would have made
+  the action lie about what it takes. That open item is now a decision: it should
+  go.
 
 ### 2026-08-20 — Two reads and a `source`, so a run can land its boxes (`claude/a-run-lands-in-stock`)
 
@@ -379,7 +452,9 @@ Platform-wide change; the reasoning is in
 | --- | --- | --- |
 | `inventory_items` | A kind of thing held | `tenant_id`, FORCE RLS. One `stocking_unit`, and the balance is kept only in it. `purchase_unit` + `purchase_unit_qty` are an ENTRY convenience, never a second balance |
 | `inventory_lots` | **The spine.** A batch, with lineage | Composite FKs to the item and to a parent lot (self-referential, RESTRICT). `source` in `purchased\|raised\|produced` — recorded now because slice 3 cannot infer it retroactively. CHECK: a lot is not its own parent |
-| `inventory_movements` | **The ledger.** Every quantity change, and what it cost | Composite FKs to item, lot and **`assets`** (the location). `quantity` is signed and CHECKed non-zero. FORCE RLS in its own right — it is the traceability chain |
+| `inventory_movements` | **The ledger.** Every quantity change, and what it cost | Composite FKs to item, lot and **`assets`** (the location). `quantity` is signed and CHECKed non-zero. FORCE RLS in its own right — it is the traceability chain. `reason` (slice 2) is an open taxonomy and the diagnostic |
+| `inventory_counts` | **A physical count.** Two acts: `draft` while walking, `posted` once the variances are in the ledger | `tenant_id`, FORCE RLS. `location_asset_id` null means everywhere. CHECK: `posted` status and `posted_on` are set together |
+| `inventory_count_lines` | One shelf: this batch of this item, and how much is actually there | Composite FKs to the count (CASCADE), item, lot and the adjustment it wrote. `expected_quantity` is stamped at POST time. `counted_quantity` NOT NULL because zero is a real count |
 
 Lots mirror into **`dimension_members`** with `dimension_type = 'lot'`, in the
 same transaction as the write.
@@ -393,12 +468,16 @@ and most head events `livestock` writes carry no money at all.
 movement that empties it, which is the same discipline `issueStock` follows.
 `averageCostRate` is unaffected: it counts only what came in with a price.
 
+`expires_on` on the lot and `reason` on the movement arrived in slice 2. Both are
+nullable and null is ordinary: a batch with no date is one nobody has dated (and
+the pack does not try to tell that apart from "does not expire"), and a movement
+with no reason is one whose kind already says why.
+
 **Not columns, deliberately** — each would have no reader today: VALUATION and
 the posting to 1300/5000 (slice 3, basis-aware per ADR 0007 — slice 1
-accumulates cost, it does not present it), expiry and FEFO (slice 2),
-reorder points and capacity (slice 5), and commitments — a pre-sold half is
-never inventory, it goes from a commitment against a live animal to delivered
-without sitting on a shelf.
+accumulates cost, it does not present it), reorder points and capacity
+(slice 5), and commitments — a pre-sold half is never inventory, it goes from a
+commitment against a live animal to delivered without sitting on a shelf.
 
 ## Key files & seams
 
@@ -421,6 +500,32 @@ without sitting on a shelf.
   Tuesday entry teaches people to stop entering things, which costs far more
   than a temporarily wrong number. It is surfaced on the item page and corrected
   by an adjustment or a count in slice 2. Do not "fix" this.
+- **AN ADJUSTMENT'S REASON IS A DIAGNOSTIC, NOT A CORRECTION.** It is a column
+  so it can be grouped, and the counting page leads with the pattern rather than
+  with the counts. If a future slice is tempted to fold the reasons into one
+  "adjustments" total, that throws away the only thing they were for.
+- **`count_variance` IS NOT `shrinkage`, and must not be merged into it.** The
+  first means the record drifted; the second means stock went missing. It is
+  also deliberately absent from `SUGGESTED_ADJUSTMENT_REASONS`, so nobody can
+  pick it by hand — it is written by posting a count and only there.
+- **A COUNT NEVER EDITS A MOVEMENT.** It writes new ones. What happened,
+  happened; a disagreement is another event rather than a rewrite of an old one.
+  This is why a posted count is frozen rather than editable.
+- **A count line's `expected_quantity` is STORED and must never be recomputed.**
+  It is what the ledger believed when somebody disagreed with it. A backdated
+  movement tomorrow must not restate a variance that already posted.
+- **THE COUNT FORM MUST NOT SHOW THE EXPECTED FIGURE.** A number on the screen
+  is the fastest way to make a count agree with a record that is wrong. If a
+  future slice adds a "pre-fill from the ledger" convenience, it has defeated
+  the feature.
+- **`inventory_count_lines`'s unique index does not hold for lot-less lines.**
+  Postgres treats two nulls as distinct; `NULLS NOT DISTINCT` would fix it and
+  this drizzle version cannot emit it, and hand-writing the index in a custom
+  migration would drift the snapshot — which this repo has paid for before.
+  `recordCountLine` upserts on the same key instead, including the null case.
+- **EXPIRY IS ON THE LOT, AND FEFO IS NEVER ENFORCED.** A batch expires; a kind
+  of thing does not. Nothing refuses an issue from a later batch, because the
+  person holding the scoop can see which bag is already open and this cannot.
 - **The stocking unit is immutable once anything has moved.** Converting the
   column alone would re-denominate every historical movement silently.
 - **Live-to-hanging is a production YIELD, not a unit conversion.** A steer goes
@@ -451,10 +556,20 @@ without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
-- **`recordMovementAction` no longer has a UI caller** since slice 1 routed the
-  form through `receiveStock`/`issueStock`. The ops primitive underneath is used
-  by both and by `livestock`; the ACTION is now dead at the boundary and should
-  either gain a caller in slice 2 (adjustments) or go.
+- **`recordMovementAction` should now GO.** Slice 2 gave adjustments their own
+  action rather than reusing it: an adjustment has a required reason and a signed
+  quantity, and routing it through the generic primitive would have made the
+  action lie about what it accepts. Nothing calls it, and nothing is going to.
+- **A batch's expiry cannot be edited after it is created.** There is no
+  `updateLot` at all — the same shape as the four actions below — so a delivery
+  entered without a date, or with the wrong one, is stuck with it.
+- **A posted count cannot be corrected.** By design, and the screen says so: the
+  variances are in the ledger and unwriting them would rewrite what happened.
+  What is missing is the honest remedy — count again — and nothing on the screen
+  suggests it.
+- **Nothing warns that a batch has gone past its date and is still on hand.**
+  The item page colours it and the home page lists it; neither is a rule anybody
+  is asked about, which is the deviation-surfacing the design keeps wanting.
 - **Four of the eight actions have no UI caller**: `updateItem`, `archiveItem`,
   `closeLot` and `mergeLot`. So an item cannot be renamed or retired and a batch
   cannot be closed. `updateItem` is the one that stings: the stocking unit is

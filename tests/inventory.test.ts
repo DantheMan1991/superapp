@@ -26,8 +26,14 @@ import {
   type MovementRow,
 } from "../src/packs/inventory/core/balances";
 import {
+  ADJUSTMENT_REASON_LABELS,
+  ADJUSTMENT_REASON_NOTES,
+  COUNT_STATUSES,
+  COUNT_VARIANCE_REASON,
   SLUG_FORMAT,
+  SUGGESTED_ADJUSTMENT_REASONS,
   SUGGESTED_ITEM_KINDS,
+  adjustmentReasonLabel,
   isLotSource,
   isValidSlug,
   movementKindLabel,
@@ -411,5 +417,42 @@ describe("costPerUnit", () => {
     // A pen showing $0.00 a bird because the count is zero reads as "free",
     // which is the opposite of "not known yet".
     expect(costPerUnit(19_833, 0)).toBeNull();
+  });
+});
+
+describe("adjustment reasons", () => {
+  it("has a label and a note for every suggestion, and for the count's own", () => {
+    /**
+     * A reason with no copy is a slug on a screen. The count's own reason is in
+     * the maps but NOT in the suggestions, on purpose: `count_variance` is
+     * written by posting a count and must never be pickable by hand, or the
+     * diagnostic stops telling drift apart from loss.
+     */
+    for (const reason of SUGGESTED_ADJUSTMENT_REASONS) {
+      expect(ADJUSTMENT_REASON_LABELS[reason]).toBeTruthy();
+      expect(ADJUSTMENT_REASON_NOTES[reason].length).toBeGreaterThan(20);
+    }
+    expect(ADJUSTMENT_REASON_LABELS[COUNT_VARIANCE_REASON]).toBeTruthy();
+    expect(
+      (SUGGESTED_ADJUSTMENT_REASONS as readonly string[]).includes(
+        COUNT_VARIANCE_REASON,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps every reason a valid slug, because the column checks the format", () => {
+    for (const reason of [...SUGGESTED_ADJUSTMENT_REASONS, COUNT_VARIANCE_REASON]) {
+      expect(isValidSlug(reason)).toBe(true);
+    }
+  });
+
+  it("falls back to the slug for a reason nobody wrote copy for", () => {
+    // The taxonomy is open: a tenant will type one this pack has never seen.
+    expect(adjustmentReasonLabel("dropped_in_the_mud")).toBe("Dropped in the mud");
+    expect(adjustmentReasonLabel("spoilage")).toBe("Went off");
+  });
+
+  it("keeps a count in exactly two states", () => {
+    expect([...COUNT_STATUSES]).toEqual(["draft", "posted"]);
   });
 });

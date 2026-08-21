@@ -35,6 +35,9 @@ d("inventory tables (RLS)", () => {
   let freezerA: string;
   let itemB: string;
   let lotB: string;
+  let countA: string;
+  let countB: string;
+  let lineA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -100,6 +103,43 @@ d("inventory tables (RLS)", () => {
           occurredOn: "2026-08-01",
         },
       ]);
+    });
+  });
+
+  beforeAll(async () => {
+    // Slice 2's tables, built the same way and for the same reason: what the
+    // DATABASE enforces, not what the ops layer happens to do.
+    await withSystem(async (tx) => {
+      const counts = await tx
+        .insert(schema.inventoryCounts)
+        .values([
+          { tenantId: tenantA, countedOn: "2026-08-20", countedBy: "A" },
+          { tenantId: tenantB, countedOn: "2026-08-20", countedBy: "B" },
+        ])
+        .returning();
+      countA = counts[0].id;
+      countB = counts[1].id;
+
+      const lines = await tx
+        .insert(schema.inventoryCountLines)
+        .values([
+          {
+            tenantId: tenantA,
+            countId: countA,
+            itemId: feedA,
+            lotId: lotA,
+            countedQuantity: 12,
+          },
+          {
+            tenantId: tenantB,
+            countId: countB,
+            itemId: itemB,
+            lotId: lotB,
+            countedQuantity: 34,
+          },
+        ])
+        .returning();
+      lineA = lines[0].id;
     });
   });
 
@@ -298,7 +338,162 @@ d("inventory tables (RLS)", () => {
     ).toHaveLength(1);
   });
 
-  it("is default-deny on all three tables with no tenant context", async () => {
+  // ---- counts ----------------------------------------------------------
+
+  it("a tenant sees only its own counts and their lines", async () => {
+    expect(
+      (await asStaff((tx) => tx.select().from(schema.inventoryCounts))).map(
+        (c) => c.countedBy,
+      ),
+    ).toEqual(["A"]);
+    expect(
+      (await asStaff((tx) => tx.select().from(schema.inventoryCountLines))).map(
+        (l) => l.countedQuantity,
+      ),
+    ).toEqual([12]);
+    expect(
+      (await asOtherTenant((tx) => tx.select().from(schema.inventoryCounts))).map(
+        (c) => c.countedBy,
+      ),
+    ).toEqual(["B"]);
+  });
+
+  it("cannot read, update or delete another tenant's count", async () => {
+    expect(
+      await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.inventoryCounts)
+          .where(eq(schema.inventoryCounts.id, countB)),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await asOwner((tx) =>
+        tx
+          .update(schema.inventoryCounts)
+          .set({ countedBy: "Stolen" })
+          .where(eq(schema.inventoryCounts.id, countB))
+          .returning(),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await asOwner((tx) =>
+        tx
+          .delete(schema.inventoryCounts)
+          .where(eq(schema.inventoryCounts.id, countB))
+          .returning(),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("cannot move a count into another tenant", async () => {
+    // THROWS rather than returning zero rows: the row is visible and it is the
+    // new values that leave the tenant, so WITH CHECK refuses with 42501.
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.inventoryCounts)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.inventoryCounts.id, countA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("CANNOT COUNT ANOTHER TENANT'S SHELF ONTO THIS FARM'S COUNT", async () => {
+    /**
+     * The one that matters here. A count line is the evidence behind an
+     * adjustment — it is what says the variance came from somebody walking the
+     * shelves rather than from somebody typing a number they liked better. A
+     * line naming another tenant's batch would post a correction to stock that
+     * was never counted.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCountLines).values({
+          tenantId: tenantA,
+          countId: countA,
+          itemId: feedA,
+          lotId: lotB,
+          countedQuantity: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot put a line on another tenant's count, or count their item", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCountLines).values({
+          tenantId: tenantA,
+          countId: countB,
+          itemId: feedA,
+          countedQuantity: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCountLines).values({
+          tenantId: tenantA,
+          countId: countA,
+          itemId: itemB,
+          countedQuantity: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot count the same batch twice on one count", async () => {
+    // Counting the same shelf twice in one walk and getting two answers is a
+    // question for the person holding the clipboard, not two variances.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCountLines).values({
+          tenantId: tenantA,
+          countId: countA,
+          itemId: feedA,
+          lotId: lotA,
+          countedQuantity: 99,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot move a count line into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.inventoryCountLines)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.inventoryCountLines.id, lineA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a posted status with no posted date, and the reverse", async () => {
+    // Posted means BOTH. A half-finished post would leave a count claiming its
+    // variances are in the ledger with nothing to say when.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCounts).values({
+          tenantId: tenantA,
+          countedOn: "2026-08-20",
+          status: "posted",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCounts).values({
+          tenantId: tenantA,
+          countedOn: "2026-08-20",
+          postedOn: "2026-08-20",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("is default-deny on every table in the pack with no tenant context", async () => {
     const nowhere = "00000000-0000-0000-0000-000000000000";
     expect(
       await withTenant(nowhere, (tx) => tx.select().from(schema.inventoryItems)),
@@ -309,6 +504,14 @@ d("inventory tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.inventoryMovements),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.inventoryCounts)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.inventoryCountLines),
       ),
     ).toHaveLength(0);
   });

@@ -694,6 +694,16 @@ commitment against a live animal to delivered without sitting on a shelf.
      and a replayed write cannot double-post.
   The account resolver and the `MACHINE_SOURCES` seam this needs are already
   built and tested; what is missing is the link.
+- **A TRANSFER IS TWO ROWS WITH NOTHING JOINING THEM**, and driving slice 3a is
+  what showed the cost. `transferStock` writes a leg at each end and records no
+  pairing, so nothing can void, correct or even *identify* a transfer as one
+  act. Tidying the retail fixtures deleted the legs at the truck and left the
+  legs at the other end behind — a lot silently 30 lb short, with both halves of
+  the ledger internally consistent and disagreeing with each other. A person
+  correcting a mistaken transfer by hand will hit exactly this. A `transfer_id`
+  on the movement, written by `transferStock` and shared by both rows, is the
+  fix; the pair would then also be voidable together the way an intercompany
+  pair is (ADR 0010 slice 2 already argues this shape for the ledger).
 - **A valuation cannot be exported.** The figure is on a screen and an
   accountant will want it as a file, with the as-of date and the unvalued count
   in it — an export that carried the total alone would strip the caveat, which

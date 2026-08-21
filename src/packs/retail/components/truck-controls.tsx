@@ -85,24 +85,36 @@ export function TruckMoveForm({
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [itemId, setItemId] = useState<string>(items[0]?.id ?? "");
+  /**
+   * The unload list is the truck's own stock, so it changes as things sell. If
+   * the selected item leaves the truck entirely, fall back to the first thing
+   * still on it rather than holding a value the picker no longer offers.
+   */
+  const selectable = items.some((i) => i.id === itemId)
+    ? itemId
+    : (items[0]?.id ?? "");
   const [lotId, setLotId] = useState<string>(NO_LOT);
 
-  const item = items.find((i) => i.id === itemId);
+  const item = items.find((i) => i.id === selectable);
   const itemLots = useMemo(
-    () => lots.filter((l) => l.itemId === itemId),
-    [lots, itemId],
+    () => lots.filter((l) => l.itemId === selectable),
+    [lots, selectable],
   );
   const loading = direction === "load";
 
   function submit(formData: FormData) {
-    if (!itemId) {
-      toast.error("Pick what is going on the truck.");
+    if (!selectable) {
+      toast.error(
+        loading
+          ? "Pick what is going on the truck."
+          : "Nothing on the truck to bring back.",
+      );
       return;
     }
     const other = String(formData.get("otherLocation") ?? NO_LOCATION);
     startTransition(async () => {
       const shared = {
-        itemId,
+        itemId: selectable,
         lotId: lotId === NO_LOT ? null : lotId,
         quantity: Number(formData.get("quantity")),
         truckAssetId,
@@ -132,7 +144,13 @@ export function TruckMoveForm({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button
+          variant="outline"
+          size="sm"
+          /* An empty truck has nothing to bring back, and a dialog with an
+             empty picker is a worse way to say so than a dead button. */
+          disabled={!loading && items.length === 0}
+        >
           {loading ? "Load the truck" : "Bring it back"}
         </Button>
       </DialogTrigger>
@@ -153,7 +171,7 @@ export function TruckMoveForm({
             <div className="grid gap-2">
               <Label htmlFor="truck-item">What</Label>
               <Select
-                value={itemId}
+                value={selectable}
                 onValueChange={(value) => {
                   setItemId(value);
                   setLotId(NO_LOT);

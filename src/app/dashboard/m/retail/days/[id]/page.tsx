@@ -5,7 +5,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone } from "@/lib/timezone";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, formatMoneySign } from "@/lib/money";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
@@ -58,7 +58,20 @@ export default async function SellingDayPage({
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "retail");
 
-  const today = todayInTimezone(ctx.tenant.timezone);
+  const timezone = ctx.tenant.timezone;
+  const today = todayInTimezone(timezone);
+  /**
+   * **THE STALL'S CLOCK, NOT UTC.** These rows were rendered with
+   * `toISOString()`, so a farm in Denver selling at four in the afternoon read
+   * its own market back as 22:00 — and a sale after five in the evening would
+   * have been filed under tomorrow.
+   */
+  const atTime = (when: Date) =>
+    when.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: timezone,
+    });
   const currencySymbol = ctx.tenant.currencySymbol;
   const truckParam = typeof query.truck === "string" ? query.truck : undefined;
 
@@ -86,6 +99,22 @@ export default async function SellingDayPage({
 
   if (!data) notFound();
   const { till, locations, lots, prices, pack, truckAssetId, onTruck } = data;
+
+  /**
+   * What "bring it back" may offer: the truck's own stock, by item and batch.
+   * Everything else on the price list is somewhere else entirely.
+   */
+  const onTruckItems = [
+    ...new Map(
+      onTruck.map((l) => [
+        l.itemId,
+        { id: l.itemId, name: l.itemName, unit: l.unit },
+      ]),
+    ).values(),
+  ];
+  const onTruckLots = onTruck
+    .filter((l) => l.lotId !== null)
+    .map((l) => ({ id: l.lotId!, itemId: l.itemId, code: l.lotCode ?? "" }));
   const dayWord = labelFor(pack.labels, "marketDay", "Market day");
   const priceByItem = new Map(
     prices.map((p) => [p.item.id, p.current?.priceCents ?? null]),
@@ -145,16 +174,13 @@ export default async function SellingDayPage({
                 />
                 <TruckMoveForm
                   truckAssetId={truckAssetId}
-                  items={prices.map((p) => ({
-                    id: p.item.id,
-                    name: p.item.name,
-                    unit: p.item.stockingUnit,
-                  }))}
-                  lots={lots.map((l) => ({
-                    id: l.id,
-                    itemId: l.itemId,
-                    code: l.code,
-                  }))}
+                  /* YOU CAN ONLY BRING BACK WHAT YOU TOOK. Offering the whole
+                     price list here let a farmer unload feed and antibiotics
+                     that were never on the truck, each one a transfer driving
+                     the truck negative. The batch comes back with it, so the
+                     lot does not end the day stranded on a vehicle. */
+                  items={onTruckItems}
+                  lots={onTruckLots}
                   locations={locations
                     .filter((l) => l.id !== truckAssetId)
                     .map((l) => ({ id: l.id, name: l.name }))}
@@ -201,8 +227,17 @@ export default async function SellingDayPage({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold tabular-nums">
-              {formatMoney(till.result.marginCents, currencySymbol)}
+            <div
+              className={`text-2xl font-semibold tabular-nums ${
+                till.result.marginCents < 0 ? "text-destructive" : ""
+              }`}
+            >
+              {/* A LOSING DAY MUST LOOK LIKE ONE. `formatMoney` drops the sign
+                  on purpose - it formats an AMOUNT, and a margin is not one.
+                  Read without the minus, a market that cost $53 and took
+                  nothing reads as $53 EARNED, which is the exact opposite of
+                  the fact this whole pack exists to surface. */}
+              {formatMoneySign(till.result.marginCents, currencySymbol)}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {/* MARGIN, NOT PROFIT, and the name is doing work: what the goods
@@ -211,7 +246,10 @@ export default async function SellingDayPage({
                 ? "Nothing recorded for the stall or the journey, so this is just the takings."
                 : `After ${formatMoney(till.result.costCents, currencySymbol)} to stand there. What the goods cost to make is not in this.`}
               {till.result.perPersonHourCents !== null &&
-                ` ${formatMoney(till.result.perPersonHourCents, currencySymbol)} a person-hour.`}
+                ` ${formatMoneySign(
+                  till.result.perPersonHourCents,
+                  currencySymbol,
+                )} a person-hour.`}
             </p>
           </CardContent>
         </Card>
@@ -274,6 +312,12 @@ export default async function SellingDayPage({
           marketDayId={till.day.id}
           truckAssetId={truckAssetId}
           lines={tillLines}
+          /* WHAT THIS SNAPSHOT ALREADY KNOWS ABOUT. `lines` is a point-in-time
+             count, so the till has to add back only the sales that are NOT in
+             it yet - and the ref each one was posted under is how it tells. */
+          postedRefs={till.sales
+            .map((row) => row.sale.clientRef)
+            .filter((ref): ref is string => ref !== null)}
           currencySymbol={currencySymbol}
         />
       )}
@@ -342,7 +386,7 @@ export default async function SellingDayPage({
                   <TableRow key={s.id}>
                     <TableCell className="font-medium">{s.itemName}</TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">
-                      {s.noticedAt.toISOString().slice(11, 16)}
+                      {atTime(s.noticedAt)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -380,7 +424,7 @@ export default async function SellingDayPage({
                 {till.sales.map((row) => (
                   <TableRow key={row.sale.id}>
                     <TableCell className="tabular-nums text-muted-foreground">
-                      {row.sale.soldAt.toISOString().slice(11, 16)}
+                      {atTime(row.sale.soldAt)}
                     </TableCell>
                     <TableCell>
                       {row.lines.map((l) => (
@@ -400,7 +444,13 @@ export default async function SellingDayPage({
                       {formatMoney(row.totalCents, currencySymbol)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <VoidSaleButton id={row.sale.id} />
+                      <VoidSaleButton
+                        id={row.sale.id}
+                        what={`${formatMoney(
+                          row.totalCents,
+                          currencySymbol,
+                        )} at ${atTime(row.sale.soldAt)}`}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

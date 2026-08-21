@@ -17,7 +17,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatMoney } from "@/lib/money";
 import { recordSaleAction, recordStockoutAction } from "../actions";
-import { lineTotalCents, saleTotalCents, soldByItem } from "../core/till";
+import {
+  lineTotalCents,
+  saleTotalCents,
+  soldByItem,
+  unconfirmedSales,
+} from "../core/till";
 
 /** What the till can sell: a truck line, with the channel's price attached. */
 export interface TillLine {
@@ -74,22 +79,56 @@ export function Till({
   marketDayId,
   truckAssetId,
   lines,
+  postedRefs,
   currencySymbol,
 }: {
   channelId: string;
   marketDayId: string;
   truckAssetId: string | null;
   lines: TillLine[];
+  /**
+   * The `clientRef` of every sale the SERVER already has. This is what makes
+   * the local count safe to add to a server snapshot - see `unconfirmed`.
+   */
+  postedRefs: string[];
   currencySymbol: string | null;
 }) {
   const router = useRouter();
   const [basket, setBasket] = useState<Basket[]>([]);
   const [paymentMethod, setPaymentMethod] = useState("cash");
-  const [pending, startTransition] = useTransition();
-  /** Sold on this device since the page loaded, for the local stock count. */
-  const [soldSince, setSoldSince] = useState<{ itemId: string; quantity: number }[]>([]);
+  /**
+   * The network call only. **NOT a `useTransition`, and that is deliberate.**
+   * Everything inside a transition commits together, so putting the local stock
+   * countdown in the same one as `router.refresh()` made the truck wait on the
+   * server before it would show the sale — in a till whose entire reason for
+   * counting locally is that there may be no server to wait for.
+   */
+  const [pending, setPending] = useState(false);
+  const [, startTransition] = useTransition();
+  /**
+   * Sold on this device and **tagged with the ref it was posted under**, which
+   * is the whole trick. `lines` is a server snapshot that goes stale the moment
+   * a sale lands and fresh again a second later when `router.refresh()` returns
+   * - so a local delta that simply accumulated would be subtracted twice from
+   * every refreshed figure, and the truck would under-report by the session's
+   * entire takings. It read 35.65 lb with 36.65 lb in the cooler before this
+   * was tagged.
+   *
+   * Tagged, the delta answers exactly the right question: **what has this
+   * device sold that the snapshot does not know about yet?** Late refreshes,
+   * out-of-order ones and a queue flushing an hour of sales at once all
+   * converge on the same number, and it drains itself.
+   */
+  const [soldSince, setSoldSince] = useState<
+    { clientRef: string; itemId: string; quantity: number }[]
+  >([]);
 
-  const sold = useMemo(() => soldByItem(soldSince), [soldSince]);
+  const sold = useMemo(
+    () => soldByItem(unconfirmedSales(soldSince, postedRefs)),
+    [soldSince, postedRefs],
+  );
+
+
   const totalCents = saleTotalCents(basket);
 
   function add(line: TillLine) {
@@ -142,7 +181,8 @@ export function Till({
     // MINTED BEFORE THE NETWORK. This is what makes a retry safe.
     const clientRef = crypto.randomUUID();
     const snapshot = basket;
-    startTransition(async () => {
+    void (async () => {
+      setPending(true);
       const result = await recordSaleAction({
         clientRef,
         channelId,
@@ -157,6 +197,7 @@ export function Till({
           unitPriceCents: b.unitPriceCents,
         })),
       });
+      setPending(false);
       if ("error" in result) {
         // THE BASKET IS NOT CLEARED. A till that emptied itself on a failure
         // would have taken the goods off the stall and lost the money.
@@ -169,12 +210,24 @@ export function Till({
           : `${formatMoney(result.totalCents ?? 0, currencySymbol)} taken`,
       );
       setSoldSince((current) => [
-        ...current,
-        ...snapshot.map((b) => ({ itemId: b.itemId, quantity: b.quantity })),
+        // Drop what the snapshot has caught up on while we are here.
+        // `unconfirmedSales` at read time is what makes this CORRECT; pruning
+        // on write only stops a long market day growing a list forever, and it
+        // belongs in the handler rather than an effect that would re-render
+        // every time the server answered.
+        ...unconfirmedSales(current, postedRefs),
+        ...snapshot.map((b) => ({
+          clientRef,
+          itemId: b.itemId,
+          quantity: b.quantity,
+        })),
       ]);
       setBasket([]);
-      router.refresh();
-    });
+      // LAST, AND ON ITS OWN. The till is already correct without it; this only
+      // catches the server-rendered cards up — takings, margin, the sales list.
+      // It is allowed to be slow, and one day it is allowed to fail.
+      startTransition(() => router.refresh());
+    })();
   }
 
   return (

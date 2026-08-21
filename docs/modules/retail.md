@@ -71,7 +71,8 @@ one snapshot, which is why it needs no server round trip between customers.
   A reconciliation that checked the tin against total takings would report every
   card sale as a shortfall — the fastest way to teach somebody to ignore it.
 - **A blank count is not a zero count.** Not counted and counted-and-right are
-  different facts, and the panel says which.
+  different facts, and the panel says which. Zero variance reads "Balanced"
+  rather than a signed nothing.
 - **Stockouts are one tap and nothing can infer them.** Selling everything you
   brought looks like a perfect day; nobody knows how many people wanted eggs at
   noon and found none. Unique per item per day, so a double-tap corrects the
@@ -83,15 +84,55 @@ one snapshot, which is why it needs no server round trip between customers.
 - **It is a MARGIN, not a profit, and the name is doing work.** What the goods
   cost to produce is not in it; that lives on the stock's stamped receipt, and
   joining the two is a report nobody has built.
-- 17 new pure tests, 9 new ops tests, 14 new isolation tests, plus 3 in
-  `inventory` for the transfer. Migration `0174` **hand-reordered — eleventh
-  check, sixth yes**; `0175` is the RLS trio.
+- 22 new pure tests, 9 new ops tests, 14 new isolation tests, plus 3 in
+  `inventory` for the transfer and 3 in `money-symbol` for the sign. Migration
+  `0174` **hand-reordered — eleventh check, sixth yes**; `0175` is the RLS trio.
 
-**NOT DRIVEN IN A BROWSER YET**, and that is recorded rather than glossed: the
-dev browser lost its session mid-session and signing in is not something this
-agent does. Every claim above is covered by tests against a real database, and
-this repo's own history says that is not the same thing — four of the last four
-slices had a defect that only clicking found.
+**DRIVEN END TO END BEFORE THE PR** — truck asset, channel, price, market day,
+four sales, a haggled line, a cash count, a stockout, a bring-back and a void —
+**and it made five of the last five slices with a defect that only clicking
+found.** Every one was already covered by a passing test.
+
+1. **The margin card read `$53.00` for a day that took nothing and cost $53 to
+   stand there.** `formatMoney` drops the sign by design, so **the loss rendered
+   identically to a profit** — the exact fact this pack exists to surface,
+   inverted. Now `formatMoneySign`, whose doc comment says what every
+   `formatMoney` caller is really asserting: that the number cannot go negative.
+   A subtraction produced this one.
+2. **The truck read 35.65 lb with 36.65 lb in the cooler.** The page re-reads
+   the truck a beat after each sale; the local delta was then applied to a
+   figure that already contained it, so **the truck ran short by the whole
+   session's sales** and would have driven a "ran out" tapped over stock that
+   was there — the one event here nothing else can reconstruct. Fixed by tagging
+   each delta entry with the `clientRef` it was posted under, so the question it
+   answers is exact rather than timed: what has this device sold that the
+   snapshot does not know about? See `unconfirmedSales`. **This is also the
+   shape the offline queue needs**, so 1b inherits it.
+3. **The local count was trapped in the same transition as `router.refresh()`**,
+   so the truck would not move until the server answered — in a till whose whole
+   reason for counting locally is that there may be no server to answer. The
+   network call is a plain `useState` flag now and the refresh is a transition
+   of its own, allowed to be slow and one day allowed to fail.
+4. **"Bring it back" offered the entire price list**, feed and antibiotics
+   included, defaulting to something never on the truck — each one a transfer
+   driving the truck negative, and unbatched, which would strand the lot on a
+   vehicle. It now offers the truck's own stock with its batches, and greys out
+   when the truck is empty.
+5. **Void had no confirmation**, on a row of buttons used one-handed at a stall,
+   for an action that destroys posted revenue and deliberately does NOT put the
+   stock back — so a mis-tap leaves the takings short, the truck right, and
+   nothing saying the two disagree. The doc comment already claimed a dialog.
+   **Then the dialog did not appear**: asking inside a transition deadlocks,
+   because opening it is a transition update the transition cannot commit while
+   suspended on the answer. The button silently did nothing, which is the exact
+   failure `useConfirm` was written to end. The guard belongs ahead of the
+   transition, as every other call site in the app has it.
+6. **Sale and stockout times rendered in UTC** via `toISOString()`. A Denver
+   farm selling at four in the afternoon read its own market back as 22:00.
+   `ctx.tenant.timezone` was already on the page.
+
+Not fixed here, and filed separately: one accounting call site
+(`companies-controls.tsx`) has the same confirm-inside-transition deadlock.
 
 ### 2026-08-20 — Slice 0: where it sells, what it charges, what standing there costs (`claude/what-a-market-day-costs`)
 
@@ -195,6 +236,8 @@ guard with nothing to read.
   customer can check
 - `src/packs/retail/components/till.tsx` — the point of sale, and where a
   `clientRef` is minted
+- `src/packs/retail/core/till.ts` → `unconfirmedSales` — how a server snapshot
+  and a local delta are added together without counting a sale twice
 - `src/app/dashboard/m/retail/days/[id]/page.tsx` — one selling day
 - `src/packs/inventory/ops.ts` → `transferStock`, `stockAtLocation` — added for
   the truck, and living in `inventory` because the ledger is its table
@@ -214,6 +257,18 @@ guard with nothing to read.
 - **`client_ref` IS LOAD-BEARING AND MUST NEVER BECOME OPTIONAL FOR A TILL.**
   Posting is retried by design; without the ref a retry takes the money twice.
   Any future till — farm store, online — mints one before it touches the network.
+- **A NUMBER A SUBTRACTION PRODUCED IS RENDERED WITH `formatMoneySign`.**
+  `formatMoney` drops the sign, so reaching for it is an assertion that the
+  figure cannot be negative. A margin, a balance and a variance all can.
+- **THE LOCAL DELTA IS KEYED TO WHAT THE SERVER HAS NOT SEEN**, never to a
+  clock or a render. `unconfirmedSales` is the whole of it, and it is what makes
+  a snapshot plus a delta add up to the truth no matter how late, how repeated
+  or how out of order the server's answer is.
+- **THE TILL NEVER WAITS ON THE SERVER TO SHOW WHAT IT JUST DID.** The refresh
+  that catches the day's cards up is its own transition, and the till is already
+  correct without it.
+- **AN "ARE YOU SURE" IS ASKED BEFORE THE TRANSITION, NEVER INSIDE ONE.** Inside,
+  it deadlocks and the button silently does nothing.
 - **THE TRUCK IS COUNTED DOWN LOCALLY.** A till that re-fetched the balance
   between customers would be unusable at a stall with no signal and no better
   anywhere else. It is safe precisely because one device touches one location.
@@ -281,9 +336,10 @@ guard with nothing to read.
 - **Cards genuinely cannot work offline**, and the till should say so rather than
   appear to accept one. Authorisation has to reach the network — an OS-level
   fact, not a provider limitation. Today the payment method is simply recorded.
-- **NOBODY HAS CLICKED THE TILL.** It compiles, its ops are covered by 21 tests
-  against a real database and its isolation by 27, and this repo's own history
-  says that is not the same thing.
+- **The till has been driven; the market truck has not left a yard.** Six
+  defects came out of one browser session (above) and every one had a passing
+  test over it. What no amount of clicking here can test is a phone, one hand,
+  a queue of people and no signal.
 - **A market day cannot be edited from the UI.** `updateMarketDay` exists, is
   tested, and has no caller — only remove-and-re-enter. The same shape
   `inventory`'s four callerless actions had.

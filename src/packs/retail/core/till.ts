@@ -209,6 +209,29 @@ export function remainingOnTruck(
   }));
 }
 
+/**
+ * What this device has sold that a server snapshot does not account for yet.
+ *
+ * **THE STOCK COUNT ON THE TRUCK IS A SNAPSHOT PLUS A DELTA, AND THE DELTA HAS
+ * TO KNOW WHEN IT IS SPENT.** A market-day page re-reads the truck from the
+ * ledger a beat after every sale; a delta that simply accumulated would then be
+ * applied to a figure that already included it, and the truck would read short
+ * by the whole session's sales. It reported 35.65 lb with 36.65 lb in the
+ * cooler, and the cost of that is a "ran out" tapped over stock that was there
+ * - the one number in this pack nothing else can reconstruct.
+ *
+ * Tagging each entry with the `clientRef` it was posted under makes the answer
+ * exact rather than timed: a late refresh, an out-of-order one, or a queue
+ * flushing an hour of sales at once all converge, and the delta drains itself.
+ */
+export function unconfirmedSales<T extends { clientRef: string }>(
+  soldSince: T[],
+  postedRefs: Iterable<string>,
+): T[] {
+  const posted = new Set(postedRefs);
+  return soldSince.filter((entry) => !posted.has(entry.clientRef));
+}
+
 /** Quantities sold per item, for the arithmetic above. */
 export function soldByItem(
   lines: { itemId: string; quantity: number }[],

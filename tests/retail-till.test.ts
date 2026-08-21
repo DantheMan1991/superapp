@@ -7,6 +7,7 @@ import {
   saleTotalCents,
   soldByItem,
   takings,
+  unconfirmedSales,
 } from "../src/packs/retail/core/till";
 
 /**
@@ -212,6 +213,60 @@ describe("dayResult", () => {
         costUnrecorded: true,
       }).costUnrecorded,
     ).toBe(false);
+  });
+});
+
+describe("unconfirmedSales", () => {
+  /**
+   * Written after the till reported **35.65 lb on the truck with 36.65 lb in
+   * the cooler.** The page re-reads the truck from the ledger a beat after each
+   * sale; the local delta was then applied to a figure that already contained
+   * it, so the truck read short by the whole session's takings — and a "ran
+   * out" tapped over stock that is really there is the one event in this pack
+   * that nothing else can reconstruct.
+   */
+  const soldSince = [
+    { clientRef: "a", itemId: "beef", quantity: 2.35 },
+    { clientRef: "b", itemId: "beef", quantity: 1 },
+    { clientRef: "c", itemId: "eggs", quantity: 6 },
+  ];
+
+  it("DROPS WHAT THE SNAPSHOT ALREADY COUNTED", () => {
+    expect(unconfirmedSales(soldSince, ["a", "b"])).toEqual([
+      { clientRef: "c", itemId: "eggs", quantity: 6 },
+    ]);
+  });
+
+  it("adds a snapshot and a delta up to the truth, not to double the sale", () => {
+    // The whole bug, end to end. 40 lb loaded, 2.35 sold. The server catches up
+    // on that one sale and the second is still in flight.
+    const serverSnapshot = [{ itemId: "beef", onHand: 37.65 }];
+    const delta = unconfirmedSales(
+      [
+        { clientRef: "a", itemId: "beef", quantity: 2.35 },
+        { clientRef: "b", itemId: "beef", quantity: 1 },
+      ],
+      ["a"],
+    );
+    expect(remainingOnTruck(serverSnapshot, soldByItem(delta))).toEqual([
+      { itemId: "beef", onHand: 36.65 },
+    ]);
+  });
+
+  it("keeps everything while the server knows nothing yet", () => {
+    expect(unconfirmedSales(soldSince, [])).toEqual(soldSince);
+  });
+
+  it("drains to nothing once the server has caught up", () => {
+    // What lets a market day run for hours without the list growing forever,
+    // and what a queue flushing an hour of sales at once converges on.
+    expect(unconfirmedSales(soldSince, ["a", "b", "c"])).toEqual([]);
+  });
+
+  it("ignores refs the server has that this device never minted", () => {
+    // A second till, or a sale rung up on the office machine. Not this
+    // device's delta, and not its business.
+    expect(unconfirmedSales(soldSince, ["somebody-else"])).toEqual(soldSince);
   });
 });
 

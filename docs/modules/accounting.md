@@ -13,6 +13,51 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-21 — Who may cause a posting (branch `claude/what-the-shelf-is-worth`)
+
+**`postEntry` no longer asks only WHO is posting; it asks WHAT produced the
+entry.** See [ADR 0011](../decisions/0011-machine-posted-entries.md).
+
+`requireOwnerRole(ctx)` at the one posted-entry call site became
+`requirePostingRight(ctx, input.source)`. An ordinary journal is still an
+owner's decision and a plain `manual` entry from staff is still refused. A small
+explicit set — `MACHINE_SOURCES` in `core/guards.ts` — posts without the owner
+check.
+
+**Why this module had to change for a pack.** `inventory` slice 3 makes stock
+movements post, and those movements are deliberately not owner-level:
+`livestock` settled the write levels on 2026-08-15 ("movements and merges are
+chores"), `retail`'s till exists so a **staff member** sells at a market stall,
+and production runs are recorded by whoever ran them. Under the old rule, adding
+perpetual posting would silently have made feeding animals, selling at a market
+and processing a batch all owner-only — three deliberate decisions reversed, and
+features already live broken. The check was firing after the decision it was
+meant to influence had already been made and authorised elsewhere; all it could
+have produced is a half-written transaction, the movement recorded and the
+journal line refused.
+
+**What makes it safe, in three layers.** `source` is absent from
+`entryInputSchema`, so nothing over the wire can name one; it defaults to
+`manual`, so a caller that forgets gets the STRICTER rule; and
+`journal_entry_source` is a Postgres ENUM, so a source cannot be invented at a
+call site, only chosen. A test meant to assert that a made-up source is refused
+**could not be written — it does not compile.** The day `source` becomes
+client-settable, this becomes a privilege escalation and the check has to move.
+
+**An expert still never posts**, machine-sourced or not, and every other guard
+is untouched: closed periods, balance, active accounts, entity postability. The
+audit row records the staff member who caused it rather than a borrowed owner —
+ADR 0011 rejected elevating `ctx.role` precisely because that would make the
+trail lie.
+
+`depreciation` is a machine source by every argument in the ADR and is
+deliberately NOT in the set: it runs from an owner's screen today, and loosening
+a rule no caller is asking about only widens what has to be reasoned about
+later.
+
+8 tests in `tests/ledger.test.ts` pin the boundary — including the ones that
+prove what did NOT change. Migration `0176` adds the three enum values.
+
 ### 2026-08-17 — A payment row that would not say whose account it was (branch `claude/payment-rows-name-the-company`)
 
 Found while finishing the drive of the mirror case. The invoice's payment row

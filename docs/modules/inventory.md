@@ -18,11 +18,86 @@ this dossier is the build record.
 | **0** | **Items + units + locations + on-hand ledger + the lot spine** | **shipped 2026-08-15** |
 | **1** | **Receipts and issues** — closes the `livestock` costing loop | **shipped 2026-08-19** |
 | **2** | **Adjustments, physical counts, expiry/FEFO** | **shipped 2026-08-20** |
-| 3 | Valuation + COGS posting, basis-aware | next |
+| **3a** | **Valuation — what stock is worth, as of a date** | **shipped 2026-08-21** |
+| 3b | **Perpetual posting to 1300/5000 — and the bill→item link it cannot ship without** | next — see Open items |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
 ## Build log
+
+### 2026-08-21 — Slice 3a: what the shelf is worth, and what it will not guess at (`claude/what-the-shelf-is-worth`)
+
+The third of the design's three layers, and the first that a balance sheet
+could ever read. `costing.ts` said outright that the third was not there; it is
+now — as a **read**, with nothing posted yet, for a reason recorded below that
+turned out to be a hard blocker rather than a preference.
+
+**A LOT IS VALUED AT WHAT IT CARRIED, NEVER AT QUANTITY × THE ITEM'S AVERAGE**,
+and that ordering is the whole design. The average is only meaningful for a
+fungible item; the design is explicit that it is *"emphatically NOT fine for
+specific identity (meat from animal #47, where traceability forbids averaging)
+and there is no such thing for raised stock with no purchase basis"*. A pen that
+accumulated chicks plus feed already knows what it is worth, and averaging it
+against every other batch of the same item would throw that away to produce a
+worse number. The average is the FALLBACK, for stock held outside any lot.
+
+**UNVALUED IS NOT ZERO, AND A TOTAL THAT CONFLATES THEM IS A LIE.** A raised lot
+nobody costed has no basis: zero says the shelf holds something worthless, a
+guess puts an invented number on a balance sheet, and it is neither. So
+`valuationTotal` reports what it could NOT value beside what it could, the page
+gives the gap the same size as the figure, and **any screen that shows the total
+without the caveat has recreated the bug — that is the defect, not a display
+preference.**
+
+**Which is exactly the bug this slice then shipped into its own first draft.**
+`lotCarried` folds an uncosted lot and a fully-released lot to the same
+`remainingCents: 0`, so 30 dozen eggs valued at `$0.00` — *after* the file
+header warning about that precise mistake was already written. A db-backed test
+caught it. `carriedValue` is now where the distinction is actually made rather
+than merely described, and the discriminator is whether money has EVER touched
+the lot in any direction. **Third appearance of this bug class here**:
+`costPerUnit` refuses it, `production` slice 0 shipped it, this one was caught.
+
+- **COGS resolves by CODE `5000` before subtype**, because the general chart
+  ships two accounts with subtype `cogs` — `5000 Cost of Goods Sold` and
+  `5100 Subcontractor Expense`. A resolver that took the first row would have
+  booked a farm's meat against subcontractors, quietly, and compounded it every
+  movement until somebody reconciled. Everything else follows
+  `resolveDepreciationAccounts`: config first, convention second, refuse rather
+  than guess.
+- **The shrinkage account defaults to COGS**, and sharing an account does not
+  lose slice 2's diagnostic: the reason travels in the entry memo, and grouping
+  still happens where it always did, over `inventory_movements.reason`.
+- **`carriedCostByLot` gained an as-of filter**, and it filters the MOVEMENTS
+  rather than the lot — a pen created in June has eaten more by August, and a
+  June balance sheet must not see August's feed.
+- **`averageRatesForItems` is the many-item form of `itemCostRate`.** A stock
+  list asks for fifty at a time, and fifty round trips is the pattern that makes
+  a page crawl.
+- **As-of is a URL parameter, not component state.** A valuation is a figure
+  somebody quotes to an accountant, and a number that cannot be linked to has to
+  be described instead.
+- 17 new pure tests, 8 new db-backed. Migration `0176` is three enum values and
+  nothing else.
+
+**ADR 0011 came out of this slice and is the part with teeth.** Perpetual posting
+collides head-on with the ledger's owner check: every feed issue, market sale and
+production run posts, and all three are deliberately staff-level chores.
+`livestock` settled that on 2026-08-15, `retail`'s till exists so a staff member
+can sell at a stall, and production runs are recorded by whoever ran them — so
+the old rule would have silently made all three owner-only. Machine-sourced
+entries now ride the authorisation of the act that produced them. What keeps it
+from being a privilege escalation is that `source` is absent from
+`entryInputSchema`, defaults to `manual`, and is a Postgres ENUM: a source cannot
+be invented at a call site, only chosen. A test that tried to assert a made-up
+source is refused **could not be written — it does not compile.**
+
+**WHY NOTHING POSTS YET, and it is a blocker rather than a slice line.**
+`bill_lines` has an `account_id` and **no link to an inventory item**. A bill
+today posts `Dr Feed Expense / Cr AP`. If a receipt also posted `Dr 1300`, the
+same delivery would sit on the books twice — so the receipt side and the bill
+side are not separable, and shipping half of perpetual would double-count every
+purchase a farm makes. Slice 3b is both together.
 
 ### 2026-08-21 — One act instead of two, for a truck that drives away (`claude/the-till-that-cannot-double-post`)
 
@@ -499,10 +574,15 @@ nullable and null is ordinary: a batch with no date is one nobody has dated (and
 the pack does not try to tell that apart from "does not expire"), and a movement
 with no reason is one whose kind already says why.
 
-**Not columns, deliberately** — each would have no reader today: VALUATION and
-the posting to 1300/5000 (slice 3, basis-aware per ADR 0007 — slice 1
-accumulates cost, it does not present it), reorder points and capacity
-(slice 5), and commitments — a pre-sold half is never inventory, it goes from a
+**Valuation is not a column and never will be.** What stock is worth is a fold
+over the movements (`core/valuation.ts`), exactly as an account balance is a
+fold over journal lines rather than a maintained total. A stored valuation is a
+second source of truth that must agree with the ledger forever, which ADR 0007
+names as accounting software's worst bug class.
+
+**Not columns, deliberately** — each would have no reader today: the POSTING to
+1300/5000 (slice 3b, and see Open items for the bill link it waits on),
+reorder points and capacity (slice 5), and commitments — a pre-sold half is never inventory, it goes from a
 commitment against a live animal to delivered without sitting on a shelf.
 
 ## Key files & seams
@@ -511,6 +591,11 @@ commitment against a live animal to delivered without sitting on a shelf.
   why only two of them live in code
 - `src/packs/inventory/core/balances.ts` — pure. The fold. **Read this before
   changing anything about quantities**
+- `src/packs/inventory/core/valuation.ts` — pure. **What the shelf is worth, and
+  what it refuses to guess at.** Read `carriedValue` before touching any figure
+  that could be zero
+- `src/packs/inventory/ledger-ops.ts` — **the only file that touches core's
+  tables.** Account resolution today; the posting will live here
 - `src/packs/inventory/ops.ts` — all reads and writes, takes a `Tx`. `splitLot`
   and `mergeLot` are the only operations that change cardinality
 - `src/packs/inventory/actions.ts` — `requireTenant` + `requireModuleEnabled` +
@@ -521,6 +606,17 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Decisions & gotchas
 
+- **UNVALUED IS NOT ZERO.** A lot nobody costed and a lot whose cost has all
+  been released both fold to `remainingCents: 0`, and only the second is worth
+  nothing. `carriedValue` is the discriminator and `valueLine` must never be
+  handed `remainingCents` directly. A total is always reported with the count
+  and quantity it could not value.
+- **A LOT IS VALUED AT ITS CARRIED COST, NEVER AT QUANTITY × AVERAGE.**
+  Reversing the two quietly re-averages the one case the lot spine exists to
+  keep apart.
+- **RESOLVE AN ACCOUNT BY CODE BEFORE SUBTYPE, AND REFUSE AMBIGUITY.** Two
+  accounts ship with subtype `cogs`. A resolver that picks the first row is
+  wrong quietly and compounds.
 - **NEGATIVE STOCK IS ALLOWED, and it is not a bug.** Somebody issues feed on
   Tuesday and records Monday's delivery on Wednesday; a system that refuses the
   Tuesday entry teaches people to stop entering things, which costs far more
@@ -582,6 +678,30 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
+- **PERPETUAL POSTING IS BLOCKED ON A BILL→ITEM LINK, and this is the next
+  thing to build.** `bill_lines` carries an `account_id` and nothing that names
+  an inventory item, so a bill for feed posts `Dr Feed Expense / Cr AP` with no
+  idea stock arrived. Post `Dr 1300` from the receipt as well and the delivery
+  is on the books twice. The two halves are one change:
+  1. **A nullable `inventory_item_id` on `bill_lines`**, so a bill line can say
+     it bought stock.
+  2. **That line posts to `1300` instead of an expense account**, which is what
+     makes the receipt's own entry non-duplicative.
+  3. **Then the movement postings**: receipt debits inventory, issue credits it
+     against COGS, adjustment against the variance account. Transfers, splits
+     and merges post NOTHING — they move cost within one account.
+  4. **Idempotency is the movement id**, so one movement is one entry forever
+     and a replayed write cannot double-post.
+  The account resolver and the `MACHINE_SOURCES` seam this needs are already
+  built and tested; what is missing is the link.
+- **A valuation cannot be exported.** The figure is on a screen and an
+  accountant will want it as a file, with the as-of date and the unvalued count
+  in it — an export that carried the total alone would strip the caveat, which
+  is the one thing this slice was careful about.
+- **Nothing values stock BY LOCATION.** `valueStock` groups by item and lot; a
+  farm with three freezers and a market truck cannot ask what is in each. The
+  read already joins movements, so this is a `groupBy` away rather than a
+  design question.
 - **`recordMovementAction` should now GO.** Slice 2 gave adjustments their own
   action rather than reusing it: an adjustment has a required reason and a signed
   quantity, and routing it through the generic primitive would have made the

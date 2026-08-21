@@ -9,12 +9,18 @@ import { logAudit } from "@/lib/audit";
 import {
   RetailError,
   createChannel,
+  moveStockToTruck,
   recordMarketDay,
+  recordSale,
+  recordStockout,
   removeMarketDay,
   removePrice,
+  removeStockout,
+  returnStockFromTruck,
   setPrice,
   updateChannel,
   updateMarketDay,
+  voidSale,
   type RetailCtx,
 } from "./ops";
 
@@ -44,6 +50,8 @@ function toResult(err: unknown): { error: string } {
       case "CHANNEL_INVALID":
       case "ITEM_INVALID":
       case "MARKET_DAY_INVALID":
+      case "SALE_INVALID":
+      case "NO_LINES":
         return { error: err.message };
     }
   }
@@ -208,6 +216,8 @@ const marketDayFields = {
     .multipleOf(0.01)
     .nullable()
     .optional(),
+  openingFloatCents: cents.nullable().optional(),
+  cashCountedCents: cents.nullable().optional(),
   weather: z.string().max(300).optional(),
   notes: z.string().max(5000).optional(),
 };
@@ -266,6 +276,229 @@ export async function removeMarketDayAction(input: unknown) {
     await withTenant(
       ctx.tenant.id,
       (tx) => removeMarketDay(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+// ------------------------------------------------------------- the truck ---
+
+const truckMove = {
+  itemId: z.string().uuid(),
+  lotId: z.string().uuid().nullable().optional(),
+  quantity: z.number().positive().max(100_000_000).multipleOf(0.0001),
+  occurredOn: requiredDate,
+  notes: z.string().max(2000).optional(),
+};
+
+export async function loadTruckAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      ...truckMove,
+      truckAssetId: z.string().uuid(),
+      fromLocationAssetId: z.string().uuid().nullable().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => moveStockToTruck(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    // Stock left a shelf; the item page has to agree.
+    revalidatePath("/dashboard/m/inventory", "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function unloadTruckAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      ...truckMove,
+      truckAssetId: z.string().uuid(),
+      toLocationAssetId: z.string().uuid().nullable().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => returnStockFromTruck(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/inventory", "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ---------------------------------------------------------------- selling ---
+
+/**
+ * Take a sale.
+ *
+ * **SAFE TO CALL TWICE WITH THE SAME `clientRef`, and the client depends on it.**
+ * A till that queued a sale at a signal-less market has no way of knowing
+ * whether a request that timed out arrived; its only safe move is to send it
+ * again, and this returns `alreadyPosted` rather than taking the money twice.
+ *
+ * The result carries the total back so the screen can show what was rung up —
+ * and `alreadyPosted` so a flush can report "5 sent, 1 was already in" instead
+ * of silently double-counting its own success.
+ */
+export async function recordSaleAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      // A uuid from the till. Bounded and format-checked like anything else
+      // crossing the boundary — it is client input, however friendly.
+      clientRef: z.string().min(8).max(64).nullable().optional(),
+      channelId: z.string().uuid(),
+      marketDayId: z.string().uuid().nullable().optional(),
+      soldAt: z.string().datetime(),
+      paymentMethod: z.string().min(1).max(63).optional(),
+      locationAssetId: z.string().uuid().nullable().optional(),
+      lines: z
+        .array(
+          z.object({
+            itemId: z.string().uuid(),
+            lotId: z.string().uuid().nullable().optional(),
+            quantity: z.number().positive().max(1_000_000).multipleOf(0.0001),
+            unitPriceCents: cents,
+          }),
+        )
+        .min(1)
+        .max(200),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        recordSale(tx, ctxOf(ctx), {
+          ...parsed.data,
+          soldAt: new Date(parsed.data.soldAt),
+        }),
+      { role: ctx.role },
+    );
+    // Only audit what actually happened. A replay wrote nothing and an audit
+    // entry claiming otherwise would be the log lying about the ledger.
+    if (!result.alreadyPosted) {
+      await logAudit({
+        action: "retail.sale.recorded",
+        tenantId: ctx.tenant.id,
+        actorClerkUserId: ctx.userId,
+        targetType: "retail_channel",
+        targetId: parsed.data.channelId,
+        meta: {
+          saleId: result.sale.id,
+          totalCents: result.totalCents,
+          lines: result.lines.length,
+          paymentMethod: result.sale.paymentMethod,
+        },
+      });
+    }
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/inventory", "layout");
+    return {
+      ok: true,
+      saleId: result.sale.id,
+      totalCents: result.totalCents,
+      alreadyPosted: result.alreadyPosted,
+    };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function voidSaleAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const sale = await withTenant(
+      ctx.tenant.id,
+      (tx) => voidSale(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "retail.sale.voided",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "retail_channel",
+      targetId: sale.channelId,
+      meta: { saleId: sale.id, soldAt: sale.soldAt.toISOString() },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// -------------------------------------------------------------- stockouts ---
+
+export async function recordStockoutAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      marketDayId: z.string().uuid(),
+      itemId: z.string().uuid(),
+      noticedAt: z.string().datetime(),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        recordStockout(tx, ctxOf(ctx), {
+          ...parsed.data,
+          noticedAt: new Date(parsed.data.noticedAt),
+        }),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function removeStockoutAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => removeStockout(tx, ctxOf(ctx), parsed.data.id),
       { role: ctx.role },
     );
     revalidatePath(BASE, "layout");

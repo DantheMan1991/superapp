@@ -309,7 +309,15 @@ export default async function RetailChannelPage({
                   return (
                     <TableRow key={row.day.id}>
                       <TableCell className="tabular-nums font-medium">
-                        {row.day.heldOn}
+                        {/* The day now HAS a page — the till, what it took and
+                            whether the tin agreed — so the date is finally a
+                            link to something. */}
+                        <Link
+                          href={`${BASE}/days/${row.day.id}`}
+                          className="hover:underline"
+                        >
+                          {row.day.heldOn}
+                        </Link>
                         {row.day.notes && (
                           <div className="text-xs font-normal text-muted-foreground">
                             {row.day.notes}

@@ -116,6 +116,28 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-21 — Retail slice 1: the till, and the column that makes a retry safe (`claude/the-till-that-cannot-double-post`)
+- **Profit per market day is a number now**, not a promise. Slice 0 recorded what
+  a day cost; this records what it took, and the design's argument about the dud
+  market attended out of habit finally has data behind it.
+- **`retail_sales.client_ref` is the point of the slice, and it shipped before
+  any offline code.** A stall with no signal means posting gets retried, and a
+  retry whose reply was lost would take the money twice. Everything else about
+  offline is client code that can be swapped; idempotent posting is a column and
+  an index, and retrofitting it means reconciling every sale already taken.
+- **The offline problem stayed a data-model problem.** The truck is a
+  storage-location asset, loading it is a transfer, and the till counts it down
+  locally from one snapshot — one device, one location, nothing to conflict over.
+- **`inventory` gained `transferStock`**, closing an open item it had carried
+  since its own slice 0.
+- **Round once, per line; cash apart from cards; a blank count is not a zero
+  count; voiding leaves the stock issue behind.** Each is written up in the
+  dossier with the reason.
+- **NOT DRIVEN IN A BROWSER** — the dev browser lost its session and signing in
+  is not something this agent does. Recorded as the top open item rather than
+  glossed, because four of the last four slices had a defect only clicking found.
+- Dossier: [retail.md](retail.md).
+
 ### 2026-08-20 — Retail slice 0: the revenue half finally starts (`claude/what-a-market-day-costs`)
 - **Sixth pack to ship, and the first on the revenue side.** Every other pack in
   this profile answers what something COST; until now nothing could say what

@@ -33,6 +33,8 @@ import {
   itemCostRate,
   postCount,
   receiveStock,
+  stockAtLocation,
+  transferStock,
   recordCountLine,
   startCount,
 } from "../src/packs/inventory/ops";
@@ -519,6 +521,127 @@ d("inventory ops", () => {
       expiringLots(tx, tenantId, { onOrBefore: "2026-10-01" }),
     );
     expect(beforeOctober.map((r) => r.lot.code)).toEqual(["GOES-FIRST"]);
+  });
+
+
+  it("A TRANSFER MOVES STOCK WITHOUT CHANGING HOW MUCH THERE IS", async () => {
+    /**
+     * Closes an open item this pack has carried since slice 0: moving stock was
+     * "two movements, and the UI does not offer it as one act" — exactly the
+     * shape that produces one leg entered and the other forgotten.
+     *
+     * `retail` needs it to load a market truck, which is a storage-location
+     * asset like any other. That is the whole reason the design can claim the
+     * offline problem has no distributed-inventory problem inside it.
+     */
+    const item = await newItem("Transferred feed");
+    const truck = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.assets)
+        .values({
+          tenantId,
+          kind: "vehicle",
+          name: "Market truck",
+          isStorageLocation: true,
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 100,
+        costCents: 10_000,
+        occurredOn: "2026-08-01",
+        locationAssetId: freezerId,
+      }),
+    );
+
+    const moved = await asOwner((tx) =>
+      transferStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 40,
+        fromLocationAssetId: freezerId,
+        toLocationAssetId: truck,
+        occurredOn: "2026-08-20",
+      }),
+    );
+    expect(moved.out.quantity).toBe(-40);
+    expect(moved.in.quantity).toBe(40);
+    // CARRIES NO COST. Moving a box does not change what it cost, and stamping
+    // a figure would release cost from the lot and put a different one back.
+    expect(moved.out.costCents).toBeNull();
+    expect(moved.in.costCents).toBeNull();
+
+    // The item's total is untouched; only the "where" split moved.
+    expect((await asOwner((tx) => onHandByItem(tx, tenantId))).get(item.id)).toBe(100);
+    const onTruck = await asOwner((tx) => stockAtLocation(tx, tenantId, truck));
+    expect(onTruck.find((l) => l.itemId === item.id)?.onHand).toBe(40);
+    const inFreezer = await asOwner((tx) => stockAtLocation(tx, tenantId, freezerId));
+    expect(inFreezer.find((l) => l.itemId === item.id)?.onHand).toBe(60);
+  });
+
+  it("refuses a transfer that starts and ends in the same place", async () => {
+    // Both null is the common version: a farm that has never recorded a
+    // location asking to move something from nowhere to nowhere. Two rows that
+    // cancel would be noise in the one table that has to reconcile.
+    const item = await newItem("Going nowhere");
+    await expect(
+      asOwner((tx) =>
+        transferStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 5,
+          occurredOn: "2026-08-20",
+        }),
+      ),
+    ).rejects.toThrow(InventoryError);
+  });
+
+  it("drops a location line that has gone back to zero", async () => {
+    // Stock that went out and came back is not "0 lb on the truck"; it is not
+    // on the truck. Same call the item page's "where it is" panel makes.
+    const item = await newItem("There and back");
+    const van = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.assets)
+        .values({
+          tenantId,
+          kind: "vehicle",
+          name: "Van",
+          isStorageLocation: true,
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 20,
+        costCents: 2_000,
+        occurredOn: "2026-08-01",
+        locationAssetId: freezerId,
+      }),
+    );
+    await asOwner((tx) =>
+      transferStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 20,
+        fromLocationAssetId: freezerId,
+        toLocationAssetId: van,
+        occurredOn: "2026-08-20",
+      }),
+    );
+    await asOwner((tx) =>
+      transferStock(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 20,
+        fromLocationAssetId: van,
+        toLocationAssetId: freezerId,
+        occurredOn: "2026-08-21",
+      }),
+    );
+    const onVan = await asOwner((tx) => stockAtLocation(tx, tenantId, van));
+    expect(onVan.find((l) => l.itemId === item.id)).toBeUndefined();
   });
 
   it("offers only the places things are kept", async () => {

@@ -1219,6 +1219,20 @@
       "when": 1787274694392,
       "tag": "0173_retail_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "7",
+      "when": 1787306337073,
+      "tag": "0174_jazzy_wonder_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 1787306338073,
+      "tag": "0175_retail_till_rls",
+      "breakpoints": true
     }
   ]
 }

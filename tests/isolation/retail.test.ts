@@ -32,6 +32,13 @@ d("retail tables (RLS)", () => {
   let channelB: string;
   let priceA: string;
   let dayA: string;
+  let dayB: string;
+  let saleA: string;
+  let saleB: string;
+  let lineA: string;
+  let movementA: string;
+  let movementB: string;
+  let stockoutA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -111,6 +118,95 @@ d("retail tables (RLS)", () => {
         ])
         .returning();
       dayA = days[0].id;
+      dayB = days[1].id;
+
+      // Slice 1's tables, built the same way and for the same reason: what the
+      // DATABASE enforces, not what the ops layer happens to do.
+      const movements = await tx
+        .insert(schema.inventoryMovements)
+        .values([
+          {
+            tenantId: tenantA,
+            itemId: itemA,
+            quantity: -2,
+            movementKind: "issue",
+            occurredOn: "2026-08-20",
+          },
+          {
+            tenantId: tenantB,
+            itemId: itemB,
+            quantity: -2,
+            movementKind: "issue",
+            occurredOn: "2026-08-20",
+          },
+        ])
+        .returning();
+      movementA = movements[0].id;
+      movementB = movements[1].id;
+
+      const sales = await tx
+        .insert(schema.retailSales)
+        .values([
+          {
+            tenantId: tenantA,
+            clientRef: "till-a-1",
+            channelId: channelA,
+            marketDayId: dayA,
+            soldAt: new Date("2026-08-20T10:00:00Z"),
+          },
+          {
+            tenantId: tenantB,
+            clientRef: "till-b-1",
+            channelId: channelB,
+            marketDayId: dayB,
+            soldAt: new Date("2026-08-20T10:00:00Z"),
+          },
+        ])
+        .returning();
+      saleA = sales[0].id;
+      saleB = sales[1].id;
+
+      const lines = await tx
+        .insert(schema.retailSaleLines)
+        .values([
+          {
+            tenantId: tenantA,
+            saleId: saleA,
+            itemId: itemA,
+            quantity: 2,
+            unitPriceCents: 900,
+            inventoryMovementId: movementA,
+          },
+          {
+            tenantId: tenantB,
+            saleId: saleB,
+            itemId: itemB,
+            quantity: 2,
+            unitPriceCents: 700,
+            inventoryMovementId: movementB,
+          },
+        ])
+        .returning();
+      lineA = lines[0].id;
+
+      const stockouts = await tx
+        .insert(schema.retailStockouts)
+        .values([
+          {
+            tenantId: tenantA,
+            marketDayId: dayA,
+            itemId: itemA,
+            noticedAt: new Date("2026-08-20T11:00:00Z"),
+          },
+          {
+            tenantId: tenantB,
+            marketDayId: dayB,
+            itemId: itemB,
+            noticedAt: new Date("2026-08-20T11:00:00Z"),
+          },
+        ])
+        .returning();
+      stockoutA = stockouts[0].id;
     });
   });
 
@@ -300,7 +396,245 @@ d("retail tables (RLS)", () => {
 
   // ---- default deny -----------------------------------------------------
 
-  it("is default-deny on all three tables with no tenant context", async () => {
+
+  // ---- sales ------------------------------------------------------------
+
+  it("a tenant sees only its own sales and their lines", async () => {
+    expect(
+      (await asStaff((tx) => tx.select().from(schema.retailSales))).map(
+        (s) => s.clientRef,
+      ),
+    ).toEqual(["till-a-1"]);
+    expect(
+      (await asStaff((tx) => tx.select().from(schema.retailSaleLines))).map(
+        (l) => l.unitPriceCents,
+      ),
+    ).toEqual([900]);
+    expect(
+      (await asOtherTenant((tx) => tx.select().from(schema.retailSales))).map(
+        (s) => s.clientRef,
+      ),
+    ).toEqual(["till-b-1"]);
+  });
+
+  it("cannot read, update or delete another tenant's sale", async () => {
+    expect(
+      await asOwner((tx) =>
+        tx.select().from(schema.retailSales).where(eq(schema.retailSales.id, saleB)),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await asOwner((tx) =>
+        tx
+          .update(schema.retailSales)
+          .set({ notes: "Stolen" })
+          .where(eq(schema.retailSales.id, saleB))
+          .returning(),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await asOwner((tx) =>
+        tx
+          .delete(schema.retailSales)
+          .where(eq(schema.retailSales.id, saleB))
+          .returning(),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("TWO TENANTS MAY USE THE SAME CLIENT REF", async () => {
+    /**
+     * The uniqueness that makes a replay safe is per TENANT, and it has to be:
+     * two farms' tills are separate devices minting separate ids, and a
+     * collision across the boundary would refuse one of them a sale it really
+     * made. Same ref, different tenant, both fine.
+     */
+    await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.retailSales)
+        .values({
+          tenantId: tenantB,
+          clientRef: "till-a-1",
+          channelId: channelB,
+          soldAt: new Date("2026-08-20T12:00:00Z"),
+        })
+        .returning();
+      expect(rows).toHaveLength(1);
+      await tx
+        .delete(schema.retailSales)
+        .where(eq(schema.retailSales.id, rows[0].id));
+    });
+  });
+
+  it("cannot post the same client ref twice within a tenant", async () => {
+    // The whole point of the column: a retried flush lands once.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailSales).values({
+          tenantId: tenantA,
+          clientRef: "till-a-1",
+          channelId: channelA,
+          soldAt: new Date("2026-08-20T13:00:00Z"),
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot sell into another tenant's channel or day", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailSales).values({
+          tenantId: tenantA,
+          channelId: channelB,
+          soldAt: new Date(),
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailSales).values({
+          tenantId: tenantA,
+          channelId: channelA,
+          marketDayId: dayB,
+          soldAt: new Date(),
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot move a sale into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.retailSales)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.retailSales.id, saleA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  // ---- sale lines -------------------------------------------------------
+
+  it("CANNOT SELL ANOTHER TENANT'S STOCK", async () => {
+    /**
+     * The sharpest one in this file. A sale line is revenue with a stock issue
+     * behind it — pointing at another tenant's movement would book this
+     * business's money against that one's goods.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailSaleLines).values({
+          tenantId: tenantA,
+          saleId: saleA,
+          itemId: itemA,
+          quantity: 1,
+          unitPriceCents: 100,
+          inventoryMovementId: movementB,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailSaleLines).values({
+          tenantId: tenantA,
+          saleId: saleA,
+          itemId: itemB,
+          quantity: 1,
+          unitPriceCents: 100,
+          inventoryMovementId: movementA,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot put a line on another tenant's sale", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailSaleLines).values({
+          tenantId: tenantA,
+          saleId: saleB,
+          itemId: itemA,
+          quantity: 1,
+          unitPriceCents: 100,
+          inventoryMovementId: movementA,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot sell the same stock issue twice", async () => {
+    // One movement is one line, the same rule a production run input follows.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailSaleLines).values({
+          tenantId: tenantA,
+          saleId: saleA,
+          itemId: itemA,
+          quantity: 1,
+          unitPriceCents: 100,
+          inventoryMovementId: movementA,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot move a sale line into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.retailSaleLines)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.retailSaleLines.id, lineA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  // ---- stockouts --------------------------------------------------------
+
+  it("a tenant sees only its own stockouts", async () => {
+    expect(
+      await asStaff((tx) => tx.select().from(schema.retailStockouts)),
+    ).toHaveLength(1);
+  });
+
+  it("cannot record running out on another tenant's day", async () => {
+    // The only record anywhere of revenue that was NOT taken.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailStockouts).values({
+          tenantId: tenantA,
+          marketDayId: dayB,
+          itemId: itemA,
+          noticedAt: new Date(),
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot record running out of the same thing twice on one day", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.retailStockouts).values({
+          tenantId: tenantA,
+          marketDayId: dayA,
+          itemId: itemA,
+          noticedAt: new Date(),
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot move a stockout into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.retailStockouts)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.retailStockouts.id, stockoutA)),
+      ),
+    ).rejects.toThrow();
+  });
+  it("is default-deny on every table in the pack with no tenant context", async () => {
     // FORCE ROW LEVEL SECURITY: an unknown tenant sees nothing, even for the
     // connection's own role.
     const nowhere = "00000000-0000-0000-0000-000000000000";
@@ -314,6 +648,15 @@ d("retail tables (RLS)", () => {
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.retailMarketDays),
       ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.retailSales)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.retailSaleLines)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.retailStockouts)),
     ).toHaveLength(0);
   });
 });

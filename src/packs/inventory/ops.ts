@@ -2087,6 +2087,162 @@ async function itemsByIds(
   return out;
 }
 
+
+/**
+ * Move stock from one place to another, as ONE act.
+ *
+ * **TWO MOVEMENTS AND NO NET CHANGE.** A `transfer_out` at the origin and a
+ * `transfer_in` at the destination, same item, same lot, same day. The item's
+ * balance does not move; only the "where is it" split does — which is the
+ * property `splitLot` already relies on and the reason both sides are recorded
+ * rather than one row with two locations on it.
+ *
+ * **CARRIES NO COST, and that is deliberate.** Moving a box of beef from a
+ * garage freezer to a market truck does not change what it cost; stamping a
+ * figure would release cost from the lot and then put a different one back,
+ * which is how a lot's `remainingCents` starts disagreeing with itself. This is
+ * the same reasoning `livestock` applies to a pen walking to the next paddock.
+ *
+ * **THIS CLOSES A KNOWN GAP.** The pack's own open items have said since slice 0
+ * that moving stock was "two movements, and the UI does not offer it as one
+ * act" — which is exactly the shape that produces one leg entered and the other
+ * forgotten. `retail` needs it to load a truck, and it belongs here because the
+ * ledger is this pack's.
+ */
+export async function transferStock(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    itemId: string;
+    lotId?: string | null;
+    /** Positive. The direction is the two locations, not the sign. */
+    quantity: number;
+    /** Null means "from wherever it was", which an uncounted farm honestly has. */
+    fromLocationAssetId?: string | null;
+    toLocationAssetId?: string | null;
+    occurredOn: string;
+    extensionSlug?: string;
+    notes?: string;
+  },
+): Promise<{ out: InventoryMovement; in: InventoryMovement }> {
+  requireWrite(ctx, "member");
+  const quantity = roundQuantity(Math.abs(input.quantity));
+  if (quantity <= 0) {
+    throw new InventoryError("ZERO_QUANTITY", "a transfer has to be a positive quantity");
+  }
+  const from = input.fromLocationAssetId ?? null;
+  const to = input.toLocationAssetId ?? null;
+  if (from === to) {
+    // Both null is the common version of this: a farm that has never recorded a
+    // location asking to move something from nowhere to nowhere. It is not a
+    // move, and two rows that cancel would be noise in the one table that has to
+    // reconcile.
+    throw new InventoryError(
+      "LOT_INVALID",
+      "pick two different places — a transfer that starts and ends in the same place is not a move",
+    );
+  }
+
+  const outbound = await recordMovement(tx, ctx, {
+    itemId: input.itemId,
+    lotId: input.lotId ?? null,
+    locationAssetId: from,
+    quantity: -quantity,
+    movementKind: "transfer_out",
+    occurredOn: input.occurredOn,
+    extensionSlug: input.extensionSlug,
+    notes: input.notes,
+  });
+  const inbound = await recordMovement(tx, ctx, {
+    itemId: input.itemId,
+    lotId: input.lotId ?? null,
+    locationAssetId: to,
+    quantity,
+    movementKind: "transfer_in",
+    occurredOn: input.occurredOn,
+    extensionSlug: input.extensionSlug,
+    notes: input.notes,
+  });
+  return { out: outbound, in: inbound };
+}
+
+export interface LocationStockLine {
+  itemId: string;
+  itemName: string;
+  unit: string;
+  lotId: string | null;
+  lotCode: string | null;
+  onHand: number;
+}
+
+/**
+ * What is at one place, by item and batch.
+ *
+ * **ADDED FOR THE MARKET TRUCK**, which is a storage-location asset like any
+ * other — the whole reason the design says the offline problem has no
+ * distributed-inventory problem inside it. A till loads this once and does its
+ * own arithmetic from there.
+ *
+ * Lines that net to zero are dropped, the same call the item page's "where it
+ * is" panel makes: stock that went out and came back is not "0 lb on the truck",
+ * it is not on the truck.
+ */
+export async function stockAtLocation(
+  tx: Tx,
+  tenantId: string,
+  locationAssetId: string,
+): Promise<LocationStockLine[]> {
+  const rows = await tx
+    .select({
+      itemId: schema.inventoryMovements.itemId,
+      itemName: schema.inventoryItems.name,
+      unit: schema.inventoryItems.stockingUnit,
+      lotId: schema.inventoryMovements.lotId,
+      lotCode: schema.inventoryLots.code,
+      quantity: sql<string>`sum(${schema.inventoryMovements.quantity})`,
+    })
+    .from(schema.inventoryMovements)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryItems.id, schema.inventoryMovements.itemId),
+      ),
+    )
+    .leftJoin(
+      schema.inventoryLots,
+      and(
+        eq(schema.inventoryLots.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryLots.id, schema.inventoryMovements.lotId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        eq(schema.inventoryMovements.locationAssetId, locationAssetId),
+      ),
+    )
+    .groupBy(
+      schema.inventoryMovements.itemId,
+      schema.inventoryItems.name,
+      schema.inventoryItems.stockingUnit,
+      schema.inventoryMovements.lotId,
+      schema.inventoryLots.code,
+    );
+
+  return rows
+    .map((row) => ({
+      itemId: row.itemId,
+      itemName: row.itemName,
+      unit: row.unit,
+      lotId: row.lotId,
+      lotCode: row.lotCode,
+      onHand: roundQuantity(Number(row.quantity)),
+    }))
+    .filter((row) => row.onHand !== 0)
+    .sort((a, b) => (a.itemName < b.itemName ? -1 : 1));
+}
+
 /** Everything issued into one lot, newest first — the "what has this pen eaten" list. */
 export async function consumedByLot(
   tx: Tx,

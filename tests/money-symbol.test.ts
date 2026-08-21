@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatCents, formatMoney, formatMoneySigned } from "../src/lib/money";
+import {
+  formatCents,
+  formatMoney,
+  formatMoneySign,
+  formatMoneySigned,
+} from "../src/lib/money";
 import { homesteadFarm } from "../src/industries/homestead-farm";
 import { listIndustryProfiles } from "../src/industries";
 
@@ -40,6 +45,32 @@ describe("formatMoney", () => {
     expect(formatMoneySigned(-8_500, "$")).toBe("($85.00)");
     expect(formatMoneySigned(8_500, "$")).toBe("$85.00");
     expect(formatMoneySigned(-8_500, null)).toBe("(85.00)");
+  });
+});
+
+describe("formatMoneySign", () => {
+  /**
+   * Written after a market-day card read **"Margin $53.00"** for a day that
+   * took nothing and cost $53 to stand there. `formatMoney` drops the sign by
+   * design, so the loss rendered as an identical-looking profit - the exact
+   * fact the retail pack exists to surface, inverted.
+   */
+  it("KEEPS THE MINUS, which is the whole reason it exists", () => {
+    // A true minus sign (U+2212), not a hyphen - it lines up in a tabular-nums
+    // column, which is where every one of these numbers is rendered.
+    expect(formatMoneySign(-5_300, "$")).toBe("−$53.00");
+    expect(formatMoneySign(-5_300, "$")).not.toBe(formatMoney(5_300, "$"));
+  });
+
+  it("leaves a positive alone rather than decorating it with a plus", () => {
+    // A margin is not a delta. Only the cash variance says "+", because there
+    // the direction against an expectation is the point.
+    expect(formatMoneySign(5_300, "$")).toBe("$53.00");
+    expect(formatMoneySign(0, "$")).toBe("$0.00");
+  });
+
+  it("still does nothing about a symbol nobody asked for", () => {
+    expect(formatMoneySign(5_300, null)).toBe("53.00");
   });
 });
 

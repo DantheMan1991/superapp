@@ -54,6 +54,24 @@ export function formatMoney(cents: number, symbol: string | null): string {
   return symbol ? `${symbol}${amount}` : amount;
 }
 
+/**
+ * A signed amount, for a figure that can genuinely go either way - a margin, a
+ * balance, a variance.
+ *
+ * **`formatMoney` DROPS THE SIGN, AND EVERY CALLER OF IT IS ASSERTING THE
+ * NUMBER CANNOT BE NEGATIVE.** That is right for a price or a cost and wrong
+ * for a result: a market day that cost $53 and took nothing renders as
+ * "$53.00" through `formatMoney`, which reads as fifty-three dollars EARNED.
+ * Reach for this one whenever a subtraction produced the number.
+ *
+ * A minus rather than accounting parentheses, because these numbers are read
+ * by the person who stood at the stall, not by their accountant.
+ */
+export function formatMoneySign(cents: number, symbol: string | null): string {
+  const amount = formatMoney(Math.abs(cents), symbol);
+  return cents < 0 ? `−${amount}` : amount;
+}
+
 /** Accounting-style negatives, with the symbol inside the parentheses. */
 export function formatMoneySigned(cents: number, symbol: string | null): string {
   const amount = formatMoney(Math.abs(cents), symbol);

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useConfirm } from "@/components/app/use-confirm";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,7 @@ import {
   removePriceAction,
   setPriceAction,
   updateChannelAction,
+  voidSaleAction,
 } from "../actions";
 import { slugLabel } from "../vocabulary";
 
@@ -572,5 +574,77 @@ export function RemoveMarketDayButton({ id }: { id: string }) {
     >
       Remove
     </Button>
+  );
+}
+
+/**
+ * Void a sale.
+ *
+ * **THE STOCK ISSUE IS DELIBERATELY LEFT BEHIND**, and the confirm dialog says
+ * so rather than letting somebody find it later as stock they cannot account
+ * for.
+ * The goods went over the table; a movement records what happened, and unwriting
+ * it would rewrite that. `inventory` slice 2's adjustment is the remedy — which
+ * means that for the first time in this repo the loose end has a screen.
+ */
+export function VoidSaleButton({
+  id,
+  what,
+}: {
+  id: string;
+  /** "$11.75 at 11:05", so the dialog names the sale rather than "this one". */
+  what: string;
+}) {
+  const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
+  const [pending, startTransition] = useTransition();
+
+  /**
+   * **ASKED FIRST, BECAUSE THIS IS A ROW OF BUTTONS ON A PHONE.** Void sits
+   * beside every sale on a screen used one-handed at a stall, it destroys
+   * posted revenue, and it deliberately does NOT put the stock back - so a
+   * mis-tap leaves the takings short, the truck right, and nothing anywhere
+   * saying the two disagree.
+   *
+   * **THE GUARD IS OUTSIDE THE TRANSITION, AND IT HAS TO BE.** Asking inside
+   * one deadlocks: opening the dialog is a transition update, and the
+   * transition cannot commit it while it is still suspended on the promise
+   * that only resolves when somebody answers the dialog. The button then does
+   * nothing at all, which is the same silent failure `useConfirm` was written
+   * to end. Every other call site in the app guards before the transition.
+   */
+  async function voidIt() {
+    const asked = await confirm({
+      title: `Void ${what}?`,
+      description:
+        "The takings drop by this sale. The stock stays off the truck, because it went over the table — put it back with an inventory adjustment if it did not.",
+      confirmLabel: "Void the sale",
+      destructive: true,
+    });
+    if (!asked) return;
+    startTransition(async () => {
+      const result = await voidSaleAction({ id });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Voided — the stock that went out is still off the truck");
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      {confirmDialog}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={voidIt}
+        disabled={pending}
+        className="text-muted-foreground"
+      >
+        Void
+      </Button>
+    </>
   );
 }

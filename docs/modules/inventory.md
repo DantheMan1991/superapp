@@ -24,6 +24,32 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-21 — One act instead of two, for a truck that drives away (`claude/the-till-that-cannot-double-post`)
+
+`transferStock` and `stockAtLocation`, added for `retail`'s till and living here
+because the ledger is this pack's table.
+
+**This closes an open item slice 0 wrote down and slice 1 did not fix**: moving
+stock was *"two movements, and the UI does not offer it as one act"* — which is
+precisely the shape that gets one leg entered and the other forgotten, leaving
+stock in two places at once.
+
+- **The item's balance does not move; only the "where" split does.** Both legs
+  are recorded rather than one row with two locations, which is the same reason
+  `splitLot` writes a pair.
+- **A transfer carries NO COST.** Moving a box of beef from a garage freezer to
+  a market truck does not change what it cost, and stamping a figure would
+  release cost from the lot and then put a different one back — which is how
+  `remainingCents` starts disagreeing with itself. Same reasoning `livestock`
+  applies to a pen walking to the next paddock.
+- **From and to must differ.** Both null is the common attempt: a farm that has
+  never recorded a location asking to move something from nowhere to nowhere.
+  Two rows that cancel would be noise in the one table that has to reconcile.
+- **`stockAtLocation` drops a line that has gone back to zero**, the same call
+  the item page's "where it is" panel makes: stock that went out and came back
+  is not "0 lb on the truck", it is not on the truck.
+- 3 new ops tests. No migration, no schema change.
+
 ### 2026-08-20 — Slice 2: counting what is actually there, and saying why (`claude/counting-what-is-actually-there`)
 
 The slice that lets somebody be WRONG. Everything before this could record what
@@ -584,8 +610,14 @@ commitment against a live animal to delivered without sitting on a shelf.
   the owner because each of them creates or retires a cost object.
 - **Merge is not in the UI.** `mergeLot` exists, is tested, and has no caller —
   splits are what `livestock` needs first.
-- **No transfer between locations.** Moving stock from the barn to a freezer is
-  two movements, and the UI does not offer it as one act.
+- ~~No transfer between locations~~ — **closed 2026-08-21.** `transferStock`
+  writes both legs as one act, and `stockAtLocation` answers "what is at this
+  place". Built for `retail`'s market truck, which is a storage-location asset
+  like any other — the whole reason that design has no distributed-inventory
+  problem in it. A transfer carries **no cost**: moving a box does not change
+  what it cost, and stamping a figure would release cost from the lot and put a
+  different one back. **Still no UI in this pack** — the only caller is retail's
+  load/unload, so moving between two freezers is still two entries here.
 - **Item-specific purchase conversions are entered as free text.** "bag" is not
   validated against anything, so two items can spell it differently.
 - **`wouldGoNegative` has no caller.** Written for a warning the UI does not yet

@@ -30,6 +30,7 @@ import {
   removePriceAction,
   setPriceAction,
   updateChannelAction,
+  voidSaleAction,
 } from "../actions";
 import { slugLabel } from "../vocabulary";
 
@@ -571,6 +572,44 @@ export function RemoveMarketDayButton({ id }: { id: string }) {
       className="text-muted-foreground"
     >
       Remove
+    </Button>
+  );
+}
+
+/**
+ * Void a sale.
+ *
+ * **THE STOCK ISSUE IS DELIBERATELY LEFT BEHIND**, and the dialog copy says so
+ * rather than letting somebody find it later as stock they cannot account for.
+ * The goods went over the table; a movement records what happened, and unwriting
+ * it would rewrite that. `inventory` slice 2's adjustment is the remedy — which
+ * means that for the first time in this repo the loose end has a screen.
+ */
+export function VoidSaleButton({ id }: { id: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  function voidIt() {
+    startTransition(async () => {
+      const result = await voidSaleAction({ id });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Voided — the stock that went out is still off the truck");
+      router.refresh();
+    });
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={voidIt}
+      disabled={pending}
+      className="text-muted-foreground"
+    >
+      Void
     </Button>
   );
 }

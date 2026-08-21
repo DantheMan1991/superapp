@@ -18,7 +18,12 @@ import {
 } from "@/components/ui/table";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
-import { listChannels, marketDays, pricedCountByChannel } from "./ops";
+import {
+  listChannels,
+  marketDays,
+  pricedCountByChannel,
+  takingsByDay,
+} from "./ops";
 import { costPerPersonHour } from "./core/pricing";
 import {
   CHANNEL_STATUS_LABELS,
@@ -56,7 +61,7 @@ export async function RetailModule({
   const today = todayInTimezone(ctx.tenant.timezone);
   const currencySymbol = ctx.tenant.currencySymbol;
 
-  const { channels, priced, days, pack } = await withTenant(
+  const { channels, priced, days, pack, took } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const [channels, days, pack] = await Promise.all([
@@ -64,13 +69,20 @@ export async function RetailModule({
         marketDays(tx, ctx.tenant.id, { limit: RECENT_DAYS }),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "retail"),
       ]);
-      const priced = await pricedCountByChannel(
-        tx,
-        ctx.tenant.id,
-        channels.map((c) => c.id),
-        today,
-      );
-      return { channels, priced, days, pack };
+      const [priced, took] = await Promise.all([
+        pricedCountByChannel(
+          tx,
+          ctx.tenant.id,
+          channels.map((c) => c.id),
+          today,
+        ),
+        takingsByDay(
+          tx,
+          ctx.tenant.id,
+          days.map((d) => d.day.id),
+        ),
+      ]);
+      return { channels, priced, days, pack, took };
     },
     { role: ctx.role },
   );
@@ -172,7 +184,9 @@ export async function RetailModule({
                 <TableRow>
                   <TableHead>When</TableHead>
                   <TableHead>Where</TableHead>
+                  <TableHead className="text-right">Took</TableHead>
                   <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="text-right">Margin</TableHead>
                   <TableHead className="text-right">Person-hours</TableHead>
                   <TableHead className="text-right">Cost an hour</TableHead>
                   <TableHead>Weather</TableHead>
@@ -183,13 +197,16 @@ export async function RetailModule({
                   const perHour = costPerPersonHour(row.cost);
                   return (
                     <TableRow key={row.day.id}>
-                      {/* THE LINK GOES ON THE THING IT OPENS. Found by
-                          clicking: the DATE was the link and it led to the
-                          channel, while the channel's own name sat inert
-                          beside it. There is no page for a single day, so the
-                          date is plain text and the channel is the link. */}
+                      {/* The date is the link again now that a day HAS a page:
+                          slice 0 left it plain because there was nothing behind
+                          it, and slice 1 gave it the till. */}
                       <TableCell className="tabular-nums font-medium">
-                        {row.day.heldOn}
+                        <Link
+                          href={`${BASE}/days/${row.day.id}`}
+                          className="hover:underline"
+                        >
+                          {row.day.heldOn}
+                        </Link>
                       </TableCell>
                       <TableCell>
                         <Link
@@ -200,12 +217,32 @@ export async function RetailModule({
                         </Link>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
+                        {(took.get(row.day.id)?.totalCents ?? 0) === 0
+                          ? "—"
+                          : formatMoney(
+                              took.get(row.day.id)!.totalCents,
+                              currencySymbol,
+                            )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
                         {/* Nothing recorded is an em dash, not zero. A farm gate
                             with no fee and no journey is a real zero and a
                             different fact. */}
                         {row.cost.unrecorded
                           ? "—"
                           : formatMoney(row.cost.outOfPocketCents, currencySymbol)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {/* THE NUMBER THE PACK WAS BUILT FOR. Takings less what
+                            it cost to stand there — and NOT less the hours,
+                            which sit in their own column. */}
+                        {(took.get(row.day.id)?.totalCents ?? 0) === 0
+                          ? "—"
+                          : formatMoney(
+                              took.get(row.day.id)!.totalCents -
+                                row.cost.outOfPocketCents,
+                              currencySymbol,
+                            )}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">
                         {row.cost.personHours ?? "—"}
@@ -225,10 +262,11 @@ export async function RetailModule({
             </Table>
             <p className="mt-3 text-xs text-muted-foreground">
               {/* Said plainly rather than left as a column of dashes. */}
-              What each day MADE arrives with the till. Until then this is the
-              cost side, and the hours sit beside the money rather than inside
-              it — own time counted as nothing makes every market look worth
-              going to.
+              Margin is what a day took less what it cost to stand there. The
+              hours stay in their own column rather than inside it: own time
+              counted as nothing makes every market look worth going to. What
+              the goods cost to produce is not in this either — that lives on
+              the stock, and joining the two is a report nobody has built yet.
             </p>
           </CardContent>
         </Card>

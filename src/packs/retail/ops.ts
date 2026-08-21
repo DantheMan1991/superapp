@@ -7,8 +7,19 @@ import type {
   RetailChannel,
   RetailMarketDay,
   RetailPrice,
+  RetailSale,
+  RetailSaleLine,
+  RetailStockout,
 } from "@/db/schema";
-import { listItems } from "@/packs/inventory/ops";
+import {
+  getItem,
+  issueStock,
+  listItems,
+  stockAtLocation,
+  transferStock,
+  type InventoryCtx,
+  type LocationStockLine,
+} from "@/packs/inventory/ops";
 import { isValidSlug } from "./vocabulary";
 import {
   marketDayCost,
@@ -18,6 +29,16 @@ import {
   type MarketDayCost,
   type PriceRow,
 } from "./core/pricing";
+import {
+  cashCount,
+  dayResult,
+  lineTotalCents,
+  saleTotalCents,
+  takings,
+  type CashCount,
+  type DayResult,
+  type Takings,
+} from "./core/till";
 
 /**
  * Retail operations. Every function takes a `Tx` so the caller owns the
@@ -43,7 +64,9 @@ export class RetailError extends Error {
       | "CHANNEL_INVALID"
       | "ITEM_INVALID"
       | "INVALID_PRICE"
-      | "MARKET_DAY_INVALID",
+      | "MARKET_DAY_INVALID"
+      | "SALE_INVALID"
+      | "NO_LINES",
     message: string,
   ) {
     super(message);
@@ -390,6 +413,596 @@ export async function pricedCountByChannel(
 
 // ----------------------------------------------------------- market days ---
 
+
+// ------------------------------------------------------------- the truck ---
+
+const asInventory = (ctx: RetailCtx): InventoryCtx => ctx;
+
+/**
+ * Load or unload the truck.
+ *
+ * **THE WHOLE OFFLINE ARCHITECTURE IS THIS ONE SENTENCE**: the market truck is a
+ * mobile inventory location, so loading it is a TRANSFER and there is no
+ * distributed-inventory problem to solve. The app knows exactly what left, sales
+ * draw down the truck's own stock, and what did not sell transfers back. Nothing
+ * is shared, so nothing can conflict.
+ *
+ * Wrapping `inventory.transferStock` rather than reimplementing it: the ledger
+ * is that pack's, and a second way to move stock is the duplication the pack
+ * model exists to stop.
+ */
+export async function moveStockToTruck(
+  tx: Tx,
+  ctx: RetailCtx,
+  input: {
+    itemId: string;
+    lotId?: string | null;
+    quantity: number;
+    fromLocationAssetId?: string | null;
+    truckAssetId: string;
+    occurredOn: string;
+    notes?: string;
+  },
+): Promise<void> {
+  requireWrite(ctx, "member");
+  await transferStock(tx, asInventory(ctx), {
+    itemId: input.itemId,
+    lotId: input.lotId ?? null,
+    quantity: input.quantity,
+    fromLocationAssetId: input.fromLocationAssetId ?? null,
+    toLocationAssetId: input.truckAssetId,
+    occurredOn: input.occurredOn,
+    extensionSlug: "retail",
+    notes: input.notes,
+  });
+}
+
+/** And back again at the end of the day. Unsold stock is not lost stock. */
+export async function returnStockFromTruck(
+  tx: Tx,
+  ctx: RetailCtx,
+  input: {
+    itemId: string;
+    lotId?: string | null;
+    quantity: number;
+    truckAssetId: string;
+    toLocationAssetId?: string | null;
+    occurredOn: string;
+    notes?: string;
+  },
+): Promise<void> {
+  requireWrite(ctx, "member");
+  await transferStock(tx, asInventory(ctx), {
+    itemId: input.itemId,
+    lotId: input.lotId ?? null,
+    quantity: input.quantity,
+    fromLocationAssetId: input.truckAssetId,
+    toLocationAssetId: input.toLocationAssetId ?? null,
+    occurredOn: input.occurredOn,
+    extensionSlug: "retail",
+    notes: input.notes,
+  });
+}
+
+/** What is on the truck right now, straight from `inventory`'s ledger. */
+export async function truckStock(
+  tx: Tx,
+  tenantId: string,
+  truckAssetId: string,
+): Promise<LocationStockLine[]> {
+  return stockAtLocation(tx, tenantId, truckAssetId);
+}
+
+// ---------------------------------------------------------------- selling ---
+
+export interface SaleLineInput {
+  itemId: string;
+  lotId?: string | null;
+  quantity: number;
+  /** What was actually charged, per stocking unit. Stamped, never looked up. */
+  unitPriceCents: number;
+}
+
+export interface RecordSaleInput {
+  /**
+   * The till's own id for this sale, minted before it reached the network.
+   *
+   * **THIS IS WHAT MAKES POSTING SAFE TO RETRY.** Omitting it is allowed and is
+   * what a server-side sale does; supplying it means the same sale can be sent
+   * as many times as the network demands and land exactly once.
+   */
+  clientRef?: string | null;
+  channelId: string;
+  marketDayId?: string | null;
+  soldAt: Date;
+  paymentMethod?: string;
+  locationAssetId?: string | null;
+  lines: SaleLineInput[];
+  notes?: string;
+}
+
+export interface RecordSaleResult {
+  sale: RetailSale;
+  lines: RetailSaleLine[];
+  totalCents: number;
+  /** True when this exact sale had already been posted and nothing was written. */
+  alreadyPosted: boolean;
+}
+
+/**
+ * Take a sale: stamp the prices, draw the stock off the truck, and be safe to
+ * send twice.
+ *
+ * **IDEMPOTENT BY `clientRef`, AND THAT IS THE POINT OF THE WHOLE FUNCTION.** A
+ * till at a market with no signal queues its sales and flushes them later; a
+ * flush whose request succeeded but whose reply never arrived WILL be retried,
+ * and without this the customer's money would be taken twice and the stock
+ * issued twice with it. Checking first and returning what is already there is
+ * cheaper and clearer than catching a unique violation, and it lets the caller
+ * tell "posted" from "already posted" rather than guessing.
+ *
+ * **EVERY LINE ISSUES STOCK, at the truck's location.** A sale line without a
+ * movement would be revenue with nothing behind it — and the truck's balance is
+ * what the till's own arithmetic is built on.
+ *
+ * **THE PRICE COMES FROM THE CALLER, NOT FROM THE PRICE LIST.** The list is
+ * where the till READS a suggestion; what the customer paid is what is recorded.
+ * A market haggles, and *two for twenty* is a real transaction.
+ */
+export async function recordSale(
+  tx: Tx,
+  ctx: RetailCtx,
+  input: RecordSaleInput,
+): Promise<RecordSaleResult> {
+  requireWrite(ctx, "member");
+
+  const clientRef = input.clientRef?.trim() || null;
+  if (clientRef) {
+    const existing = await tx.query.retailSales.findFirst({
+      where: and(
+        eq(schema.retailSales.tenantId, ctx.tenantId),
+        eq(schema.retailSales.clientRef, clientRef),
+      ),
+    });
+    if (existing) {
+      const lines = await saleLines(tx, ctx.tenantId, existing.id);
+      return {
+        sale: existing,
+        lines,
+        totalCents: saleTotalCents(
+          lines.map((l) => ({
+            quantity: l.quantity,
+            unitPriceCents: l.unitPriceCents,
+          })),
+        ),
+        alreadyPosted: true,
+      };
+    }
+  }
+
+  if (input.lines.length === 0) {
+    throw new RetailError("NO_LINES", "a sale with nothing in it is not a sale");
+  }
+  const channel = await getChannel(tx, ctx.tenantId, input.channelId);
+  if (!channel) {
+    throw new RetailError("CHANNEL_INVALID", "that channel does not exist");
+  }
+  const paymentMethod = (input.paymentMethod ?? "cash").trim().toLowerCase();
+  if (!isValidSlug(paymentMethod)) {
+    throw new RetailError("SALE_INVALID", "that is not a payment method");
+  }
+
+  for (const line of input.lines) {
+    if (line.quantity <= 0) {
+      throw new RetailError("SALE_INVALID", "a sale line has to be a positive quantity");
+    }
+    if (line.unitPriceCents < 0) {
+      // Free is a real line. A refund is its own sale rather than a negative one.
+      throw new RetailError("INVALID_PRICE", "a price cannot be negative");
+    }
+    const item = await getItem(tx, ctx.tenantId, line.itemId);
+    if (!item) throw new RetailError("ITEM_INVALID", "that item does not exist");
+  }
+
+  const saleRows = await tx
+    .insert(schema.retailSales)
+    .values({
+      tenantId: ctx.tenantId,
+      clientRef,
+      channelId: input.channelId,
+      marketDayId: input.marketDayId ?? null,
+      soldAt: input.soldAt,
+      paymentMethod,
+      locationAssetId: input.locationAssetId ?? null,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  const sale = saleRows[0];
+
+  const occurredOn = input.soldAt.toISOString().slice(0, 10);
+  const lines: RetailSaleLine[] = [];
+  for (const line of input.lines) {
+    // The stock leaves from wherever the sale was served from — the truck at a
+    // market, nothing recorded at a gate. `issueStock` stamps the COST at the
+    // item's average, which is what makes margin answerable later; the PRICE is
+    // a separate fact and lives on the line.
+    const movement = await issueStock(tx, asInventory(ctx), {
+      itemId: line.itemId,
+      lotId: line.lotId ?? null,
+      quantity: line.quantity,
+      occurredOn,
+      locationAssetId: input.locationAssetId ?? null,
+      extensionSlug: "retail",
+    });
+    const rows = await tx
+      .insert(schema.retailSaleLines)
+      .values({
+        tenantId: ctx.tenantId,
+        saleId: sale.id,
+        itemId: line.itemId,
+        lotId: line.lotId ?? null,
+        quantity: line.quantity,
+        unitPriceCents: Math.round(line.unitPriceCents),
+        inventoryMovementId: movement.id,
+      })
+      .returning();
+    lines.push(rows[0]);
+  }
+
+  return {
+    sale,
+    lines,
+    totalCents: saleTotalCents(
+      lines.map((l) => ({ quantity: l.quantity, unitPriceCents: l.unitPriceCents })),
+    ),
+    alreadyPosted: false,
+  };
+}
+
+export async function saleLines(
+  tx: Tx,
+  tenantId: string,
+  saleId: string,
+): Promise<RetailSaleLine[]> {
+  return tx.query.retailSaleLines.findMany({
+    where: and(
+      eq(schema.retailSaleLines.tenantId, tenantId),
+      eq(schema.retailSaleLines.saleId, saleId),
+    ),
+    orderBy: (l, { asc: byAsc }) => [byAsc(l.createdAt)],
+  });
+}
+
+/**
+ * Void a sale.
+ *
+ * **THE STOCK ISSUE IS DELIBERATELY NOT UNWRITTEN**, which is the call
+ * `livestock` made when a treatment is removed and the medicine has already left
+ * the shelf. The goods went over the table; a movement records what happened,
+ * and unwriting it would rewrite that. The sale row goes, the issue stays, and
+ * the screen names the loose end rather than letting somebody find it later as
+ * stock they cannot account for.
+ *
+ * Putting it right is `inventory`'s adjustment — which slice 2 built, so for the
+ * first time in this repo the remedy actually exists.
+ */
+export async function voidSale(
+  tx: Tx,
+  ctx: RetailCtx,
+  id: string,
+): Promise<RetailSale> {
+  requireWrite(ctx, "member");
+  const rows = await tx
+    .delete(schema.retailSales)
+    .where(
+      and(
+        eq(schema.retailSales.tenantId, ctx.tenantId),
+        eq(schema.retailSales.id, id),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) throw new RetailError("NOT_FOUND", "that sale is gone");
+  return rows[0];
+}
+
+// -------------------------------------------------------------- stockouts ---
+
+/**
+ * Record running out of something, at the time it happened.
+ *
+ * **NOTHING CAN INFER THIS**, which is why it is a table and a one-tap button
+ * rather than a report. A stall that sold its last dozen at closing time and one
+ * that ran dry at eleven and turned people away for four hours produce identical
+ * sales data, and only one of them is a reason to bring more next week.
+ *
+ * Upserts: running out is one fact about one day, and a second tap should
+ * correct the time rather than create a second event.
+ */
+export async function recordStockout(
+  tx: Tx,
+  ctx: RetailCtx,
+  input: {
+    marketDayId: string;
+    itemId: string;
+    noticedAt: Date;
+    notes?: string;
+  },
+): Promise<RetailStockout> {
+  requireWrite(ctx, "member");
+  const existing = await tx.query.retailStockouts.findFirst({
+    where: and(
+      eq(schema.retailStockouts.tenantId, ctx.tenantId),
+      eq(schema.retailStockouts.marketDayId, input.marketDayId),
+      eq(schema.retailStockouts.itemId, input.itemId),
+    ),
+  });
+  if (existing) {
+    const rows = await tx
+      .update(schema.retailStockouts)
+      .set({
+        noticedAt: input.noticedAt,
+        notes: input.notes?.trim() ?? existing.notes,
+      })
+      .where(
+        and(
+          eq(schema.retailStockouts.tenantId, ctx.tenantId),
+          eq(schema.retailStockouts.id, existing.id),
+        ),
+      )
+      .returning();
+    return rows[0];
+  }
+  const rows = await tx
+    .insert(schema.retailStockouts)
+    .values({
+      tenantId: ctx.tenantId,
+      marketDayId: input.marketDayId,
+      itemId: input.itemId,
+      noticedAt: input.noticedAt,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+export async function removeStockout(
+  tx: Tx,
+  ctx: RetailCtx,
+  id: string,
+): Promise<RetailStockout> {
+  requireWrite(ctx, "member");
+  const rows = await tx
+    .delete(schema.retailStockouts)
+    .where(
+      and(
+        eq(schema.retailStockouts.tenantId, ctx.tenantId),
+        eq(schema.retailStockouts.id, id),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) throw new RetailError("NOT_FOUND", "that is gone");
+  return rows[0];
+}
+
+// ---------------------------------------------------------- the day's till ---
+
+export interface SaleRow {
+  sale: RetailSale;
+  lines: (RetailSaleLine & { itemName: string; unit: string })[];
+  totalCents: number;
+}
+
+/** Every sale on a day, with its lines and its total folded. */
+export async function salesForDay(
+  tx: Tx,
+  tenantId: string,
+  marketDayId: string,
+): Promise<SaleRow[]> {
+  const sales = await tx.query.retailSales.findMany({
+    where: and(
+      eq(schema.retailSales.tenantId, tenantId),
+      eq(schema.retailSales.marketDayId, marketDayId),
+    ),
+    orderBy: (s, { desc: byDesc }) => [byDesc(s.soldAt)],
+  });
+  if (sales.length === 0) return [];
+
+  const rows = await tx
+    .select({
+      line: schema.retailSaleLines,
+      itemName: schema.inventoryItems.name,
+      unit: schema.inventoryItems.stockingUnit,
+    })
+    .from(schema.retailSaleLines)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.retailSaleLines.tenantId),
+        eq(schema.inventoryItems.id, schema.retailSaleLines.itemId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.retailSaleLines.tenantId, tenantId),
+        inArray(
+          schema.retailSaleLines.saleId,
+          sales.map((s) => s.id),
+        ),
+      ),
+    );
+
+  const bySale = new Map<string, (RetailSaleLine & { itemName: string; unit: string })[]>();
+  for (const row of rows) {
+    const entry = { ...row.line, itemName: row.itemName, unit: row.unit };
+    const list = bySale.get(row.line.saleId);
+    if (list) list.push(entry);
+    else bySale.set(row.line.saleId, [entry]);
+  }
+
+  return sales.map((sale) => {
+    const lines = bySale.get(sale.id) ?? [];
+    return {
+      sale,
+      lines,
+      totalCents: saleTotalCents(
+        lines.map((l) => ({
+          quantity: l.quantity,
+          unitPriceCents: l.unitPriceCents,
+        })),
+      ),
+    };
+  });
+}
+
+export interface DayTill {
+  day: RetailMarketDay;
+  channelName: string;
+  sales: SaleRow[];
+  takings: Takings;
+  cash: CashCount;
+  cost: MarketDayCost;
+  result: DayResult;
+  stockouts: (RetailStockout & { itemName: string })[];
+}
+
+/**
+ * Everything one selling day's page needs — and the first time in this build
+ * that **profit per market day** is a number rather than a promise.
+ *
+ * Folded, never stored. Re-running after a correction gives the corrected
+ * answer, which is the property every report in these packs rests on.
+ */
+export async function dayTill(
+  tx: Tx,
+  tenantId: string,
+  marketDayId: string,
+): Promise<DayTill | null> {
+  const day = await tx.query.retailMarketDays.findFirst({
+    where: and(
+      eq(schema.retailMarketDays.tenantId, tenantId),
+      eq(schema.retailMarketDays.id, marketDayId),
+    ),
+  });
+  if (!day) return null;
+
+  const [sales, channel, stockoutRows] = await Promise.all([
+    salesForDay(tx, tenantId, marketDayId),
+    getChannel(tx, tenantId, day.channelId),
+    tx
+      .select({
+        stockout: schema.retailStockouts,
+        itemName: schema.inventoryItems.name,
+      })
+      .from(schema.retailStockouts)
+      .innerJoin(
+        schema.inventoryItems,
+        and(
+          eq(schema.inventoryItems.tenantId, schema.retailStockouts.tenantId),
+          eq(schema.inventoryItems.id, schema.retailStockouts.itemId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.retailStockouts.tenantId, tenantId),
+          eq(schema.retailStockouts.marketDayId, marketDayId),
+        ),
+      ),
+  ]);
+
+  const took = takings(
+    sales.map((s) => ({
+      paymentMethod: s.sale.paymentMethod,
+      totalCents: s.totalCents,
+    })),
+  );
+  const cost = marketDayCost(day);
+
+  return {
+    day,
+    channelName: channel?.name ?? "—",
+    sales,
+    takings: took,
+    cash: cashCount({
+      openingFloatCents: day.openingFloatCents,
+      cashCountedCents: day.cashCountedCents,
+      cashSalesCents: took.cashCents,
+    }),
+    cost,
+    result: dayResult({
+      takings: took,
+      outOfPocketCents: cost.outOfPocketCents,
+      personHours: cost.personHours,
+      costUnrecorded: cost.unrecorded,
+    }),
+    stockouts: stockoutRows.map((r) => ({ ...r.stockout, itemName: r.itemName })),
+  };
+}
+
+/** Takings per day, for the list page. One query whatever the day count. */
+export async function takingsByDay(
+  tx: Tx,
+  tenantId: string,
+  marketDayIds: string[],
+): Promise<Map<string, Takings>> {
+  const out = new Map<string, Takings>();
+  if (marketDayIds.length === 0) return out;
+
+  const rows = await tx
+    .select({
+      marketDayId: schema.retailSales.marketDayId,
+      saleId: schema.retailSales.id,
+      paymentMethod: schema.retailSales.paymentMethod,
+      quantity: schema.retailSaleLines.quantity,
+      unitPriceCents: schema.retailSaleLines.unitPriceCents,
+    })
+    .from(schema.retailSales)
+    .leftJoin(
+      schema.retailSaleLines,
+      and(
+        eq(schema.retailSaleLines.tenantId, schema.retailSales.tenantId),
+        eq(schema.retailSaleLines.saleId, schema.retailSales.id),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.retailSales.tenantId, tenantId),
+        inArray(schema.retailSales.marketDayId, marketDayIds),
+      ),
+    );
+
+  // Fold to sale totals first, because the sale total is the sum of ROUNDED
+  // lines — adding the raw quantities up per day would round once and disagree
+  // with every receipt.
+  const perSale = new Map<string, { dayId: string; method: string; cents: number }>();
+  for (const row of rows) {
+    if (!row.marketDayId) continue;
+    const entry = perSale.get(row.saleId) ?? {
+      dayId: row.marketDayId,
+      method: row.paymentMethod,
+      cents: 0,
+    };
+    if (row.quantity !== null && row.unitPriceCents !== null) {
+      entry.cents += lineTotalCents({
+        quantity: row.quantity,
+        unitPriceCents: row.unitPriceCents,
+      });
+    }
+    perSale.set(row.saleId, entry);
+  }
+
+  const byDay = new Map<string, { paymentMethod: string; totalCents: number }[]>();
+  for (const entry of perSale.values()) {
+    const list = byDay.get(entry.dayId);
+    const sale = { paymentMethod: entry.method, totalCents: entry.cents };
+    if (list) list.push(sale);
+    else byDay.set(entry.dayId, [sale]);
+  }
+  for (const dayId of marketDayIds) {
+    out.set(dayId, takings(byDay.get(dayId) ?? []));
+  }
+  return out;
+}
+
 export interface MarketDayInput {
   channelId: string;
   heldOn: string;
@@ -397,6 +1010,9 @@ export interface MarketDayInput {
   travelCents?: number | null;
   crewSize?: number | null;
   hours?: number | null;
+  /** The change taken to the stall, and what was in the tin at the end. */
+  openingFloatCents?: number | null;
+  cashCountedCents?: number | null;
   weather?: string;
   notes?: string;
 }
@@ -421,6 +1037,8 @@ export async function recordMarketDay(
       travelCents: input.travelCents ?? null,
       crewSize: input.crewSize ?? null,
       hours: input.hours ?? null,
+      openingFloatCents: input.openingFloatCents ?? null,
+      cashCountedCents: input.cashCountedCents ?? null,
       weather: input.weather?.trim() ?? "",
       notes: input.notes?.trim() ?? "",
     })
@@ -463,6 +1081,14 @@ export async function updateMarketDay(
         patch.travelCents === undefined ? existing.travelCents : patch.travelCents,
       crewSize: patch.crewSize === undefined ? existing.crewSize : patch.crewSize,
       hours: patch.hours === undefined ? existing.hours : patch.hours,
+      openingFloatCents:
+        patch.openingFloatCents === undefined
+          ? existing.openingFloatCents
+          : patch.openingFloatCents,
+      cashCountedCents:
+        patch.cashCountedCents === undefined
+          ? existing.cashCountedCents
+          : patch.cashCountedCents,
       weather: patch.weather === undefined ? existing.weather : patch.weather.trim(),
       notes: patch.notes === undefined ? existing.notes : patch.notes.trim(),
       updatedAt: new Date(),

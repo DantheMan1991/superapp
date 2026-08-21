@@ -5,17 +5,31 @@ import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
   RetailError,
   createChannel,
+  dayTill,
   listChannels,
   marketDays,
+  moveStockToTruck,
   priceListFor,
   pricedCountByChannel,
   recordMarketDay,
+  recordSale,
+  recordStockout,
   removePrice,
+  returnStockFromTruck,
   setPrice,
+  takingsByDay,
+  truckStock,
   updateChannel,
+  updateMarketDay,
+  voidSale,
   type RetailCtx,
 } from "../src/packs/retail/ops";
-import { createItem, type InventoryCtx } from "../src/packs/inventory/ops";
+import {
+  createItem,
+  onHandByItem,
+  receiveStock,
+  type InventoryCtx,
+} from "../src/packs/inventory/ops";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -38,6 +52,8 @@ d("retail ops", () => {
   const TODAY = "2026-08-20";
 
   let tenantId: string;
+  let truckId: string;
+  let barnId: string;
 
   const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantId, fn, { role: "owner", userId: OWNER });
@@ -62,6 +78,28 @@ d("retail ops", () => {
         })
         .returning();
       tenantId = rows[0].id;
+      // A market truck is an asset flagged as somewhere stock is kept — no new
+      // concept, which is the whole reason the offline problem has no
+      // distributed-inventory problem inside it.
+      const assetRows = await tx
+        .insert(schema.assets)
+        .values([
+          {
+            tenantId,
+            kind: "vehicle",
+            name: "Market truck",
+            isStorageLocation: true,
+          },
+          {
+            tenantId,
+            kind: "building",
+            name: "Barn",
+            isStorageLocation: true,
+          },
+        ])
+        .returning();
+      truckId = assetRows[0].id;
+      barnId = assetRows[1].id;
     });
   });
 
@@ -416,6 +454,375 @@ d("retail ops", () => {
     expect(day.stallFeeCents).toBe(2_000);
   });
 
+
+  // ---- slice 1: the truck, the till, the tin ----------------------------
+
+  /** A channel with one priced item and stock in the barn. The pilot's shape. */
+  async function stall(name: string, priceCents = 550) {
+    const channel = await asOwner((tx) =>
+      createChannel(tx, ownerCtx(), { name, channelKind: "farmers_market" }),
+    );
+    const item = await newItem(`${name} beef`);
+    await asOwner((tx) =>
+      receiveStock(tx, inv(), {
+        itemId: item.id,
+        quantity: 100,
+        costCents: 20_000,
+        occurredOn: "2026-08-01",
+        locationAssetId: barnId,
+      }),
+    );
+    await asOwner((tx) =>
+      setPrice(tx, ownerCtx(), {
+        channelId: channel.id,
+        itemId: item.id,
+        priceCents,
+        effectiveFrom: "2026-01-01",
+      }),
+    );
+    const day = await asOwner((tx) =>
+      recordMarketDay(tx, ownerCtx(), {
+        channelId: channel.id,
+        heldOn: TODAY,
+        stallFeeCents: 3_500,
+        travelCents: 1_800,
+        crewSize: 2,
+        hours: 5,
+      }),
+    );
+    return { channel, item, day };
+  }
+
+  it("LOADING THE TRUCK IS A TRANSFER — the app knows exactly what left", async () => {
+    /**
+     * The design's answer to the offline problem, and it is a data-model answer
+     * rather than a client one: the truck is a mobile inventory location, so
+     * nothing is shared and nothing can conflict.
+     */
+    const { item } = await stall("Transfer market");
+    await asOwner((tx) =>
+      moveStockToTruck(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 40,
+        fromLocationAssetId: barnId,
+        truckAssetId: truckId,
+        occurredOn: TODAY,
+      }),
+    );
+
+    const onTruck = await asOwner((tx) => truckStock(tx, tenantId, truckId));
+    expect(onTruck.find((l) => l.itemId === item.id)?.onHand).toBe(40);
+
+    // AND THE ITEM'S TOTAL HAS NOT MOVED. A transfer relocates; it does not
+    // create or destroy, which is the property the whole ledger rests on.
+    const onHand = await asOwner((tx) => onHandByItem(tx, tenantId));
+    expect(onHand.get(item.id)).toBe(100);
+
+    // Unsold stock comes back.
+    await asOwner((tx) =>
+      returnStockFromTruck(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 15,
+        truckAssetId: truckId,
+        toLocationAssetId: barnId,
+        occurredOn: TODAY,
+      }),
+    );
+    const after = await asOwner((tx) => truckStock(tx, tenantId, truckId));
+    expect(after.find((l) => l.itemId === item.id)?.onHand).toBe(25);
+    expect((await asOwner((tx) => onHandByItem(tx, tenantId))).get(item.id)).toBe(100);
+  });
+
+  it("A SALE DRAWS THE STOCK OFF THE TRUCK AND STAMPS THE PRICE CHARGED", async () => {
+    const { channel, item, day } = await stall("Selling market");
+    await asOwner((tx) =>
+      moveStockToTruck(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 40,
+        fromLocationAssetId: barnId,
+        truckAssetId: truckId,
+        occurredOn: TODAY,
+      }),
+    );
+
+    const result = await asOwner((tx) =>
+      recordSale(tx, ownerCtx(), {
+        clientRef: "sale-one",
+        channelId: channel.id,
+        marketDayId: day.id,
+        soldAt: new Date(`${TODAY}T10:30:00Z`),
+        paymentMethod: "cash",
+        locationAssetId: truckId,
+        // A market haggles: charged at $5.00, not the $5.50 on the list.
+        lines: [{ itemId: item.id, quantity: 2.35, unitPriceCents: 500 }],
+      }),
+    );
+    expect(result.alreadyPosted).toBe(false);
+    // 2.35 × 500 = 1175 exactly.
+    expect(result.totalCents).toBe(1_175);
+    expect(result.lines[0].unitPriceCents).toBe(500);
+
+    // The truck is lighter, and the item's total is genuinely lower — a sale
+    // leaves the business, unlike a transfer.
+    const onTruck = await asOwner((tx) => truckStock(tx, tenantId, truckId));
+    expect(onTruck.find((l) => l.itemId === item.id)?.onHand).toBe(37.65);
+    expect((await asOwner((tx) => onHandByItem(tx, tenantId))).get(item.id)).toBe(97.65);
+  });
+
+  it("POSTING THE SAME SALE TWICE TAKES THE MONEY ONCE", async () => {
+    /**
+     * **THE REASON `client_ref` IS IN THE SCHEMA BEFORE ANY OFFLINE CODE
+     * EXISTS.** A till at a signal-less market queues its sales and flushes them
+     * later; a flush whose request arrived but whose reply did not WILL be
+     * retried, and there is no way for the till to know the difference. Without
+     * this the customer is charged twice and the stock issued twice with it.
+     */
+    const { channel, item, day } = await stall("Replay market");
+    await asOwner((tx) =>
+      moveStockToTruck(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 40,
+        fromLocationAssetId: barnId,
+        truckAssetId: truckId,
+        occurredOn: TODAY,
+      }),
+    );
+
+    const send = () =>
+      asOwner((tx) =>
+        recordSale(tx, ownerCtx(), {
+          clientRef: "queued-sale-42",
+          channelId: channel.id,
+          marketDayId: day.id,
+          soldAt: new Date(`${TODAY}T11:00:00Z`),
+          // The truck, or the issue comes off "nowhere" and the truck never
+          // depletes — which is correct for a farm-gate sale and wrong here.
+          locationAssetId: truckId,
+          lines: [{ itemId: item.id, quantity: 4, unitPriceCents: 550 }],
+        }),
+      );
+
+    const first = await send();
+    const second = await send();
+    const third = await send();
+
+    expect(first.alreadyPosted).toBe(false);
+    expect(second.alreadyPosted).toBe(true);
+    expect(third.alreadyPosted).toBe(true);
+    // Same sale, same id, same total, every time.
+    expect(second.sale.id).toBe(first.sale.id);
+    expect(second.totalCents).toBe(first.totalCents);
+
+    // ONE sale on the day, and the stock left ONCE.
+    const till = await asOwner((tx) => dayTill(tx, tenantId, day.id));
+    expect(till!.sales).toHaveLength(1);
+    const onTruck = await asOwner((tx) => truckStock(tx, tenantId, truckId));
+    expect(onTruck.find((l) => l.itemId === item.id)?.onHand).toBe(36);
+  });
+
+  it("two sales without a client ref are two sales, not a collision", async () => {
+    // A server-side sale has no till behind it. Multiple nulls must stay
+    // distinct or a farm store could only ever record one sale.
+    const { channel, item, day } = await stall("Server market");
+    await asOwner((tx) =>
+      moveStockToTruck(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 40,
+        fromLocationAssetId: barnId,
+        truckAssetId: truckId,
+        occurredOn: TODAY,
+      }),
+    );
+    for (const n of [1, 2]) {
+      await asOwner((tx) =>
+        recordSale(tx, ownerCtx(), {
+          channelId: channel.id,
+          marketDayId: day.id,
+          soldAt: new Date(`${TODAY}T1${n}:00:00Z`),
+          locationAssetId: truckId,
+          lines: [{ itemId: item.id, quantity: 1, unitPriceCents: 550 }],
+        }),
+      );
+    }
+    const till = await asOwner((tx) => dayTill(tx, tenantId, day.id));
+    expect(till!.sales).toHaveLength(2);
+  });
+
+  it("gives the day its takings, its margin and its cash count", async () => {
+    /**
+     * **PROFIT PER SELLING DAY, which slice 0 could only answer half of.**
+     */
+    const { channel, item, day } = await stall("Reconciled market");
+    await asOwner((tx) =>
+      moveStockToTruck(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 50,
+        fromLocationAssetId: barnId,
+        truckAssetId: truckId,
+        occurredOn: TODAY,
+      }),
+    );
+    // $110 cash and $55 card.
+    await asOwner((tx) =>
+      recordSale(tx, ownerCtx(), {
+        channelId: channel.id,
+        marketDayId: day.id,
+        soldAt: new Date(`${TODAY}T10:00:00Z`),
+        paymentMethod: "cash",
+        locationAssetId: truckId,
+        lines: [{ itemId: item.id, quantity: 20, unitPriceCents: 550 }],
+      }),
+    );
+    await asOwner((tx) =>
+      recordSale(tx, ownerCtx(), {
+        channelId: channel.id,
+        marketDayId: day.id,
+        soldAt: new Date(`${TODAY}T12:00:00Z`),
+        paymentMethod: "card",
+        locationAssetId: truckId,
+        lines: [{ itemId: item.id, quantity: 10, unitPriceCents: 550 }],
+      }),
+    );
+    await asOwner((tx) =>
+      updateMarketDay(tx, ownerCtx(), day.id, {
+        openingFloatCents: 5_000,
+        cashCountedCents: 16_000,
+      }),
+    );
+
+    const till = await asOwner((tx) => dayTill(tx, tenantId, day.id));
+    expect(till!.takings.totalCents).toBe(16_500);
+    expect(till!.takings.cashCents).toBe(11_000);
+    expect(till!.takings.otherCents).toBe(5_500);
+    // $165.00 less $53.00 to stand there.
+    expect(till!.result.marginCents).toBe(11_200);
+    // Ten person-hours.
+    expect(till!.result.perPersonHourCents).toBe(1_120);
+    // Float $50 + $110 cash = $160 expected; $160 counted.
+    expect(till!.cash.expectedCents).toBe(16_000);
+    expect(till!.cash.varianceCents).toBe(0);
+    expect(till!.cash.uncounted).toBe(false);
+
+    // And the list page's fold agrees with the day page's.
+    const byDay = await asOwner((tx) => takingsByDay(tx, tenantId, [day.id]));
+    expect(byDay.get(day.id)?.totalCents).toBe(16_500);
+    expect(byDay.get(day.id)?.cashCents).toBe(11_000);
+  });
+
+  it("records running out of something, once per item per day", async () => {
+    // Nothing else in the system can tell selling out at closing time from
+    // running dry at eleven, and the two are worth completely different amounts.
+    const { item, day } = await stall("Sold out market");
+    await asOwner((tx) =>
+      recordStockout(tx, ownerCtx(), {
+        marketDayId: day.id,
+        itemId: item.id,
+        noticedAt: new Date(`${TODAY}T11:00:00Z`),
+      }),
+    );
+    // A second tap corrects the time rather than creating a second event.
+    await asOwner((tx) =>
+      recordStockout(tx, ownerCtx(), {
+        marketDayId: day.id,
+        itemId: item.id,
+        noticedAt: new Date(`${TODAY}T11:30:00Z`),
+      }),
+    );
+    const till = await asOwner((tx) => dayTill(tx, tenantId, day.id));
+    expect(till!.stockouts).toHaveLength(1);
+    expect(till!.stockouts[0].noticedAt.toISOString()).toContain("11:30");
+  });
+
+  it("voiding a sale LEAVES THE STOCK ISSUE BEHIND, on purpose", async () => {
+    /**
+     * The call `livestock` made when a treatment is removed and the medicine has
+     * already left the shelf. The goods went over the table; unwriting the
+     * movement would rewrite what happened. `inventory` slice 2's adjustment is
+     * the remedy — and for the first time in this repo, it exists.
+     */
+    const { channel, item, day } = await stall("Voided market");
+    await asOwner((tx) =>
+      moveStockToTruck(tx, ownerCtx(), {
+        itemId: item.id,
+        quantity: 40,
+        fromLocationAssetId: barnId,
+        truckAssetId: truckId,
+        occurredOn: TODAY,
+      }),
+    );
+    const sale = await asOwner((tx) =>
+      recordSale(tx, ownerCtx(), {
+        channelId: channel.id,
+        marketDayId: day.id,
+        soldAt: new Date(`${TODAY}T10:00:00Z`),
+        locationAssetId: truckId,
+        lines: [{ itemId: item.id, quantity: 5, unitPriceCents: 550 }],
+      }),
+    );
+    await asOwner((tx) => voidSale(tx, ownerCtx(), sale.sale.id));
+
+    const till = await asOwner((tx) => dayTill(tx, tenantId, day.id));
+    expect(till!.sales).toHaveLength(0);
+    expect(till!.takings.totalCents).toBe(0);
+    // The stock is still gone. That is the loose end, and it is deliberate.
+    const onTruck = await asOwner((tx) => truckStock(tx, tenantId, truckId));
+    expect(onTruck.find((l) => l.itemId === item.id)?.onHand).toBe(35);
+  });
+
+  it("refuses an empty sale and a negative price", async () => {
+    const { channel, item, day } = await stall("Refusing market");
+    await expect(
+      asOwner((tx) =>
+        recordSale(tx, ownerCtx(), {
+          channelId: channel.id,
+          marketDayId: day.id,
+          soldAt: new Date(),
+          lines: [],
+        }),
+      ),
+    ).rejects.toThrow(/not a sale/);
+    await expect(
+      asOwner((tx) =>
+        recordSale(tx, ownerCtx(), {
+          channelId: channel.id,
+          marketDayId: day.id,
+          soldAt: new Date(),
+          lines: [{ itemId: item.id, quantity: 1, unitPriceCents: -1 }],
+        }),
+      ),
+    ).rejects.toThrow(RetailError);
+  });
+
+  it("a till is a CHORE — staff can sell, load and count", async () => {
+    // A point of sale only the owner could operate is a point of sale nobody
+    // uses. Setting the price stays the owner's; taking the money does not.
+    const { channel, item, day } = await stall("Crew market");
+    await withTenant(
+      tenantId,
+      (tx) =>
+        moveStockToTruck(tx, staffCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          fromLocationAssetId: barnId,
+          truckAssetId: truckId,
+          occurredOn: TODAY,
+        }),
+      { role: "staff", userId: STAFF },
+    );
+    const sale = await withTenant(
+      tenantId,
+      (tx) =>
+        recordSale(tx, staffCtx(), {
+          channelId: channel.id,
+          marketDayId: day.id,
+          soldAt: new Date(),
+          locationAssetId: truckId,
+          lines: [{ itemId: item.id, quantity: 2, unitPriceCents: 550 }],
+        }),
+      { role: "staff", userId: STAFF },
+    );
+    expect(sale.totalCents).toBe(1_100);
+  });
   it("refuses a price or a day against a channel that does not exist", async () => {
     const item = await newItem("Orphan");
     const nowhere = "00000000-0000-0000-0000-000000000000";

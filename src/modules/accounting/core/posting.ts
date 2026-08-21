@@ -11,6 +11,7 @@ import {
   getClosedThrough,
   getSettings,
   requireOwnerRole,
+  requirePostingRight,
 } from "./guards";
 import type { EntryLineInput, LedgerCtx, NewEntryInput, PostResult } from "./types";
 
@@ -280,7 +281,12 @@ export async function postEntry(
     reversesEntryId?: string | null;
   },
 ): Promise<PostResult> {
-  if (input.status === "posted") requireOwnerRole(ctx);
+  // WHO MAY POST depends on WHAT produced the entry, not only on who is
+  // asking. A hand-written journal is an owner's decision; a journal line that
+  // exists because a staff member issued feed rides the authorisation of that
+  // act. See MACHINE_SOURCES and ADR 0011 — and note `source` defaults to
+  // "manual", so anything that does not name itself still needs an owner.
+  if (input.status === "posted") requirePostingRight(ctx, input.source);
   if (!isValidIsoDate(input.entryDate)) {
     throw new LedgerError("PERIOD_CLOSED", `invalid entry date ${input.entryDate}`);
   }

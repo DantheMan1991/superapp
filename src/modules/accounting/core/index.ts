@@ -7,8 +7,10 @@ export {
   getClosedThrough,
   getSettings,
   requireOwnerRole,
+  requirePostingRight,
   requireReviewRole,
   setClosedThrough,
+  MACHINE_SOURCES,
 } from "./guards";
 export {
   addCloseNote,

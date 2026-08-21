@@ -12,6 +12,59 @@ export function requireOwnerRole(ctx: LedgerCtx): void {
   }
 }
 
+/**
+ * Entry sources produced by an OPERATIONAL act rather than by a person writing
+ * a journal. See
+ * [ADR 0011](../../../../docs/decisions/0011-machine-posted-entries.md).
+ *
+ * **THESE STRINGS ARE A PRIVILEGE BOUNDARY. Do not add one casually.** An entry
+ * whose source is in this set posts without the owner check, on the reasoning
+ * that the authorisation already happened where the act did: a staff member
+ * allowed to issue feed was allowed by `requireModuleEnabled` plus the pack's
+ * own write level, and the journal line is a CONSEQUENCE of that decision
+ * rather than a second one. Perpetual inventory made this unavoidable — every
+ * feed issue, market sale and production run posts, and all three are
+ * deliberately staff-level chores.
+ *
+ * **What keeps it safe is that `source` is not user input.** It is absent from
+ * `entryInputSchema`, so nothing arriving over the wire can name one; a caller
+ * that does not set it gets `"manual"`, which still requires an owner. The day
+ * `source` becomes settable from a client, this set becomes a privilege
+ * escalation and the check has to move.
+ *
+ * Deliberately minimal. `depreciation` is a machine source by every argument
+ * here and is NOT in the set, because nothing needs it to be — it runs from an
+ * owner's screen today, and loosening a rule no caller is asking about only
+ * widens what has to be reasoned about later.
+ */
+export const MACHINE_SOURCES = new Set([
+  "inventory_receipt",
+  "inventory_issue",
+  "inventory_adjustment",
+]);
+
+/**
+ * Who may cause this entry to be POSTED.
+ *
+ * An ordinary journal is an owner's decision and stays one. A machine-sourced
+ * entry rides the authorisation of the act that produced it — but **an expert
+ * still never posts anything**, machine-sourced or not, because that role is
+ * read plus close-review by definition and an outside accountant issuing feed
+ * is not a thing that should happen.
+ */
+export function requirePostingRight(
+  ctx: LedgerCtx,
+  source: string | null | undefined,
+): void {
+  if (MACHINE_SOURCES.has(source ?? "manual")) {
+    if (ctx.role === "expert") {
+      throw new LedgerError("FORBIDDEN", "an accountant does not post");
+    }
+    return;
+  }
+  requireOwnerRole(ctx);
+}
+
 /** Close-review surface (sign-off, notes): the accountant and the owner. */
 export function requireReviewRole(ctx: LedgerCtx): void {
   if (ctx.role !== "owner" && ctx.role !== "expert") {

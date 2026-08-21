@@ -58,6 +58,27 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
    */
   "depreciation",
   /**
+   * Posted by the `inventory` pack from a stock movement — perpetual inventory,
+   * slice 3. Three values rather than one because they are three different
+   * postings with three different offsets, and a single `inventory` source
+   * would make the ledger unable to say which without joining back to the
+   * movement.
+   *
+   * **THESE THREE ARE IN `MACHINE_SOURCES` (core/guards.ts), which makes them a
+   * privilege boundary** — an entry naming one of them posts without the owner
+   * check, because the authorisation happened where the stock moved. See
+   * [ADR 0011](../../../docs/decisions/0011-machine-posted-entries.md) before
+   * adding a fourth.
+   *
+   * That this is an ENUM rather than free text is load-bearing for that ADR: a
+   * source cannot be invented at a call site, only chosen from here, so the set
+   * of things that could ever bypass the owner check is fixed at compile time
+   * and by a migration.
+   */
+  "inventory_receipt",
+  "inventory_issue",
+  "inventory_adjustment",
+  /**
    * BOTH HALVES of an intercompany pair (ADR 0010 slice 2). Added in
    * `drizzle/0150`, alone in its own migration for the reason `depreciation`
    * was: an enum value cannot be USED in the transaction that adds it, and

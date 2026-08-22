@@ -60,7 +60,32 @@ the payment date**, while the consumption entry has no AR/AP leg and passes
 through untouched. The report says "cash basis" and expenses stock when it is
 CONSUMED.
 
-That much is simply a bug and needs fixing whatever else is decided.
+> **THAT SENTENCE USED TO READ "that much is simply a bug and needs fixing
+> whatever else is decided", AND IT DOES NOT HOLD. Corrected 2026-08-22, after
+> being repeated in three places without anybody deriving it.**
+>
+> Recognising an ASSET on the date it was paid for is not obviously wrong on a
+> report labelled cash basis. Working the case through:
+>
+> - A bill line coded to `1300` posts `Dr 1300 / Cr AP`. In cash mode
+>   `getBalances` drops the whole entry
+>   ([balances.ts](../../src/modules/accounting/core/balances.ts)), and the
+>   adjustment re-adds `Dr 1300` with a `Cr AP` offset at the payment date. The
+>   asset appears when the money left. Balanced, and defensible.
+> - It only goes wrong if that same stock ALSO came in through the pack, which
+>   capitalises it a second time — and that tenant is double-counting inventory
+>   whatever basis they report on. The timing is not their problem.
+>
+> **So the reachable defect was the CODING, not the lens**, and it is closed:
+> `isCodableAccount` now excludes the inventory subtype for the same reason it
+> already excluded GRNI. A read of both databases on 2026-08-22 found zero bill
+> lines ever coded that way, so this is prophylactic rather than a repair.
+>
+> What remains true is narrower and is above: the lens has no concept of a
+> capitalising line, so it treats one as something to re-time. That matters when
+> a rule other than `consumed` exists to re-time it TO, which is A.1's problem
+> and not a standalone fix. **The claim that it could be fixed on its own, by
+> somebody, this afternoon, was wrong.**
 
 ### The fix that was wrong
 

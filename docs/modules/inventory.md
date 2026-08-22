@@ -23,7 +23,7 @@ this dossier is the build record.
 | **3c** | **The screen: matching, the GRNI reconciliation, and the switch that turns posting on** | **shipped 2026-08-22** |
 | **3d** | **Cost-adjustment corrections** — `inventory_cost_adjustments`, ADR 0012 §A.4 | **shipped 2026-08-22** |
 | **3d ii** | **Recording a tax decision** — `inventory_tax_treatments`, resolution, screen | **shipped 2026-08-22** |
-| 3d iii | The lens that APPLIES a rule other than `consumed` | **not blocked on code and not on one answer.** [ADR 0013](../decisions/0013-inventory-tax-treatment.md) was revised 2026-08-22: treatment is per item category, per tenant, and the software offers dates it can observe rather than tax treatments it cannot read. [The brief](../briefs/inventory-tax-treatment.md) is a per-client template now, not a one-time question |
+| 3d iii | The lens that APPLIES a rule other than `consumed` | next, and **specified rather than vague**: the two obstacles are in Open items. Not blocked on an accountant — [the brief](../briefs/inventory-tax-treatment.md) is a per-client template, and a tenant electing nothing keeps today's behaviour |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
@@ -84,7 +84,7 @@ three to `inherited`.
 11 pure tests, 6 ops, 5 isolation. Migrations `0182` (table + enum) and `0183`
 (RLS).
 
-**Still not built: the lens.** Stage 2 is what applies a rule other than
+**Still not built: the lens.** Slice 3d iii is what applies a rule other than
 `consumed`, and it is where the two things reading `cash-basis.ts` turned up have
 to be solved — an entry has ONE control leg shared across mixed lines, and the
 adjustment only runs for documents with a payment in the window.
@@ -791,21 +791,26 @@ commitment against a live animal to delivered without sitting on a shelf.
   and the valuation screen and `1300` already disagree by that drift. What is
   new is a second way to produce it. The honest fixes are per-lot costing or a
   reconciliation that names the drift; neither is a slice yet.
-- **THE CASH LENS STILL RE-TIMES BALANCE-SHEET LINES.**
-  [cash-basis.ts:247](../../src/modules/accounting/core/cash-basis.ts:247) skips
-  only the AR/AP control leg and re-recognises every other line of a bill at the
-  payment date, with no account-type filter — so a bill line coded to `1300`
-  moves to the payment date as an ASSET. `isCodableAccount` excludes GRNI and
-  not Inventory, so that coding is reachable by hand. It is a bug under the only
-  treatment anyone is on, it needs nobody's ruling, and ADR 0013 has said since
-  it was written that it *"needs fixing whatever else is decided"*.
-- **NOTHING APPLIES A TAX RULE YET.** Stage 1 records the decision and resolves
-  it; the lens is stage 3d iii. Two things reading `cash-basis.ts` turned up that
-  it will have to solve, neither of which the ADR had reckoned with: an entry has
-  ONE control leg shared across mixed lines, so keeping a capitalising line at
-  its accrual date means splitting that leg pro rata; and `cashBasisAdjustment`
-  only runs for documents with a payment in the window, so a bill never paid
-  never gets its line back at all.
+- ~~The cash lens re-times balance-sheet lines, and it is a standalone bug~~ —
+  **the claim was wrong and is corrected 2026-08-22.** Recognising an asset on
+  the date it was paid for is defensible on a cash-basis report; it only breaks
+  for a tenant ALSO capitalising the same stock through the pack, and that
+  tenant is double-counting on any basis. **The reachable defect was the coding,
+  and it is closed** — `isCodableAccount` excludes the inventory subtype now,
+  for the reason it already excluded GRNI. Zero bill lines on either database
+  had ever been coded that way.
+  What remains is real and is not standalone: **the lens has no concept of a
+  capitalising line**, so it treats one as something to re-time. That only needs
+  solving when a rule other than `consumed` exists to re-time it to, which makes
+  it slice 3d iii rather than a fix somebody can do this afternoon — see the
+  next item for what it will have to solve.
+- **NOTHING APPLIES A TAX RULE YET.** Stage 3d ii records the decision and
+  resolves it; the lens is 3d iii. **Two things reading `cash-basis.ts` turned
+  up that it will have to solve, neither of which ADR 0013 had reckoned with:**
+  an entry has ONE control leg shared across mixed lines, so keeping a
+  capitalising line at its accrual date means splitting that leg pro rata; and
+  `cashBasisAdjustment` only runs for documents with a payment in the window, so
+  a bill never paid never gets its line back at all.
 - **THE EXPENSE ACCOUNT IS RECORDABLE AND UNREAD.** Under `consumed` nothing
   substitutes, so nothing needs it. It is captured now because ADR 0013 §A.5
   calls it a prerequisite rather than a refinement, and because asking an

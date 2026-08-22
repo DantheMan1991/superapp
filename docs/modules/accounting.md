@@ -13,6 +13,50 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-22 — The bug that was not there (`claude/the-bug-that-was-not-there`)
+
+**A claim this repo repeated three times does not survive being derived.**
+
+[ADR 0013](../decisions/0013-inventory-tax-treatment.md) has said since it was
+written that the cash lens re-recognising a capitalising line at the payment date
+*"is simply a bug and needs fixing whatever else is decided"*. That sentence went
+into the inventory dossier's open items and into two pull request descriptions.
+Nobody, including me twice, worked the case through.
+
+Worked through, it does not hold. In cash mode `getBalances` drops the whole
+invoice/bill entry, and the adjustment re-adds the non-control lines with an
+offsetting control leg at the payment date — so a bill line coded to `1300`
+produces `Dr 1300 / Cr Cash` on the day the money left. Balanced, and
+**recognising an asset on the date it was paid for is not obviously wrong on a
+report labelled cash basis.**
+
+It only breaks for a tenant who ALSO brought that stock in through the pack,
+which capitalises it a second time. That tenant is double-counting inventory on
+any basis, and the timing of the lens is the least of it.
+
+**So the reachable defect was the CODING, and it is now closed.**
+`isCodableAccount` excludes the inventory subtype, for the identical reason it
+already excluded GRNI: ADR 0012 §A.1 says the RECEIPT capitalises and the BILL
+clears, so a line pointed straight at Inventory is the "both capitalise" failure
+that ADR opens with. The GRNI exclusion was written the day somebody got bitten
+by GRNI; the Inventory one should have been written in the same commit and was
+not.
+
+**A read of both databases found ZERO bill lines ever coded that way**, so this
+is prophylactic rather than a repair. Worth saying: the fix is small because the
+problem was small, not because the problem was solved cleverly.
+
+What remains true is narrower and is not a standalone fix: **the lens has no
+concept of a capitalising line**, so it treats one as something to re-time. That
+only needs solving once a rule other than `consumed` exists to re-time it TO,
+which puts it inside the tax axis. Two things that work will have to solve, both
+found by reading rather than guessing: an entry has ONE control leg shared across
+mixed lines, so keeping a capitalising line at its accrual date means splitting
+that leg pro rata; and `cashBasisAdjustment` only runs for documents with a
+payment in the window, so a bill never paid never gets its line back at all.
+
+7 tests, the first coverage `isCodableAccount` has had. No migration.
+
 ### 2026-08-22 — A method is not a toggle, and ADR 0013 was carrying its own refutation (`claude/a-method-is-not-a-toggle`)
 
 The brief could not be answered — no accountant available — so the question came

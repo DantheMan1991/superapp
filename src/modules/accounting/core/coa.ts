@@ -261,6 +261,24 @@ export function isCodableAccount(
   // GRNI is set by ALLOCATING a bill line to a stock receipt, never by hand.
   // Coding a line to it directly would clear a balance no receipt created.
   if (account.subtype === "goods_received") return false;
+  /**
+   * **INVENTORY IS CAPITALISED BY THE RECEIPT, NEVER BY THE BILL** —
+   * [ADR 0012](../../../../docs/decisions/0012-what-capitalises-stock.md) §A.1.
+   * Stock arriving posts `Dr Inventory / Cr GRNI`, and the bill for it CLEARS
+   * GRNI. A line coded straight to Inventory capitalises the same delivery a
+   * second time, which is the "both capitalise" failure that ADR opens with:
+   * the stock is on the books twice and nothing reconciles it.
+   *
+   * Same reasoning as the line above, and it should have been written at the
+   * same time. It was not, because GRNI was the account somebody had just been
+   * bitten by.
+   *
+   * **Existing lines are unaffected.** This filters the PICKERS; nothing
+   * validates it on save, and the bill edit page already re-adds any account a
+   * bill has actually used, which is the fix that had to be made for GRNI when
+   * a matched line rendered with an empty account box.
+   */
+  if (account.subtype === "inventory") return false;
   if (
     account.isSystem &&
     (account.subtype === "accounts_receivable" ||

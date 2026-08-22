@@ -22,7 +22,7 @@ this dossier is the build record.
 | **3b** | **Perpetual posting, GRNI, and matching a bill to the deliveries it pays for** | **shipped 2026-08-21** |
 | **3c** | **The screen: matching, the GRNI reconciliation, and the switch that turns posting on** | **shipped 2026-08-22** |
 | **3d** | **Cost-adjustment corrections** — `inventory_cost_adjustments`, ADR 0012 §A.4 | **shipped 2026-08-22** |
-| 3d ii | The `expense_on_payment` lens | blocked on [ADR 0013](../decisions/0013-inventory-tax-treatment.md), which needs an accountant |
+| 3d ii | The `expense_on_payment` lens | blocked on [ADR 0013](../decisions/0013-inventory-tax-treatment.md) — the question is written out for an accountant in [the brief](../briefs/inventory-tax-treatment.md) and is waiting on an answer, not on code |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 

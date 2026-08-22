@@ -8,6 +8,12 @@
 > is the point of the ADR rather than a caveat on it. It exists because an
 > earlier draft encoded one likely tax treatment as the universal meaning of the
 > word "cash", and the fix is to stop encoding tax answers at all.
+>
+> **The question is written out for them** in
+> [docs/briefs/inventory-tax-treatment.md](../briefs/inventory-tax-treatment.md)
+> — plain prose, meant to be sent rather than read here. This ADR is the
+> reasoning; that is the ask. Neither is a substitute for the other, and the
+> brief is the thing that actually moves this from Proposed.
 
 ## Context
 

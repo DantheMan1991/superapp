@@ -69,10 +69,47 @@ export function averageCostRate(movements: CostedMovement[]): number | null {
  * costing, it does not compound, and it is visible because the receipts and the
  * issues are both on the ledger to compare.
  */
-export function issueCostCents(rate: number | null, quantity: number): number | null {
+export function issueCostCents(
+  rate: number | null,
+  quantity: number,
+  /**
+   * What the item still holds — everything that came in with a price, less
+   * everything already issued out. Omitted means "do not cap", which is what
+   * every caller before the ledger existed wanted.
+   */
+  unreleasedCents?: number | null,
+): number | null {
   if (rate === null) return null;
-  return Math.round(rate * Math.abs(quantity));
+  const stamped = Math.round(rate * Math.abs(quantity));
+  if (unreleasedCents === undefined || unreleasedCents === null) return stamped;
+  // Never release more than came in. See below for why that is not a tidy-up.
+  return Math.max(0, Math.min(stamped, unreleasedCents));
 }
+
+/**
+ * **YOU CANNOT ISSUE OUT MORE COST THAN CAME IN**, and without the cap above
+ * this pack did.
+ *
+ * `averageCostRate` is deliberately the average of what arrived **with a
+ * price** — it divides priced cost by priced quantity. Applying that rate to a
+ * quantity that includes UNPRICED stock invents money. Receive 100 lb at $100
+ * and 100 lb with no price on the ticket: the rate is $1.00/lb, and issuing all
+ * 200 lb stamps $200 against $100 that ever existed. Once inventory posts, that
+ * drives `1300` to a credit balance with stock still sitting on the shelf.
+ *
+ * Including unpriced receipts in the DENOMINATOR instead would have been the
+ * other repair, and it is worse: it treats stock nobody has costed as costing
+ * nothing, which is the one thing `carriedValue` and the whole valuation slice
+ * exist to refuse.
+ *
+ * So the rate is unchanged and the release is bounded. The unpriced half stays
+ * uncosted — which is true, and which the valuation screen already reports in
+ * its "what this figure leaves out" card rather than hiding in a total.
+ *
+ * The cap applies to the STAMP, not only to the posting, so the two cannot
+ * disagree: the ledger and `carriedValue` are the same number by construction
+ * rather than by a second calculation that has to be kept in step.
+ */
 
 export interface LotCost {
   /** Everything issued INTO this lot — feed eaten by this pen. */

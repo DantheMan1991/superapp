@@ -26,6 +26,47 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-22 — Three defects that only showed up in the books (`claude/what-a-shortfall-is-not`)
+
+The correctness items 3b left open, cleared before any screen invites somebody
+to switch posting on.
+
+**AN ISSUE CANNOT RELEASE COST THAT NEVER CAME IN.** `averageCostRate` is the
+average of what arrived WITH A PRICE — priced cost over priced quantity — and
+applying it to a quantity that includes unpriced stock invents money. 100 lb at
+$100 plus 100 lb with nothing on the ticket is a $1.00/lb rate, so issuing all
+200 stamped $200 against $100 that ever existed and drove `1300` to a CREDIT
+balance with stock still on the shelf. The rate is left alone deliberately:
+putting unpriced receipts in the denominator would treat stock nobody has costed
+as costing nothing, which is the one thing the valuation slice exists to refuse.
+So the release is bounded instead — **and bounded at the STAMP, not only at the
+posting**, so the ledger and `carriedValue` stay the same number by construction
+rather than by a second calculation somebody has to keep in step.
+
+**A SHORT DELIVERY IS NOT A PRICE DIFFERENCE.** Every gap between an invoice and
+the tickets was booked as a variance, so an invoice for ten bags against six that
+arrived was EXPENSED and GRNI cleared to zero — the reconciliation showed nothing
+outstanding and nobody chased the supplier. The allocation now takes the invoiced
+QUANTITY, which is what tells the two apart: a rate difference is a real cost and
+goes to the P&L, a shortfall is stock paid for and not held and stays in GRNI as
+a debit, which is what that account is for.
+
+**WHAT THE INVOICE CHARGES IS NO LONGER A PARAMETER.** It was passed in and
+nothing reconciled it against the line it rewrites, so a caller could change what
+the bill posts to AP while the aging report kept the old number. It is derived
+from the line now — reconstructed as the line plus its variance sibling, because
+matching rewrites the line and may already have done so. That also makes the
+freight case correct **by construction**: whatever is not matched to stock stays
+on the bill as an expense line instead of the line being shrunk to the matched
+amount, which would have taken money off what the vendor is owed.
+
+The first attempt at that last one validated `invoiceCostCents` against
+`line.amountCents` and broke both idempotency and matching a line one delivery at
+a time — the line no longer carries the invoice amount once it has been matched.
+Deriving removes the disagreement rather than validating it away.
+
+5 new tests, 30 in the file.
+
 ### 2026-08-22 — The company a movement's cost belongs to (`claude/the-books-follow-the-shelf`)
 
 **`postMovement` used to post to the tenant's DEFAULT company**, because a
@@ -771,21 +812,6 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
-- **AN ISSUE CAN RELEASE COST THAT WAS NEVER CAPITALISED.** `issueStock` stamps
-  at the average of PRICED receipts but applies it to all quantity, priced or
-  not, so a lot half-filled by unpriced deliveries releases more than `1300`
-  ever received and the account can go to a credit balance with stock still on
-  the shelf. The stamp itself is correct and deliberate — it is the ledger side
-  that needs capping at what the lot actually carries.
-- **A quantity shortfall is booked as a price variance.** The difference between
-  an invoice and the tickets is always treated as a price difference, so an
-  invoice for goods that never arrived is expensed and GRNI clears to zero —
-  where ADR 0012 case 6 says the shortfall should stay in GRNI for somebody to
-  chase. Telling the two apart needs the invoiced QUANTITY, which the allocation
-  does not yet carry.
-- **Nothing validates that a line's allocations sum to its amount.** A line that
-  is part stock and part freight points its whole amount at GRNI, so the freight
-  clears a balance no receipt created.
 - **A COST CORRECTION HAS NOWHERE TO GO, and this is the next thing to build.**
   A delivery ticket can overstate, understate, omit freight or use the wrong
   unit, and today a stamped cost is final. ADR 0012 §A.4 settles the shape —

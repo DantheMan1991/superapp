@@ -87,7 +87,8 @@ export class InventoryError extends Error {
       | "BILL_POSTED"
       | "ENTITY_AMBIGUOUS"
       | "ENTITY_MISMATCH"
-      | "ALLOCATION_MISMATCH",
+      | "ALLOCATION_MISMATCH"
+      | "POSTING_OFF",
     message: string,
   ) {
     super(message);

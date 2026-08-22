@@ -20,11 +20,63 @@ this dossier is the build record.
 | **2** | **Adjustments, physical counts, expiry/FEFO** | **shipped 2026-08-20** |
 | **3a** | **Valuation — what stock is worth, as of a date** | **shipped 2026-08-21** |
 | **3b** | **Perpetual posting, GRNI, and matching a bill to the deliveries it pays for** | **shipped 2026-08-21** |
-| 3c | Cost-adjustment corrections, and the `expense_on_payment` lens | next — see Open items |
+| **3c** | **The screen: matching, the GRNI reconciliation, and the switch that turns posting on** | **shipped 2026-08-22** |
+| 3d | Cost-adjustment corrections, and the `expense_on_payment` lens | next — see Open items |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
 ## Build log
+
+### 2026-08-22 — Slice 3c: the screen, and three things clicking it found (`claude/the-screen-that-matches-a-delivery`)
+
+Everything 3b built was reachable only from ops. This is the first time anybody
+can turn posting on at all, let alone match a bill to a delivery.
+
+**Both halves are on ONE page deliberately.** "Deliveries with no invoice" and
+"bill lines with no delivery" are the same question asked from opposite ends,
+and seeing them together is the whole value of GRNI — a reconciliation split
+across two screens is one nobody finishes.
+
+**The quantity boxes start EMPTY.** A pre-filled number is a number nobody
+reads, and the one question this screen exists to ask is whether what the
+invoice charges for is what actually turned up. "How much is the bill charging
+for?" is a separate box for the same reason, and it is what turns a short
+delivery into owed stock rather than a cost.
+
+**Three defects came out of opening it**, and the first two were only findable
+by clicking:
+
+1. **Matching worked while posting was OFF.** Only `postMovement` checked the
+   treatment. With posting off a receipt credits nothing to GRNI, but matching
+   still re-coded the bill line to it — and approving posted `Dr 2050` against a
+   credit that was never made, leaving a debit nothing could ever clear.
+   `allocateBillLineToStock` refuses now, and the screen does not offer the
+   button rather than offering one that fails.
+2. **The GRNI card reported the WORKING and called it the ANSWER.** It showed
+   "$700 is what Goods Received Not Invoiced should be holding" about an account
+   holding nothing, because every one of those deliveries predated the switch
+   and turning posting on does not backfill. Its own doc comment described a
+   comparison the code never made. It now shows the account as the headline, the
+   deliveries beside it, and names the difference — which is almost always
+   exactly that: stock recorded before the books were watching.
+3. **The three new actions called `requireTenant()` INSIDE their try block.**
+   It signals "not signed in" by THROWING `NEXT_REDIRECT`, a Next control-flow
+   exception — caught, it became "Something went wrong saving that". Every other
+   action in the file calls it first, outside. Found by clicking the switch with
+   a stale session.
+
+The treatment switch says what it does before it does it, including the thing
+people assume and should not: **it does not backfill.** It also says out loud
+that an accountant should be the one deciding.
+
+Only the acts are owner-gated — seeing what arrived and what was billed for it
+is a bookkeeper's daily question. 3 new tests, 36 in the file.
+
+**NOT FULLY DRIVEN, and recorded rather than glossed.** The page, the switch,
+the confirm and the GRNI card were all clicked; the match dialog itself was not,
+because the dev tenant with inventory has no draft bills and the org switcher
+kept reverting on full page loads. What the match path has is 36 tests against a
+real database, and this repo's history says that is not the same thing.
 
 ### 2026-08-22 — Unpicking a match (`claude/what-a-shortfall-is-not`)
 
@@ -849,10 +901,6 @@ commitment against a live animal to delivered without sitting on a shelf.
   clearing a balance whose entry no longer says so. That is an accounting-side
   gap and predates this pack; matching and unpicking both refuse an approved
   bill, which is as far as this side can reach.
-- **Nothing renders any of this.** There is no matching screen, no GRNI
-  reconciliation, and no way to set `inventory_treatment` — which means the
-  posting engine is live, tested, and reachable only from ops. That is
-  deliberate for one slice and is the whole of what 3c owes.
 - **The valuation screen is basis-blind and does not say so.** It reports
   accumulated cost, which is right and always on — but a cash-basis tenant
   reading "$463 on hand" will not find that figure in their financial

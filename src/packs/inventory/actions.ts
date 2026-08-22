@@ -81,6 +81,7 @@ function toResult(err: unknown): { error: string } {
       case "ENTITY_AMBIGUOUS":
       case "ENTITY_MISMATCH":
       case "ALLOCATION_MISMATCH":
+      case "POSTING_OFF":
         return { error: err.message };
       case "INVALID_REASON":
         return { error: "Use lowercase letters, numbers and underscores." };
@@ -674,11 +675,19 @@ const matchSchema = z.object({
  * `/admin/audit`.
  */
 export async function matchBillLineAction(input: unknown) {
+  /**
+   * **THE GATE IS OUTSIDE THE TRY, and that is not style.** `requireTenant`
+   * signals "not signed in" by THROWING `NEXT_REDIRECT` — a Next control-flow
+   * exception, not an error. Caught, it is swallowed and rendered as "Something
+   * went wrong saving that", which is what this action did until somebody
+   * clicked it with a stale session. Every other action in this file calls it
+   * first, outside; these three did not.
+   */
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
   const parsed = matchSchema.safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
   try {
-    const ctx = await requireTenant();
-    await requireModuleEnabled(ctx.tenant.id, PACK);
     const result = await withTenant(
       ctx.tenant.id,
       (tx) => allocateBillLineToStock(tx, ctxOf(ctx), parsed.data),
@@ -706,11 +715,11 @@ export async function matchBillLineAction(input: unknown) {
 }
 
 export async function unmatchBillLineAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
   const parsed = z.object({ billLineId: z.string().uuid() }).safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
   try {
-    const ctx = await requireTenant();
-    await requireModuleEnabled(ctx.tenant.id, PACK);
     const result = await withTenant(
       ctx.tenant.id,
       (tx) => unmatchBillLine(tx, ctxOf(ctx), parsed.data),
@@ -742,13 +751,13 @@ export async function unmatchBillLineAction(input: unknown) {
  * says yes rather than being silently rewritten backwards.
  */
 export async function setInventoryTreatmentAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
   const parsed = z
     .object({ treatment: z.enum(["none", "capitalise"]) })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
   try {
-    const ctx = await requireTenant();
-    await requireModuleEnabled(ctx.tenant.id, PACK);
     if (ctx.role !== "owner") {
       return { error: "Only an owner can change how stock reaches the books." };
     }

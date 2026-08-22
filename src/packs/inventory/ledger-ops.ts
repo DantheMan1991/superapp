@@ -641,6 +641,28 @@ export async function allocateBillLineToStock(
     );
   }
 
+  /**
+   * **MATCHING ONLY MEANS ANYTHING IF THE RECEIPT CAPITALISED.**
+   *
+   * Only `postMovement` used to check the treatment, so with posting OFF a
+   * receipt credited nothing to GRNI — and matching still re-coded the bill line
+   * to it. Approving then posted `Dr 2050` against a credit that was never
+   * made, leaving a debit balance in Goods Received Not Invoiced that no
+   * delivery explains and nothing can ever clear.
+   *
+   * Found by opening the screen on a farm that had just switched accounting on
+   * and had not turned posting on: the deliveries were listed and offered for
+   * matching, which is the point at which it becomes obvious that "what has
+   * arrived" and "what the books think has arrived" are different questions.
+   */
+  const treatment = await inventoryTreatmentOf(tx, ctx.tenantId);
+  if (treatment === "none") {
+    throw new InventoryError(
+      "POSTING_OFF",
+      "Stock is not on the balance sheet for this business, so there is nothing for a bill to settle. Turn that on first.",
+    );
+  }
+
   const line = await tx.query.billLines.findFirst({
     where: and(
       eq(schema.billLines.tenantId, ctx.tenantId),
@@ -1152,26 +1174,64 @@ export async function matchableBillLines(
 }
 
 export interface GrniPosition {
-  /** Priced deliveries with no invoice against them yet. */
+  /** What the deliveries say is waiting for an invoice — the WORKING. */
   awaitingInvoiceCents: number;
   awaitingInvoiceCount: number;
+  /** What the account actually holds — the ANSWER. Credits are positive here. */
+  accountCents: number;
+  /**
+   * Working less answer. **Nearly always the deliveries that arrived before
+   * posting was switched on**, which never credited anything and never will —
+   * turning it on does not backfill. Anything else is worth finding.
+   */
+  differenceCents: number;
 }
 
 /**
- * The GRNI position in the terms a person asks it in.
+ * The GRNI position, **from both ends**.
  *
- * Deliberately computed from the DELIVERIES rather than read off the account
- * balance: the account is the answer, and this is the working. If the two
- * disagree, something posted that no delivery explains — which is the thing
- * worth finding, and it cannot be found by reporting the account twice.
+ * The account is the answer and the deliveries are the working, and the whole
+ * point is COMPARING them — an earlier version of this computed only the
+ * working, and a doc comment claimed the comparison it never made. On a farm
+ * that had just switched posting on it reported "$700 is what Goods Received
+ * Not Invoiced should be holding" about an account holding nothing, because
+ * every one of those deliveries predated the switch.
+ *
+ * Reporting one number and calling it both is exactly the failure this pack
+ * keeps writing tests against.
  */
 export async function grniPosition(
   tx: Tx,
   tenantId: string,
 ): Promise<GrniPosition> {
   const open = await unbilledReceipts(tx, tenantId, { limit: 1000 });
+  const awaitingInvoiceCents = open.reduce((sum, r) => sum + r.openCostCents, 0);
+
+  let accountCents = 0;
+  try {
+    const accountId = await resolveGrniAccount(tx, tenantId);
+    const rows = await tx
+      .select({ amountCents: schema.journalLines.amountCents })
+      .from(schema.journalLines)
+      .where(
+        and(
+          eq(schema.journalLines.tenantId, tenantId),
+          eq(schema.journalLines.accountId, accountId),
+        ),
+      );
+    // A liability is credited, and credits are negative in the ledger's own
+    // convention — flipped here so the card can read it beside the working.
+    accountCents = -rows.reduce((sum, r) => sum + r.amountCents, 0);
+  } catch {
+    // No GRNI account: a tenant with no books. The working still stands, and
+    // the answer is genuinely zero rather than unknown.
+    accountCents = 0;
+  }
+
   return {
-    awaitingInvoiceCents: open.reduce((sum, r) => sum + r.openCostCents, 0),
+    awaitingInvoiceCents,
     awaitingInvoiceCount: open.length,
+    accountCents,
+    differenceCents: awaitingInvoiceCents - accountCents,
   };
 }

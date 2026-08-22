@@ -94,26 +94,50 @@ export default async function InventoryMatchingPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold tabular-nums">
-              {formatMoney(position.awaitingInvoiceCents, currencySymbol)}
+              {formatMoney(position.accountCents, currencySymbol)}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              {/* The account is the answer; this is the working. If the two ever
-                  disagree, something posted that no delivery explains. */}
+              {/* THE ACCOUNT IS THE HEADLINE, because the account is the answer.
+                  The deliveries are the working, and the two are shown together
+                  precisely so a difference is visible instead of assumed away. */}
+              What Goods Received Not Invoiced is holding.{" "}
               {position.awaitingInvoiceCount === 0
                 ? "Every priced delivery has an invoice against it."
-                : `Across ${position.awaitingInvoiceCount} ${
+                : `${position.awaitingInvoiceCount} ${
                     position.awaitingInvoiceCount === 1
-                      ? "delivery"
-                      : "deliveries"
-                  }. This is what Goods Received Not Invoiced should be holding.`}
+                      ? "delivery is"
+                      : "deliveries are"
+                  } waiting for one, worth ${formatMoney(
+                    position.awaitingInvoiceCents,
+                    currencySymbol,
+                  )}.`}
             </p>
+            {position.differenceCents !== 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {formatMoney(
+                    Math.abs(position.differenceCents),
+                    currencySymbol,
+                  )}{" "}
+                  of that never reached the books.
+                </span>{" "}
+                Almost always deliveries recorded before stock went on the
+                balance sheet — switching it on does not go back and rewrite
+                them. They can still be matched to a bill; they just have
+                nothing to clear.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Bills waiting to be matched</CardTitle>
+          <CardTitle className="text-base">
+            {treatment === "none"
+              ? "Bills that could be matched, once stock is on the balance sheet"
+              : "Bills waiting to be matched"}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {lines.length === 0 ? (
@@ -168,7 +192,10 @@ export default async function InventoryMatchingPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {isOwner && (
+                        {/* Matching is refused while posting is off — a bill
+                            cannot settle a balance no delivery created — so the
+                            button is absent rather than present and failing. */}
+                        {isOwner && treatment === "capitalise" && (
                           <div className="flex items-center justify-end gap-1">
                             <MatchDialog
                               billLineId={line.billLineId}
@@ -196,8 +223,20 @@ export default async function InventoryMatchingPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Deliveries with no invoice yet
+            {treatment === "none"
+              ? "Priced deliveries"
+              : "Deliveries with no invoice yet"}
           </CardTitle>
+          {treatment === "none" && (
+            <p className="text-xs text-muted-foreground">
+              {/* WITH POSTING OFF THIS IS NOT A RECONCILIATION, and calling it
+                  one would be the screen claiming the books know something they
+                  do not. Nothing here has reached the ledger. */}
+              None of these have reached the books, because stock is not on the
+              balance sheet for this business. This is what would be waiting for
+              an invoice if it were.
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           {open.length === 0 ? (

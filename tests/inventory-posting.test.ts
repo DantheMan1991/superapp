@@ -20,6 +20,7 @@ import {
   inventoryTreatmentOf,
   resolveGrniAccount,
   unbilledReceipts,
+  unmatchBillLine,
 } from "../src/packs/inventory/ledger-ops";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -233,6 +234,74 @@ d("inventory posting", () => {
       );
       // 40 lb at $1.00 = $40.
       expect((await netOf(cogsAccountId)) - before).toBe(4_000);
+    });
+
+it("WILL NOT RELEASE COST THAT NEVER CAME IN", async () => {
+      /**
+       * `averageCostRate` is the average of what arrived WITH A PRICE. Applying
+       * it to a quantity that includes unpriced stock invents money: 100 lb at
+       * $100 plus 100 lb with no price on the ticket is a $1.00/lb rate, and
+       * issuing all 200 lb used to stamp $200 against $100 that ever existed —
+       * driving 1300 to a CREDIT balance with stock still on the shelf.
+       *
+       * The rate is left alone deliberately. Putting unpriced receipts in the
+       * denominator would treat stock nobody has costed as costing nothing,
+       * which is the one thing the valuation slice exists to refuse.
+       */
+      const item = await newItem("Half priced");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 100,
+          costCents: 10_000,
+          occurredOn: "2027-02-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 100,
+          occurredOn: "2027-02-02",
+          locationAssetId: freezerId,
+        }),
+      );
+      const before = await netOf(inventoryAccountId);
+      const issued = await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 200,
+          occurredOn: "2027-02-03",
+          locationAssetId: freezerId,
+        }),
+      );
+      // Capped at what came in, not 200 * $1.00.
+      expect(issued.costCents).toBe(10_000);
+      expect((await netOf(inventoryAccountId)) - before).toBe(-10_000);
+    });
+
+    it("leaves an ordinary issue alone", async () => {
+      // The cap must bind ONLY when the rate would over-release. A normal item
+      // with everything priced is untouched by it.
+      const item = await newItem("All priced");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 100,
+          costCents: 10_000,
+          occurredOn: "2027-02-10",
+          locationAssetId: freezerId,
+        }),
+      );
+      const issued = await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 40,
+          occurredOn: "2027-02-11",
+          locationAssetId: freezerId,
+        }),
+      );
+      expect(issued.costCents).toBe(4_000);
     });
 
     it("POSTS NOTHING for a receipt with no price on the ticket", async () => {
@@ -518,7 +587,6 @@ d("inventory posting", () => {
         asOwner((tx) =>
           allocateBillLineToStock(tx, ownerCtx(), {
             billLineId,
-            invoiceCostCents: 4_000,
             matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
           }),
         ),
@@ -578,7 +646,6 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
       const result = await asOwner((tx) =>
         allocateBillLineToStock(tx, ownerCtx(), {
           billLineId,
-          invoiceCostCents: 6_000,
           matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
         }),
       );
@@ -620,7 +687,6 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
       const result = await asOwner((tx) =>
         allocateBillLineToStock(tx, ownerCtx(), {
           billLineId,
-          invoiceCostCents: 6_500,
           matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
         }),
       );
@@ -678,7 +744,6 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
       await asOwner((tx) =>
         allocateBillLineToStock(tx, ownerCtx(), {
           billLineId,
-          invoiceCostCents: 9_001,
           matches: open.map((r) => ({
             movementId: r.movementId,
             quantityMatched: r.quantity,
@@ -695,6 +760,118 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
       // 1:2 by cost, and the odd cent lands on the larger remainder rather than
       // going missing.
       expect(rows.reduce((sum, r) => sum + r.invoiceCostCents, 0)).toBe(9_001);
+    });
+
+it("KEEPS A SHORT DELIVERY IN GRNI INSTEAD OF EXPENSING IT", async () => {
+      /**
+       * The gap between an invoice and the tickets had two meanings and was
+       * always booked as one. Charged for ten bags, six arrived: the missing
+       * four are not a cost, they are stock the business has paid for and does
+       * not have. Expensing them cleared GRNI to zero, so the reconciliation
+       * showed nothing outstanding and nobody chased the supplier.
+       */
+      const item = await newItem("Short delivered");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 6,
+          costCents: 6_000,
+          occurredOn: "2027-03-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      // The vendor invoiced for ten at the same rate.
+      const { billId, billLineId } = await makeBill(10_000);
+      const result = await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 10,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 6 }],
+        }),
+      );
+      // Four bags at $10 that never turned up — NOT a price difference.
+      expect(result.shortfallCents).toBe(4_000);
+      expect(result.varianceCents).toBe(0);
+
+      const grniBefore = await netOf(grniAccountId);
+      await asOwner(async (tx) => {
+        const b = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: b!.version,
+        });
+      });
+      // The whole invoice hits GRNI, so the 4,000 stays there as a debit for
+      // somebody to chase rather than quietly becoming cost of goods.
+      expect((await netOf(grniAccountId)) - grniBefore).toBe(10_000);
+    });
+
+    it("still calls a genuine rate difference a variance", async () => {
+      // Same quantity, higher rate: a real cost, and it belongs on the P&L.
+      const item = await newItem("Dearer than quoted");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2027-03-10",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billLineId } = await makeBill(6_500);
+      const result = await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 10,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      expect(result.varianceCents).toBe(500);
+      expect(result.shortfallCents).toBe(0);
+    });
+
+    it("KEEPS THE BILL'S TOTAL when part of a line is not stock", async () => {
+      /**
+       * "$60 feed + $10 delivery" on one line. The freight is not matched to
+       * anything, and the fix is that it stays on the bill as an expense line
+       * rather than the line being shrunk to the matched amount — which would
+       * have taken $10 off what the vendor is owed.
+       */
+      const item = await newItem("With freight");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2027-03-20",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(7_000);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 10,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      const lines = await asOwner((tx) =>
+        tx.select().from(schema.billLines).where(eq(schema.billLines.billId, billId)),
+      );
+      // Still $70 to the vendor: $60 against GRNI, $10 left as an expense.
+      expect(lines.reduce((sum, l) => sum + l.amountCents, 0)).toBe(7_000);
     });
 
     it("REFUSES to match more than a delivery has left", async () => {
@@ -715,7 +892,6 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
         asOwner((tx) =>
           allocateBillLineToStock(tx, ownerCtx(), {
             billLineId,
-            invoiceCostCents: 1_000,
             matches: [{ movementId: open[0].movementId, quantityMatched: 11 }],
           }),
         ),
@@ -742,7 +918,6 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
           (tx) =>
             allocateBillLineToStock(tx, staffCtx(), {
               billLineId,
-              invoiceCostCents: 400,
               matches: [{ movementId: open[0].movementId, quantityMatched: 4 }],
             }),
           { role: "staff", userId: STAFF },
@@ -854,7 +1029,6 @@ it("A MADE THING CREDITS CONSUMPTION, NOT GRNI", async () => {
         asOwner((tx) =>
           allocateBillLineToStock(tx, ownerCtx(), {
             billLineId,
-            invoiceCostCents: 1_000,
             matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
           }),
         ),
@@ -882,7 +1056,6 @@ it("A MADE THING CREDITS CONSUMPTION, NOT GRNI", async () => {
       const { billId, billLineId } = await makeBill(1_200);
       const match = {
         billLineId,
-        invoiceCostCents: 1_200,
         matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
       };
       await asOwner((tx) => allocateBillLineToStock(tx, ownerCtx(), match));
@@ -927,14 +1100,12 @@ it("A MADE THING CREDITS CONSUMPTION, NOT GRNI", async () => {
       await asOwner((tx) =>
         allocateBillLineToStock(tx, ownerCtx(), {
           billLineId,
-          invoiceCostCents: 3_000,
           matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
         }),
       );
       await asOwner((tx) =>
         allocateBillLineToStock(tx, ownerCtx(), {
           billLineId,
-          invoiceCostCents: 6_000,
           matches: [{ movementId: open[1].movementId, quantityMatched: 10 }],
         }),
       );
@@ -964,6 +1135,131 @@ it("A MADE THING CREDITS CONSUMPTION, NOT GRNI", async () => {
       expect(
         await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
       ).toHaveLength(0);
+    });
+
+it("UNPICKS A MATCH AND PUTS THE BILL BACK AS IT WAS", async () => {
+      /**
+       * Somebody will match the wrong delivery, and until this existed the only
+       * way out was SQL. Undoing has to do three things together: release the
+       * deliveries, fold the variance sibling's amount back into the line so the
+       * vendor is still owed what they invoiced, and clear the GRNI coding so
+       * the line is UNCODED again — which is the honest state, because the
+       * alternative is guessing an expense account on the way out.
+       */
+      const item = await newItem("Mis-matched");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2027-04-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(6_500);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 10,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      // Matched: the delivery is off the list and the bill is two lines.
+      expect(
+        await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
+      ).toHaveLength(0);
+
+      const result = await asOwner((tx) =>
+        unmatchBillLine(tx, ownerCtx(), { billLineId }),
+      );
+      expect(result.released).toBe(1);
+
+      // The delivery is back on the reconciliation...
+      const reopened = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      expect(reopened).toHaveLength(1);
+      expect(reopened[0].openQuantity).toBe(10);
+
+      // ...the bill is one line again, still for what the vendor invoiced...
+      const lines = await asOwner((tx) =>
+        tx.select().from(schema.billLines).where(eq(schema.billLines.billId, billId)),
+      );
+      expect(lines).toHaveLength(1);
+      expect(lines[0].amountCents).toBe(6_500);
+      // ...and UNCODED, so approving it refuses until somebody says what it was.
+      expect(lines[0].accountId).toBeNull();
+    });
+
+    it("refuses to unpick a bill that has already been approved", async () => {
+      const item = await newItem("Approved then unpicked");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 5,
+          costCents: 500,
+          occurredOn: "2027-04-10",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(500);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 5,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 5 }],
+        }),
+      );
+      await asOwner(async (tx) => {
+        const b = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: b!.version,
+        });
+      });
+      await expect(
+        asOwner((tx) => unmatchBillLine(tx, ownerCtx(), { billLineId })),
+      ).rejects.toMatchObject({ code: "BILL_POSTED" });
+    });
+
+    it("refuses a staff member, the same as matching does", async () => {
+      const item = await newItem("Staff unpick");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 5,
+          costCents: 500,
+          occurredOn: "2027-04-20",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billLineId } = await makeBill(500);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 5,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 5 }],
+        }),
+      );
+      await expect(
+        withTenant(
+          tenantId,
+          (tx) => unmatchBillLine(tx, staffCtx(), { billLineId }),
+          { role: "staff", userId: STAFF },
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
     });
 
     it("lists only receipts that credited GRNI and still have room", async () => {

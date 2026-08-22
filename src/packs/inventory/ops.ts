@@ -86,7 +86,8 @@ export class InventoryError extends Error {
       | "LEDGER_ACCOUNTS"
       | "BILL_POSTED"
       | "ENTITY_AMBIGUOUS"
-      | "ENTITY_MISMATCH",
+      | "ENTITY_MISMATCH"
+      | "ALLOCATION_MISMATCH",
     message: string,
   ) {
     super(message);
@@ -1152,7 +1153,13 @@ export async function issueStock(
   }
 
   const rate = await itemCostRate(tx, ctx.tenantId, input.itemId);
-  const costCents = issueCostCents(rate, input.quantity);
+  // Bounded by what the item actually holds — an issue cannot release cost that
+  // never came in. See `issueCostCents` for why the rate itself is left alone.
+  const costCents = issueCostCents(
+    rate,
+    input.quantity,
+    await itemUnreleasedCost(tx, ctx.tenantId, input.itemId),
+  );
 
   const movement = await recordMovement(tx, ctx, {
     itemId: input.itemId,
@@ -1169,6 +1176,48 @@ export async function issueStock(
   });
 
   return movement;
+}
+
+/**
+ * What an item still holds: everything that came in with a price, less
+ * everything already issued back out.
+ *
+ * **THE CAP ON A RELEASE.** `averageCostRate` divides priced cost by priced
+ * quantity, so applying it to a quantity that includes unpriced stock invents
+ * money — see `issueCostCents`. This is the ceiling that stops it, and it is
+ * deliberately per ITEM rather than per lot, because the rate it bounds is an
+ * item-level average.
+ *
+ * Adjustments count as releases: spoiled stock has left just as surely as
+ * issued stock has, and leaving them out would let the same cost go out twice.
+ */
+export async function itemUnreleasedCost(
+  tx: Tx,
+  tenantId: string,
+  itemId: string,
+): Promise<number> {
+  const rows = await tx
+    .select({
+      quantity: schema.inventoryMovements.quantity,
+      costCents: schema.inventoryMovements.costCents,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        eq(schema.inventoryMovements.itemId, itemId),
+        isNotNull(schema.inventoryMovements.costCents),
+      ),
+    );
+  let held = 0;
+  for (const row of rows) {
+    if (row.costCents === null) continue;
+    // In adds, out releases. A transfer carries no cost at all, so it never
+    // appears here — which is why moving a box between freezers cannot change
+    // what the item holds.
+    held += row.quantity > 0 ? row.costCents : -row.costCents;
+  }
+  return held;
 }
 
 /**
@@ -1670,7 +1719,11 @@ export async function adjustStock(
   let costCents: number | null = null;
   if (quantity < 0) {
     const rate = await itemCostRate(tx, ctx.tenantId, input.itemId);
-    costCents = issueCostCents(rate, quantity);
+    costCents = issueCostCents(
+      rate,
+      quantity,
+      await itemUnreleasedCost(tx, ctx.tenantId, input.itemId),
+    );
   }
 
   const movement = await recordMovement(tx, ctx, {

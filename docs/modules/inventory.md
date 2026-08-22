@@ -26,6 +26,65 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-22 — Unpicking a match (`claude/what-a-shortfall-is-not`)
+
+Somebody will match the wrong delivery, and until now the only way out was SQL.
+`unmatchBillLine` undoes the three things matching did, and it has to do all
+three or the bill is left in a state no screen can explain: release the
+allocations so the deliveries return to the reconciliation, fold the variance
+sibling's amount back into the line so the vendor is still owed exactly what
+they invoiced, and **clear the coding so the line is UNCODED again**.
+
+Uncoded is the honest state. The alternative is guessing an expense account on
+the way out, and `approveBill` already refuses an uncoded line — so the bill
+cannot be approved until a person says what it was for, which is the right place
+for that question.
+
+Refuses on an approved bill for the same reason matching does: the entry has
+posted, and this would change what the bill says without changing what was
+posted. Owner-only, the same as matching.
+
+### 2026-08-22 — Three defects that only showed up in the books (`claude/what-a-shortfall-is-not`)
+
+The correctness items 3b left open, cleared before any screen invites somebody
+to switch posting on.
+
+**AN ISSUE CANNOT RELEASE COST THAT NEVER CAME IN.** `averageCostRate` is the
+average of what arrived WITH A PRICE — priced cost over priced quantity — and
+applying it to a quantity that includes unpriced stock invents money. 100 lb at
+$100 plus 100 lb with nothing on the ticket is a $1.00/lb rate, so issuing all
+200 stamped $200 against $100 that ever existed and drove `1300` to a CREDIT
+balance with stock still on the shelf. The rate is left alone deliberately:
+putting unpriced receipts in the denominator would treat stock nobody has costed
+as costing nothing, which is the one thing the valuation slice exists to refuse.
+So the release is bounded instead — **and bounded at the STAMP, not only at the
+posting**, so the ledger and `carriedValue` stay the same number by construction
+rather than by a second calculation somebody has to keep in step.
+
+**A SHORT DELIVERY IS NOT A PRICE DIFFERENCE.** Every gap between an invoice and
+the tickets was booked as a variance, so an invoice for ten bags against six that
+arrived was EXPENSED and GRNI cleared to zero — the reconciliation showed nothing
+outstanding and nobody chased the supplier. The allocation now takes the invoiced
+QUANTITY, which is what tells the two apart: a rate difference is a real cost and
+goes to the P&L, a shortfall is stock paid for and not held and stays in GRNI as
+a debit, which is what that account is for.
+
+**WHAT THE INVOICE CHARGES IS NO LONGER A PARAMETER.** It was passed in and
+nothing reconciled it against the line it rewrites, so a caller could change what
+the bill posts to AP while the aging report kept the old number. It is derived
+from the line now — reconstructed as the line plus its variance sibling, because
+matching rewrites the line and may already have done so. That also makes the
+freight case correct **by construction**: whatever is not matched to stock stays
+on the bill as an expense line instead of the line being shrunk to the matched
+amount, which would have taken money off what the vendor is owed.
+
+The first attempt at that last one validated `invoiceCostCents` against
+`line.amountCents` and broke both idempotency and matching a line one delivery at
+a time — the line no longer carries the invoice amount once it has been matched.
+Deriving removes the disagreement rather than validating it away.
+
+5 new tests, 30 in the file.
+
 ### 2026-08-22 — The company a movement's cost belongs to (`claude/the-books-follow-the-shelf`)
 
 **`postMovement` used to post to the tenant's DEFAULT company**, because a
@@ -771,21 +830,6 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
-- **AN ISSUE CAN RELEASE COST THAT WAS NEVER CAPITALISED.** `issueStock` stamps
-  at the average of PRICED receipts but applies it to all quantity, priced or
-  not, so a lot half-filled by unpriced deliveries releases more than `1300`
-  ever received and the account can go to a credit balance with stock still on
-  the shelf. The stamp itself is correct and deliberate — it is the ledger side
-  that needs capping at what the lot actually carries.
-- **A quantity shortfall is booked as a price variance.** The difference between
-  an invoice and the tickets is always treated as a price difference, so an
-  invoice for goods that never arrived is expensed and GRNI clears to zero —
-  where ADR 0012 case 6 says the shortfall should stay in GRNI for somebody to
-  chase. Telling the two apart needs the invoiced QUANTITY, which the allocation
-  does not yet carry.
-- **Nothing validates that a line's allocations sum to its amount.** A line that
-  is part stock and part freight points its whole amount at GRNI, so the freight
-  clears a balance no receipt created.
 - **A COST CORRECTION HAS NOWHERE TO GO, and this is the next thing to build.**
   A delivery ticket can overstate, understate, omit freight or use the wrong
   unit, and today a stamped cost is final. ADR 0012 §A.4 settles the shape —
@@ -799,11 +843,12 @@ commitment against a live animal to delivered without sitting on a shelf.
   report "No cost recorded" — the eggs-at-$0.00 bug arriving through a new door.
   `production/ops.ts` repeats the same test independently and would stamp NULL
   on a run output.
-- **A matched bill cannot be un-matched.** `allocateBillLineToStock` writes and
-  points the line at GRNI; nothing takes it back. Voiding a bill leaves the
-  allocation in place, and `editEntry` can rewrite a bill's entry from the
-  journal screen with no source guard at all — so an allocation can be left
-  clearing a balance whose entry no longer says so.
+- **`editEntry` can still rewrite a bill's posted entry from the journal
+  screen**, with no source guard — `assertEntryNotSourceManaged` is called by
+  the void action and not the edit path. An allocation can therefore be left
+  clearing a balance whose entry no longer says so. That is an accounting-side
+  gap and predates this pack; matching and unpicking both refuse an approved
+  bill, which is as far as this side can reach.
 - **Nothing renders any of this.** There is no matching screen, no GRNI
   reconciliation, and no way to set `inventory_treatment` — which means the
   posting engine is live, tested, and reachable only from ops. That is

@@ -566,14 +566,37 @@ export async function unbilledReceipts(
     .filter((r) => r.openQuantity > 0);
 }
 
+
 function round4(n: number): number {
   return Math.round(n * 10_000) / 10_000;
 }
 
 export interface AllocateBillLineInput {
   billLineId: string;
-  /** What the invoice charges for this line, in cents. Split across the matches. */
-  invoiceCostCents: number;
+  /**
+   * **WHAT THE INVOICE CHARGES IS NOT A PARAMETER. It is the line.**
+   *
+   * It used to be passed in, and nothing reconciled it with the line it
+   * rewrites — so a caller could quietly change what the bill posts to AP while
+   * the aging report kept the old number. Deriving it removes the disagreement
+   * instead of validating it away, and it makes the freight case correct by
+   * construction: whatever is not matched to stock stays on the bill as an
+   * expense line rather than vanishing from the total.
+   */
+  /**
+   * How many units the invoice says it is charging for.
+   *
+   * **THIS IS WHAT TELLS A PRICE DIFFERENCE FROM A SHORT DELIVERY**, and
+   * without it the two were indistinguishable: every gap between the invoice
+   * and the tickets was booked as a price variance, so an invoice for six bags
+   * against four that arrived was EXPENSED and GRNI cleared to zero. The
+   * shortfall then showed nowhere, and nobody chased the supplier for the two
+   * bags. ADR 0012 case 6 says it stays in GRNI where it can be seen.
+   *
+   * Omitted means "the same quantity we matched" — an ordinary invoice for
+   * exactly what turned up.
+   */
+  invoiceQuantity?: number;
   matches: { movementId: string; quantityMatched: number }[];
 }
 
@@ -598,7 +621,13 @@ export async function allocateBillLineToStock(
   tx: Tx,
   ctx: InventoryCtx,
   input: AllocateBillLineInput,
-): Promise<{ allocations: number; varianceCents: number }> {
+): Promise<{
+  allocations: number;
+  /** Charged at a different RATE than the ticket said. Goes to the P&L. */
+  varianceCents: number;
+  /** Charged for stock that never arrived. Stays in GRNI to be chased. */
+  shortfallCents: number;
+}> {
   // OWNER. Matching a bill to a delivery decides what stock cost and clears a
   // liability — a decision, not a chore, which is the same line `livestock`
   // drew when it made movements member-level and lots owner-level.
@@ -645,6 +674,30 @@ export async function allocateBillLineToStock(
     );
   }
 
+  /**
+   * **THE INVOICE AMOUNT, RECONSTRUCTED** — because matching rewrites the line
+   * and may already have done so.
+   *
+   * A matched line carries the receipts' total and its sibling carries the
+   * rest, so the two together are what the vendor charged. Reading only the
+   * line would shrink the bill a little more on every re-match; the first
+   * version of this validated against it and broke both idempotency and
+   * matching a line one delivery at a time.
+   */
+  const varianceDescription = `Price difference against delivery — ${line.description}`;
+  const priorSiblings = await tx
+    .select({ amountCents: schema.billLines.amountCents })
+    .from(schema.billLines)
+    .where(
+      and(
+        eq(schema.billLines.tenantId, ctx.tenantId),
+        eq(schema.billLines.billId, line.billId),
+        eq(schema.billLines.description, varianceDescription),
+      ),
+    );
+  const invoiceTotalCents =
+    line.amountCents + priorSiblings.reduce((sum, r) => sum + r.amountCents, 0);
+
   // Only the receipts this call names. Reusing the screen's paginated query
   // meant that past its limit the newest deliveries were invisible and the
   // caller got a false "already fully invoiced".
@@ -682,7 +735,7 @@ export async function allocateBillLineToStock(
     return { match, receipt, receiptShare };
   });
   const allocated = allocateByWeight(
-    input.invoiceCostCents,
+    invoiceTotalCents,
     shares.map((s) => s.receiptShare),
   );
 
@@ -709,6 +762,7 @@ export async function allocateBillLineToStock(
       );
     }
   }
+
 
   const grniAccountId = await resolveGrniAccount(tx, ctx.tenantId);
   const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);
@@ -766,11 +820,37 @@ export async function allocateBillLineToStock(
       ),
     );
   const lineReceiptTotal = onLine.reduce((sum, r) => sum + r.receiptCostCents, 0);
-  const lineInvoiceTotal = onLine.reduce((sum, r) => sum + r.invoiceCostCents, 0);
 
-  // Positive: the invoice asks for more than the tickets said. Computed from
-  // every allocation on the line, so a second match adds to the first.
-  const varianceCents = lineInvoiceTotal - lineReceiptTotal;
+
+  /**
+   * **SPLIT THE DIFFERENCE BY CAUSE.** The gap between what the invoice charges
+   * and what the tickets said has two entirely different meanings, and booking
+   * both as a price variance meant an invoice for goods that never arrived was
+   * quietly expensed:
+   *
+   * - **A price difference** — same quantity, different rate — is a real cost
+   *   and belongs on the P&L.
+   * - **A shortfall** — charged for more than turned up — is not a cost at all.
+   *   It is stock the business has paid for and does not have, so it stays in
+   *   GRNI as a debit, which is exactly what that account is for and exactly
+   *   what the reconciliation is meant to surface.
+   */
+  const matchedQuantity = input.matches.reduce(
+    (sum, m) => sum + m.quantityMatched,
+    0,
+  );
+  const invoiceQuantity = input.invoiceQuantity ?? matchedQuantity;
+  const shortQuantity = Math.max(0, round4(invoiceQuantity - matchedQuantity));
+
+  const totalGap = invoiceTotalCents - lineReceiptTotal;
+  // The shortfall is valued at the rate the invoice is actually charging, so a
+  // short delivery and a price rise on the same invoice each land where they
+  // belong rather than netting into one misleading number.
+  const invoiceRate =
+    invoiceQuantity > 0 ? invoiceTotalCents / invoiceQuantity : 0;
+  const shortfallCents =
+    shortQuantity > 0 ? Math.round(invoiceRate * shortQuantity) : 0;
+  const varianceCents = totalGap - shortfallCents;
 
   /**
    * **THE LINE IS SPLIT SO THAT GRNI CLEARS EXACTLY.**
@@ -793,7 +873,12 @@ export async function allocateBillLineToStock(
    */
   await tx
     .update(schema.billLines)
-    .set({ accountId: grniAccountId, amountCents: lineReceiptTotal })
+    .set({
+      accountId: grniAccountId,
+      // Receipts PLUS anything charged for and not delivered: the shortfall
+      // belongs in GRNI, not on the P&L.
+      amountCents: lineReceiptTotal + shortfallCents,
+    })
     .where(
       and(
         eq(schema.billLines.tenantId, ctx.tenantId),
@@ -807,7 +892,6 @@ export async function allocateBillLineToStock(
    * variance with no error anywhere — the allocation was conflict-protected and
    * this was not.
    */
-  const varianceDescription = `Price difference against delivery — ${line.description}`;
   await tx
     .delete(schema.billLines)
     .where(
@@ -842,7 +926,7 @@ export async function allocateBillLineToStock(
     });
   }
 
-  return { allocations: shares.length, varianceCents };
+  return { allocations: shares.length, varianceCents, shortfallCents };
 }
 
 /**
@@ -874,4 +958,96 @@ function allocateByWeight(total: number, weights: number[]): number[] {
     left -= 1;
   }
   return floors;
+}
+
+/**
+ * **UNDO A MATCH**, putting the line back where it was.
+ *
+ * A person will get a match wrong — the wrong delivery, the wrong quantity, the
+ * right delivery on the wrong bill — and until this existed the only way out
+ * was SQL. `allocateBillLineToStock` re-codes the line and rewrites its amount,
+ * so undoing has to do three things together or it leaves the bill in a state
+ * no screen can explain:
+ *
+ * 1. drop the allocations, so the deliveries go back on the reconciliation;
+ * 2. fold the variance sibling's amount back into the line, so the vendor is
+ *    still owed exactly what they invoiced;
+ * 3. clear the GRNI coding, so the line is uncoded again and `approveBill`
+ *    refuses it until somebody says what it was for. **Uncoded is the honest
+ *    state** — the alternative is guessing an expense account on the way out.
+ *
+ * Refuses on an approved bill for the same reason matching does: the entry is
+ * already posted and this would change what the bill says without changing what
+ * was posted.
+ */
+export async function unmatchBillLine(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: { billLineId: string },
+): Promise<{ released: number }> {
+  if (!allowsWrite(ctx.role, "owner")) {
+    throw new InventoryError(
+      "FORBIDDEN",
+      "only an owner can unpick a bill from stock",
+    );
+  }
+
+  const line = await tx.query.billLines.findFirst({
+    where: and(
+      eq(schema.billLines.tenantId, ctx.tenantId),
+      eq(schema.billLines.id, input.billLineId),
+    ),
+  });
+  if (!line) throw new InventoryError("NOT_FOUND", "bill line");
+
+  const bill = await tx.query.bills.findFirst({
+    where: and(
+      eq(schema.bills.tenantId, ctx.tenantId),
+      eq(schema.bills.id, line.billId),
+    ),
+    columns: { status: true },
+  });
+  if (!bill) throw new InventoryError("NOT_FOUND", "bill");
+  if (bill.status !== "draft" && bill.status !== "awaiting_approval") {
+    throw new InventoryError(
+      "BILL_POSTED",
+      "that bill is already approved — its entry has posted, so the match cannot be unpicked",
+    );
+  }
+
+  const dropped = await tx
+    .delete(schema.billLineStockAllocations)
+    .where(
+      and(
+        eq(schema.billLineStockAllocations.tenantId, ctx.tenantId),
+        eq(schema.billLineStockAllocations.billLineId, input.billLineId),
+      ),
+    )
+    .returning({ id: schema.billLineStockAllocations.id });
+
+  // The sibling's amount comes home, so the bill still totals the invoice.
+  const varianceDescription = `Price difference against delivery — ${line.description}`;
+  const siblings = await tx
+    .delete(schema.billLines)
+    .where(
+      and(
+        eq(schema.billLines.tenantId, ctx.tenantId),
+        eq(schema.billLines.billId, line.billId),
+        eq(schema.billLines.description, varianceDescription),
+      ),
+    )
+    .returning({ amountCents: schema.billLines.amountCents });
+  const returned = siblings.reduce((sum, r) => sum + r.amountCents, 0);
+
+  await tx
+    .update(schema.billLines)
+    .set({ accountId: null, amountCents: line.amountCents + returned })
+    .where(
+      and(
+        eq(schema.billLines.tenantId, ctx.tenantId),
+        eq(schema.billLines.id, input.billLineId),
+      ),
+    );
+
+  return { released: dropped.length };
 }

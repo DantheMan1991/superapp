@@ -13,6 +13,58 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-22 — The `.so` the tracer cannot see (branch `claude/the-so-the-tracer-cannot-see`)
+
+The deployment half of the sharp incident, and the interesting part is WHY it
+was invisible.
+
+`sharp` is already on Next's default external list, so it was never bundled —
+the production error even names the external module,
+`Failed to load external module sharp-20c6a5da84e2135f`, and the local build
+writes that same id into the route's trace. Tracing followed it into
+`node_modules` and copied what JavaScript requires, which includes
+`@img/sharp-linux-x64`. That is why the `.node` binary LOADED.
+
+**What it could not copy is the shared library that binary links against.**
+`@img/sharp-libvips-linux-x64` is required by nothing in JavaScript: the `.node`
+names it at the ELF level and the loader resolves it at dlopen time. Nothing in
+the module graph mentions it, so nothing traced it, so it was absent on the
+function:
+
+```
+ERR_DLOPEN_FAILED: libvips-cpp.so.8.18.3: cannot open shared object file
+```
+
+The repair is `outputFileTracingIncludes`, which this config already uses for
+exactly this class of problem — the PDF fonts, with a comment reading *"a
+failure that cannot reproduce locally, where the repo is simply there."* Same
+shape, one degree worse: **this machine is Windows, so the linux-x64 packages
+are not even installed here.** There is no way of running the app on the
+founder's laptop that could have caught it.
+
+- Only **linux-x64** is listed. Shipping every platform's binaries would put
+  ~100MB of macOS and Windows libvips into a Linux function for nothing. Moving
+  to arm64 breaks this, and the dlopen failure will say so.
+- **Both** packages are named, not only libvips — a trace that gets one and not
+  the other is the failure being fixed.
+- **A NEW ROUTE THAT PROCESSES AN IMAGE MUST ADD ITSELF.** The four listed are
+  everything reaching `ai/extract.ts` today: the inbound email hook, the receipts
+  inbox and its detail page, and the document browser.
+
+**The load failure now says what it is.** All anybody could see was
+`digest: '508730998'`; the message was in a Vercel log nobody was reading, and
+finding it took a deliberate hunt. A native library that will not load is an
+infrastructure fault rather than a bad upload, and the error says so and points
+at the config. The failure is deliberately not cached, so a redeploy that fixes
+the install does not need a cold start to be believed.
+
+**Verified as far as this machine allows, and no further.** The tracing
+mechanism is proven locally — the PDF fonts appear in the route that includes
+them and are absent from one that does not. The sharp globs themselves cannot
+resolve here, because the packages are not installed on Windows. **Whether
+receipt extraction actually works is a question only production can answer**,
+by extracting one.
+
 ### 2026-08-22 — A native module took the payables actions down with it (branch `claude/approve-a-matched-bill`)
 
 **Approving a bill returned a 500 on the live app**, with nothing but a digest

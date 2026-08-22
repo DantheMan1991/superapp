@@ -13,6 +13,37 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-21 — A pack posts, and core never learns it exists (branch `claude/what-the-shelf-is-worth`)
+
+`inventory` slice 3b. Three changes land in this module and none of them teaches
+it about inventory.
+
+- **`2050 Goods Received Not Invoiced`**, subtype `goods_received`, added to the
+  general chart and backfilled into existing tenants by `0178` — `0151`'s shape
+  exactly, guarded on both subtype and code, driven off `accounting_settings`
+  because that is what "uses accounting" means.
+- **`accounting_settings.inventory_treatment`**, defaulting to `none`. Nothing
+  posts until an owner asks for it.
+- **`BS_GROUP_BY_SUBTYPE` gains `goods_received`**, and this one is worth
+  keeping: `bsGroupFor` does NOT error on an unmapped subtype, it falls back to
+  "Other Liabilities" — so a missing entry here is invisible until a client
+  reads their own balance sheet. `isCodableAccount` excludes it too, because
+  hand-coding a bill line to GRNI would clear a balance no receipt created.
+
+**`approveBill` is untouched.** It copies a bill line's account verbatim, so the
+inventory pack sets the line to GRNI when it matches the line to a delivery, and
+the bill path never has to know. The alternative — `approveBill` reading a pack's
+allocation table — would put a Layer 1 industry-blind module in the business of
+reading Layer 2a, which `docs/extension-model.md` forbids in as many words.
+
+**Two live bugs found while mapping the seams**, both in this module's blast
+radius and both silent: an unmapped subtype falling into Other Liabilities as
+above, and `editEntry` being able to rewrite a bill's posted entry from the
+journal screen with no source guard — `assertEntryNotSourceManaged` is called by
+the void action but not the edit path. The second is recorded in
+`docs/modules/inventory.md`'s open items because an allocation has to survive it,
+but it is an accounting-side gap and predates this slice.
+
 ### 2026-08-21 — The pass-through rule that was an observation, and the repair that was also too broad (branch `claude/what-the-shelf-is-worth`)
 
 Two ADRs, design only — no code in this change; the rules land with `inventory`

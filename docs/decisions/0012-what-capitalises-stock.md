@@ -201,7 +201,7 @@ view. If they diverge, one of them is wrong and the invariant says which.
 
 **What it buys.** An accrual set of books where inventory reconciles to the stock
 ledger, a GRNI balance that names the gap between what the business has and what
-it owes, and one mechanism — an appended movement — for every kind of cost
+it owes, and one mechanism — an appended adjustment — for every kind of cost
 correction. The invariants above make "are these two views the same?" a testable
 question instead of a hope.
 

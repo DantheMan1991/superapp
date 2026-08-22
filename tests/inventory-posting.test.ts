@@ -446,7 +446,7 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
       const open = await asOwner((tx) =>
         unbilledReceipts(tx, tenantId, { itemId: item.id }),
       );
-      const { billLineId } = await makeBill(6_500);
+      const { billId, billLineId } = await makeBill(6_500);
       const result = await asOwner((tx) =>
         allocateBillLineToStock(tx, ownerCtx(), {
           billLineId,
@@ -455,6 +455,24 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
         }),
       );
       expect(result.varianceCents).toBe(500);
+
+      // ...and GRNI must still clear. The receipt credited 6,000; the bill
+      // debits its own 6,500. If the extra 500 has nowhere to go it parks in
+      // GRNI forever, and the account stops meaning "received not invoiced".
+      const grniBefore = await netOf(grniAccountId);
+      await asOwner(async (tx) => {
+        const bill = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: bill!.version,
+        });
+      });
+      // The line was split: GRNI takes exactly what the receipt credited, and
+      // the extra 500 went to the variance account instead of parking here.
+      expect((await netOf(grniAccountId)) - grniBefore).toBe(6_000);
     });
 
     it("SPLITS ONE INVOICE ACROSS TWO DELIVERIES by what each was worth", async () => {

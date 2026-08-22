@@ -541,6 +541,7 @@ export async function allocateBillLineToStock(
   );
 
   const grniAccountId = await resolveGrniAccount(tx, ctx.tenantId);
+  const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);
 
   for (let i = 0; i < shares.length; i += 1) {
     const { match, receiptShare } = shares[i];
@@ -557,11 +558,31 @@ export async function allocateBillLineToStock(
       .onConflictDoNothing();
   }
 
-  // Point the line at GRNI. `approveBill` copies a line's account verbatim, so
-  // this is the whole of the integration with the bill path.
+  // Positive: the invoice asks for more than the tickets said.
+  const varianceCents = input.invoiceCostCents - receiptTotal;
+
+  /**
+   * **THE LINE IS SPLIT SO THAT GRNI CLEARS EXACTLY.**
+   *
+   * `approveBill` posts each bill line to its own account at its own amount, so
+   * a single line for the invoice total would debit GRNI 6,500 against the
+   * 6,000 the receipt credited — and the 500 would sit in GRNI forever, where it
+   * means neither "received not invoiced" nor anything else. That is not a
+   * rounding difference; it is the price variance with nowhere to go, and ADR
+   * 0012 §A.5 says it lands in an account rather than being absorbed.
+   *
+   * So the matched line carries exactly what the receipts credited, and a
+   * sibling line carries the difference. AP is unaffected — the two still sum
+   * to the invoice — and the entry `approveBill` builds becomes
+   * `Dr GRNI 6,000 / Dr Variance 500 / Cr AP 6,500`.
+   *
+   * Found by a test that asserted GRNI clears. The test before it asserted only
+   * that the variance was CALCULATED, which it was, and which is not the same
+   * as it being recorded.
+   */
   await tx
     .update(schema.billLines)
-    .set({ accountId: grniAccountId })
+    .set({ accountId: grniAccountId, amountCents: receiptTotal })
     .where(
       and(
         eq(schema.billLines.tenantId, ctx.tenantId),
@@ -569,11 +590,31 @@ export async function allocateBillLineToStock(
       ),
     );
 
-  return {
-    allocations: shares.length,
-    // Positive: the invoice asks for more than the tickets said.
-    varianceCents: input.invoiceCostCents - receiptTotal,
-  };
+  if (varianceCents !== 0) {
+    const siblings = await tx
+      .select({ lineNo: schema.billLines.lineNo })
+      .from(schema.billLines)
+      .where(
+        and(
+          eq(schema.billLines.tenantId, ctx.tenantId),
+          eq(schema.billLines.billId, line.billId),
+        ),
+      );
+    const nextLineNo =
+      siblings.reduce((max, r) => Math.max(max, r.lineNo), 0) + 1;
+    // A NEGATIVE line is legal and is the cheaper-than-quoted case: the schema
+    // calls it a credit line, and it credits the variance account instead.
+    await tx.insert(schema.billLines).values({
+      tenantId: ctx.tenantId,
+      billId: line.billId,
+      lineNo: nextLineNo,
+      description: `Price difference against delivery — ${line.description}`,
+      amountCents: varianceCents,
+      accountId: accounts.varianceAccountId,
+    });
+  }
+
+  return { allocations: shares.length, varianceCents };
 }
 
 /**

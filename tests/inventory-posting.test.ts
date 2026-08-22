@@ -8,8 +8,10 @@ import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
   adjustStock,
   createItem,
+  createLot,
   issueStock,
   receiveStock,
+  recordMovement,
   transferStock,
   type InventoryCtx,
 } from "../src/packs/inventory/ops";
@@ -107,6 +109,10 @@ d("inventory posting", () => {
           lineNo: 1,
           description: "Feed",
           amountCents,
+          // `approveBill` refuses an uncoded line. Matching re-codes it to
+          // GRNI; a bill approved WITHOUT matching keeps this, which is the
+          // bill-first ordering.
+          accountId: cogsAccountId,
         })
         .returning();
       return { billId: bill[0].id, billLineId: line[0].id };
@@ -368,7 +374,7 @@ d("inventory posting", () => {
       );
       expect(entries).toHaveLength(1);
       expect(entries[0].source).toBe("inventory_receipt");
-      expect(entries[0].idempotencyKey).toBe(`inventory:receipt:${movement.id}`);
+      expect(entries[0].idempotencyKey).toBe(`inventory:inventory_receipt:${movement.id}`);
     });
   });
 
@@ -578,6 +584,222 @@ it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
           { role: "staff", userId: STAFF },
         ),
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+it("A MADE THING CREDITS CONSUMPTION, NOT GRNI", async () => {
+      /**
+       * The worst defect this slice had, and two independent reviewers found it
+       * separately. A production run lands its outputs through `receiveStock`,
+       * so every completed run used to mint a payable no supplier would ever
+       * invoice — and because the run's inputs had already been charged to
+       * consumption on the way in, the same pot of cost hit the P&L twice.
+       *
+       * A transformation does not change what the business owes anybody. Inputs
+       * debit consumption on the way in, the output credits the same account on
+       * the way out, and the run nets to nothing on the P&L.
+       */
+      const item = await newItem("Made here");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: "RUN-1",
+          source: "produced",
+        }),
+      );
+      const grniBefore = await netOf(grniAccountId);
+      const cogsBefore = await netOf(cogsAccountId);
+
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 100,
+          costCents: 20_000,
+          occurredOn: "2026-12-01",
+        }),
+      );
+
+      // No phantom payable...
+      expect(await netOf(grniAccountId)).toBe(grniBefore);
+      // ...and the cost comes back OUT of consumption, where the inputs put it.
+      expect((await netOf(cogsAccountId)) - cogsBefore).toBe(-20_000);
+      expect(await netOf(inventoryAccountId)).toBeGreaterThan(0);
+    });
+
+    it("POSTS FOR A COSTED MOVEMENT WRITTEN STRAIGHT THROUGH recordMovement", async () => {
+      /**
+       * `livestock`'s `removeHead` does exactly this when a pen is processed:
+       * a negative quantity carrying the pen's cost. Posting used to hang off
+       * three named ops, so that cost left the lot and never left `1300`, and
+       * the meat it became was capitalised on top of it.
+       */
+      const item = await newItem("Straight through");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 50,
+          costCents: 10_000,
+          occurredOn: "2026-12-05",
+        }),
+      );
+      const invBefore = await netOf(inventoryAccountId);
+      await asOwner((tx) =>
+        recordMovement(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: -20,
+          movementKind: "processed",
+          occurredOn: "2026-12-06",
+          costCents: 4_000,
+        }),
+      );
+      expect((await netOf(inventoryAccountId)) - invBefore).toBe(-4_000);
+    });
+
+    it("REFUSES TO MATCH A BILL THAT IS ALREADY APPROVED", async () => {
+      /**
+       * Matching rewrites the line's account and amount, and `approveBill`
+       * builds its entry FROM those lines — so matching afterwards changes what
+       * the bill says without changing what was posted, and the delivery ends
+       * up both expensed and capitalised.
+       */
+      const item = await newItem("Late match");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 1_000,
+          occurredOn: "2026-12-10",
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(1_000);
+      await asOwner(async (tx) => {
+        const b = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        // Approve it BEFORE matching, which is the bill-first ordering.
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: b!.version,
+        });
+      });
+      await expect(
+        asOwner((tx) =>
+          allocateBillLineToStock(tx, ownerCtx(), {
+            billLineId,
+            invoiceCostCents: 1_000,
+            matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "BILL_POSTED" });
+    });
+
+    it("IS IDEMPOTENT — matching twice does not add a second variance line", async () => {
+      /**
+       * The allocation was conflict-protected and the variance line was not, so
+       * a double-click appended a second one and inflated both AP and the
+       * expense with no error anywhere.
+       */
+      const item = await newItem("Double matched");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 1_000,
+          occurredOn: "2026-12-15",
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(1_200);
+      const match = {
+        billLineId,
+        invoiceCostCents: 1_200,
+        matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+      };
+      await asOwner((tx) => allocateBillLineToStock(tx, ownerCtx(), match));
+      await asOwner((tx) => allocateBillLineToStock(tx, ownerCtx(), match));
+
+      const lines = await asOwner((tx) =>
+        tx.select().from(schema.billLines).where(eq(schema.billLines.billId, billId)),
+      );
+      // One matched line and exactly ONE variance line.
+      expect(lines).toHaveLength(2);
+      expect(lines.reduce((sum, l) => sum + l.amountCents, 0)).toBe(1_200);
+    });
+
+    it("ACCUMULATES across two matches on one line rather than overwriting", async () => {
+      /**
+       * One invoice covering two deliveries, matched one at a time — which the
+       * per-pair unique index explicitly anticipates. The line used to be
+       * overwritten with the second call's total, stranding the first
+       * delivery's GRNI credit forever.
+       */
+      const item = await newItem("Two calls");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 3_000,
+          occurredOn: "2026-12-20",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2026-12-21",
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(9_000);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceCostCents: 3_000,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceCostCents: 6_000,
+          matches: [{ movementId: open[1].movementId, quantityMatched: 10 }],
+        }),
+      );
+      const line = await asOwner((tx) =>
+        tx.query.billLines.findFirst({ where: eq(schema.billLines.id, billLineId) }),
+      );
+      // BOTH deliveries, not just the last one.
+      expect(line!.amountCents).toBe(9_000);
+      void billId;
+    });
+
+    it("WILL NOT MATCH A DELIVERY ENTERED AT ZERO", async () => {
+      /**
+       * A receipt entered at 0 credited nothing to GRNI, so there is nothing to
+       * clear against it. Listing it let a whole invoice land in the variance
+       * account as a "price difference" while inventory never moved.
+       */
+      const item = await newItem("Free delivery");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 0,
+          occurredOn: "2026-12-28",
+        }),
+      );
+      expect(
+        await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
+      ).toHaveLength(0);
     });
 
     it("lists only receipts that credited GRNI and still have room", async () => {

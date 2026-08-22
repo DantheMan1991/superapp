@@ -71,6 +71,8 @@ function toResult(err: unknown): { error: string } {
       // whole point of refusing instead of guessing is that somebody can act.
       case "LEDGER_ACCOUNTS":
         return { error: err.message };
+      case "BILL_POSTED":
+        return { error: err.message };
       case "INVALID_REASON":
         return { error: "Use lowercase letters, numbers and underscores." };
       // Both are written for a person where they are thrown, and both are about

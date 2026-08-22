@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { getDefaultEntityId, postEntry, type LedgerCtx } from "@/modules/accounting/core";
 import { allowsWrite } from "@/lib/packs/authorize";
@@ -208,130 +208,141 @@ function ledgerCtx(ctx: InventoryCtx): LedgerCtx {
   return { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role };
 }
 
+
 /**
- * **ONE MOVEMENT, ONE ENTRY, FOREVER.**
+ * Movement kinds that NEVER post, whatever they carry.
  *
- * The idempotency key is the movement's own id, so a retried write, a replayed
- * action or a double-submitted form lands exactly once — the same property
- * `retail`'s till gets from its `clientRef`, obtained here for free because a
- * movement already has an identity by the time it can be posted.
+ * They move stock (and its cost) WITHIN inventory, so the entry would be
+ * `Dr 1300 / Cr 1300` — a row that says nothing and balances. ADR 0012 §A.3.
  */
-function movementKey(kind: string, movementId: string): string {
-  return `inventory:${kind}:${movementId}`;
-}
+const NEVER_POST = new Set([
+  "transfer_in",
+  "transfer_out",
+  "split_in",
+  "split_out",
+  "merge_in",
+  "merge_out",
+  "placement",
+]);
 
 export interface PostMovementInput {
   movementId: string;
-  /** `receipt`, `issue` or `adjustment`. Decides which pair of accounts. */
-  kind: "receipt" | "issue" | "adjustment";
-  occurredOn: string;
+  movementKind: string;
+  /** Signed exactly as the movement is: positive in, negative out. */
+  quantity: number;
+  /** The movement's own cost. Null or zero posts nothing. */
+  costCents: number | null;
   /**
-   * Signed, and the sign only matters for an adjustment: POSITIVE is stock
-   * leaving (a loss — `Dr variance / Cr inventory`), NEGATIVE is stock arriving.
+   * Where the stock came from — the LOT's `source`, or null for lot-less stock.
    *
-   * A gain does not occur today and that is deliberate rather than unhandled:
-   * `adjustStock` stamps a negative adjustment at the average and a positive one
-   * at NULL, because stock that turns up was never bought. A null cost posts
-   * nothing, so the gain branch is unreachable until something starts costing
-   * found stock — at which point it already works.
+   * **THIS DECIDES THE CREDIT SIDE OF A RECEIPT, and getting it from the
+   * movement kind instead was a real bug.** Every receipt used to credit GRNI,
+   * including stock the business MADE: a production run lands its outputs
+   * through `receiveStock`, so completing one minted a payable no supplier
+   * would ever invoice — and because the run's inputs had already been charged
+   * to consumption on the way in, the same pot of cost hit the P&L twice.
    */
-  costCents: number;
-  /** Named in the entry memo, so the ledger says what moved. */
+  lotSource: string | null;
+  occurredOn: string;
   itemId: string;
-  /** Appended to the memo when there is one — "(Kill day 2026-08-20)". */
   lotCode?: string | null;
 }
 
 const MEMO_VERB = {
-  receipt: "Stock received",
-  issue: "Stock issued",
+  in: "Stock received",
+  out: "Stock issued",
   adjustment: "Stock adjusted",
 } as const;
 
 /**
  * Post one stock movement to the ledger, if this tenant posts at all.
  *
- * | Movement | Debit | Credit |
+ * | What moved | Debit | Credit |
  * | --- | --- | --- |
- * | receipt | Inventory | Goods Received Not Invoiced |
- * | issue | the consumption account | Inventory |
- * | adjustment (loss) | the variance account | Inventory |
- * | adjustment (gain) | Inventory | the variance account |
+ * | bought stock in | Inventory | Goods Received Not Invoiced |
+ * | made or raised stock in | Inventory | the consumption account |
+ * | stock out | the consumption account | Inventory |
+ * | stock out, adjustment | the variance account | Inventory |
  *
- * **TRANSFERS, SPLITS AND MERGES ARE ABSENT ON PURPOSE**, not forgotten: they
- * move cost within one account, so the entry would be `Dr 1300 / Cr 1300` — a
- * row that says nothing and balances. ADR 0012 §A.3.
+ * **A MADE THING CREDITS CONSUMPTION, NOT GRNI**, and that is what makes a
+ * production run net to nothing on the P&L: its inputs were debited to
+ * consumption on the way in, and its output credits the same account on the way
+ * out. Total inventory value is unchanged by a transformation, which is the
+ * truth a run represents. Crediting GRNI instead would accrue a liability for
+ * goods nobody sold the business.
  *
  * Returns `null` when nothing was posted, which is the ordinary case: a tenant
- * on `none`, or a movement with no cost. **A movement with no cost posts
- * NOTHING rather than posting zero** — the distinction `carriedValue` exists to
- * keep, arriving in the ledger.
+ * on `none`, a kind that never posts, or a movement with no cost. **A movement
+ * with no cost posts NOTHING rather than posting zero** — the distinction
+ * `carriedValue` exists to keep, arriving in the ledger.
  */
 export async function postMovement(
   tx: Tx,
   ctx: InventoryCtx,
   input: PostMovementInput,
 ): Promise<{ entryId: string } | null> {
-  if (input.costCents === 0) return null;
+  if (!input.costCents) return null;
+  if (NEVER_POST.has(input.movementKind)) return null;
   const treatment = await inventoryTreatmentOf(tx, ctx.tenantId);
   if (treatment === "none") return null;
 
   const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);
   const entityId = await getDefaultEntityId(tx, ctx.tenantId);
-  // Read AFTER the `none` check, so a tenant that does not post pays for
-  // nothing. A ledger line nobody can read back to a thing is a ledger line
-  // somebody will ask about in a year, so the name is worth one lookup.
   const item = await tx.query.inventoryItems.findFirst({
     where: eq(schema.inventoryItems.id, input.itemId),
     columns: { name: true },
   });
-  const memo =
-    `${MEMO_VERB[input.kind]} — ${item?.name ?? "stock"}` +
-    (input.lotCode ? ` (${input.lotCode})` : "");
+
+  const incoming = input.quantity > 0;
+  const bought = input.lotSource === null || input.lotSource === "purchased";
+  const cost = input.costCents;
 
   // Positive = debit, negative = credit — the ledger's own convention.
-  const lines =
-    input.kind === "receipt"
-      ? [
-          { accountId: accounts.inventoryAccountId, amountCents: input.costCents },
-          {
-            accountId: await resolveGrniAccount(tx, ctx.tenantId),
-            amountCents: -input.costCents,
-          },
-        ]
-      : input.kind === "issue"
-        ? [
-            { accountId: accounts.cogsAccountId, amountCents: input.costCents },
-            {
-              accountId: accounts.inventoryAccountId,
-              amountCents: -input.costCents,
-            },
-          ]
-        : [
-            { accountId: accounts.varianceAccountId, amountCents: input.costCents },
-            {
-              accountId: accounts.inventoryAccountId,
-              amountCents: -input.costCents,
-            },
-          ];
+  const lines = incoming
+    ? [
+        { accountId: accounts.inventoryAccountId, amountCents: cost },
+        {
+          accountId: bought
+            ? await resolveGrniAccount(tx, ctx.tenantId)
+            : accounts.cogsAccountId,
+          amountCents: -cost,
+        },
+      ]
+    : [
+        {
+          accountId:
+            input.movementKind === "adjustment"
+              ? accounts.varianceAccountId
+              : accounts.cogsAccountId,
+          amountCents: cost,
+        },
+        { accountId: accounts.inventoryAccountId, amountCents: -cost },
+      ];
 
-  const source =
-    input.kind === "receipt"
-      ? ("inventory_receipt" as const)
-      : input.kind === "issue"
-        ? ("inventory_issue" as const)
-        : ("inventory_adjustment" as const);
+  const source = incoming
+    ? ("inventory_receipt" as const)
+    : input.movementKind === "adjustment"
+      ? ("inventory_adjustment" as const)
+      : ("inventory_issue" as const);
+
+  const verb = incoming
+    ? MEMO_VERB.in
+    : input.movementKind === "adjustment"
+      ? MEMO_VERB.adjustment
+      : MEMO_VERB.out;
 
   const { entry } = await postEntry(tx, ledgerCtx(ctx), {
     entityId,
     status: "posted",
     entryDate: input.occurredOn,
-    memo,
+    memo:
+      `${verb} — ${item?.name ?? "stock"}` +
+      (input.lotCode ? ` (${input.lotCode})` : ""),
     // ADR 0011: this source posts without the owner check, because the
     // authorisation happened where the stock moved.
     source,
     sourceId: input.movementId,
-    idempotencyKey: movementKey(input.kind, input.movementId),
+    idempotencyKey: `inventory:${source}:${input.movementId}`,
     lines,
   });
   return { entryId: entry.id };
@@ -370,8 +381,27 @@ export interface UnbilledReceipt {
 export async function unbilledReceipts(
   tx: Tx,
   tenantId: string,
-  opts: { itemId?: string; limit?: number } = {},
+  opts: {
+    itemId?: string;
+    limit?: number;
+    movementIds?: string[];
+    /**
+     * Ignore what THIS bill line already claims.
+     *
+     * Re-matching the same pair is a CORRECTION to the first match, which the
+     * per-pair unique index exists to allow. Without this the receipt reads as
+     * fully matched by its own prior allocation, so the correction is refused
+     * with "already fully invoiced" — about a delivery the caller is in the
+     * middle of re-stating.
+     */
+    exceptBillLineId?: string;
+  } = {},
 ): Promise<UnbilledReceipt[]> {
+  // Built as SQL rather than passed as a null parameter: Postgres cannot infer
+  // the type of a bare null here and refuses the whole query with 42P18.
+  const exceptLine = opts.exceptBillLineId
+    ? sql`and a.bill_line_id <> ${opts.exceptBillLineId}::uuid`
+    : sql``;
   const rows = await tx
     .select({
       movementId: schema.inventoryMovements.id,
@@ -387,11 +417,13 @@ export async function unbilledReceipts(
         select sum(a.quantity_matched) from bill_line_stock_allocations a
          where a.tenant_id = ${schema.inventoryMovements.tenantId}
            and a.inventory_movement_id = ${schema.inventoryMovements.id}
+           ${exceptLine}
       ), 0)`,
       matchedCostCents: sql<string>`coalesce((
         select sum(a.receipt_cost_cents) from bill_line_stock_allocations a
          where a.tenant_id = ${schema.inventoryMovements.tenantId}
            and a.inventory_movement_id = ${schema.inventoryMovements.id}
+           ${exceptLine}
       ), 0)`,
     })
     .from(schema.inventoryMovements)
@@ -413,9 +445,18 @@ export async function unbilledReceipts(
       and(
         eq(schema.inventoryMovements.tenantId, tenantId),
         eq(schema.inventoryMovements.movementKind, "receipt"),
-        isNotNull(schema.inventoryMovements.costCents),
+        // **> 0, not "is not null".** A receipt entered at zero credited
+        // nothing to GRNI — `postMovement` declines it on exactly that value —
+        // so there is nothing for a bill to clear against it. Listing it let a
+        // whole invoice land in the variance account as a "price difference"
+        // while `1300` never moved. `isNotNull` was the bug; the doc comment
+        // above already said `> 0`.
+        gt(schema.inventoryMovements.costCents, 0),
         opts.itemId
           ? eq(schema.inventoryMovements.itemId, opts.itemId)
+          : undefined,
+        opts.movementIds
+          ? inArray(schema.inventoryMovements.id, opts.movementIds)
           : undefined,
       ),
     )
@@ -500,10 +541,40 @@ export async function allocateBillLineToStock(
   });
   if (!line) throw new InventoryError("NOT_FOUND", "bill line");
 
-  const open = await unbilledReceipts(tx, ctx.tenantId);
+  /**
+   * **THE BILL MUST STILL BE A DRAFT.**
+   *
+   * Matching rewrites the line's account and amount, and `approveBill` builds
+   * its entry FROM those lines — so matching an already-approved bill changes
+   * what the bill says without changing what was posted. The delivery ends up
+   * both expensed (by the original coding) and capitalised (by the receipt),
+   * which is precisely the "both capitalise" failure ADR 0012 opens with, and
+   * the bill's own lines stop reconciling to its own journal entry.
+   */
+  const bill = await tx.query.bills.findFirst({
+    where: and(
+      eq(schema.bills.tenantId, ctx.tenantId),
+      eq(schema.bills.id, line.billId),
+    ),
+    columns: { status: true },
+  });
+  if (!bill) throw new InventoryError("NOT_FOUND", "bill");
+  if (bill.status !== "draft" && bill.status !== "awaiting_approval") {
+    throw new InventoryError(
+      "BILL_POSTED",
+      "that bill is already approved — match the delivery before approving it",
+    );
+  }
+
+  // Only the receipts this call names. Reusing the screen's paginated query
+  // meant that past its limit the newest deliveries were invisible and the
+  // caller got a false "already fully invoiced".
+  const open = await unbilledReceipts(tx, ctx.tenantId, {
+    movementIds: input.matches.map((m) => m.movementId),
+    exceptBillLineId: input.billLineId,
+  });
   const byId = new Map(open.map((r) => [r.movementId, r]));
 
-  let receiptTotal = 0;
   for (const match of input.matches) {
     const receipt = byId.get(match.movementId);
     if (!receipt) {
@@ -521,10 +592,6 @@ export async function allocateBillLineToStock(
         `that delivery only has ${receipt.openQuantity} ${receipt.unit} left to invoice`,
       );
     }
-    // The receipt's own cost for the matched share, at its own rate.
-    receiptTotal += Math.round(
-      (receipt.costCents * match.quantityMatched) / receipt.quantity,
-    );
   }
 
   // Largest remainder, so the parts sum to the invoice exactly.
@@ -543,6 +610,13 @@ export async function allocateBillLineToStock(
   const grniAccountId = await resolveGrniAccount(tx, ctx.tenantId);
   const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);
 
+  /**
+   * **UPSERT, NOT insert-or-ignore.** A second match against the same pair is a
+   * correction to the first — the schema comment says so — and
+   * `onConflictDoNothing` made it a silent no-op that still reported success
+   * and still re-pointed the line. Re-matching part of a delivery left the
+   * allocations claiming the old quantity while the line claimed the new one.
+   */
   for (let i = 0; i < shares.length; i += 1) {
     const { match, receiptShare } = shares[i];
     await tx
@@ -555,11 +629,45 @@ export async function allocateBillLineToStock(
         receiptCostCents: receiptShare,
         invoiceCostCents: allocated[i],
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: [
+          schema.billLineStockAllocations.tenantId,
+          schema.billLineStockAllocations.billLineId,
+          schema.billLineStockAllocations.inventoryMovementId,
+        ],
+        set: {
+          quantityMatched: match.quantityMatched,
+          receiptCostCents: receiptShare,
+          invoiceCostCents: allocated[i],
+        },
+      });
   }
 
-  // Positive: the invoice asks for more than the tickets said.
-  const varianceCents = input.invoiceCostCents - receiptTotal;
+  /**
+   * **THE LINE IS REBUILT FROM EVERY ALLOCATION ON IT, not from this call.**
+   *
+   * Matching one line against two deliveries in two calls used to OVERWRITE the
+   * line with the second call's total, stranding the first delivery's GRNI
+   * credit forever while the allocation table said both were invoiced.
+   */
+  const onLine = await tx
+    .select({
+      receiptCostCents: schema.billLineStockAllocations.receiptCostCents,
+      invoiceCostCents: schema.billLineStockAllocations.invoiceCostCents,
+    })
+    .from(schema.billLineStockAllocations)
+    .where(
+      and(
+        eq(schema.billLineStockAllocations.tenantId, ctx.tenantId),
+        eq(schema.billLineStockAllocations.billLineId, input.billLineId),
+      ),
+    );
+  const lineReceiptTotal = onLine.reduce((sum, r) => sum + r.receiptCostCents, 0);
+  const lineInvoiceTotal = onLine.reduce((sum, r) => sum + r.invoiceCostCents, 0);
+
+  // Positive: the invoice asks for more than the tickets said. Computed from
+  // every allocation on the line, so a second match adds to the first.
+  const varianceCents = lineInvoiceTotal - lineReceiptTotal;
 
   /**
    * **THE LINE IS SPLIT SO THAT GRNI CLEARS EXACTLY.**
@@ -582,11 +690,28 @@ export async function allocateBillLineToStock(
    */
   await tx
     .update(schema.billLines)
-    .set({ accountId: grniAccountId, amountCents: receiptTotal })
+    .set({ accountId: grniAccountId, amountCents: lineReceiptTotal })
     .where(
       and(
         eq(schema.billLines.tenantId, ctx.tenantId),
         eq(schema.billLines.id, input.billLineId),
+      ),
+    );
+
+  /**
+   * The variance line is REPLACED, never appended twice. A double-submitted
+   * match used to add a second one, inflating both AP and the expense by the
+   * variance with no error anywhere — the allocation was conflict-protected and
+   * this was not.
+   */
+  const varianceDescription = `Price difference against delivery — ${line.description}`;
+  await tx
+    .delete(schema.billLines)
+    .where(
+      and(
+        eq(schema.billLines.tenantId, ctx.tenantId),
+        eq(schema.billLines.billId, line.billId),
+        eq(schema.billLines.description, varianceDescription),
       ),
     );
 
@@ -608,7 +733,7 @@ export async function allocateBillLineToStock(
       tenantId: ctx.tenantId,
       billId: line.billId,
       lineNo: nextLineNo,
-      description: `Price difference against delivery — ${line.description}`,
+      description: varianceDescription,
       amountCents: varianceCents,
       accountId: accounts.varianceAccountId,
     });

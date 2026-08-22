@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { withTenant } from "@/db";
+import { eq } from "drizzle-orm";
+import { withTenant, schema } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
@@ -22,6 +23,7 @@ import {
   getProfitAndLoss,
   postDraft,
   postEntry,
+  requireOwnerRole,
   residualIfConsolidated,
   residualNote,
   resolveReportEntity,
@@ -80,6 +82,50 @@ function fail(err: unknown): { error: string; accountId?: string } {
     error: friendlyMessage(err),
     ...(typeof accountId === "string" ? { accountId } : {}),
   };
+}
+
+/**
+ * Set the basis every report opens on.
+ *
+ * **A PRESENTATION PREFERENCE, AND THE GUARDS HERE ARE ABOUT NOT LETTING IT
+ * BECOME ANYTHING MORE.** It never reaches `postEntry`, never changes what is
+ * stored and never decides what a pack posts — the ledger is accrual for every
+ * tenant whatever this says ([ADR 0007](../../docs/decisions/0007-cash-basis-reporting.md)).
+ *
+ * Owner-only all the same. It changes the number every other person in the
+ * business sees first, and the two bases give different and both-correct profit
+ * figures, so "which one loads by default" is a decision rather than a display
+ * tweak. Audited for the same reason.
+ */
+export async function setDefaultBasis(
+  input: unknown,
+): Promise<ActionResult<{ basis: "accrual" | "cash" }>> {
+  const parsed = z
+    .object({ basis: z.enum(["accrual", "cash"]) })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const ctx = await gate();
+    requireOwnerRole(ctx);
+    await withTenant(ctx.tenantId, async (tx) => {
+      await tx
+        .update(schema.accountingSettings)
+        .set({ defaultBasis: parsed.data.basis, updatedAt: new Date() })
+        .where(eq(schema.accountingSettings.tenantId, ctx.tenantId));
+      await logAuditInTx(tx, {
+        action: "ledger.default_basis_set",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "accounting_settings",
+        targetId: ctx.tenantId,
+        meta: { basis: parsed.data.basis },
+      });
+    });
+    revalidatePath("/dashboard/m/accounting", "layout");
+    return { ok: true, data: { basis: parsed.data.basis } };
+  } catch (err) {
+    return fail(err);
+  }
 }
 
 function revalidate(): void {

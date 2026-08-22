@@ -69,16 +69,7 @@ export {
   type AffiliateBalance,
   type IntercompanyPair,
 } from "./intercompany";
-export {
-  getBalances,
-  getTrialBalance,
-  ledgerIsBalanced,
-  ledgerIsBalancedPerEntity,
-  type AccountingBasis,
-  type BalanceRow,
-  type TrialBalance,
-  type TrialBalanceRow,
-} from "./balances";
+export { getBalances, getTrialBalance, ledgerIsBalanced, ledgerIsBalancedPerEntity, resolveBasis, type AccountingBasis, type BalanceRow, type TrialBalance, type TrialBalanceRow } from "./balances";
 export {
   MAX_COA_DEPTH,
   NORMAL_BALANCE,

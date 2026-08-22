@@ -24,14 +24,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { parties } from "./parties";
-import {
-  accounts,
-  dimensionMembers,
-  entities,
-  entryEditPolicy,
-  journalEntries,
-  journalLines,
-} from "./ledger";
+import { accountingBasis, accounts, dimensionMembers, entities, entryEditPolicy, journalEntries, journalLines } from "./ledger";
 import { billLines, vendors } from "./payables";
 
 export const invoiceStatus = pgEnum("invoice_status", [
@@ -777,6 +770,18 @@ export const accountingSettings = pgTable(
     entryEditPolicy: entryEditPolicy("entry_edit_policy")
       .notNull()
       .default("standard"),
+    /**
+     * Which basis a report opens on when the URL does not say.
+     *
+     * **DEFAULTS TO `accrual`, so nothing that exists today changes** — the same
+     * property ADR 0007 preserved when it added the lens at all. A tenant that
+     * files on cash sets it once instead of re-picking on every report.
+     *
+     * This is a PRESENTATION preference and nothing else. It must never reach
+     * `postEntry`, alter what is stored, or decide what a pack posts: the ledger
+     * is accrual for every tenant regardless of what this says.
+     */
+    defaultBasis: accountingBasis("default_basis").notNull().default("accrual"),
     // `bookkeeping_timezone` lived here from 0007 until 0088. The business
     // day is `tenants.timezone` now — one clock, readable by every module.
     /**

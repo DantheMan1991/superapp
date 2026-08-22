@@ -3,6 +3,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant } from "@/db";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/app/page-header";
+import { DefaultBasisNote } from "@/modules/accounting/components/default-basis-note";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
 import { ReportTable } from "@/modules/accounting/components/report-table";
@@ -12,6 +13,7 @@ import {
   getBalanceSheet,
   getSettings,
   residualIfConsolidated,
+  resolveBasis,
 } from "@/modules/accounting/core";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { isValidIsoDate, todayInTimezone } from "@/modules/accounting/lib/money";
@@ -33,12 +35,11 @@ export default async function BalanceSheetPage({
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
   const compare = sp.compare === "prev-year" ? sp.compare : undefined;
-  // Anything that is not exactly "cash" is accrual: an unreadable query string
-  // must never silently produce the other basis.
-  const basis = sp.basis === "cash" ? "cash" : "accrual";
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
+    // See the P&L page: the URL wins, otherwise the basis they file on.
+    const basis = resolveBasis(sp.basis, settings.defaultBasis);
     const today = todayInTimezone(ctx.tenant.timezone);
     const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
     // OFFERED here: the balance sheet is where a group's affiliate balances
@@ -59,10 +60,10 @@ export default async function BalanceSheetPage({
     const residual = await residualIfConsolidated(tx, ctx.tenant.id, entityView.scope, {
       asOf,
     });
-    return { settings, today, asOf, report, entityView, residual };
+    return { settings, today, asOf, report, entityView, residual, basis };
   });
 
-  const { report } = data;
+  const { report, basis } = data;
 
   return (
     <div className="space-y-6">
@@ -97,6 +98,12 @@ export default async function BalanceSheetPage({
             />
           </>
         }
+      />
+
+      <DefaultBasisNote
+        basis={basis}
+        defaultBasis={data.settings.defaultBasis}
+        isOwner={ctx.role === "owner"}
       />
 
       <div className="print:hidden">

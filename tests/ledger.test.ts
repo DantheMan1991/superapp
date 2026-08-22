@@ -10,12 +10,14 @@ import {
   getBalances,
   getDefaultEntityId,
   getLedgerIntegrity,
+  getSettings,
   getTrialBalance,
   type LedgerCtx,
   LedgerError,
   ledgerIsBalanced,
   postDraft,
   postEntry,
+  resolveBasis,
   reverseEntry,
   setClosedThrough,
   updateAccount,
@@ -285,6 +287,111 @@ d("core ledger platform", () => {
         }),
       );
       expect(entry.createdByClerkUserId).toBe("staff-user");
+    });
+  });
+
+// ------------------------------------------------- the basis they file on
+
+  describe("resolveBasis", () => {
+    /**
+     * Pure, and the whole of the default-basis feature's decision-making. It
+     * replaced `sp.basis === "cash" ? "cash" : "accrual"`, repeated in three
+     * report pages — a hardcoded literal that opened every report on accrual,
+     * including for a business that files on cash.
+     */
+    it("takes the URL over the default, IN BOTH DIRECTIONS", () => {
+      /**
+       * The asymmetric version of this is the bug worth guarding: if an
+       * explicit `?basis=accrual` fell through to a cash default, a report
+       * somebody sent their accountant would change meaning depending on who
+       * opened it. A report URL is exactly the thing people paste to eachother.
+       */
+      expect(resolveBasis("cash", "accrual")).toBe("cash");
+      expect(resolveBasis("accrual", "cash")).toBe("accrual");
+    });
+
+    it("falls to the tenant default when the URL says nothing", () => {
+      expect(resolveBasis(undefined, "cash")).toBe("cash");
+      expect(resolveBasis(undefined, "accrual")).toBe("accrual");
+      expect(resolveBasis(null, "cash")).toBe("cash");
+      expect(resolveBasis("", "cash")).toBe("cash");
+    });
+
+    it("FALLS TO THE TENANT DEFAULT ON GARBAGE, not to accrual", () => {
+      /**
+       * The rule this replaces said an unreadable query string "must never
+       * silently produce the other basis". That intent is kept and its
+       * reference point corrected: the other basis means other than the one
+       * this business files on.
+       */
+      expect(resolveBasis("CASH", "cash")).toBe("cash");
+      expect(resolveBasis("nonsense", "cash")).toBe("cash");
+      expect(resolveBasis("nonsense", "accrual")).toBe("accrual");
+    });
+  });
+
+  describe("default basis setting", () => {
+    it("is accrual for a freshly provisioned tenant", async () => {
+      // Nothing that exists today changes — the same property ADR 0007
+      // preserved when it added the lens at all.
+      const settings = await withTenant(tenantId, (tx) =>
+        getSettings(tx, tenantId),
+      );
+      expect(settings.defaultBasis).toBe("accrual");
+    });
+
+    it("stores cash and reads it back", async () => {
+      await withSystem((tx) =>
+        tx
+          .update(schema.accountingSettings)
+          .set({ defaultBasis: "cash" })
+          .where(eq(schema.accountingSettings.tenantId, tenantId)),
+      );
+      const settings = await withTenant(tenantId, (tx) =>
+        getSettings(tx, tenantId),
+      );
+      expect(settings.defaultBasis).toBe("cash");
+      expect(resolveBasis(undefined, settings.defaultBasis)).toBe("cash");
+    });
+
+    it("CHANGES NOTHING ABOUT WHAT IS POSTED", async () => {
+      /**
+       * The guard that keeps this a presentation preference. The ledger is
+       * accrual for every tenant whatever the setting says — if this ever
+       * starts deciding what gets stored, ADR 0007's single-set-of-books
+       * property is gone.
+       */
+      const accounts = await withTenant(tenantId, (tx) =>
+        tx.select().from(schema.accounts).where(eq(schema.accounts.tenantId, tenantId)),
+      );
+      const exp = accounts.find((a) => a.code === "5000")!.id;
+      const cashAcct = accounts.find((a) => a.accountType === "asset")!.id;
+      const { entry } = await withTenant(tenantId, (tx) =>
+        postEntry(tx, owner, {
+          entityId,
+          status: "posted",
+          entryDate: "2026-05-01",
+          idempotencyKey: `${STAMP}-basis-neutral`,
+          lines: pair(exp, cashAcct, 1_000),
+        }),
+      );
+      expect(entry.status).toBe("posted");
+      // Still readable on BOTH bases, unchanged by the preference.
+      const accrual = await withTenant(tenantId, (tx) =>
+        getBalances(tx, tenantId, {
+          scope: COMBINED,
+          asOf: "2026-05-31",
+          basis: "accrual",
+        }),
+      );
+      expect(accrual.some((r) => r.accountId === exp)).toBe(true);
+
+      await withSystem((tx) =>
+        tx
+          .update(schema.accountingSettings)
+          .set({ defaultBasis: "accrual" })
+          .where(eq(schema.accountingSettings.tenantId, tenantId)),
+      );
     });
   });
 

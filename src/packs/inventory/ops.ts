@@ -46,6 +46,7 @@ import {
   type ValuationMethod,
   type ValuationTotal,
 } from "./core/valuation";
+import { postMovement } from "./ledger-ops";
 
 /**
  * Inventory operations. Every function takes a `Tx` so the caller owns the
@@ -82,7 +83,8 @@ export class InventoryError extends Error {
       | "COUNT_CLOSED"
       | "COUNT_INVALID"
       | "INSUFFICIENT"
-      | "LEDGER_ACCOUNTS",
+      | "LEDGER_ACCOUNTS"
+      | "BILL_POSTED",
     message: string,
   ) {
     super(message);
@@ -486,6 +488,8 @@ export async function recordMovement(
     // reconcile should not carry rows that mean nothing happened.
     throw new InventoryError("ZERO_QUANTITY", "a movement cannot be zero");
   }
+  let lotSource: string | null = null;
+  let lotCode: string | null = null;
   if (input.lotId) {
     const lot = await getLot(tx, ctx.tenantId, input.lotId);
     if (!lot) throw new InventoryError("LOT_INVALID", "that lot does not exist");
@@ -495,6 +499,10 @@ export async function recordMovement(
         "that lot belongs to a different item",
       );
     }
+    // The ledger needs to know whether this stock was BOUGHT or MADE — see
+    // `postMovement`, where it decides the credit side of a receipt.
+    lotSource = lot.source;
+    lotCode = lot.code;
   }
   if (input.issuedToLotId) {
     // The CONSUMING lot is deliberately unconstrained as to item: feed is not
@@ -530,6 +538,31 @@ export async function recordMovement(
       notes: input.notes?.trim() ?? "",
     })
     .returning();
+
+  /**
+   * **THE BOOKS FOLLOW THE SHELF, AND THEY FOLLOW IT FROM HERE.**
+   *
+   * Posting used to hang off `receiveStock`, `issueStock` and `adjustStock`,
+   * which was wrong in a way that only showed up across packs: cost enters and
+   * leaves inventory through more paths than those three. `livestock`'s
+   * `removeHead` writes a costed movement straight through this function when a
+   * pen is processed, so the pen's cost left the lot and never left `1300` —
+   * and the meat it became was capitalised again on top.
+   *
+   * This is the write everything is built from, so it is the only place that
+   * can see every one of them.
+   */
+  await postMovement(tx, ctx, {
+    movementId: rows[0].id,
+    movementKind: kind,
+    quantity,
+    costCents: rows[0].costCents,
+    lotSource,
+    occurredOn: input.occurredOn,
+    itemId: input.itemId,
+    lotCode,
+  });
+
   return rows[0];
 }
 
@@ -1066,6 +1099,7 @@ export async function receiveStock(
     extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
+
   return { movement, lotId };
 }
 
@@ -1117,7 +1151,7 @@ export async function issueStock(
   const rate = await itemCostRate(tx, ctx.tenantId, input.itemId);
   const costCents = issueCostCents(rate, input.quantity);
 
-  return recordMovement(tx, ctx, {
+  const movement = await recordMovement(tx, ctx, {
     itemId: input.itemId,
     lotId: input.lotId ?? null,
     locationAssetId: input.locationAssetId ?? null,
@@ -1130,6 +1164,8 @@ export async function issueStock(
     extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
+
+  return movement;
 }
 
 /**
@@ -1634,7 +1670,7 @@ export async function adjustStock(
     costCents = issueCostCents(rate, quantity);
   }
 
-  return recordMovement(tx, ctx, {
+  const movement = await recordMovement(tx, ctx, {
     itemId: input.itemId,
     lotId: input.lotId ?? null,
     locationAssetId: input.locationAssetId ?? null,
@@ -1646,6 +1682,8 @@ export async function adjustStock(
     extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
+
+  return movement;
 }
 
 /**

@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import {
   grniPosition,
+  postedInventoryEntries,
   inventoryTreatmentOf,
   matchableBillLines,
   unbilledReceipts,
@@ -54,18 +55,19 @@ export default async function InventoryMatchingPage() {
   const data = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [treatment, position, open, lines] = await Promise.all([
+      const [treatment, position, open, lines, posted] = await Promise.all([
         inventoryTreatmentOf(tx, ctx.tenant.id),
         grniPosition(tx, ctx.tenant.id),
         unbilledReceipts(tx, ctx.tenant.id, { limit: 100 }),
         matchableBillLines(tx, ctx.tenant.id),
+        postedInventoryEntries(tx, ctx.tenant.id),
       ]);
-      return { treatment, position, open, lines };
+      return { treatment, position, open, lines, posted };
     },
     { role: ctx.role },
   );
 
-  const { treatment, position, open, lines } = data;
+  const { treatment, position, open, lines, posted } = data;
 
   return (
     <div className="space-y-6">
@@ -83,7 +85,14 @@ export default async function InventoryMatchingPage() {
         }
       />
 
-      <TreatmentControl treatment={treatment} isOwner={isOwner} />
+      <TreatmentControl
+        treatment={treatment}
+        isOwner={isOwner}
+        /* What is already in the books, so the switch can say what turning it
+           off would strand BEFORE somebody clicks it rather than after. */
+        postedEntries={posted.entries}
+        postedSince={posted.firstOn}
+      />
 
       {treatment === "capitalise" && (
         <Card>

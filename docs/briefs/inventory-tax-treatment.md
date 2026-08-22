@@ -1,106 +1,123 @@
-# Inventory: when should the cost become a deduction?
+# Inventory: when should the cost be deducted?
 
-> A brief to hand to an accountant. **Written to be sent, so it does not follow
-> the house documentation style** — plain sentences, no jargon, no internal
-> shorthand. The technical version is
-> [ADR 0013](../decisions/0013-inventory-tax-treatment.md), which is Proposed and
-> should not be Accepted until this comes back answered.
-> Status: `brief` · Scope: `platform` <!-- keep Status on ONE line — /admin/docs parses it -->
+> A template to hand to a client's accountant, one business at a time. **Written
+> to be sent, so it does not follow the house documentation style** — plain
+> sentences, no jargon, no internal shorthand. Fill in the business name and
+> delete any category the business does not hold.
+> Status: `brief` · Scope: `platform`
+>
+> The reasoning behind it is [ADR 0013](../decisions/0013-inventory-tax-treatment.md),
+> which is Proposed and stays that way. **This is not a question the platform
+> answers once.** The setting is per business, so the answer belongs to whoever
+> prepares that business's return. If nobody ever answers it, the software keeps
+> every underlying fact and makes no claim about timing, which is the design and
+> not a fallback.
 
 ---
 
-## What this is
+## Inventory and supplies: when should the cost be deducted?
 
-We've built stock tracking into the bookkeeping software this business runs on.
-It records what was delivered, what it cost, what's still on the shelf and what
-has been used.
+**Business:** _______________________
 
-There's one question we can't answer ourselves. When does the cost of that stock
-become a deduction? We'd rather ask than guess, because a wrong answer here still
-balances and still looks right.
+We've built inventory tracking into the bookkeeping software this business uses.
+It records purchases, quantities received, what they cost, what has been used or
+sold, and what's still on hand.
 
-We need about twenty minutes of your time.
+We need your guidance on when those costs should be deducted for tax. We're
+asking rather than guessing, because a wrong answer here still balances and still
+looks right on every report.
+
+Most of what we need is one table. It's near the end.
 
 ## What the software does today
 
-Two settings, and every business starts on the first one.
+Two things, and every business starts with the first.
 
-**Off.** Stock doesn't reach the books at all. Costs are still tracked, so we can
-always say what a batch cost and what's on hand. Nothing posts to the ledger.
+**Stock does not reach the ledger.** Costs are still tracked, so we can always say
+what a batch cost and what's on hand. Nothing posts.
 
-**On.** Stock is an asset. A delivery is recorded as Inventory, with the amount
-owed sitting in a holding account until the supplier's bill arrives. The bill
-clears that account. The cost reaches the profit and loss when the stock is
-actually used or sold.
+**Stock is an asset.** A delivery is recorded as Inventory, with the amount owed
+sitting in a holding account until the supplier's bill arrives. The bill clears
+that account. The cost reaches the profit and loss when the item is used or sold.
 
-That second one is the only treatment we've built so far. It's also the safest
-one to have running while this is undecided, since it doesn't claim anything
-about timing that we haven't been told.
+The second is the only treatment built so far. We're not calling it the safe
+choice. Doing nothing is still adopting a method, and moving off it later may be
+a formal change rather than a settings edit. What is actually safe is that we
+keep every underlying record, so any timing rule can be applied later.
 
-## The question
+## What we can date
 
-Which of these is right, and are these even the right choices to offer?
+We can attach any of these dates to a purchase, because the system already
+records them:
 
-**1. Stock is an asset. The cost lands when it's used.**
-Built and running. Nothing changes if this is the answer.
+* when the bill was dated
+* when it was paid
+* when the item was used or consumed
+* when it was sold to a customer
+* the later of payment and use
+* the later of payment and sale
 
-**2. The cost lands when the money left.**
-Not built. We'd build it if you tell us it's right. Roughly a week's work, and
-the design is already written.
+We can also keep beginning and ending quantities and values for any period.
 
-**3. The deduction turns on the stock being used, and on it having been paid
-for.**
-Not built, and we've written down that it's missing rather than approximating it.
-It would need us to track payments down to each individual batch, which we don't
-do. If this is the answer for this business, tell us now, because the honest
-position is that the software can't do it yet.
+If the right rule needs a date that isn't on that list, please say so. We'd
+rather add it than approximate it.
 
-We're not asking you to pick from a menu we've decided is complete. If the useful
-cuts are different, or if one of these isn't a real option, that's the most
-valuable thing you can tell us.
+## What we'd like to confirm first
 
-## If the answer is option 2, we need one more thing
+1. The method this business uses for tax, cash or accrual.
+2. Whether it's a small business taxpayer under section 448(c).
+3. What inventory or section 471(c) treatment its returns already show.
+4. Whether adopting anything different would be a change in accounting method
+   needing Form 3115 or a section 481(a) adjustment.
 
-"Put it all to cost of goods sold" produces a report that balances and is no use
-at return time. Feed, seed and veterinary supplies want to be separate lines.
+Point 4 matters to us more than it might seem. We've built the software so a
+treatment cannot be changed casually once it's in use, and we don't want to treat
+a method change as if it were a settings edit.
 
-We can map each kind of item to its own expense account. Every item in the system
-already carries a kind. So we need to know which accounts you want those kinds
-landing in, and we'll wire it up once.
+## The table we need back
 
-## Two things we're not assuming
+For each category the business holds, when does the cost become deductible?
 
-**Cash or accrual doesn't decide this.** We had it the other way round in an
-early draft and it was wrong. Our reading is that two businesses both correctly
-on the cash method can owe different answers here, which is why this is a setting
-of its own rather than something we infer. Tell us if that reading is off.
+| Category | Examples | When is it deducted? | Which expense account? |
+| --- | --- | --- | --- |
+| Feed and animal supplies | Feed, minerals, bedding | | |
+| Crop inputs | Seed, fertiliser, chemicals | | |
+| Veterinary supplies | Medicine, treatment supplies | | |
+| Production materials | Packaging, ingredients that go into a finished product | | |
+| Goods bought to resell | Finished products sold on without much change | | |
+| Small shop supplies | Consumables nobody keeps usage records for | | |
 
-**Goods held for resale might not follow the same rule.** There's a retail side
-that sells finished product, and our understanding is that merchandise held for
-resale is the case where the sale still matters. If feed and shop stock want
-different answers, say so and we'll make it settable per item rather than per
-business.
+Two notes on that table:
 
-## What happens if nobody decides
+**We expect the answers to differ by row.** Our reading is that goods held for
+resale may turn on the sale in a way feed does not. If that's wrong, one answer
+for everything is easier for us, so please say so.
 
-The safe setting keeps running. Stock stays an asset and the cost lands when it's
-used. That's a real answer rather than a placeholder, but it may not be the one
-you'd elect, and the difference shows up as timing.
+**The account column is not a formality.** "All of it to cost of goods sold"
+produces a report that balances and is no use at return time. Every item in the
+system already carries a category, so we can route each one wherever you say.
 
-## One gap worth knowing about before you pick
+## Three specific questions
 
-We haven't built anything for changing method later. If this business ever
-switches treatment there's an adjustment to make, and today that would be done by
-hand. Worth factoring in if two options look close.
+**Payment plus use.** We understand some treatments need both payment and use or
+sale to have happened, whichever is later. Please confirm whether that applies
+here. If it does, we can already tell whether a purchase has been paid, with one
+exception: on a bill that's only part paid we know the bill isn't settled but not
+which line the money reached. We need a convention. Either nothing on the bill
+counts as paid until the whole bill is, or we pro-rate. Please pick one.
 
----
+**Prepaid supplies.** We understand there may be limits on deducting feed or
+other farm supplies bought in one year and used in the next. If there are tests
+the software should flag, please tell us what to watch for.
 
-## What we need back
+**Books versus tax.** We can keep the financial statements on one treatment and
+produce the tax numbers on another, or we can make the ledger follow the tax
+treatment directly. The first is how the software is built. Please confirm that's
+acceptable, or tell us you'd rather they match.
 
-1. Which treatment, and whether the three above are the right choices to offer.
-2. If it's option 2, the expense accounts for each kind of item.
-3. Whether any pairing of reporting basis and treatment is one you'd refuse, so
-   we can stop the software offering it.
-4. Whether feed and goods held for resale need different answers.
+## What we're not asking you to do
 
-Happy to walk through the software or send the full technical write up.
+Design anything. If the categories above are the wrong cuts, or one of them isn't
+a real choice, telling us that is the most useful answer we can get.
+
+Happy to walk through the software or send the technical write up.

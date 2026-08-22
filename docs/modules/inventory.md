@@ -22,11 +22,55 @@ this dossier is the build record.
 | **3b** | **Perpetual posting, GRNI, and matching a bill to the deliveries it pays for** | **shipped 2026-08-21** |
 | **3c** | **The screen: matching, the GRNI reconciliation, and the switch that turns posting on** | **shipped 2026-08-22** |
 | **3d** | **Cost-adjustment corrections** — `inventory_cost_adjustments`, ADR 0012 §A.4 | **shipped 2026-08-22** |
-| 3d ii | The `expense_on_payment` lens | blocked on [ADR 0013](../decisions/0013-inventory-tax-treatment.md) — the question is written out for an accountant in [the brief](../briefs/inventory-tax-treatment.md) and is waiting on an answer, not on code |
+| 3d ii | The tax-timing lens | **not blocked on code and not on one answer.** [ADR 0013](../decisions/0013-inventory-tax-treatment.md) was revised 2026-08-22: treatment is per item category, per tenant, and the software offers dates it can observe rather than tax treatments it cannot read. [The brief](../briefs/inventory-tax-treatment.md) is a per-client template now, not a one-time question |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
 ## Build log
+
+### 2026-08-22 — A method is not a toggle (`claude/a-method-is-not-a-toggle`)
+
+**TURNING POSTING OFF STRANDED THE BALANCE SHEET, and nothing stopped it.** Found
+by asking what a change of accounting method should do, and finding a plain bug
+underneath the tax question.
+
+`postMovement` returns null on `none`. So a tenant that capitalised $10,000 of
+feed and then switched off kept every one of those debits in `1300`, while the
+issues that would have relieved them stopped posting entirely. The stock gets
+eaten and the asset never moves. Nothing reconciles it and nothing reports it —
+and the valuation screen goes on being right the whole time, because it folds
+MOVEMENTS rather than reading the ledger, so the two silently part company.
+
+The switch's own copy said it does not backfill. **Nobody had said it does not
+unwind either**, and the turn-off dialog read *"what is already posted stays
+posted"*, which is true, reassuring, and the exact half of the sentence that
+matters least.
+
+`assertPostingChangeSafe` refuses now, and it refuses rather than warning for the
+reason this pack refuses everywhere else: the damage is silent and compounding,
+and a warning is read once by somebody who has already decided. **Turning it ON
+is untouched** — additive, and where every tenant starts. **Nothing has posted
+yet is still allowed**, so somebody who switched it on by mistake five minutes ago
+is not trapped.
+
+The screen does not offer a switch that will fail, which is slice 3c's rule
+applied again: the toggle is disabled with the count and the date beside it. No
+in-product remedy is offered, on purpose — unwinding capitalised stock is a
+decision about what the business owns, made as a journal entry by a person.
+[ADR 0013](../decisions/0013-inventory-tax-treatment.md) §A.6.
+
+**The audit line now records BOTH ENDS.** It logged `{treatment}`, which does not
+say whether that was the first time or the third. It is the only durable record
+of the change anywhere.
+
+**`INVENTORY_ENTRY_SOURCES` is a list, and the list is the fragile part.** The
+guard counts entries across all four sources this pack posts under. A fifth added
+to `ledger.ts` without being added here would under-count, and under-counting
+presents as the switch ALLOWING a change it should refuse. A test asserts the
+count covers every `inventory_*` source actually present in the tenant, so the
+omission fails rather than passes.
+
+5 new tests, 56 in the file. No migration.
 
 ### 2026-08-22 — Slice 3d (first half): a cost you can put right (`claude/a-cost-you-can-put-right`)
 
@@ -669,6 +713,14 @@ commitment against a live animal to delivered without sitting on a shelf.
   and the valuation screen and `1300` already disagree by that drift. What is
   new is a second way to produce it. The honest fixes are per-lot costing or a
   reconciliation that names the drift; neither is a slice yet.
+- **THE CASH LENS STILL RE-TIMES BALANCE-SHEET LINES.**
+  [cash-basis.ts:247](../../src/modules/accounting/core/cash-basis.ts:247) skips
+  only the AR/AP control leg and re-recognises every other line of a bill at the
+  payment date, with no account-type filter — so a bill line coded to `1300`
+  moves to the payment date as an ASSET. `isCodableAccount` excludes GRNI and
+  not Inventory, so that coding is reachable by hand. It is a bug under the only
+  treatment anyone is on, it needs nobody's ruling, and ADR 0013 has said since
+  it was written that it *"needs fixing whatever else is decided"*.
 - **A COST CORRECTION CANNOT BE UNPICKED.** By design — appended, never edited —
   and the remedy is an equal-and-opposite correction, which nothing on the screen
   suggests. The same gap a posted count has.

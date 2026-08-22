@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import { getBalances, getDefaultEntityId } from "../src/modules/accounting/core";
 import { approveBill } from "../src/modules/accounting/payables/bills";
@@ -19,9 +19,11 @@ import {
 } from "../src/packs/inventory/ops";
 import {
   allocateBillLineToStock,
+  assertPostingChangeSafe,
   inventoryTreatmentOf,
   grniPosition,
   postCostAdjustment,
+  postedInventoryEntries,
   resolveGrniAccount,
   unbilledReceipts,
   unmatchBillLine,
@@ -250,6 +252,30 @@ d("inventory posting", () => {
       carriedCostByLot(tx, tenantId, [lot.id]),
     );
     expect(carriedValue(carried.get(lot.id)!)).toBe(1_400);
+  });
+
+  it("lets posting be turned off while NOTHING has reached the ledger", async () => {
+    /**
+     * The other side of the guard, and the reason it counts entries rather than
+     * refusing outright: somebody who switched it on by mistake five minutes ago
+     * has stranded nothing and must not be trapped. `setTreatment` writes the
+     * column directly under `withSystem`, which is what lets this reach the
+     * `capitalise → none` branch before anything has posted.
+     */
+    expect((await asOwner((tx) => postedInventoryEntries(tx, tenantId))).entries).toBe(0);
+    await setTreatment("capitalise");
+    await expect(
+      asOwner((tx) => assertPostingChangeSafe(tx, tenantId, "none")),
+    ).resolves.toBeUndefined();
+    await setTreatment("none");
+  });
+
+  it("never blocks turning posting ON", async () => {
+    // Additive, and where every tenant starts. The dialog already says history
+    // is not backfilled.
+    await expect(
+      asOwner((tx) => assertPostingChangeSafe(tx, tenantId, "capitalise")),
+    ).resolves.toBeUndefined();
   });
 
   // ---- capitalise ---------------------------------------------------------
@@ -1968,6 +1994,75 @@ it("NOBODY INVOICES YOU FOR WHAT YOU MADE", async () => {
           }),
         ),
       ).rejects.toThrow();
+    });
+
+    // ---- a method is not a toggle (ADR 0013 A.6) ------------------------
+
+    it("REFUSES TO TURN POSTING OFF ONCE IT HAS POSTED", async () => {
+      /**
+       * **Turning it off strands the balance sheet**, and nothing said so until
+       * this. `postMovement` returns null on `none`, so issues stop crediting
+       * Inventory while everything already capitalised stays there, relieved by
+       * nothing, as the stock behind it is eaten.
+       *
+       * The switch's copy always said it does not backfill. Nobody had said it
+       * does not unwind either, which is the more expensive half.
+       */
+      const posted = await asOwner((tx) => postedInventoryEntries(tx, tenantId));
+      expect(posted.entries).toBeGreaterThan(0);
+      expect(posted.firstOn).not.toBeNull();
+
+      await expect(
+        asOwner((tx) => assertPostingChangeSafe(tx, tenantId, "none")),
+      ).rejects.toThrow(/leave that cost sitting in Inventory/i);
+    });
+
+    it("allows the change that is not a change", async () => {
+      // Setting it to what it already is asks nothing of the books.
+      await expect(
+        asOwner((tx) => assertPostingChangeSafe(tx, tenantId, "capitalise")),
+      ).resolves.toBeUndefined();
+    });
+
+    it("counts every source this pack posts under, not just receipts", async () => {
+      /**
+       * The guard under-counting is the failure that matters: it presents as
+       * the switch ALLOWING a change it should refuse. Cost corrections post
+       * under a fourth source added in slice 3d, and a list that missed it would
+       * still look right on a tenant that had only ever received stock.
+       */
+      const sources = await asOwner((tx) =>
+        tx
+          .selectDistinct({ source: schema.journalEntries.source })
+          .from(schema.journalEntries)
+          .where(
+            and(
+              eq(schema.journalEntries.tenantId, tenantId),
+              eq(schema.journalEntries.status, "posted"),
+            ),
+          ),
+      );
+      const inventorySources = sources
+        .map((r) => r.source)
+        .filter((x) => x.startsWith("inventory_"));
+      expect(inventorySources).toContain("inventory_cost_adjustment");
+      const counted = await asOwner((tx) =>
+        postedInventoryEntries(tx, tenantId),
+      );
+      // Every inventory-sourced entry in the tenant is inside the count.
+      const [{ n }] = await asOwner((tx) =>
+        tx
+          .select({ n: sql<string>`count(*)` })
+          .from(schema.journalEntries)
+          .where(
+            and(
+              eq(schema.journalEntries.tenantId, tenantId),
+              eq(schema.journalEntries.status, "posted"),
+              inArray(schema.journalEntries.source, inventorySources),
+            ),
+          ),
+      );
+      expect(counted.entries).toBe(Number(n));
     });
 
     it("keeps a correction out of a valuation dated before it", async () => {

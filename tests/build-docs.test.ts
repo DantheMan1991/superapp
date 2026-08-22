@@ -55,7 +55,18 @@ describe("build docs", () => {
     // on it is worse than a broken header anywhere else on the page.
     const doc = await getBuildDoc("briefs/inventory-tax-treatment");
     expect(doc).not.toBeNull();
-    expect(doc!.title).toContain("deduction");
+    /**
+     * **NOT the exact wording.** The first version of this asserted the title
+     * contained "deduction", and the very next edit to the brief retitled it
+     * from "become a deduction" to "be deducted". A test that fails when prose
+     * is improved is a test that teaches people not to improve prose.
+     *
+     * What it actually guards is the fallback: `parseMeta` uses the SLUG as the
+     * title when a file has no `# ` heading, so a doc with a broken header
+     * renders as "inventory-tax-treatment" and nobody notices.
+     */
+    expect(doc!.title).not.toBe("inventory-tax-treatment");
+    expect(doc!.title.length).toBeGreaterThan(10);
     expect(doc!.summary).not.toBe("");
     expect(doc!.statusLine).toContain("brief");
   });

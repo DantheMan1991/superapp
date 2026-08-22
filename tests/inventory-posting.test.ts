@@ -1314,6 +1314,12 @@ it("REFUSES TO MATCH WHILE POSTING IS OFF", async () => {
        * writing tests against, and the doc comment claimed a comparison the code
        * never made.
        */
+      // DIFFERENTIAL, not absolute: this file shares one tenant and every test
+      // before this one has left something in both figures. What matters is
+      // what THIS delivery does to them.
+      await setTreatment("capitalise");
+      const before = await asOwner((tx) => grniPosition(tx, tenantId));
+
       await setTreatment("none");
       const item = await newItem("Before the switch");
       await asOwner((tx) =>
@@ -1327,13 +1333,15 @@ it("REFUSES TO MATCH WHILE POSTING IS OFF", async () => {
       );
       await setTreatment("capitalise");
 
-      const position = await asOwner((tx) => grniPosition(tx, tenantId));
-      // The delivery is waiting for an invoice...
-      expect(position.awaitingInvoiceCents).toBeGreaterThanOrEqual(7_000);
-      // ...and the difference names what never reached the books.
-      expect(position.differenceCents).toBeGreaterThanOrEqual(7_000);
-      expect(position.awaitingInvoiceCents - position.accountCents).toBe(
-        position.differenceCents,
+      const after = await asOwner((tx) => grniPosition(tx, tenantId));
+      // It is waiting for an invoice...
+      expect(after.awaitingInvoiceCents - before.awaitingInvoiceCents).toBe(7_000);
+      // ...but it never reached the books, so only one end moved...
+      expect(after.accountCents).toBe(before.accountCents);
+      // ...and the gap grew by exactly what did not post.
+      expect(after.differenceCents - before.differenceCents).toBe(7_000);
+      expect(after.awaitingInvoiceCents - after.accountCents).toBe(
+        after.differenceCents,
       );
     });
 
@@ -1356,6 +1364,119 @@ it("REFUSES TO MATCH WHILE POSTING IS OFF", async () => {
       expect(after.awaitingInvoiceCents - before.awaitingInvoiceCents).toBe(2_500);
       expect(after.accountCents - before.accountCents).toBe(2_500);
       // The gap is unchanged: this delivery contributed to BOTH ends.
+      expect(after.differenceCents).toBe(before.differenceCents);
+    });
+
+it("NOBODY INVOICES YOU FOR WHAT YOU MADE", async () => {
+      /**
+       * Found on the live app. A kill day's output was sitting in "deliveries
+       * with no invoice yet" beside a lumber bill — inviting somebody to match
+       * the two.
+       *
+       * A produced lot credits the CONSUMPTION account, not GRNI, so there is
+       * nothing against it for a bill to clear. `postMovement` already knew
+       * that; `unbilledReceipts` did not, and the two now share one predicate so
+       * they cannot drift again.
+       */
+      await setTreatment("capitalise");
+      const item = await newItem("Kill day output");
+      const made = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: "KILL-1",
+          source: "produced",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: made.id,
+          quantity: 100,
+          costCents: 9_000,
+          occurredOn: "2027-07-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      expect(
+        await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
+      ).toHaveLength(0);
+    });
+
+    it("still lists what a supplier DID sell you", async () => {
+      // The filter must not swallow the ordinary case it sits next to.
+      const item = await newItem("Bought in");
+      const bought = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: "DELIVERY-1",
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: bought.id,
+          quantity: 50,
+          costCents: 4_000,
+          occurredOn: "2027-07-05",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      expect(open).toHaveLength(1);
+      expect(open[0].openCostCents).toBe(4_000);
+    });
+
+    it("treats stock with no batch as bought, the same as posting does", async () => {
+      // A receipt with no lot is almost always a delivery, and `postMovement`
+      // credits GRNI for it — so the list has to agree or the two ends diverge.
+      const item = await newItem("No batch bought");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 20,
+          costCents: 1_500,
+          occurredOn: "2027-07-10",
+          locationAssetId: freezerId,
+        }),
+      );
+      expect(
+        await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
+      ).toHaveLength(1);
+    });
+
+    it("keeps the GRNI working and answer able to agree", async () => {
+      /**
+       * The knock-on. With made goods in the working, the two ends could never
+       * meet and the difference would be permanently overstated — and blamed on
+       * "deliveries from before the switch", which is the one explanation the
+       * card offers.
+       */
+      const before = await asOwner((tx) => grniPosition(tx, tenantId));
+      const item = await newItem("Made, not bought");
+      const made = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: "KILL-2",
+          source: "produced",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: made.id,
+          quantity: 10,
+          costCents: 5_000,
+          occurredOn: "2027-07-20",
+          locationAssetId: freezerId,
+        }),
+      );
+      const after = await asOwner((tx) => grniPosition(tx, tenantId));
+      // It changed neither end, so the gap between them is untouched.
+      expect(after.awaitingInvoiceCents).toBe(before.awaitingInvoiceCents);
+      expect(after.accountCents).toBe(before.accountCents);
       expect(after.differenceCents).toBe(before.differenceCents);
     });
 

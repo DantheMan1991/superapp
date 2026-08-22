@@ -11,8 +11,10 @@
 > only about what the ACCRUAL books do, which is the same for every tenant.
 >
 > Two further corrections from review are folded in: an `inventory_item_id` on a
-> bill line is **not** a receipt match (see A.2), and a cost correction is a
-> **movement**, not a column edit (see A.4).
+> bill line is **not** a receipt match (see A.2), and a cost correction is an
+> appended record rather than a column edit (see A.4). A third correction came
+> from the database itself: that record cannot be a MOVEMENT either, because two
+> CHECK constraints refuse it.
 
 ## Context
 
@@ -85,7 +87,7 @@ Issues post `Dr <consumption account> / Cr 1300`. Adjustments post against the
 variance account. **Transfers, splits and merges post nothing** — they move cost
 within one account.
 
-### A.4 — A cost correction is a MOVEMENT, not an edit
+### A.4 — A cost correction is appended, never an edit — and it is not a movement
 
 The previous draft proposed that a cost which was never recorded could be
 *supplied* by writing into a `null` column, while a recorded cost could never be
@@ -99,17 +101,43 @@ ones. What happened, happened; a disagreement is another event rather than a
 rewrite of an old one."*
 
 Cost follows the same rule. **A stamped cost is immutable; a correction is an
-appended cost-adjustment movement**, carrying its own date, reason and author.
-This covers the uncosted receipt (the adjustment supplies what the ticket never
-said), the mis-entered ticket, the omitted freight and the wrong unit of measure
-— one mechanism instead of a special case, and no conditionally-writable column
-for a future reader to get wrong.
+appended record** carrying its own date, reason and author. This covers the
+uncosted receipt (the correction supplies what the ticket never said), the
+mis-entered ticket, the omitted freight and the wrong unit of measure — one
+mechanism instead of a special case, and no conditionally-writable column for a
+future reader to get wrong.
+
+**It is a row in its own table, NOT a movement**, and the database settles that
+rather than taste. `inventory_movements` carries two CHECK constraints that a
+cost correction cannot satisfy
+([inventory.ts:409](../../src/db/schema/inventory.ts:409)):
+
+```sql
+check("inventory_movements_quantity_nonzero",   quantity <> 0)
+check("inventory_movements_cost_not_negative",  cost_cents is null or cost_cents >= 0)
+```
+
+A cost correction moves **no quantity** — it is pure money — so it fails the
+first. And it must be able to go **down**, because a ticket can overstate as
+easily as understate, so it fails the second. Relaxing either would weaken a
+constraint that protects the quantity ledger for every other caller, to
+accommodate rows that are not quantities.
+
+So: `inventory_cost_adjustments`, keyed to the lot, with a **signed**
+`amount_cents`. `lotCarried` folds it alongside the movements it already folds,
+and the cost ledger stays a ledger without the quantity ledger having to pretend
+these are movements.
 
 A cost adjustment splits by what has already left the lot:
 
 - the portion **still on hand** raises the lot's carrying value;
 - the portion **already issued** goes to the consumption or variance account,
   because sending it to `1300` would capitalise stock that has been eaten.
+
+**That split is STORED, not re-derived**, for the reason a count line stores its
+`expected_quantity`: it is what the ledger believed at the moment somebody
+corrected it, and a movement backdated tomorrow must not restate a posting that
+already happened.
 
 ### A.5 — A price difference is recorded, never absorbed
 
@@ -160,6 +188,7 @@ view. If they diverge, one of them is wrong and the invariant says which.
 | **Match on `inventory_item_id` alone** | Works only for one receipt against one invoice. Every other case in the table above is unresolvable. |
 | **Let the bill overwrite the lot's recorded cost** | Would let a late invoice restate a cost already used to stamp issues — the drift `costing.ts` exists to prevent. |
 | **A conditionally-writable `cost_cents`** | The previous draft's A.4. Contradicts the header of the file it governs, and is one `is null` check away from being violated by a well-meaning change. |
+| **A cost correction as a new MOVEMENT kind** | The shape this ADR first proposed. The database refuses it twice: `quantity <> 0` rules out a pure-money row, and `cost_cents >= 0` rules out a correction downwards. Relaxing either weakens a constraint that protects the quantity ledger for every other caller. |
 | **Full three-way match with purchase orders** | The complete answer, and machinery a farm will not maintain. A.2 and A.5 get the reconciliation and the variance without the third document. |
 | **GRNI as an item-level pool, no allocation table** | The genuine fallback if the allocation table proves too heavy: reconciliation in aggregate, no A.4 and no A.5. Cheaper, and it leaves uncosted lots uncosted forever. Recorded here so the trade is visible rather than rediscovered. |
 
@@ -178,9 +207,10 @@ question instead of a hope.
 - **A new account, and one more thing to explain.** "Goods Received Not
   Invoiced" is unfamiliar to anybody who has not used a system that has it, and
   a farmer will ask. The reconciliation screen has to earn it.
-- **A cost-adjustment movement is a new movement kind**, and every fold over
-  `inventory_movements` has to know about it or it will be silently excluded
-  from exactly the totals it was written to correct.
+- **A second table now feeds the cost fold.** `lotCarried` currently reads
+  movements alone; after this it reads movements and adjustments, and any caller
+  that reaches for movements directly to compute cost will be quietly wrong. The
+  invariant above is what catches that.
 - **A.4 cannot recover a stamped `null` issue at the rate that applied then.**
   The already-issued portion is corrected at the adjustment's rate. Over one
   delivery this is immaterial; across a long gap with moving prices it is an
@@ -195,7 +225,9 @@ question instead of a hope.
    and the honest test is whether anybody ever opens the reconciliation screen.
 2. **The cost-adjustment split in A.4** — on-hand versus already-issued — is
    arithmetic nobody in this repo has written yet, and the issued side is an
-   approximation as noted.
+   approximation as noted. That it needs its own table is now settled by the
+   CHECK constraints rather than by argument; what the table's columns should be
+   is not.
 3. **Whether `2050` is the right code** and whether GRNI should be one account or
    one per inventory account. One is simpler; per-account reconciles more
    finely. Nothing here needs the finer version yet.

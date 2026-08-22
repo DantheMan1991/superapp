@@ -79,6 +79,22 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
   "inventory_issue",
   "inventory_adjustment",
   /**
+   * A correction to what a batch COST — ADR 0012 §A.4, `inventory` slice 3d.
+   * `source_id` names an `inventory_cost_adjustments` row rather than a
+   * movement, which is why it could not reuse `inventory_adjustment`: that one
+   * means a quantity changed, and two sources pointing into two different
+   * tables would leave the ledger unable to say which.
+   *
+   * **DELIBERATELY NOT IN `MACHINE_SOURCES`, and that is the answer to the
+   * warning above.** Re-stating what stock cost moves money between the balance
+   * sheet and the P&L on somebody's say-so, so it is an owner's decision and
+   * `requireOwnerRole` is exactly the check it should meet. The other three are
+   * in that set because issuing feed is a staff chore; this is not one, and
+   * widening a privilege boundary to admit an act that does not need it is how
+   * the boundary stops meaning anything.
+   */
+  "inventory_cost_adjustment",
+  /**
    * BOTH HALVES of an intercompany pair (ADR 0010 slice 2). Added in
    * `drizzle/0150`, alone in its own migration for the reason `depreciation`
    * was: an enum value cannot be USED in the transaction that adds it, and

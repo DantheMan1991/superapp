@@ -104,6 +104,8 @@ describe("carriedValue", () => {
     purchasedCents: 0,
     consumedCents: 0,
     releasedCents: 0,
+    adjustedOnHandCents: 0,
+    adjustedIssuedCents: 0,
     remainingCents: 0,
     ...over,
   });
@@ -133,6 +135,31 @@ describe("carriedValue", () => {
     expect(
       carriedValue(cost({ purchasedCents: 10_000, remainingCents: 10_000 })),
     ).toBe(10_000);
+  });
+
+  /**
+   * **THE EGGS-AT-$0.00 BUG THROUGH A NEW DOOR**, and the reason `carriedValue`
+   * had to change when `inventory_cost_adjustments` arrived (ADR 0012 §A.4).
+   *
+   * A delivery that arrived with nothing on the ticket is recorded uncosted,
+   * and the correction that supplies its price is not a movement — so the batch
+   * has purchased, consumed and released all at zero while carrying real money.
+   * Reading only those three called it "No cost recorded", about a batch the
+   * ledger holds a debit for.
+   */
+  it("counts a correction alone as having been costed", () => {
+    expect(
+      carriedValue(cost({ adjustedOnHandCents: 34_000, remainingCents: 34_000 })),
+    ).toBe(34_000);
+  });
+
+  /**
+   * The correction landed entirely on stock that had already gone, so nothing
+   * is carried — but somebody HAS said what this batch cost, and zero is now a
+   * real answer rather than an absence.
+   */
+  it("counts a correction on already-issued stock as having been costed", () => {
+    expect(carriedValue(cost({ adjustedIssuedCents: 6_000 }))).toBe(0);
   });
 
   it("passes a negative through rather than reading it as uncosted", () => {

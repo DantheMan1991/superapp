@@ -23,6 +23,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  carriedCostByLot,
+  costAdjustmentsForLots,
   getItem,
   listLocations,
   itemCostRate,
@@ -35,15 +37,18 @@ import {
   balanceByLocation,
   balanceOfLot,
 } from "@/packs/inventory/core/balances";
+import { carriedValue } from "@/packs/inventory/core/valuation";
 import { formatQuantity, getUnit } from "@/packs/inventory/core/units";
 import {
   LOT_SOURCE_LABELS,
   isLotSource,
   adjustmentReasonLabel,
+  costAdjustmentReasonLabel,
   movementKindLabel,
   slugLabel,
 } from "@/packs/inventory/vocabulary";
 import {
+  LotCostForm,
   LotForm,
   MovementForm,
   SplitLotForm,
@@ -91,14 +96,47 @@ export default async function InventoryItemPage({
           listItems(tx, ctx.tenant.id, { status: "active" }),
           itemCostRate(tx, ctx.tenant.id, id),
         ]);
-      return { item, lots, rows, movements, locations, allLots, allItems, costRate };
+      /**
+       * **THE SECOND ROUND TRIP IS THE LOT LIST'S FAULT, not an oversight.**
+       * Both of these are keyed by lot, and the lots are what the first round
+       * just went to fetch. Batched across every lot at once rather than asked
+       * per row, which is how a page with twenty batches becomes a page with
+       * twenty-one queries.
+       */
+      const lotIds = lots.map((l) => l.id);
+      const [carried, corrections] = await Promise.all([
+        carriedCostByLot(tx, ctx.tenant.id, lotIds),
+        costAdjustmentsForLots(tx, ctx.tenant.id, lotIds),
+      ]);
+      return {
+        item,
+        lots,
+        rows,
+        movements,
+        locations,
+        allLots,
+        allItems,
+        costRate,
+        carried,
+        corrections,
+      };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { item, lots, rows, movements, locations, allLots, allItems, costRate } =
-    data;
+  const {
+    item,
+    lots,
+    rows,
+    movements,
+    locations,
+    allLots,
+    allItems,
+    costRate,
+    carried,
+    corrections,
+  } = data;
 
   /**
    * Recording stock in and out is a chore and is ungated. Starting a batch or
@@ -110,6 +148,7 @@ export default async function InventoryItemPage({
   const unitLabel = getUnit(unit)?.plural ?? unit;
   const unitSingular = getUnit(unit)?.singular ?? unit;
   const locationNames = new Map(locations.map((l) => [l.id, l.name]));
+  const lotCodes = new Map(lots.map((l) => [l.id, l.code]));
 
   const total = rows.reduce((sum, r) => sum + r.quantity, 0);
   const byLocation = balanceByLocation(rows);
@@ -273,12 +312,26 @@ export default async function InventoryItemPage({
                 <TableHead>Started</TableHead>
                 <TableHead>Good until</TableHead>
                 <TableHead className="text-right">On hand</TableHead>
-                <TableHead className="w-20" />
+                <TableHead className="text-right">Carrying</TableHead>
+                <TableHead className="w-36" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {lots.map((lot) => {
                 const balance = balanceOfLot(rows, lot.id);
+                /**
+                 * **`carriedValue`, NEVER `remainingCents`.** A batch nobody
+                 * costed and a batch whose cost has all been released both fold
+                 * to zero, and only the second is worth nothing. Since
+                 * ADR 0012 §A.4 an appended correction counts as having costed
+                 * it too — which is what stops a batch corrected into
+                 * existence reading as "No cost recorded".
+                 */
+                const cost = carried.get(lot.id);
+                const carriedCents = cost ? carriedValue(cost) : null;
+                const received = rows
+                  .filter((r) => r.lotId === lot.id && r.quantity > 0)
+                  .reduce((sum, r) => sum + r.quantity, 0);
                 return (
                   <TableRow key={lot.id}>
                     <TableCell>
@@ -315,7 +368,39 @@ export default async function InventoryItemPage({
                     <TableCell className="text-right tabular-nums">
                       {formatQuantity(balance, unit)}
                     </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {carriedCents === null ? (
+                        <span className="text-muted-foreground">
+                          No cost recorded
+                        </span>
+                      ) : (
+                        formatMoney(carriedCents, currencySymbol)
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
+                      {/* **A CORRECTION IS OFFERED ON AN EMPTY BATCH TOO**, and
+                          on a closed one. The invoice for a delivery routinely
+                          arrives after the feed has been eaten, and a screen
+                          that only offers the correction while stock is still
+                          on the shelf refuses the commonest case there is. */}
+                      {isOwner && (
+                        <LotCostForm
+                          lot={{
+                            id: lot.id,
+                            code: lot.code,
+                            carriedLabel:
+                              carriedCents === null
+                                ? null
+                                : formatMoney(carriedCents, currencySymbol),
+                            quantityOnHand: balance,
+                            quantityReceived: received,
+                            onHandLabel: formatQuantity(balance, unit),
+                            receivedLabel: formatQuantity(received, unit),
+                          }}
+                          currencySymbol={currencySymbol}
+                          today={today}
+                        />
+                      )}
                       {isOwner && lot.status === "open" && balance > 0 && (
                         <SplitLotForm
                           lot={{
@@ -336,6 +421,78 @@ export default async function InventoryItemPage({
           </Table>
         )}
       </div>
+
+      {corrections.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-medium">Cost corrections</h2>
+          {/**
+           * **A SECTION OF ITS OWN, not rows folded into "Recent entries".**
+           * Every row in that table moved something; none of these did. Listing
+           * them together would put a $60 correction beside a 20 lb issue under
+           * a heading that says what happened, and one of the two would be
+           * lying about which column matters.
+           *
+           * The SPLIT is shown rather than the total alone, because the split
+           * is the part somebody will come back to argue with — it is why the
+           * batch went up by less than the correction, and it is the figure
+           * that was frozen at the moment it was written.
+           */}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Batch</TableHead>
+                <TableHead>Why</TableHead>
+                <TableHead className="text-right">Correction</TableHead>
+                <TableHead className="text-right">To the batch</TableHead>
+                <TableHead className="text-right">To cost of goods</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {corrections.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {c.occurredOn}
+                  </TableCell>
+                  <TableCell>{lotCodes.get(c.lotId) ?? "—"}</TableCell>
+                  <TableCell>
+                    {costAdjustmentReasonLabel(c.reason)}
+                    {c.notes && (
+                      <div className="text-xs text-muted-foreground">
+                        {c.notes}
+                      </div>
+                    )}
+                    <div className="text-xs text-muted-foreground">
+                      {/* WHAT THE LEDGER BELIEVED, stamped. This is the whole
+                          reason the two quantity columns are stored, and the
+                          only place a person can check the split against it. */}
+                      {formatQuantity(c.quantityOnHand, unit)} of{" "}
+                      {formatQuantity(c.quantityReceived, unit)} still on hand
+                      then
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {c.amountCents > 0 ? "+" : "−"}
+                    {formatMoney(Math.abs(c.amountCents), currencySymbol)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {c.onHandCents === 0
+                      ? "—"
+                      : (c.onHandCents > 0 ? "+" : "−") +
+                        formatMoney(Math.abs(c.onHandCents), currencySymbol)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {c.issuedCents === 0
+                      ? "—"
+                      : (c.issuedCents > 0 ? "+" : "−") +
+                        formatMoney(Math.abs(c.issuedCents), currencySymbol)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {movements.length > 0 && (
         <div className="space-y-3">

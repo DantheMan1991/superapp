@@ -8,6 +8,7 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
 import {
   InventoryError,
+  adjustLotCost,
   adjustStock,
   postCount,
   recordCountLine,
@@ -528,6 +529,83 @@ export async function adjustStockAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, costCents: movement.costCents };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * **RE-STATE WHAT A BATCH COST, WITHOUT REWRITING WHAT HAPPENED.**
+ * ADR 0012 §A.4.
+ *
+ * `owner`: a quantity adjustment is a chore and stays member-level, but saying
+ * that a delivery cost something other than what the ticket said moves money
+ * between the balance sheet and the P&L. That is the same line `createLot` and
+ * `splitLot` already draw.
+ *
+ * **The audit line carries the amount and the split, never the notes.** The
+ * cents are the point of the act and are already logged elsewhere in this pack;
+ * the notes are free text about a supplier and belong only in the row.
+ */
+export async function adjustLotCostAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      lotId: z.string().uuid(),
+      /**
+       * SIGNED and non-zero — a ticket overstates as easily as it understates.
+       *
+       * **BOUNDED AT THE SAME CEILING `receiveStockAction` USES for a
+       * delivery's cost, and found by fat-fingering it.** Unbounded, a typed
+       * `99999999999` sailed through, posted a $99,999,999,999 entry and left a
+       * batch carrying sixty billion dollars — because the ledger's own ceiling
+       * is $100B and nothing between the box and it had an opinion. A
+       * correction is the same kind of number as the cost it corrects, so it
+       * takes the same limit, and above it the caller gets "check the details"
+       * rather than a raw ledger error.
+       */
+      amountCents: z
+        .number()
+        .int()
+        .min(-1_000_000_000_000)
+        .max(1_000_000_000_000)
+        .refine((n) => n !== 0, "a correction cannot be zero"),
+      reason: z.string().min(1).max(63),
+      occurredOn: requiredDate,
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) => adjustLotCost(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.lot_cost_corrected",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_lot",
+      targetId: parsed.data.lotId,
+      meta: {
+        amountCents: row.amountCents,
+        onHandCents: row.onHandCents,
+        issuedCents: row.issuedCents,
+        reason: row.reason,
+        occurredOn: row.occurredOn,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    // The correction posts, so the journal and the trial balance have moved.
+    revalidatePath("/dashboard/m/accounting", "layout");
+    return {
+      ok: true as const,
+      onHandCents: row.onHandCents,
+      issuedCents: row.issuedCents,
+    };
   } catch (err) {
     return toResult(err);
   }

@@ -43,6 +43,7 @@ d("inventory tables (RLS)", () => {
   let billLineA: string;
   let billLineB: string;
   let allocationA: string;
+  let costAdjustmentA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -246,6 +247,39 @@ d("inventory tables (RLS)", () => {
         ])
         .returning();
       lineA = lines[0].id;
+
+      // Slice 3d. Same reasoning again: built by the database, not by the ops
+      // layer, so a bug in `adjustLotCost` cannot make these tests agree with it.
+      const corrections = await tx
+        .insert(schema.inventoryCostAdjustments)
+        .values([
+          {
+            tenantId: tenantA,
+            itemId: feedA,
+            lotId: lotA,
+            occurredOn: "2026-08-21",
+            amountCents: 6_000,
+            onHandCents: 3_600,
+            issuedCents: 2_400,
+            quantityOnHand: 60,
+            quantityReceived: 100,
+            reason: "freight_omitted",
+          },
+          {
+            tenantId: tenantB,
+            itemId: itemB,
+            lotId: lotB,
+            occurredOn: "2026-08-21",
+            amountCents: -900,
+            onHandCents: -900,
+            issuedCents: 0,
+            quantityOnHand: 34,
+            quantityReceived: 34,
+            reason: "ticket_wrong",
+          },
+        ])
+        .returning();
+      costAdjustmentA = corrections[0].id;
     });
   });
 
@@ -743,6 +777,155 @@ d("inventory tables (RLS)", () => {
     });
   });
 
+// ---- slice 3d: cost corrections -----------------------------------------
+
+  it("a tenant sees only its own cost corrections", async () => {
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.inventoryCostAdjustments),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].id).toBe(costAdjustmentA);
+    expect(
+      await asOtherTenant((tx) =>
+        tx.select().from(schema.inventoryCostAdjustments),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("CANNOT CORRECT ANOTHER TENANT'S BATCH", async () => {
+    /**
+     * These rows feed the cost fold — `lotCarried` reads them beside the
+     * movements — so one pointing across the boundary would put this business's
+     * money onto another's balance sheet, and the valuation screen would report
+     * it as that farm's stock. Unrepresentable rather than merely refused: the
+     * composite FK fails even under `withSystem`.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCostAdjustments).values({
+          tenantId: tenantA,
+          itemId: feedA,
+          lotId: lotB,
+          occurredOn: "2026-08-21",
+          amountCents: 100,
+          onHandCents: 100,
+          issuedCents: 0,
+          quantityOnHand: 1,
+          quantityReceived: 1,
+          reason: "ticket_wrong",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot point a correction at another tenant's item", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCostAdjustments).values({
+          tenantId: tenantA,
+          itemId: itemB,
+          lotId: lotA,
+          occurredOn: "2026-08-21",
+          amountCents: 100,
+          onHandCents: 100,
+          issuedCents: 0,
+          quantityOnHand: 1,
+          quantityReceived: 1,
+          reason: "ticket_wrong",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a correction of nothing", async () => {
+    // Mirrors the movement ledger's `quantity <> 0`, on the column that carries
+    // the meaning here. A correction of zero is not a correction.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCostAdjustments).values({
+          tenantId: tenantA,
+          itemId: feedA,
+          lotId: lotA,
+          occurredOn: "2026-08-21",
+          amountCents: 0,
+          onHandCents: 0,
+          issuedCents: 0,
+          quantityOnHand: 1,
+          quantityReceived: 1,
+          reason: "ticket_wrong",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("REFUSES A SPLIT THAT DOES NOT ADD UP TO THE CORRECTION", async () => {
+    /**
+     * The two halves are derived once and then stored, so this CHECK is what
+     * stops a later caller storing halves that do not account for the whole. A
+     * correction whose parts fall short leaves the ledger and the batch's
+     * carrying value permanently apart by the difference, with nothing anywhere
+     * to say by how much.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryCostAdjustments).values({
+          tenantId: tenantA,
+          itemId: feedA,
+          lotId: lotA,
+          occurredOn: "2026-08-21",
+          amountCents: 6_000,
+          onHandCents: 3_600,
+          issuedCents: 2_000,
+          quantityOnHand: 60,
+          quantityReceived: 100,
+          reason: "ticket_wrong",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("ACCEPTS A CORRECTION DOWNWARDS, which a movement could not carry", async () => {
+    /**
+     * The reason this is a table of its own rather than a movement kind:
+     * `inventory_movements` CHECKs `cost_cents >= 0`, and a ticket overstates as
+     * easily as it understates. ADR 0012 §A.4.
+     */
+    const rows = await withSystem((tx) =>
+      tx
+        .insert(schema.inventoryCostAdjustments)
+        .values({
+          tenantId: tenantA,
+          itemId: feedA,
+          lotId: lotA,
+          occurredOn: "2026-08-21",
+          amountCents: -5_000,
+          onHandCents: -3_000,
+          issuedCents: -2_000,
+          quantityOnHand: 60,
+          quantityReceived: 100,
+          reason: "discount_applied",
+        })
+        .returning(),
+    );
+    expect(rows[0].amountCents).toBe(-5_000);
+    await withSystem((tx) =>
+      tx
+        .delete(schema.inventoryCostAdjustments)
+        .where(eq(schema.inventoryCostAdjustments.id, rows[0].id)),
+    );
+  });
+
+  it("cannot move a cost correction into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.inventoryCostAdjustments)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.inventoryCostAdjustments.id, costAdjustmentA)),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("is default-deny on every table in the pack with no tenant context", async () => {
     const nowhere = "00000000-0000-0000-0000-000000000000";
     expect(
@@ -767,6 +950,11 @@ d("inventory tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.inventoryCountLines),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.inventoryCostAdjustments),
       ),
     ).toHaveLength(0);
   });

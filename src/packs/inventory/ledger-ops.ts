@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { postEntry, type LedgerCtx } from "@/modules/accounting/core";
 import { allowsWrite } from "@/lib/packs/authorize";
@@ -441,6 +441,194 @@ export async function postMovement(
     source,
     sourceId: input.movementId,
     idempotencyKey: `inventory:${source}:${input.movementId}`,
+    lines,
+  });
+  return { entryId: entry.id };
+}
+
+
+/**
+ * **THE COMPANY A BATCH'S COST BELONGS TO.**
+ *
+ * A cost correction has no location of its own — it is money, not a movement —
+ * so `resolveMovementEntity` has nothing to be handed. The batch does: its stock
+ * has been somewhere, and a place is an `asset`, and an asset already names the
+ * books it belongs to.
+ *
+ * Same order and the same refusal as `resolveMovementEntity`, for the same
+ * reason: **one postable company is not a guess**, and where there is more than
+ * one, a default chosen at posting time is exactly the behaviour the
+ * `entity_id` column replaced. A batch that has moved between two companies'
+ * places is refused rather than assigned to whichever query row came back
+ * first.
+ */
+export async function resolveLotEntity(
+  tx: Tx,
+  tenantId: string,
+  lotId: string,
+): Promise<string> {
+  const companies = await tx
+    .select({ id: schema.entities.id })
+    .from(schema.entities)
+    .where(
+      and(
+        eq(schema.entities.tenantId, tenantId),
+        eq(schema.entities.isActive, true),
+      ),
+    );
+  if (companies.length === 1) return companies[0].id;
+  if (companies.length === 0) {
+    throw new InventoryError(
+      "LEDGER_ACCOUNTS",
+      "This business has no company to post to. Open the books first.",
+    );
+  }
+
+  const places = await tx
+    .selectDistinct({ locationAssetId: schema.inventoryMovements.locationAssetId })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        eq(schema.inventoryMovements.lotId, lotId),
+        isNotNull(schema.inventoryMovements.locationAssetId),
+      ),
+    );
+  const locationIds = places
+    .map((p) => p.locationAssetId)
+    .filter((id): id is string => id !== null);
+  if (locationIds.length === 0) {
+    throw new InventoryError(
+      "ENTITY_AMBIGUOUS",
+      "This business keeps more than one set of books, so this batch has to say where it is before its cost can be corrected.",
+    );
+  }
+
+  const rows = await tx
+    .select({
+      entityId: schema.assets.entityId,
+      name: schema.assets.name,
+    })
+    .from(schema.assets)
+    .where(
+      and(
+        eq(schema.assets.tenantId, tenantId),
+        inArray(schema.assets.id, locationIds),
+      ),
+    );
+  const unnamed = rows.find((r) => !r.entityId);
+  if (unnamed) {
+    throw new InventoryError(
+      "ENTITY_AMBIGUOUS",
+      `${unnamed.name} does not say which company it belongs to, and this business keeps more than one set of books. Set the company on it first.`,
+    );
+  }
+  const entityIds = new Set(rows.map((r) => r.entityId!));
+  if (entityIds.size !== 1) {
+    throw new InventoryError(
+      "ENTITY_AMBIGUOUS",
+      "This batch has been kept in places belonging to more than one company, so there is no single set of books to correct its cost in.",
+    );
+  }
+  return [...entityIds][0];
+}
+
+export interface PostCostAdjustmentInput {
+  adjustmentId: string;
+  itemId: string;
+  lotId: string;
+  lotCode: string | null;
+  occurredOn: string;
+  /** The stored split. Both SIGNED; either may be zero. */
+  onHandCents: number;
+  issuedCents: number;
+}
+
+/**
+ * Post a cost correction — ADR 0012 §A.4.
+ *
+ * | Half of the correction | Debit | Credit |
+ * | --- | --- | --- |
+ * | still on hand | Inventory | the variance account |
+ * | already issued | the consumption account | the variance account |
+ *
+ * **THE CREDIT IS THE VARIANCE ACCOUNT AND DELIBERATELY NOT GRNI**, which is
+ * the one decision in this posting that had a plausible alternative.
+ *
+ * Crediting Goods Received Not Invoiced reads right — a delivery that cost $60
+ * more than the ticket said is $60 more that a supplier will invoice for — and
+ * it is wrong in a way that only shows up later. **Matching clears GRNI at the
+ * RECEIPT's stamped cost**, and a receipt's stamped cost is not what a
+ * correction changes, so the extra credit is one nothing can ever debit: a
+ * permanent balance in a liability account, in the exact place slice 3c built a
+ * reconciliation to make such things visible, blamed by that card on
+ * "deliveries from before the switch". It would also DOUBLE COUNT, because when
+ * the invoice does arrive §A.5 books the same difference again.
+ *
+ * So the two mechanisms are complementary rather than overlapping:
+ * **§A.5 corrects the books when an invoice disagrees with the ticket; §A.4
+ * corrects the stock record when there is no invoice to disagree with.** They
+ * land in the same account, which is why a delivery that gets both ends up with
+ * the right inventory value, the right liability and no net variance — traced
+ * in the dossier.
+ *
+ * **THE LINES ARE NETTED BY ACCOUNT AND ZEROES ARE DROPPED**, which is not
+ * tidiness: `varianceAccountId` DEFAULTS to the consumption account, so a
+ * correction against a batch that has been entirely issued out would otherwise
+ * try to post `Dr 5000 / Cr 5000`, and `postEntry` refuses a zero-amount line.
+ * Netted, that correction posts nothing at all — which is the truth about it,
+ * and leaves the ledger and `lotCarried` agreeing by construction rather than
+ * by a second calculation.
+ *
+ * Returns null when nothing was posted: a tenant on `none`, or a correction
+ * whose halves cancel in one account.
+ */
+export async function postCostAdjustment(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: PostCostAdjustmentInput,
+): Promise<{ entryId: string } | null> {
+  const treatment = await inventoryTreatmentOf(tx, ctx.tenantId);
+  if (treatment === "none") return null;
+
+  const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);
+  const entityId = await resolveLotEntity(tx, ctx.tenantId, input.lotId);
+  const item = await tx.query.inventoryItems.findFirst({
+    where: eq(schema.inventoryItems.id, input.itemId),
+    columns: { name: true },
+  });
+
+  // Positive = debit, negative = credit — the ledger's own convention.
+  const byAccount = new Map<string, number>();
+  const add = (accountId: string, amountCents: number) => {
+    byAccount.set(accountId, (byAccount.get(accountId) ?? 0) + amountCents);
+  };
+  add(accounts.inventoryAccountId, input.onHandCents);
+  add(accounts.cogsAccountId, input.issuedCents);
+  add(accounts.varianceAccountId, -(input.onHandCents + input.issuedCents));
+
+  const lines = [...byAccount.entries()]
+    .filter(([, amountCents]) => amountCents !== 0)
+    .map(([accountId, amountCents]) => ({ accountId, amountCents }));
+  if (lines.length < 2) return null;
+
+  const { entry } = await postEntry(tx, ledgerCtx(ctx), {
+    entityId,
+    status: "posted",
+    entryDate: input.occurredOn,
+    memo:
+      `Cost corrected — ${item?.name ?? "stock"}` +
+      (input.lotCode ? ` (${input.lotCode})` : ""),
+    /**
+     * **NOT A MACHINE SOURCE, unlike the three movement postings.** Re-stating
+     * what stock cost is an owner's decision rather than a chore riding one, so
+     * this entry meets `requireOwnerRole` in `postEntry` like any hand-written
+     * journal — and `adjustLotCost` refuses a non-owner before it ever gets
+     * here. See the note beside the enum value in `db/schema/ledger.ts`.
+     */
+    source: "inventory_cost_adjustment",
+    sourceId: input.adjustmentId,
+    idempotencyKey: `inventory:inventory_cost_adjustment:${input.adjustmentId}`,
     lines,
   });
   return { entryId: entry.id };

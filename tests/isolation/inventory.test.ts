@@ -38,6 +38,11 @@ d("inventory tables (RLS)", () => {
   let countA: string;
   let countB: string;
   let lineA: string;
+  let movementA: string;
+  let movementB: string;
+  let billLineA: string;
+  let billLineB: string;
+  let allocationA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -84,25 +89,126 @@ d("inventory tables (RLS)", () => {
       lotA = lots[0].id;
       lotB = lots[1].id;
 
-      await tx.insert(schema.inventoryMovements).values([
-        {
-          tenantId: tenantA,
-          itemId: feedA,
-          lotId: lotA,
-          locationAssetId: freezerA,
-          quantity: 500,
-          movementKind: "receipt",
-          occurredOn: "2026-08-01",
-        },
-        {
-          tenantId: tenantB,
-          itemId: itemB,
-          lotId: lotB,
-          quantity: 20,
-          movementKind: "receipt",
-          occurredOn: "2026-08-01",
-        },
-      ]);
+      const movements = await tx
+        .insert(schema.inventoryMovements)
+        .values([
+          {
+            tenantId: tenantA,
+            itemId: feedA,
+            lotId: lotA,
+            locationAssetId: freezerA,
+            quantity: 500,
+            movementKind: "receipt",
+            occurredOn: "2026-08-01",
+            costCents: 50_000,
+          },
+          {
+            tenantId: tenantB,
+            itemId: itemB,
+            lotId: lotB,
+            quantity: 20,
+            movementKind: "receipt",
+            occurredOn: "2026-08-01",
+            costCents: 2_000,
+          },
+        ])
+        .returning();
+      movementA = movements[0].id;
+      movementB = movements[1].id;
+
+      // Slice 3b: a bill line per tenant, and an allocation joining it to that
+      // tenant's own receipt. Built here under withSystem for the same reason
+      // every other fixture in this file is — so a bug in the ops cannot make
+      // this suite agree with it.
+      const parties = await tx
+        .insert(schema.parties)
+        .values([
+          { tenantId: tenantA, kind: "organization", displayName: "Feed Co A" },
+          { tenantId: tenantB, kind: "organization", displayName: "Feed Co B" },
+        ])
+        .returning();
+      const vendors = await tx
+        .insert(schema.vendors)
+        .values([
+          { tenantId: tenantA, partyId: parties[0].id, name: "Feed Co A" },
+          { tenantId: tenantB, partyId: parties[1].id, name: "Feed Co B" },
+        ])
+        .returning();
+      // These fixtures are bare tenants — no accounting is provisioned here, so
+      // the company a bill belongs to has to be made by hand. Nothing in this
+      // suite reads the books; the entity exists only so a bill row is legal.
+      const entitiesRows = await tx
+        .insert(schema.entities)
+        .values([
+          { tenantId: tenantA, name: "Farm A", isDefault: true },
+          { tenantId: tenantB, name: "Farm B", isDefault: true },
+        ])
+        .returning();
+      const entityOf = (t: string) =>
+        entitiesRows.find((e) => e.tenantId === t)!.id;
+      const bills = await tx
+        .insert(schema.bills)
+        .values([
+          {
+            tenantId: tenantA,
+            entityId: entityOf(tenantA),
+            vendorId: vendors[0].id,
+            billDate: "2026-08-02",
+            createdByClerkUserId: OWNER,
+          },
+          {
+            tenantId: tenantB,
+            entityId: entityOf(tenantB),
+            vendorId: vendors[1].id,
+            billDate: "2026-08-02",
+            createdByClerkUserId: OTHER,
+          },
+        ])
+        .returning();
+      const billLines = await tx
+        .insert(schema.billLines)
+        .values([
+          {
+            tenantId: tenantA,
+            billId: bills[0].id,
+            lineNo: 1,
+            description: "Feed",
+            amountCents: 50_000,
+          },
+          {
+            tenantId: tenantB,
+            billId: bills[1].id,
+            lineNo: 1,
+            description: "Feed",
+            amountCents: 2_000,
+          },
+        ])
+        .returning();
+      billLineA = billLines[0].id;
+      billLineB = billLines[1].id;
+
+      const allocations = await tx
+        .insert(schema.billLineStockAllocations)
+        .values([
+          {
+            tenantId: tenantA,
+            billLineId: billLineA,
+            inventoryMovementId: movementA,
+            quantityMatched: 500,
+            receiptCostCents: 50_000,
+            invoiceCostCents: 50_000,
+          },
+          {
+            tenantId: tenantB,
+            billLineId: billLineB,
+            inventoryMovementId: movementB,
+            quantityMatched: 20,
+            receiptCostCents: 2_000,
+            invoiceCostCents: 2_000,
+          },
+        ])
+        .returning();
+      allocationA = allocations[0].id;
     });
   });
 
@@ -493,6 +599,150 @@ d("inventory tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+// ---- slice 3b: bill-to-stock allocations --------------------------------
+
+  it("a tenant sees only its own bill-to-stock allocations", async () => {
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.billLineStockAllocations),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].id).toBe(allocationA);
+    expect(
+      await asOtherTenant((tx) =>
+        tx.select().from(schema.billLineStockAllocations),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("CANNOT SETTLE ANOTHER TENANT'S DELIVERY", async () => {
+    /**
+     * The sharpest one here. An allocation clears a liability against a
+     * receipt — pointing one across the boundary would settle this business's
+     * bill using another business's stock, and the GRNI reconciliation that
+     * exists to catch a mistake would report the account as balanced.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.billLineStockAllocations).values({
+          tenantId: tenantA,
+          billLineId: billLineA,
+          inventoryMovementId: movementB,
+          quantityMatched: 1,
+          receiptCostCents: 100,
+          invoiceCostCents: 100,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot attach an allocation to another tenant's bill line", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.billLineStockAllocations).values({
+          tenantId: tenantA,
+          billLineId: billLineB,
+          inventoryMovementId: movementA,
+          quantityMatched: 1,
+          receiptCostCents: 100,
+          invoiceCostCents: 100,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("settles a given delivery from a given line only ONCE", async () => {
+    // A second match against the same pair is a correction to the first, not a
+    // second settlement. Without this a double-submitted match clears GRNI twice.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.billLineStockAllocations).values({
+          tenantId: tenantA,
+          billLineId: billLineA,
+          inventoryMovementId: movementA,
+          quantityMatched: 1,
+          receiptCostCents: 100,
+          invoiceCostCents: 100,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a non-positive matched quantity", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.billLineStockAllocations).values({
+          tenantId: tenantA,
+          billLineId: billLineA,
+          inventoryMovementId: movementA,
+          quantityMatched: 0,
+          receiptCostCents: 0,
+          invoiceCostCents: 0,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot move an allocation into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.billLineStockAllocations)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.billLineStockAllocations.id, allocationA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("DIES WITH ITS BILL LINE, because a draft edit re-creates every line", async () => {
+    /**
+     * `updateBillDraft` deletes and re-inserts every line of a draft, so a bill
+     * line id does not survive an edit. Without the cascade this table would
+     * accumulate rows pointing at lines that no longer exist — and each one
+     * would still be clearing GRNI.
+     */
+    await withSystem(async (tx) => {
+      const line = await tx
+        .insert(schema.billLines)
+        .values({
+          tenantId: tenantA,
+          billId: (await tx.query.billLines.findFirst({
+            where: eq(schema.billLines.id, billLineA),
+          }))!.billId,
+          lineNo: 99,
+          description: "Doomed",
+          amountCents: 100,
+        })
+        .returning();
+      const movement = await tx
+        .insert(schema.inventoryMovements)
+        .values({
+          tenantId: tenantA,
+          itemId: feedA,
+          quantity: 1,
+          movementKind: "receipt",
+          occurredOn: "2026-08-03",
+          costCents: 100,
+        })
+        .returning();
+      await tx.insert(schema.billLineStockAllocations).values({
+        tenantId: tenantA,
+        billLineId: line[0].id,
+        inventoryMovementId: movement[0].id,
+        quantityMatched: 1,
+        receiptCostCents: 100,
+        invoiceCostCents: 100,
+      });
+      await tx.delete(schema.billLines).where(eq(schema.billLines.id, line[0].id));
+      const left = await tx
+        .select()
+        .from(schema.billLineStockAllocations)
+        .where(
+          eq(schema.billLineStockAllocations.inventoryMovementId, movement[0].id),
+        );
+      expect(left).toHaveLength(0);
+    });
+  });
+
   it("is default-deny on every table in the pack with no tenant context", async () => {
     const nowhere = "00000000-0000-0000-0000-000000000000";
     expect(
@@ -504,6 +754,11 @@ d("inventory tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.inventoryMovements),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.billLineStockAllocations),
       ),
     ).toHaveLength(0);
     expect(

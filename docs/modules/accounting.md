@@ -13,51 +13,63 @@ export for the accountant.
 
 ## Build log
 
-### 2026-08-21 — The pass-through rule that was an observation (branch `claude/what-the-shelf-is-worth`)
+### 2026-08-21 — The pass-through rule that was an observation, and the repair that was also too broad (branch `claude/what-the-shelf-is-worth`)
 
-**[ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md): inventory is not
-an asset on a cash basis.** Design only — no code in this change; the rules land
-with `inventory` slice 3b.
+Two ADRs, design only — no code in this change; the rules land with `inventory`
+slice 3b.
 
-[ADR 0007](../decisions/0007-cash-basis-reporting.md) says everything that is
-not an invoice or a bill *"is already cash-dated and passes through untouched"*.
-**That was never a decision. It was an observation that, at the time, happened to
-be true** — and it was written down as a rule, so nothing failed when it stopped
-holding.
+- **[ADR 0012](../decisions/0012-what-capitalises-stock.md)** — what capitalises
+  stock, and what joins the two records of its cost. Accrual only.
+- **[ADR 0013](../decisions/0013-inventory-tax-treatment.md)** — inventory
+  treatment is a POLICY, not a property of the word "cash".
 
-Perpetual inventory is the first thing in this build that capitalises. Traced
-through the lens as it stands, a feed purchase comes out wrong twice over: the
-bill's `1300` line is re-recognised as an ASSET at the payment date, because
-`cash-basis.ts` builds recognition from every non-control line and does not care
-about account type
+**The bug.** [ADR 0007](../decisions/0007-cash-basis-reporting.md) says
+everything that is not an invoice or a bill *"is already cash-dated and passes
+through untouched"*. **That was never a decision. It was an observation that, at
+the time, happened to be true** — written down as a rule, so nothing failed when
+it stopped holding. Perpetual inventory is the first thing in this build that
+capitalises, and traced through the lens a stock purchase comes out wrong twice:
+the bill's capitalising line is re-recognised as an ASSET at the payment date,
+because `cash-basis.ts` builds recognition from every non-control line and does
+not care about account type
 ([cash-basis.ts:247](../../src/modules/accounting/core/cash-basis.ts:247)); and
-the consumption entry `Dr 5000 / Cr 1300` has no AR/AP leg, so it passes through.
-The result is a report labelled cash basis that **expenses feed when it is
-consumed rather than when it is paid for** — and most small farms file on cash,
-where feed is deducted when purchased.
+the consumption entry has no AR/AP leg, so it passes through untouched.
 
-Three rules, in the ADR:
+**The repair that was also wrong.** The first fix was to substitute capitalising
+lines to an expense account and drop the movement entries on cash basis — which
+produces "deduct at payment". That is a plausible treatment for feed bought by a
+qualifying farmer. **It is not what "cash basis" means**: a qualifying small
+business has more than one option, and the answers differ. Two businesses both
+correctly on the cash method can owe different results.
 
-1. **Substitute, never drop.** An inventory line becomes its consumption
-   account. Dropping one leg unbalances the entry — a bank-imported cash
-   purchase is `Dr 1300 / Cr Cash`. `opening_balance` is the one exception: the
-   line collapses against Opening Balance Equity, because inventing a purchase
-   in the opening period is worse than the asset was.
-2. **Drop a stock-movement entry whole**, by `source`, the same one-line shape
-   as the existing invoice/bill exclusion. Both legs go together, so balance
-   holds — and it prevents shrinkage being **deducted twice**, once when the
-   feed was paid for and again when it spoiled.
-3. **A movement posts exactly what the valuation says it carries**, and nothing
-   where that is null. Accrual-side, and it is what removes any need for a
-   goods-received-not-invoiced account.
+**And it was already wrong in this repo, not hypothetically.** The `retail` pack
+shipped the same day and sells goods out of `inventory`. Merchandise held for
+resale is exactly the category where sale still matters.
 
-The accrual path stays byte-identical; every rule is inside the `cash` branch.
+So the mechanism ships and the opinion becomes a setting:
+`accounting_settings.inventory_treatment`, orthogonal to basis, defaulting to
+`capitalise` — which changes nothing for anybody today. `expense_on_payment` is
+the second value. **Non-incidental materials and supplies is NAMED AND
+DELIBERATELY NOT IMPLEMENTED**, because approximating it would produce a
+confident wrong number in the one place where wrong means an amended return.
 
-**The implementation trap, named in the ADR because it will look like a rounding
+The names stay industry-neutral: not `farm_cash_payment_basis`. `accounting` is
+core, and core carries no trade-specific nouns — the farm profile *selects* a
+treatment rather than getting its name written into the ledger.
+
+**`expense_on_payment` cannot ship without per-item expense mapping.** It has to
+substitute *to* something, and everything-to-COGS balances while being useless
+for preparing a return. Resolution is item → `item_kind` → tenant default, reusing
+the taxonomy that already exists at
+[inventory.ts:73](../../src/db/schema/inventory.ts:73).
+
+**The implementation trap, named because it will look like a rounding
 difference:** `getBalances` filters `accountIds` inside the query
 ([balances.ts:89](../../src/modules/accounting/core/balances.ts:89)), before
-anything is substituted — so a cash-basis report asking only for the expense
-account would filter out the `1300` lines that were about to become it.
+anything is substituted — so a report asking only for the expense account would
+filter out the lines that were about to become it.
+
+The accrual path stays byte-identical; every rule is inside the `cash` branch.
 
 ### 2026-08-21 — Who may cause a posting (branch `claude/what-the-shelf-is-worth`)
 

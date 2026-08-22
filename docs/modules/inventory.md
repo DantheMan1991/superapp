@@ -683,29 +683,33 @@ commitment against a live animal to delivered without sitting on a shelf.
   an inventory item, so a bill for feed posts `Dr Feed Expense / Cr AP` with no
   idea stock arrived. Post `Dr 1300` from the receipt as well and the delivery
   is on the books twice. The two halves are one change:
-  1. **A nullable `inventory_item_id` on `bill_lines`**, so a bill line can say
-     it bought stock.
-  2. **That line posts to `1300` instead of an expense account**, which is what
-     makes the receipt's own entry non-duplicative.
+  1. **A receipt-level allocation between a bill line and the movements it
+     settles** — `bill_line_receipt_allocations`, with a matched quantity and
+     both costs. **An `inventory_item_id` alone is NOT a match** and assuming it
+     was is the largest hole review found in the first design: one item can have
+     three unbilled receipts at three prices across two lots, and one invoice can
+     cover two of them.
+  2. **The RECEIPT capitalises and the bill line CLEARS `2050 Goods Received Not
+     Invoiced`**, which is the account that joins what the business has to what
+     it owes. `2050` does not exist in the chart yet.
   3. **Then the movement postings**: receipt debits inventory, issue credits it
      against COGS, adjustment against the variance account. Transfers, splits
-     and merges post NOTHING — they move cost within one account. **The RECEIPT
-     capitalises** (`Dr 1300 / Cr 2050 Goods Received Not Invoiced`) and the
-     bill line CLEARS that account rather than capitalising a second time —
-     see [ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md), which
-     corrects an earlier draft of this plan that claimed GRNI was unnecessary.
-     It is necessary: without it, feed issued before its bill arrives is stamped
-     `null` by `issueStock` and, because a stamped cost is never re-derived, the
-     cost is lost permanently while `1300` holds an asset that has been eaten.
-  4. **The cash-basis lens, per
-     [ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md) — and this is
-     not optional polish.** Perpetual is the first thing in this build that
+     and merges post NOTHING — they move cost within one account. **A cost
+     correction is an appended MOVEMENT, never an edit** — `costing.ts` already
+     says "cost is a ledger, not a column, exactly as quantity is", and a count
+     already corrects quantity the same way. See
+     [ADR 0012](../decisions/0012-what-capitalises-stock.md), which corrects two
+     things the first draft of this plan got wrong.
+  4. **The reporting lens, per
+     [ADR 0013](../decisions/0013-inventory-tax-treatment.md) — and this is not
+     optional polish.** Perpetual is the first thing in this build that
      capitalises, and ADR 0007 passes non-AR/AP entries through untouched, so
-     without this a "cash basis" report expenses feed when it is CONSUMED
-     rather than when it is PAID FOR, and shows an inventory asset a cash-basis
-     farmer does not have. Most small farms file on cash. **The trap named in
-     that ADR is the `accountIds` filter**, which runs before substitution and
-     will silently under-report.
+     without this a report labelled "cash basis" re-recognises stock as an ASSET
+     at the payment date and then expenses it at consumption. **The treatment is
+     a SETTING, not a property of the word "cash"** — a farm and a `retail`
+     tenant can both be correctly on the cash method and owe different answers,
+     and `retail` ships today. **The trap named in that ADR is the `accountIds`
+     filter**, which runs before substitution and will silently under-report.
   5. **Idempotency is the movement id**, so one movement is one entry forever
      and a replayed write cannot double-post.
   The account resolver and the `MACHINE_SOURCES` seam this needs are already
@@ -724,7 +728,7 @@ commitment against a live animal to delivered without sitting on a shelf.
   accumulated cost, which is right and always on — but a cash-basis tenant
   reading "$463 on hand" will not find that figure in their financial
   statements, because on their basis it is not an asset
-  ([ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md)). The card should
+  ([ADR 0013](../decisions/0013-inventory-tax-treatment.md)). The card should
   say which basis it is and is not.
 - **A valuation cannot be exported.** The figure is on a screen and an
   accountant will want it as a file, with the as-of date and the unvalued count

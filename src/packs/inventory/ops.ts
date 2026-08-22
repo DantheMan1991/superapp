@@ -15,6 +15,7 @@ import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   InventoryCostAdjustment,
+  InventoryTaxTreatment,
   InventoryCount,
   InventoryCountLine,
   InventoryItem,
@@ -49,6 +50,13 @@ import {
   type ValuationMethod,
   type ValuationTotal,
 } from "./core/valuation";
+import {
+  isImplementedRule,
+  isTimingRule,
+  resolveTaxRule,
+  type ResolvedTaxRule,
+  type TaxRuleRow,
+} from "./core/tax-rules";
 import { postCostAdjustment, postMovement } from "./ledger-ops";
 
 /**
@@ -92,7 +100,9 @@ export class InventoryError extends Error {
       | "ENTITY_MISMATCH"
       | "ALLOCATION_MISMATCH"
       | "POSTING_OFF"
-      | "POSTING_LOCKED",
+      | "POSTING_LOCKED"
+      | "INVALID_TIMING_RULE"
+      | "TIMING_RULE_UNAVAILABLE",
     message: string,
   ) {
     super(message);
@@ -1706,6 +1716,197 @@ export async function balanceByLots(
   return out;
 }
 
+
+
+// ------------------------------------ where a tax decision gets recorded ---
+
+/** Every rule this tenant has recorded, defaults first. */
+export async function listTaxRules(
+  tx: Tx,
+  tenantId: string,
+): Promise<InventoryTaxTreatment[]> {
+  return tx.query.inventoryTaxTreatments.findMany({
+    where: eq(schema.inventoryTaxTreatments.tenantId, tenantId),
+    orderBy: (r, { asc: byAsc }) => [byAsc(r.itemKind)],
+  });
+}
+
+/**
+ * What each category in use resolves to, and WHY.
+ *
+ * **DRIVEN BY THE KINDS THE BUSINESS ACTUALLY HOLDS**, not by the suggested
+ * list: `item_kind` is an open taxonomy, so a farm that typed `bedding` has a
+ * category the vocabulary has never heard of, and a screen built from the
+ * suggestions would silently omit it. The one place a person checks what their
+ * decision means must be built from their own data.
+ *
+ * The tenant default is always included even when nothing resolves to it, since
+ * it is what a new category will get.
+ */
+export async function taxRuleCoverage(
+  tx: Tx,
+  tenantId: string,
+): Promise<
+  {
+    itemKind: string | null;
+    items: number;
+    resolved: ResolvedTaxRule;
+  }[]
+> {
+  const [kinds, rows] = await Promise.all([
+    tx
+      .select({
+        itemKind: schema.inventoryItems.itemKind,
+        items: sql<string>`count(*)`,
+      })
+      .from(schema.inventoryItems)
+      .where(
+        and(
+          eq(schema.inventoryItems.tenantId, tenantId),
+          eq(schema.inventoryItems.status, "active"),
+        ),
+      )
+      .groupBy(schema.inventoryItems.itemKind),
+    listTaxRules(tx, tenantId),
+  ]);
+  const stored: TaxRuleRow[] = rows.map((r) => ({
+    itemKind: r.itemKind,
+    timingRule: r.timingRule,
+    expenseAccountId: r.expenseAccountId,
+  }));
+
+  // Typed explicitly: `inventory_items.item_kind` is NOT NULL, so the mapped
+  // rows infer as `string` and the tenant-default row below cannot be unshifted
+  // into them.
+  const out: { itemKind: string | null; items: number; resolved: ResolvedTaxRule }[] =
+    kinds
+      .map((k) => ({
+        itemKind: k.itemKind as string | null,
+        items: Number(k.items),
+        resolved: resolveTaxRule(k.itemKind, stored),
+      }))
+      .sort((a, b) => (a.itemKind ?? "").localeCompare(b.itemKind ?? ""));
+
+  out.unshift({
+    itemKind: null,
+    items: 0,
+    resolved: resolveTaxRule(null, stored),
+  });
+  return out;
+}
+
+/**
+ * **RECORD WHAT SOMEBODY QUALIFIED DECIDED**, for one category or for the
+ * business as a whole.
+ *
+ * OWNER only. A tax election is not a chore, and it is the same line every other
+ * cost-object decision in this pack sits on.
+ *
+ * **REFUSES A RULE THE REPORT LENS CANNOT HONOUR.** Stage 1 can apply
+ * `consumed` and nothing else. Storing `paid` here while the lens ignores it
+ * would produce a setting that claims to change a report and does not, which is
+ * precisely the "plausible, balanced, wrong" failure ADR 0013 was written to
+ * end. The refusal names the rule so a person can see the software is not ready
+ * rather than that they typed something invalid.
+ *
+ * **Upserts by selecting first**, including the null-kind default row, because
+ * Postgres treats two nulls as distinct and the unique index therefore does not
+ * hold for it. Same limitation and the same remedy as `recordCountLine`.
+ */
+export async function setTaxRule(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    /** Null records the tenant's default. */
+    itemKind: string | null;
+    timingRule: string;
+    expenseAccountId?: string | null;
+    decidedBy?: string;
+    decidedOn?: string | null;
+    notes?: string;
+  },
+): Promise<InventoryTaxTreatment> {
+  requireWrite(ctx, "owner");
+  if (input.itemKind !== null && !isValidSlug(input.itemKind)) {
+    throw new InventoryError("INVALID_KIND", input.itemKind);
+  }
+  if (!isTimingRule(input.timingRule)) {
+    throw new InventoryError(
+      "INVALID_TIMING_RULE",
+      "that is not a moment this software can date",
+    );
+  }
+  if (!isImplementedRule(input.timingRule)) {
+    throw new InventoryError(
+      "TIMING_RULE_UNAVAILABLE",
+      `The reports cannot apply "${input.timingRule}" yet, so recording it here would mean a setting that says one thing and does another. Only "when it is used" is applied today.`,
+    );
+  }
+
+  const existing = await tx.query.inventoryTaxTreatments.findFirst({
+    where: and(
+      eq(schema.inventoryTaxTreatments.tenantId, ctx.tenantId),
+      input.itemKind === null
+        ? isNull(schema.inventoryTaxTreatments.itemKind)
+        : eq(schema.inventoryTaxTreatments.itemKind, input.itemKind),
+    ),
+  });
+
+  const values = {
+    timingRule: input.timingRule,
+    expenseAccountId: input.expenseAccountId ?? null,
+    decidedBy: input.decidedBy?.trim() ?? "",
+    decidedOn: input.decidedOn ?? null,
+    notes: input.notes?.trim() ?? "",
+  };
+
+  if (existing) {
+    const [row] = await tx
+      .update(schema.inventoryTaxTreatments)
+      .set({ ...values, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.inventoryTaxTreatments.tenantId, ctx.tenantId),
+          eq(schema.inventoryTaxTreatments.id, existing.id),
+        ),
+      )
+      .returning();
+    return row;
+  }
+  const [row] = await tx
+    .insert(schema.inventoryTaxTreatments)
+    .values({ tenantId: ctx.tenantId, itemKind: input.itemKind, ...values })
+    .returning();
+  return row;
+}
+
+/**
+ * Remove a recorded decision, so the category falls back to the next step of the
+ * resolution order.
+ *
+ * Deleting rather than setting it back to `consumed`, because those are
+ * different facts: one is "nobody has decided about this category", the other is
+ * "somebody decided it is used-based". `resolveTaxRule` reports which through
+ * `source`, and a screen that could not tell them apart would put an
+ * accountant's name against a decision they never made.
+ */
+export async function clearTaxRule(
+  tx: Tx,
+  ctx: InventoryCtx,
+  itemKind: string | null,
+): Promise<void> {
+  requireWrite(ctx, "owner");
+  await tx
+    .delete(schema.inventoryTaxTreatments)
+    .where(
+      and(
+        eq(schema.inventoryTaxTreatments.tenantId, ctx.tenantId),
+        itemKind === null
+          ? isNull(schema.inventoryTaxTreatments.itemKind)
+          : eq(schema.inventoryTaxTreatments.itemKind, itemKind),
+      ),
+    );
+}
 
 // --------------------------------------------- correcting what it cost ---
 

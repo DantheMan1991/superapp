@@ -20,7 +20,11 @@ import {
   lotAncestry,
   type InventoryCtx,
   listLocations,
+  setTaxRule,
+  clearTaxRule,
+  listTaxRules,
 } from "../src/packs/inventory/ops";
+import { resolveTaxRule } from "../src/packs/inventory/core/tax-rules";
 import { balanceOfLot, balanceByItem } from "../src/packs/inventory/core/balances";
 import {
   adjustStock,
@@ -1512,6 +1516,123 @@ d("inventory ops", () => {
           }),
         ),
       ).rejects.toMatchObject({ code: "LOT_INVALID" });
+    });
+  });
+
+  // ---- where a tax decision gets recorded (ADR 0013 A.2) ------------------
+
+  describe("tax rules", () => {
+    it("REFUSES A RULE THE REPORT LENS CANNOT HONOUR", async () => {
+      /**
+       * **The guarantee the whole stage rests on.** The screen disables the
+       * unbuilt rules, but a disabled option is a courtesy — this is the rule.
+       * Storing `paid` while the lens ignores it would produce a setting that
+       * claims to change a report and does not, which is the "plausible,
+       * balanced, wrong" failure ADR 0013 exists to end.
+       *
+       * When the lens learns a rule, `IMPLEMENTED_TIMING_RULES` widens and this
+       * test's expectation moves with it. That is the intended coupling.
+       */
+      await expect(
+        asOwner((tx) =>
+          setTaxRule(tx, ownerCtx(), { itemKind: "feed", timingRule: "paid" }),
+        ),
+      ).rejects.toMatchObject({ code: "TIMING_RULE_UNAVAILABLE" });
+    });
+
+    it("refuses something that is not a moment the ledger can date", async () => {
+      await expect(
+        asOwner((tx) =>
+          setTaxRule(tx, ownerCtx(), {
+            itemKind: "feed",
+            timingRule: "when_the_accountant_says",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_TIMING_RULE" });
+    });
+
+    it("refuses a staff member — a tax election is not a chore", async () => {
+      await expect(
+        asOwner((tx) =>
+          setTaxRule(tx, staffCtx(), {
+            itemKind: "feed",
+            timingRule: "consumed",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("UPSERTS THE NULL-KIND DEFAULT rather than adding a second one", async () => {
+      /**
+       * Postgres treats two nulls as distinct, so the unique index does not hold
+       * for the tenant default and the database would happily take two. Same
+       * limitation and the same remedy as `recordCountLine`: select, then
+       * update. Two default rows would make which one applies a matter of query
+       * order.
+       */
+      await asOwner((tx) =>
+        setTaxRule(tx, ownerCtx(), {
+          itemKind: null,
+          timingRule: "consumed",
+          decidedBy: "First",
+        }),
+      );
+      await asOwner((tx) =>
+        setTaxRule(tx, ownerCtx(), {
+          itemKind: null,
+          timingRule: "consumed",
+          decidedBy: "Second",
+        }),
+      );
+      const rows = await asOwner((tx) => listTaxRules(tx, tenantId));
+      const defaults = rows.filter((r) => r.itemKind === null);
+      expect(defaults).toHaveLength(1);
+      expect(defaults[0].decidedBy).toBe("Second");
+    });
+
+    it("resolves most specific first, and says which row answered", async () => {
+      await asOwner((tx) =>
+        setTaxRule(tx, ownerCtx(), {
+          itemKind: "feed",
+          timingRule: "consumed",
+          decidedBy: "Feed's accountant",
+        }),
+      );
+      const rows = await asOwner((tx) => listTaxRules(tx, tenantId));
+      const stored = rows.map((r) => ({
+        itemKind: r.itemKind,
+        timingRule: r.timingRule,
+        expenseAccountId: r.expenseAccountId,
+      }));
+      expect(resolveTaxRule("feed", stored).source).toBe("item_kind");
+      // A category nobody has decided about inherits the default row.
+      expect(resolveTaxRule("bedding", stored).source).toBe("tenant_default");
+    });
+
+    it("CLEARING IS NOT THE SAME AS SETTING IT BACK", async () => {
+      /**
+       * "Nobody has decided about this category" and "somebody decided it is
+       * used-based" are different facts, and `source` is what tells them apart.
+       * A screen that could not would put an accountant's name against a
+       * decision they never made.
+       */
+      await asOwner((tx) =>
+        setTaxRule(tx, ownerCtx(), {
+          itemKind: "seed",
+          timingRule: "consumed",
+          decidedBy: "Somebody",
+        }),
+      );
+      await asOwner((tx) => clearTaxRule(tx, ownerCtx(), "seed"));
+      const rows = await asOwner((tx) => listTaxRules(tx, tenantId));
+      expect(rows.find((r) => r.itemKind === "seed")).toBeUndefined();
+      // Still resolves — through the default, which is a different answer.
+      const stored = rows.map((r) => ({
+        itemKind: r.itemKind,
+        timingRule: r.timingRule,
+        expenseAccountId: r.expenseAccountId,
+      }));
+      expect(resolveTaxRule("seed", stored).source).toBe("tenant_default");
     });
   });
 });

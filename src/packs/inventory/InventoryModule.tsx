@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Boxes, ClipboardList, Coins, FileCheck } from "lucide-react";
+import { Boxes, ClipboardList, Coins, FileCheck, Scale } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { PageHeader } from "@/components/app/page-header";
@@ -127,6 +127,19 @@ export async function InventoryModule({
                 Deliveries & invoices
               </Link>
             </Button>
+            {/* OWNER ONLY, unlike the three above, and it is the only one of
+                the four that is not a daily question. Recording what an
+                accountant decided about a tax election is a decision about the
+                business, not a chore, and it sits on the same line as every
+                other cost-object act in this pack. */}
+            {isOwner && (
+              <Button asChild variant="outline">
+                <Link href="/dashboard/m/inventory/tax">
+                  <Scale className="mr-2 h-4 w-4" />
+                  When it is deducted
+                </Link>
+              </Button>
+            )}
             {isOwner && (
               <ItemForm
                 kindsInUse={kinds.map((k) => k.kind)}

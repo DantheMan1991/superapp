@@ -10,6 +10,8 @@ import {
   InventoryError,
   adjustLotCost,
   adjustStock,
+  clearTaxRule,
+  setTaxRule,
   postCount,
   recordCountLine,
   removeCountLine,
@@ -92,6 +94,11 @@ function toResult(err: unknown): { error: string } {
         return { error: err.message };
       case "INVALID_REASON":
         return { error: "Use lowercase letters, numbers and underscores." };
+      // Both carry what the software can and cannot do yet. Flattening them
+      // would turn "we have not built that" into "you typed it wrong".
+      case "INVALID_TIMING_RULE":
+      case "TIMING_RULE_UNAVAILABLE":
+        return { error: err.message };
       // Both are written for a person where they are thrown, and both are about
       // what the person is holding rather than about the data.
       case "COUNT_CLOSED":
@@ -820,6 +827,85 @@ export async function unmatchBillLineAction(input: unknown) {
     revalidatePath(BASE, "layout");
     revalidatePath("/dashboard/m/accounting", "layout");
     return { ok: true as const, ...result };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * **RECORD WHAT SOMEBODY QUALIFIED DECIDED** about when a category's cost is
+ * deducted. ADR 0013 §A.2.
+ *
+ * OWNER only, and the audit line carries the category, the rule and the name of
+ * whoever decided — because this is a record rather than a preference, and the
+ * question "who told us to do this" is the one somebody will ask.
+ */
+export async function setTaxRuleAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      // Null is the tenant's default, and it is a real value here rather than
+      // an omission — see `setTaxRule`.
+      itemKind: z.string().min(1).max(63).nullable(),
+      timingRule: z.string().min(1).max(63),
+      expenseAccountId: z.string().uuid().nullable().optional(),
+      decidedBy: z.string().max(200).optional(),
+      decidedOn: optionalDate.nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) => setTaxRule(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.tax_rule_set",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_tax_treatment",
+      targetId: row.id,
+      meta: {
+        itemKind: row.itemKind,
+        timingRule: row.timingRule,
+        decidedBy: row.decidedBy,
+        decidedOn: row.decidedOn,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function clearTaxRuleAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ itemKind: z.string().min(1).max(63).nullable() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => clearTaxRule(tx, ctxOf(ctx), parsed.data.itemKind),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.tax_rule_cleared",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_tax_treatment",
+      targetId: ctx.tenant.id,
+      meta: { itemKind: parsed.data.itemKind },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true as const };
   } catch (err) {
     return toResult(err);
   }

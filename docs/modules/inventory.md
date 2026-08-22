@@ -22,11 +22,72 @@ this dossier is the build record.
 | **3b** | **Perpetual posting, GRNI, and matching a bill to the deliveries it pays for** | **shipped 2026-08-21** |
 | **3c** | **The screen: matching, the GRNI reconciliation, and the switch that turns posting on** | **shipped 2026-08-22** |
 | **3d** | **Cost-adjustment corrections** — `inventory_cost_adjustments`, ADR 0012 §A.4 | **shipped 2026-08-22** |
-| 3d ii | The tax-timing lens | **not blocked on code and not on one answer.** [ADR 0013](../decisions/0013-inventory-tax-treatment.md) was revised 2026-08-22: treatment is per item category, per tenant, and the software offers dates it can observe rather than tax treatments it cannot read. [The brief](../briefs/inventory-tax-treatment.md) is a per-client template now, not a one-time question |
+| **3d ii** | **Recording a tax decision** — `inventory_tax_treatments`, resolution, screen | **shipped 2026-08-22** |
+| 3d iii | The lens that APPLIES a rule other than `consumed` | next, and **specified rather than vague**: the two obstacles are in Open items. Not blocked on an accountant — [the brief](../briefs/inventory-tax-treatment.md) is a per-client template, and a tenant electing nothing keeps today's behaviour |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
 ## Build log
+
+### 2026-08-22 — Where a decision gets recorded (`claude/where-a-decision-gets-recorded`)
+
+Slice 3d stage 1: `inventory_tax_treatments`, the resolution, and a screen.
+[ADR 0013](../decisions/0013-inventory-tax-treatment.md) §A.2 and §A.5.
+**Nothing on it changes a report yet, and the page says so in its first card.**
+
+**THE LIST IS MOMENTS THE LEDGER CAN DATE, NOT TAX TREATMENTS**, and that is the
+whole design rather than a limitation. A list of treatments would be a reading of
+the regulations, maintained by people not qualified to read them, and every gap
+in it would be invisible to everybody. A list of dates is checkable: `billed` is
+`bills.bill_date`, `paid` is `bill_payments.payment_date` reached through the
+allocation chain, `sold` is the movement a `retail_sale_lines` row names. If an
+election needs a moment that is not on the list, the answer is to add another
+observable event — never to round to the nearest one already there.
+
+**WHAT IS SETTABLE IS NARROWER THAN WHAT IS LISTED, AND THE GAP IS ENFORCED.**
+`consumed` is the only rule the lens can apply, because it is the only one
+meaning "change nothing". `setTaxRule` refuses the rest with a message saying the
+reports cannot apply it yet; the screen shows them greyed as *"not built yet"*.
+Showing them is deliberate — this page exists so an accountant's answer has
+somewhere to go, and hiding the answers the software cannot take would let
+somebody conclude it never will.
+
+**PER `item_kind`, WHICH ALREADY EXISTED.** An earlier draft of the ADR made this
+one setting for a whole business in the same document that says merchandise held
+for resale behaves differently from feed. Resolution is item kind → tenant
+default → built-in, and **both fields come from ONE row**: resolving them
+independently would let a category say "expense this at payment" while the
+account came from a row that never agreed to it.
+
+**IT IS A RECORD, NOT A PREFERENCE**, so it carries `decided_by` and
+`decided_on`. Free text, for the reason `inventory_counts.counted_by` is: the
+accountant has no login here. The screen shows the name beside the rule, and
+badges every row with where its answer came from — `inherited` when the default
+answered, `not decided` when nothing has.
+
+**CLEARING IS NOT SETTING IT BACK TO `consumed`.** "Nobody has decided about this
+category" and "somebody decided it is used-based" are different facts, and
+`resolveTaxRule`'s `source` is what tells them apart. Collapsing them would put
+an accountant's name against a decision they never made.
+
+**The null-kind default hits the `NULLS NOT DISTINCT` trap again**, the third
+time in this pack. The unique index does not hold for the tenant default row, so
+`setTaxRule` selects then updates — `recordCountLine`'s remedy, for
+`recordCountLine`'s reason.
+
+Driven on the dev farm: the page builds its rows from the categories that tenant
+actually holds (feed, livestock, meat, medicine — `item_kind` is an open
+taxonomy, so a page built from the SUGGESTED list would have missed anything
+typed by hand). Recording feed, then the business default, flipped the other
+three to `inherited`.
+
+11 pure tests, 6 ops, 5 isolation. Migrations `0182` (table + enum) and `0183`
+(RLS).
+
+**Still not built: the lens.** Slice 3d iii is what applies a rule other than
+`consumed`, and it is where the two things reading `cash-basis.ts` turned up have
+to be solved — an entry has ONE control leg shared across mixed lines, and the
+adjustment only runs for documents with a payment in the window.
 
 ### 2026-08-22 — A method is not a toggle (`claude/a-method-is-not-a-toggle`)
 
@@ -561,6 +622,8 @@ nullable and null is ordinary: a batch with no date is one nobody has dated (and
 the pack does not try to tell that apart from "does not expire"), and a movement
 with no reason is one whose kind already says why.
 
+| `inventory_tax_treatments` | **Where an accountant's decision is recorded**, per category — ADR 0013 §A.2 | `item_kind` NULL is the tenant default, and the unique index does NOT hold for it (Postgres nulls are distinct) — `setTaxRule` selects then updates, third time this pack has hit that. Composite FK to `accounts`. Carries `decided_by` and `decided_on`, because it is a record rather than a preference |
+
 | `inventory_cost_adjustments` | **A correction to what a batch COST.** Appended, never an edit — ADR 0012 §A.4 | Composite FKs to the item and the lot, **neither cascading**: erasing the record that somebody re-stated a cost would hide the money. `amount_cents` is SIGNED and CHECKed non-zero, which is the pair of things `inventory_movements` structurally cannot carry. `on_hand_cents + issued_cents = amount_cents` is CHECKed, so a stored split can never fail to account for the whole |
 
 | `bill_line_stock_allocations` | **Which delivery a bill line is settling** | Composite FKs to `bill_lines` (**CASCADE** — a draft edit re-creates every line, so ids do not survive one) and to the receipt movement (**no cascade** — erasing the record that a bill settled it would hide the money). UNIQUE per (line, movement): a second match is a correction, not a second settlement |
@@ -587,6 +650,8 @@ commitment against a live animal to delivered without sitting on a shelf.
   that could be zero, and `hasRecordedCost` before adding anything that can put
   money on a batch — it is shared with `production` and is the ONE place "has
   anybody said what this cost" is answered
+- `src/packs/inventory/core/tax-rules.ts` — pure. The timing rules, what is
+  implemented, and the resolution order. **Read the header before adding a rule**
 - `src/packs/inventory/core/costing.ts` — pure. `lotCarried` folds movements AND
   cost corrections; `splitCostAdjustment` is the on-hand/issued arithmetic and is
   called by the server and by the dialog's preview, so the two cannot disagree
@@ -616,6 +681,19 @@ commitment against a live animal to delivered without sitting on a shelf.
   while a kill day stamped NULL on the meat. **If a future slice adds another
   way for money to reach a batch, this predicate is the thing to change**, and
   changing it fixes both callers at once, which is the whole point of it.
+- **THE TIMING-RULE LIST IS MOMENTS THE LEDGER CAN DATE, NOT TAX TREATMENTS.**
+  Every value in `TIMING_RULES` names a column that exists. A list of treatments
+  would be a reading of the regulations maintained by people who cannot read
+  them, and its gaps would be invisible; this list is checkable against the
+  ledger. **If an election needs a moment that is not on it, add another
+  observable event — never round to the nearest one that is.**
+- **`IMPLEMENTED_TIMING_RULES` MUST NOT WIDEN AHEAD OF THE LENS.** It is what
+  stops a recorded decision being a lie about what the reports do, and it is
+  enforced in `setTaxRule` rather than only in the UI.
+- **CLEARING A TAX RULE IS NOT SETTING IT TO `consumed`.** One means nobody has
+  decided, the other means somebody did. `resolveTaxRule`'s `source` is the
+  discriminator, and collapsing them would put an accountant's name against a
+  decision they never made.
 - **A COST CORRECTION IS NOT A MOVEMENT, AND MUST NOT BECOME ONE.** Two CHECKs
   refuse it: `quantity <> 0` rules out a pure-money row, `cost_cents >= 0` rules
   out a correction downwards. Both constraints protect the quantity ledger for
@@ -724,11 +802,19 @@ commitment against a live animal to delivered without sitting on a shelf.
   What remains is real and is not standalone: **the lens has no concept of a
   capitalising line**, so it treats one as something to re-time. That only needs
   solving when a rule other than `consumed` exists to re-time it to, which makes
-  it part of the tax axis rather than a fix somebody can do this afternoon. Two
-  things it will have to solve: an entry has ONE control leg shared across mixed
-  lines, so keeping a capitalising line at its accrual date means splitting that
-  leg pro rata; and the adjustment only runs for documents with a payment in the
-  window, so a bill never paid never gets its line back at all.
+  it slice 3d iii rather than a fix somebody can do this afternoon — see the
+  next item for what it will have to solve.
+- **NOTHING APPLIES A TAX RULE YET.** Stage 3d ii records the decision and
+  resolves it; the lens is 3d iii. **Two things reading `cash-basis.ts` turned
+  up that it will have to solve, neither of which ADR 0013 had reckoned with:**
+  an entry has ONE control leg shared across mixed lines, so keeping a
+  capitalising line at its accrual date means splitting that leg pro rata; and
+  `cashBasisAdjustment` only runs for documents with a payment in the window, so
+  a bill never paid never gets its line back at all.
+- **THE EXPENSE ACCOUNT IS RECORDABLE AND UNREAD.** Under `consumed` nothing
+  substitutes, so nothing needs it. It is captured now because ADR 0013 §A.5
+  calls it a prerequisite rather than a refinement, and because asking an
+  accountant twice is worse than asking once.
 - **A COST CORRECTION CANNOT BE UNPICKED.** By design — appended, never edited —
   and the remedy is an equal-and-opposite correction, which nothing on the screen
   suggests. The same gap a posted count has.

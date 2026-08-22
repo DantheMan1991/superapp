@@ -37,6 +37,32 @@ export interface BalanceRow {
  */
 export type AccountingBasis = "accrual" | "cash";
 
+/**
+ * Which basis a report should run on: what the URL asked for, or what the
+ * business files on.
+ *
+ * **AN EXPLICIT PARAMETER ALWAYS WINS**, in both directions. A link to
+ * `?basis=accrual` has to produce accrual even for a tenant whose default is
+ * cash, or a figure somebody sent to their accountant would change meaning
+ * depending on who opened it — and a report URL is exactly the thing people
+ * paste to each other.
+ *
+ * **ANYTHING UNREADABLE FALLS TO THE TENANT'S DEFAULT, not to accrual.** The
+ * rule this replaces was `sp.basis === "cash" ? "cash" : "accrual"`, whose
+ * comment said an unreadable query string "must never silently produce the
+ * other basis". That intent is kept and its reference point corrected: the
+ * other basis now means *other than the one this business files on*, which for
+ * a cash-basis farm was previously the one they always got.
+ */
+export function resolveBasis(
+  param: string | undefined | null,
+  tenantDefault: AccountingBasis,
+): AccountingBasis {
+  if (param === "cash") return "cash";
+  if (param === "accrual") return "accrual";
+  return tenantDefault;
+}
+
 /** Sum two sets of rows by (account, dimension member). */
 function mergeRows(base: BalanceRow[], delta: BalanceRow[]): BalanceRow[] {
   if (delta.length === 0) return base;

@@ -19,9 +19,11 @@ import Link from "next/link";
 import { Lock, Scale } from "lucide-react";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import {
+  getSettings,
   getTrialBalance,
   groupClosedThrough,
   residualIfConsolidated,
+  resolveBasis,
 } from "@/modules/accounting/core";
 import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
@@ -42,16 +44,15 @@ export default async function TrialBalancePage({
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
 
-  // Anything that is not exactly "cash" is accrual: an unreadable query string
-  // must never silently produce the other basis.
-  const basis = sp.basis === "cash" ? "cash" : "accrual";
 
-  const { tb, asOf, entityView, residual, closedThrough, closedLabel } =
+  const { tb, basis, asOf, entityView, residual, closedThrough, closedLabel } =
     await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const today = todayInTimezone(ctx.tenant.timezone);
       const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
+      // See the P&L page: the URL wins, otherwise the basis they file on.
+      const basis = resolveBasis(sp.basis, (await getSettings(tx, ctx.tenant.id)).defaultBasis);
       // OFFERED: this is the report where elimination is provable, because a
       // consolidated trial balance still has to balance — and it does, since a
       // pair's two affiliate legs are +X and -X and removing them removes zero.
@@ -89,6 +90,7 @@ export default async function TrialBalancePage({
             : "";
       return {
         tb,
+        basis,
         asOf,
         entityView,
         residual,

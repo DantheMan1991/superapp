@@ -13,6 +13,59 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-21 — The basis you file on (branch `claude/the-basis-you-file-on`)
+
+**`accounting_settings.default_basis`**, and the end of a hardcoded literal that
+had been quietly answering a question it was not qualified to answer.
+
+Three report pages each resolved basis identically:
+
+```ts
+const basis = sp.basis === "cash" ? "cash" : "accrual";
+```
+
+So a business that **files on cash opened every report on accrual**, every time,
+and had to re-pick on each one. Two correct-but-different profit figures, with
+the wrong one loading by default, is the shape of an error somebody eventually
+acts on — and ADR 0007 exists precisely because most small businesses file cash.
+
+- **`resolveBasis(param, tenantDefault)`** is pure and is the whole decision.
+  **An explicit parameter wins in BOTH directions**: a link to `?basis=accrual`
+  produces accrual even for a cash-default tenant, because a report URL is
+  exactly the thing people paste to their accountant and it must not change
+  meaning depending on who opens it. Anything unreadable falls to the tenant
+  default rather than to accrual — the old comment said an unreadable query
+  string "must never silently produce the other basis", and this keeps that
+  intent while fixing its reference point.
+- **Resolution moved INSIDE the transaction**, because that is where the
+  settings row is readable. Each page now returns `basis` from its data block
+  rather than computing it in the request scope.
+- **`DefaultBasisNote` is shown at the moment somebody demonstrates the
+  preference** — the report they have just switched to Cash — rather than on a
+  settings screen. A default basis is set once in the life of a business and
+  then never again, which makes a settings screen the place it goes to be
+  undiscovered. It renders only when the report's basis differs from the saved
+  default, so it is absent for everybody already on the right one and disappears
+  the moment it is used.
+- **Owner-only and audited** (`ledger.default_basis_set`). It changes the figure
+  every other person in the business sees first.
+- **It is a PRESENTATION preference and the tests pin that.** It never reaches
+  `postEntry`, never changes what is stored and never decides what a pack posts
+  — the ledger is accrual for every tenant whatever it says. If this ever starts
+  deciding what gets stored, ADR 0007's single-set-of-books property is gone.
+- Defaults to `accrual`, so nothing that exists today changes.
+- Migration `0177`. 6 new tests.
+
+**Driven**, and worth recording how: the P&L 404'd with the change applied and
+rendered on a stashed tree, which read as a clear break. It was a stale dev
+server — stashing forced the recompile that actually fixed it. **A stash/restore
+A-B test is not a controlled experiment when a dev server is compiling in
+between.**
+
+Found while looking, not fixed here: **`/dashboard/m/accounting/reports` is
+linked from the accounting nav and 404s.** The index page exists; something in
+it refuses. Pre-existing.
+
 ### 2026-08-21 — The pass-through rule that was an observation (branch `claude/what-the-shelf-is-worth`)
 
 **[ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md): inventory is not

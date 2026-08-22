@@ -2,6 +2,7 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { withTenant } from "@/db";
 import { PageHeader } from "@/components/app/page-header";
+import { DefaultBasisNote } from "@/modules/accounting/components/default-basis-note";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { ReportControls } from "@/modules/accounting/components/report-controls";
 import { ReportTable } from "@/modules/accounting/components/report-table";
@@ -13,6 +14,7 @@ import {
   getSettings,
   listDimensionMembers,
   residualIfConsolidated,
+  resolveBasis,
 } from "@/modules/accounting/core";
 import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
 import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
@@ -46,12 +48,13 @@ export default async function PnlPage({
       : undefined;
   const dim =
     !compare && !spread && sp.dim?.match(/^[a-z0-9_]+$/) ? sp.dim : undefined;
-  // Anything that is not exactly "cash" is accrual: an unreadable query string
-  // must never silently produce the other basis.
-  const basis = sp.basis === "cash" ? "cash" : "accrual";
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const settings = await getSettings(tx, ctx.tenant.id);
+    // The URL wins when it says something; otherwise the basis this business
+    // FILES ON. It was a hardcoded "accrual" here, so a cash-basis farm opened
+    // every report on the basis it does not file on.
+    const basis = resolveBasis(sp.basis, settings.defaultBasis);
     const today = todayInTimezone(ctx.tenant.timezone);
     const fallback = presetRange("this-month", today, settings.fiscalYearStartMonth);
     const from = sp.from && isValidIsoDate(sp.from) ? sp.from : fallback.from;
@@ -96,6 +99,7 @@ export default async function PnlPage({
     const members = await listDimensionMembers(tx, ctx.tenant.id);
     const dimensionTypes = [...new Set(members.map((m) => m.dimensionType))];
     return {
+      basis,
       settings,
       today,
       from,
@@ -108,7 +112,7 @@ export default async function PnlPage({
     };
   });
 
-  const { report } = data;
+  const { report, basis } = data;
 
   return (
     <div className="space-y-6">
@@ -138,6 +142,12 @@ export default async function PnlPage({
             }}
           />
         }
+      />
+
+      <DefaultBasisNote
+        basis={basis}
+        defaultBasis={data.settings.defaultBasis}
+        isOwner={ctx.role === "owner"}
       />
 
       <div className="print:hidden">

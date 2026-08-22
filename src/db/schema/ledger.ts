@@ -100,6 +100,23 @@ export const entryEditPolicy = pgEnum("entry_edit_policy", [
   "strict_append_only",
 ]);
 
+/**
+ * **THE BASIS THE BUSINESS FILES ON**, and the default every report opens on.
+ *
+ * NOT a second set of books and not a posting rule — the ledger is always
+ * accrual ([ADR 0007](../../../docs/decisions/0007-cash-basis-reporting.md)) and
+ * cash is derived at read time. This says only which lens a report should reach
+ * for when nobody has said otherwise.
+ *
+ * It exists because the previous answer was `sp.basis === "cash" ? "cash" :
+ * "accrual"` in three separate report pages: a hardcoded literal, so a farm
+ * that files on cash opened every report on the basis it does NOT file on, and
+ * had to re-pick each time. Two correct-but-different profit figures, with the
+ * wrong one loading by default, is the shape of an error somebody eventually
+ * acts on.
+ */
+export const accountingBasis = pgEnum("accounting_basis", ["accrual", "cash"]);
+
 /** Chart of accounts. Never hard-deleted once referenced — deactivate instead. */
 export const accounts = pgTable(
   "accounts",

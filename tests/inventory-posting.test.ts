@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import { getBalances, getDefaultEntityId } from "../src/modules/accounting/core";
+import { approveBill } from "../src/modules/accounting/payables/bills";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
   adjustStock,
@@ -69,6 +70,47 @@ d("inventory posting", () => {
       }),
     );
     return rows.reduce((sum, r) => sum + r.netCents, 0);
+  };
+
+  const ledgerOwner = () => ({ tenantId, userId: OWNER, role: "owner" as const });
+
+  /** A one-line draft bill from a throwaway vendor, ready to be matched. */
+  const makeBill = async (amountCents: number) => {
+    const vendorId = await asOwner(async (tx) => {
+      const party = await tx
+        .insert(schema.parties)
+        .values({ tenantId, kind: "organization", displayName: `V-${amountCents}` })
+        .returning();
+      const rows = await tx
+        .insert(schema.vendors)
+        .values({ tenantId, partyId: party[0].id, name: `V-${amountCents}` })
+        .returning();
+      return rows[0].id;
+    });
+    return asOwner(async (tx) => {
+      const bill = await tx
+        .insert(schema.bills)
+        .values({
+          tenantId,
+          entityId,
+          vendorId,
+          billDate: "2026-09-01",
+          status: "draft",
+          createdByClerkUserId: OWNER,
+        })
+        .returning();
+      const line = await tx
+        .insert(schema.billLines)
+        .values({
+          tenantId,
+          billId: bill[0].id,
+          lineNo: 1,
+          description: "Feed",
+          amountCents,
+        })
+        .returning();
+      return { billId: bill[0].id, billLineId: line[0].id };
+    });
   };
 
   const setTreatment = (treatment: "none" | "capitalise") =>
@@ -334,6 +376,191 @@ d("inventory posting", () => {
 
   describe("matching a bill to stock", () => {
     beforeAll(() => setTreatment("capitalise"));
+
+it("CLEARS GRNI TO ZERO when the bill is matched and approved", async () => {
+      /**
+       * The whole loop, end to end. The receipt credits GRNI; matching points
+       * the bill line at it; approving debits it. A non-zero balance afterwards
+       * is stock received with no invoice, or an invoice for stock that never
+       * arrived — both real, both worth seeing, and neither is this case.
+       */
+      const item = await newItem("Full loop");
+      // BEFORE the receipt: the round trip is receipt-credits then
+      // bill-debits, so the baseline has to sit outside both halves.
+      const grniBefore = await netOf(grniAccountId);
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2026-09-01",
+        }),
+      );
+      // The receipt has credited it, and nothing has cleared that yet.
+      expect((await netOf(grniAccountId)) - grniBefore).toBe(-6_000);
+
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      expect(open).toHaveLength(1);
+      const { billId, billLineId } = await makeBill(6_000);
+
+      const result = await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceCostCents: 6_000,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      expect(result.allocations).toBe(1);
+      expect(result.varianceCents).toBe(0);
+
+      // Read the version rather than assume it: approveBill is compare-and-swap,
+      // and a hardcoded 0 is a test that breaks the day a default changes.
+      await asOwner(async (tx) => {
+        const bill = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: bill!.version,
+        });
+      });
+
+      // The receipt credited 6,000; the bill debited it back.
+      expect((await netOf(grniAccountId)) - grniBefore).toBe(0);
+    });
+
+    it("reports the variance when the invoice disagrees with the ticket", async () => {
+      // Ticket said $60, invoice says $65. The $5 is a fact, not a rounding.
+      const item = await newItem("Priced up");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2026-09-10",
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billLineId } = await makeBill(6_500);
+      const result = await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceCostCents: 6_500,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      expect(result.varianceCents).toBe(500);
+    });
+
+    it("SPLITS ONE INVOICE ACROSS TWO DELIVERIES by what each was worth", async () => {
+      /**
+       * The case an item-level link could never have handled, and the reason
+       * ADR 0012 has an allocation table at all. Two deliveries of the same feed
+       * at different prices, one invoice: each carries its share in proportion
+       * to what it cost, and the parts sum to the invoice exactly.
+       */
+      const item = await newItem("Two deliveries");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 3_000,
+          occurredOn: "2026-10-01",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2026-10-02",
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      expect(open).toHaveLength(2);
+
+      const { billLineId } = await makeBill(9_001);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceCostCents: 9_001,
+          matches: open.map((r) => ({
+            movementId: r.movementId,
+            quantityMatched: r.quantity,
+          })),
+        }),
+      );
+      const rows = await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.billLineStockAllocations)
+          .where(eq(schema.billLineStockAllocations.billLineId, billLineId)),
+      );
+      expect(rows).toHaveLength(2);
+      // 1:2 by cost, and the odd cent lands on the larger remainder rather than
+      // going missing.
+      expect(rows.reduce((sum, r) => sum + r.invoiceCostCents, 0)).toBe(9_001);
+    });
+
+    it("REFUSES to match more than a delivery has left", async () => {
+      const item = await newItem("Over-matched");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 1_000,
+          occurredOn: "2026-11-01",
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billLineId } = await makeBill(1_000);
+      await expect(
+        asOwner((tx) =>
+          allocateBillLineToStock(tx, ownerCtx(), {
+            billLineId,
+            invoiceCostCents: 1_000,
+            matches: [{ movementId: open[0].movementId, quantityMatched: 11 }],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INSUFFICIENT" });
+    });
+
+    it("refuses a staff member — matching a bill is a DECISION", async () => {
+      const item = await newItem("Staff match");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 4,
+          costCents: 400,
+          occurredOn: "2026-11-05",
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billLineId } = await makeBill(400);
+      await expect(
+        withTenant(
+          tenantId,
+          (tx) =>
+            allocateBillLineToStock(tx, staffCtx(), {
+              billLineId,
+              invoiceCostCents: 400,
+              matches: [{ movementId: open[0].movementId, quantityMatched: 4 }],
+            }),
+          { role: "staff", userId: STAFF },
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
 
     it("lists only receipts that credited GRNI and still have room", async () => {
       const item = await newItem("Matchable");

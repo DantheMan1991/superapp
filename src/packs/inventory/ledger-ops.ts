@@ -959,3 +959,95 @@ function allocateByWeight(total: number, weights: number[]): number[] {
   }
   return floors;
 }
+
+/**
+ * **UNDO A MATCH**, putting the line back where it was.
+ *
+ * A person will get a match wrong — the wrong delivery, the wrong quantity, the
+ * right delivery on the wrong bill — and until this existed the only way out
+ * was SQL. `allocateBillLineToStock` re-codes the line and rewrites its amount,
+ * so undoing has to do three things together or it leaves the bill in a state
+ * no screen can explain:
+ *
+ * 1. drop the allocations, so the deliveries go back on the reconciliation;
+ * 2. fold the variance sibling's amount back into the line, so the vendor is
+ *    still owed exactly what they invoiced;
+ * 3. clear the GRNI coding, so the line is uncoded again and `approveBill`
+ *    refuses it until somebody says what it was for. **Uncoded is the honest
+ *    state** — the alternative is guessing an expense account on the way out.
+ *
+ * Refuses on an approved bill for the same reason matching does: the entry is
+ * already posted and this would change what the bill says without changing what
+ * was posted.
+ */
+export async function unmatchBillLine(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: { billLineId: string },
+): Promise<{ released: number }> {
+  if (!allowsWrite(ctx.role, "owner")) {
+    throw new InventoryError(
+      "FORBIDDEN",
+      "only an owner can unpick a bill from stock",
+    );
+  }
+
+  const line = await tx.query.billLines.findFirst({
+    where: and(
+      eq(schema.billLines.tenantId, ctx.tenantId),
+      eq(schema.billLines.id, input.billLineId),
+    ),
+  });
+  if (!line) throw new InventoryError("NOT_FOUND", "bill line");
+
+  const bill = await tx.query.bills.findFirst({
+    where: and(
+      eq(schema.bills.tenantId, ctx.tenantId),
+      eq(schema.bills.id, line.billId),
+    ),
+    columns: { status: true },
+  });
+  if (!bill) throw new InventoryError("NOT_FOUND", "bill");
+  if (bill.status !== "draft" && bill.status !== "awaiting_approval") {
+    throw new InventoryError(
+      "BILL_POSTED",
+      "that bill is already approved — its entry has posted, so the match cannot be unpicked",
+    );
+  }
+
+  const dropped = await tx
+    .delete(schema.billLineStockAllocations)
+    .where(
+      and(
+        eq(schema.billLineStockAllocations.tenantId, ctx.tenantId),
+        eq(schema.billLineStockAllocations.billLineId, input.billLineId),
+      ),
+    )
+    .returning({ id: schema.billLineStockAllocations.id });
+
+  // The sibling's amount comes home, so the bill still totals the invoice.
+  const varianceDescription = `Price difference against delivery — ${line.description}`;
+  const siblings = await tx
+    .delete(schema.billLines)
+    .where(
+      and(
+        eq(schema.billLines.tenantId, ctx.tenantId),
+        eq(schema.billLines.billId, line.billId),
+        eq(schema.billLines.description, varianceDescription),
+      ),
+    )
+    .returning({ amountCents: schema.billLines.amountCents });
+  const returned = siblings.reduce((sum, r) => sum + r.amountCents, 0);
+
+  await tx
+    .update(schema.billLines)
+    .set({ accountId: null, amountCents: line.amountCents + returned })
+    .where(
+      and(
+        eq(schema.billLines.tenantId, ctx.tenantId),
+        eq(schema.billLines.id, input.billLineId),
+      ),
+    );
+
+  return { released: dropped.length };
+}

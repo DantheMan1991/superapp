@@ -26,6 +26,24 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-22 — Unpicking a match (`claude/what-a-shortfall-is-not`)
+
+Somebody will match the wrong delivery, and until now the only way out was SQL.
+`unmatchBillLine` undoes the three things matching did, and it has to do all
+three or the bill is left in a state no screen can explain: release the
+allocations so the deliveries return to the reconciliation, fold the variance
+sibling's amount back into the line so the vendor is still owed exactly what
+they invoiced, and **clear the coding so the line is UNCODED again**.
+
+Uncoded is the honest state. The alternative is guessing an expense account on
+the way out, and `approveBill` already refuses an uncoded line — so the bill
+cannot be approved until a person says what it was for, which is the right place
+for that question.
+
+Refuses on an approved bill for the same reason matching does: the entry has
+posted, and this would change what the bill says without changing what was
+posted. Owner-only, the same as matching.
+
 ### 2026-08-22 — Three defects that only showed up in the books (`claude/what-a-shortfall-is-not`)
 
 The correctness items 3b left open, cleared before any screen invites somebody
@@ -825,11 +843,12 @@ commitment against a live animal to delivered without sitting on a shelf.
   report "No cost recorded" — the eggs-at-$0.00 bug arriving through a new door.
   `production/ops.ts` repeats the same test independently and would stamp NULL
   on a run output.
-- **A matched bill cannot be un-matched.** `allocateBillLineToStock` writes and
-  points the line at GRNI; nothing takes it back. Voiding a bill leaves the
-  allocation in place, and `editEntry` can rewrite a bill's entry from the
-  journal screen with no source guard at all — so an allocation can be left
-  clearing a balance whose entry no longer says so.
+- **`editEntry` can still rewrite a bill's posted entry from the journal
+  screen**, with no source guard — `assertEntryNotSourceManaged` is called by
+  the void action and not the edit path. An allocation can therefore be left
+  clearing a balance whose entry no longer says so. That is an accounting-side
+  gap and predates this pack; matching and unpicking both refuse an approved
+  bill, which is as far as this side can reach.
 - **Nothing renders any of this.** There is no matching screen, no GRNI
   reconciliation, and no way to set `inventory_treatment` — which means the
   posting engine is live, tested, and reachable only from ops. That is

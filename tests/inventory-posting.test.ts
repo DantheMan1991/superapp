@@ -20,6 +20,7 @@ import {
   inventoryTreatmentOf,
   resolveGrniAccount,
   unbilledReceipts,
+  unmatchBillLine,
 } from "../src/packs/inventory/ledger-ops";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -1134,6 +1135,131 @@ it("A MADE THING CREDITS CONSUMPTION, NOT GRNI", async () => {
       expect(
         await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
       ).toHaveLength(0);
+    });
+
+it("UNPICKS A MATCH AND PUTS THE BILL BACK AS IT WAS", async () => {
+      /**
+       * Somebody will match the wrong delivery, and until this existed the only
+       * way out was SQL. Undoing has to do three things together: release the
+       * deliveries, fold the variance sibling's amount back into the line so the
+       * vendor is still owed what they invoiced, and clear the GRNI coding so
+       * the line is UNCODED again — which is the honest state, because the
+       * alternative is guessing an expense account on the way out.
+       */
+      const item = await newItem("Mis-matched");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 6_000,
+          occurredOn: "2027-04-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(6_500);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 10,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+        }),
+      );
+      // Matched: the delivery is off the list and the bill is two lines.
+      expect(
+        await asOwner((tx) => unbilledReceipts(tx, tenantId, { itemId: item.id })),
+      ).toHaveLength(0);
+
+      const result = await asOwner((tx) =>
+        unmatchBillLine(tx, ownerCtx(), { billLineId }),
+      );
+      expect(result.released).toBe(1);
+
+      // The delivery is back on the reconciliation...
+      const reopened = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      expect(reopened).toHaveLength(1);
+      expect(reopened[0].openQuantity).toBe(10);
+
+      // ...the bill is one line again, still for what the vendor invoiced...
+      const lines = await asOwner((tx) =>
+        tx.select().from(schema.billLines).where(eq(schema.billLines.billId, billId)),
+      );
+      expect(lines).toHaveLength(1);
+      expect(lines[0].amountCents).toBe(6_500);
+      // ...and UNCODED, so approving it refuses until somebody says what it was.
+      expect(lines[0].accountId).toBeNull();
+    });
+
+    it("refuses to unpick a bill that has already been approved", async () => {
+      const item = await newItem("Approved then unpicked");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 5,
+          costCents: 500,
+          occurredOn: "2027-04-10",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billId, billLineId } = await makeBill(500);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 5,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 5 }],
+        }),
+      );
+      await asOwner(async (tx) => {
+        const b = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: b!.version,
+        });
+      });
+      await expect(
+        asOwner((tx) => unmatchBillLine(tx, ownerCtx(), { billLineId })),
+      ).rejects.toMatchObject({ code: "BILL_POSTED" });
+    });
+
+    it("refuses a staff member, the same as matching does", async () => {
+      const item = await newItem("Staff unpick");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 5,
+          costCents: 500,
+          occurredOn: "2027-04-20",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billLineId } = await makeBill(500);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          invoiceQuantity: 5,
+          matches: [{ movementId: open[0].movementId, quantityMatched: 5 }],
+        }),
+      );
+      await expect(
+        withTenant(
+          tenantId,
+          (tx) => unmatchBillLine(tx, staffCtx(), { billLineId }),
+          { role: "staff", userId: STAFF },
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
     });
 
     it("lists only receipts that credited GRNI and still have room", async () => {

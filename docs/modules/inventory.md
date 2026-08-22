@@ -743,6 +743,32 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
+- **POSTING IS SINGLE-COMPANY, and a two-company tenant gets it wrong.**
+  `postMovement` posts to `getDefaultEntityId`, because a movement carries no
+  entity — while the bill that clears it posts to `bill.entityId`. In a tenant
+  with two companies the receipt capitalises in the default company and the bill
+  clears in the other, so neither GRNI ever nets: one carries a permanent credit
+  the reconciliation calls settled, the other a permanent debit, and the stock
+  sits on the wrong balance sheet. Only a consolidated view hides it. **The Test
+  tenant deliberately holds two companies**, so this is reachable today. The fix
+  is to resolve the entity from the movement (its location asset's company, or
+  an explicit one on the op) and refuse a match across companies rather than
+  defaulting silently.
+- **AN ISSUE CAN RELEASE COST THAT WAS NEVER CAPITALISED.** `issueStock` stamps
+  at the average of PRICED receipts but applies it to all quantity, priced or
+  not, so a lot half-filled by unpriced deliveries releases more than `1300`
+  ever received and the account can go to a credit balance with stock still on
+  the shelf. The stamp itself is correct and deliberate — it is the ledger side
+  that needs capping at what the lot actually carries.
+- **A quantity shortfall is booked as a price variance.** The difference between
+  an invoice and the tickets is always treated as a price difference, so an
+  invoice for goods that never arrived is expensed and GRNI clears to zero —
+  where ADR 0012 case 6 says the shortfall should stay in GRNI for somebody to
+  chase. Telling the two apart needs the invoiced QUANTITY, which the allocation
+  does not yet carry.
+- **Nothing validates that a line's allocations sum to its amount.** A line that
+  is part stock and part freight points its whole amount at GRNI, so the freight
+  clears a balance no receipt created.
 - **A COST CORRECTION HAS NOWHERE TO GO, and this is the next thing to build.**
   A delivery ticket can overstate, understate, omit freight or use the wrong
   unit, and today a stamped cost is final. ADR 0012 §A.4 settles the shape —

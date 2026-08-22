@@ -1051,3 +1051,127 @@ export async function unmatchBillLine(
 
   return { released: dropped.length };
 }
+
+export interface MatchableBillLine {
+  billLineId: string;
+  billId: string;
+  vendorName: string;
+  billNumber: string;
+  billDate: string;
+  description: string;
+  /** What the vendor is charging for this line, including any variance sibling. */
+  invoiceCents: number;
+  /** How much of it is already matched to deliveries. */
+  matchedCents: number;
+  matchedCount: number;
+}
+
+/**
+ * **BILL LINES THAT COULD BE A DELIVERY**, for the matching screen.
+ *
+ * Only DRAFT and awaiting-approval bills: once a bill is approved its entry has
+ * posted, and matching then would change what the bill says without changing
+ * what was posted — `allocateBillLineToStock` refuses it, so offering it here
+ * would be offering a button that cannot work.
+ *
+ * Lines already coded to something else are still listed, because "this was
+ * coded to Feed Expense and should have been a delivery" is exactly the
+ * correction somebody opens this screen to make. What is NOT listed is a line
+ * on a bill nobody can still change.
+ */
+export async function matchableBillLines(
+  tx: Tx,
+  tenantId: string,
+  limit = 100,
+): Promise<MatchableBillLine[]> {
+  const rows = await tx
+    .select({
+      billLineId: schema.billLines.id,
+      billId: schema.bills.id,
+      vendorName: schema.vendors.name,
+      billNumber: schema.bills.billNumber,
+      billDate: schema.bills.billDate,
+      description: schema.billLines.description,
+      amountCents: schema.billLines.amountCents,
+      matchedCents: sql<string>`coalesce((
+        select sum(a.receipt_cost_cents) from bill_line_stock_allocations a
+         where a.tenant_id = ${schema.billLines.tenantId}
+           and a.bill_line_id = ${schema.billLines.id}
+      ), 0)`,
+      matchedCount: sql<string>`coalesce((
+        select count(*) from bill_line_stock_allocations a
+         where a.tenant_id = ${schema.billLines.tenantId}
+           and a.bill_line_id = ${schema.billLines.id}
+      ), 0)`,
+      siblingCents: sql<string>`coalesce((
+        select sum(v.amount_cents) from bill_lines v
+         where v.tenant_id = ${schema.billLines.tenantId}
+           and v.bill_id = ${schema.billLines.billId}
+           and v.description = 'Price difference against delivery — ' || ${schema.billLines.description}
+      ), 0)`,
+    })
+    .from(schema.billLines)
+    .innerJoin(
+      schema.bills,
+      and(
+        eq(schema.bills.tenantId, schema.billLines.tenantId),
+        eq(schema.bills.id, schema.billLines.billId),
+      ),
+    )
+    .innerJoin(
+      schema.vendors,
+      and(
+        eq(schema.vendors.tenantId, schema.bills.tenantId),
+        eq(schema.vendors.id, schema.bills.vendorId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.billLines.tenantId, tenantId),
+        inArray(schema.bills.status, ["draft", "awaiting_approval"]),
+        // The variance siblings this pack writes are not themselves matchable.
+        sql`${schema.billLines.description} not like 'Price difference against delivery — %'`,
+      ),
+    )
+    .orderBy(asc(schema.bills.billDate))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    billLineId: r.billLineId,
+    billId: r.billId,
+    vendorName: r.vendorName,
+    billNumber: r.billNumber,
+    billDate: r.billDate,
+    description: r.description,
+    // The line plus its sibling is what the vendor actually charged — the same
+    // reconstruction `allocateBillLineToStock` does, and for the same reason.
+    invoiceCents: r.amountCents + Number(r.siblingCents),
+    matchedCents: Number(r.matchedCents),
+    matchedCount: Number(r.matchedCount),
+  }));
+}
+
+export interface GrniPosition {
+  /** Priced deliveries with no invoice against them yet. */
+  awaitingInvoiceCents: number;
+  awaitingInvoiceCount: number;
+}
+
+/**
+ * The GRNI position in the terms a person asks it in.
+ *
+ * Deliberately computed from the DELIVERIES rather than read off the account
+ * balance: the account is the answer, and this is the working. If the two
+ * disagree, something posted that no delivery explains — which is the thing
+ * worth finding, and it cannot be found by reporting the account twice.
+ */
+export async function grniPosition(
+  tx: Tx,
+  tenantId: string,
+): Promise<GrniPosition> {
+  const open = await unbilledReceipts(tx, tenantId, { limit: 1000 });
+  return {
+    awaitingInvoiceCents: open.reduce((sum, r) => sum + r.openCostCents, 0),
+    awaitingInvoiceCount: open.length,
+  };
+}

@@ -1275,6 +1275,20 @@
       "when": 1787415556777,
       "tag": "0181_inventory_cost_adjustments_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "7",
+      "when": 1787436177119,
+      "tag": "0182_supreme_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1787436204002,
+      "tag": "0183_inventory_tax_treatments_rls",
+      "breakpoints": true
     }
   ]
 }

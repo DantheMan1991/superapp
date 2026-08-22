@@ -42,6 +42,7 @@ import {
   index,
   jsonb,
   numeric,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -51,6 +52,7 @@ import {
 import { tenants } from "./platform";
 import { assets } from "./assets";
 import { billLines } from "./payables";
+import { accounts } from "./ledger";
 
 /**
  * A thing the business holds a quantity of: feed, cartons, eggs, ground beef.
@@ -843,6 +845,115 @@ export const inventoryCostAdjustments = pgTable(
   ],
 );
 
+/**
+ * **WHICH RECORDED EVENT RELEASES A CATEGORY'S COST.**
+ * [ADR 0013](../../../docs/decisions/0013-inventory-tax-treatment.md) §A.1.
+ *
+ * **THIS IS A LIST OF MOMENTS THE LEDGER CAN DATE, NOT A LIST OF TAX
+ * TREATMENTS**, and the difference is the whole design. A list of treatments
+ * would be a reading of the regulations, maintained by people who cannot read
+ * them, and every gap in it would be invisible. A list of dates is checkable by
+ * looking at the ledger: each value below names a column that already exists.
+ *
+ * - `consumed` — the `issue` movement's date. **The default and today's
+ *   behaviour**, so a tenant that never touches this is unaffected.
+ * - `billed` — `bills.bill_date`.
+ * - `paid` — `bill_payments.payment_date`, reached from the receipt through
+ *   `bill_line_stock_allocations`.
+ * - `sold` — the movement a `retail_sale_lines` row names.
+ * - `later_of_paid_and_consumed`, `later_of_paid_and_sold` — the max of two of
+ *   the above. Computed, stored nowhere.
+ *
+ * **A RULE THE SOFTWARE CANNOT DATE MUST BE REFUSED RATHER THAN APPROXIMATED.**
+ * If an election needs a moment that is not on this list, the answer is another
+ * observable event, not the nearest of these.
+ */
+export const inventoryTimingRule = pgEnum("inventory_timing_rule", [
+  "consumed",
+  "billed",
+  "paid",
+  "sold",
+  "later_of_paid_and_consumed",
+  "later_of_paid_and_sold",
+]);
+
+/**
+ * **WHERE AN ACCOUNTANT'S DECISION GETS RECORDED**, per category of thing the
+ * business holds. ADR 0013 §A.2 and §A.5.
+ *
+ * **IT IS A RECORD, NOT A PREFERENCE**, which is why it carries who decided and
+ * when. The alternative is that a tax election lives in a developer's assumption
+ * or in somebody's memory of an email. `decided_by` is free text for the same
+ * reason `inventory_counts.counted_by` is: the accountant does not have a login
+ * here.
+ *
+ * **KEYED ON `item_kind`, WHICH ALREADY EXISTED.** An earlier draft of ADR 0013
+ * made this one setting for a whole business, in the same document that says
+ * merchandise held for resale behaves differently from feed. A farm that buys
+ * feed and also runs a market stall has both cases inside one set of books.
+ * `inventory_items.item_kind` is an open, indexed taxonomy and is already how
+ * the expense account resolves, so one row answers both questions and one
+ * resolution order serves both.
+ *
+ * **`item_kind` NULL IS THE TENANT'S DEFAULT**, and the unique index does not
+ * hold for it — Postgres treats two nulls as distinct. Same limitation, same
+ * remedy and the same reason as `inventory_count_lines`: `NULLS NOT DISTINCT`
+ * would fix it, this drizzle version cannot emit it, and hand-writing the index
+ * would drift the snapshot. `setInventoryTaxRule` selects then updates,
+ * including the null case.
+ *
+ * **NOTHING APPLIES THESE YET.** Stage 1 records the decision and resolves it;
+ * the report lens that acts on anything other than `consumed` is the next
+ * slice. The action refuses to store a rule the lens cannot honour, so there is
+ * no way to end up with a setting that claims to change a report and does not.
+ */
+export const inventoryTaxTreatments = pgTable(
+  "inventory_tax_treatments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Open taxonomy, matching `inventory_items.item_kind`. NULL = the default. */
+    itemKind: text("item_kind"),
+    timingRule: inventoryTimingRule("timing_rule").notNull().default("consumed"),
+    /**
+     * What a substituting rule releases cost TO. Null falls through to the next
+     * step of the resolution order. "Everything to cost of goods" balances and
+     * is useless at return time, which is why this is per category.
+     */
+    expenseAccountId: uuid("expense_account_id"),
+    /** Who said so. Free text: the accountant has no login here. */
+    decidedBy: text("decided_by").notNull().default(""),
+    decidedOn: date("decided_on"),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("inventory_tax_treatments_tenant_id_id_idx").on(t.tenantId, t.id),
+    // ONE RULE PER CATEGORY. See the note above for why this does not hold for
+    // the tenant default, and what closes it instead.
+    uniqueIndex("inventory_tax_treatments_tenant_kind_idx").on(
+      t.tenantId,
+      t.itemKind,
+    ),
+    foreignKey({
+      name: "inventory_tax_treatments_account_fk",
+      columns: [t.tenantId, t.expenseAccountId],
+      foreignColumns: [accounts.tenantId, accounts.id],
+    }),
+    check(
+      "inventory_tax_treatments_kind_format",
+      sql`${t.itemKind} is null or ${t.itemKind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+  ],
+);
+
 export type InventoryItem = typeof inventoryItems.$inferSelect;
 export type NewInventoryItem = typeof inventoryItems.$inferInsert;
 export type InventoryLot = typeof inventoryLots.$inferSelect;
@@ -857,6 +968,10 @@ export type BillLineStockAllocation =
   typeof billLineStockAllocations.$inferSelect;
 export type NewBillLineStockAllocation =
   typeof billLineStockAllocations.$inferInsert;
+export type InventoryTaxTreatment =
+  typeof inventoryTaxTreatments.$inferSelect;
+export type NewInventoryTaxTreatment =
+  typeof inventoryTaxTreatments.$inferInsert;
 export type InventoryCostAdjustment =
   typeof inventoryCostAdjustments.$inferSelect;
 export type NewInventoryCostAdjustment =

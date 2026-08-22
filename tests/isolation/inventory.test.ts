@@ -44,6 +44,7 @@ d("inventory tables (RLS)", () => {
   let billLineB: string;
   let allocationA: string;
   let costAdjustmentA: string;
+  let taxRuleA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -280,6 +281,30 @@ d("inventory tables (RLS)", () => {
         ])
         .returning();
       costAdjustmentA = corrections[0].id;
+
+      // Slice 3d stage 1. A recorded tax election, which is a different shape
+      // of sensitive from a figure: leaking one would not move a number today,
+      // it would change which one moves when the lens lands — carrying another
+      // business's accountant's name while doing it.
+      const taxRules = await tx
+        .insert(schema.inventoryTaxTreatments)
+        .values([
+          {
+            tenantId: tenantA,
+            itemKind: "feed",
+            timingRule: "consumed",
+            decidedBy: "A's accountant",
+            decidedOn: "2026-08-22",
+          },
+          {
+            tenantId: tenantB,
+            itemKind: null,
+            timingRule: "consumed",
+            decidedBy: "B's accountant",
+          },
+        ])
+        .returning();
+      taxRuleA = taxRules[0].id;
     });
   });
 
@@ -926,6 +951,84 @@ d("inventory tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+// ---- slice 3d stage 1: recorded tax elections ---------------------------
+
+  it("a tenant sees only its own recorded tax rules", async () => {
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.inventoryTaxTreatments),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].id).toBe(taxRuleA);
+    expect(mine[0].decidedBy).toBe("A's accountant");
+    expect(
+      await asOtherTenant((tx) =>
+        tx.select().from(schema.inventoryTaxTreatments),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("ONE RULE PER CATEGORY", async () => {
+    // A second row for the same kind is an edit, not a second decision, and two
+    // would make which one applies a matter of query order.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryTaxTreatments).values({
+          tenantId: tenantA,
+          itemKind: "feed",
+          timingRule: "consumed",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot point a rule at another tenant's expense account", async () => {
+    const theirs = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.accounts)
+        .values({
+          tenantId: tenantB,
+          code: "6999",
+          name: "Theirs",
+          accountType: "expense",
+        })
+        .returning();
+      return rows[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryTaxTreatments).values({
+          tenantId: tenantA,
+          itemKind: "seed",
+          timingRule: "consumed",
+          expenseAccountId: theirs,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a category that is not a slug", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.inventoryTaxTreatments).values({
+          tenantId: tenantA,
+          itemKind: "Not A Slug",
+          timingRule: "consumed",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot move a recorded rule into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.inventoryTaxTreatments)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.inventoryTaxTreatments.id, taxRuleA)),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("is default-deny on every table in the pack with no tenant context", async () => {
     const nowhere = "00000000-0000-0000-0000-000000000000";
     expect(
@@ -955,6 +1058,11 @@ d("inventory tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.inventoryCostAdjustments),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.inventoryTaxTreatments),
       ),
     ).toHaveLength(0);
   });

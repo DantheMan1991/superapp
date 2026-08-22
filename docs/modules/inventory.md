@@ -26,6 +26,34 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-22 — The company a movement's cost belongs to (`claude/the-books-follow-the-shelf`)
+
+**`postMovement` used to post to the tenant's DEFAULT company**, because a
+movement carries no `entity_id` — while the bill clearing it posts to the bill's
+own. In a tenant with two companies neither GRNI ever netted: one kept a
+permanent credit the reconciliation called settled, the other a permanent debit,
+and the stock sat on the wrong balance sheet. Only a consolidated view hid it,
+and **the Test tenant deliberately holds two companies**, so it was reachable.
+
+`assets` had already settled this and the answer is copied deliberately — its
+`entityOf` refuses rather than defaulting, because *"a default chosen at posting
+time is exactly the behaviour this column replaced"*. So `resolveMovementEntity`
+takes the only company when there is one, the LOCATION'S company when there is
+more than one (a freezer, a barn and a market truck are all assets, and an asset
+already names its books), and **refuses otherwise**. A match across companies is
+refused from the other end.
+
+**Every one of the 21 existing tests passed while this was broken**, because
+every one of them ran single-company. The four new ones stand up a second
+company on purpose.
+
+Two things the fix taught, both recorded because they cost a red run:
+`provisionAccounting` ADOPTS the assets that already exist, so the fixture
+freezer does name a company and resolving it was never ambiguous — the first
+version of that test asserted a refusal that correctly never came. And a company
+cannot be deleted once entries have posted to it, so the cleanup deactivates it;
+a failed delete is what made a dozen later tests inherit the ambiguity.
+
 ### 2026-08-21 — Slice 3b: the books follow the shelf, and only when asked to (`claude/what-the-shelf-is-worth`)
 
 Inventory reaches the ledger. `costing.ts` has said since slice 1 that the third
@@ -743,17 +771,6 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
-- **POSTING IS SINGLE-COMPANY, and a two-company tenant gets it wrong.**
-  `postMovement` posts to `getDefaultEntityId`, because a movement carries no
-  entity — while the bill that clears it posts to `bill.entityId`. In a tenant
-  with two companies the receipt capitalises in the default company and the bill
-  clears in the other, so neither GRNI ever nets: one carries a permanent credit
-  the reconciliation calls settled, the other a permanent debit, and the stock
-  sits on the wrong balance sheet. Only a consolidated view hides it. **The Test
-  tenant deliberately holds two companies**, so this is reachable today. The fix
-  is to resolve the entity from the movement (its location asset's company, or
-  an explicit one on the op) and refuse a match across companies rather than
-  defaulting silently.
 - **AN ISSUE CAN RELEASE COST THAT WAS NEVER CAPITALISED.** `issueStock` stamps
   at the average of PRICED receipts but applies it to all quantity, priced or
   not, so a lot half-filled by unpriced deliveries releases more than `1300`

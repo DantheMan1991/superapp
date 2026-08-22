@@ -84,7 +84,9 @@ export class InventoryError extends Error {
       | "COUNT_INVALID"
       | "INSUFFICIENT"
       | "LEDGER_ACCOUNTS"
-      | "BILL_POSTED",
+      | "BILL_POSTED"
+      | "ENTITY_AMBIGUOUS"
+      | "ENTITY_MISMATCH",
     message: string,
   ) {
     super(message);
@@ -561,6 +563,7 @@ export async function recordMovement(
     occurredOn: input.occurredOn,
     itemId: input.itemId,
     lotCode,
+    locationAssetId: input.locationAssetId ?? null,
   });
 
   return rows[0];

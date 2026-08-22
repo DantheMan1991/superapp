@@ -378,6 +378,170 @@ d("inventory posting", () => {
     });
   });
 
+// ---- two companies ------------------------------------------------------
+
+  describe("a tenant that keeps two sets of books", () => {
+    /**
+     * **THE DEFECT THIS BLOCK EXISTS FOR.** `postMovement` used to post to the
+     * tenant's DEFAULT company, because a movement carries no entity — while the
+     * bill clearing it posts to the bill's own. In a two-company tenant neither
+     * GRNI ever netted: one company kept a permanent credit the reconciliation
+     * called settled, the other a permanent debit, and the stock sat on the
+     * wrong balance sheet. Only a consolidated view hid it.
+     *
+     * Every other test in this file runs single-company, so every one of them
+     * passed while this was broken.
+     */
+    let secondEntityId: string;
+    let barnId: string;
+    let unownedId: string;
+
+    beforeAll(async () => {
+      await setTreatment("capitalise");
+      secondEntityId = await withSystem(async (tx) => {
+        const rows = await tx
+          .insert(schema.entities)
+          .values({ tenantId, name: "Oak Row LLC" })
+          .returning();
+        return rows[0].id;
+      });
+      barnId = await withSystem(async (tx) => {
+        const rows = await tx
+          .insert(schema.assets)
+          .values({
+            tenantId,
+            kind: "building",
+            name: "Oak Row barn",
+            isStorageLocation: true,
+            entityId: secondEntityId,
+          })
+          .returning();
+        return rows[0].id;
+      });
+      // Created AFTER provisioning, so nothing adopted it into a company. The
+      // fixture freezer is not this: `provisionAccounting` adopts the assets
+      // that already exist, so it DOES name a company and resolving it is not
+      // ambiguous at all.
+      unownedId = await withSystem(async (tx) => {
+        const rows = await tx
+          .insert(schema.assets)
+          .values({
+            tenantId,
+            kind: "equipment",
+            name: "Unclaimed shed",
+            isStorageLocation: true,
+          })
+          .returning();
+        return rows[0].id;
+      });
+    });
+
+    it("POSTS TO THE COMPANY THE PLACE BELONGS TO, not the default", async () => {
+      const item = await newItem("Oak Row feed");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 5_000,
+          occurredOn: "2027-01-05",
+          locationAssetId: barnId,
+        }),
+      );
+      const entries = await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.journalEntries)
+          .where(
+            and(
+              eq(schema.journalEntries.tenantId, tenantId),
+              eq(schema.journalEntries.source, "inventory_receipt"),
+              eq(schema.journalEntries.entityId, secondEntityId),
+            ),
+          ),
+      );
+      expect(entries.length).toBeGreaterThan(0);
+    });
+
+    it("REFUSES rather than guessing when the stock is nowhere in particular", async () => {
+      /**
+       * The rule `assets` already settled: *"a default chosen at posting time is
+       * exactly the behaviour this column replaced"*. With two companies and no
+       * location, there is no honest answer — so it refuses instead of
+       * capitalising into whichever company happens to be first.
+       */
+      const item = await newItem("Homeless stock");
+      await expect(
+        asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: item.id,
+            quantity: 10,
+            costCents: 5_000,
+            occurredOn: "2027-01-06",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "ENTITY_AMBIGUOUS" });
+    });
+
+    it("refuses a place that does not say which company it belongs to", async () => {
+      const item = await newItem("Nameless place");
+      await expect(
+        asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: item.id,
+            quantity: 10,
+            costCents: 5_000,
+            occurredOn: "2027-01-07",
+            locationAssetId: unownedId,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "ENTITY_AMBIGUOUS" });
+    });
+
+    it("WILL NOT LET ONE COMPANY'S BILL SETTLE ANOTHER'S DELIVERY", async () => {
+      const item = await newItem("Cross company");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 4_000,
+          occurredOn: "2027-01-10",
+          locationAssetId: barnId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      expect(open).toHaveLength(1);
+      // makeBill draws on the DEFAULT company; the delivery is Oak Row's.
+      const { billLineId } = await makeBill(4_000);
+      await expect(
+        asOwner((tx) =>
+          allocateBillLineToStock(tx, ownerCtx(), {
+            billLineId,
+            invoiceCostCents: 4_000,
+            matches: [{ movementId: open[0].movementId, quantityMatched: 10 }],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "ENTITY_MISMATCH" });
+    });
+
+    afterAll(async () => {
+      /**
+       * DEACTIVATED, not deleted: entries have posted to it and the FK holds.
+       * `resolveMovementEntity` filters on `is_active`, so this genuinely
+       * returns the tenant to one set of books for everything after — and a
+       * failed cleanup here is what made a dozen later tests report
+       * ENTITY_AMBIGUOUS the first time round.
+       */
+      await withSystem((tx) =>
+        tx
+          .update(schema.entities)
+          .set({ isActive: false })
+          .where(eq(schema.entities.id, secondEntityId)),
+      );
+    });
+  });
+
   // ---- matching a bill ----------------------------------------------------
 
   describe("matching a bill to stock", () => {

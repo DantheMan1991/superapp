@@ -72,6 +72,8 @@ function toResult(err: unknown): { error: string } {
       case "LEDGER_ACCOUNTS":
         return { error: err.message };
       case "BILL_POSTED":
+      case "ENTITY_AMBIGUOUS":
+      case "ENTITY_MISMATCH":
         return { error: err.message };
       case "INVALID_REASON":
         return { error: "Use lowercase letters, numbers and underscores." };

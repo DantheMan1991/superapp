@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq, gt, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import { getDefaultEntityId, postEntry, type LedgerCtx } from "@/modules/accounting/core";
+import { postEntry, type LedgerCtx } from "@/modules/accounting/core";
 import { allowsWrite } from "@/lib/packs/authorize";
 import { InventoryError, type InventoryCtx } from "./ops";
 
@@ -210,6 +210,76 @@ function ledgerCtx(ctx: InventoryCtx): LedgerCtx {
 
 
 /**
+ * **THE COMPANY A MOVEMENT'S COST BELONGS TO.**
+ *
+ * A movement carries no `entity_id`, so this used to be
+ * `getDefaultEntityId(tenantId)` — and in a tenant with two companies that was
+ * silently wrong in the worst available way. The receipt capitalised in the
+ * DEFAULT company while the bill clearing it posted to the bill's own company,
+ * so neither GRNI ever netted: one carried a permanent credit the reconciliation
+ * called settled, the other a permanent debit, and the stock sat on the wrong
+ * balance sheet. Only a consolidated view hid it.
+ *
+ * `assets` solved this before and the answer is copied deliberately — its
+ * `entityOf` REFUSES rather than falling back to the tenant default, because
+ * *"a default chosen at posting time is exactly the behaviour this column
+ * replaced"*. Same reasoning, same refusal.
+ *
+ * Resolution, and note the order:
+ *   1. **One postable company: use it.** Not a guess — there is nothing to be
+ *      ambiguous about, and this is nearly every tenant.
+ *   2. **More than one: the location's company.** A freezer, a barn or a market
+ *      truck is an `asset`, and an asset already names the books it belongs to.
+ *      That is the honest answer to "whose stock is this" for a business that
+ *      keeps two sets of them.
+ *   3. **Otherwise refuse.** Stock sitting nowhere in particular, in a tenant
+ *      with two companies, cannot be capitalised into either without inventing
+ *      the answer.
+ */
+export async function resolveMovementEntity(
+  tx: Tx,
+  tenantId: string,
+  locationAssetId: string | null,
+): Promise<string> {
+  const companies = await tx
+    .select({ id: schema.entities.id })
+    .from(schema.entities)
+    .where(
+      and(
+        eq(schema.entities.tenantId, tenantId),
+        eq(schema.entities.isActive, true),
+      ),
+    );
+  if (companies.length === 1) return companies[0].id;
+  if (companies.length === 0) {
+    throw new InventoryError(
+      "LEDGER_ACCOUNTS",
+      "This business has no company to post to. Open the books first.",
+    );
+  }
+
+  if (locationAssetId) {
+    const asset = await tx.query.assets.findFirst({
+      where: and(
+        eq(schema.assets.tenantId, tenantId),
+        eq(schema.assets.id, locationAssetId),
+      ),
+      columns: { entityId: true, name: true },
+    });
+    if (asset?.entityId) return asset.entityId;
+    throw new InventoryError(
+      "ENTITY_AMBIGUOUS",
+      `${asset?.name ?? "That place"} does not say which company it belongs to, and this business keeps more than one set of books. Set the company on it first.`,
+    );
+  }
+
+  throw new InventoryError(
+    "ENTITY_AMBIGUOUS",
+    "This business keeps more than one set of books, so stock has to say where it is before its cost can be posted.",
+  );
+}
+
+/**
  * Movement kinds that NEVER post, whatever they carry.
  *
  * They move stock (and its cost) WITHIN inventory, so the entry would be
@@ -246,6 +316,8 @@ export interface PostMovementInput {
   occurredOn: string;
   itemId: string;
   lotCode?: string | null;
+  /** Which place the stock moved at — how the company is resolved. */
+  locationAssetId: string | null;
 }
 
 const MEMO_VERB = {
@@ -287,7 +359,11 @@ export async function postMovement(
   if (treatment === "none") return null;
 
   const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);
-  const entityId = await getDefaultEntityId(tx, ctx.tenantId);
+  const entityId = await resolveMovementEntity(
+    tx,
+    ctx.tenantId,
+    input.locationAssetId,
+  );
   const item = await tx.query.inventoryItems.findFirst({
     where: eq(schema.inventoryItems.id, input.itemId),
     columns: { name: true },
@@ -357,6 +433,7 @@ export interface UnbilledReceipt {
   unit: string;
   lotId: string | null;
   lotCode: string | null;
+  locationAssetId: string | null;
   occurredOn: string;
   quantity: number;
   costCents: number;
@@ -410,6 +487,7 @@ export async function unbilledReceipts(
       unit: schema.inventoryItems.stockingUnit,
       lotId: schema.inventoryMovements.lotId,
       lotCode: schema.inventoryLots.code,
+      locationAssetId: schema.inventoryMovements.locationAssetId,
       occurredOn: schema.inventoryMovements.occurredOn,
       quantity: schema.inventoryMovements.quantity,
       costCents: schema.inventoryMovements.costCents,
@@ -475,6 +553,7 @@ export async function unbilledReceipts(
         unit: r.unit,
         lotId: r.lotId,
         lotCode: r.lotCode,
+        locationAssetId: r.locationAssetId,
         occurredOn: r.occurredOn,
         quantity: r.quantity,
         costCents,
@@ -556,7 +635,7 @@ export async function allocateBillLineToStock(
       eq(schema.bills.tenantId, ctx.tenantId),
       eq(schema.bills.id, line.billId),
     ),
-    columns: { status: true },
+    columns: { status: true, entityId: true },
   });
   if (!bill) throw new InventoryError("NOT_FOUND", "bill");
   if (bill.status !== "draft" && bill.status !== "awaiting_approval") {
@@ -606,6 +685,30 @@ export async function allocateBillLineToStock(
     input.invoiceCostCents,
     shares.map((s) => s.receiptShare),
   );
+
+  /**
+   * **A BILL CANNOT SETTLE ANOTHER COMPANY'S DELIVERY.**
+   *
+   * The receipt capitalised into whichever company its location belongs to; the
+   * bill clears in `bill.entityId`. If those differ the two halves land in
+   * different books and neither GRNI can ever net — which is the same defect
+   * `resolveMovementEntity` fixes on the posting side, arriving from the other
+   * end.
+   */
+  for (const match of input.matches) {
+    const receipt = byId.get(match.movementId)!;
+    const receiptEntity = await resolveMovementEntity(
+      tx,
+      ctx.tenantId,
+      receipt.locationAssetId,
+    );
+    if (receiptEntity !== bill.entityId) {
+      throw new InventoryError(
+        "ENTITY_MISMATCH",
+        "That delivery belongs to a different company from this bill.",
+      );
+    }
+  }
 
   const grniAccountId = await resolveGrniAccount(tx, ctx.tenantId);
   const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);

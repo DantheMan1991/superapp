@@ -1,7 +1,8 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { getDefaultEntityId, postEntry, type LedgerCtx } from "@/modules/accounting/core";
+import { allowsWrite } from "@/lib/packs/authorize";
 import { InventoryError, type InventoryCtx } from "./ops";
 
 /**
@@ -334,4 +335,274 @@ export async function postMovement(
     lines,
   });
   return { entryId: entry.id };
+}
+
+// ------------------------------------------------------- matching the bill ---
+
+export interface UnbilledReceipt {
+  movementId: string;
+  itemId: string;
+  itemName: string;
+  unit: string;
+  lotId: string | null;
+  lotCode: string | null;
+  occurredOn: string;
+  quantity: number;
+  costCents: number;
+  /** Already matched against this receipt by some bill line. */
+  matchedQuantity: number;
+  matchedCostCents: number;
+  /** What is still waiting for an invoice. Can be zero; never negative here. */
+  openQuantity: number;
+  openCostCents: number;
+}
+
+/**
+ * **STOCK THAT HAS ARRIVED AND HAS NOT BEEN INVOICED** — the working list for
+ * matching a bill, and the detail behind the GRNI balance.
+ *
+ * A receipt with no cost is EXCLUDED: it credited nothing to GRNI, so there is
+ * nothing for a bill to clear against it. That is not the same as saying it is
+ * settled, and the valuation screen's "what this figure leaves out" card is
+ * where an uncosted delivery shows up. Two different questions, two different
+ * screens, and conflating them would make an unpriced delivery look reconciled.
+ */
+export async function unbilledReceipts(
+  tx: Tx,
+  tenantId: string,
+  opts: { itemId?: string; limit?: number } = {},
+): Promise<UnbilledReceipt[]> {
+  const rows = await tx
+    .select({
+      movementId: schema.inventoryMovements.id,
+      itemId: schema.inventoryMovements.itemId,
+      itemName: schema.inventoryItems.name,
+      unit: schema.inventoryItems.stockingUnit,
+      lotId: schema.inventoryMovements.lotId,
+      lotCode: schema.inventoryLots.code,
+      occurredOn: schema.inventoryMovements.occurredOn,
+      quantity: schema.inventoryMovements.quantity,
+      costCents: schema.inventoryMovements.costCents,
+      matchedQuantity: sql<string>`coalesce((
+        select sum(a.quantity_matched) from bill_line_stock_allocations a
+         where a.tenant_id = ${schema.inventoryMovements.tenantId}
+           and a.inventory_movement_id = ${schema.inventoryMovements.id}
+      ), 0)`,
+      matchedCostCents: sql<string>`coalesce((
+        select sum(a.receipt_cost_cents) from bill_line_stock_allocations a
+         where a.tenant_id = ${schema.inventoryMovements.tenantId}
+           and a.inventory_movement_id = ${schema.inventoryMovements.id}
+      ), 0)`,
+    })
+    .from(schema.inventoryMovements)
+    .innerJoin(
+      schema.inventoryItems,
+      and(
+        eq(schema.inventoryItems.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryItems.id, schema.inventoryMovements.itemId),
+      ),
+    )
+    .leftJoin(
+      schema.inventoryLots,
+      and(
+        eq(schema.inventoryLots.tenantId, schema.inventoryMovements.tenantId),
+        eq(schema.inventoryLots.id, schema.inventoryMovements.lotId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        eq(schema.inventoryMovements.movementKind, "receipt"),
+        isNotNull(schema.inventoryMovements.costCents),
+        opts.itemId
+          ? eq(schema.inventoryMovements.itemId, opts.itemId)
+          : undefined,
+      ),
+    )
+    .orderBy(asc(schema.inventoryMovements.occurredOn))
+    .limit(opts.limit ?? 200);
+
+  return rows
+    .map((r) => {
+      const matchedQuantity = round4(Number(r.matchedQuantity));
+      const matchedCostCents = Number(r.matchedCostCents);
+      const costCents = r.costCents ?? 0;
+      return {
+        movementId: r.movementId,
+        itemId: r.itemId,
+        itemName: r.itemName,
+        unit: r.unit,
+        lotId: r.lotId,
+        lotCode: r.lotCode,
+        occurredOn: r.occurredOn,
+        quantity: r.quantity,
+        costCents,
+        matchedQuantity,
+        matchedCostCents,
+        openQuantity: round4(r.quantity - matchedQuantity),
+        openCostCents: costCents - matchedCostCents,
+      };
+    })
+    .filter((r) => r.openQuantity > 0);
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10_000) / 10_000;
+}
+
+export interface AllocateBillLineInput {
+  billLineId: string;
+  /** What the invoice charges for this line, in cents. Split across the matches. */
+  invoiceCostCents: number;
+  matches: { movementId: string; quantityMatched: number }[];
+}
+
+/**
+ * **MATCH A BILL LINE TO THE DELIVERIES IT IS PAYING FOR**, and point the line
+ * at GRNI so approving the bill clears what the receipts credited.
+ *
+ * **THE BILL LINE'S ACCOUNT IS SET HERE, NOT AT APPROVAL, and that is a layering
+ * decision rather than a convenience.** `approveBill` lives in accounting core,
+ * which is industry-blind and must not reach into a pack — so the substitution
+ * cannot happen there. Setting the account at match time means `approveBill`
+ * copies it verbatim, exactly as it does for every other line, and the bill path
+ * is untouched by this slice.
+ *
+ * The invoice cost is split across the matches **by the receipts' own costs**,
+ * not evenly: two deliveries of the same feed at different prices should each
+ * carry its share of a combined invoice in proportion to what it was worth, and
+ * splitting evenly would misstate both. The largest-remainder rule keeps the
+ * parts summing to the whole.
+ */
+export async function allocateBillLineToStock(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: AllocateBillLineInput,
+): Promise<{ allocations: number; varianceCents: number }> {
+  // OWNER. Matching a bill to a delivery decides what stock cost and clears a
+  // liability — a decision, not a chore, which is the same line `livestock`
+  // drew when it made movements member-level and lots owner-level.
+  if (!allowsWrite(ctx.role, "owner")) {
+    throw new InventoryError("FORBIDDEN", "only an owner can match a bill to stock");
+  }
+  if (input.matches.length === 0) {
+    throw new InventoryError(
+      "LOT_INVALID",
+      "pick at least one delivery for this line",
+    );
+  }
+
+  const line = await tx.query.billLines.findFirst({
+    where: and(
+      eq(schema.billLines.tenantId, ctx.tenantId),
+      eq(schema.billLines.id, input.billLineId),
+    ),
+  });
+  if (!line) throw new InventoryError("NOT_FOUND", "bill line");
+
+  const open = await unbilledReceipts(tx, ctx.tenantId);
+  const byId = new Map(open.map((r) => [r.movementId, r]));
+
+  let receiptTotal = 0;
+  for (const match of input.matches) {
+    const receipt = byId.get(match.movementId);
+    if (!receipt) {
+      throw new InventoryError(
+        "NOT_FOUND",
+        "that delivery is already fully invoiced, or carries no cost to settle",
+      );
+    }
+    if (match.quantityMatched <= 0) {
+      throw new InventoryError("ZERO_QUANTITY", "match a quantity above zero");
+    }
+    if (round4(match.quantityMatched) > receipt.openQuantity) {
+      throw new InventoryError(
+        "INSUFFICIENT",
+        `that delivery only has ${receipt.openQuantity} ${receipt.unit} left to invoice`,
+      );
+    }
+    // The receipt's own cost for the matched share, at its own rate.
+    receiptTotal += Math.round(
+      (receipt.costCents * match.quantityMatched) / receipt.quantity,
+    );
+  }
+
+  // Largest remainder, so the parts sum to the invoice exactly.
+  const shares = input.matches.map((match) => {
+    const receipt = byId.get(match.movementId)!;
+    const receiptShare = Math.round(
+      (receipt.costCents * match.quantityMatched) / receipt.quantity,
+    );
+    return { match, receipt, receiptShare };
+  });
+  const allocated = allocateByWeight(
+    input.invoiceCostCents,
+    shares.map((s) => s.receiptShare),
+  );
+
+  const grniAccountId = await resolveGrniAccount(tx, ctx.tenantId);
+
+  for (let i = 0; i < shares.length; i += 1) {
+    const { match, receiptShare } = shares[i];
+    await tx
+      .insert(schema.billLineStockAllocations)
+      .values({
+        tenantId: ctx.tenantId,
+        billLineId: input.billLineId,
+        inventoryMovementId: match.movementId,
+        quantityMatched: match.quantityMatched,
+        receiptCostCents: receiptShare,
+        invoiceCostCents: allocated[i],
+      })
+      .onConflictDoNothing();
+  }
+
+  // Point the line at GRNI. `approveBill` copies a line's account verbatim, so
+  // this is the whole of the integration with the bill path.
+  await tx
+    .update(schema.billLines)
+    .set({ accountId: grniAccountId })
+    .where(
+      and(
+        eq(schema.billLines.tenantId, ctx.tenantId),
+        eq(schema.billLines.id, input.billLineId),
+      ),
+    );
+
+  return {
+    allocations: shares.length,
+    // Positive: the invoice asks for more than the tickets said.
+    varianceCents: input.invoiceCostCents - receiptTotal,
+  };
+}
+
+/**
+ * Split a total across weights so the parts sum to the whole, largest remainder
+ * first. The same rule the cash-basis allocator uses, and for the same reason:
+ * without it a split in integer cents loses or invents pennies.
+ *
+ * All-zero weights fall back to an even split, because "two deliveries that both
+ * recorded no cost" still has to put the invoice somewhere.
+ */
+function allocateByWeight(total: number, weights: number[]): number[] {
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (sum === 0) {
+    const even = Math.floor(total / weights.length);
+    const out = weights.map(() => even);
+    let left = total - even * weights.length;
+    for (let i = 0; left > 0; i += 1, left -= 1) out[i % out.length] += 1;
+    return out;
+  }
+  const exact = weights.map((w) => (total * w) / sum);
+  const floors = exact.map((e) => Math.floor(e));
+  let left = total - floors.reduce((a, b) => a + b, 0);
+  const order = exact
+    .map((e, i) => ({ i, frac: e - Math.floor(e) }))
+    .sort((a, b) => b.frac - a.frac);
+  for (const { i } of order) {
+    if (left <= 0) break;
+    floors[i] += 1;
+    left -= 1;
+  }
+  return floors;
 }

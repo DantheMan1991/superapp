@@ -111,6 +111,64 @@ export function issueCostCents(
  * rather than by a second calculation that has to be kept in step.
  */
 
+/**
+ * **A CORRECTION TO WHAT A BATCH COST**, as the fold sees it. ADR 0012 §A.4.
+ *
+ * Not a movement, and not a column edit. `inventory_movements` refuses it
+ * twice — `quantity <> 0` rules out a pure-money row and `cost_cents >= 0`
+ * rules out a correction downwards — and the header of this file rules out the
+ * edit. So it is an appended record in its own table, and this is the shape it
+ * folds in as.
+ */
+export interface CostAdjustment {
+  /** The whole correction, signed. */
+  amountCents: number;
+  /** The stored half that landed on stock still on hand. */
+  onHandCents: number;
+  /** The stored half that landed on stock already issued. */
+  issuedCents: number;
+}
+
+/**
+ * **HOW MUCH OF A CORRECTION IS STILL ON THE SHELF.**
+ *
+ * A ticket that understated a delivery by $60 is not $60 of asset if a third of
+ * the delivery has already been eaten. The part covering stock still on hand
+ * raises what the batch is carried at; the part covering stock already issued
+ * has to be expensed, because capitalising it would put cost back on the
+ * balance sheet for feed that is gone.
+ *
+ * **THE CALLER STORES WHAT THIS RETURNS AND NEVER ASKS AGAIN.** The proportion
+ * is what the ledger believed at the moment somebody corrected it, and a
+ * movement backdated tomorrow must not restate a posting that already happened
+ * — the same rule, for the same reason, as a count line's `expected_quantity`.
+ *
+ * `quantityReceived` is everything that has ever come INTO the batch rather
+ * than its current balance, because the question is what proportion of the
+ * batch the correction is still holding. It cannot be less than `quantityOnHand`
+ * arithmetically; both are clamped anyway, because **negative stock is allowed
+ * in this pack** and a batch issued below zero would otherwise send more than
+ * the whole correction to consumption.
+ *
+ * A batch nothing has ever come into keeps the whole correction: nothing has
+ * left it, so there is nothing to expense.
+ *
+ * The rounding lands ONCE, on the on-hand half, and the issued half takes the
+ * remainder — so the two always sum to the correction exactly and the CHECK
+ * that says so can never be the thing that fails.
+ */
+export function splitCostAdjustment(input: {
+  amountCents: number;
+  quantityOnHand: number;
+  quantityReceived: number;
+}): { onHandCents: number; issuedCents: number } {
+  const received = input.quantityReceived;
+  const onHandFraction =
+    received > 0 ? Math.min(1, Math.max(0, input.quantityOnHand / received)) : 1;
+  const onHandCents = Math.round(input.amountCents * onHandFraction);
+  return { onHandCents, issuedCents: input.amountCents - onHandCents };
+}
+
 export interface LotCost {
   /** Everything issued INTO this lot — feed eaten by this pen. */
   consumedCents: number;
@@ -150,6 +208,19 @@ export interface LotCarriedCost extends LotCost {
    * delivery, head taken out of a pen by a production run.
    */
   releasedCents: number;
+  /**
+   * Corrections landing on stock that was STILL ON HAND when they were made.
+   * They raise what the batch is carried at, so they are part of
+   * `remainingCents`.
+   */
+  adjustedOnHandCents: number;
+  /**
+   * Corrections landing on stock that had ALREADY BEEN ISSUED. Expensed where
+   * they were written and never carried — kept as a figure of its own so
+   * `carriedValue` can still tell that somebody costed this batch, which is the
+   * whole difference between a zero and an unknown.
+   */
+  adjustedIssuedCents: number;
   /** Everything spent on the lot, less everything that has already left it. */
   remainingCents: number;
 }
@@ -173,6 +244,17 @@ export interface LotCarriedCost extends LotCost {
 export function lotCarried(
   ownMovements: CostedMovement[],
   consumedMovements: CostedMovement[],
+  /**
+   * Appended cost corrections against this lot (ADR 0012 §A.4).
+   *
+   * **REQUIRED RATHER THAN DEFAULTED, on purpose.** ADR 0012's consequences
+   * name the exact hazard: *"a second table now feeds the cost fold... any
+   * caller that reaches for movements directly to compute cost will be quietly
+   * wrong"*. An optional parameter is a caller forgetting it and getting a
+   * plausible number, which is the failure mode this whole file is written
+   * against. Pass `[]` where there genuinely are none.
+   */
+  adjustments: CostAdjustment[],
 ): LotCarriedCost {
   const base = lotCost(ownMovements, consumedMovements);
   let releasedCents = 0;
@@ -181,12 +263,49 @@ export function lotCarried(
     if (movement.quantity >= 0) continue;
     releasedCents += movement.costCents;
   }
+  let adjustedOnHandCents = 0;
+  let adjustedIssuedCents = 0;
+  for (const adjustment of adjustments) {
+    adjustedOnHandCents += adjustment.onHandCents;
+    adjustedIssuedCents += adjustment.issuedCents;
+  }
   return {
     ...base,
     releasedCents,
-    remainingCents: base.purchasedCents + base.consumedCents - releasedCents,
+    adjustedOnHandCents,
+    adjustedIssuedCents,
+    /**
+     * **ONLY THE ON-HAND HALF IS CARRIED.** The issued half was expensed at the
+     * moment of the correction, and adding it here would capitalise cost for
+     * stock that has already gone — the same double-count in miniature that
+     * ADR 0012 opens with.
+     */
+    remainingCents:
+      base.purchasedCents +
+      base.consumedCents +
+      adjustedOnHandCents -
+      releasedCents,
   };
 }
+
+/**
+ * **A CORRECTION DOES NOT MOVE THE ITEM'S AVERAGE, AND THAT IS A DECISION.**
+ *
+ * `averageCostRate` folds MOVEMENTS at the ITEM level; a correction belongs to
+ * one batch. Feeding it into the average would spread one mis-ticketed delivery
+ * across every other batch of that item and re-price future issues out of
+ * batches that had nothing to do with it — which is the exact re-averaging the
+ * lot spine exists to prevent, and the reason `valueLine` puts carried cost
+ * before the average rather than after it.
+ *
+ * The consequence is real and is not hidden: stock issued out of a corrected
+ * batch is still stamped at the uncorrected average, so the correction stays
+ * standing in the batch instead of leaving with the stock. That is the same
+ * drift item-level average costing already produces whenever two batches of one
+ * item arrived at different prices, and `remainingCents` is deliberately left
+ * as it falls — negative included — so it can be seen rather than tidied away.
+ */
+
 
 /**
  * Cost per head, or per anything.

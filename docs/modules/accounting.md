@@ -65,6 +65,26 @@ resolve here, because the packages are not installed on Windows. **Whether
 receipt extraction actually works is a question only production can answer**,
 by extracting one.
 
+**STILL UNCONFIRMED ON 2026-08-22, and the attempt is worth recording because it
+will be made again.** The obvious test — press Read on a receipt that is already
+in the inbox — cannot be done, for two reasons that compound:
+
+- **The Read button only renders for `pending` or `failed`**
+  ([receipts-controls.tsx:321](../../src/app/dashboard/m/accounting/receipts/receipts-controls.tsx:321)),
+  and every document in the Test tenant is `done`. `extractDocumentAction` itself
+  has no such guard; the UI does.
+- **A PDF never touches sharp at all.**
+  [extract-image.ts:63](../../src/modules/accounting/ai/extract-image.ts:63)
+  returns early for `application/pdf`, so re-reading one proves nothing. The only
+  image in the tenant is a trashed email-signature logo, and it is `done` too.
+
+Only three things call extraction — the inbound email hook, upload registration,
+and the Read button — so **confirming this needs a NEW image document**: upload a
+photo to `/dashboard/m/accounting/receipts`, or forward one to the email-in
+address. Registration auto-runs extraction, so the answer arrives immediately:
+either the fields come back, or the row shows `failed` and the error now says
+whether it is the deploy or the file.
+
 ### 2026-08-22 — A native module took the payables actions down with it (branch `claude/approve-a-matched-bill`)
 
 **Approving a bill returned a 500 on the live app**, with nothing but a digest

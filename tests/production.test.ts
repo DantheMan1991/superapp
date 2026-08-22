@@ -247,10 +247,12 @@ describe("lotCarried", () => {
       { quantity: -100, costCents: 70_000, movementKind: "processed" },
     ];
     const consumed = [{ quantity: -500, costCents: 100_000, movementKind: "issue" }];
-    expect(lotCarried(own, consumed)).toEqual({
+    expect(lotCarried(own, consumed, [])).toEqual({
       purchasedCents: 40_000,
       consumedCents: 100_000,
       releasedCents: 70_000,
+      adjustedOnHandCents: 0,
+      adjustedIssuedCents: 0,
       remainingCents: 70_000,
     });
   });
@@ -258,7 +260,7 @@ describe("lotCarried", () => {
   it("is the plain accumulated cost before anything leaves", () => {
     const own = [{ quantity: 200, costCents: 40_000, movementKind: "placement" }];
     const consumed = [{ quantity: -500, costCents: 60_000, movementKind: "issue" }];
-    expect(lotCarried(own, consumed).remainingCents).toBe(100_000);
+    expect(lotCarried(own, consumed, []).remainingCents).toBe(100_000);
   });
 });
 

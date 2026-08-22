@@ -20,6 +20,7 @@ import {
   type InventoryCtx,
 } from "@/packs/inventory/ops";
 import { convert, getUnit, roundQuantity } from "@/packs/inventory/core/units";
+import { hasRecordedCost } from "@/packs/inventory/core/valuation";
 import { RUN_INPUT_HANDLERS } from "@/packs/run-handlers";
 import type { RunInputBlock } from "./core/handler";
 import { isValidSlug } from "./vocabulary";
@@ -319,14 +320,22 @@ export async function addRunInput(
      * A genuine zero still gets through: a pen whose cost has ALREADY been
      * carried out by an earlier run has accumulated something and has nothing
      * left, and 0 is exactly right there.
+     *
+     * **THE TEST IS `inventory`'S OWN, NOT A COPY OF IT.** This used to read
+     * `purchased + consumed === 0`, which was the same question the valuation
+     * screen's `carriedValue` asks in a different shape — and two shapes of one
+     * question is one that can be answered differently in two places. It duly
+     * was: when `inventory_cost_adjustments` arrived, a batch costed ONLY by a
+     * correction was invisible to both, so a kill day would have stamped NULL
+     * on meat carrying real money while the valuation screen called the same
+     * batch "No cost recorded". One predicate now, in the pack that owns the
+     * fold.
      */
-    const accumulated =
-      (lotCost?.purchasedCents ?? 0) + (lotCost?.consumedCents ?? 0);
     const costCents =
-      accumulated === 0
+      !lotCost || !hasRecordedCost(lotCost)
         ? null
         : lotShareCents(
-            lotCost?.remainingCents ?? 0,
+            lotCost.remainingCents,
             quantity,
             standing.get(input.lotId) ?? 0,
           );

@@ -6,7 +6,9 @@ import { getBalances, getDefaultEntityId } from "../src/modules/accounting/core"
 import { approveBill } from "../src/modules/accounting/payables/bills";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
+  adjustLotCost,
   adjustStock,
+  carriedCostByLot,
   createItem,
   createLot,
   issueStock,
@@ -19,10 +21,12 @@ import {
   allocateBillLineToStock,
   inventoryTreatmentOf,
   grniPosition,
+  postCostAdjustment,
   resolveGrniAccount,
   unbilledReceipts,
   unmatchBillLine,
 } from "../src/packs/inventory/ledger-ops";
+import { carriedValue } from "../src/packs/inventory/core/valuation";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -193,6 +197,59 @@ d("inventory posting", () => {
     expect(await asOwner((tx) => resolveGrniAccount(tx, tenantId))).toBe(
       grniAccountId,
     );
+  });
+
+  it("RECORDS A COST CORRECTION WITH POSTING OFF, and posts nothing", async () => {
+    /**
+     * **COST ACCUMULATION IS ALWAYS ON; POSTING IS THE PART A TENANT CHOOSES.**
+     * The design's own split, and it applies to a correction exactly as it does
+     * to a receipt: a farm that keeps no books still wants what a batch cost.
+     * The row is written, the fold moves, and the ledger is untouched.
+     */
+    const item = await newItem("Corrected while off");
+    const lot = await asOwner((tx) =>
+      createLot(tx, ownerCtx(), {
+        itemId: item.id,
+        code: `CC-off-${Date.now()}`,
+        source: "purchased",
+      }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ownerCtx(), {
+        itemId: item.id,
+        lotId: lot.id,
+        quantity: 10,
+        costCents: 1_000,
+        occurredOn: "2026-01-06",
+      }),
+    );
+    const row = await asOwner((tx) =>
+      adjustLotCost(tx, ownerCtx(), {
+        lotId: lot.id,
+        amountCents: 400,
+        reason: "freight_omitted",
+        occurredOn: "2026-01-07",
+      }),
+    );
+    expect(row.onHandCents).toBe(400);
+    expect(
+      await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.journalEntries)
+          .where(
+            and(
+              eq(schema.journalEntries.tenantId, tenantId),
+              eq(schema.journalEntries.sourceId, row.id),
+            ),
+          ),
+      ),
+    ).toHaveLength(0);
+    expect(await netOf(inventoryAccountId)).toBe(0);
+    const carried = await asOwner((tx) =>
+      carriedCostByLot(tx, tenantId, [lot.id]),
+    );
+    expect(carriedValue(carried.get(lot.id)!)).toBe(1_400);
   });
 
   // ---- capitalise ---------------------------------------------------------
@@ -1504,6 +1561,455 @@ it("NOBODY INVOICES YOU FOR WHAT YOU MADE", async () => {
       expect(open).toHaveLength(1);
       expect(open[0].openQuantity).toBe(12);
       expect(open[0].openCostCents).toBe(34_000);
+    });
+
+    // ---- slice 3d: correcting what a batch cost -------------------------
+
+    /**
+     * **THE INVARIANT, RESTATED FOR CORRECTIONS.** ADR 0012:
+     *
+     *     original stamped cost + appended corrections − cost issued out
+     *       = the batch's carrying value  (== core/valuation.ts carriedValue)
+     *
+     * Every test below measures the ledger and `carriedCostByLot` and expects
+     * them to move together. Differentially, because this file shares one
+     * tenant: an absolute assertion about `1300` here is a claim about every
+     * test above it as much as about itself.
+     */
+    const carriedOf = async (lotId: string) => {
+      const map = await asOwner((tx) => carriedCostByLot(tx, tenantId, [lotId]));
+      const cost = map.get(lotId)!;
+      return { cost, value: carriedValue(cost) };
+    };
+
+    it("A CORRECTION RAISES WHAT THE BATCH IS CARRIED AT", async () => {
+      const item = await newItem("Corrected feed");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-up-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 100,
+          costCents: 34_000,
+          occurredOn: "2026-10-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      const inventoryBefore = await netOf(inventoryAccountId);
+      const cogsBefore = await netOf(cogsAccountId);
+
+      const row = await asOwner((tx) =>
+        adjustLotCost(tx, ownerCtx(), {
+          lotId: lot.id,
+          amountCents: 6_000,
+          reason: "freight_omitted",
+          occurredOn: "2026-10-05",
+        }),
+      );
+
+      // Nothing has left the batch, so the whole correction stays with it.
+      expect(row.onHandCents).toBe(6_000);
+      expect(row.issuedCents).toBe(0);
+      expect((await netOf(inventoryAccountId)) - inventoryBefore).toBe(6_000);
+      // The credit is the variance account, which DEFAULTS to consumption.
+      expect((await netOf(cogsAccountId)) - cogsBefore).toBe(-6_000);
+      expect((await carriedOf(lot.id)).value).toBe(40_000);
+    });
+
+    it("does NOT credit GRNI, because matching could never clear it", async () => {
+      /**
+       * The one decision in this posting that had a plausible alternative, and
+       * the reason it was refused. Matching clears GRNI at the RECEIPT's
+       * stamped cost, which a correction does not change — so a credit put here
+       * is one nothing can ever debit, and it would show up on the
+       * reconciliation card blamed on "deliveries from before the switch".
+       */
+      const item = await newItem("Grni untouched");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-grni-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 10,
+          costCents: 1_000,
+          occurredOn: "2026-10-10",
+          locationAssetId: freezerId,
+        }),
+      );
+      const before = await asOwner((tx) => grniPosition(tx, tenantId));
+      await asOwner((tx) =>
+        adjustLotCost(tx, ownerCtx(), {
+          lotId: lot.id,
+          amountCents: 250,
+          reason: "ticket_wrong",
+          occurredOn: "2026-10-11",
+        }),
+      );
+      const after = await asOwner((tx) => grniPosition(tx, tenantId));
+      // Both ends of the reconciliation are where they were, so the gap is too.
+      expect(after.accountCents).toBe(before.accountCents);
+      expect(after.awaitingInvoiceCents).toBe(before.awaitingInvoiceCents);
+      expect(after.differenceCents).toBe(before.differenceCents);
+    });
+
+    it("SPLITS BY WHAT HAS ALREADY BEEN ISSUED, and stores the split", async () => {
+      const item = await newItem("Half eaten");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-split-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 100,
+          costCents: 10_000,
+          occurredOn: "2026-11-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 40,
+          occurredOn: "2026-11-02",
+          locationAssetId: freezerId,
+        }),
+      );
+      const inventoryBefore = await netOf(inventoryAccountId);
+      const cogsBefore = await netOf(cogsAccountId);
+
+      const row = await asOwner((tx) =>
+        adjustLotCost(tx, ownerCtx(), {
+          lotId: lot.id,
+          amountCents: 6_000,
+          reason: "ticket_wrong",
+          occurredOn: "2026-11-05",
+        }),
+      );
+
+      expect(row.onHandCents).toBe(3_600);
+      expect(row.issuedCents).toBe(2_400);
+      // STORED, not re-derivable later: what the ledger believed at the moment
+      // somebody corrected it.
+      expect(row.quantityOnHand).toBe(60);
+      expect(row.quantityReceived).toBe(100);
+
+      /**
+       * Only the on-hand half reaches the balance sheet. With the variance
+       * account defaulting to consumption, the issued half debits and the
+       * credit offsets it, so the entry nets to `Dr 1300 3,600 / Cr 5000 3,600`
+       * — and the batch's carrying value moves by exactly the same 3,600.
+       */
+      expect((await netOf(inventoryAccountId)) - inventoryBefore).toBe(3_600);
+      expect((await netOf(cogsAccountId)) - cogsBefore).toBe(-3_600);
+      // 10,000 purchased − 4,000 issued out + 3,600 corrected = 9,600.
+      expect((await carriedOf(lot.id)).value).toBe(9_600);
+    });
+
+    it("A BATCH COSTED ONLY BY A CORRECTION IS NOT 'No cost recorded'", async () => {
+      /**
+       * **THE EGGS-AT-$0.00 BUG THROUGH A NEW DOOR, and the reason this slice
+       * had to touch two files.** A delivery that arrives with nothing on the
+       * paperwork is recorded uncosted, and the correction that supplies its
+       * price is not a movement — so purchased, consumed and released are all
+       * zero while the batch carries real money. `carriedValue` decided "was
+       * this ever costed" from those three alone, and `production/ops.ts` asked
+       * the same question independently in a different shape.
+       */
+      const item = await newItem("Priceless on arrival");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-none-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 30,
+          // No price on the ticket. This is the case ADR 0012 §A.4 names first.
+          occurredOn: "2026-11-10",
+          locationAssetId: freezerId,
+        }),
+      );
+      // Before the correction it is honestly unknown, NOT zero.
+      expect((await carriedOf(lot.id)).value).toBeNull();
+
+      await asOwner((tx) =>
+        adjustLotCost(tx, ownerCtx(), {
+          lotId: lot.id,
+          amountCents: 4_500,
+          reason: "no_price_on_ticket",
+          occurredOn: "2026-11-12",
+        }),
+      );
+      const after = await carriedOf(lot.id);
+      expect(after.cost.purchasedCents).toBe(0);
+      expect(after.cost.adjustedOnHandCents).toBe(4_500);
+      expect(after.value).toBe(4_500);
+    });
+
+    it("TAKES A CORRECTION DOWNWARDS, which a movement's CHECK forbids", async () => {
+      const item = await newItem("Overcharged");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-down-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 50,
+          costCents: 15_000,
+          occurredOn: "2026-11-20",
+          locationAssetId: freezerId,
+        }),
+      );
+      const inventoryBefore = await netOf(inventoryAccountId);
+      await asOwner((tx) =>
+        adjustLotCost(tx, ownerCtx(), {
+          lotId: lot.id,
+          amountCents: -5_000,
+          reason: "discount_applied",
+          occurredOn: "2026-11-21",
+        }),
+      );
+      expect((await netOf(inventoryAccountId)) - inventoryBefore).toBe(-5_000);
+      expect((await carriedOf(lot.id)).value).toBe(10_000);
+    });
+
+    it("names its own entry source, and is idempotent by it", async () => {
+      const item = await newItem("Sourced");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-src-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 5,
+          costCents: 500,
+          occurredOn: "2026-11-25",
+          locationAssetId: freezerId,
+        }),
+      );
+      const row = await asOwner((tx) =>
+        adjustLotCost(tx, ownerCtx(), {
+          lotId: lot.id,
+          amountCents: 100,
+          reason: "ticket_wrong",
+          occurredOn: "2026-11-26",
+        }),
+      );
+      const entries = await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.journalEntries)
+          .where(
+            and(
+              eq(schema.journalEntries.tenantId, tenantId),
+              eq(schema.journalEntries.sourceId, row.id),
+            ),
+          ),
+      );
+      expect(entries).toHaveLength(1);
+      // NOT `inventory_adjustment`: that source means a quantity moved, and its
+      // sourceId points at a movement rather than at one of these rows.
+      expect(entries[0].source).toBe("inventory_cost_adjustment");
+
+      // Re-posting the same correction returns the same entry rather than a
+      // second one — the idempotency key is the row's id.
+      const again = await asOwner((tx) =>
+        postCostAdjustment(tx, ownerCtx(), {
+          adjustmentId: row.id,
+          itemId: item.id,
+          lotId: lot.id,
+          lotCode: lot.code,
+          occurredOn: "2026-11-26",
+          onHandCents: row.onHandCents,
+          issuedCents: row.issuedCents,
+        }),
+      );
+      expect(again?.entryId).toBe(entries[0].id);
+    });
+
+    it("posts NOTHING for a correction that nets within one account", async () => {
+      /**
+       * A batch entirely issued out, in a tenant whose variance account is the
+       * consumption account — which is the default. `Dr 5000 / Cr 5000` says
+       * nothing and `postEntry` refuses a zero-amount line, so the correction is
+       * recorded and posts no entry at all. The fold agrees: the on-hand half is
+       * zero, so the batch's carrying value does not move either.
+       */
+      const item = await newItem("All gone");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-nil-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 20,
+          costCents: 2_000,
+          occurredOn: "2026-12-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 20,
+          occurredOn: "2026-12-02",
+          locationAssetId: freezerId,
+        }),
+      );
+      const inventoryBefore = await netOf(inventoryAccountId);
+      const cogsBefore = await netOf(cogsAccountId);
+      const row = await asOwner((tx) =>
+        adjustLotCost(tx, ownerCtx(), {
+          lotId: lot.id,
+          amountCents: 700,
+          reason: "freight_omitted",
+          occurredOn: "2026-12-03",
+        }),
+      );
+      expect(row.onHandCents).toBe(0);
+      expect(row.issuedCents).toBe(700);
+      expect(
+        await asOwner((tx) =>
+          tx
+            .select()
+            .from(schema.journalEntries)
+            .where(
+              and(
+                eq(schema.journalEntries.tenantId, tenantId),
+                eq(schema.journalEntries.sourceId, row.id),
+              ),
+            ),
+        ),
+      ).toHaveLength(0);
+      expect((await netOf(inventoryAccountId)) - inventoryBefore).toBe(0);
+      expect((await netOf(cogsAccountId)) - cogsBefore).toBe(0);
+      // Zero, and it is a REAL zero now: somebody has said what this cost.
+      expect((await carriedOf(lot.id)).value).toBe(0);
+    });
+
+    it("refuses a staff member — re-stating a cost is a DECISION", async () => {
+      const item = await newItem("Staff refused");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-staff-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await expect(
+        withTenant(
+          tenantId,
+          (tx) =>
+            adjustLotCost(tx, staffCtx(), {
+              lotId: lot.id,
+              amountCents: 100,
+              reason: "ticket_wrong",
+              occurredOn: "2026-12-05",
+            }),
+          { role: "staff", userId: STAFF },
+        ),
+      ).rejects.toThrow(/owner/i);
+    });
+
+    it("refuses a correction of nothing", async () => {
+      const item = await newItem("Zero refused");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-zero-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          adjustLotCost(tx, ownerCtx(), {
+            lotId: lot.id,
+            amountCents: 0,
+            reason: "ticket_wrong",
+            occurredOn: "2026-12-05",
+          }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("keeps a correction out of a valuation dated before it", async () => {
+      /**
+       * Filtered by `occurred_on` exactly as the movements are. A balance sheet
+       * dated June must not see August's correction, for the same reason it must
+       * not see August's feed.
+       */
+      const item = await newItem("As of");
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `CC-asof-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 10,
+          costCents: 1_000,
+          occurredOn: "2027-01-05",
+          locationAssetId: freezerId,
+        }),
+      );
+      await asOwner((tx) =>
+        adjustLotCost(tx, ownerCtx(), {
+          lotId: lot.id,
+          amountCents: 300,
+          reason: "freight_omitted",
+          occurredOn: "2027-02-05",
+        }),
+      );
+      const inJanuary = await asOwner((tx) =>
+        carriedCostByLot(tx, tenantId, [lot.id], "2027-01-31"),
+      );
+      expect(carriedValue(inJanuary.get(lot.id)!)).toBe(1_000);
+      const inFebruary = await asOwner((tx) =>
+        carriedCostByLot(tx, tenantId, [lot.id], "2027-02-28"),
+      );
+      expect(carriedValue(inFebruary.get(lot.id)!)).toBe(1_300);
     });
   });
 });

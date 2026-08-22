@@ -44,12 +44,45 @@ export interface ValuationInput {
   averageRate: number | null;
 }
 
-/** The three cost figures a lot carries, from `lotCarried`. */
+/** The cost figures a lot carries, from `lotCarried`. */
 export interface CarriedCost {
   purchasedCents: number;
   consumedCents: number;
   releasedCents: number;
+  /** Appended corrections landing on stock still on hand — ADR 0012 §A.4. */
+  adjustedOnHandCents: number;
+  /** Appended corrections landing on stock already issued. */
+  adjustedIssuedCents: number;
   remainingCents: number;
+}
+
+/**
+ * **HAS ANYBODY EVER SAID WHAT THIS BATCH COST?**
+ *
+ * The discriminator between a real zero and an unknown, and **the single place
+ * that question is answered** — which is the point of it being a function of
+ * its own rather than an expression repeated wherever it is needed.
+ *
+ * It was repeated. `production/ops.ts` asked it independently before stamping a
+ * run's output, and the two tests were not even the same shape. When
+ * `inventory_cost_adjustments` arrived, a batch costed ONLY by a correction
+ * would have passed neither: the valuation screen would have reported "No cost
+ * recorded" about a batch carrying real money, and a kill day would have
+ * stamped NULL on the meat it produced. That is the eggs-at-$0.00 bug arriving
+ * through a new door, twice, in two files, from one omission.
+ *
+ * Money in ANY direction counts. Purchased, consumed into it, released out of
+ * it, or corrected — any of the five means somebody costed this batch and zero
+ * is then a real answer.
+ */
+export function hasRecordedCost(cost: CarriedCost): boolean {
+  return (
+    cost.purchasedCents !== 0 ||
+    cost.consumedCents !== 0 ||
+    cost.releasedCents !== 0 ||
+    cost.adjustedOnHandCents !== 0 ||
+    cost.adjustedIssuedCents !== 0
+  );
 }
 
 /**
@@ -70,15 +103,11 @@ export interface CarriedCost {
  * this is the one a test caught before it went out.
  *
  * The discriminator is whether any money has EVER touched the lot, in any
- * direction. Purchased, consumed into it, or released out of it — any of the
- * three means somebody costed this batch and zero is a real answer.
+ * direction — `hasRecordedCost`, which is shared with `production` rather than
+ * restated there, because when it WAS restated the two copies disagreed.
  */
 export function carriedValue(cost: CarriedCost): number | null {
-  const everCosted =
-    cost.purchasedCents !== 0 ||
-    cost.consumedCents !== 0 ||
-    cost.releasedCents !== 0;
-  return everCosted ? cost.remainingCents : null;
+  return hasRecordedCost(cost) ? cost.remainingCents : null;
 }
 
 /**

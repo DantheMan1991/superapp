@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  adjustLotCostAction,
   adjustStockAction,
   createLotAction,
   issueStockAction,
@@ -34,10 +35,20 @@ import {
 import {
   ADJUSTMENT_REASON_LABELS,
   ADJUSTMENT_REASON_NOTES,
+  COST_ADJUSTMENT_REASONS,
+  COST_ADJUSTMENT_REASON_LABELS,
+  COST_ADJUSTMENT_REASON_NOTES,
   LOT_SOURCES,
   LOT_SOURCE_LABELS,
   SUGGESTED_ADJUSTMENT_REASONS,
 } from "../vocabulary";
+/**
+ * PURE, and that is what makes it importable here. `core/costing.ts` has no
+ * imports and no `server-only` directive, so the preview in `LotCostForm` runs
+ * the very function the server will run rather than a second copy of the
+ * arithmetic that could drift from it.
+ */
+import { splitCostAdjustment } from "../core/costing";
 
 const NO_LOT = "__none__";
 const CUSTOM_REASON = "__custom__";
@@ -655,6 +666,261 @@ export function SplitLotForm({
           <DialogFooter>
             <Button type="submit" disabled={pending}>
               {pending ? "Splitting…" : "Split"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * What a batch is carrying, and what the split will be measured against.
+ * Everything the correction dialog needs is computed on the server and handed
+ * over, so the client does no arithmetic it cannot show its working for.
+ */
+export interface CostCorrectionLot {
+  id: string;
+  code: string;
+  /** Null when nobody has recorded a cost for this batch at all. */
+  carriedLabel: string | null;
+  quantityOnHand: number;
+  quantityReceived: number;
+  onHandLabel: string;
+  receivedLabel: string;
+}
+
+/**
+ * **CORRECT WHAT A BATCH COST.** ADR 0012 §A.4.
+ *
+ * Separate from the adjustment form, and deliberately not a fourth tab on it.
+ * That form changes HOW MUCH IS THERE; this one changes WHAT IT COST and moves
+ * no stock at all. Putting them together would invite somebody to record a
+ * spoiled bag as a cost correction, which leaves the bag on the shelf and
+ * quietly re-prices the batch.
+ *
+ * **THE SPLIT IS SHOWN BEFORE IT HAPPENS, and that is the point of the panel.**
+ * A person entering "the $60 the ticket missed" does not expect part of it to
+ * land on the profit and loss, and finding that out afterwards from a journal
+ * entry is the wrong order. Same discipline as the posting switch, which says
+ * what it does — including the thing people assume and should not — first.
+ */
+export function LotCostForm({
+  lot,
+  currencySymbol,
+  today,
+}: {
+  lot: CostCorrectionLot;
+  currencySymbol: string | null;
+  today: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [reason, setReason] = useState<string>(COST_ADJUSTMENT_REASONS[0]);
+  const [amount, setAmount] = useState("");
+  const [direction, setDirection] = useState<"up" | "down">("up");
+
+  /**
+   * **THE SAME FUNCTION THE SERVER WILL CALL**, so the preview cannot say one
+   * thing and the stored record another. `splitCostAdjustment` is pure and
+   * imports nothing, which is exactly why a client component can have it.
+   */
+  const typed = Math.round(Number(amount || "0") * 100);
+  const signed = direction === "down" ? -Math.abs(typed) : Math.abs(typed);
+  const preview =
+    Number.isFinite(typed) && typed > 0
+      ? splitCostAdjustment({
+          amountCents: signed,
+          quantityOnHand: lot.quantityOnHand,
+          quantityReceived: lot.quantityReceived,
+        })
+      : null;
+
+  function submit(formData: FormData) {
+    const chosenReason =
+      reason === CUSTOM_REASON
+        ? String(formData.get("customReason") ?? "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, "_")
+        : reason;
+    startTransition(async () => {
+      const result = await adjustLotCostAction({
+        lotId: lot.id,
+        amountCents: signed,
+        reason: chosenReason,
+        occurredOn: String(formData.get("occurredOn") ?? today),
+        notes: String(formData.get("notes") ?? ""),
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      /**
+       * **THE VERB FOLLOWS THE SIGN, and it did not until somebody clicked
+       * "It cost less".** A correction downwards took $8 OFF cost of goods
+       * sold, and the toast said it "went to" cost of goods sold — the opposite
+       * of the entry it had just posted, in the one sentence a person reads
+       * before deciding whether to believe the number. Keyed off the STORED
+       * `issuedCents` rather than off the form's direction, because that is
+       * what was actually written.
+       */
+      toast.success(
+        result.issuedCents === 0
+          ? "Cost corrected."
+          : "Cost corrected — " +
+              formatMoney(Math.abs(result.issuedCents), currencySymbol) +
+              (result.issuedCents > 0 ? " of it went to" : " of it came off") +
+              " cost of goods sold, because that much had already been used.",
+      );
+      setOpen(false);
+      setAmount("");
+      router.refresh();
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm">
+          Correct cost
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <form action={submit}>
+          <DialogHeader>
+            <DialogTitle>Correct what {lot.code} cost</DialogTitle>
+            <DialogDescription>
+              {lot.carriedLabel === null
+                ? "Nobody has recorded a cost for this batch yet, and this is how you supply one. It does not change how much of it there is."
+                : `This batch is carrying ${lot.carriedLabel}. This changes what it cost, never how much of it there is.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="cost-direction">Which way</Label>
+                <Select
+                  value={direction}
+                  onValueChange={(v) => setDirection(v as "up" | "down")}
+                >
+                  <SelectTrigger id="cost-direction">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="up">It cost more</SelectItem>
+                    <SelectItem value="down">It cost less</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="cost-amount">
+                  By how much{currencySymbol ? ` (${currencySymbol})` : ""}
+                </Label>
+                {/* A POSITIVE NUMBER AND A DIRECTION, never a minus sign typed
+                    into a box — the same two questions the adjustment form
+                    splits, for the same reason. */}
+                <Input
+                  id="cost-amount"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  required
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="cost-reason">Why</Label>
+              <Select value={reason} onValueChange={setReason}>
+                <SelectTrigger id="cost-reason">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COST_ADJUSTMENT_REASONS.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {COST_ADJUSTMENT_REASON_LABELS[r]}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={CUSTOM_REASON}>Something else…</SelectItem>
+                </SelectContent>
+              </Select>
+              {reason === CUSTOM_REASON ? (
+                <Input
+                  name="customReason"
+                  maxLength={63}
+                  required
+                  placeholder="e.g. billed in tons not pounds"
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {COST_ADJUSTMENT_REASON_NOTES[reason]}
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="cost-when">When</Label>
+              <Input
+                id="cost-when"
+                name="occurredOn"
+                type="date"
+                defaultValue={today}
+                required
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="cost-notes">Notes</Label>
+              <Textarea id="cost-notes" name="notes" rows={2} />
+            </div>
+
+            {preview && (
+              <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">Where this lands</p>
+                <p className="mt-1">
+                  {formatMoney(Math.abs(preview.onHandCents), currencySymbol)}{" "}
+                  {direction === "down"
+                    ? "comes off what the batch is carried at"
+                    : "goes onto what the batch is carried at"}
+                  , because {lot.onHandLabel} of the {lot.receivedLabel} that
+                  came in is still on hand.
+                </p>
+                {preview.issuedCents !== 0 && (
+                  /* THE HALF PEOPLE DO NOT EXPECT. Stock that has already been
+                     used cannot take cost back onto the balance sheet, so its
+                     share goes to the profit and loss — and saying so here is
+                     cheaper than explaining a journal entry afterwards.
+
+                     The verb follows the direction. Found by clicking "It cost
+                     less": this read "goes to cost of goods sold" about $8 that
+                     was about to come OFF it. */
+                  <p className="mt-1">
+                    The other{" "}
+                    {formatMoney(Math.abs(preview.issuedCents), currencySymbol)}{" "}
+                    {direction === "down"
+                      ? "comes off cost of goods sold"
+                      : "goes to cost of goods sold"}
+                    , because that much of the batch has already been used and
+                    is no longer on the balance sheet to change.
+                  </p>
+                )}
+                <p className="mt-1">
+                  Nothing about how much is there changes, and the entries
+                  already recorded are left exactly as they are.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Correcting…" : "Correct cost"}
             </Button>
           </DialogFooter>
         </form>

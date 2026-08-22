@@ -709,6 +709,140 @@ export const billLineStockAllocations = pgTable(
   ],
 );
 
+/**
+ * **A CORRECTION TO WHAT A BATCH COST. APPENDED, NEVER AN EDIT.**
+ * [ADR 0012](../../../docs/decisions/0012-what-capitalises-stock.md) §A.4.
+ *
+ * A delivery ticket can overstate, understate, omit the freight or use the
+ * wrong unit, and until this table a stamped cost was final. The rule the
+ * correction obeys is the one at the top of `packs/inventory/core/costing.ts`:
+ * **cost is a ledger, not a column** — so a disagreement about what something
+ * cost is another row, exactly as a disagreement about how much of it there is
+ * is another movement.
+ *
+ * **IT IS NOT A MOVEMENT, and the database settled that rather than taste.**
+ * `inventory_movements` carries two CHECKs a pure-money correction cannot
+ * satisfy: `quantity <> 0` rules out a row that moves nothing, and
+ * `cost_cents >= 0` rules out a correction downwards. Relaxing either would
+ * weaken a constraint that protects the quantity ledger for every other caller,
+ * to admit rows that are not quantities.
+ *
+ * **THE SPLIT IS STORED, and that is the whole reason two money columns exist
+ * where one would do.** A correction lands partly on stock still on the shelf
+ * — which raises what that batch is carried at — and partly on stock already
+ * issued, which has to be expensed because capitalising it would put cost back
+ * on the balance sheet for feed that has been eaten. The proportion is what the
+ * ledger BELIEVED at the moment somebody corrected it; recomputing it later
+ * would let a movement backdated tomorrow restate a posting that already
+ * happened. Same rule, and the same reason, as a count line's
+ * `expected_quantity`.
+ *
+ * `quantity_on_hand` and `quantity_received` are kept beside the split so the
+ * proportion can be READ rather than reverse-engineered out of two cent
+ * figures — the number a person is owed when they ask why $60 became $36 and
+ * $24.
+ */
+export const inventoryCostAdjustments = pgTable(
+  "inventory_cost_adjustments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id").notNull(),
+    /**
+     * **KEYED TO THE LOT, and NOT NULL.** A correction is about what a
+     * particular batch cost — which delivery was mis-ticketed — and there is no
+     * such thing as correcting the cost of "feed in general". Stock held outside
+     * a batch is valued at the item average, which has no single receipt to
+     * correct.
+     */
+    lotId: uuid("lot_id").notNull(),
+    /** The date the correction belongs to. What a valuation `asOf` filters on. */
+    occurredOn: date("occurred_on").notNull(),
+    /**
+     * **SIGNED, and that is the point.** A ticket overstates as easily as it
+     * understates, and a correction that can only go up is not a correction.
+     */
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    /** The part that lands on stock still on hand. Raises the batch's carrying value. */
+    onHandCents: bigint("on_hand_cents", { mode: "number" }).notNull(),
+    /** The part that lands on stock already issued. Expensed, never carried. */
+    issuedCents: bigint("issued_cents", { mode: "number" }).notNull(),
+    /** What the ledger believed was standing in the batch when this was written. */
+    quantityOnHand: numeric("quantity_on_hand", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
+    /** Everything that had ever come INTO the batch — the split's denominator. */
+    quantityReceived: numeric("quantity_received", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
+    /** Why. Open taxonomy, same shape as a movement's — see `COST_ADJUSTMENT_REASONS`. */
+    reason: text("reason").notNull(),
+    notes: text("notes").notNull().default(""),
+    /** Who said so. The ADR asks for date, reason AND author on the record itself. */
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("inventory_cost_adjustments_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    // The fold: every correction against these batches, as of a date.
+    index("inventory_cost_adjustments_tenant_lot_idx").on(
+      t.tenantId,
+      t.lotId,
+      t.occurredOn,
+    ),
+    // The item average reads this way round — it needs every batch's at once.
+    index("inventory_cost_adjustments_tenant_item_idx").on(
+      t.tenantId,
+      t.itemId,
+      t.occurredOn,
+    ),
+    foreignKey({
+      name: "inventory_cost_adjustments_item_fk",
+      columns: [t.tenantId, t.itemId],
+      foreignColumns: [inventoryItems.tenantId, inventoryItems.id],
+    }),
+    /**
+     * NO cascade. A correction is a record that somebody re-stated what a batch
+     * cost, and deleting the batch would not make that untrue — the same
+     * reasoning that keeps `bill_line_stock_allocations` off cascade.
+     */
+    foreignKey({
+      name: "inventory_cost_adjustments_lot_fk",
+      columns: [t.tenantId, t.lotId],
+      foreignColumns: [inventoryLots.tenantId, inventoryLots.id],
+    }),
+    // A correction of nothing is not a correction. Mirrors the movement ledger's
+    // `quantity <> 0`, for the column that carries the meaning here.
+    check("inventory_cost_adjustments_amount_nonzero", sql`${t.amountCents} <> 0`),
+    /**
+     * **THE SPLIT MUST ACCOUNT FOR THE WHOLE CORRECTION.** The two halves are
+     * derived at write time and then stored, so this is what stops a later
+     * caller storing halves that do not add up — which would leave the ledger
+     * and the batch's carrying value permanently apart by the difference, with
+     * nothing to say by how much.
+     */
+    check(
+      "inventory_cost_adjustments_split_sums",
+      sql`${t.onHandCents} + ${t.issuedCents} = ${t.amountCents}`,
+    ),
+    check(
+      "inventory_cost_adjustments_reason_format",
+      sql`${t.reason} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+  ],
+);
+
 export type InventoryItem = typeof inventoryItems.$inferSelect;
 export type NewInventoryItem = typeof inventoryItems.$inferInsert;
 export type InventoryLot = typeof inventoryLots.$inferSelect;
@@ -723,3 +857,7 @@ export type BillLineStockAllocation =
   typeof billLineStockAllocations.$inferSelect;
 export type NewBillLineStockAllocation =
   typeof billLineStockAllocations.$inferInsert;
+export type InventoryCostAdjustment =
+  typeof inventoryCostAdjustments.$inferSelect;
+export type NewInventoryCostAdjustment =
+  typeof inventoryCostAdjustments.$inferInsert;

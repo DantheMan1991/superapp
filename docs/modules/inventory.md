@@ -19,11 +19,102 @@ this dossier is the build record.
 | **1** | **Receipts and issues** — closes the `livestock` costing loop | **shipped 2026-08-19** |
 | **2** | **Adjustments, physical counts, expiry/FEFO** | **shipped 2026-08-20** |
 | **3a** | **Valuation — what stock is worth, as of a date** | **shipped 2026-08-21** |
-| 3b | **Perpetual posting to 1300/5000 — and the bill→item link it cannot ship without** | next — see Open items |
+| **3b** | **Perpetual posting, GRNI, and matching a bill to the deliveries it pays for** | **shipped 2026-08-21** |
+| 3c | Cost-adjustment corrections, and the `expense_on_payment` lens | next — see Open items |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
 ## Build log
+
+### 2026-08-22 — The company a movement's cost belongs to (`claude/the-books-follow-the-shelf`)
+
+**`postMovement` used to post to the tenant's DEFAULT company**, because a
+movement carries no `entity_id` — while the bill clearing it posts to the bill's
+own. In a tenant with two companies neither GRNI ever netted: one kept a
+permanent credit the reconciliation called settled, the other a permanent debit,
+and the stock sat on the wrong balance sheet. Only a consolidated view hid it,
+and **the Test tenant deliberately holds two companies**, so it was reachable.
+
+`assets` had already settled this and the answer is copied deliberately — its
+`entityOf` refuses rather than defaulting, because *"a default chosen at posting
+time is exactly the behaviour this column replaced"*. So `resolveMovementEntity`
+takes the only company when there is one, the LOCATION'S company when there is
+more than one (a freezer, a barn and a market truck are all assets, and an asset
+already names its books), and **refuses otherwise**. A match across companies is
+refused from the other end.
+
+**Every one of the 21 existing tests passed while this was broken**, because
+every one of them ran single-company. The four new ones stand up a second
+company on purpose.
+
+Two things the fix taught, both recorded because they cost a red run:
+`provisionAccounting` ADOPTS the assets that already exist, so the fixture
+freezer does name a company and resolving it was never ambiguous — the first
+version of that test asserted a refusal that correctly never came. And a company
+cannot be deleted once entries have posted to it, so the cleanup deactivates it;
+a failed delete is what made a dozen later tests inherit the ambiguity.
+
+### 2026-08-21 — Slice 3b: the books follow the shelf, and only when asked to (`claude/what-the-shelf-is-worth`)
+
+Inventory reaches the ledger. `costing.ts` has said since slice 1 that the third
+layer was not there; it is now, and it is **off by default**.
+
+**`inventory_treatment` DEFAULTS TO `none`, and that is the decision that made
+this safe to merge.** Perpetual posting rewrites how every purchase reaches the
+books. Switching that on by migration, for tenants already keeping accounts, is
+not something anybody should acquire without being asked — so nothing changes
+until an owner turns it on. ADR 0013 had it defaulting to `capitalise`; that was
+wrong for live books and the ADR is now the thing that is out of step.
+
+**THE RECEIPT CAPITALISES AND THE BILL CLEARS.** `Dr 1300 / Cr 2050 Goods
+Received Not Invoiced` when stock arrives; `Dr 2050 / Cr AP` when the bill for it
+is matched and approved. GRNI is the join between what the business HAS and what
+it OWES, and its balance is a report rather than plumbing: a credit is stock
+received with no invoice, a debit is an invoice for stock the books never
+received.
+
+- **Accounting core never learns that inventory exists.** `approveBill` copies a
+  bill line's account verbatim, so **the allocation sets the line's account to
+  GRNI at match time** and the bill path is untouched by this slice. Teaching
+  `approveBill` about allocations would have put a Layer 1, industry-blind module
+  in the business of reading a pack's tables.
+- **An item link was never enough**, and the first draft of ADR 0012 thought it
+  was. `bill_line_stock_allocations` matches a quantity against a specific
+  receipt, which is what lets one invoice cover two deliveries at two prices,
+  a receipt be part-invoiced, and a variance be attributed to something.
+- **The invoice splits by what each delivery was worth**, not evenly, largest
+  remainder so the parts sum to the whole.
+- **Transfers, splits and merges post NOTHING.** The entry would be
+  `Dr 1300 / Cr 1300` — a row that says nothing and balances.
+- **A movement with no cost posts nothing rather than posting zero**, which is
+  the same distinction `carriedValue` keeps on the valuation screen, arriving in
+  the ledger.
+- **One movement is one entry forever.** The idempotency key is the movement's
+  own id, so a replayed write lands once — the property `retail`'s till needed a
+  `clientRef` for, obtained here free because a movement already has an identity.
+- 15 posting tests, 7 isolation. Migrations `0177` (table + enum + column) and
+  `0178` (RLS + the GRNI backfill, `0151`'s shape).
+
+**Mapping the seams before writing anything turned up nine things that would have
+shipped silently.** Three mattered enough to change the design, and two were
+already-live bugs:
+
+- **`LEDGER_ACCOUNTS` was a declared error code with no case in `toResult`**, so
+  every refusal from `resolveInventoryAccounts` rendered as "Something went
+  wrong saving that." The message carries the repair; it passes through now.
+- **GRNI would have fallen silently into "Other Liabilities"** without a
+  `BS_GROUP_BY_SUBTYPE` entry — `bsGroupFor` does not error on an unmapped
+  subtype, it just picks the fallback, and nobody notices until a client reads
+  the balance sheet. It is also excluded from `isCodableAccount`, so nobody can
+  hand-code a bill line to it and clear a balance no receipt created.
+
+**Two of the new tests were wrong before they were right**, both the same shape:
+a test that passes over behaviour that never ran. "POSTS NOTHING for a transfer"
+passed `null` for both locations, which `transferStock` refuses as `SAME_PLACE`,
+with a `.catch()` swallowing the refusal — it asserted that nothing changed after
+an operation that did not happen. And the GRNI round-trip assertion took its
+baseline AFTER the receipt, so the bill's debit read as `+6000` and looked like a
+failure. The code was right both times.
 
 ### 2026-08-21 — Slice 3a: what the shelf is worth, and what it will not guess at (`claude/what-the-shelf-is-worth`)
 
@@ -574,6 +665,8 @@ nullable and null is ordinary: a batch with no date is one nobody has dated (and
 the pack does not try to tell that apart from "does not expire"), and a movement
 with no reason is one whose kind already says why.
 
+| `bill_line_stock_allocations` | **Which delivery a bill line is settling** | Composite FKs to `bill_lines` (**CASCADE** — a draft edit re-creates every line, so ids do not survive one) and to the receipt movement (**no cascade** — erasing the record that a bill settled it would hide the money). UNIQUE per (line, movement): a second match is a correction, not a second settlement |
+
 **Valuation is not a column and never will be.** What stock is worth is a fold
 over the movements (`core/valuation.ts`), exactly as an account balance is a
 fold over journal lines rather than a maintained total. A stored valuation is a
@@ -678,50 +771,48 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
-- **PERPETUAL POSTING IS BLOCKED ON A BILL→ITEM LINK, and this is the next
-  thing to build.** `bill_lines` carries an `account_id` and nothing that names
-  an inventory item, so a bill for feed posts `Dr Feed Expense / Cr AP` with no
-  idea stock arrived. Post `Dr 1300` from the receipt as well and the delivery
-  is on the books twice. The two halves are one change:
-  1. **A nullable `inventory_item_id` on `bill_lines`**, so a bill line can say
-     it bought stock.
-  2. **That line posts to `1300` instead of an expense account**, which is what
-     makes the receipt's own entry non-duplicative.
-  3. **Then the movement postings**: receipt debits inventory, issue credits it
-     against COGS, adjustment against the variance account. Transfers, splits
-     and merges post NOTHING — they move cost within one account. **A movement
-     posts exactly what `carriedValue` says it carries, and where that is null
-     it posts nothing** — which is what keeps the ledger and the valuation
-     screen provably the same view, and what removes any need for a
-     goods-received-not-invoiced account.
-  4. **The cash-basis lens, per
-     [ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md) — and this is
-     not optional polish.** Perpetual is the first thing in this build that
-     capitalises, and ADR 0007 passes non-AR/AP entries through untouched, so
-     without this a "cash basis" report expenses feed when it is CONSUMED
-     rather than when it is PAID FOR, and shows an inventory asset a cash-basis
-     farmer does not have. Most small farms file on cash. **The trap named in
-     that ADR is the `accountIds` filter**, which runs before substitution and
-     will silently under-report.
-  5. **Idempotency is the movement id**, so one movement is one entry forever
-     and a replayed write cannot double-post.
-  The account resolver and the `MACHINE_SOURCES` seam this needs are already
-  built and tested; what is missing is the link and the lens.
-- **A TRANSFER IS TWO ROWS WITH NOTHING JOINING THEM**, and driving slice 3a is
-  what showed the cost. `transferStock` writes a leg at each end and records no
-  pairing, so nothing can void, correct or even *identify* a transfer as one
-  act. Tidying the retail fixtures deleted the legs at the truck and left the
-  legs at the other end behind — a lot silently 30 lb short, with both halves of
-  the ledger internally consistent and disagreeing with each other. A person
-  correcting a mistaken transfer by hand will hit exactly this. A `transfer_id`
-  on the movement, written by `transferStock` and shared by both rows, is the
-  fix; the pair would then also be voidable together the way an intercompany
-  pair is (ADR 0010 slice 2 already argues this shape for the ledger).
+- **AN ISSUE CAN RELEASE COST THAT WAS NEVER CAPITALISED.** `issueStock` stamps
+  at the average of PRICED receipts but applies it to all quantity, priced or
+  not, so a lot half-filled by unpriced deliveries releases more than `1300`
+  ever received and the account can go to a credit balance with stock still on
+  the shelf. The stamp itself is correct and deliberate — it is the ledger side
+  that needs capping at what the lot actually carries.
+- **A quantity shortfall is booked as a price variance.** The difference between
+  an invoice and the tickets is always treated as a price difference, so an
+  invoice for goods that never arrived is expensed and GRNI clears to zero —
+  where ADR 0012 case 6 says the shortfall should stay in GRNI for somebody to
+  chase. Telling the two apart needs the invoiced QUANTITY, which the allocation
+  does not yet carry.
+- **Nothing validates that a line's allocations sum to its amount.** A line that
+  is part stock and part freight points its whole amount at GRNI, so the freight
+  clears a balance no receipt created.
+- **A COST CORRECTION HAS NOWHERE TO GO, and this is the next thing to build.**
+  A delivery ticket can overstate, understate, omit freight or use the wrong
+  unit, and today a stamped cost is final. ADR 0012 §A.4 settles the shape —
+  an appended record, never an edit — and the database settles that it cannot be
+  a MOVEMENT: `quantity <> 0` rules out a pure-money row and `cost_cents >= 0`
+  rules out a correction downwards. So `inventory_cost_adjustments`, with a
+  signed amount, folded by `lotCarried` alongside the movements it already
+  reads.
+  **The trap is `carriedValue`**: it decides "was this lot ever costed" from
+  purchased/consumed/released, so a lot costed ONLY by an adjustment would still
+  report "No cost recorded" — the eggs-at-$0.00 bug arriving through a new door.
+  `production/ops.ts` repeats the same test independently and would stamp NULL
+  on a run output.
+- **A matched bill cannot be un-matched.** `allocateBillLineToStock` writes and
+  points the line at GRNI; nothing takes it back. Voiding a bill leaves the
+  allocation in place, and `editEntry` can rewrite a bill's entry from the
+  journal screen with no source guard at all — so an allocation can be left
+  clearing a balance whose entry no longer says so.
+- **Nothing renders any of this.** There is no matching screen, no GRNI
+  reconciliation, and no way to set `inventory_treatment` — which means the
+  posting engine is live, tested, and reachable only from ops. That is
+  deliberate for one slice and is the whole of what 3c owes.
 - **The valuation screen is basis-blind and does not say so.** It reports
   accumulated cost, which is right and always on — but a cash-basis tenant
   reading "$463 on hand" will not find that figure in their financial
   statements, because on their basis it is not an asset
-  ([ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md)). The card should
+  ([ADR 0013](../decisions/0013-inventory-tax-treatment.md)). The card should
   say which basis it is and is not.
 - **A valuation cannot be exported.** The figure is on a screen and an
   accountant will want it as a file, with the as-of date and the unvalued count

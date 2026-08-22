@@ -162,6 +162,11 @@ export const BS_GROUP_BY_SUBTYPE: Record<string, BsGroupKey> = {
   credit_card: "current_liabilities",
   sales_tax: "current_liabilities",
   due_to_affiliate: "current_liabilities",
+  // Goods received not invoiced is a payable in all but name — it becomes one
+  // the moment the invoice lands. Unmapped it would fall to "Other
+  // Liabilities" silently, which nobody notices until a client reads the
+  // balance sheet.
+  goods_received: "current_liabilities",
   payroll_liability: "current_liabilities",
   other_current_liability: "current_liabilities",
   long_term_liability: "long_term_liabilities",

@@ -50,6 +50,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { assets } from "./assets";
+import { billLines } from "./payables";
 
 /**
  * A thing the business holds a quantity of: feed, cartons, eggs, ground beef.
@@ -604,6 +605,110 @@ export const inventoryCountLines = pgTable(
   ],
 );
 
+/**
+ * **WHICH STOCK RECEIPT A BILL LINE IS SETTLING.**
+ * [ADR 0012](../../../docs/decisions/0012-what-capitalises-stock.md) §A.2.
+ *
+ * The receipt capitalises (`Dr 1300 / Cr 2050 Goods Received Not Invoiced`) and
+ * the bill line CLEARS that account rather than capitalising a second time. This
+ * table is what says how much of which bill line clears which receipt.
+ *
+ * **AN ITEM LINK WOULD NOT HAVE BEEN ENOUGH, and an earlier draft of the ADR
+ * thought it was.** One item can have three unbilled receipts at three ticket
+ * prices across two lots; one invoice can cover two of them; one receipt can be
+ * part-invoiced. Without a matched quantity against a specific movement, nothing
+ * can clear the right GRNI balance, know which lot a supplied cost belongs to,
+ * or attribute a price variance to anything.
+ *
+ * It also answers the **bill-first** case: a bill approved before its stock
+ * arrives debits GRNI with no allocation, and the later receipt allocates
+ * against it instead of adding an unmatched credit. Without the table the two
+ * amounts net to zero in the account while remaining unmatched in the records,
+ * which reads as reconciled and is not.
+ *
+ * **NOT `..._receipt_allocations`.** "Receipts" already means the scanned
+ * document inbox at `/dashboard/m/accounting/receipts`, which has its own email
+ * intake address, so the name has to say `stock`.
+ */
+export const billLineStockAllocations = pgTable(
+  "bill_line_stock_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * CASCADE, and it is load-bearing rather than tidiness: `updateBillDraft`
+     * DELETES AND RE-INSERTS every line of a draft, so a bill line's id does not
+     * survive an edit. Without the cascade this table would accumulate rows
+     * pointing at lines that no longer exist. `line_dimensions` carries the same
+     * cascade for the same reason.
+     */
+    billLineId: uuid("bill_line_id").notNull(),
+    /** The `receipt` movement being settled. No cascade — see below. */
+    inventoryMovementId: uuid("inventory_movement_id").notNull(),
+    /** How much of the receipt this line covers, in the item's stocking unit. */
+    quantityMatched: numeric("quantity_matched", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }).notNull(),
+    /**
+     * What the delivery ticket said, for this quantity. Stamped at match time
+     * and never re-derived — it is what the receipt claimed when somebody
+     * reconciled it, and a later correction must not restate a variance that has
+     * already posted. Same rule as a count line's `expected_quantity`.
+     */
+    receiptCostCents: bigint("receipt_cost_cents", { mode: "number" }).notNull(),
+    /** What the invoice says, for this quantity. The difference is the variance. */
+    invoiceCostCents: bigint("invoice_cost_cents", { mode: "number" }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("bill_line_stock_allocations_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    /**
+     * One bill line settles a given receipt once. A second match against the
+     * same pair is a correction to the first, not a second settlement — and
+     * without this a double-submitted match would clear GRNI twice.
+     */
+    uniqueIndex("bill_line_stock_allocations_pair_idx").on(
+      t.tenantId,
+      t.billLineId,
+      t.inventoryMovementId,
+    ),
+    // "What is still unmatched against this receipt" — the GRNI reconciliation.
+    index("bill_line_stock_allocations_movement_idx").on(
+      t.tenantId,
+      t.inventoryMovementId,
+    ),
+    foreignKey({
+      name: "bill_line_stock_allocations_line_fk",
+      columns: [t.tenantId, t.billLineId],
+      foreignColumns: [billLines.tenantId, billLines.id],
+    }).onDelete("cascade"),
+    /**
+     * NO cascade. A movement is never deleted in this pack — a disagreement is
+     * another event — and if one ever were, erasing the record that a bill had
+     * settled it would hide the money rather than surface it.
+     */
+    foreignKey({
+      name: "bill_line_stock_allocations_movement_fk",
+      columns: [t.tenantId, t.inventoryMovementId],
+      foreignColumns: [inventoryMovements.tenantId, inventoryMovements.id],
+    }),
+    check(
+      "bill_line_stock_allocations_quantity_positive",
+      sql`${t.quantityMatched} > 0`,
+    ),
+  ],
+);
+
 export type InventoryItem = typeof inventoryItems.$inferSelect;
 export type NewInventoryItem = typeof inventoryItems.$inferInsert;
 export type InventoryLot = typeof inventoryLots.$inferSelect;
@@ -614,3 +719,7 @@ export type InventoryCount = typeof inventoryCounts.$inferSelect;
 export type NewInventoryCount = typeof inventoryCounts.$inferInsert;
 export type InventoryCountLine = typeof inventoryCountLines.$inferSelect;
 export type NewInventoryCountLine = typeof inventoryCountLines.$inferInsert;
+export type BillLineStockAllocation =
+  typeof billLineStockAllocations.$inferSelect;
+export type NewBillLineStockAllocation =
+  typeof billLineStockAllocations.$inferInsert;

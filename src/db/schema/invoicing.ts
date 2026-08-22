@@ -24,7 +24,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { parties } from "./parties";
-import { accountingBasis, accounts, dimensionMembers, entities, entryEditPolicy, journalEntries, journalLines } from "./ledger";
+import { accountingBasis, accounts, dimensionMembers, entities, entryEditPolicy, inventoryTreatment, journalEntries, journalLines } from "./ledger";
 import { billLines, vendors } from "./payables";
 
 export const invoiceStatus = pgEnum("invoice_status", [
@@ -782,6 +782,17 @@ export const accountingSettings = pgTable(
      * is accrual for every tenant regardless of what this says.
      */
     defaultBasis: accountingBasis("default_basis").notNull().default("accrual"),
+    /**
+     * Whether and how the `inventory` pack posts to this tenant's ledger.
+     *
+     * **Defaults to `none` â€” nothing changes for anybody until an owner turns
+     * it on.** Perpetual posting rewrites how every purchase reaches the books,
+     * and switching that on by migration for tenants already keeping accounts
+     * is not a default anybody should get without asking.
+     */
+    inventoryTreatment: inventoryTreatment("inventory_treatment")
+      .notNull()
+      .default("none"),
     // `bookkeeping_timezone` lived here from 0007 until 0088. The business
     // day is `tenants.timezone` now — one clock, readable by every module.
     /**

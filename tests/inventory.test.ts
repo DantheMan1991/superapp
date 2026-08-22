@@ -4,6 +4,7 @@ import {
   costPerUnit,
   issueCostCents,
   lotCost,
+  splitCostAdjustment,
 } from "../src/packs/inventory/core/costing";
 import {
   UnitError,
@@ -408,6 +409,101 @@ describe("lotCost", () => {
     expect(
       lotCost([], [{ quantity: -10, costCents: null, movementKind: "issue" }]),
     ).toEqual({ purchasedCents: 0, consumedCents: 0 });
+  });
+});
+
+describe("splitCostAdjustment", () => {
+  /**
+   * **THE HALF PEOPLE DO NOT EXPECT.** ADR 0012 §A.4: a correction to what a
+   * delivery cost is not all an asset if part of the delivery has already been
+   * eaten. Capitalising that part would put cost back on the balance sheet for
+   * feed that is gone, which is the double-count the whole ADR opens with.
+   */
+  it("splits by what is still on the shelf", () => {
+    // $60 the ticket left out, 60 of the 100 lb still on hand.
+    expect(
+      splitCostAdjustment({
+        amountCents: 6_000,
+        quantityOnHand: 60,
+        quantityReceived: 100,
+      }),
+    ).toEqual({ onHandCents: 3_600, issuedCents: 2_400 });
+  });
+
+  it("keeps the whole correction when nothing has left", () => {
+    expect(
+      splitCostAdjustment({
+        amountCents: 6_000,
+        quantityOnHand: 100,
+        quantityReceived: 100,
+      }),
+    ).toEqual({ onHandCents: 6_000, issuedCents: 0 });
+  });
+
+  it("sends the whole correction to consumption when the batch is empty", () => {
+    // The invoice arriving after the feed was eaten, which is an ordinary farm
+    // month rather than an edge case.
+    expect(
+      splitCostAdjustment({
+        amountCents: 6_000,
+        quantityOnHand: 0,
+        quantityReceived: 100,
+      }),
+    ).toEqual({ onHandCents: 0, issuedCents: 6_000 });
+  });
+
+  it("splits a correction DOWNWARDS the same way", () => {
+    // The direction a movement could not carry: `cost_cents >= 0`.
+    expect(
+      splitCostAdjustment({
+        amountCents: -5_000,
+        quantityOnHand: 60,
+        quantityReceived: 100,
+      }),
+    ).toEqual({ onHandCents: -3_000, issuedCents: -2_000 });
+  });
+
+  it("CLAMPS A BATCH THAT HAS GONE NEGATIVE", () => {
+    /**
+     * Negative stock is allowed in this pack and is not a bug — Monday's
+     * delivery entered on Wednesday. Unclamped, a batch at −20 of 100 would
+     * send 120% of the correction to consumption and take 20% back OFF the
+     * balance sheet for stock that is not there to lose it.
+     */
+    expect(
+      splitCostAdjustment({
+        amountCents: 6_000,
+        quantityOnHand: -20,
+        quantityReceived: 100,
+      }),
+    ).toEqual({ onHandCents: 0, issuedCents: 6_000 });
+  });
+
+  it("keeps the whole correction when nothing has ever come in", () => {
+    expect(
+      splitCostAdjustment({
+        amountCents: 6_000,
+        quantityOnHand: 0,
+        quantityReceived: 0,
+      }),
+    ).toEqual({ onHandCents: 6_000, issuedCents: 0 });
+  });
+
+  it("ALWAYS SUMS TO THE CORRECTION, whatever the rounding", () => {
+    /**
+     * The database CHECKs this, so a split that did not add up would be a
+     * failed insert rather than a wrong number — but the reason it never can is
+     * here: the rounding lands once, on the on-hand half, and the issued half
+     * takes the remainder.
+     */
+    for (const onHand of [1, 7, 33, 66, 99]) {
+      const parts = splitCostAdjustment({
+        amountCents: 3_331,
+        quantityOnHand: onHand,
+        quantityReceived: 100,
+      });
+      expect(parts.onHandCents + parts.issuedCents).toBe(3_331);
+    }
   });
 });
 

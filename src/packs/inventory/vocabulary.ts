@@ -137,6 +137,58 @@ export const ADJUSTMENT_REASON_NOTES: Record<string, string> = {
 };
 
 /**
+ * **WHY A BATCH'S COST WAS RE-STATED.** ADR 0012 §A.4.
+ *
+ * A different list from `SUGGESTED_ADJUSTMENT_REASONS` on purpose, and the
+ * difference is the whole point of the two tables: those reasons are about
+ * QUANTITY — how much is actually there — and these are about MONEY, with the
+ * quantity untouched. A bag that spoiled and a ticket that was mis-keyed are
+ * not two flavours of the same event, and one picker offering both would invite
+ * somebody to record a spoiled bag as a cost correction, which changes what the
+ * stock is carried at and leaves the bag on the shelf.
+ *
+ * SUGGESTIONS, NOT A CONSTRAINT — the column checks the format and never the
+ * values. Ordered by how often somebody reaches for them, not alphabetically.
+ * Industry-neutral, like every other list here: a bakery is mis-invoiced for
+ * flour the same way a farm is for feed.
+ */
+export const COST_ADJUSTMENT_REASONS = [
+  "ticket_wrong",
+  "freight_omitted",
+  "no_price_on_ticket",
+  "wrong_unit",
+  "discount_applied",
+  "correction",
+] as const;
+
+export const COST_ADJUSTMENT_REASON_LABELS: Record<string, string> = {
+  ticket_wrong: "The ticket was wrong",
+  freight_omitted: "Freight was left out",
+  no_price_on_ticket: "The ticket had no price",
+  wrong_unit: "Priced in the wrong unit",
+  discount_applied: "A discount came off",
+  correction: "Correcting an entry",
+};
+
+export const COST_ADJUSTMENT_REASON_NOTES: Record<string, string> = {
+  ticket_wrong:
+    "The delivery ticket said one thing and the delivery cost another. Nothing about how much arrived changes.",
+  freight_omitted:
+    "The goods were entered and the carrier billed separately. This puts the carriage onto the batch it carried.",
+  no_price_on_ticket:
+    "It arrived with nothing on the paperwork, so it was recorded uncosted. This is what supplies the cost.",
+  wrong_unit:
+    "Entered per bag against a price per pound, or the other way round. The quantity is right; the money was not.",
+  discount_applied:
+    "The supplier took something off after the fact. Use a negative amount.",
+  correction: "Something else was keyed wrong and this puts it right.",
+};
+
+export function costAdjustmentReasonLabel(reason: string): string {
+  return COST_ADJUSTMENT_REASON_LABELS[reason] ?? slugLabel(reason);
+}
+
+/**
  * The reason a posted count writes. **Separate from `shrinkage` on purpose**: a
  * count variance means the record drifted, while shrinkage means stock actually
  * went missing, and one number covering both would hide each of them.

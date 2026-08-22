@@ -14,6 +14,7 @@ import {
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
+  InventoryCostAdjustment,
   InventoryCount,
   InventoryCountLine,
   InventoryItem,
@@ -36,6 +37,8 @@ import {
   averageCostRate,
   issueCostCents,
   lotCarried,
+  splitCostAdjustment,
+  type CostAdjustment,
   type CostedMovement,
   type LotCarriedCost,
 } from "./core/costing";
@@ -46,7 +49,7 @@ import {
   type ValuationMethod,
   type ValuationTotal,
 } from "./core/valuation";
-import { postMovement } from "./ledger-ops";
+import { postCostAdjustment, postMovement } from "./ledger-ops";
 
 /**
  * Inventory operations. Every function takes a `Tx` so the caller owns the
@@ -1573,7 +1576,7 @@ export async function carriedCostByLot(
   if (lotIds.length === 0) return out;
   const upTo = asOf ? lte(schema.inventoryMovements.occurredOn, asOf) : undefined;
 
-  const [own, consumed] = await Promise.all([
+  const [own, consumed, adjustments] = await Promise.all([
     tx
       .select({
         lotId: schema.inventoryMovements.lotId,
@@ -1604,6 +1607,33 @@ export async function carriedCostByLot(
           upTo,
         ),
       ),
+    /**
+     * **THE THIRD TABLE THAT FEEDS THIS FOLD** — ADR 0012 §A.4, and the one its
+     * Consequences warned about: *"any caller that reaches for movements
+     * directly to compute cost will be quietly wrong."* Read here, in the one
+     * function that answers "what has this batch cost", so nowhere else has to
+     * remember.
+     *
+     * Filtered by `occurred_on` exactly as the movements are: a correction
+     * dated in August must not appear in a balance sheet dated June.
+     */
+    tx
+      .select({
+        lotId: schema.inventoryCostAdjustments.lotId,
+        amountCents: schema.inventoryCostAdjustments.amountCents,
+        onHandCents: schema.inventoryCostAdjustments.onHandCents,
+        issuedCents: schema.inventoryCostAdjustments.issuedCents,
+      })
+      .from(schema.inventoryCostAdjustments)
+      .where(
+        and(
+          eq(schema.inventoryCostAdjustments.tenantId, tenantId),
+          inArray(schema.inventoryCostAdjustments.lotId, lotIds),
+          asOf
+            ? lte(schema.inventoryCostAdjustments.occurredOn, asOf)
+            : undefined,
+        ),
+      ),
   ]);
 
   const ownByLot = new Map<string, CostedMovement[]>();
@@ -1621,10 +1651,21 @@ export async function carriedCostByLot(
     else consumedByLotId.set(row.lotId, [row]);
   }
 
+  const adjustedByLot = new Map<string, CostAdjustment[]>();
+  for (const row of adjustments) {
+    const list = adjustedByLot.get(row.lotId);
+    if (list) list.push(row);
+    else adjustedByLot.set(row.lotId, [row]);
+  }
+
   for (const lotId of lotIds) {
     out.set(
       lotId,
-      lotCarried(ownByLot.get(lotId) ?? [], consumedByLotId.get(lotId) ?? []),
+      lotCarried(
+        ownByLot.get(lotId) ?? [],
+        consumedByLotId.get(lotId) ?? [],
+        adjustedByLot.get(lotId) ?? [],
+      ),
     );
   }
   return out;
@@ -1662,6 +1703,153 @@ export async function balanceByLots(
     out.set(row.lotId, roundQuantity(Number(row.quantity)));
   }
   return out;
+}
+
+
+// --------------------------------------------- correcting what it cost ---
+
+/**
+ * **PUT RIGHT WHAT A BATCH COST, WITHOUT REWRITING WHAT HAPPENED.**
+ * [ADR 0012](../../../docs/decisions/0012-what-capitalises-stock.md) §A.4.
+ *
+ * A delivery ticket can overstate, understate, omit the freight or use the
+ * wrong unit, and a receipt can arrive with no price at all. Until this, a
+ * stamped cost was final — `issueStock` stamps at the moment of issue and this
+ * repo's rule is that a stamped cost is never re-derived, so feed issued before
+ * its invoice arrived stayed at `null` forever while `1300` held an asset that
+ * had been eaten.
+ *
+ * **THE CORRECTION IS A NEW RECORD, NOT AN EDIT**, which is `costing.ts`'s own
+ * rule — *cost is a ledger, not a column* — and the same rule a physical count
+ * already follows for quantity: what happened, happened, and a disagreement is
+ * another event.
+ *
+ * **IT SPLITS BY WHAT HAS ALREADY LEFT THE BATCH, AND THE SPLIT IS STORED.**
+ * The part covering stock still on hand raises the batch's carrying value; the
+ * part covering stock already issued is expensed, because capitalising it would
+ * put an asset back on the balance sheet for feed that is gone. The proportion
+ * is what the ledger believed at this moment, and it is written down rather
+ * than re-derived for the reason a count line stores `expected_quantity`: a
+ * movement backdated tomorrow must not restate a posting that has happened.
+ *
+ * **OWNER ONLY.** Recording that a bag was opened is a chore; saying that a
+ * delivery cost something other than what the ticket said moves money between
+ * the balance sheet and the P&L, and that is the same line `createLot` and
+ * `splitLot` already draw — an act that creates or re-states a cost object.
+ *
+ * The correction is deliberately NOT bounded by what the batch currently
+ * carries. A batch can be corrected downwards past zero, and the negative that
+ * leaves is left standing rather than clamped, for the reason `lotCarried`
+ * gives: it is a real disagreement somebody should see.
+ */
+export async function adjustLotCost(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    lotId: string;
+    /** SIGNED, and non-zero. Negative means the ticket said too much. */
+    amountCents: number;
+    /** Open taxonomy. See `COST_ADJUSTMENT_REASONS`. */
+    reason: string;
+    occurredOn: string;
+    notes?: string;
+  },
+): Promise<InventoryCostAdjustment> {
+  requireWrite(ctx, "owner");
+
+  const amountCents = Math.round(input.amountCents);
+  if (amountCents === 0) {
+    throw new InventoryError(
+      "INVALID_COST",
+      "a correction of nothing is not a correction",
+    );
+  }
+  if (!isValidSlug(input.reason)) {
+    throw new InventoryError("INVALID_REASON", input.reason);
+  }
+
+  const lot = await getLot(tx, ctx.tenantId, input.lotId);
+  if (!lot) throw new InventoryError("NOT_FOUND", "that batch no longer exists");
+
+  /**
+   * **BOTH FIGURES COME FROM THE LEDGER, IN ONE QUERY, AND THEN STOP BEING
+   * QUESTIONS.** `quantityReceived` is everything that has ever come into the
+   * batch — the denominator — and `quantityOnHand` is the net balance. They are
+   * read now and stored, because the split they produce has to survive
+   * everything that happens to this batch afterwards.
+   */
+  const [totals] = await tx
+    .select({
+      onHand: sql<string>`coalesce(sum(${schema.inventoryMovements.quantity}), 0)`,
+      received: sql<string>`coalesce(sum(${schema.inventoryMovements.quantity}) filter (where ${schema.inventoryMovements.quantity} > 0), 0)`,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, ctx.tenantId),
+        eq(schema.inventoryMovements.lotId, input.lotId),
+      ),
+    );
+  const quantityOnHand = roundQuantity(Number(totals?.onHand ?? 0));
+  const quantityReceived = roundQuantity(Number(totals?.received ?? 0));
+
+  const split = splitCostAdjustment({
+    amountCents,
+    quantityOnHand,
+    quantityReceived,
+  });
+
+  const [row] = await tx
+    .insert(schema.inventoryCostAdjustments)
+    .values({
+      tenantId: ctx.tenantId,
+      itemId: lot.itemId,
+      lotId: lot.id,
+      occurredOn: input.occurredOn,
+      amountCents,
+      onHandCents: split.onHandCents,
+      issuedCents: split.issuedCents,
+      quantityOnHand,
+      quantityReceived,
+      reason: input.reason,
+      notes: input.notes ?? "",
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+
+  await postCostAdjustment(tx, ctx, {
+    adjustmentId: row.id,
+    itemId: lot.itemId,
+    lotId: lot.id,
+    lotCode: lot.code,
+    occurredOn: input.occurredOn,
+    onHandCents: split.onHandCents,
+    issuedCents: split.issuedCents,
+  });
+
+  return row;
+}
+
+/**
+ * Every correction against these batches, newest first.
+ *
+ * Takes a list because the caller is always a list — the item page shows one
+ * row per batch and asking per batch is how a page with twenty batches becomes
+ * a page with twenty-one queries.
+ */
+export async function costAdjustmentsForLots(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+): Promise<InventoryCostAdjustment[]> {
+  if (lotIds.length === 0) return [];
+  return tx.query.inventoryCostAdjustments.findMany({
+    where: and(
+      eq(schema.inventoryCostAdjustments.tenantId, tenantId),
+      inArray(schema.inventoryCostAdjustments.lotId, lotIds),
+    ),
+    orderBy: (a, { desc: byDesc }) => [byDesc(a.occurredOn), byDesc(a.createdAt)],
+  });
 }
 
 

@@ -30,6 +30,34 @@ lot.
 
 ## Build log
 
+### 2026-08-22 — The question this pack was answering for itself (`claude/a-cost-you-can-put-right`)
+
+**"Has anybody said what this batch cost" was asked here AND in `inventory`, in
+two different shapes, and two shapes of one question is a question that can be
+answered differently in two places.** It duly was.
+
+`addRunInput` tested `purchased + consumed === 0` before stamping a pen's share
+onto its output; `inventory`'s `carriedValue` tested
+`purchased !== 0 || consumed !== 0 || released !== 0`. When
+[ADR 0012](../decisions/0012-what-capitalises-stock.md) §A.4 landed
+`inventory_cost_adjustments` — a correction to what a batch cost, which is a row
+of its own rather than a movement — a pen whose ONLY money was an appended
+correction passed neither test. A kill day would have stamped NULL on meat
+carrying real money while the valuation screen called the same pen "No cost
+recorded": the `$0.00`-per-bird bug this pack shipped in slice 0, arriving
+through a new door, in two files at once.
+
+It is `hasRecordedCost` now, exported from `inventory/core/valuation.ts` and
+called by both. **This pack must not restate that test**, and if a future slice
+adds another way for money to reach a batch, that predicate is the one thing to
+change.
+
+Nothing else moved: the genuine zero still gets through (a pen whose cost was
+already carried out by an earlier run has accumulated something and has nothing
+left), and the unpriced pen still stamps null. One new ops test stands a pen up
+with no priced chicks, corrects its cost, and expects half the pen to carry half
+the money.
+
 ### 2026-08-20 — Driven on the live app, and it found what the dev tenant could not (`claude/cost-that-left-with-the-meat`)
 
 Slice 0 driven on the `Test` tenant against **a pen with real feed on it** —

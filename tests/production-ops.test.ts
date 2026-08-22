@@ -14,6 +14,7 @@ import {
   type ProductionCtx,
 } from "../src/packs/production/ops";
 import {
+  adjustLotCost,
   carriedCostByLot,
   createItem,
   issueStock,
@@ -21,6 +22,7 @@ import {
   receiveStock,
   type InventoryCtx,
 } from "../src/packs/inventory/ops";
+import { carriedValue } from "../src/packs/inventory/core/valuation";
 import {
   LEDGER_EPOCH,
   createLivestockLot,
@@ -595,6 +597,77 @@ d("production ops", () => {
     expect(detail!.inputs[0].costCents).toBeNull();
     expect(detail!.unpricedInputs).toBe(1);
     expect(detail!.potCents).toBe(0);
+  });
+
+  it("STAMPS A PEN COSTED ONLY BY A CORRECTION", async () => {
+    /**
+     * **THE TWIN OF THE TEST ABOVE, and the reason ADR 0012 §A.4 had to touch
+     * this file at all.** A cost correction is not a movement, so a batch whose
+     * only money is an appended correction has purchased, consumed and released
+     * all at zero — indistinguishable, to the test above, from a pen nobody has
+     * costed. It would have stamped NULL on meat carrying real money, while the
+     * valuation screen called the same batch "No cost recorded": the eggs-at-
+     * $0.00 bug arriving through a new door, in two files at once.
+     *
+     * The predicate is `inventory`'s `hasRecordedCost` now, shared rather than
+     * restated here, so the two cannot answer differently again.
+     */
+    const item = await meatItem("Corrected birds", "head");
+    const lotId = await asOwner(async (tx) => {
+      const { inventoryLotId } = await createLivestockLot(tx, ls(), {
+        itemId: item.id,
+        code: "PEN-CORRECTED",
+        species: "poultry",
+      });
+      await placeHead(tx, ls(), {
+        itemId: item.id,
+        inventoryLotId,
+        head: 40,
+        occurredOn: "2026-06-01",
+      });
+      return inventoryLotId;
+    });
+    // Nothing priced anywhere: the chicks arrived with no invoice.
+    expect(
+      carriedValue(
+        (await asOwner((tx) => carriedCostByLot(tx, tenantId, [lotId]))).get(
+          lotId,
+        )!,
+      ),
+    ).toBeNull();
+
+    await asOwner((tx) =>
+      adjustLotCost(tx, inv(), {
+        lotId,
+        amountCents: 20_000,
+        reason: "no_price_on_ticket",
+        occurredOn: "2026-06-02",
+      }),
+    );
+
+    const run = await asOwner((tx) =>
+      startRun(tx, ownerCtx(), { code: "KILL-CORRECTED", startedOn: TODAY }),
+    );
+    await asOwner((tx) =>
+      addRunInput(
+        tx,
+        ownerCtx(),
+        {
+          runId: run.id,
+          itemId: item.id,
+          lotId,
+          quantity: 20,
+          weightLb: 120,
+          occurredOn: TODAY,
+        },
+        TODAY,
+      ),
+    );
+
+    const detail = await asOwner((tx) => runDetail(tx, tenantId, run.id, TODAY));
+    // Half the pen, so half of the $200 the correction supplied.
+    expect(detail!.inputs[0].costCents).toBe(10_000);
+    expect(detail!.unpricedInputs).toBe(0);
   });
 
   it("STOPS THE PEN CLAIMING COST THAT LEFT WITH THE MEAT", async () => {

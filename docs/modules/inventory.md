@@ -21,11 +21,137 @@ this dossier is the build record.
 | **3a** | **Valuation — what stock is worth, as of a date** | **shipped 2026-08-21** |
 | **3b** | **Perpetual posting, GRNI, and matching a bill to the deliveries it pays for** | **shipped 2026-08-21** |
 | **3c** | **The screen: matching, the GRNI reconciliation, and the switch that turns posting on** | **shipped 2026-08-22** |
-| 3d | Cost-adjustment corrections, and the `expense_on_payment` lens | next — see Open items |
+| **3d** | **Cost-adjustment corrections** — `inventory_cost_adjustments`, ADR 0012 §A.4 | **shipped 2026-08-22** |
+| 3d ii | The `expense_on_payment` lens | blocked on [ADR 0013](../decisions/0013-inventory-tax-treatment.md), which needs an accountant |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
 ## Build log
+
+### 2026-08-22 — Slice 3d (first half): a cost you can put right (`claude/a-cost-you-can-put-right`)
+
+`inventory_cost_adjustments`, [ADR 0012](../decisions/0012-what-capitalises-stock.md) §A.4.
+Until this, a stamped cost was final: a ticket could overstate, understate, omit
+the freight or carry no price at all, and the only remedy was SQL.
+
+**IT IS A ROW, NOT A MOVEMENT, and the database settled that rather than taste.**
+`inventory_movements` carries two CHECKs a pure-money correction cannot satisfy —
+`quantity <> 0` rules out a row that moves nothing, and `cost_cents >= 0` rules
+out a correction downwards. Relaxing either would weaken a constraint protecting
+the quantity ledger for every other caller. Both halves were driven: a −$20
+correction posted `Cr 1300 / Dr 5000` on the live dev farm, which is the entry
+that column could never have carried.
+
+**THE SPLIT IS STORED, and it is why two money columns exist where one would
+do.** A correction lands partly on stock still on the shelf (which raises the
+batch's carrying value) and partly on stock already issued (which is expensed,
+because capitalising it would put an asset back on the balance sheet for feed
+that has been eaten). `$60 → $36 + $24` on a batch with 60 of 100 lb left. The
+proportion is what the ledger believed at that moment and is written down rather
+than re-derived, for the reason a count line stores `expected_quantity`: a
+movement backdated tomorrow must not restate a posting that already happened.
+`quantity_on_hand` and `quantity_received` sit beside it so the proportion can be
+READ rather than reverse-engineered out of two cent figures.
+
+**THE CREDIT IS THE VARIANCE ACCOUNT AND DELIBERATELY NOT GRNI**, which is the
+one decision here that had a plausible alternative. Crediting Goods Received Not
+Invoiced reads right — a delivery that cost $60 more is $60 more a supplier will
+invoice for — and it is wrong in a way that only shows up later. **Matching
+clears GRNI at the RECEIPT's stamped cost**, which a correction does not change,
+so the extra credit is one nothing can ever debit: a permanent balance in a
+liability account, in the exact place slice 3c built a reconciliation to make
+such things visible, and blamed by that card on "deliveries from before the
+switch". It would also DOUBLE COUNT, because §A.5 books the same difference again
+when the invoice arrives. So the two are complementary rather than overlapping:
+**§A.5 corrects the books when an invoice disagrees with the ticket; §A.4
+corrects the stock record when there is no invoice to disagree with.** They land
+in the same account, which is why a delivery that gets both ends up with the
+right inventory value, the right liability and no net variance:
+
+```
+receipt $340         Dr 1300 340   Cr 2050 340
+correction +$60      Dr 1300  60   Cr 5000  60
+bill $400 matched    Dr 2050 340   Dr 5000 60   Cr AP 400
+                     ───────────────────────────────────
+                     1300 = 400 · 2050 = 0 · AP = 400 · P&L = 0
+```
+
+**THE LINES ARE NETTED BY ACCOUNT AND ZEROES DROPPED**, which is not tidiness:
+`varianceAccountId` DEFAULTS to the consumption account, so a correction against
+a batch entirely issued out would try to post `Dr 5000 / Cr 5000`, and
+`postEntry` refuses a zero-amount line. Netted, that correction posts nothing at
+all — which is the truth about it — and every other correction posts exactly
+`Dr 1300 / Cr 5000` for the on-hand half, so the ledger and `lotCarried` move by
+the same number *by construction* rather than by a second calculation.
+
+**THE TRAP THE OPEN ITEM NAMED, and it needed two files.** `carriedValue`
+decided "was this batch ever costed" from purchased/consumed/released, and
+`production/ops.ts` asked the same question independently in a different shape
+(`purchased + consumed === 0`). A batch costed ONLY by a correction passes
+neither: the valuation screen would have said "No cost recorded" about a batch
+carrying real money, and a kill day would have stamped NULL on the meat it
+produced. **Two shapes of one question is a question that can be answered
+differently in two places, and it duly was** — so it is one exported predicate
+now, `hasRecordedCost`, in the pack that owns the fold. Driven end to end: a
+30 lb delivery entered with no price read "No cost recorded", a $45 correction
+turned it into `$45.00` on both the item page and the valuation screen, and a
+production run against a pen in the same state stamps its share instead of null.
+
+**A NEW ENTRY SOURCE, AND DELIBERATELY NOT A NEW MACHINE SOURCE.**
+`inventory_cost_adjustment` had to be its own value because `source_id` names one
+of these rows rather than a movement, and two sources pointing into two tables
+would leave the ledger unable to say which. It is NOT in `MACHINE_SOURCES`: the
+other three are there because issuing feed is a staff chore riding its own
+authorisation, and re-stating what stock cost is not one. It meets
+`requireOwnerRole` like any hand-written journal, and `adjustLotCost` refuses a
+non-owner before it ever gets there.
+
+**`resolveLotEntity`, because a correction has no location.** A movement carries
+one and `resolveMovementEntity` uses it; money does not. So the batch's own
+places answer instead — a freezer is an asset and an asset already names its
+books — and it REFUSES where they disagree or say nothing, the same refusal for
+the same reason: a default chosen at posting time is exactly the behaviour the
+`entity_id` column replaced.
+
+**A CORRECTION DOES NOT MOVE THE ITEM'S AVERAGE, and that is a decision rather
+than an omission.** `averageCostRate` folds movements at the ITEM level; a
+correction belongs to one batch. Feeding it in would spread one mis-ticketed
+delivery across every other batch of that item and re-price future issues out of
+batches that had nothing to do with it — the exact re-averaging the lot spine
+exists to prevent. The consequence is real and is in Open items rather than
+hidden: stock issued out of a corrected batch is still stamped at the uncorrected
+average, so the correction stays standing in the batch instead of leaving with
+the stock. That is the same drift item-level average costing already produces
+whenever two batches of one item arrived at different prices.
+
+**Three things clicking found, and two of them were the screen lying about the
+direction:**
+
+1. **A fat-fingered `99999999999` went straight through** — posted a
+   $99,999,999,999 entry and left a batch carrying sixty billion dollars, because
+   the ledger's own ceiling is $100B and nothing between the box and it had an
+   opinion. `receiveStockAction` already bounds a delivery's cost at
+   $10,000,000,000; a correction is the same kind of number and takes the same
+   limit.
+2. **"It cost less" said the money "goes to cost of goods sold"** when $8 was
+   about to come OFF it — in the preview panel that exists precisely so nobody
+   has to read a journal entry to find out. The verb follows the direction now.
+3. **The toast said the same thing**, and it is keyed off the STORED
+   `issuedCents` rather than the form's direction, because that is what was
+   actually written.
+
+The dialog is deliberately separate from the adjustment form rather than a fourth
+tab on it: that one changes HOW MUCH IS THERE and this one changes WHAT IT COST.
+One picker offering both reasons would invite somebody to record a spoiled bag as
+a cost correction, which re-prices the batch and leaves the bag on the shelf —
+which is also why `COST_ADJUSTMENT_REASONS` is its own list.
+
+15 new tests (11 posting, 1 production, 8 pure across two files) and 6 isolation.
+Migrations `0180` (table + enum value) and `0181` (RLS).
+
+**NOT BUILT, on purpose: the `expense_on_payment` lens**, slice 3d's other half.
+[ADR 0013](../decisions/0013-inventory-tax-treatment.md) is still Proposed and
+should not be accepted without an accountant.
 
 ### 2026-08-22 — Nobody invoices you for what you made (`claude/nobody-invoices-you-for-what-you-made`)
 
@@ -358,427 +484,11 @@ stock in two places at once.
   is not "0 lb on the truck", it is not on the truck.
 - 3 new ops tests. No migration, no schema change.
 
-### 2026-08-20 — Slice 2: counting what is actually there, and saying why (`claude/counting-what-is-actually-there`)
-
-The slice that lets somebody be WRONG. Everything before this could record what
-happened; nothing could record that the record had drifted, and three packs had
-open items saying so — a treatment removed left an orphaned cost with no way to
-correct it, a feed draw could not be reversed, a run input could not be taken
-off. All of them were waiting on the same missing thing.
-
-**THE REASON IS THE POINT, AND IT IS A DIAGNOSTIC RATHER THAN A CORRECTION.**
-The design says it outright: *sustained feed shrinkage is not an accounting
-problem, it is a rodent problem.* So `inventory_movements.reason` is a column
-rather than free text, `adjustmentReasons` groups it, and the counting page
-leads with **what keeps happening** rather than with the list of counts. One
-spoiled bag is a wasted bag; the same reason four months running is a freezer
-that is not holding temperature, and nobody sees that in a ledger.
-
-**A NEGATIVE ADJUSTMENT RELEASES COST AT THE AVERAGE; A POSITIVE ONE CARRIES
-NONE.** Stock that spoils really did cost money, and stamping it is what turns a
-loss into a number somebody acts on — the same rule `issueStock` follows. Stock
-that turns up was never bought, so it arrives at null rather than at a price the
-farm did not pay, and the item average does not move: `averageCostRate` counts
-only what came in WITH a price, which is how raised stock is already treated.
-
-**A COUNT IS TWO ACTS, LIKE A RUN, AND FOR THE SAME REASON.** Counting a freezer
-takes an hour and is done a shelf at a time, so lines are recorded as they are
-found and POSTING writes every variance in one transaction. Half a posted count
-would leave some shelves reconciled and others not with nothing to say which.
-
-- **A line that agrees writes NOTHING.** A movement of zero is refused by the
-  ledger anyway, and a row meaning "nothing happened" in the one table that has
-  to reconcile is noise. The line still records that it was counted and what was
-  expected, which is the useful half.
-- **`expected_quantity` IS STORED, and it is the only stored derivation in the
-  pack.** What the ledger believed at the moment somebody disagreed with it is a
-  historical fact the fold stops being able to reproduce as soon as anybody
-  backdates a movement — and recomputing it would silently restate a variance
-  that has already posted. Same reasoning as `production_runs.cost_basis`.
-- **`count_variance` is its own reason, separate from `shrinkage`.** One means
-  the record drifted; the other means stock actually went missing. A single
-  number covering both would hide each of them.
-- **The form does NOT show what the ledger expects.** A count is worth nothing
-  if the screen tells the person with the clipboard what to write: they will see
-  92, find 88, and write 92. The comparison is the OUTPUT of counting.
-- **Zero is a real count; a shelf nobody got to is not a line.** That distinction
-  is why `counted_quantity` is NOT NULL and why lines are added rather than
-  pre-generated for every item.
-
-**EXPIRY IS ON THE LOT, AND FEFO IS A SUGGESTION.** A batch goes off; a kind of
-thing does not, and two deliveries of the same feed bought a month apart go off a
-month apart. `expiringLots` answers both views the design asks for — *oldest
-first* and *expiring soon* — because sorted-by-expiry is the same list. **Nothing
-refuses an issue from a later batch**: the person holding the scoop can see which
-bag is already open and this cannot. Batches at zero are dropped, because a batch
-that is not there cannot go off into a loss.
-
-**Driven on the dev tenant, and it found one defect.** 20 lb of spoilage came off
-Grower crumble at $10.00 (the $0.50 average, unmoved), a count of 315 against a
-record of 330 posted a −15 lb variance at $7.50, and the two reasons sat apart on
-the diagnostic panel — drift told from loss, which is the whole argument for
-keeping them separate. **The ledger row said "Adjusted" and nothing about why**,
-on the one screen somebody opens when they wonder where the feed went; the
-reason now renders under the kind. A row that hides the reason turns the
-diagnostic back into a correction.
-
-- 11 new ops tests, 4 new pure tests, 8 new isolation tests. Migration `0170`
-  **hand-reordered — ninth check, fourth time the answer was yes**; `0171` is the
-  RLS pair.
-- **`recordMovementAction` still has no UI caller.** Adjustments got their own
-  action rather than reusing it, because an adjustment has a required reason and
-  a signed quantity and routing it through the generic primitive would have made
-  the action lie about what it takes. That open item is now a decision: it should
-  go.
-
-### 2026-08-20 — Two reads and a `source`, so a run can land its boxes (`claude/a-run-lands-in-stock`)
-
-`production` slice 0 needed three things from this pack, and all three live
-here for the reason `movementsOnDate` does: the ledger is this pack's, and a
-neighbour querying `inventory_movements` directly is the leak the extension
-model forbids.
-
-- **`carriedCostByLot`** — what a lot has cost, and **what has already left it
-  carrying some of that**. `consumedCostByLot` answers "what was fed to this
-  pen"; a run consuming the pen needs the whole accumulated figure — chicks plus
-  feed plus medicine — because pricing a bird at what the chick cost throws away
-  eight weeks of feed. **`remainingCents` is the new idea, and it exists because
-  of an ordinary farm fortnight**: half a $1,000 pen processed on Saturday and
-  the rest a fortnight later. The accumulated total never goes down, so
-  pro-rating the gross twice charges $1,500 for a $1,000 pen. Netting the
-  released cost off first makes the two halves sum. Folded in
-  `core/costing.ts` as `lotCarried`; `lotCost` is untouched.
-- **`balanceByLots`** — the fold per LOT, summed in SQL. `onHandByItem` answers
-  the same question one grain coarser, and a run pro-rating a pen needs the
-  pen's balance *before* it takes anything out.
-- **`receiveStock` takes a `source` and an `extensionSlug`.** It hardcoded
-  `purchased`, which is right for a delivery and wrong for a box of meat: an
-  output is **`produced`**, and this pack's own column comment says slice 3
-  cannot infer that retroactively. The slug follows `issueStock`'s, for the same
-  reason — a row should be attributable to the pack that will explain it.
-
-**Nothing about cost changed.** An output's receipt is stamped once, when it
-lands, exactly as an issue is — which is what lets a run completed in August
-still say what it cost after feed prices move in October.
-
-**One thing to know if you are reading `averageCostRate` and worrying:** a
-`processed` movement carries a cost on a NEGATIVE quantity, and the average
-ignores anything that did not come in with a price. Stamping cost on the way out
-cannot move the item average, and that was checked rather than assumed.
-
-### 2026-08-20 — The consumption reads now say what KIND was consumed (`claude/the-withdrawal-clock`)
-
-`consumedByLotAndItem` and `consumedDatedByLots` return `itemKind`, and neither
-has an opinion about what it means.
-
-**`livestock` slice 3 put medicine through the same door feed goes through** —
-`issued_to_lot_id`, so a sick pen carries its own expense — and that silently
-broke a number in the pack next door: the feed report absorbed the penicillin
-into cost per head, pounds fed, and the feed conversion ratio. A card reading
-"Fed" that includes the medicine is wrong in the pack that owns the word.
-
-The classification stays the CALLER's, exactly as `movementKindsForLots` leaves
-the death-versus-transfer decision to `livestock`. This pack knows an item has a
-kind; what counts as feed is somebody else's judgement.
-
-### 2026-08-20 — One more read, and its window is different for every lot (`claude/weights-carry-a-method`)
-
-`consumedDatedByLots` — what was issued into each lot, movement by movement,
-with its date. `consumedByLotAndItem` aggregates over a fixed period, which is
-what a report wants; **feed conversion needs a window that differs per lot.**
-
-Conversion is feed per pound of GAIN, gain is measured between that lot's own
-first and last weighing, and feed fed before anybody put a bird on a scale
-produced gain nobody measured. Summing it into the ratio would inflate the one
-number the enterprise is judged on — worst for the farm that starts weighing
-halfway through its first batch, which is every farm's first batch. So the caller
-gets the rows and does its own arithmetic per lot.
-
-Still one query whatever the lot count, and still no opinion here about what any
-of it means. Full reasoning in [livestock.md](livestock.md).
-
-### 2026-08-20 — Three reads and one flag, for livestock's feed report (`claude/feed-and-fcr`)
-
-Slice 1 gave `livestock` the costing loop. Its slice 2 turns that into the
-report the broiler enterprise is judged on, and needed this pack to answer three
-questions it could not before. All three live here for the reason
-`movementsOnDate` does: the ledger is this pack's, and a neighbour querying
-`inventory_movements` directly is the leak the extension model forbids.
-
-- **`consumedByLotAndItem`** — what was issued into each lot, broken down by
-  item and carrying its stocking unit, optionally windowed by date.
-  `consumedCostByLot` answers a card in one number; a report needs the QUANTITY
-  (and pounds of grower never add to gallons of surplus milk), and **how many of
-  those entries carried no price at all**. That last count is not an error tally
-  — spent grain and windfalls are real feed with no invoice, and the design is
-  explicit that a model insisting every input has a purchase price will be lied
-  to. A null cost is carried through as fed-but-not-spent and counted.
-- **`movementsByIds`** — rows behind a set of ids, with the item name and unit.
-  A shared-feeder draw is an ordinary issue in this ledger plus an association
-  row in `livestock`; what a feeding group IS has nothing to do with inventory,
-  so the caller arrives holding ids.
-- **`datedMovementsForLots(…, limit: null)` now means every row.** A running
-  balance day by day — what livestock's allocation divides by — cannot be
-  computed from the most recent 200 movements, because the opening balance would
-  silently start in the middle of the ledger. **A cap is right for a digest and
-  wrong for arithmetic**, and the default stays 200.
-- **`issueStock` takes an optional `extensionSlug`**, so a draw is attributable
-  to the pack that will explain it — the same reason every head event carries
-  one.
-
-Nothing about cost changed. A draw is stamped at the average exactly as a bag
-handed to a named pen is, which is what lets livestock's allocated figure be
-compared with its measured one without a reconciliation step.
-
-### 2026-08-19 — A second read, this one for the advisor (`claude/livestock-advisor`)
-
-`datedMovementsForLots` — movements for a set of lots, newest first, capped.
-`movementKindsForLots` drops the date because a BALANCE does not need one; a
-DIAGNOSIS does, and livestock's advisor needs to know that seven of eight birds
-died on days 22 and 27 rather than merely that eight died.
-
-It has no opinion about which kinds are deaths. That classification is
-`livestock`'s and stays there, as it has since its slice 0.
-
-### 2026-08-19 — "Where do I add livestock, both pages or one?" (`claude/animals-live-in-livestock`)
-
-The founder's question after driving slice 1, and it is a fair one that neither
-screen answered: *"the inventory versus the livestock page. Where do i add
-livestock. to both? just one?"*
-
-**The answer is Livestock, always** — `Start a lot` creates the stock line, the
-batch and the biology in one transaction. But an item called "Broiler chicks"
-sitting in this list beside the feed reads as a duplicate of the Livestock page,
-and nothing anywhere said otherwise.
-
-**Both pages are right and the model is not the problem.** Market animals ARE
-inventory — head is a unit of measure, a pen is a batch — and that is precisely
-what makes cost per pen fall out of the same ledger as the feed bought for it.
-Inventory shows the STOCK LINE ("Broiler chicks · 407 head"); Livestock shows
-the BATCHES with their biology. One thing, two questions.
-
-- **The row now says so.** A livestock-kind item carries a *managed in
-  Livestock* link, gated on the pack actually being switched on — pointing at a
-  module a tenant does not have is the mistake `land` made with its parcel
-  finder the day before.
-- **The trap is closed.** Picking "Livestock" as a kind in *Add an item*
-  produced an item with no batch and no biology: a half-thing that shows up in
-  the Livestock form's "Counted as" picker and nowhere else, looking like a
-  fault. Choosing it now explains that animals are started in Livestock, links
-  there, and disables the submit rather than letting somebody build the broken
-  half.
-
-**The pattern, third time this week:** the model was right, the screen was
-silent, and a person had to ask. Types and tests cannot see the difference.
-
-### 2026-08-19 — The page that owns the money never mentioned it (`claude/the-page-that-never-mentions-money`)
-
-Slice 1 driven on production, and the loop closed on the first try: a
-600 lb delivery at $340, 150 lb issued to BATCH-2, and the toast came back
-**"Stock recorded out · 85.00"** — 150 at 56.67 cents, stamped. The livestock lot
-page then showed a **Fed** card at 85.00 and *"0.43 a head at today's count"*,
-with a *Fed in* row carrying the same figure. Feed bought, fed to a pen, carried
-by the animal, across three packs and two screens.
-
-**The defect: the item page never showed a cost anywhere.** Recent entries had
-When / What happened / Where / Amount and no money at all, so a $340 delivery
-landed and the page that owns it said nothing. Same shape as the round's
-`attention` badge and the parcel finder's missing button — a capability stored
-and never surfaced, invisible to types and tests, thirty seconds to find by
-clicking.
-
-- A **Cost** column on Recent entries, showing the stamped figure per movement.
-- The **average paid** on the On hand card — *"Averaging 56.67 a pound across
-  everything received"*. That is cost ACCUMULATION, deliberately not valuation:
-  what the stock on hand is worth is basis-dependent and belongs to slice 3, not
-  to a card that would have to guess.
-- *"the price per pounds"* now reads *per pound*. `unitLabel` is the plural and
-  a price is per one of them.
-
-**Not changed, and worth a decision rather than a quiet fix: no currency symbol
-anywhere.** `formatCents` is deliberately symbol-free because it was built for
-debit/credit columns whose headers carry the currency. On a card reading
-*"Fed · 85.00 · 0.43 a head"* there is no header to carry it, and the number
-reads as a quantity. That is an app-wide design-system question — accounting's
-own reports say *"1,234.56 overdue"* — so changing it in one pack would make the
-app inconsistent rather than better.
-
-### 2026-08-19 — Slice 1: the first money on the farm (`claude/feed-in-feed-out`)
-
-Slice 0 could say a pen held 210 birds. Nothing anywhere could say what anything
-cost. This is the slice the profile's whole thesis rests on — *every farm
-activity posts a cost to a cost object* — and until now that sentence described
-nothing.
-
-**Two columns on the ledger, and that is the whole schema change.**
-`cost_cents` is what a movement cost, as a TOTAL rather than a rate, because
-"$340 for 12 bags" is the number on the ticket and a rate is derived from it.
-`issued_to_lot_id` is **which lot ate it** — the join that closes the loop, and
-the reason a pen of broilers can be charged for a delivery of feed that is a
-different item entirely.
-
-**THE ISSUE COST IS STAMPED, NEVER DERIVED LATER, and that is the sharpest
-decision here.** If a pen's feed cost were computed from today's average, then
-buying dearer feed next month would retroactively change what that pen cost last
-month, and every FCR comparison between batches would move under its own feet.
-Certified: issue at a 10-cent average, buy in feed at 90, and the first issue
-still reads 100 cents while the next reads 500.
-
-**THIS IS LAYER TWO OF THREE. Nothing here posts to the ledger.** The design
-splits inventory into quantities (always on), cost accumulation (always on —
-cost per finished hog is wanted whatever the tax basis) and financial
-presentation (basis-dependent, derived at read time). No 1300, no 5000, no
-journal line: slice 3 does that through the lens ADR 0007 already established,
-rather than writing a second set of numbers that must agree forever.
-
-- **Cost is a fold, never a column.** No stored average, no stored valuation —
-  the same discipline the quantity balance follows, and for the same reason.
-- **The average ignores issues**, or it would be circular: an issue's cost came
-  from the average, so folding it back in would make the rate depend on how much
-  had been used.
-- **Unpriced stock is not free.** Raised stock has no purchase basis and an
-  invoice can be late; both arrive as null and are excluded from the average
-  rather than dragging it down.
-- **A rounding remainder is real and does not compound.** 100 cents over 3
-  units, issued singly, sums to 99. That is ordinary average costing, and it is
-  visible because receipts and issues are both on the ledger.
-- **THE SAME DOOR, NOT A SECOND ONE.** This could have added "Receive" and "Use"
-  buttons and left three ways to move stock. It extends the form people already
-  know instead: In carries a price, Out carries who ate it.
-- **The cost lands on the animal.** The livestock lot page gained a **Fed** card
-  and a "Fed in" list, read through `inventory`'s ops rather than its tables.
-  That is the pack seam doing the thing it was built for, visible on one screen.
-- 15 new pure tests, 7 new ops tests. Migration `0159` is additive and needed no
-  hand-reordering — its FK target `inventory_lots` already existed.
-
-### 2026-08-19 — One read added for livestock's daily round (`claude/livestock-daily-log`)
-
-`movementsOnDate` — movements against a set of lots on one day, keyed by lot.
-It exists so `livestock`'s round can show what was lost today WITHOUT storing
-it: the losses entered during a check are ordinary movements in this ledger, and
-the round reads them back rather than keeping a copy that would have to agree
-with this table forever.
-
-It lives here, like `movementKindsForLots` before it, because the ledger is this
-pack's and a neighbour querying `inventory_movements` directly would be the leak
-the extension model forbids. Full reasoning in [livestock.md](livestock.md).
-
-### 2026-08-19 — The location picker only offers places (`claude/assets-hold-stock`)
-
-`listLocations` filters on `assets.is_storage_location` now, so the *Where*
-picker stops offering a gate and a tractor as somewhere to put chickens. The
-flag, the backfill and the reasoning for putting it on the asset rather than
-keying it on kind are in [assets.md](assets.md) — this pack only reads it.
-
-The function's name finally describes what it does, which is the whole of the
-defect `land` fixed for structures in August and this one inherited.
-
-### 2026-08-19 — Driven for the first time (no code change yet)
-
-Slice 0 was written, migrated against both databases and covered by 61 tests,
-and its own Open items said the obvious thing: *every bug found this week was
-found by clicking*. So it was clicked.
-
-**What holds up, and it is most of it.** The fold reconciles exactly: six ledger
-entries (+210, +210, −9, −70, +70, −1) sum to the 410 head on the card, and the
-three batches (200 + 70 + 140) sum to the same number by a different route. The
-split's −70/+70 nets to zero at item level, which is the property `livestock`
-depends on. Recording stock updates *Where it is* into a per-location split, and
-a location that returns to zero DISAPPEARS from that panel rather than showing
-"0 head" — the right call. The dialog explains the model in one line: *"Every
-quantity on this page is the sum of these, so nothing is counted twice and a
-correction is just another entry."*
-
-**FOUR OF THE EIGHT ACTIONS HAVE NO UI CALLER**, and only one of them is
-recorded as a known gap:
-
-| action | UI callers | consequence |
-| --- | --- | --- |
-| `updateItemAction` | **0** | an item cannot be renamed, and its purchase conversion cannot be corrected |
-| `archiveItemAction` | **0** | an item can never be retired; the list only grows |
-| `closeLotAction` | **0** | a batch can never be closed — B-2026-04-15 from April is still listed as open |
-| `mergeLotAction` | 0 | already recorded in Open items |
-
-The sharpest of these is `updateItem`. This dossier says the stocking unit
-**locks once anything has moved**, which implies it can be set right *before*
-then — but there is no screen to change it at any point, so an item created with
-the wrong unit is wrong for ever and the only remedy is a new item and a lost
-ledger. The ops layer and the actions are complete and tested; the screens expose
-half of them, and no test can see the difference.
-
-**`listLocations` returns EVERY active asset**, so the *Where* picker offered
-**Oak Row gate** and **Tractor** as places to put chickens. That is the shape
-land fixed on 2026-08-16 (*"A chest freezer was on the list of places to put
-chickens"*) — a function whose name claims a filter it never applies.
-
-**But land's remedy does not transfer, and that is the interesting part.** There
-the fix was a config-driven kinds filter defaulting to `building` +
-`infrastructure`. Here the real data defeats it: on the live tenant a **chest
-freezer and a tractor are both `equipment`**, and a **garage and a gate are both
-`building`**. A kinds filter either admits the tractor or excludes the freezer,
-and the freezer is the canonical inventory location — this pack's own header
-calls it one. So this needs a decision rather than a copy of the previous fix:
-
-- **Add storage kinds to the taxonomy.** `assets.kind` is deliberately open, and
-  the homestead profile already adds `chicken_tractor`, `hoop_house`, `coop` and
-  `barn` for structures. `freezer` / `cold_storage` would make a
-  `storageKindsFrom(config)` filter work exactly like `structureKindsFrom`.
-- **Or mark the asset itself as holding stock**, which survives a tenant whose
-  freezer is recorded as equipment and needs no vocabulary agreement.
-
-Unlike the accounting register pickers, **nothing refuses a bad location** — the
-engine accepts any asset — so this is a quality question rather than a correctness one,
-and it is why it was never going to fail a test.
-
-**Not tested on purpose:** negative stock. It is allowed by design and covered by
-tests, and deliberately creating a negative on the live tenant would leave a
-number somebody later reads as a fault.
-
-### 2026-08-15 — Feeding out is a chore; a lot is still a decision (`claude/pack-write-levels`)
-
-Platform-wide change; the reasoning is in
-[packs-and-profiles.md](packs-and-profiles.md). What it means here:
-
-- **`recordMovement` and `mergeLot` are open to any member.** Every ledger row
-  in this pack is somebody reporting what they physically did with a bag of
-  feed. Requiring the owner for that does not make the count safer, it makes the
-  count empty.
-- **`createItem`, `updateItem`, `archiveItem`, `createLot`, `closeLot` and
-  `splitLot` stay owner-only.** A lot is a dimension member, and
-  `upsertDimensionMember` requires the owner role — a staff-created lot would
-  exist with nothing to group it by. `splitLot` is on this side because it makes
-  a lot, not because it feels like a decision.
-
-### 2026-08-15 — Slice 0: items, the lot spine, and the ledger (`claude/inventory-lot-spine`)
-- **`livestock` is now unblocked.** That was the point of building this pack
-  ahead of the one that needs it, and it is why the lot spine was folded into
-  slice 0 rather than left for later.
-- **Nothing writes a balance.** Movements are events and the balance is their
-  sum, folded in `core/balances.ts` — the same reasoning `assets` applies to
-  accumulated depreciation. It reconciles, **split and merge stop being special
-  cases**, and the traceability trail IS the model rather than an addition to it.
-- **A split BALANCES**, and that is the property `livestock` actually needs: 210
-  chicks split 70 into a pen leaves 140 and 70, and the item total is still 210.
-  Certified in `tests/inventory-ops.test.ts`.
-- **The LOT is the cost object, not the item.** "What did this pen cost" is a
-  lot question; nobody asks what "feed" cost in the abstract. So lots sync into
-  `dimension_members` as `lot` and items do not — which is what makes
-  profit-per-pen fall out of the existing P&L with no accounting change.
-- **`inventory` now requires `assets`.** A storage location IS an asset — a
-  chest freezer, in a garage, on a parcel — so the ledger points at `assets`
-  with a composite FK rather than inventing a parallel location model. Every
-  profile listing `inventory` already lists `assets`.
-- **One stocking unit per item, and it locks once anything moves.** Every
-  movement was recorded in the old unit, so changing the column alone would
-  silently restate the whole ledger. The pack refuses it and says why.
-- **Conversions refuse across dimensions.** There is no factor between pounds
-  and gallons that does not depend on what is in the bucket.
-- **Negative stock is allowed on purpose** — see Decisions. It is the single
-  most likely thing to be mistaken for a bug.
-- Migration `0136` **hand-reordered, for the fourth time** — four composite FKs
-  into brand-new tables. Done with a script rather than by hand, because
-  spotting four by eye is how the fifth gets missed.
-- 29 pure tests, 22 ops tests, 10 isolation tests.
+**Older entries — slices 0 to 2, and the run-up to them — are in**
+**[inventory-build-log.md](inventory-build-log.md).** Swept there on 2026-08-22 under
+AGENTS.md's rule that a dossier is read at the START of every session touching this
+area, so its length is a tax on every future change to it. build-docs walks the whole
+tree, so the archive renders at /admin/docs with no code change.
 
 ## Data model
 
@@ -807,6 +517,8 @@ nullable and null is ordinary: a batch with no date is one nobody has dated (and
 the pack does not try to tell that apart from "does not expire"), and a movement
 with no reason is one whose kind already says why.
 
+| `inventory_cost_adjustments` | **A correction to what a batch COST.** Appended, never an edit — ADR 0012 §A.4 | Composite FKs to the item and the lot, **neither cascading**: erasing the record that somebody re-stated a cost would hide the money. `amount_cents` is SIGNED and CHECKed non-zero, which is the pair of things `inventory_movements` structurally cannot carry. `on_hand_cents + issued_cents = amount_cents` is CHECKed, so a stored split can never fail to account for the whole |
+
 | `bill_line_stock_allocations` | **Which delivery a bill line is settling** | Composite FKs to `bill_lines` (**CASCADE** — a draft edit re-creates every line, so ids do not survive one) and to the receipt movement (**no cascade** — erasing the record that a bill settled it would hide the money). UNIQUE per (line, movement): a second match is a correction, not a second settlement |
 
 **Valuation is not a column and never will be.** What stock is worth is a fold
@@ -828,7 +540,12 @@ commitment against a live animal to delivered without sitting on a shelf.
   changing anything about quantities**
 - `src/packs/inventory/core/valuation.ts` — pure. **What the shelf is worth, and
   what it refuses to guess at.** Read `carriedValue` before touching any figure
-  that could be zero
+  that could be zero, and `hasRecordedCost` before adding anything that can put
+  money on a batch — it is shared with `production` and is the ONE place "has
+  anybody said what this cost" is answered
+- `src/packs/inventory/core/costing.ts` — pure. `lotCarried` folds movements AND
+  cost corrections; `splitCostAdjustment` is the on-hand/issued arithmetic and is
+  called by the server and by the dialog's preview, so the two cannot disagree
 - `src/packs/inventory/ledger-ops.ts` — **the only file that touches core's
   tables.** Account resolution today; the posting will live here
 - `src/packs/inventory/ops.ts` — all reads and writes, takes a `Tx`. `splitLot`
@@ -846,6 +563,26 @@ commitment against a live animal to delivered without sitting on a shelf.
   nothing. `carriedValue` is the discriminator and `valueLine` must never be
   handed `remainingCents` directly. A total is always reported with the count
   and quantity it could not value.
+- **"HAS THIS BATCH EVER BEEN COSTED" IS ONE FUNCTION, NOT A TEST YOU WRITE.**
+  `hasRecordedCost` is exported from `core/valuation.ts` and used by
+  `carriedValue` AND by `production/ops.ts`. It was two independent expressions
+  in two files, of two different shapes, and when
+  `inventory_cost_adjustments` arrived neither counted a correction — so a batch
+  costed only by one would have read "No cost recorded" on the valuation screen
+  while a kill day stamped NULL on the meat. **If a future slice adds another
+  way for money to reach a batch, this predicate is the thing to change**, and
+  changing it fixes both callers at once, which is the whole point of it.
+- **A COST CORRECTION IS NOT A MOVEMENT, AND MUST NOT BECOME ONE.** Two CHECKs
+  refuse it: `quantity <> 0` rules out a pure-money row, `cost_cents >= 0` rules
+  out a correction downwards. Both constraints protect the quantity ledger for
+  every other caller.
+- **A COST CORRECTION'S SPLIT IS STORED AND MUST NEVER BE RECOMPUTED**, the same
+  rule as a count line's `expected_quantity` and for the same reason.
+- **A COST CORRECTION CREDITS THE VARIANCE ACCOUNT, NEVER GRNI.** Matching clears
+  GRNI at the receipt's stamped cost, which a correction does not change, so a
+  credit put there is one nothing can ever debit — and §A.5 already books the
+  invoice-vs-ticket difference, so it would double count. See the build log for
+  the worked entry.
 - **A LOT IS VALUED AT ITS CARRIED COST, NEVER AT QUANTITY × AVERAGE.**
   Reversing the two quietly re-averages the one case the lot spine exists to
   keep apart.
@@ -913,19 +650,34 @@ commitment against a live animal to delivered without sitting on a shelf.
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all
   reconcile. It found the two items below.
-- **A COST CORRECTION HAS NOWHERE TO GO, and this is the next thing to build.**
-  A delivery ticket can overstate, understate, omit freight or use the wrong
-  unit, and today a stamped cost is final. ADR 0012 §A.4 settles the shape —
-  an appended record, never an edit — and the database settles that it cannot be
-  a MOVEMENT: `quantity <> 0` rules out a pure-money row and `cost_cents >= 0`
-  rules out a correction downwards. So `inventory_cost_adjustments`, with a
-  signed amount, folded by `lotCarried` alongside the movements it already
-  reads.
-  **The trap is `carriedValue`**: it decides "was this lot ever costed" from
-  purchased/consumed/released, so a lot costed ONLY by an adjustment would still
-  report "No cost recorded" — the eggs-at-$0.00 bug arriving through a new door.
-  `production/ops.ts` repeats the same test independently and would stamp NULL
-  on a run output.
+- ~~A COST CORRECTION HAS NOWHERE TO GO~~ — **closed 2026-08-22.**
+  `inventory_cost_adjustments`, ADR 0012 §A.4, driven on the dev farm in both
+  directions. The `carriedValue` trap this item named is closed by making the
+  test one shared predicate (`hasRecordedCost`) rather than two.
+- **A CORRECTION DOES NOT MOVE THE ITEM'S AVERAGE, so it does not leave with the
+  stock.** `averageCostRate` is an ITEM-level fold over movements and a
+  correction belongs to one batch; folding it in would spread a mis-ticketed
+  delivery across every other batch of that item, which is the re-averaging the
+  lot spine exists to prevent. The cost of that: stock issued out of a corrected
+  batch is stamped at the UNCORRECTED average, so the correction stays standing
+  in the batch, and once the batch empties it stands there with no stock behind
+  it — visible on the batch while it has stock, and invisible on the valuation
+  screen afterwards, because `valueStock` drops lines that net to zero.
+  **This is not new with corrections**: item-level average costing already does
+  it whenever two batches of one item arrived at different prices (lot A at $1.00
+  and lot B at $2.00 both issue at $1.50, so A goes negative and B stays high),
+  and the valuation screen and `1300` already disagree by that drift. What is
+  new is a second way to produce it. The honest fixes are per-lot costing or a
+  reconciliation that names the drift; neither is a slice yet.
+- **A COST CORRECTION CANNOT BE UNPICKED.** By design — appended, never edited —
+  and the remedy is an equal-and-opposite correction, which nothing on the screen
+  suggests. The same gap a posted count has.
+- **The cost-correction list is per ITEM, not per business.** There is no "every
+  correction this quarter" view, which is the question an accountant reviewing
+  the variance account will actually ask.
+- **A correction is offered on a CLOSED batch**, deliberately (the invoice
+  routinely arrives after the feed is eaten), but nothing warns that the batch is
+  closed, so it reads as an oversight rather than a decision.
 - **`editEntry` can still rewrite a bill's posted entry from the journal
   screen**, with no source guard — `assertEntryNotSourceManaged` is called by
   the void action and not the edit path. An allocation can therefore be left

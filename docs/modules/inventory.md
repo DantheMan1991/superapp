@@ -713,14 +713,22 @@ commitment against a live animal to delivered without sitting on a shelf.
   and the valuation screen and `1300` already disagree by that drift. What is
   new is a second way to produce it. The honest fixes are per-lot costing or a
   reconciliation that names the drift; neither is a slice yet.
-- **THE CASH LENS STILL RE-TIMES BALANCE-SHEET LINES.**
-  [cash-basis.ts:247](../../src/modules/accounting/core/cash-basis.ts:247) skips
-  only the AR/AP control leg and re-recognises every other line of a bill at the
-  payment date, with no account-type filter — so a bill line coded to `1300`
-  moves to the payment date as an ASSET. `isCodableAccount` excludes GRNI and
-  not Inventory, so that coding is reachable by hand. It is a bug under the only
-  treatment anyone is on, it needs nobody's ruling, and ADR 0013 has said since
-  it was written that it *"needs fixing whatever else is decided"*.
+- ~~The cash lens re-times balance-sheet lines, and it is a standalone bug~~ —
+  **the claim was wrong and is corrected 2026-08-22.** Recognising an asset on
+  the date it was paid for is defensible on a cash-basis report; it only breaks
+  for a tenant ALSO capitalising the same stock through the pack, and that
+  tenant is double-counting on any basis. **The reachable defect was the coding,
+  and it is closed** — `isCodableAccount` excludes the inventory subtype now,
+  for the reason it already excluded GRNI. Zero bill lines on either database
+  had ever been coded that way.
+  What remains is real and is not standalone: **the lens has no concept of a
+  capitalising line**, so it treats one as something to re-time. That only needs
+  solving when a rule other than `consumed` exists to re-time it to, which makes
+  it part of the tax axis rather than a fix somebody can do this afternoon. Two
+  things it will have to solve: an entry has ONE control leg shared across mixed
+  lines, so keeping a capitalising line at its accrual date means splitting that
+  leg pro rata; and the adjustment only runs for documents with a payment in the
+  window, so a bill never paid never gets its line back at all.
 - **A COST CORRECTION CANNOT BE UNPICKED.** By design — appended, never edited —
   and the remedy is an equal-and-opposite correction, which nothing on the screen
   suggests. The same gap a posted count has.

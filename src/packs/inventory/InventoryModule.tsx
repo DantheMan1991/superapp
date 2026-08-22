@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Boxes, ClipboardList, Coins } from "lucide-react";
+import { Boxes, ClipboardList, Coins, FileCheck } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { PageHeader } from "@/components/app/page-header";
@@ -115,6 +115,16 @@ export async function InventoryModule({
               <Link href="/dashboard/m/inventory/value">
                 <Coins className="mr-2 h-4 w-4" />
                 What it is worth
+              </Link>
+            </Button>
+            {/* Not owner-gated: seeing what has arrived and what has been
+                billed for it is a bookkeeper's daily question. Only the acts
+                — matching, unpicking, switching posting on — are owner-only,
+                and those are gated on the page itself. */}
+            <Button asChild variant="outline">
+              <Link href="/dashboard/m/inventory/matching">
+                <FileCheck className="mr-2 h-4 w-4" />
+                Deliveries & invoices
               </Link>
             </Button>
             {isOwner && (

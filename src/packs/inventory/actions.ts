@@ -25,6 +25,12 @@ import {
   updateItem,
   type InventoryCtx,
 } from "./ops";
+import {
+  allocateBillLineToStock,
+  unmatchBillLine,
+} from "./ledger-ops";
+import { schema } from "@/db";
+import { eq } from "drizzle-orm";
 
 /**
  * Inventory write surface.
@@ -75,6 +81,7 @@ function toResult(err: unknown): { error: string } {
       case "ENTITY_AMBIGUOUS":
       case "ENTITY_MISMATCH":
       case "ALLOCATION_MISMATCH":
+      case "POSTING_OFF":
         return { error: err.message };
       case "INVALID_REASON":
         return { error: "Use lowercase letters, numbers and underscores." };
@@ -637,6 +644,151 @@ export async function postCountAction(input: unknown) {
     // A count that moved head is a count `livestock` needs to re-read.
     revalidatePath("/dashboard/m/livestock", "layout");
     return { ok: true, agreed: result.agreed, adjusted: result.adjusted };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ------------------------------------------------- matching a bill to stock ---
+
+const matchSchema = z.object({
+  billLineId: z.string().uuid(),
+  /** What the invoice says it is charging FOR, in the item's stocking unit. */
+  invoiceQuantity: z.number().positive().optional(),
+  matches: z
+    .array(
+      z.object({
+        movementId: z.string().uuid(),
+        quantityMatched: z.number().positive(),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+
+/**
+ * Match a bill line to the deliveries it is paying for.
+ *
+ * **The audit line records the LINE and the count, never the amounts.** Cent
+ * figures are already logged elsewhere in this pack, but a bill line's
+ * description is free text a tenant typed, and `meta` is rendered on
+ * `/admin/audit`.
+ */
+export async function matchBillLineAction(input: unknown) {
+  /**
+   * **THE GATE IS OUTSIDE THE TRY, and that is not style.** `requireTenant`
+   * signals "not signed in" by THROWING `NEXT_REDIRECT` — a Next control-flow
+   * exception, not an error. Caught, it is swallowed and rendered as "Something
+   * went wrong saving that", which is what this action did until somebody
+   * clicked it with a stale session. Every other action in this file calls it
+   * first, outside; these three did not.
+   */
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = matchSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => allocateBillLineToStock(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.bill_matched",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "bill_line",
+      targetId: parsed.data.billLineId,
+      meta: {
+        deliveries: result.allocations,
+        varianceCents: result.varianceCents,
+        shortfallCents: result.shortfallCents,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    // The bill's own screens show the line this just re-coded and re-priced.
+    revalidatePath("/dashboard/m/accounting", "layout");
+    return { ok: true as const, ...result };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function unmatchBillLineAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ billLineId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => unmatchBillLine(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.bill_unmatched",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "bill_line",
+      targetId: parsed.data.billLineId,
+      meta: { released: result.released },
+    });
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/accounting", "layout");
+    return { ok: true as const, ...result };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Turn inventory posting on or off for this business.
+ *
+ * **OWNER ONLY, and it is the switch that makes every other posting happen.**
+ * `none` is where every tenant starts: cost accumulation runs regardless, it
+ * simply does not reach the ledger. Turning it on does NOT backfill — entries
+ * are written as movements happen, so the books start from the day somebody
+ * says yes rather than being silently rewritten backwards.
+ */
+export async function setInventoryTreatmentAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ treatment: z.enum(["none", "capitalise"]) })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  try {
+    if (ctx.role !== "owner") {
+      return { error: "Only an owner can change how stock reaches the books." };
+    }
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        const rows = await tx
+          .update(schema.accountingSettings)
+          .set({ inventoryTreatment: parsed.data.treatment, updatedAt: new Date() })
+          .where(eq(schema.accountingSettings.tenantId, ctx.tenant.id))
+          .returning({ id: schema.accountingSettings.id });
+        if (rows.length === 0) {
+          throw new InventoryError(
+            "LEDGER_ACCOUNTS",
+            "This business has no books yet. Switch accounting on first.",
+          );
+        }
+      },
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.treatment_set",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "accounting_settings",
+      targetId: ctx.tenant.id,
+      meta: { treatment: parsed.data.treatment },
+    });
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/accounting", "layout");
+    return { ok: true as const };
   } catch (err) {
     return toResult(err);
   }

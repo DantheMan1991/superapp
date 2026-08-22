@@ -18,6 +18,7 @@ import {
 import {
   allocateBillLineToStock,
   inventoryTreatmentOf,
+  grniPosition,
   resolveGrniAccount,
   unbilledReceipts,
   unmatchBillLine,
@@ -1260,6 +1261,102 @@ it("UNPICKS A MATCH AND PUTS THE BILL BACK AS IT WAS", async () => {
           { role: "staff", userId: STAFF },
         ),
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+it("REFUSES TO MATCH WHILE POSTING IS OFF", async () => {
+      /**
+       * Found by opening the screen on a farm that had just switched accounting
+       * on. With posting off a receipt credits NOTHING to GRNI — but matching
+       * still re-coded the bill line to it, and approving then posted `Dr 2050`
+       * against a credit that was never made, leaving a debit in Goods Received
+       * Not Invoiced that no delivery explains and nothing can ever clear.
+       *
+       * Only `postMovement` checked the treatment; matching did not.
+       */
+      await setTreatment("capitalise");
+      const item = await newItem("Posted then off");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 5,
+          costCents: 500,
+          occurredOn: "2027-05-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      const open = await asOwner((tx) =>
+        unbilledReceipts(tx, tenantId, { itemId: item.id }),
+      );
+      const { billLineId } = await makeBill(500);
+
+      await setTreatment("none");
+      await expect(
+        asOwner((tx) =>
+          allocateBillLineToStock(tx, ownerCtx(), {
+            billLineId,
+            invoiceQuantity: 5,
+            matches: [{ movementId: open[0].movementId, quantityMatched: 5 }],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "POSTING_OFF" });
+      await setTreatment("capitalise");
+    });
+
+    it("REPORTS GRNI FROM BOTH ENDS, and the gap between them", async () => {
+      /**
+       * The card used to show only the deliveries — the WORKING — and call it
+       * what the account "should be holding". On a farm that had just switched
+       * posting on it announced $700 about an account holding nothing, because
+       * every one of those deliveries predated the switch and switching on does
+       * not backfill.
+       *
+       * Reporting one number and calling it both is the failure this pack keeps
+       * writing tests against, and the doc comment claimed a comparison the code
+       * never made.
+       */
+      await setTreatment("none");
+      const item = await newItem("Before the switch");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 7_000,
+          occurredOn: "2027-06-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      await setTreatment("capitalise");
+
+      const position = await asOwner((tx) => grniPosition(tx, tenantId));
+      // The delivery is waiting for an invoice...
+      expect(position.awaitingInvoiceCents).toBeGreaterThanOrEqual(7_000);
+      // ...and the difference names what never reached the books.
+      expect(position.differenceCents).toBeGreaterThanOrEqual(7_000);
+      expect(position.awaitingInvoiceCents - position.accountCents).toBe(
+        position.differenceCents,
+      );
+    });
+
+    it("matches the working to the answer once a delivery posts", async () => {
+      // With posting on from the start, the two ends agree for that delivery —
+      // which is what makes a difference meaningful when it appears.
+      await setTreatment("capitalise");
+      const before = await asOwner((tx) => grniPosition(tx, tenantId));
+      const item = await newItem("After the switch");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 10,
+          costCents: 2_500,
+          occurredOn: "2027-06-10",
+          locationAssetId: freezerId,
+        }),
+      );
+      const after = await asOwner((tx) => grniPosition(tx, tenantId));
+      expect(after.awaitingInvoiceCents - before.awaitingInvoiceCents).toBe(2_500);
+      expect(after.accountCents - before.accountCents).toBe(2_500);
+      // The gap is unchanged: this delivery contributed to BOTH ends.
+      expect(after.differenceCents).toBe(before.differenceCents);
     });
 
     it("lists only receipts that credited GRNI and still have room", async () => {

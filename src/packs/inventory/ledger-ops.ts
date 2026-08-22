@@ -641,6 +641,28 @@ export async function allocateBillLineToStock(
     );
   }
 
+  /**
+   * **MATCHING ONLY MEANS ANYTHING IF THE RECEIPT CAPITALISED.**
+   *
+   * Only `postMovement` used to check the treatment, so with posting OFF a
+   * receipt credited nothing to GRNI — and matching still re-coded the bill line
+   * to it. Approving then posted `Dr 2050` against a credit that was never
+   * made, leaving a debit balance in Goods Received Not Invoiced that no
+   * delivery explains and nothing can ever clear.
+   *
+   * Found by opening the screen on a farm that had just switched accounting on
+   * and had not turned posting on: the deliveries were listed and offered for
+   * matching, which is the point at which it becomes obvious that "what has
+   * arrived" and "what the books think has arrived" are different questions.
+   */
+  const treatment = await inventoryTreatmentOf(tx, ctx.tenantId);
+  if (treatment === "none") {
+    throw new InventoryError(
+      "POSTING_OFF",
+      "Stock is not on the balance sheet for this business, so there is nothing for a bill to settle. Turn that on first.",
+    );
+  }
+
   const line = await tx.query.billLines.findFirst({
     where: and(
       eq(schema.billLines.tenantId, ctx.tenantId),
@@ -1050,4 +1072,166 @@ export async function unmatchBillLine(
     );
 
   return { released: dropped.length };
+}
+
+export interface MatchableBillLine {
+  billLineId: string;
+  billId: string;
+  vendorName: string;
+  billNumber: string;
+  billDate: string;
+  description: string;
+  /** What the vendor is charging for this line, including any variance sibling. */
+  invoiceCents: number;
+  /** How much of it is already matched to deliveries. */
+  matchedCents: number;
+  matchedCount: number;
+}
+
+/**
+ * **BILL LINES THAT COULD BE A DELIVERY**, for the matching screen.
+ *
+ * Only DRAFT and awaiting-approval bills: once a bill is approved its entry has
+ * posted, and matching then would change what the bill says without changing
+ * what was posted — `allocateBillLineToStock` refuses it, so offering it here
+ * would be offering a button that cannot work.
+ *
+ * Lines already coded to something else are still listed, because "this was
+ * coded to Feed Expense and should have been a delivery" is exactly the
+ * correction somebody opens this screen to make. What is NOT listed is a line
+ * on a bill nobody can still change.
+ */
+export async function matchableBillLines(
+  tx: Tx,
+  tenantId: string,
+  limit = 100,
+): Promise<MatchableBillLine[]> {
+  const rows = await tx
+    .select({
+      billLineId: schema.billLines.id,
+      billId: schema.bills.id,
+      vendorName: schema.vendors.name,
+      billNumber: schema.bills.billNumber,
+      billDate: schema.bills.billDate,
+      description: schema.billLines.description,
+      amountCents: schema.billLines.amountCents,
+      matchedCents: sql<string>`coalesce((
+        select sum(a.receipt_cost_cents) from bill_line_stock_allocations a
+         where a.tenant_id = ${schema.billLines.tenantId}
+           and a.bill_line_id = ${schema.billLines.id}
+      ), 0)`,
+      matchedCount: sql<string>`coalesce((
+        select count(*) from bill_line_stock_allocations a
+         where a.tenant_id = ${schema.billLines.tenantId}
+           and a.bill_line_id = ${schema.billLines.id}
+      ), 0)`,
+      siblingCents: sql<string>`coalesce((
+        select sum(v.amount_cents) from bill_lines v
+         where v.tenant_id = ${schema.billLines.tenantId}
+           and v.bill_id = ${schema.billLines.billId}
+           and v.description = 'Price difference against delivery — ' || ${schema.billLines.description}
+      ), 0)`,
+    })
+    .from(schema.billLines)
+    .innerJoin(
+      schema.bills,
+      and(
+        eq(schema.bills.tenantId, schema.billLines.tenantId),
+        eq(schema.bills.id, schema.billLines.billId),
+      ),
+    )
+    .innerJoin(
+      schema.vendors,
+      and(
+        eq(schema.vendors.tenantId, schema.bills.tenantId),
+        eq(schema.vendors.id, schema.bills.vendorId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.billLines.tenantId, tenantId),
+        inArray(schema.bills.status, ["draft", "awaiting_approval"]),
+        // The variance siblings this pack writes are not themselves matchable.
+        sql`${schema.billLines.description} not like 'Price difference against delivery — %'`,
+      ),
+    )
+    .orderBy(asc(schema.bills.billDate))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    billLineId: r.billLineId,
+    billId: r.billId,
+    vendorName: r.vendorName,
+    billNumber: r.billNumber,
+    billDate: r.billDate,
+    description: r.description,
+    // The line plus its sibling is what the vendor actually charged — the same
+    // reconstruction `allocateBillLineToStock` does, and for the same reason.
+    invoiceCents: r.amountCents + Number(r.siblingCents),
+    matchedCents: Number(r.matchedCents),
+    matchedCount: Number(r.matchedCount),
+  }));
+}
+
+export interface GrniPosition {
+  /** What the deliveries say is waiting for an invoice — the WORKING. */
+  awaitingInvoiceCents: number;
+  awaitingInvoiceCount: number;
+  /** What the account actually holds — the ANSWER. Credits are positive here. */
+  accountCents: number;
+  /**
+   * Working less answer. **Nearly always the deliveries that arrived before
+   * posting was switched on**, which never credited anything and never will —
+   * turning it on does not backfill. Anything else is worth finding.
+   */
+  differenceCents: number;
+}
+
+/**
+ * The GRNI position, **from both ends**.
+ *
+ * The account is the answer and the deliveries are the working, and the whole
+ * point is COMPARING them — an earlier version of this computed only the
+ * working, and a doc comment claimed the comparison it never made. On a farm
+ * that had just switched posting on it reported "$700 is what Goods Received
+ * Not Invoiced should be holding" about an account holding nothing, because
+ * every one of those deliveries predated the switch.
+ *
+ * Reporting one number and calling it both is exactly the failure this pack
+ * keeps writing tests against.
+ */
+export async function grniPosition(
+  tx: Tx,
+  tenantId: string,
+): Promise<GrniPosition> {
+  const open = await unbilledReceipts(tx, tenantId, { limit: 1000 });
+  const awaitingInvoiceCents = open.reduce((sum, r) => sum + r.openCostCents, 0);
+
+  let accountCents = 0;
+  try {
+    const accountId = await resolveGrniAccount(tx, tenantId);
+    const rows = await tx
+      .select({ amountCents: schema.journalLines.amountCents })
+      .from(schema.journalLines)
+      .where(
+        and(
+          eq(schema.journalLines.tenantId, tenantId),
+          eq(schema.journalLines.accountId, accountId),
+        ),
+      );
+    // A liability is credited, and credits are negative in the ledger's own
+    // convention — flipped here so the card can read it beside the working.
+    accountCents = -rows.reduce((sum, r) => sum + r.amountCents, 0);
+  } catch {
+    // No GRNI account: a tenant with no books. The working still stands, and
+    // the answer is genuinely zero rather than unknown.
+    accountCents = 0;
+  }
+
+  return {
+    awaitingInvoiceCents,
+    awaitingInvoiceCount: open.length,
+    accountCents,
+    differenceCents: awaitingInvoiceCents - accountCents,
+  };
 }

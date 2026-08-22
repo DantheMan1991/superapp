@@ -13,6 +13,45 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-22 — The question only an accountant can answer (`claude/the-question-only-an-accountant-can-answer`)
+
+`docs/briefs/inventory-tax-treatment.md`, and a `docs/briefs/` section to put it
+in. **No code behaviour changes.**
+
+[ADR 0013](../decisions/0013-inventory-tax-treatment.md) has said since 2026-08-21
+that nothing in it should be Accepted without an accountant's sign-off, and that
+*"the list is the thing to hand them first"*. It has been Proposed ever since,
+and slice 3d's second half — the `expense_on_payment` lens — has been blocked
+behind it. **Nobody had written the ask down.** A blocker with no artefact is a
+blocker nobody can clear, and the software has been sitting a week's work behind
+a twenty-minute conversation.
+
+**A brief is a different kind of document and gets a section of its own.** The
+four that existed all face inward. This one leaves the building: it goes to
+somebody who has never seen the repo, under the founder's name, and it is
+useless if it reads like a design doc. So `docs/briefs/` is registered in
+`build-docs.ts` with a blurb that says exactly that. An unregistered folder
+already rendered — the walker takes the whole tree — but it would have shown up
+title-cased with no blurb beside four that have one, which reads as unfinished
+rather than as a deliberate fourth kind.
+
+**It is written plainly ON PURPOSE, and that is the one rule to keep if it is
+ever edited.** No em dashes, short sentences, contractions, no internal
+shorthand, no "deliberately". The house style in every other doc here is dense
+and explanatory because the reader is us. This reader is an accountant with
+twenty minutes, and prose that reads as machine written undercuts the person
+sending it.
+
+**It asks rather than proposes**, which is the whole point. It sets out what the
+software does today, the three treatments (two built, one named and missing),
+what happens if nobody decides, and the method-change gap that is not covered at
+all. It does not recommend one. The one place it pushes is to say that the list
+itself may be wrong and that saying so is the most valuable answer — because ADR
+0013's own "least sure of" section says the cuts are the accountant's call.
+
+The ADR now points at the brief and the brief points back. The ADR is the
+reasoning; the brief is the ask.
+
 ### 2026-08-22 — The `.so` the tracer cannot see (branch `claude/the-so-the-tracer-cannot-see`)
 
 The deployment half of the sharp incident, and the interesting part is WHY it

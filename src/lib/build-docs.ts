@@ -9,7 +9,8 @@ import path from "path";
 //
 // This walks the whole tree rather than one folder. Module dossiers
 // (`docs/modules/`), the platform docs (`docs/*.md`), the ADRs
-// (`docs/decisions/`) and the runbooks (`docs/runbooks/`) are all build
+// (`docs/decisions/`), the briefs (`docs/briefs/`) and the runbooks
+// (`docs/runbooks/`) are all build
 // docs and all belong on the page — the previous reader only knew about
 // `docs/modules/`, so four platform docs and every ADR were invisible in
 // the app no matter how carefully they were written. Anything added under
@@ -67,6 +68,12 @@ const SECTIONS: Omit<DocSection, "docs">[] = [
     label: "Decisions",
     blurb:
       "Architecture decision records — why a foundational choice is the way it is, and what it ruled out. Immutable once accepted.",
+  },
+  {
+    key: "briefs",
+    label: "Briefs",
+    blurb:
+      "Written to be SENT, not read here: a question put to somebody outside the building whose answer the software cannot invent. Plain prose on purpose — the dossier voice is for us.",
   },
   {
     key: "runbooks",
@@ -281,7 +288,23 @@ export async function getBuildDoc(slug: string): Promise<BuildDoc | null> {
   const entry = (await index()).get(slug.toLowerCase());
   if (!entry) return null;
   const { meta, raw } = await readMeta(slug.toLowerCase(), entry);
-  return { ...meta, content: raw };
+  /**
+   * **HTML COMMENTS ARE INSTRUCTIONS TO THE AUTHOR, NEVER CONTENT FOR THE
+   * READER**, and they were being rendered as text on 21 of the 29 docs that
+   * have a `Status:` line — `<!-- keep Status on ONE line ... -->` sitting in
+   * the middle of the header of nearly every dossier on the page.
+   *
+   * `react-markdown` runs without `rehype-raw`, so it does not render HTML; it
+   * passes an unrecognised comment through as the literal characters instead,
+   * which is worse than either rendering or dropping it. `stripInline` has
+   * always removed them from the summary cards, which is why the index looked
+   * clean and only the doc pages were wrong.
+   *
+   * Found while adding the first `docs/briefs/` page — a document written to be
+   * handed to somebody outside the company, where a stray authoring note is not
+   * a wart but a credibility problem.
+   */
+  return { ...meta, content: raw.replace(/<!--[\s\S]*?-->/g, "") };
 }
 
 /** Section label for a key, for breadcrumbs. */

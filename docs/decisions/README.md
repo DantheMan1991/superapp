@@ -46,4 +46,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0009](0009-packs-are-modules-profiles-install-them.md) | A pack is a module row; a profile installs, it does not bind | 2026-08-13 | Accepted |
 | [0010](0010-entities-inside-a-tenant.md) | A tenant holds many legal entities; the entity owns the books | 2026-08-16 | Proposed |
 | [0011](0011-machine-posted-entries.md) | A posting that merely records an authorised act rides that act's permission | 2026-08-21 | Accepted |
-| [0012](0012-inventory-on-a-cash-basis.md) | Inventory is not an asset on a cash basis | 2026-08-21 | Accepted |
+| [0012](0012-inventory-on-a-cash-basis.md) | What capitalises stock, and what a cash basis does with it | 2026-08-21 | Proposed |

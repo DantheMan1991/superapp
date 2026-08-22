@@ -689,11 +689,14 @@ commitment against a live animal to delivered without sitting on a shelf.
      makes the receipt's own entry non-duplicative.
   3. **Then the movement postings**: receipt debits inventory, issue credits it
      against COGS, adjustment against the variance account. Transfers, splits
-     and merges post NOTHING — they move cost within one account. **A movement
-     posts exactly what `carriedValue` says it carries, and where that is null
-     it posts nothing** — which is what keeps the ledger and the valuation
-     screen provably the same view, and what removes any need for a
-     goods-received-not-invoiced account.
+     and merges post NOTHING — they move cost within one account. **The RECEIPT
+     capitalises** (`Dr 1300 / Cr 2050 Goods Received Not Invoiced`) and the
+     bill line CLEARS that account rather than capitalising a second time —
+     see [ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md), which
+     corrects an earlier draft of this plan that claimed GRNI was unnecessary.
+     It is necessary: without it, feed issued before its bill arrives is stamped
+     `null` by `issueStock` and, because a stamped cost is never re-derived, the
+     cost is lost permanently while `1300` holds an asset that has been eaten.
   4. **The cash-basis lens, per
      [ADR 0012](../decisions/0012-inventory-on-a-cash-basis.md) — and this is
      not optional polish.** Perpetual is the first thing in this build that

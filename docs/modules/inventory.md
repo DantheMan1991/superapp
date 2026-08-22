@@ -27,6 +27,37 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-22 — Nobody invoices you for what you made (`claude/nobody-invoices-you-for-what-you-made`)
+
+**Found on the live app**, which is the first time this pack has been looked at
+with real data in it. A kill day's output — "Whole broilers · Kill day
+2026-08-21", and the chicken backs beside it — was sitting in *deliveries with
+no invoice yet*, next to a draft lumber bill for $16,677.33. The screen was
+inviting somebody to match the two.
+
+`postMovement` already knew better: a **produced** or **raised** lot credits the
+CONSUMPTION account, not GRNI, because a run's inputs were charged there on the
+way in and its output credits the same account on the way out. `unbilledReceipts`
+did not know it, and listed every priced receipt whatever its provenance.
+
+Three consequences, and only the first is visible:
+
+1. The list offers stock no supplier ever sold the business.
+2. **The GRNI working could never agree with the account**, because made goods
+   were in one and not the other — and the card blames a difference on
+   "deliveries from before the switch", which would have been wrong every time.
+3. Matching one would point a bill line at GRNI to clear a credit that was never
+   made — the same failure as matching with posting off, arriving through
+   provenance instead of through a setting.
+
+The predicate is now **shared** — `owesASupplier`, used by both ends — so they
+cannot drift again. Lot-less stock counts as bought, which is what a receipt
+with no batch almost always is, and is what posting already assumed.
+
+4 tests, 40 in the file. One of them had to be rewritten as a DIFFERENTIAL
+measurement rather than an absolute one: the file shares a tenant, so "the gap
+is at least $70" was a claim about every test before it as much as about itself.
+
 ### 2026-08-22 — Slice 3c: the screen, and three things clicking it found (`claude/the-screen-that-matches-a-delivery`)
 
 Everything 3b built was reachable only from ops. This is the first time anybody

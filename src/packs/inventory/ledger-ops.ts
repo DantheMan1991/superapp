@@ -280,6 +280,28 @@ export async function resolveMovementEntity(
 }
 
 /**
+ * **DOES STOCK OF THIS PROVENANCE OWE A SUPPLIER ANYTHING?**
+ *
+ * Bought stock credits Goods Received Not Invoiced when it arrives, so a bill
+ * can clear it. Stock the business MADE or RAISED credits the consumption
+ * account instead — a run's inputs were charged there on the way in and its
+ * output credits the same account on the way out — so there is nothing in GRNI
+ * against it and no supplier will ever invoice for it.
+ *
+ * Lot-less stock is treated as bought, which is what a receipt with no batch
+ * almost always is, and matches what `postMovement` does.
+ *
+ * **SHARED ON PURPOSE.** `postMovement` used this test and `unbilledReceipts`
+ * did not, so a kill day's output was listed as "awaiting an invoice" on the
+ * live app — inviting somebody to match a lumber bill against chicken backs,
+ * and guaranteeing the GRNI working could never agree with the account. One
+ * predicate, so the two ends cannot drift again.
+ */
+export function owesASupplier(lotSource: string | null): boolean {
+  return lotSource === null || lotSource === "purchased";
+}
+
+/**
  * Movement kinds that NEVER post, whatever they carry.
  *
  * They move stock (and its cost) WITHIN inventory, so the entry would be
@@ -370,7 +392,7 @@ export async function postMovement(
   });
 
   const incoming = input.quantity > 0;
-  const bought = input.lotSource === null || input.lotSource === "purchased";
+  const bought = owesASupplier(input.lotSource);
   const cost = input.costCents;
 
   // Positive = debit, negative = credit — the ledger's own convention.
@@ -530,6 +552,10 @@ export async function unbilledReceipts(
         // while `1300` never moved. `isNotNull` was the bug; the doc comment
         // above already said `> 0`.
         gt(schema.inventoryMovements.costCents, 0),
+        // Only stock somebody SOLD this business can be invoiced for. A made or
+        // raised lot credited the consumption account, not GRNI, so there is
+        // nothing here for a bill to clear — see `owesASupplier`.
+        sql`(${schema.inventoryLots.source} is null or ${schema.inventoryLots.source} = 'purchased')`,
         opts.itemId
           ? eq(schema.inventoryMovements.itemId, opts.itemId)
           : undefined,

@@ -28,6 +28,8 @@ import {
 } from "./ops";
 import {
   allocateBillLineToStock,
+  assertPostingChangeSafe,
+  inventoryTreatmentOf,
   unmatchBillLine,
 } from "./ledger-ops";
 import { schema } from "@/db";
@@ -83,6 +85,10 @@ function toResult(err: unknown): { error: string } {
       case "ENTITY_MISMATCH":
       case "ALLOCATION_MISMATCH":
       case "POSTING_OFF":
+      // Carries the count and the date it started, and the reason a person
+      // cannot just flip it back. Flattening it would remove the only thing
+      // that makes the refusal actionable.
+      case "POSTING_LOCKED":
         return { error: err.message };
       case "INVALID_REASON":
         return { error: "Use lowercase letters, numbers and underscores." };
@@ -839,9 +845,17 @@ export async function setInventoryTreatmentAction(input: unknown) {
     if (ctx.role !== "owner") {
       return { error: "Only an owner can change how stock reaches the books." };
     }
-    await withTenant(
+    const from = await withTenant(
       ctx.tenant.id,
       async (tx) => {
+        /**
+         * **REFUSES TO STRAND WHAT IS ALREADY ON THE BALANCE SHEET.** Inside the
+         * transaction that does the update, so the count it refuses on cannot
+         * change between the check and the write. See `assertPostingChangeSafe`
+         * for what turning it off after it has posted actually does.
+         */
+        const before = await inventoryTreatmentOf(tx, ctx.tenant.id);
+        await assertPostingChangeSafe(tx, ctx.tenant.id, parsed.data.treatment);
         const rows = await tx
           .update(schema.accountingSettings)
           .set({ inventoryTreatment: parsed.data.treatment, updatedAt: new Date() })
@@ -853,6 +867,7 @@ export async function setInventoryTreatmentAction(input: unknown) {
             "This business has no books yet. Switch accounting on first.",
           );
         }
+        return before;
       },
       { role: ctx.role },
     );
@@ -862,7 +877,11 @@ export async function setInventoryTreatmentAction(input: unknown) {
       actorClerkUserId: ctx.userId,
       targetType: "accounting_settings",
       targetId: ctx.tenant.id,
-      meta: { treatment: parsed.data.treatment },
+      // **BOTH ENDS, not just the new one.** ADR 0013 §A.6: this is a change of
+      // METHOD, and "set to capitalise" does not say whether that was the first
+      // time or the third. The audit line is the only durable record of the
+      // change anywhere, so it has to carry what it changed FROM.
+      meta: { from, to: parsed.data.treatment },
     });
     revalidatePath(BASE, "layout");
     revalidatePath("/dashboard/m/accounting", "layout");

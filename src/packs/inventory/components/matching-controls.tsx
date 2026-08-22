@@ -47,14 +47,27 @@ interface Delivery {
 export function TreatmentControl({
   treatment,
   isOwner,
+  postedEntries,
+  postedSince,
 }: {
   treatment: "none" | "capitalise";
   isOwner: boolean;
+  /** Entries this pack has already put in the books. See `postedInventoryEntries`. */
+  postedEntries: number;
+  postedSince: string | null;
 }) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
   const on = treatment === "capitalise";
+  /**
+   * **ONCE SOMETHING HAS POSTED, THIS IS A METHOD RATHER THAN A SETTING** —
+   * [ADR 0013](../../../../docs/decisions/0013-inventory-tax-treatment.md) §A.6.
+   * The server refuses it (`assertPostingChangeSafe`); the switch does not offer
+   * it, which is the same rule slice 3c set when it stopped offering a Match
+   * button that was going to fail.
+   */
+  const locked = on && postedEntries > 0;
 
   async function toggle(next: boolean) {
     const asked = await confirm(
@@ -67,8 +80,16 @@ export function TreatmentControl({
           }
         : {
             title: "Stop posting stock to the books?",
+            /**
+             * **THIS USED TO SAY "what is already posted stays posted", WHICH
+             * IS TRUE AND WAS THE PROBLEM.** It reads as reassurance. What it
+             * leaves out is that issues stop posting too, so anything already
+             * capitalised sits in Inventory with nothing left to relieve it. It
+             * is only reachable now when nothing has posted, so the sentence
+             * can simply be accurate instead.
+             */
             description:
-              "What is already posted stays posted — this only stops new movements from reaching the ledger. Cost is still tracked either way, it just will not appear in your financial statements.",
+              "Nothing has reached the ledger yet, so there is nothing to unwind. Cost is still tracked either way — this only decides whether stock appears in your financial statements.",
             confirmLabel: "Turn it off",
             destructive: true,
           },
@@ -103,6 +124,18 @@ export function TreatmentControl({
                 ? "A delivery becomes an asset when it arrives, and its cost moves to cost of goods when it is used. What you were charged is matched to what turned up below."
                 : "What stock costs is tracked either way — this decides whether it appears in your financial statements. Most small businesses should ask their accountant before turning it on."}
             </p>
+            {locked && (
+              /* Said HERE rather than only in the refusal, because a disabled
+                 switch with no explanation reads as a bug. */
+              <p className="mt-2 text-xs text-muted-foreground">
+                This cannot be turned off now. Stock has been on the books since{" "}
+                {postedSince}, across {postedEntries}{" "}
+                {postedEntries === 1 ? "entry" : "entries"}, and switching off
+                would leave that cost in Inventory with nothing left to relieve
+                it. Deciding what to do with it is a journal entry somebody makes
+                on purpose.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Label htmlFor="treatment" className="text-xs text-muted-foreground">
@@ -111,7 +144,7 @@ export function TreatmentControl({
             <Switch
               id="treatment"
               checked={on}
-              disabled={!isOwner || pending}
+              disabled={!isOwner || pending || locked}
               onCheckedChange={toggle}
             />
           </div>

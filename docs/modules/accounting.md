@@ -13,6 +13,48 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-22 — A method is not a toggle, and ADR 0013 was carrying its own refutation (`claude/a-method-is-not-a-toggle`)
+
+The brief could not be answered — no accountant available — so the question came
+back as a cross-model review instead. Three of its points landed, and two of
+those were things [ADR 0013](../decisions/0013-inventory-tax-treatment.md)
+already knew and had not acted on. **The ADR was revised in place**, which is
+allowed only because it was never Accepted.
+
+**One column was carrying two questions.** The shipped enum is
+`none | capitalise` — whether stock POSTS, a book decision. The ADR's enum was
+`capitalise | expense_on_payment` — how a report LENS re-times, a tax decision.
+Different axes. Adding the second to the first would have been the category error
+the ADR rejects for the basis enum two sections further down. Nobody caught it,
+including two passes over this file.
+
+**"NIMS needs machinery that does not exist here" was true for one day.** Slice 3b
+shipped `bill_line_stock_allocations` the next morning, and receipt → allocation →
+bill → `bill_payments.payment_date` has been a complete indexed chain ever since.
+The ADR refused to implement a later-of rule on a premise that had already
+expired, and the brief repeated the refusal without checking it.
+
+**Treatment was business-wide in the same document that refuted business-wide.**
+Its Context names merchandise held for resale as the case that behaves
+differently; its Decision put one setting on the tenant. It is per `item_kind`
+now, which is the key the expense-account mapping already needed.
+
+**The list is now EVENTS THE SOFTWARE CAN DATE, not tax treatments.** `billed`,
+`paid`, `consumed`, `sold`, and the two later-of combinations. Every one is a
+date the ledger already holds, which is the test for whether a rule belongs on
+the list. A list of treatments would be a reading of the regulations maintained
+by people who cannot read them, and every gap in it would be invisible; a list of
+dates is checkable by looking at the ledger.
+
+**One disputed paragraph is left standing with the disagreement recorded beside
+it** rather than edited to whichever reading was argued most recently. Nobody
+here can settle what the materials-and-supplies rule turns on, and the point of
+the events list is that the design no longer depends on the answer.
+
+The brief is a per-client template now. It stops calling `capitalise` the safe
+choice — doing nothing is still adopting a method — and it asks for a table by
+category rather than one answer.
+
 ### 2026-08-22 — The question only an accountant can answer (`claude/the-question-only-an-accountant-can-answer`)
 
 `docs/briefs/inventory-tax-treatment.md`, and a `docs/briefs/` section to put it

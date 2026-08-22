@@ -167,6 +167,105 @@ export async function inventoryTreatmentOf(
   return row?.inventoryTreatment ?? "none";
 }
 
+
+/**
+ * Every entry source this pack posts under. **The list is here rather than
+ * inline** because `postedInventoryEntries` has to count ALL of them, and a
+ * fifth source added to `ledger.ts` without being added here would make the
+ * guard below quietly under-count — which presents as the switch allowing a
+ * change it should have refused.
+ */
+const INVENTORY_ENTRY_SOURCES = [
+  "inventory_receipt",
+  "inventory_issue",
+  "inventory_adjustment",
+  "inventory_cost_adjustment",
+] as const;
+
+export interface PostedInventoryEntries {
+  entries: number;
+  /** Null when nothing has posted. */
+  firstOn: string | null;
+  lastOn: string | null;
+}
+
+/**
+ * What this pack has already put in the books.
+ *
+ * Read before letting anybody change how inventory posts — see
+ * `assertPostingChangeSafe`.
+ */
+export async function postedInventoryEntries(
+  tx: Tx,
+  tenantId: string,
+): Promise<PostedInventoryEntries> {
+  const [row] = await tx
+    .select({
+      entries: sql<string>`count(*)`,
+      firstOn: sql<string | null>`min(${schema.journalEntries.entryDate})`,
+      lastOn: sql<string | null>`max(${schema.journalEntries.entryDate})`,
+    })
+    .from(schema.journalEntries)
+    .where(
+      and(
+        eq(schema.journalEntries.tenantId, tenantId),
+        eq(schema.journalEntries.status, "posted"),
+        inArray(schema.journalEntries.source, [...INVENTORY_ENTRY_SOURCES]),
+      ),
+    );
+  return {
+    entries: Number(row?.entries ?? 0),
+    firstOn: row?.firstOn ?? null,
+    lastOn: row?.lastOn ?? null,
+  };
+}
+
+/**
+ * **TURNING POSTING OFF AFTER IT HAS POSTED STRANDS THE BALANCE SHEET, and
+ * until now nothing stopped it.**
+ *
+ * `postMovement` returns null on `none`. So a tenant that capitalised $10,000 of
+ * feed and then switched off keeps every one of those debits in Inventory, while
+ * the issues that would have relieved them stop posting entirely. The stock gets
+ * eaten and the asset never moves. Nothing reconciles it, nothing reports it,
+ * and the valuation screen — which folds movements rather than reading the
+ * ledger — goes on being right while the balance sheet quietly is not.
+ *
+ * The switch's own copy already says it does not backfill. **Nobody had said it
+ * does not unwind either**, which is the more expensive half.
+ *
+ * So this refuses, and it refuses rather than warning for the reason this pack
+ * refuses everywhere else: the damage is silent and compounding, and a warning
+ * on a screen is read once by somebody who has already decided.
+ *
+ * **Turning it ON is untouched.** That direction is additive, it is where every
+ * tenant starts, and the dialog already explains that history is not backfilled.
+ *
+ * There is deliberately NO in-product remedy offered. Unwinding capitalised
+ * stock is a decision about what the business owns, made by a person, as a
+ * journal entry — [ADR 0013](../../../docs/decisions/0013-inventory-tax-treatment.md)
+ * §A.6 says what the software must not improvise here, and this is that.
+ */
+export async function assertPostingChangeSafe(
+  tx: Tx,
+  tenantId: string,
+  next: "none" | "capitalise",
+): Promise<void> {
+  const current = await inventoryTreatmentOf(tx, tenantId);
+  if (current === next) return;
+  if (next !== "none") return;
+
+  const posted = await postedInventoryEntries(tx, tenantId);
+  if (posted.entries === 0) return;
+
+  throw new InventoryError(
+    "POSTING_LOCKED",
+    `Stock has been on this business's books since ${posted.firstOn}, across ${posted.entries} ${
+      posted.entries === 1 ? "entry" : "entries"
+    }. Turning posting off would leave that cost sitting in Inventory with nothing left to relieve it, because issues would stop posting too. Decide what to do with the stock already capitalised first — that is a journal entry somebody makes on purpose, not a setting.`,
+  );
+}
+
 /**
  * The GRNI account — `2050 Goods Received Not Invoiced`.
  *

@@ -28,9 +28,28 @@ import "server-only";
 type SharpModule = typeof import("sharp");
 let sharpPromise: Promise<SharpModule> | null = null;
 
-/** Cached so a page that normalises several images pays the load once. */
+/**
+ * Cached so a page that normalises several images pays the load once.
+ *
+ * **THE CATCH IS THE POINT.** When this broke in production the only thing a
+ * person could see was `digest: '508730998'` — the real message lived in a
+ * Vercel log nobody was reading, and finding it took a deliberate hunt. A
+ * native library that fails to load is an infrastructure fault, not a bad
+ * upload, and the error should say which so the next person starts in the right
+ * place.
+ */
 function loadSharp(): Promise<SharpModule> {
-  sharpPromise ??= import("sharp");
+  sharpPromise ??= import("sharp").catch((cause) => {
+    // Do not cache the failure: a redeploy that fixes the install should not
+    // need a cold start to be believed.
+    sharpPromise = null;
+    throw new Error(
+      "Image processing is unavailable on this deployment: sharp could not load its native library. " +
+        "This is a build/deploy problem, not a problem with the file — see next.config.ts " +
+        "`SHARP_NATIVE` and docs/modules/accounting.md.",
+      { cause },
+    );
+  });
   return sharpPromise;
 }
 

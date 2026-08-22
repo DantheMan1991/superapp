@@ -65,6 +65,12 @@ function toResult(err: unknown): { error: string } {
         return { error: "A cost cannot be negative." };
       case "ZERO_QUANTITY":
         return { error: "Enter a quantity other than zero." };
+      // Thrown by resolveInventoryAccounts / resolveGrniAccount when the chart
+      // cannot be resolved. It carries the repair in its message, so pass the
+      // message through rather than flattening it to a generic apology — the
+      // whole point of refusing instead of guessing is that somebody can act.
+      case "LEDGER_ACCOUNTS":
+        return { error: err.message };
       case "INVALID_REASON":
         return { error: "Use lowercase letters, numbers and underscores." };
       // Both are written for a person where they are thrown, and both are about

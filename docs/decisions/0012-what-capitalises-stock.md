@@ -67,13 +67,18 @@ to, and cannot attribute a variance to anything.
 So the link is an allocation, roughly:
 
 ```
-bill_line_receipt_allocations
+bill_line_stock_allocations
   bill_line_id
-  inventory_movement_id     -- the receipt being settled
+  inventory_movement_id     -- the stock receipt being settled
   quantity_matched
   receipt_cost_matched      -- what the ticket said, for this quantity
   invoice_cost_allocated    -- what the invoice says, for this quantity
 ```
+
+**Not `..._receipt_allocations`.** "Receipts" already means something else in
+this codebase — the scanned-document inbox at `/dashboard/m/accounting/receipts`,
+which has its own email intake address. A table joining bills to that inbox is a
+thing a reader could reasonably expect, so the name has to say `stock`.
 
 This is also what answers the **bill-first** case. A bill that arrives before its
 stock posts `Dr 2050 / Cr AP` with no allocation; the later receipt allocates

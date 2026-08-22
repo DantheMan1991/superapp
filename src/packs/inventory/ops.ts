@@ -46,6 +46,7 @@ import {
   type ValuationMethod,
   type ValuationTotal,
 } from "./core/valuation";
+import { postMovement } from "./ledger-ops";
 
 /**
  * Inventory operations. Every function takes a `Tx` so the caller owns the
@@ -1066,6 +1067,20 @@ export async function receiveStock(
     extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
+
+  // **THE BOOKS FOLLOW THE SHELF** (ADR 0012 §A.1). Posts only when the tenant
+  // has turned inventory posting on, and only when the ticket carried a price —
+  // a delivery with no cost posts NOTHING rather than posting zero, which is the
+  // same distinction `carriedValue` keeps on the valuation screen.
+  await postMovement(tx, ctx, {
+    movementId: movement.id,
+    kind: "receipt",
+    occurredOn: input.occurredOn,
+    costCents: movement.costCents ?? 0,
+    itemId: input.itemId,
+    lotCode: newLotCode ?? null,
+  });
+
   return { movement, lotId };
 }
 
@@ -1117,7 +1132,7 @@ export async function issueStock(
   const rate = await itemCostRate(tx, ctx.tenantId, input.itemId);
   const costCents = issueCostCents(rate, input.quantity);
 
-  return recordMovement(tx, ctx, {
+  const movement = await recordMovement(tx, ctx, {
     itemId: input.itemId,
     lotId: input.lotId ?? null,
     locationAssetId: input.locationAssetId ?? null,
@@ -1130,6 +1145,19 @@ export async function issueStock(
     extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
+
+  // `Dr consumption / Cr inventory`. An issue with no cost — an item nothing
+  // priced has ever come in for — posts nothing, for the same reason the
+  // receipt does not.
+  await postMovement(tx, ctx, {
+    movementId: movement.id,
+    kind: "issue",
+    occurredOn: input.occurredOn,
+    costCents: costCents ?? 0,
+    itemId: input.itemId,
+  });
+
+  return movement;
 }
 
 /**
@@ -1634,7 +1662,7 @@ export async function adjustStock(
     costCents = issueCostCents(rate, quantity);
   }
 
-  return recordMovement(tx, ctx, {
+  const movement = await recordMovement(tx, ctx, {
     itemId: input.itemId,
     lotId: input.lotId ?? null,
     locationAssetId: input.locationAssetId ?? null,
@@ -1646,6 +1674,20 @@ export async function adjustStock(
     extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
+
+  // `Dr variance / Cr inventory` for a loss. Stock that TURNS UP is stamped at
+  // null cost by the branch above — it was never bought — so a gain posts
+  // nothing, which is the asymmetry slice 2 decided and this inherits rather
+  // than re-litigates.
+  await postMovement(tx, ctx, {
+    movementId: movement.id,
+    kind: "adjustment",
+    occurredOn: input.occurredOn,
+    costCents: costCents ?? 0,
+    itemId: input.itemId,
+  });
+
+  return movement;
 }
 
 /**

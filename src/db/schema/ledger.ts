@@ -100,6 +100,34 @@ export const entryEditPolicy = pgEnum("entry_edit_policy", [
   "strict_append_only",
 ]);
 
+/**
+ * **HOW INVENTORY REACHES THE BOOKS**, per
+ * [ADR 0013](../../../docs/decisions/0013-inventory-tax-treatment.md).
+ *
+ * Orthogonal to `accounting_basis`, and deliberately so: a business's reporting
+ * basis does not determine its inventory treatment. A qualifying small business
+ * has more than one option available, and two businesses both correctly on the
+ * cash method can owe different answers — which is why an earlier draft that
+ * made this a property of the word "cash" was wrong.
+ *
+ * - `none` — **the default, and where every tenant is today.** Inventory does
+ *   not post at all. Cost accumulation still runs (it is always on, and wanted
+ *   regardless of tax basis); it simply does not reach the ledger. Correct for
+ *   any tenant not using accounting, and the only safe default for a change
+ *   that alters how purchases hit live books.
+ * - `capitalise` — stock is an asset. The receipt posts
+ *   `Dr Inventory / Cr Goods Received Not Invoiced`, the bill line clears GRNI,
+ *   and cost lands in the consumption account when stock is issued (ADR 0012).
+ *
+ * `expense_on_payment` is named in ADR 0013 and is NOT here yet: it needs the
+ * cash lens to substitute capitalising lines, which is its own change. Adding it
+ * costs one enum value and one migration.
+ */
+export const inventoryTreatment = pgEnum("inventory_treatment", [
+  "none",
+  "capitalise",
+]);
+
 /** Chart of accounts. Never hard-deleted once referenced — deactivate instead. */
 export const accounts = pgTable(
   "accounts",

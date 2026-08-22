@@ -684,7 +684,7 @@ commitment against a live animal to delivered without sitting on a shelf.
   idea stock arrived. Post `Dr 1300` from the receipt as well and the delivery
   is on the books twice. The two halves are one change:
   1. **A receipt-level allocation between a bill line and the movements it
-     settles** — `bill_line_receipt_allocations`, with a matched quantity and
+     settles** — `bill_line_stock_allocations`, with a matched quantity and
      both costs. **An `inventory_item_id` alone is NOT a match** and assuming it
      was is the largest hole review found in the first design: one item can have
      three unbilled receipts at three prices across two lots, and one invoice can

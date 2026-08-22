@@ -258,6 +258,9 @@ export function isCodableAccount(
   if (account.subtype === "opening_balance") return false;
   if (account.subtype === "due_from_affiliate") return false;
   if (account.subtype === "due_to_affiliate") return false;
+  // GRNI is set by ALLOCATING a bill line to a stock receipt, never by hand.
+  // Coding a line to it directly would clear a balance no receipt created.
+  if (account.subtype === "goods_received") return false;
   if (
     account.isSystem &&
     (account.subtype === "accounts_receivable" ||

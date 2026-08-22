@@ -54,6 +54,12 @@ export const GENERAL_COA: CoaTemplate = {
     { code: "1700", name: "Accumulated Depreciation", type: "asset", subtype: "accumulated_depreciation" },
     // Liabilities
     { code: "2000", name: "Accounts Payable", type: "liability", subtype: "accounts_payable", isSystem: true },
+    // **Goods received, not yet invoiced.** The account that joins what the
+    // business HAS to what it OWES: credited when stock arrives, debited when
+    // the bill for it is allocated. A standing credit balance is stock received
+    // with no invoice; a debit is an invoice for stock the books never received.
+    // Both are month-end questions worth being asked. See ADR 0012.
+    { code: "2050", name: "Goods Received Not Invoiced", type: "liability", subtype: "goods_received", isSystem: true },
     { code: "2100", name: "Credit Card", type: "liability", subtype: "credit_card" },
     { code: "2200", name: "Sales Tax Payable", type: "liability", subtype: "sales_tax", isSystem: true },
     { code: "2300", name: "Payroll Liabilities", type: "liability", subtype: "payroll_liability" },

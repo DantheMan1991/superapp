@@ -168,8 +168,24 @@ export default async function BillDetailPage({
     data.allAccounts.map((a) => [a.id, `${a.code} · ${a.name}`]),
   );
   const registerIds = new Set(data.registers.map((r) => r.accountId));
-  const codableAccounts = data.accounts.filter((a) =>
-    isCodableAccount(a, registerIds),
+  /**
+   * What may be PICKED, plus whatever the lines are already coded to.
+   *
+   * **A SELECT CANNOT SHOW A VALUE THAT IS NOT AMONG ITS OPTIONS.** Matching a
+   * bill to a delivery codes its line to Goods Received Not Invoiced, and GRNI
+   * is deliberately excluded from the pickable list so nobody hand-codes to it
+   * — so a matched line rendered with an EMPTY account box, on a screen whose
+   * own footnote says "approval requires accounts on every line". It looked
+   * uncoded and was not.
+   *
+   * Already-used accounts are added back for display. They stay out of the list
+   * for every other line, which is the part that mattered.
+   */
+  const usedAccountIds = new Set(
+    data.lines.map((l) => l.accountId).filter((id): id is string => !!id),
+  );
+  const codableAccounts = data.accounts.filter(
+    (a) => isCodableAccount(a, registerIds) || usedAccountIds.has(a.id),
   );
   const coding = readBillCoding(bill.aiCoding);
   const isOwner = ctx.role === "owner";

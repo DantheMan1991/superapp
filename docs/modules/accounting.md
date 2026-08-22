@@ -13,6 +13,40 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-22 — A native module took the payables actions down with it (branch `claude/approve-a-matched-bill`)
+
+**Approving a bill returned a 500 on the live app**, with nothing but a digest
+to go on. The Vercel log had the whole story:
+
+```
+Could not load the "sharp" module using the linux-x64 runtime
+ERR_DLOPEN_FAILED: libvips-cpp.so.8.18.3: cannot open shared object file
+digest: '508730998'
+```
+
+`ai/extract-image.ts` had a top-level `import sharp from "sharp"`,
+`ai/extract.ts` imports that file, and `payables/actions.ts` reaches
+`extract.ts` — so a native optional dependency failing to load **took every
+server action in the payables module with it.** Nothing about approving a bill
+touches an image.
+
+The import is lazy now, cached so a page normalising several images pays the
+load once. **This does not fix the install** — sharp genuinely cannot load on
+that runtime — it makes the blast radius honest: a missing libvips now breaks
+image normalisation, which is what it actually affects, instead of accounting.
+
+**The deployment side is still open.** `npm install --os=linux --cpu=x64 sharp`,
+or declaring it in `serverExternalPackages`, is the real repair, and receipt
+extraction from photographs stays broken in production until somebody does it.
+
+**Also fixed, and found by the same drive:** a bill line coded to Goods Received
+Not Invoiced rendered with an EMPTY account box. GRNI is deliberately excluded
+from `isCodableAccount` so nobody hand-codes to it — but a `Select` cannot
+display a value that is not among its options, so a matched line looked uncoded
+on a screen whose own footnote reads *"approval requires accounts on every
+line"*. Accounts already used by the bill's lines are added back for display and
+stay out of the list for everything else.
+
 ### 2026-08-21 — The basis you file on (branch `claude/the-basis-you-file-on`)
 
 **`accounting_settings.default_basis`**, and the end of a hardcoded literal that

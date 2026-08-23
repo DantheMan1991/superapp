@@ -199,3 +199,69 @@ describe("readText", () => {
     expect(readText("x".repeat(900), 10)).toHaveLength(10);
   });
 });
+
+/**
+ * ── WHAT A REAL RATE SHEET DID (2026-08-23) ───────────────────────────────
+ *
+ * Pleasant Valley Poultry's 2026 price list, a genuine two-page USDA poultry
+ * plant sheet, was run through the live extractor. These pin the two shapes it
+ * contains that a naive reader gets WRONG, because both were refused correctly
+ * and a later prompt change must not start guessing at them.
+ */
+describe("what a real rate sheet contains", () => {
+  it("keeps a banded fee OUT of the number and IN the note", () => {
+    // The chicken slaughter fee on that sheet is a 4-breed x 6-batch-band
+    // matrix — 24 prices. Any single one of them in `killFee` is wrong for the
+    // other 23. The live run returned null and put the whole matrix in the
+    // note, which is the only honest answer.
+    const out = validatePriceList({
+      rows: [
+        {
+          kind: "chicken",
+          capacityPerDay: null,
+          killFee: null,
+          cutWrapPerLb: null,
+          priceNotes:
+            "Cornish x $3.75 (50 to 100), $3.15 (101 to 250) ... varies by breed and batch size",
+        },
+      ],
+      note: "",
+    });
+    expect(out.rows[0].killFee).toBeNull();
+    expect(out.rows[0].priceNotes).toContain("varies by breed and batch size");
+  });
+
+  it("keeps a PER-POUND slaughter fee out of the per-head field", () => {
+    // Turkey on that sheet is $0.65-$0.90 PER POUND with a $10 minimum, not a
+    // flat fee per bird. `killFee` is per head, so the only correct value is
+    // null — and 0.65 would have looked entirely plausible sitting there.
+    const out = validatePriceList({
+      rows: [
+        {
+          kind: "turkey",
+          capacityPerDay: null,
+          killFee: null,
+          cutWrapPerLb: null,
+          priceNotes: "charged by weight, not a flat per head fee",
+        },
+      ],
+      note: "",
+    });
+    expect(out.rows[0].killFee).toBeNull();
+  });
+
+  it("takes the flat per-bird fees exactly as printed", () => {
+    // Ducks, geese and quail ARE flat per head, and the live run returned all
+    // three to the cent.
+    const out = validatePriceList({
+      rows: [
+        { kind: "duck", capacityPerDay: null, killFee: 10.55, cutWrapPerLb: null, priceNotes: "" },
+        { kind: "goose", capacityPerDay: null, killFee: 11.55, cutWrapPerLb: null, priceNotes: "" },
+        { kind: "quail", capacityPerDay: null, killFee: 2.75, cutWrapPerLb: null, priceNotes: "" },
+      ],
+      note: "",
+    });
+    expect(out.rows.map((r) => r.killFee)).toEqual([10.55, 11.55, 2.75]);
+    expect(out.rows.map((r) => r.kind)).toEqual(["duck", "goose", "quail"]);
+  });
+});

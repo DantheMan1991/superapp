@@ -406,11 +406,43 @@ export function ReadPriceListDialog({
     });
   };
 
+  /**
+   * **FIVE PRICES, ONE ROW — FOUND BY A REAL RATE SHEET.**
+   *
+   * `setHandle` upserts on `(processor, kind)`. A real poultry plant's sheet
+   * prices chickens, turkeys, ducks, geese and quail separately, and every one
+   * of them is `poultry` in this farm's vocabulary — so recording all five
+   * wrote five rows into ONE, each silently overwriting the last, and reported
+   * "5 recorded". The survivor was whichever happened to be last.
+   *
+   * The dialog already warned that recording a kind already on file replaces
+   * it. It said nothing about rows in the SAME batch colliding with each other,
+   * which is the case that actually arises.
+   */
+  const collidingKinds = (() => {
+    const seen = new Set<string>();
+    const clashes = new Set<string>();
+    for (const row of rows ?? []) {
+      if (!row.keep || row.kind === "") continue;
+      if (seen.has(row.kind)) clashes.add(row.kind);
+      seen.add(row.kind);
+    }
+    return clashes;
+  })();
+
   const confirm = () => {
     if (!rows) return;
     const keep = rows.filter((r) => r.keep && r.kind !== "");
     if (keep.length === 0) {
       toast.error("Nothing ticked, or nothing has been said what it is for.");
+      return;
+    }
+    if (collidingKinds.size > 0) {
+      toast.error(
+        `Two ticked rows are both ${[...collidingKinds]
+          .map(slugLabel)
+          .join(" and ")} — one price per kind, so recording both would keep only the last. Give them different kinds or untick one.`,
+      );
       return;
     }
     startTransition(async () => {
@@ -490,8 +522,10 @@ export function ReadPriceListDialog({
           {rows && rows.length > 0 && (
             <div className="space-y-2">
               <p className="text-sm font-medium">
-                {rows.length} read. Check them against the sheet — recording one
-                that is already there replaces it.
+                {rows.length} read. Check them against the sheet. There is one
+                price per kind, so recording a kind replaces whatever is on file
+                for it — and two ticked rows of the same kind would keep only the
+                last, which is why a clash is refused.
               </p>
               {rows.map((row, i) => (
                 <div
@@ -504,7 +538,14 @@ export function ReadPriceListDialog({
                     aria-label="Record this row"
                   />
                   <div className="w-36 space-y-1">
-                    <Label className="text-xs">What</Label>
+                    <Label className="text-xs">
+                      What
+                      {row.keep && collidingKinds.has(row.kind) && (
+                        <span className="ml-1 font-medium text-destructive">
+                          · clashes
+                        </span>
+                      )}
+                    </Label>
                     <Select
                       value={row.kind === "" ? "none" : row.kind}
                       onValueChange={(v) =>

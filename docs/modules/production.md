@@ -38,6 +38,55 @@ That is the same shape `land` found when 2a became three slices.
 
 ## Build log
 
+### 2026-08-23 — Slice 1a driven on `Test`, and for once it found nothing (`claude/driven-on-test`)
+
+**THE FIRST KILL SHEET ANYBODY HAS EVER TRANSCRIBED IN THIS APP**, entered by
+hand on the live site against the finished Butchering run (BATCH-2, 100 head in,
+618.0 lb on the trailer, 468.0 lb packaged). Three lines, deliberately chosen to
+walk the sheet from useless to answerable:
+
+| Line | Head | Live (plant) | Hanging | Outcome |
+| --- | --- | --- | --- | --- |
+| 1 | 60 | 368.0 lb | 292.0 lb | Passed |
+| 2 | 37 | 226.5 lb | 180.0 lb | Passed |
+| 3 | 3 | 18.5 lb | — | Condemned · Airsacculitis |
+
+**The refusal held at both incomplete stages, which is the behaviour worth
+having.** At 60 head the page said *"40 of the 100 that went in are not on it
+yet"* and both ratios read `—`; at 97 it said *"3 … not on it yet"* and still
+refused. Only at 100 — *"matches the 100 that went in"* — did it answer. A
+cutting yield computed at line one would have read about 160% and looked like a
+triumph.
+
+**Both ratios came out exactly where the arithmetic says**, over the passed
+animals only: dressing **79.4%** (472.0 hanging / 594.5 live) and cutting
+**99.2%** (468.0 packaged / 472.0 hanging). The condemned bird is out of both
+sides rather than averaged out of one.
+
+**The headline did not move, and that is the decision working.** Yield stayed
+75.7% over the full 618.0 lb and grew the line *"3 of 100 head condemned (3.0%),
+and they are still in the pounds that went in. This number is meant to read low
+when that happens."* The loss stays visible in the number a person actually
+looks at.
+
+Everything else behaved: the condemned form dropped the hanging-weight field
+entirely and offered an optional cause; causes grouped into *"Why they were
+condemned — Airsacculitis · 3 head"*; the `Condemned` column appeared on the run
+list only once a sheet existed, having been correctly absent while none did; and
+a FINISHED run accepted the sheet without complaint, which is the one write a
+complete run is meant to allow.
+
+**Checked behind the screen too.** Three `production.carcass.recorded` audit
+rows carrying `carcassId`, `runInputId`, `headCount` and `disposition` — and
+**not** the cause, which is free text off somebody else's paperwork and stays in
+the row. In the table, the condemned line holds `hanging_lb = NULL` and the
+passed lines hold an empty `condemn_reason`, so both CHECK constraints are doing
+their job rather than being enforced only in TypeScript.
+
+**No defect was found, which breaks a run of five slices in six.** Worth stating
+plainly rather than quietly: it is one sheet on one run, and the paths below are
+still untouched.
+
 ### 2026-08-23 — The migration that never ran, and the re-land (`claude/the-migration-that-never-ran`)
 
 **SLICE 1a TOOK THIS PACK'S PAGE DOWN FOR FIVE HOURS, AND THE CODE WAS NEVER THE
@@ -558,19 +607,15 @@ run model, separate templates), and the processing path and eligibility flag
 
 ## Open items
 
-- **SLICE 1a HAS NOT BEEN DRIVEN IN A BROWSER.** Every test passes — the ops
-  suite and the isolation certification included — and on the re-land the
-  certification ran against the Neon dev branch rather than a database built
-  from zero, so the schema this pack queries is the schema production now holds.
-  That closes the failure mode #251 shipped into; it closes nothing else.
-  **Five of the last six slices had at least one defect that only clicking
-  found, and one had a passing test over the wrong behaviour**, and this slice
-  is still in exactly that state. The screens most likely to be wrong are the
-  ones in a state nothing else on this pack has: a sheet on a FINISHED run, and
-  the form that changes shape when a carcass is condemned. **No carcass row has
-  ever been written by a person** — `production_run_carcasses` holds zero rows on
-  both databases. The blocker is a signed-in Clerk session rather than a
-  database, and the farm tenant to drive it on is Hilltop Farm on the dev branch.
+- ~~**SLICE 1a HAS NOT BEEN DRIVEN IN A BROWSER.**~~ **Driven on `Test`
+  2026-08-23** — the kill sheet transcribed line by line on the finished
+  Butchering run, including the condemned line. Nothing was found; see the build
+  log entry. What is still unexercised is narrower and worth naming: **`Correct`
+  and `Remove` were never clicked**, so the two audited edit paths
+  (`production.carcass.corrected`, `production.carcass.removed`) have never run
+  outside a test — and editing a condemnation back to a pass is the write those
+  audit rows exist for. `SHEET_OVER_ACCOUNTED` and `ALL_CONDEMNED` have also
+  never been seen on a screen.
 - **NOTHING EXTRACTS A KILL SHEET FROM A PHOTOGRAPH YET**, which is the other
   half of what the design calls kill-sheet capture and is slice 1b. The rows
   exist to extract into now, which is the ordering that made 1a first. The

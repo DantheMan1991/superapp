@@ -36,6 +36,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/** How a group reads. Falls back to the slug for a category nobody anticipated. */
+function categoryOf(category: string): string {
+  return PRICE_CATEGORY_LABELS[category] ?? slugLabel(category);
+}
+
 const BASE = "/dashboard/m/production";
 
 /**
@@ -275,10 +280,20 @@ export default async function ProcessorsPage() {
                                 ? "Anything"
                                 : slugLabel(item.kind)}
                             </Badge>
-                            <span className="text-muted-foreground">
-                              {PRICE_CATEGORY_LABELS[item.category] ??
-                                slugLabel(item.category)}
-                            </span>
+                            {/*
+                              **SUPPRESSED WHEN IT ONLY REPEATS THE LABEL.**
+                              Found by reading the live directory: five of
+                              Valley Poultry's rows said "Slaughter · Duck ·
+                              Slaughter · $10.55 per head". The grouping earns
+                              its place when it adds something and is noise when
+                              it does not.
+                            */}
+                            {categoryOf(item.category).toLowerCase() !==
+                              item.label.trim().toLowerCase() && (
+                              <span className="text-muted-foreground">
+                                {categoryOf(item.category)}
+                              </span>
+                            )}
                             {/* Not quoted is a question, never $0.00. */}
                             <span
                               className={

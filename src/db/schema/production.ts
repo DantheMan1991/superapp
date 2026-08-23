@@ -1363,6 +1363,24 @@ export const productionOrderLines = pgTable(
   (t) => [
     uniqueIndex("production_order_lines_tenant_id_id_idx").on(t.tenantId, t.id),
     index("production_order_lines_order_idx").on(t.tenantId, t.orderId),
+    /**
+     * **ONE LINE PER PRICED OPTION PER SHEET**, and PARTIAL so it says nothing
+     * about instruction lines — a sheet may carry as many of those as the
+     * customer has opinions.
+     *
+     * Found by driving on the live `Test` tenant, 2026-08-23: the picker went
+     * on offering an option already on the sheet, and `feeTotal` sums every
+     * line, so adding "Slaughter" twice would silently DOUBLE what the plant
+     * appears to have charged. Two lines quoting one option are two claims
+     * about the same thing; the way to say "more of it" is the quantity.
+     *
+     * The same option on two SHEETS is ordinary — a half sold to a customer and
+     * the retained half are both slaughtered — which is why this is scoped to
+     * the order and not to the run.
+     */
+    uniqueIndex("production_order_lines_one_per_price_item_idx")
+      .on(t.tenantId, t.orderId, t.priceItemId)
+      .where(sql`${t.priceItemId} is not null`),
     foreignKey({
       name: "production_order_lines_order_fk",
       columns: [t.tenantId, t.orderId],

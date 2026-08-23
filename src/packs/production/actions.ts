@@ -58,6 +58,13 @@ export async function startRunAction(input: unknown) {
       runKind: z.string().min(1).max(63).optional(),
       startedOn: requiredDate,
       locationAssetId: z.string().uuid().nullable().optional(),
+      /**
+       * THE PROCESSING PATH. Null is on-farm and is a real answer, not a
+       * missing one — see the column comment. Until this it could only arrive
+       * from a booking, which left a run started any other way unable to carry
+       * a cut sheet or a processing fee.
+       */
+      processorId: z.string().uuid().nullable().optional(),
       performedBy: z.string().max(200).optional(),
       crewSize: z.number().int().positive().max(1000).nullable().optional(),
       labourHours: z
@@ -84,7 +91,14 @@ export async function startRunAction(input: unknown) {
       actorClerkUserId: ctx.userId,
       targetType: "production_run",
       targetId: run.id,
-      meta: { code: run.code, runKind: run.runKind, startedOn: run.startedOn },
+      // The path goes in the log: it decides what the meat may be sold as, and
+      // it is stamped onto every output's batch at completion.
+      meta: {
+        code: run.code,
+        runKind: run.runKind,
+        startedOn: run.startedOn,
+        processorId: run.processorId,
+      },
     });
     revalidatePath(BASE, "layout");
     return { ok: true, runId: run.id };

@@ -8,6 +8,7 @@ import {
   priceWithUnit,
   slugLabel,
 } from "../vocabulary";
+
 import {
   AddInstructionDialog,
   AddOrderLineDialog,
@@ -15,6 +16,11 @@ import {
   RemoveOrderLineButton,
   type PriceItemOption,
 } from "./order-controls";
+
+/** How a group reads. Falls back to the slug for a category nobody anticipated. */
+function categoryLabel(category: string): string {
+  return PRICE_CATEGORY_LABELS[category] ?? slugLabel(category);
+}
 
 /**
  * ONE CUT SHEET, RENDERED ONCE.
@@ -57,7 +63,15 @@ export function CutSheet({
 }) {
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+      {/*
+        **SCREEN ONLY, BECAUSE THE PRINTED HEADER ALREADY SAYS ALL OF IT.**
+        Found by printing one: the page's print header rendered "Cut sheet —
+        Hendricks half" and this row rendered "Hendricks half · Cattle · 1 head"
+        immediately under it, with the head count twice. On the run page this
+        row is what tells two sheets apart, so it stays there — it is only
+        redundant on the sheet's own page, which is the only thing that prints.
+      */}
+      <div className="flex flex-wrap items-baseline justify-between gap-2 print:hidden">
         <div className="flex flex-wrap items-baseline gap-2">
           <h3 className="text-sm font-medium">{order.title || sheetWord}</h3>
           {order.kind !== "" && (
@@ -71,9 +85,16 @@ export function CutSheet({
         </div>
         {editable && (
           <span className="flex items-center gap-2 print:hidden">
+            {/*
+              **WHAT IS ALREADY ON THE SHEET IS NOT OFFERED AGAIN.** The write
+              refuses a second line for one option and the index makes that
+              true of every path — this is what stops somebody meeting either.
+            */}
             <AddOrderLineDialog
               orderId={order.id}
-              options={priceOptions}
+              options={priceOptions.filter(
+                (o) => !lines.some((l) => l.priceItemId === o.id),
+              )}
               sheetWord={sheetWord}
             />
             <AddInstructionDialog orderId={order.id} />
@@ -99,17 +120,34 @@ export function CutSheet({
                 className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b py-1.5 last:border-0"
               >
                 <span className="font-medium">{line.label}</span>
-                <span className="text-muted-foreground">
-                  {PRICE_CATEGORY_LABELS[line.category] ??
-                    slugLabel(line.category)}
-                </span>
+                {/*
+                  **THE GROUPING IS SCREEN-ONLY, AND IT DISAPPEARS WHEN IT ONLY
+                  REPEATS THE LABEL.** Both found by reading a real one:
+                  "Slaughter · Slaughter" on five rows of Valley Poultry's
+                  sheet, and on the printed page a butcher being told that
+                  "Keep the heart and liver" is filed under "Extras" — which is
+                  this farm's filing, not an instruction to them.
+                */}
+                {categoryLabel(line.category).toLowerCase() !==
+                  line.label.trim().toLowerCase() && (
+                  <span className="text-muted-foreground print:hidden">
+                    {categoryLabel(line.category)}
+                  </span>
+                )}
                 {line.notes !== "" && (
                   <span className="text-muted-foreground">{line.notes}</span>
                 )}
-                {/* Not a charge at all, and saying so is what stops an
-                    instruction reading as an option nobody priced. */}
+                {/*
+                  Not a charge at all, and saying so is what stops an
+                  instruction reading as an option nobody priced.
+
+                  **`ml-auto` IS ON BOTH BRANCHES OR THE ROW STOPS LINING UP.**
+                  A priced row is pushed right by its price; an instruction row
+                  had nothing to push it, so its Remove sat inline in the
+                  sentence while every row above it had one at the margin.
+                */}
                 {line.unit === null && (
-                  <span className="text-xs text-muted-foreground print:hidden">
+                  <span className="ml-auto text-xs text-muted-foreground print:hidden">
                     instruction
                   </span>
                 )}

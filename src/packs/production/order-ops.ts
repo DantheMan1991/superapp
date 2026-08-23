@@ -332,6 +332,28 @@ export async function addOrderLine(
         "that price belongs to somebody else — a sheet quotes the rates of the place it is going to",
       );
     }
+    /**
+     * **ONE LINE PER PRICED OPTION PER SHEET.** The unique index says so and
+     * this says it in words, because a constraint violation here would surface
+     * as an index name on a screen where the answer is plain: two lines quoting
+     * one option are two claims about the same thing, and the way to ask for
+     * more of it is the quantity. Found by driving — the picker offered an
+     * option already on the sheet, and adding it twice would have doubled what
+     * the plant appeared to charge.
+     */
+    const already = await tx.query.productionOrderLines.findFirst({
+      where: and(
+        eq(schema.productionOrderLines.tenantId, ctx.tenantId),
+        eq(schema.productionOrderLines.orderId, orderId),
+        eq(schema.productionOrderLines.priceItemId, input.priceItemId),
+      ),
+    });
+    if (already) {
+      throw new ProductionError(
+        "ORDER_INVALID",
+        `${row.label} is already on this sheet — change how many rather than adding it twice`,
+      );
+    }
     quoted = row;
   }
 

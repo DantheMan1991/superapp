@@ -82,6 +82,98 @@ by the move: the two live weights, the condemnation adjustment, the withdrawal
 guard, the booking model and the migration that never ran are all argued there,
 and that is the file to read before changing any of them.
 
+### 2026-08-23 — Slices 2a–2c driven on `Test`, and what the sheet forgot to say (`claude/what-the-sheet-forgot-to-say`)
+
+**DRIVEN END TO END ON THE LIVE `Test` TENANT**, and it found nine things — two
+of them real gaps rather than copy. The pattern held: everything the tests
+assert was true, and everything they cannot see was where the defects were.
+
+**WHAT WORKED, INCLUDING ONE THING THAT HAD NEVER RUN.** The backfill landed
+Miller's `$105.00 per head` and `$0.90 per lb hanging` with the units the old
+columns only implied. A cut sheet was written against a September BOOKING —
+months before any run — which is the case that needed the order to hang off
+both. `startRunFromBooking` carried the processor onto the run and the badge
+read *Sent out · Valley Poultry Processing*: **that closes slice 1d's
+longest-standing open item**, a run actually sent out, which had never been
+exercised. The fee then computed on the live run — `40 head measured × $4.50` +
+`38 packages counted × $1.15` = **$223.70** — with "measured" and "counted"
+rendering differently and the uncounted line reported rather than assumed.
+
+**AND THE REFUSAL THAT LOOKED LIKE A BUG WAS NOT ONE.** Completing the run
+failed repeatedly with what appeared to be a hang. It was
+`resolveMovementEntity` refusing correctly: `Test` keeps TWO companies and the
+output had no location, so *"This business keeps more than one set of books, so
+stock has to say where it is before its cost can be posted."* The message was on
+screen the whole time; the browser tooling was timing out on screenshots. Worth
+recording because the wrong conclusion was drawn twice before the toast was read
+directly out of the DOM.
+
+── THE TWO THAT WERE NOT COPY ───────────────────────────────────────────────
+
+**A RUN STARTED BY HAND COULD NEVER NAME A PLANT.** `production_runs.processor_id`
+has existed since 1d and only `startRunFromBooking` ever set it; the *Start a
+batch* form had no picker at all. That was survivable while the column drove a
+badge and stopped being survivable the moment the cut sheet and the processing
+fee hung off it — a farm that drove the animals over without recording a booking
+had no way to record what it was charged, and `Test`'s own first butchering run
+is exactly that case. The form now offers it, hidden entirely when no plant has
+been recorded, and defaulting to *Done here*.
+
+**THE PRINTED CUT SHEET HAD NO DATE ON IT.** The print header carried the plant,
+the animal and the head count, and said WHEN only when a run already existed —
+so a sheet written against a September booking printed with nothing to say which
+day it was for. That is the one document that leaves the building, handed to
+somebody who is holding a date. It now prints the run's day once there is one,
+the booking's day before that, and both when they differ, because a sheet
+written for the 10th and used on the 12th is a real thing to be able to see.
+
+**A DUPLICATE LINE WOULD HAVE DOUBLED THE FEE.** The option picker went on
+offering an option already on the sheet, nothing refused a second line, and
+`feeTotal` sums every line — so "Slaughter" twice would have silently doubled
+what the plant appeared to charge, on the figure that reaches the cost of the
+meat. Fixed at all three levels the pack usually uses: a PARTIAL unique index
+(`0202`), a refusal in words at the ops layer, and a picker that stops offering
+what is already there. **Partial and scoped to the ORDER**, because an
+instruction line has no price item and a sheet may carry as many as the customer
+has opinions — and because the same option on two SHEETS is the design's *one
+animal, two cut sheets*, which this must not refuse.
+
+── THE COPY, WHICH IS WHERE THIS PACK KEEPS BLEEDING ────────────────────────
+
+Sixth slice running where driving found copy defects that `tsc`, eslint and the
+whole suite were blind to:
+
+- **`Slaughter · Duck · Slaughter · $10.55 per head`** — the category repeated
+  the label, on five of Valley Poultry's rows. The grouping is now suppressed
+  when it only repeats the label, on both screens.
+- **The printed sheet said `· cattle ·`** — the raw slug, lowercase, where every
+  screen says *Cattle*. `slugLabel` was missing from the one header that prints.
+- **The sheet's title printed twice**, and the head count twice, because the
+  print header and the shared `CutSheet` component both render the identity. The
+  component's row is now screen-only; on the run page it is what tells two
+  sheets apart, so it stays there.
+- **The category printed at all** — a butcher does not need to be told that
+  "Keep the heart and liver" is filed under *Extras*. That is this farm's
+  filing, not an instruction to them.
+- **An instruction row's Remove sat inline** in the sentence while every priced
+  row's sat at the margin: the price span carried the `ml-auto` and the
+  instruction branch had nothing to push it.
+- **`Vacuum Shrink Pkg.. The real figure is higher`** — a label routinely ends
+  in a full stop and the sentence added a second. Both places now use a dash.
+- **The finish dialog opened "sharing the $0.00 that went in"** while the
+  outputs were about to share $223.70. It quoted `potCents`, which deliberately
+  excludes the fee because nobody has said what the fee is until the box below
+  is filled in. It now reads off the typed fee and splits the sentence when
+  there is one.
+
+**THE LESSON THAT GENERALISES, and it is the same one as `the-word-the-note-forgot`:**
+every one of these is in a string, and every one was found by reading a screen
+out loud rather than by running anything. The two structural gaps were found the
+same way — by trying to do the thing rather than by asserting that it could be
+done.
+
+Migration `0202`. 4 new tests. Everything else in this entry is copy or a picker.
+
 ### 2026-08-23 — Slices 2b and 2c: the sheet you hand over, and what it costs the meat (`claude/what-the-menu-actually-costs`)
 
 **THE POT WAS ONLY EVER HALF A COST.** `completeRun` rolled the animals'
@@ -807,10 +899,18 @@ run model, separate templates), and the processing path and eligibility flag
 - **NOTHING WARNS THAT AN ACCRUAL HAS BEEN OPEN FOR MONTHS.** Same reason: until
   the bill can be matched there is nothing to close it against, so a digest line
   would be an obligation nobody can discharge.
-- **NOTHING HAS BEEN PRINTED.** The cut sheet's `print:` rules follow the
-  invoice pattern and have never been through a browser's print dialog, let
-  alone a printer. What a page does at `window.print()` is not something `tsc`
-  or a test can tell you.
+- ~~**NOTHING HAS BEEN PRINTED.**~~ **Printed and read 2026-08-23**, by
+  injecting the compiled `@media print` rules as screen styles rather than
+  opening a print dialog — which is a technique worth keeping, because it makes
+  the printed page readable and screenshotable. It found four defects. **What
+  has still never happened is an actual printer**, so nothing has checked page
+  breaks on a sheet longer than one page.
+- **A LONG SHEET'S PAGE BREAKS ARE UNTESTED.** Every sheet driven so far fits
+  on one page. A twelve-option chicken sheet will not, and nothing says a line
+  may not break across pages or that the header repeats.
+- **A SHEET STILL HAS NO "HANDED OVER" STATE** — see below; driving did not
+  change that, but printing one made it more obviously missing, because the
+  moment you print is the moment you would want it recorded.
 - **A SHEET CANNOT BE REORDERED.** Lines sort by the sheet's own grouping and
   then alphabetically, which is right for reading against a rate sheet and
   arbitrary for a plant working down a list. Nobody has asked yet.

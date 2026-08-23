@@ -90,11 +90,16 @@ export function StartRunForm({
   runWord,
   kindOptions,
   locations,
+  processors,
+  processorWord,
   today,
 }: {
   runWord: string;
   kindOptions: string[];
   locations: PlaceOption[];
+  /** Who could have done it. Empty when nobody has recorded a plant. */
+  processors: PlaceOption[];
+  processorWord: string;
   today: string;
 }) {
   const router = useRouter();
@@ -106,12 +111,14 @@ export function StartRunForm({
     const chosen =
       kind === CUSTOM ? String(formData.get("customKind") ?? "") : kind;
     const location = String(formData.get("locationAssetId") ?? NONE);
+    const processor = String(formData.get("processorId") ?? NONE);
     startTransition(async () => {
       const result = await startRunAction({
         code: String(formData.get("code") ?? ""),
         runKind: chosen.trim().toLowerCase().replace(/\s+/g, "_") || undefined,
         startedOn: String(formData.get("startedOn") ?? today),
         locationAssetId: location === NONE ? null : location,
+        processorId: processor === NONE ? null : processor,
         performedBy: String(formData.get("performedBy") ?? ""),
         crewSize: numberOrNull(formData.get("crewSize")),
         labourHours: numberOrNull(formData.get("labourHours")),
@@ -213,6 +220,44 @@ export function StartRunForm({
                 </SelectContent>
               </Select>
             </div>
+            {/*
+              **WHO DID IT, AND UNTIL NOW THIS FORM COULD NOT SAY.** The
+              processing path existed on the run from slice 1d and only
+              `startRunFromBooking` ever set it, so a run started here was
+              always on-farm — which was survivable while the column drove a
+              badge, and stopped being survivable when the cut sheet and the
+              processing fee started hanging off it. A farm that drove the
+              animals over without recording a booking had no way to record what
+              the plant charged. Found by driving on the live `Test` tenant.
+
+              Hidden entirely when no plant has been recorded, because a picker
+              whose only option is "nobody" is a question with one answer.
+            */}
+            {processors.length > 0 && (
+              <div className="grid gap-2">
+                <Label htmlFor="processorId">Who did it</Label>
+                <Select name="processorId" defaultValue={NONE}>
+                  <SelectTrigger id="processorId">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>Done here</SelectItem>
+                    {processors.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Leave it on <em>Done here</em> for work you did yourself.
+                  Naming a {processorWord.toLowerCase()} is what lets this
+                  {runWord.toLowerCase() === "run" ? " run" : ` ${runWord.toLowerCase()}`}{" "}
+                  carry a cut sheet and what they charged — and it decides what
+                  the meat may be sold as.
+                </p>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-4">
               <div className="grid gap-2 col-span-1">
                 <Label htmlFor="performedBy">Who</Label>
@@ -790,6 +835,13 @@ export function CompleteRunButton({
   const [fee, setFee] = useState(
     quotedFeeCents != null ? (quotedFeeCents / 100).toFixed(2) : "",
   );
+  /** What is in the box right now, in cents. Empty and unreadable both mean nothing. */
+  const typedFeeCents = (() => {
+    const trimmed = fee.trim();
+    if (trimmed === "") return 0;
+    const value = Number(trimmed);
+    return Number.isFinite(value) && value > 0 ? Math.round(value * 100) : 0;
+  })();
 
   function submit(formData: FormData) {
     startTransition(async () => {
@@ -830,12 +882,33 @@ export function CompleteRunButton({
         <form action={submit}>
           <DialogHeader>
             <DialogTitle>Finish this {runWord.toLowerCase()}</DialogTitle>
+            {/*
+              **THE FIGURE HAS TO MOVE WITH THE BOX, and it did not.** This
+              sentence quoted `potCents`, which is what went in and deliberately
+              does NOT include the fee — nobody has said what the fee is until
+              the box below is filled in. So a run whose inputs carried nothing
+              opened with "sharing the $0.00 that went in" while the outputs
+              were about to share $223.70. Found by finishing one on the live
+              `Test` tenant.
+
+              It reads off the typed fee rather than the quote, because the
+              typed fee is what will actually be stamped.
+            */}
             <DialogDescription>
               {outputCount === 1
                 ? "One output lands in Inventory as a made-here batch"
                 : `All ${outputCount} outputs land in Inventory as made-here batches`}
-              , sharing the {formatMoney(potCents, currencySymbol)} that went in.
-              Their cost is stamped as they land and is never recalculated
+              , sharing the {formatMoney(potCents + typedFeeCents, currencySymbol)}{" "}
+              this run has taken on
+              {typedFeeCents > 0 ? (
+                <>
+                  {" "}
+                  — {formatMoney(potCents, currencySymbol)} out of stock and{" "}
+                  {formatMoney(typedFeeCents, currencySymbol)} charged for the
+                  work
+                </>
+              ) : null}
+              . Their cost is stamped as they land and is never recalculated
               afterwards, so buying dearer feed next month will not change what
               this run cost.
             </DialogDescription>

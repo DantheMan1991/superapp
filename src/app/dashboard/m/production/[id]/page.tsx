@@ -533,8 +533,8 @@ export default async function ProductionRunPage({
                 {detail.quotedFee.unpriced.length}{" "}
                 {detail.quotedFee.unpriced.length === 1 ? "line" : "lines"} could
                 not be worked out because nobody has counted them —{" "}
-                {detail.quotedFee.unpriced.map((l) => l.label).join(", ")}. The
-                real figure is higher than what is shown.
+                {detail.quotedFee.unpriced.map((l) => l.label).join(", ")} —
+                so the real figure is higher than what is shown.
               </p>
             )}
             {run.processingFeeCents !== null && (

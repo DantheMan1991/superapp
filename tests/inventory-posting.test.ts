@@ -667,6 +667,38 @@ it("WILL NOT RELEASE COST THAT NEVER CAME IN", async () => {
         expect(await netOf(accrued)).toBe(before);
       });
 
+      it("RESOLVES THE COMPANY FROM WHERE THE STOCK WENT when the run names no place", async () => {
+        /**
+         * **THE DEFECT THIS TEST EXISTS FOR, found on the live `Test` tenant.**
+         *
+         * `resolveMovementEntity` needs a location to say whose books an entry
+         * belongs to once a tenant keeps more than one set. A run started from
+         * a booking never sets one — `startRunFromBooking` knows a date and a
+         * plant, not a freezer — so the accrual passed null and every
+         * completion with a fee refused, with a message about stock having to
+         * say where it is on a run whose stock HAD said.
+         *
+         * This suite is the only place that could have caught it: the pack's
+         * own tenant keeps one company, where a null location resolves fine.
+         */
+        const accrued = await asOwner((tx) =>
+          resolveServicesAccruedAccount(tx, tenantId),
+        );
+        const before = await netOf(accrued);
+        await asOwner((tx) =>
+          postServiceAccrual(tx, ownerCtx(), {
+            sourceId: randomUUID(),
+            amountCents: 23_500,
+            occurredOn: "2026-06-04",
+            // What the run carried: nothing. The freezer is what the outputs
+            // used, and borrowing it is the same answer the receipts just gave.
+            locationAssetId: freezerId,
+            memo: "Processing accrued — no place on the run",
+          }),
+        );
+        expect(await netOf(accrued)).toBe(before - 23_500);
+      });
+
       it("is idempotent on the run it names, so a retry cannot accrue twice", async () => {
         // The key is the run, not the moment. Completing a run happens in one
         // transaction, but a retried request that got as far as posting must

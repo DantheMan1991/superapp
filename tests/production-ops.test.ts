@@ -1764,6 +1764,126 @@ d("production ops", () => {
       expect(after?.quotedFee?.unpriced).toEqual([]);
     });
 
+    it("REFUSES THE SAME PRICED OPTION TWICE ON ONE SHEET", async () => {
+      // **FOUND BY DRIVING, 2026-08-23.** The picker went on offering an option
+      // already on the sheet and nothing refused a second line for it — and
+      // `feeTotal` sums every line, so "Slaughter" twice would silently DOUBLE
+      // what the plant appeared to have charged, on the figure that goes into
+      // the cost of the meat.
+      const { processor, kill } = await plantWithRates("Twice Over Meats");
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-TWICE",
+          startedOn: TODAY,
+          processorId: processor.id,
+        }),
+      );
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+        }),
+      );
+      await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, { priceItemId: kill.id }),
+      );
+      await expect(
+        asOwner((tx) =>
+          addOrderLine(tx, ownerCtx(), order.id, { priceItemId: kill.id }),
+        ),
+      ).rejects.toThrow(/already on this sheet/);
+    });
+
+    it("allows the same option on TWO sheets, which is the ordinary case", async () => {
+      // The design's *one animal, two cut sheets*: a half sold to a customer and
+      // the retained half are both slaughtered. The refusal above is scoped to
+      // the order and must not reach across a run.
+      const { processor, kill } = await plantWithRates("Two Halves Packing");
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-HALVES",
+          startedOn: TODAY,
+          processorId: processor.id,
+        }),
+      );
+      const theirs = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+          title: "Customer half",
+        }),
+      );
+      const ours = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+          title: "Retained half",
+        }),
+      );
+      await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), theirs.id, { priceItemId: kill.id }),
+      );
+      await expect(
+        asOwner((tx) =>
+          addOrderLine(tx, ownerCtx(), ours.id, { priceItemId: kill.id }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it("allows as many INSTRUCTIONS as somebody has opinions", async () => {
+      // The index is partial for this reason: an instruction has no price item,
+      // and "grind the chuck" beside "keep the heart" is two of them.
+      const { processor } = await plantWithRates("Opinions Abattoir");
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-OPINIONS",
+          startedOn: TODAY,
+          processorId: processor.id,
+        }),
+      );
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+        }),
+      );
+      for (const label of ["Grind the chuck", "Keep the heart", "Save the fat"]) {
+        await asOwner((tx) =>
+          addOrderLine(tx, ownerCtx(), order.id, { label }),
+        );
+      }
+      const detail = await asOwner((tx) => getOrder(tx, tenantId, order.id));
+      expect(detail?.lines).toHaveLength(3);
+    });
+
+    it("A RUN STARTED BY HAND CAN NAME A PLANT, which it could not before", async () => {
+      // **THE GAP DRIVING FOUND.** The processing path existed from slice 1d and
+      // only `startRunFromBooking` ever set it, so a run started any other way
+      // was always on-farm — survivable while it drove a badge, and not once the
+      // cut sheet and the processing fee hung off it. A farm that drove the
+      // animals over without recording a booking could not say what it was
+      // charged.
+      const { processor } = await plantWithRates("By Hand Packing");
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-BYHAND",
+          startedOn: TODAY,
+          processorId: processor.id,
+        }),
+      );
+      expect(run.processorId).toBe(processor.id);
+
+      // And the consequence: it can carry a sheet and a fee.
+      await expect(
+        asOwner((tx) =>
+          createOrder(tx, ownerCtx(), {
+            processorId: processor.id,
+            runId: run.id,
+          }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
     it("refuses a sheet attached to neither a date nor a run", async () => {
       const { processor } = await plantWithRates("Unattached Packing");
       await expect(

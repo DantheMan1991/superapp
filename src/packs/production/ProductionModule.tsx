@@ -25,6 +25,7 @@ import {
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { listLocations } from "@/packs/inventory/ops";
+import { listProcessors } from "@/packs/production/processor-ops";
 import { listRuns, runSummaries } from "./ops";
 import { exemptionUsage } from "./exemption-ops";
 import {
@@ -67,13 +68,17 @@ export async function ProductionModule({
   const today = todayInTimezone(ctx.tenant.timezone);
   const currencySymbol = ctx.tenant.currencySymbol;
 
-  const { runs, summaries, pack, locations, exemptions } = await withTenant(
+  const { runs, summaries, pack, locations, exemptions, processors } =
+    await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [runs, pack, locations] = await Promise.all([
+      const [runs, pack, locations, processors] = await Promise.all([
         listRuns(tx, ctx.tenant.id, { status }),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "production"),
         listLocations(tx, ctx.tenant.id),
+        // Who could have done it. Only the active ones — an archived plant is
+        // still on old runs and must not be offered for a new one.
+        listProcessors(tx, ctx.tenant.id),
       ]);
       const summaries = await runSummaries(
         tx,
@@ -86,7 +91,7 @@ export async function ProductionModule({
         exemptionsFrom(pack.config),
         Number(today.slice(0, 4)),
       );
-      return { runs, summaries, pack, locations, exemptions };
+      return { runs, summaries, pack, locations, exemptions, processors };
     },
     { role: ctx.role },
   );
@@ -126,6 +131,11 @@ export async function ProductionModule({
                 runWord={runWord}
                 kindOptions={runKindsFrom(pack.config)}
                 locations={locations.map((l) => ({ id: l.id, name: l.name }))}
+                processors={processors.map((p) => ({
+                  id: p.processor.id,
+                  name: p.name,
+                }))}
+                processorWord={labelFor(pack.labels, "processor", "Processor")}
                 today={today}
               />
             ) : null}

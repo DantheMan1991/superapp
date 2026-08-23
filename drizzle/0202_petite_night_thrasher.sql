@@ -1,0 +1,27 @@
+-- One line per priced option per cut sheet.
+--
+-- FOUND BY DRIVING ON THE LIVE `Test` TENANT, 2026-08-23. The option picker
+-- went on offering an option already on the sheet, and nothing refused a
+-- second line for it — `feeTotal` sums every line, so adding "Slaughter" twice
+-- would silently DOUBLE what the plant appeared to have charged, on the figure
+-- that goes into the cost of the meat.
+--
+-- PARTIAL, so it says nothing about instruction lines: "grind the chuck" and
+-- "keep the heart" both have a null `price_item_id`, and a sheet may carry as
+-- many of those as the customer has opinions.
+--
+-- SCOPED TO THE ORDER AND NOT THE RUN, deliberately. The same option on two
+-- SHEETS is ordinary — a half sold to a customer and the retained half are
+-- both slaughtered — and the design's "one animal, two cut sheets" is the case
+-- this must not refuse.
+--
+-- SAFE TO APPLY AHEAD OF THE DEPLOY: it can only fail if a duplicate already
+-- exists, and the query below returned none on either database before this was
+-- written. If it ever does fail, the fix is to delete the later of the two
+-- lines, not to drop the index.
+--
+--   select tenant_id, order_id, price_item_id, count(*)
+--   from production_order_lines where price_item_id is not null
+--   group by 1,2,3 having count(*) > 1;
+
+CREATE UNIQUE INDEX "production_order_lines_one_per_price_item_idx" ON "production_order_lines" USING btree ("tenant_id","order_id","price_item_id") WHERE "production_order_lines"."price_item_id" is not null;

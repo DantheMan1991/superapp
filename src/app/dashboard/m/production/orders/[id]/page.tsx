@@ -10,8 +10,10 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
+import { slugLabel } from "@/packs/production/vocabulary";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOrder } from "@/packs/production/order-ops";
+import { getBooking } from "@/packs/production/booking-ops";
 import { getProcessor } from "@/packs/production/processor-ops";
 import { runDetail } from "@/packs/production/ops";
 import { CutSheet } from "@/packs/production/components/cut-sheet";
@@ -66,13 +68,21 @@ export default async function CutSheetPage({
       const run = detail.order.runId
         ? await runDetail(tx, ctx.tenant.id, detail.order.runId, today)
         : null;
-      return { detail, processor, pack, run };
+      /**
+       * The day the sheet was written against. Read separately rather than
+       * joined onto the order, because a sheet started off a RUN has no booking
+       * at all and the printed header has to say so rather than print nothing.
+       */
+      const booking = detail.order.bookingId
+        ? await getBooking(tx, ctx.tenant.id, detail.order.bookingId)
+        : null;
+      return { detail, processor, pack, run, bookedFor: booking?.bookedFor ?? null };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { detail, processor, pack, run } = data;
+  const { detail, processor, pack, run, bookedFor } = data;
   const { order, lines, processorName } = detail;
 
   const sheetWord = labelFor(pack.labels, "cutSheet", "Order");
@@ -106,9 +116,30 @@ export default async function CutSheetPage({
         </h1>
         <p className="text-sm">
           For {processorName}
-          {order.kind !== "" ? ` · ${order.kind}` : ""}
+          {order.kind !== "" ? ` · ${slugLabel(order.kind)}` : ""}
           {order.headCount !== null ? ` · ${order.headCount} head` : ""}
-          {run ? ` · ${run.run.code}` : ""}
+        </p>
+        {/*
+          **THE DATE, AND IT WAS MISSING** — found by printing one on the live
+          `Test` tenant, 2026-08-23. The header named the plant, the animal and
+          the head count, and said WHEN only when a run already existed. A sheet
+          written against a September booking printed with nothing on it to say
+          which day it was for, which is the one fact a plant needs most: they
+          are holding a date, and the paper that arrives with the animals has to
+          match it.
+
+          The run's day wins once there is one, because that is when the work
+          actually happened; the booking's day is the promise it was written
+          against. Both are printed when they differ, since a sheet written for
+          the 10th and used on the 12th is a real thing to be able to see.
+        */}
+        <p className="text-sm">
+          {run ? `${run.run.startedOn} · ${run.run.code}` : null}
+          {run && bookedFor && bookedFor !== run.run.startedOn
+            ? ` · booked for ${bookedFor}`
+            : null}
+          {!run && bookedFor ? `Booked for ${bookedFor}` : null}
+          {!run && !bookedFor ? "No day set" : null}
         </p>
       </div>
 
@@ -126,7 +157,11 @@ export default async function CutSheetPage({
         className="print:hidden"
         title={order.title || sheetWord}
         description={`For ${processorName}${
-          run ? ` · ${run.run.code}` : " · not yet a processing day"
+          run
+            ? ` · ${run.run.code} · ${run.run.startedOn}`
+            : bookedFor
+              ? ` · booked for ${bookedFor}`
+              : " · not yet a processing day"
         }`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -176,10 +211,16 @@ export default async function CutSheetPage({
               </div>
               {uncounted.length > 0 ? (
                 <p className="text-xs text-muted-foreground">
+                  {/*
+                    **NO FULL STOP AFTER THE LIST** — a label routinely ends in
+                    one ("Vacuum Shrink Pkg.") and the sentence added a second,
+                    which is what a real rate sheet's own punctuation does to
+                    copy that assumes it will not.
+                  */}
                   {uncounted.length}{" "}
                   {uncounted.length === 1 ? "line has" : "lines have"} not been
-                  counted — {uncounted.map((l) => l.label).join(", ")}. The real
-                  figure is higher than this.
+                  counted — {uncounted.map((l) => l.label).join(", ")} — so the
+                  real figure is higher than this.
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">

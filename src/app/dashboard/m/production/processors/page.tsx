@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listProcessors } from "@/packs/production/processor-ops";
 import {
   INSPECTION_LABELS,
-  INSPECTION_NOTES,
+  inspectionNote,
   LABELLING_LABELS,
   RATING_LABELS,
   centsToDisplay,
@@ -157,7 +157,7 @@ export default async function ProcessorsPage() {
 
               <CardContent className="space-y-5">
                 <p className="text-sm text-muted-foreground">
-                  {INSPECTION_NOTES[processor.inspection]}
+                  {inspectionNote(processor.inspection, word)}
                 </p>
 
                 <div className="space-y-2">

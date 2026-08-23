@@ -34,7 +34,7 @@ import {
 import {
   INSPECTIONS,
   INSPECTION_LABELS,
-  INSPECTION_NOTES,
+  inspectionNote,
   LABELLING_LABELS,
   LABELLING_OPTIONS,
   RATING_LABELS,
@@ -129,7 +129,7 @@ function ProcessorFormBody({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          {INSPECTION_NOTES[fields.inspection]}
+          {inspectionNote(fields.inspection, word)}
         </p>
       </div>
 

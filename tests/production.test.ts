@@ -29,6 +29,7 @@ import {
   INSPECTIONS,
   INSPECTION_LABELS,
   INSPECTION_NOTES,
+  inspectionNote,
   LABELLING_OPTIONS,
   RATING_LABELS,
   centsToDisplay,
@@ -362,6 +363,23 @@ describe("processor vocabulary", () => {
     for (const value of INSPECTIONS) {
       expect(INSPECTION_LABELS[value]).toBeTruthy();
       expect(INSPECTION_NOTES[value]?.length ?? 0).toBeGreaterThan(20);
+    }
+  });
+
+  it("says the tenant's word, not the pack's, in every note", () => {
+    // FOUND BY DRIVING IT. The note under the inspection field said "this
+    // processor" on a screen that said Butcher everywhere else — a renameable
+    // word hardcoded in the one paragraph a person actually reads.
+    expect(inspectionNote("unknown", "Butcher")).toContain("this butcher");
+    expect(inspectionNote("unknown", "Butcher")).not.toContain("processor");
+    expect(inspectionNote("unknown", "Processor")).toContain("this processor");
+
+    // No note may keep an unsubstituted token, whatever it is called, and no
+    // note may name the pack's own default where a tenant word belongs.
+    for (const value of INSPECTIONS) {
+      const rendered = inspectionNote(value, "Butcher");
+      expect(rendered).not.toContain("{word}");
+      expect(rendered.toLowerCase()).not.toContain("processor");
     }
   });
 

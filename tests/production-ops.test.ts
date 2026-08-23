@@ -20,8 +20,19 @@ import {
 import {
   createProcessor,
   getProcessor,
+  removePriceItem,
   setPriceItem,
 } from "../src/packs/production/processor-ops";
+import {
+  addOrderLine,
+  createOrder,
+  getOrder,
+  updateOrderLine,
+} from "../src/packs/production/order-ops";
+import {
+  createBooking,
+  startRunFromBooking,
+} from "../src/packs/production/booking-ops";
 import {
   adjustLotCost,
   carriedCostByLot,
@@ -848,13 +859,20 @@ d("production ops", () => {
    *   3. **The merged row is what gets validated**, not the patch — the trap
    *      `livestock` hit on treatments, reachable here one field at a time.
    */
-  async function penForSheet(code: string, head: number, liveLb: number) {
+  async function penForSheet(
+    code: string,
+    head: number,
+    liveLb: number,
+    /** Who did it. Absent is on-farm, which is what most of these tests want. */
+    processorId?: string,
+  ) {
     const pen = await penWithCost(code, head);
     const run = await asOwner((tx) =>
       startRun(tx, ownerCtx(), {
         code: `SHEET-${code}`,
         runKind: "butchering",
         startedOn: TODAY,
+        processorId: processorId ?? null,
       }),
     );
     const input = await asOwner((tx) =>
@@ -1389,6 +1407,370 @@ d("production ops", () => {
           ),
       );
       expect(left).toHaveLength(0);
+    });
+  });
+
+  /**
+   * ── THE CUT SHEET AND THE FEE IT PRICES ────────────────────────────────────
+   *
+   * The claims a pure test cannot see: the snapshot, the refusals that need two
+   * tables to disagree, and — the one that matters most — the plant's bill
+   * landing in the pot the outputs are costed from.
+   */
+  describe("the cut sheet, and what the plant charged", () => {
+    // Transcribing a kill sheet is a chore and is MEMBER — the contrast with
+    // the owner-only price list is deliberate.
+    const asStaff = <T,>(fn: (tx: Tx) => Promise<T>) =>
+      withTenant(tenantId, fn, { role: "staff", userId: STAFF });
+
+    const plantWithRates = async (name: string) => {
+      const processor = await asOwner((tx) =>
+        createProcessor(tx, ownerCtx(), { name }),
+      );
+      const kill = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          kind: "cattle",
+          category: "slaughter",
+          label: "Slaughter",
+          priceCents: 9500,
+          unit: "head",
+        }),
+      );
+      const cut = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          kind: "cattle",
+          category: "cutting",
+          label: "Cut and wrap",
+          priceCents: 90,
+          unit: "hanging_lb",
+        }),
+      );
+      const pack = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          category: "packaging",
+          label: "Vacuum pack",
+          priceCents: 35,
+          unit: "package",
+        }),
+      );
+      return { processor, kill, cut, pack };
+    };
+
+    it("SNAPSHOTS THE PRICE AND THEN STOPS LOOKING AT IT", async () => {
+      // **THE RULE THE WHOLE TABLE RESTS ON.** A rate sheet updated in March
+      // must not restate what an October order was quoted, which is the same
+      // stamping rule a movement's cost follows — and it is what keeps "they
+      // charged more than they quoted" answerable a year later.
+      const { processor, kill } = await plantWithRates("Snapshot Meats");
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-SNAP",
+          startedOn: TODAY,
+          processorId: processor.id,
+        }),
+      );
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+          title: "Retained half",
+        }),
+      );
+      const line = await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, { priceItemId: kill.id }),
+      );
+      expect(line.unitPriceCents).toBe(9500);
+      expect(line.unit).toBe("head");
+      expect(line.label).toBe("Slaughter");
+
+      // The plant puts its rates up.
+      await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          kind: "cattle",
+          category: "slaughter",
+          label: "Slaughter",
+          priceCents: 11_000,
+          unit: "head",
+        }),
+      );
+      const after = await asOwner((tx) =>
+        getOrder(tx, tenantId, order.id),
+      );
+      expect(after?.lines[0].unitPriceCents).toBe(9500);
+    });
+
+    it("REFUSES A SHEET QUOTING ANOTHER PLANT'S RATE", async () => {
+      // No constraint can say this: the link runs order → processor and line →
+      // price item → processor, and Postgres has no way to insist the two ends
+      // meet. An order handed to Miller's carrying Valley Poultry's per-bird
+      // cutting fee is a number nobody could account for later.
+      const mine = await plantWithRates("Ours Packing");
+      const theirs = await plantWithRates("Theirs Packing");
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-CROSS",
+          startedOn: TODAY,
+          processorId: mine.processor.id,
+        }),
+      );
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: mine.processor.id,
+          runId: run.id,
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          addOrderLine(tx, ownerCtx(), order.id, {
+            priceItemId: theirs.kill.id,
+          }),
+        ),
+      ).rejects.toThrow(/belongs to somebody else/);
+    });
+
+    it("keeps an instruction line, which has no price at all", async () => {
+      const { processor } = await plantWithRates("Instruction Abattoir");
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-INSTR",
+          startedOn: TODAY,
+          processorId: processor.id,
+        }),
+      );
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+        }),
+      );
+      const line = await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, {
+          label: "Grind the chuck",
+          notes: "80/20, one pound packs",
+        }),
+      );
+      expect(line.unitPriceCents).toBeNull();
+      expect(line.unit).toBeNull();
+    });
+
+    it("keeps a deleted price's LINE, and only forgets where it came from", async () => {
+      // `SET NULL (price_item_id)`, the Postgres 15 column-list form. CASCADE
+      // would have deleted last October's order line because somebody tidied
+      // this year's rate sheet — the evidence rather than the reference.
+      const { processor, kill } = await plantWithRates("Tidy Up Meats");
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-TIDY",
+          startedOn: TODAY,
+          processorId: processor.id,
+        }),
+      );
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+        }),
+      );
+      await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, { priceItemId: kill.id }),
+      );
+      await asOwner((tx) => removePriceItem(tx, ownerCtx(), kill.id));
+
+      const after = await asOwner((tx) => getOrder(tx, tenantId, order.id));
+      expect(after?.lines).toHaveLength(1);
+      expect(after?.lines[0].priceItemId).toBeNull();
+      expect(after?.lines[0].unitPriceCents).toBe(9500);
+    });
+
+    it("carries the sheets from a booking onto the run it becomes", async () => {
+      // The sheet goes over WITH the animals, months before a run exists.
+      // Leaving it on the booking would strand it, and a sheet nothing can find
+      // is a sheet nobody priced.
+      const { processor } = await plantWithRates("Booked Ahead Packing");
+      const booking = await asOwner((tx) =>
+        createBooking(tx, ownerCtx(), {
+          processorId: processor.id,
+          bookedFor: TODAY,
+          kind: "cattle",
+          headCount: 2,
+        }),
+      );
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          bookingId: booking.id,
+          title: "Smith's half",
+        }),
+      );
+      expect(order.runId).toBeNull();
+
+      const started = await asOwner((tx) =>
+        startRunFromBooking(tx, ownerCtx(), booking.id, {
+          code: "SHEET-BOOKED",
+          startedOn: TODAY,
+        }),
+      );
+      expect(started.ordersMoved).toBe(1);
+      const after = await asOwner((tx) => getOrder(tx, tenantId, order.id));
+      expect(after?.order.runId).toBe(started.runId);
+    });
+
+    it("THE FEE REACHES THE MEAT — flat per animal plus per pound", async () => {
+      // **THE POINT OF THE SLICE.** Before this the pot was the animals'
+      // accumulated cost alone, so ground beef out of a $95-a-head kill carried
+      // the feed and nothing for the killing.
+      const { processor, kill, cut } = await plantWithRates("Cost Reaches Meats");
+      const { run, input } = await penForSheet("FEE-A", 2, 1000, processor.id);
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+        }),
+      );
+      await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, { priceItemId: kill.id }),
+      );
+      await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, { priceItemId: cut.id }),
+      );
+      // The plant's sheet: two head, 600 lb hanging between them.
+      await asStaff((tx) =>
+        addRunCarcass(tx, staffCtx(), {
+          runId: run.id,
+          runInputId: input.id,
+          headCount: 2,
+          liveLb: 1000,
+          hangingLb: 600,
+        }),
+      );
+
+      const detail = await asOwner((tx) =>
+        runDetail(tx, tenantId, run.id, TODAY),
+      );
+      // 2 head at $95 = $190, plus 600 lb at $0.90 = $540. $730 quoted.
+      expect(detail?.quotedFee?.cents).toBe(73_000);
+
+      const outputItem = await meatItem("Ground beef", "lb");
+      await asOwner((tx) =>
+        addRunOutput(tx, ownerCtx(), {
+          runId: run.id,
+          itemId: outputItem.id,
+          lotCode: "FEE-A-OUT",
+          quantity: 420,
+          locationAssetId: freezerId,
+        }),
+      );
+
+      const before = await asOwner((tx) => runDetail(tx, tenantId, run.id, TODAY));
+      const inputsCents = before!.potCents;
+      const result = await asOwner((tx) =>
+        completeRun(tx, ownerCtx(), run.id, TODAY, 73_000),
+      );
+      expect(result.processingFeeCents).toBe(73_000);
+      // The pot is what went in PLUS what the plant charged, and the meat
+      // landed carrying all of it.
+      expect(result.potCents).toBe(inputsCents + 73_000);
+
+      const after = await asOwner((tx) => runDetail(tx, tenantId, run.id, TODAY));
+      expect(after?.landedCents).toBe(inputsCents + 73_000);
+      expect(after?.run.processingFeeCents).toBe(73_000);
+    });
+
+    it("REFUSES A FEE ON A RUN NOBODY WAS PAID FOR", async () => {
+      // `processor_id` null means the farm did it itself, and its own labour is
+      // deliberately recorded and not costed. A figure here would put a made-up
+      // wage into the price of the meat through the back door.
+      const { run } = await penForSheet("FEE-ONFARM", 2, 1000);
+      const outputItem = await meatItem("On-farm beef", "lb");
+      await asOwner((tx) =>
+        addRunOutput(tx, ownerCtx(), {
+          runId: run.id,
+          itemId: outputItem.id,
+          lotCode: "FEE-ONFARM-OUT",
+          quantity: 400,
+          locationAssetId: freezerId,
+        }),
+      );
+      await expect(
+        asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY, 50_000)),
+      ).rejects.toThrow(/done here/);
+    });
+
+    it("keeps NULL apart from zero on the run, because they are different answers", async () => {
+      // Null is a run nobody costed; zero says the plant did it for nothing.
+      const { processor } = await plantWithRates("Waived Packing");
+      const { run } = await penForSheet("FEE-NULL", 1, 500, processor.id);
+      const outputItem = await meatItem("Unpriced beef", "lb");
+      await asOwner((tx) =>
+        addRunOutput(tx, ownerCtx(), {
+          runId: run.id,
+          itemId: outputItem.id,
+          lotCode: "FEE-NULL-OUT",
+          quantity: 300,
+          locationAssetId: freezerId,
+        }),
+      );
+      const result = await asOwner((tx) =>
+        completeRun(tx, ownerCtx(), run.id, TODAY),
+      );
+      expect(result.processingFeeCents).toBeNull();
+    });
+
+    it("reports a line it could not price rather than quietly leaving it out", async () => {
+      // A quote showing $730 with no mention of the vacuum packing nobody has
+      // counted is worse than one showing nothing: it looks finished.
+      const { processor, kill, pack } = await plantWithRates("Uncounted Meats");
+      const { run, input } = await penForSheet("FEE-UNC", 1, 600, processor.id);
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+        }),
+      );
+      await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, { priceItemId: kill.id }),
+      );
+      await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, { priceItemId: pack.id }),
+      );
+      await asStaff((tx) =>
+        addRunCarcass(tx, staffCtx(), {
+          runId: run.id,
+          runInputId: input.id,
+          headCount: 1,
+          hangingLb: 350,
+        }),
+      );
+
+      const detail = await asOwner((tx) =>
+        runDetail(tx, tenantId, run.id, TODAY),
+      );
+      expect(detail?.quotedFee?.cents).toBe(9500);
+      expect(detail?.quotedFee?.unpriced.map((l) => l.label)).toEqual([
+        "Vacuum pack",
+      ]);
+
+      // Counted, and now it prices.
+      const line = detail!.orders[0].lines.find(
+        (l) => l.label === "Vacuum pack",
+      )!;
+      await asOwner((tx) =>
+        updateOrderLine(tx, ownerCtx(), line.id, { quantity: 40 }),
+      );
+      const after = await asOwner((tx) =>
+        runDetail(tx, tenantId, run.id, TODAY),
+      );
+      expect(after?.quotedFee?.cents).toBe(9500 + 40 * 35);
+      expect(after?.quotedFee?.unpriced).toEqual([]);
+    });
+
+    it("refuses a sheet attached to neither a date nor a run", async () => {
+      const { processor } = await plantWithRates("Unattached Packing");
+      await expect(
+        asOwner((tx) =>
+          createOrder(tx, ownerCtx(), { processorId: processor.id }),
+        ),
+      ).rejects.toThrow(/which date or which run/);
     });
   });
 });

@@ -166,6 +166,31 @@ export const productionRuns = pgTable(
      * the farm did it itself, and nothing inspected it.
      */
     inspection: text("inspection"),
+    /**
+     * **WHAT THE PLANT CHARGED TO DO THIS RUN, in cents — and it is IN THE
+     * POT.** Stamped at completion beside `cost_basis` and `inspection`, and
+     * never re-derived, for the same reason they are not: it is what was
+     * believed on the day the boxes landed, and a rate sheet updated in March
+     * must not restate what October's meat cost.
+     *
+     * **THE ROLL WAS ONLY EVER HALF A COST WITHOUT IT.** Until this column the
+     * pot was the animals' accumulated cost alone, so ground beef out of a
+     * $95-a-head kill carried the feed and not the killing — and because plants
+     * commonly charge a flat fee per animal PLUS a rate per pound, a smaller
+     * animal genuinely does cost more per pound at the same plant. That is a
+     * real fact about the business, and a cost roll that leaves the flat half
+     * out cannot show it.
+     *
+     * **NULL IS NOT ZERO.** Null is a run nobody costed — an on-farm kill, or a
+     * plant whose bill has not been opened yet. Zero says they did it for
+     * nothing. The completion screen offers a figure worked out from the order
+     * and lets a person change it, which is the same confirm step the whole
+     * pack applies to anything a machine proposes.
+     *
+     * It is a QUOTE until the bill arrives, and the accrual posted alongside it
+     * is what makes that honest in the ledger — see `postProcessingAccrual`.
+     */
+    processingFeeCents: integer("processing_fee_cents"),
     notes: text("notes").notNull().default(""),
     /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
     metadata: jsonb("metadata").notNull().default({}),
@@ -194,6 +219,10 @@ export const productionRuns = pgTable(
     check(
       "production_runs_status_valid",
       sql`${t.status} in ('in_progress', 'complete')`,
+    ),
+    check(
+      "production_runs_fee_nonneg",
+      sql`${t.processingFeeCents} is null or ${t.processingFeeCents} >= 0`,
     ),
     check(
       "production_runs_basis_valid",
@@ -1167,6 +1196,226 @@ export const productionBookings = pgTable(
 );
 
 /**
+ * **THE CUT SHEET — what the farm is asking this plant to do**, and the design
+ * calls it *"the recipe"* in as many words: *"Two identical steers yield
+ * completely different SKU sets depending on how they are cut, and on a
+ * half-beef sale the cut sheet is often the CUSTOMER's choice."*
+ *
+ * **IT HANGS OFF A BOOKING, A RUN, OR BOTH, AND THE CHECK ASKS FOR AT LEAST
+ * ONE.** Neither alone would do:
+ *
+ *   - it has to exist BEFORE the run does, because the sheet is what you hand
+ *     over at drop-off and a run is not created until the day happens
+ *     (`startRunFromBooking`). An order that could only hang off a run would be
+ *     an order written after the animals were already cut.
+ *   - it has to be reachable FROM the run, because that is where the processing
+ *     fee is worked out — and a run started without a booking is ordinary. The
+ *     live `Test` tenant's first butchering run is exactly that.
+ *
+ * So `booking_id` is where it began and `run_id` is what it became, the same
+ * pairing `production_bookings` already uses, and `startRunFromBooking` stamps
+ * the second when the day arrives.
+ *
+ * **MANY ORDERS PER ANIMAL, DELIBERATELY.** The design's *"one animal, two cut
+ * sheets"*: a half sold to a customer is cut to THEIR instructions and the
+ * retained half to the farm's. There is no unique index, and `title` is what
+ * tells them apart until `retail`'s commitments can name the customer.
+ *
+ * **IT IS NOT A CAPABILITY LIST.** `production_processor_cuts` is what a plant
+ * CAN make and stays true between runs; this is what was asked for on one
+ * occasion, and it freezes what the prices were when it was asked.
+ */
+export const productionOrders = pgTable(
+  "production_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Who it is for. Required — an order is a thing you hand somebody. */
+    processorId: uuid("processor_id").notNull(),
+    /** The date it was written against. Null when it was written off a run. */
+    bookingId: uuid("booking_id"),
+    /** The run it became. Null until the day happens. */
+    runId: uuid("run_id"),
+    /**
+     * Whose sheet this is — "Retained half", "Smith's half". Free text, and it
+     * is what tells two sheets for one animal apart. A customer link belongs to
+     * `retail`'s commitments and does not exist yet.
+     */
+    title: text("title").notNull().default(""),
+    /** Which animal. Empty when nobody has said, as on a booking. */
+    kind: text("kind").notNull().default(""),
+    /** How many head this sheet covers. Null when it covers whatever went. */
+    headCount: integer("head_count"),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_orders_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("production_orders_tenant_booking_idx").on(t.tenantId, t.bookingId),
+    index("production_orders_tenant_run_idx").on(t.tenantId, t.runId),
+    foreignKey({
+      name: "production_orders_processor_fk",
+      columns: [t.tenantId, t.processorId],
+      foreignColumns: [productionProcessors.tenantId, productionProcessors.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "production_orders_booking_fk",
+      columns: [t.tenantId, t.bookingId],
+      foreignColumns: [productionBookings.tenantId, productionBookings.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "production_orders_run_fk",
+      columns: [t.tenantId, t.runId],
+      foreignColumns: [productionRuns.tenantId, productionRuns.id],
+    }).onDelete("cascade"),
+    // An order attached to nothing is a sheet for a day that does not exist.
+    check(
+      "production_orders_attached",
+      sql`${t.bookingId} is not null or ${t.runId} is not null`,
+    ),
+    check(
+      "production_orders_kind_format",
+      sql`${t.kind} = '' or ${t.kind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "production_orders_head_positive",
+      sql`${t.headCount} is null or ${t.headCount} > 0`,
+    ),
+  ],
+);
+
+/**
+ * ONE LINE OF A CUT SHEET — an option chosen, or an instruction given.
+ *
+ * **A CUT SHEET IS TWO THINGS AT ONCE AND THIS TABLE HOLDS BOTH.** *"Vacuum
+ * pack, $0.35 a package"* is a charge; *"ribeyes at one inch, grind the chuck"*
+ * is an instruction with no price at all, and the design is explicit that a cut
+ * sheet *"specifies TREATMENT, not quantities"*. A line with no
+ * `price_item_id` is the second kind: it prints on the sheet the plant reads
+ * and contributes nothing to the total.
+ *
+ * **THE PRICE IS SNAPSHOTTED, NOT JOINED, and that is this pack's oldest
+ * rule.** `unit_price_cents`, `unit` and `minimum_cents` are copied from the
+ * price item when the line is written and never re-read. A rate sheet updated
+ * in March must not restate what an October order was quoted — which is the
+ * same reason a movement's cost is stamped and the same reason a run's
+ * `inspection` is frozen at completion. It is also what keeps *"they charged
+ * more than they quoted"* answerable: the quote has to still exist, unchanged,
+ * when the bill turns up.
+ *
+ * **`price_item_id` IS `SET NULL (price_item_id)`, THE POSTGRES 15 FORM.** On a
+ * composite `(tenant_id, x)` key a bare SET NULL nulls `tenant_id` too and the
+ * delete fails outright; the column list nulls only what it names. Chosen over
+ * CASCADE because deleting a price off this year's sheet must not delete a line
+ * from last year's order — the line already carries everything it needs. See
+ * `drizzle/0192`'s header; the `.onDelete()` below is a lossy description of
+ * the constraint and has to stay that way so `db:generate` never reverts it.
+ *
+ * **`quantity` IS NULL MOST OF THE TIME, AND NULL MEANS TWO DIFFERENT THINGS**
+ * depending on the unit — which is the point rather than an ambiguity. For the
+ * four units a finished run can measure (`head`, `live_lb`, `hanging_lb`,
+ * `finished_lb`) it means *work it out from the run*, because nobody knows a
+ * hanging weight when the sheet is written. For the other four it means *nobody
+ * has counted yet*, and the fee says so rather than assuming one of anything.
+ */
+export const productionOrderLines = pgTable(
+  "production_order_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    orderId: uuid("order_id").notNull(),
+    /** Where the price came from, while it is still on file. */
+    priceItemId: uuid("price_item_id"),
+    /** How the sheet groups it, snapshotted. */
+    category: text("category").notNull().default("extra"),
+    /** What was asked for, in the plant's words or the farm's. */
+    label: text("label").notNull(),
+    /** What it was quoted at, in cents, when the line was written. */
+    unitPriceCents: integer("unit_price_cents"),
+    /** What that price is per. Null on an instruction line, which has no price. */
+    unit: text("unit"),
+    /** The floor, snapshotted alongside the price. */
+    minimumCents: integer("minimum_cents"),
+    /** How many. Null — see the header, it means two things. */
+    quantity: numeric("quantity", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }),
+    /** The instruction: "one inch thick", "grind the chuck", "keep the heart". */
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_order_lines_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("production_order_lines_order_idx").on(t.tenantId, t.orderId),
+    foreignKey({
+      name: "production_order_lines_order_fk",
+      columns: [t.tenantId, t.orderId],
+      foreignColumns: [productionOrders.tenantId, productionOrders.id],
+    }).onDelete("cascade"),
+    // `SET NULL (price_item_id)` in the database — see the header, and 0192.
+    foreignKey({
+      name: "production_order_lines_price_item_fk",
+      columns: [t.tenantId, t.priceItemId],
+      foreignColumns: [
+        productionProcessorPriceItems.tenantId,
+        productionProcessorPriceItems.id,
+      ],
+    }).onDelete("set null"),
+    check(
+      "production_order_lines_label_present",
+      sql`length(btrim(${t.label})) > 0`,
+    ),
+    check(
+      "production_order_lines_category_format",
+      sql`${t.category} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    /**
+     * **A PRICE WITHOUT ITS UNIT IS NOT A PRICE**, which is the whole argument
+     * of the itemised rate sheet, arriving on the order that quotes from it.
+     * The reverse IS allowed: a unit with no price is "vacuum pack, per
+     * package, they never said what it costs".
+     */
+    check(
+      "production_order_lines_price_has_unit",
+      sql`${t.unitPriceCents} is null or ${t.unit} is not null`,
+    ),
+    check(
+      "production_order_lines_unit_valid",
+      sql`${t.unit} is null or ${t.unit} in ('head', 'live_lb', 'hanging_lb', 'finished_lb', 'package', 'box', 'flat', 'hour')`,
+    ),
+    check(
+      "production_order_lines_price_nonneg",
+      sql`${t.unitPriceCents} is null or ${t.unitPriceCents} >= 0`,
+    ),
+    check(
+      "production_order_lines_minimum_nonneg",
+      sql`${t.minimumCents} is null or ${t.minimumCents} >= 0`,
+    ),
+    // Nought of something is not a line. Somebody who does not want it removes it.
+    check(
+      "production_order_lines_quantity_positive",
+      sql`${t.quantity} is null or ${t.quantity} > 0`,
+    ),
+  ],
+);
+
+/**
  * Deliberately absent, and worth saying where somebody will look for it: a
  * `cost_cents` column on either side. The input's cost is stamped on its
  * movement when the stock leaves; the output's is stamped on its receipt when
@@ -1204,3 +1453,7 @@ export type NewProductionProcessorPriceItem =
   typeof productionProcessorPriceItems.$inferInsert;
 export type ProductionBooking = typeof productionBookings.$inferSelect;
 export type NewProductionBooking = typeof productionBookings.$inferInsert;
+export type ProductionOrder = typeof productionOrders.$inferSelect;
+export type NewProductionOrder = typeof productionOrders.$inferInsert;
+export type ProductionOrderLine = typeof productionOrderLines.$inferSelect;
+export type NewProductionOrderLine = typeof productionOrderLines.$inferInsert;

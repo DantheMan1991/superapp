@@ -4,6 +4,7 @@ import { schema, type Tx } from "@/db";
 import type { ProductionBooking } from "@/db/schema";
 import { ProductionError, requireWrite, startRun, type ProductionCtx } from "./ops";
 import { BOOKING_STATUSES, isValidSlug } from "./vocabulary";
+import { attachOrdersToRun } from "./order-ops";
 
 /**
  * Dates held with a processor — the scarce resource.
@@ -300,7 +301,7 @@ export async function startRunFromBooking(
   ctx: ProductionCtx,
   bookingId: string,
   args: { code: string; runKind?: string; startedOn: string },
-): Promise<{ booking: ProductionBooking; runId: string }> {
+): Promise<{ booking: ProductionBooking; runId: string; ordersMoved: number }> {
   requireWrite(ctx, "owner");
   const booking = await getBooking(tx, ctx.tenantId, bookingId);
   if (!booking) throw new ProductionError("NOT_FOUND", "that booking is gone");
@@ -332,6 +333,15 @@ export async function startRunFromBooking(
     processorId: booking.processorId,
   });
 
+  /**
+   * **THE CUT SHEETS COME WITH IT.** An order is written against the BOOKING,
+   * months before the animals go, because the sheet is what you hand over at
+   * drop-off. Leaving it there would strand it: the run is where the processing
+   * fee is worked out, and a sheet nothing can find is a sheet nobody priced.
+   * Guarded to orders with no run, so nothing already attached elsewhere moves.
+   */
+  const ordersMoved = await attachOrdersToRun(tx, ctx, bookingId, run.id);
+
   const [row] = await tx
     .update(schema.productionBookings)
     .set({ runId: run.id, updatedAt: new Date() })
@@ -342,5 +352,5 @@ export async function startRunFromBooking(
       ),
     )
     .returning();
-  return { booking: row, runId: run.id };
+  return { booking: row, runId: run.id, ordersMoved };
 }

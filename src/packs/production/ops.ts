@@ -22,9 +22,10 @@ import {
 } from "@/packs/inventory/ops";
 import { convert, getUnit, roundQuantity } from "@/packs/inventory/core/units";
 import { hasRecordedCost } from "@/packs/inventory/core/valuation";
+import { postServiceAccrual } from "@/packs/inventory/ledger-ops";
 import { RUN_INPUT_HANDLERS } from "@/packs/run-handlers";
 import type { RunInputBlock } from "./core/handler";
-import { isValidSlug } from "./vocabulary";
+import { isPriceUnit, isValidSlug } from "./vocabulary";
 import { runYield, type YieldResult } from "./core/yield";
 import {
   cuttingYield,
@@ -37,6 +38,8 @@ import {
   type SheetInput,
 } from "./core/carcass";
 import { lotShareCents, rollRun, type RollBasis } from "./core/roll";
+import { feeTotal, type FeeTotal, type RunMeasures } from "./core/fee";
+import { listOrders, type OrderDetail } from "./order-ops";
 
 /**
  * Production operations. Every function takes a `Tx` so the caller owns the
@@ -73,6 +76,7 @@ export class ProductionError extends Error {
       | "CARCASS_INVALID"
       | "PROCESSOR_INVALID"
       | "BOOKING_INVALID"
+      | "ORDER_INVALID"
       | "PAPERWORK_INVALID",
     message: string,
   ) {
@@ -858,13 +862,82 @@ function sheetInputs(inputs: RunInputRow[]): SheetInput[] {
   });
 }
 
+/**
+ * The four numbers a run can measure about itself, for pricing a plant's work.
+ *
+ * **EACH ONE PREFERS THE PLANT'S OWN FIGURE AND FALLS BACK TO THE FARM'S**,
+ * which is `core/carcass.ts`'s *two live weights, chosen between and never
+ * summed* rule applied to a third question. A plant bills off its own scale, so
+ * where a kill sheet exists it is the right denominator; where it does not, the
+ * trailer ticket is better than nothing and the screen says which was used.
+ *
+ * **EVERY FIELD IS NULLABLE AND NULL MEANS UNKNOWN, NEVER ZERO.** A run with no
+ * kill sheet has no hanging weight, and a fee quoted per pound of hanging
+ * weight against a null is a line that cannot be totalled — reported, not
+ * assumed to be nought. `livestock`'s rule, arriving in a fee.
+ */
+export async function runMeasures(
+  tx: Tx,
+  tenantId: string,
+  runId: string,
+): Promise<RunMeasures> {
+  const [inputs, outputs, carcasses] = await Promise.all([
+    listRunInputs(tx, tenantId, runId),
+    listRunOutputs(tx, tenantId, runId),
+    listRunCarcasses(tx, tenantId, runId),
+  ]);
+  const items = await itemsById(
+    tx,
+    tenantId,
+    outputs.map((o) => o.itemId),
+  );
+
+  const sum = (values: (number | null)[]): number | null => {
+    const present = values.filter((v): v is number => v !== null);
+    return present.length === 0
+      ? null
+      : roundQuantity(present.reduce((a, b) => a + b, 0));
+  };
+
+  /**
+   * **HEAD COUNTS EVERY CARCASS LINE, CONDEMNED ONES INCLUDED.** A plant kills
+   * an animal and charges for killing it whatever an inspector decides
+   * afterwards; leaving condemnations out would understate the bill by exactly
+   * the animals the farm has already lost the most on. This is the opposite of
+   * what `dressingPercentage` does with the same rows, and the two are right
+   * for opposite reasons: a yield asks what the surviving meat came from, a
+   * fee asks what work was done.
+   */
+  const sheetHead = carcasses.reduce((total, row) => total + row.headCount, 0);
+  const inputHead = sum(
+    inputs.map((row) =>
+      getUnit(row.unit)?.dimension === "count"
+        ? convert(row.quantity, row.unit, "each")
+        : null,
+    ),
+  );
+
+  return {
+    head: sheetHead > 0 ? sheetHead : inputHead,
+    liveLb:
+      sum(carcasses.map((c) => c.liveLb)) ??
+      sum(inputs.map((i) => weightLbOf(i.quantity, i.unit, i.weightLb))),
+    // Only a line that PASSED carries one — the CHECK says so — and a
+    // condemned carcass is not cut, so nothing is charged per pound for it.
+    hangingLb: sum(carcasses.map((c) => c.hangingLb)),
+    finishedLb: sum(outputs.map((o) => outputWeightLb(o, items.get(o.itemId)))),
+  };
+}
+
 // --------------------------------------------------------------- complete ---
 
 export interface CompletionResult {
   run: ProductionRun;
   basis: RollBasis;
-  /** What went in, in cents — the pot that was split. */
+  /** What went in, in cents — the pot that was split, fee included. */
   potCents: number;
+  /** The plant's share of that pot. Null when nobody said what it was. */
+  processingFeeCents: number | null;
   /** Inputs whose movement carried no price at all. Reported, never guessed at. */
   unpricedInputs: number;
   landed: number;
@@ -891,9 +964,43 @@ export async function completeRun(
   ctx: ProductionCtx,
   runId: string,
   completedOn: string,
+  /**
+   * What the plant charged, in cents. Undefined and null both mean nobody said,
+   * which is not the same as nothing — see the column comment.
+   *
+   * **IT ARRIVES AS AN ARGUMENT RATHER THAN BEING READ OFF THE ORDER**, and
+   * that is the confirm step this pack applies to everything a machine
+   * proposes. `orderFee` works out what the cut sheets come to and the screen
+   * offers it; a plant's actual bill routinely differs from its rate sheet, and
+   * a figure that reached the ledger without anybody looking at it would be a
+   * quote pretending to be an invoice.
+   */
+  processingFeeCents?: number | null,
 ): Promise<CompletionResult> {
   requireWrite(ctx, "owner");
   const run = await openRunOrThrow(tx, ctx, runId);
+  const feeCents =
+    processingFeeCents === undefined || processingFeeCents === null
+      ? null
+      : Math.round(processingFeeCents);
+  if (feeCents !== null && feeCents < 0) {
+    throw new ProductionError(
+      "RUN_INVALID",
+      "a plant does not pay you to cut — what they charged cannot be negative",
+    );
+  }
+  if (feeCents !== null && run.processorId === null) {
+    /**
+     * **A FEE WITH NOBODY TO HAVE CHARGED IT.** `processor_id` null means the
+     * farm did this itself, and its own labour is deliberately recorded and not
+     * costed — see the decision about unpaid family labour. A figure here would
+     * put a made-up wage into the price of the meat through the back door.
+     */
+    throw new ProductionError(
+      "RUN_INVALID",
+      "nobody was paid for this one — it was done here, so there is no processing fee to record",
+    );
+  }
 
   const outputs = await listRunOutputs(tx, ctx.tenantId, runId);
   if (outputs.length === 0) {
@@ -910,6 +1017,16 @@ export async function completeRun(
     if (row.costCents === null) unpricedInputs += 1;
     else potCents += row.costCents;
   }
+  /**
+   * **THE PLANT'S BILL GOES IN THE POT WITH THE FEED.** Both are costs of
+   * turning an animal into boxes, and splitting only one of them across the
+   * outputs would leave a per-pound figure that quietly excludes the largest
+   * single cost of sending stock out. The roll then divides the whole thing on
+   * whatever basis the outputs support, so a fee charged per head still lands
+   * on the boxes by weight — which is right: what the boxes are worth does not
+   * depend on how the plant chose to invoice.
+   */
+  potCents += feeCents ?? 0;
 
   const items = await itemsById(
     tx,
@@ -1002,6 +1119,29 @@ export async function completeRun(
       );
   }
 
+  /**
+   * **THE ACCRUAL, AND IT IS WHAT MAKES THE RECEIPT ABOVE HONEST.** Every
+   * output just credited the consumption account for the whole pot, and the
+   * plant's share of that pot was never debited there by anything. Posting
+   * `Dr consumption / Cr 2060` supplies the missing debit, so the run still
+   * nets to nothing on the P&L and the liability sits where a bill can clear
+   * it. Without it a completed run leaves a credit balance in an expense
+   * account, self-correcting only if the plant's invoice happens to be coded to
+   * the same place.
+   *
+   * Posted AFTER the outputs so it lands in the same transaction as the cost it
+   * explains, and no-ops for a tenant that does not post at all.
+   */
+  if (feeCents !== null && feeCents > 0) {
+    await postServiceAccrual(tx, asInventory(ctx), {
+      sourceId: run.id,
+      amountCents: feeCents,
+      occurredOn: completedOn,
+      locationAssetId: run.locationAssetId,
+      memo: `Processing accrued — ${run.code}`,
+    });
+  }
+
   const updated = await tx
     .update(schema.productionRuns)
     .set({
@@ -1009,6 +1149,7 @@ export async function completeRun(
       completedOn,
       costBasis: roll.basis,
       inspection,
+      processingFeeCents: feeCents,
       updatedAt: new Date(),
     })
     .where(
@@ -1023,6 +1164,7 @@ export async function completeRun(
     run: updated[0],
     basis: roll.basis,
     potCents,
+    processingFeeCents: feeCents,
     unpricedInputs,
     landed: outputs.length,
   };
@@ -1220,12 +1362,28 @@ export interface RunDetail {
    * missing beside it, and the two stage ratios that say where the pounds went.
    */
   yieldResult: YieldResult;
-  /** What went in, in cents. */
+  /**
+   * What went in, in cents — the inputs' stamped cost PLUS whatever the plant
+   * charged once the run is finished. Before completion the fee is not in it,
+   * because nobody has said what it was.
+   */
   potCents: number;
   /** Input movements that carried no price at all. */
   unpricedInputs: number;
   /** What the outputs actually landed carrying. Zero until the run is finished. */
   landedCents: number;
+  /** The cut sheets on this run, in the order the paper reads. */
+  orders: OrderDetail[];
+  /**
+   * What those sheets come to, measured against this run.
+   *
+   * **A PROPOSAL, ON AN OPEN RUN, AND NOTHING ELSE.** It is what the completion
+   * screen offers and a person may change — a plant's actual bill routinely
+   * differs from its rate sheet. Null when there are no sheets to add up.
+   */
+  quotedFee: FeeTotal | null;
+  /** The four figures the fee was measured against, for the screen to print. */
+  measures: RunMeasures;
   blocks: Map<string, RunInputBlock>;
 }
 
@@ -1325,6 +1483,14 @@ export async function runDetail(
     if (row.costCents === null) unpricedInputs += 1;
     else potCents += row.costCents;
   }
+  /**
+   * **THE STAMPED FEE, NOT THE QUOTE.** A finished run's pot includes what the
+   * plant was recorded as charging, because that is what was split across the
+   * outputs; an open run's does not, because nobody has said yet and a quote in
+   * this figure would make the page disagree with the receipts the moment it
+   * completed. `quotedFee` below is where the estimate lives, labelled as one.
+   */
+  potCents += run.processingFeeCents ?? 0;
 
   const lotIds = inputs
     .map((i) => i.lotId)
@@ -1340,6 +1506,26 @@ export async function runDetail(
     key: o.output.id,
     lb: o.weightLb,
   }));
+
+  const orders = await listOrders(tx, tenantId, { runId });
+  const measures = await runMeasures(tx, tenantId, runId);
+  const quotedFee =
+    orders.length > 0
+      ? feeTotal(
+          orders.flatMap((o) =>
+            o.lines.map((line) => ({
+              key: line.id,
+              label: line.label,
+              unitPriceCents: line.unitPriceCents,
+              unit:
+                line.unit !== null && isPriceUnit(line.unit) ? line.unit : null,
+              minimumCents: line.minimumCents,
+              quantity: line.quantity,
+            })),
+          ),
+          measures,
+        )
+      : null;
 
   return {
     run,
@@ -1360,6 +1546,9 @@ export async function runDetail(
     potCents,
     unpricedInputs,
     landedCents,
+    orders,
+    quotedFee,
+    measures,
     // Shown on a FINISHED run too, because a withdrawal that was cleared at the
     // time is not what this says: it is where the pens stand today, and a lot
     // treated after the run is a different question from one treated before it.

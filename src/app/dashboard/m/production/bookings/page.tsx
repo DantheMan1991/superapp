@@ -20,11 +20,13 @@ import {
 } from "@/components/ui/table";
 import { listBookings } from "@/packs/production/booking-ops";
 import { listProcessors } from "@/packs/production/processor-ops";
+import { listOrders } from "@/packs/production/order-ops";
 import {
   BOOKING_STATUS_LABELS,
   bookingStanding,
   centsToDisplay,
   describeBookingDate,
+  processorHandlesFrom,
   runKindsFrom,
   slugLabel,
 } from "@/packs/production/vocabulary";
@@ -34,6 +36,7 @@ import {
   RemoveBookingButton,
   StartRunFromBookingButton,
 } from "@/packs/production/components/booking-controls";
+import { AddOrderDialog } from "@/packs/production/components/order-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -57,15 +60,18 @@ export default async function BookingsPage() {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "production");
 
-  const { bookings, processors, pack } = await withTenant(
+  const { bookings, processors, pack, orders } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [bookings, processors, pack] = await Promise.all([
+      const [bookings, processors, pack, orders] = await Promise.all([
         listBookings(tx, ctx.tenant.id),
         listProcessors(tx, ctx.tenant.id),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "production"),
+        // Every sheet, in one read. A per-row query would be an N+1 in the
+        // critical path of the page the whole booking slice exists for.
+        listOrders(tx, ctx.tenant.id),
       ]);
-      return { bookings, processors, pack };
+      return { bookings, processors, pack, orders };
     },
     { role: ctx.role },
   );
@@ -73,7 +79,21 @@ export default async function BookingsPage() {
   const today = todayInTimezone(ctx.tenant.timezone);
   const word = labelFor(pack.labels, "processor", "Processor");
   const runWord = labelFor(pack.labels, "productionRun", "Run");
+  const cutSheetWord = labelFor(pack.labels, "cutSheet", "Order");
+  const kindOptions = processorHandlesFrom(pack.config);
   const isOwner = ctx.role === "owner";
+
+  // Sheets by the date they were written against. A sheet that has become a run
+  // is still listed here, because the booking is where somebody looks for it
+  // before the day and the link goes to the same page either way.
+  const sheetsByBooking = new Map<string, typeof orders>();
+  for (const entry of orders) {
+    const key = entry.order.bookingId;
+    if (!key) continue;
+    const existing = sheetsByBooking.get(key);
+    if (existing) existing.push(entry);
+    else sheetsByBooking.set(key, [entry]);
+  }
 
   const options = processors.map((p) => ({
     id: p.processor.id,
@@ -172,6 +192,36 @@ export default async function BookingsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
+                    <div className="flex flex-wrap items-center justify-end gap-1">
+                      {/*
+                        THE CUT SHEETS WRITTEN AGAINST THIS DATE. They belong on
+                        the booking rather than only on the run, because the
+                        sheet is what goes over WITH the animals — it exists
+                        months before a run does, and `startRunFromBooking`
+                        carries it across.
+                      */}
+                      {(sheetsByBooking.get(booking.id) ?? []).map((entry) => (
+                        <Button
+                          key={entry.order.id}
+                          asChild
+                          variant="ghost"
+                          size="sm"
+                        >
+                          <Link href={`${BASE}/orders/${entry.order.id}`}>
+                            {entry.order.title || cutSheetWord}
+                          </Link>
+                        </Button>
+                      ))}
+                      {isOwner && !booking.runId && (
+                        <AddOrderDialog
+                          processorId={booking.processorId}
+                          processorName={processorName}
+                          bookingId={booking.id}
+                          kindOptions={kindOptions}
+                          sheetWord={cutSheetWord}
+                        />
+                      )}
+                    </div>
                     {isOwner && (
                       <div className="flex items-center justify-end gap-1">
                         {standing === "missed" || standing === "today" ? (

@@ -53,6 +53,9 @@ d("production tables (RLS)", () => {
   let processorB: string;
   let handleA: string;
   let priceItemA: string;
+  let orderA: string;
+  let orderB: string;
+  let orderLineA: string;
   let bookingA: string;
   let bookingB: string;
 
@@ -331,6 +334,52 @@ d("production tables (RLS)", () => {
         .returning();
       bookingA = bookings[0].id;
       bookingB = bookings[1].id;
+
+      const orders = await tx
+        .insert(schema.productionOrders)
+        .values([
+          {
+            tenantId: tenantA,
+            processorId: processorA,
+            runId: runA,
+            title: "Retained half",
+            kind: "cattle",
+            headCount: 1,
+          },
+          {
+            tenantId: tenantB,
+            processorId: processorB,
+            bookingId: bookingB,
+            title: "Their birds",
+          },
+        ])
+        .returning();
+      orderA = orders[0].id;
+      orderB = orders[1].id;
+
+      const orderLines = await tx
+        .insert(schema.productionOrderLines)
+        .values([
+          {
+            tenantId: tenantA,
+            orderId: orderA,
+            priceItemId: priceItemA,
+            category: "cutting",
+            label: "Cut and wrap",
+            unitPriceCents: 90,
+            unit: "hanging_lb",
+          },
+          {
+            tenantId: tenantB,
+            orderId: orderB,
+            category: "cutting",
+            label: "Quartered",
+            unitPriceCents: 105,
+            unit: "head",
+          },
+        ])
+        .returning();
+      orderLineA = orderLines[0].id;
     });
   });
 
@@ -777,6 +826,118 @@ d("production tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  it("cannot see another tenant's cut sheet, or the lines on it", async () => {
+    // **A NARROWER LEAK THAN THE RATE SHEET'S AND WORSE IN ONE RESPECT.** A
+    // line says what one named customer asked for on one date, at a price that
+    // farm negotiated — somebody else's terms and somebody else's customer in
+    // the same row.
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.productionOrders),
+    );
+    expect(mine.map((o) => o.title)).toEqual(["Retained half"]);
+    const myLines = await asStaff((tx) =>
+      tx.select().from(schema.productionOrderLines),
+    );
+    expect(myLines.map((l) => l.label)).toEqual(["Cut and wrap"]);
+    expect(myLines.map((l) => l.unitPriceCents)).toEqual([90]);
+
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.productionOrders),
+    );
+    expect(theirs.map((o) => o.title)).toEqual(["Their birds"]);
+  });
+
+  it("cannot hang a cut sheet off another tenant's processor, run or date", async () => {
+    for (const values of [
+      { processorId: processorB, runId: runA },
+      { processorId: processorA, runId: runB },
+      { processorId: processorA, bookingId: bookingB },
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.productionOrders).values({
+            tenantId: tenantA,
+            ...values,
+          }),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("cannot put a line on another tenant's sheet", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionOrderLines).values({
+          tenantId: tenantA,
+          orderId: orderB,
+          label: "Brisket",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("REFUSES A SHEET ATTACHED TO NEITHER A DATE NOR A RUN", async () => {
+    // A sheet for a day that does not exist. The ops layer says it in words;
+    // the CHECK is what makes it true of every path to the table.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionOrders).values({
+          tenantId: tenantA,
+          processorId: processorA,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("REFUSES A PRICE ON A LINE THAT DOES NOT SAY WHAT IT IS PER", async () => {
+    // The itemised rate sheet's central rule, arriving on the order that quotes
+    // from it: $1.05 with nothing saying whether it is a bird or a pound is the
+    // exact ambiguity the price items table was built to end.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionOrderLines).values({
+          tenantId: tenantA,
+          orderId: orderA,
+          label: "Cutting",
+          unitPriceCents: 105,
+        }),
+      ),
+    ).rejects.toThrow();
+    // The reverse IS allowed — "per package, they never said what it costs".
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionOrderLines).values({
+          tenantId: tenantA,
+          orderId: orderA,
+          label: "Vacuum pack",
+          unit: "package",
+        }),
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it("refuses a nought quantity, which is not a line", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionOrderLines)
+          .set({ quantity: 0 })
+          .where(eq(schema.productionOrderLines.id, orderLineA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a negative processing fee — a plant does not pay you to cut", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionRuns)
+          .set({ processingFeeCents: -1 })
+          .where(eq(schema.productionRuns.id, runA)),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("cannot read, update or delete another tenant's processor", async () => {
     const seen = await asOwner((tx) =>
       tx
@@ -1180,6 +1341,16 @@ d("production tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.productionProcessorPriceItems),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.productionOrders),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.productionOrderLines),
       ),
     ).toHaveLength(0);
     expect(

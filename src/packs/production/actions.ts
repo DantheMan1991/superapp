@@ -371,15 +371,42 @@ export async function completeRunAction(input: unknown) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, PACK);
   const parsed = z
-    .object({ runId: z.string().uuid(), completedOn: requiredDate })
+    .object({
+      runId: z.string().uuid(),
+      completedOn: requiredDate,
+      /**
+       * What the plant charged, in DOLLARS from the form. Absent and null both
+       * mean nobody said — which is not zero, and the difference is the whole
+       * reason this is nullable rather than defaulted.
+       */
+      processingFee: z
+        .number()
+        .min(0)
+        .max(10_000_000)
+        .multipleOf(0.01)
+        .nullable()
+        .optional(),
+    })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
+
+  const feeCents =
+    parsed.data.processingFee === null ||
+    parsed.data.processingFee === undefined
+      ? null
+      : Math.round(parsed.data.processingFee * 100);
 
   try {
     const result = await withTenant(
       ctx.tenant.id,
       (tx) =>
-        completeRun(tx, ctxOf(ctx), parsed.data.runId, parsed.data.completedOn),
+        completeRun(
+          tx,
+          ctxOf(ctx),
+          parsed.data.runId,
+          parsed.data.completedOn,
+          feeCents,
+        ),
       { role: ctx.role },
     );
     await logAudit({
@@ -392,6 +419,9 @@ export async function completeRunAction(input: unknown) {
         completedOn: parsed.data.completedOn,
         costBasis: result.basis,
         potCents: result.potCents,
+        // What the plant's share of that pot was. It reaches the ledger, so it
+        // belongs in the log beside the pot it went into.
+        processingFeeCents: result.processingFeeCents,
         landed: result.landed,
         unpricedInputs: result.unpricedInputs,
       },
@@ -402,6 +432,7 @@ export async function completeRunAction(input: unknown) {
       ok: true,
       basis: result.basis,
       potCents: result.potCents,
+      processingFeeCents: result.processingFeeCents,
       landed: result.landed,
       unpricedInputs: result.unpricedInputs,
     };

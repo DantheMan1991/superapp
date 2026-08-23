@@ -109,6 +109,26 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
    * link and is stricter, refusing a one-sided REVERSE as well as a void.
    */
   "intercompany",
+  /**
+   * **A PROCESSING FEE ACCRUED WHEN A RUN COMPLETED** — `production` slice 2c.
+   * `source_id` names a `production_runs` row.
+   *
+   * `Dr` the consumption account, `Cr 2060 Services Received Not Invoiced`.
+   * It exists because the fee goes INTO the pot the run's outputs are costed
+   * from, so the receipt that lands the meat credits consumption for money
+   * nothing had debited there — a contra credit sitting in an expense account
+   * until, and only if, the plant's bill happened to be coded to the same
+   * place. The accrual is the debit that makes the receipt's credit legitimate,
+   * and the bill clears 2060 instead of hitting the P&L twice.
+   *
+   * **NOT IN `MACHINE_SOURCES`, and the reason is `inventory_cost_adjustment`'s
+   * word for word.** Saying what a plant charged, from a quote, before the
+   * invoice arrives, moves money onto the balance sheet on somebody's say-so.
+   * `completeRun` is owner-only already, so `requireOwnerRole` is exactly the
+   * check this should meet, and widening a privilege boundary to admit an act
+   * that does not need it is how the boundary stops meaning anything.
+   */
+  "production_processing_accrual",
 ]);
 
 export const entryEditPolicy = pgEnum("entry_edit_policy", [

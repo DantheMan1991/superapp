@@ -49,6 +49,14 @@ export const homesteadFarm: IndustryProfile = {
      * processor" — they ring the butcher.
      */
     processor: "Butcher",
+    /**
+     * The instruction handed over with the animals. The pack's neutral fallback
+     * is "Order" because a bakery hands a co-packer a spec rather than a cut
+     * sheet — but on a farm this is the cut sheet, it is what the customer fills
+     * in on a half-beef sale, and calling it anything else on that screen would
+     * be the app using a word the farm does not.
+     */
+    cutSheet: "Cut sheet",
   },
   /**
    * A farmer is not reading a ledger all day. "Fed · 85.00" on a card has no

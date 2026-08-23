@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
@@ -30,6 +31,8 @@ import {
   postCostAdjustment,
   postedInventoryEntries,
   resolveGrniAccount,
+  resolveServicesAccruedAccount,
+  postServiceAccrual,
   unbilledReceipts,
   unmatchBillLine,
 } from "../src/packs/inventory/ledger-ops";
@@ -580,6 +583,112 @@ it("WILL NOT RELEASE COST THAT NEVER CAME IN", async () => {
       expect(entries).toHaveLength(1);
       expect(entries[0].source).toBe("inventory_receipt");
       expect(entries[0].idempotencyKey).toBe(`inventory:inventory_receipt:${movement.id}`);
+    });
+
+    /**
+     * ── THE PROCESSING ACCRUAL ─────────────────────────────────────────────
+     *
+     * `production` slice 2c. It lives in this suite rather than the pack's,
+     * because the pack's tenant keeps no books and the whole point of this
+     * entry is what it does to a set that does.
+     */
+    describe("a service received and not yet invoiced", () => {
+      it("provisions 2060 and resolves it by subtype", async () => {
+        const id = await asOwner((tx) =>
+          resolveServicesAccruedAccount(tx, tenantId),
+        );
+        const accounts = await asOwner((tx) =>
+          tx
+            .select()
+            .from(schema.accounts)
+            .where(eq(schema.accounts.tenantId, tenantId)),
+        );
+        expect(accounts.find((a) => a.id === id)?.code).toBe("2060");
+      });
+
+      it("IS NOT GRNI, and that was the decision", async () => {
+        // A processing fee genuinely is money owed for something received and
+        // not invoiced — and `unbilledReceipts` builds the GRNI working from
+        // stock RECEIPTS, which an accrued service has none of. A balance in
+        // 2050 that its own reconciliation could never explain is exactly the
+        // defect `owesASupplier` was extracted to stop.
+        const grni = await asOwner((tx) => resolveGrniAccount(tx, tenantId));
+        const accrued = await asOwner((tx) =>
+          resolveServicesAccruedAccount(tx, tenantId),
+        );
+        expect(accrued).not.toBe(grni);
+      });
+
+      it("DEBITS CONSUMPTION AND CREDITS 2060, which is what makes the receipt honest", async () => {
+        /**
+         * **THIS ENTRY EXISTS TO MAKE ANOTHER ENTRY HONEST.** A run's outputs
+         * credit the consumption account for the whole pot they were costed
+         * from, and the plant's share of that pot was never debited there by
+         * anything. Without this, completing a run leaves a credit balance in
+         * an expense account, self-correcting only if the plant's bill happens
+         * to be coded to the same place.
+         */
+        const accrued = await asOwner((tx) =>
+          resolveServicesAccruedAccount(tx, tenantId),
+        );
+        const cogsBefore = await netOf(cogsAccountId);
+        const accruedBefore = await netOf(accrued);
+
+        await asOwner((tx) =>
+          postServiceAccrual(tx, ownerCtx(), {
+            sourceId: randomUUID(),
+            amountCents: 73_000,
+            occurredOn: "2026-06-01",
+            locationAssetId: freezerId,
+            memo: "Processing accrued — KILL-1",
+          }),
+        );
+
+        expect(await netOf(cogsAccountId)).toBe(cogsBefore + 73_000);
+        // Liabilities are credits, so the net goes negative.
+        expect(await netOf(accrued)).toBe(accruedBefore - 73_000);
+      });
+
+      it("POSTS NOTHING FOR A WAIVED FEE, because there is nothing to accrue", async () => {
+        const accrued = await asOwner((tx) =>
+          resolveServicesAccruedAccount(tx, tenantId),
+        );
+        const before = await netOf(accrued);
+        const posted = await asOwner((tx) =>
+          postServiceAccrual(tx, ownerCtx(), {
+            sourceId: randomUUID(),
+            amountCents: 0,
+            occurredOn: "2026-06-02",
+            locationAssetId: freezerId,
+            memo: "Nothing charged",
+          }),
+        );
+        expect(posted).toBeNull();
+        expect(await netOf(accrued)).toBe(before);
+      });
+
+      it("is idempotent on the run it names, so a retry cannot accrue twice", async () => {
+        // The key is the run, not the moment. Completing a run happens in one
+        // transaction, but a retried request that got as far as posting must
+        // not double the liability.
+        const accrued = await asOwner((tx) =>
+          resolveServicesAccruedAccount(tx, tenantId),
+        );
+        const runId = randomUUID();
+        const before = await netOf(accrued);
+        for (let i = 0; i < 2; i++) {
+          await asOwner((tx) =>
+            postServiceAccrual(tx, ownerCtx(), {
+              sourceId: runId,
+              amountCents: 5_000,
+              occurredOn: "2026-06-03",
+              locationAssetId: freezerId,
+              memo: "Processing accrued — RETRY",
+            }),
+          );
+        }
+        expect(await netOf(accrued)).toBe(before - 5_000);
+      });
     });
   });
 

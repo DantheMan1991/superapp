@@ -302,6 +302,135 @@ export async function resolveGrniAccount(
   return active[0].id;
 }
 
+/**
+ * **SERVICES RECEIVED NOT INVOICED — `2060`.**
+ *
+ * Resolved by SUBTYPE and then by code, refusing ambiguity, the same way
+ * `resolveGrniAccount` does and for the same reason: an entry landing in the
+ * wrong account is worse than no entry, because it is wrong quietly.
+ *
+ * **NOT `2050`, AND THAT WAS THE DECISION.** A processing fee genuinely is
+ * money owed for something received and not yet invoiced, so GRNI reads right —
+ * and `unbilledReceipts` builds the GRNI working from stock RECEIPTS, which an
+ * accrued service has none of. Putting it in 2050 would give that account a
+ * balance its own reconciliation could never explain, which is the exact defect
+ * `owesASupplier` was extracted to stop: a kill day's output appearing on the
+ * "awaiting an invoice" list, inviting somebody to match a lumber bill against
+ * chicken backs.
+ */
+export async function resolveServicesAccruedAccount(
+  tx: Tx,
+  tenantId: string,
+): Promise<string> {
+  const rows = await tx
+    .select({
+      id: schema.accounts.id,
+      code: schema.accounts.code,
+      accountType: schema.accounts.accountType,
+      subtype: schema.accounts.subtype,
+      isActive: schema.accounts.isActive,
+    })
+    .from(schema.accounts)
+    .where(eq(schema.accounts.tenantId, tenantId));
+  const active = rows.filter(
+    (r) => r.isActive && r.accountType === "liability",
+  );
+  const bySubtype = active.filter((r) => r.subtype === "services_received");
+  const picked =
+    bySubtype.length === 1
+      ? bySubtype[0]
+      : (() => {
+          const byCode = active.filter((r) => r.code === "2060");
+          return byCode.length === 1 ? byCode[0] : null;
+        })();
+  if (!picked) {
+    throw new InventoryError(
+      "LEDGER_ACCOUNTS",
+      "Could not find exactly one active Services Received Not Invoiced account (code 2060). Re-provision the chart of accounts.",
+    );
+  }
+  return picked.id;
+}
+
+export interface PostServiceAccrualInput {
+  /** What the entry is for — a `production_runs` row today. */
+  sourceId: string;
+  /** Positive cents. Zero and null post nothing. */
+  amountCents: number;
+  occurredOn: string;
+  /** Where the work happened, for resolving the company. */
+  locationAssetId: string | null;
+  memo: string;
+}
+
+/**
+ * **ACCRUE A SERVICE THAT HAS BEEN CAPITALISED INTO STOCK BUT NOT INVOICED.**
+ *
+ * | | Debit | Credit |
+ * | --- | --- | --- |
+ * | the fee | the consumption account | Services Received Not Invoiced |
+ *
+ * **THIS ENTRY EXISTS TO MAKE ANOTHER ENTRY HONEST.** A production run's output
+ * receipt credits the CONSUMPTION account rather than GRNI, because the run's
+ * inputs were debited there on the way in and a transformation must net to
+ * nothing on the P&L. That holds exactly as long as everything in the pot was
+ * debited to consumption first — and a processing fee taken from a quote never
+ * was. Without this, completing a run leaves a credit balance in an expense
+ * account, self-correcting only if the plant's bill happens to be coded to the
+ * same place and never if it is coded to a "contract butchering" account of its
+ * own.
+ *
+ * Worked through, for a $600 fee:
+ *
+ * ```
+ * accrual        Dr 5000 600   Cr 2060 600
+ * output lands   Dr 1300 600   Cr 5000 600
+ * bill matched   Dr 2060 600   Cr AP   600
+ *                ───────────────────────────
+ *                1300 = 600 · 2060 = 0 · 5000 = 0 · AP = 600 · P&L = 0
+ * ```
+ *
+ * **THE LAST LINE OF THAT TABLE IS NOT BUILT YET**, and the balance left in
+ * 2060 is the point rather than a gap: a non-zero balance per plant IS the list
+ * of processing nobody has been invoiced for, which is the same self-surfacing
+ * shape `missedBookings` has — nothing has to remember to set a flag.
+ *
+ * Returns null when nothing was posted: a tenant on `none`, or a fee of zero,
+ * which is a plant that waived it and has nothing to accrue.
+ */
+export async function postServiceAccrual(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: PostServiceAccrualInput,
+): Promise<{ entryId: string } | null> {
+  if (input.amountCents <= 0) return null;
+  const treatment = await inventoryTreatmentOf(tx, ctx.tenantId);
+  if (treatment === "none") return null;
+
+  const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);
+  const accruedAccountId = await resolveServicesAccruedAccount(tx, ctx.tenantId);
+  const entityId = await resolveMovementEntity(
+    tx,
+    ctx.tenantId,
+    input.locationAssetId,
+  );
+
+  const { entry } = await postEntry(tx, ledgerCtx(ctx), {
+    entityId,
+    status: "posted",
+    entryDate: input.occurredOn,
+    memo: input.memo,
+    source: "production_processing_accrual",
+    sourceId: input.sourceId,
+    idempotencyKey: `production:processing_accrual:${input.sourceId}`,
+    lines: [
+      { accountId: accounts.cogsAccountId, amountCents: input.amountCents },
+      { accountId: accruedAccountId, amountCents: -input.amountCents },
+    ],
+  });
+  return { entryId: entry.id };
+}
+
 /** The ledger context a machine posting runs under. See ADR 0011. */
 function ledgerCtx(ctx: InventoryCtx): LedgerCtx {
   return { tenantId: ctx.tenantId, userId: ctx.userId, role: ctx.role };

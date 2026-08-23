@@ -1,0 +1,2 @@
+ALTER TABLE "production_processor_handles" ADD COLUMN "cut_fee_cents_per_head" integer;--> statement-breakpoint
+ALTER TABLE "production_processor_handles" ADD CONSTRAINT "production_processor_handles_cut_fee_nonneg" CHECK ("production_processor_handles"."cut_fee_cents_per_head" is null or "production_processor_handles"."cut_fee_cents_per_head" >= 0);

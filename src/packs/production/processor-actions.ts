@@ -155,12 +155,14 @@ export async function setHandleAction(input: unknown) {
       capacityPerDay: z.number().int().positive().max(1_000_000).nullable().optional(),
       killFee: dollars,
       cutWrapPerLb: dollars,
+      cutFeePerHead: dollars,
       priceNotes: z.string().max(2000).optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
 
-  const { processorId, killFee, cutWrapPerLb, ...rest } = parsed.data;
+  const { processorId, killFee, cutWrapPerLb, cutFeePerHead, ...rest } =
+    parsed.data;
   try {
     const row = await withTenant(
       ctx.tenant.id,
@@ -169,6 +171,7 @@ export async function setHandleAction(input: unknown) {
           ...rest,
           killFeeCents: toCents(killFee),
           cutWrapCentsPerLb: toCents(cutWrapPerLb),
+          cutFeeCentsPerHead: toCents(cutFeePerHead),
         }),
       { role: ctx.role },
     );
@@ -185,6 +188,7 @@ export async function setHandleAction(input: unknown) {
         capacityPerDay: row.capacityPerDay,
         killFeeCents: row.killFeeCents,
         cutWrapCentsPerLb: row.cutWrapCentsPerLb,
+        cutFeeCentsPerHead: row.cutFeeCentsPerHead,
       },
     });
     revalidatePath(BASE, "layout");

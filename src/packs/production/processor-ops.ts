@@ -55,6 +55,7 @@ export interface HandleInput {
   capacityPerDay?: number | null;
   killFeeCents?: number | null;
   cutWrapCentsPerLb?: number | null;
+  cutFeeCentsPerHead?: number | null;
   priceNotes?: string;
 }
 
@@ -342,6 +343,7 @@ export async function setHandle(
     [input.capacityPerDay, "how many they can take in a day"],
     [input.killFeeCents, "the fee per head"],
     [input.cutWrapCentsPerLb, "the cut and wrap rate"],
+    [input.cutFeeCentsPerHead, "the cutting fee per head"],
   ] as const) {
     if (value !== undefined && value !== null && value < 0) {
       throw new ProductionError("PROCESSOR_INVALID", `${what} cannot be negative`);
@@ -357,6 +359,7 @@ export async function setHandle(
       capacityPerDay: input.capacityPerDay ?? null,
       killFeeCents: input.killFeeCents ?? null,
       cutWrapCentsPerLb: input.cutWrapCentsPerLb ?? null,
+      cutFeeCentsPerHead: input.cutFeeCentsPerHead ?? null,
       priceNotes: (input.priceNotes ?? "").trim(),
     })
     .onConflictDoUpdate({
@@ -369,6 +372,7 @@ export async function setHandle(
         capacityPerDay: input.capacityPerDay ?? null,
         killFeeCents: input.killFeeCents ?? null,
         cutWrapCentsPerLb: input.cutWrapCentsPerLb ?? null,
+        cutFeeCentsPerHead: input.cutFeeCentsPerHead ?? null,
         priceNotes: (input.priceNotes ?? "").trim(),
         updatedAt: new Date(),
       },

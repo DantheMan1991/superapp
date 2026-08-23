@@ -49,13 +49,15 @@ RULES, IN ORDER OF IMPORTANCE.
 
 2. NEVER CALCULATE, CONVERT OR AVERAGE. Do not turn a per-quarter price into a per-pound one, do not average a range, do not add a minimum into a fee. If a sheet gives a range like "$95-$120", report null and put the range in the price note.
 
-3. KILL FEE IS PER HEAD. CUT AND WRAP IS PER POUND. Sheets are sloppy about saying which; use the magnitude. A beef kill fee is tens or low hundreds of dollars; cut and wrap is under two dollars a pound. If a number is labelled ambiguously and the magnitude does not settle it, leave it null and say so in the note.
+3. THERE ARE THREE FEE SLOTS AND THEY ARE NOT INTERCHANGEABLE. killFee is SLAUGHTER, per head. cutWrapPerLb is CUTTING, per pound of hanging weight. cutFeePerHead is CUTTING, per bird or per animal. Red-meat plants quote cutting per pound; poultry plants quote it per bird. Put a cutting rate in whichever slot matches the unit the sheet states, and if the sheet does not state a unit, leave it null — do not infer one from the size of the number.
 
-4. ONE ROW PER ANIMAL. If a sheet prices beef, pork and lamb, that is three rows. If it gives one price for everything, that is one row with kind empty.
+4. A MENU IS NOT A RATE. If a sheet lists several cutting options at different prices — quartered $1.05, eight-piece $1.25, deboned $1.30 — there is no single cutting fee, so leave BOTH cutting slots null and put the menu in the price note. Only fill a cutting slot when the sheet names one price for cutting that animal.
 
-5. AMOUNTS ARE IN DOLLARS, as decimals — 95 for $95.00, 0.9 for 90 cents. Never cents, never strings with symbols.
+5. ONE ROW PER ANIMAL. If a sheet prices beef, pork and lamb, that is three rows. If it gives one price for everything, that is one row with kind empty.
 
-6. PUT EVERYTHING ELSE IN THE PRICE NOTE, in the sheet's own words: minimums, extras, surcharges, disposal fees, deposit terms. Do not try to model them.
+6. AMOUNTS ARE IN DOLLARS, as decimals — 95 for $95.00, 0.9 for 90 cents. Never cents, never strings with symbols.
+
+7. PUT EVERYTHING ELSE IN THE PRICE NOTE, in the sheet's own words: minimums, extras, surcharges, disposal fees, deposit terms. Do not try to model them.
 
 If the page is not a price list at all, return no rows and say so in the note.`;
 }
@@ -93,7 +95,12 @@ const TOOL = {
             cutWrapPerLb: {
               type: ["number", "null"],
               description:
-                "Cut and wrap PER POUND of hanging weight, in dollars. Null if not given or ambiguous.",
+                "Cutting PER POUND of hanging weight, in dollars. How red-meat plants quote. Null if not given, ambiguous, or if the sheet lists a menu of cutting options rather than one price.",
+            },
+            cutFeePerHead: {
+              type: ["number", "null"],
+              description:
+                "Cutting PER BIRD or per animal, in dollars. How poultry plants quote. Null if not given, ambiguous, or if the sheet lists a menu of cutting options rather than one price.",
             },
             priceNotes: {
               type: "string",
@@ -106,6 +113,7 @@ const TOOL = {
             "capacityPerDay",
             "killFee",
             "cutWrapPerLb",
+            "cutFeePerHead",
             "priceNotes",
           ],
         },
@@ -125,6 +133,7 @@ export interface ProposedHandle {
   capacityPerDay: number | null;
   killFee: number | null;
   cutWrapPerLb: number | null;
+  cutFeePerHead: number | null;
   priceNotes: string;
 }
 
@@ -162,6 +171,7 @@ export function validatePriceList(raw: unknown): PriceListProposal {
       // Money, in dollars, and never negative. A plant does not pay you.
       killFee: readNumber(row.killFee, { min: 0, max: 1_000_000 }),
       cutWrapPerLb: readNumber(row.cutWrapPerLb, { min: 0, max: 1_000_000 }),
+      cutFeePerHead: readNumber(row.cutFeePerHead, { min: 0, max: 1_000_000 }),
       priceNotes: readText(row.priceNotes, 2000),
     });
   }

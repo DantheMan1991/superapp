@@ -371,6 +371,7 @@ export function HandleDialog({
     capacityPerDay: number | null;
     killFeeCents: number | null;
     cutWrapCentsPerLb: number | null;
+    cutFeeCentsPerHead: number | null;
     priceNotes: string;
   };
 }) {
@@ -385,6 +386,11 @@ export function HandleDialog({
   const [cutWrap, setCutWrap] = useState(
     existing?.cutWrapCentsPerLb != null
       ? (existing.cutWrapCentsPerLb / 100).toFixed(2)
+      : "",
+  );
+  const [cutFee, setCutFee] = useState(
+    existing?.cutFeeCentsPerHead != null
+      ? (existing.cutFeeCentsPerHead / 100).toFixed(2)
       : "",
   );
   const [priceNotes, setPriceNotes] = useState(existing?.priceNotes ?? "");
@@ -403,6 +409,7 @@ export function HandleDialog({
         capacityPerDay: numOrNull(capacity),
         killFee: numOrNull(killFee),
         cutWrapPerLb: numOrNull(cutWrap),
+        cutFeePerHead: numOrNull(cutFee),
         priceNotes: priceNotes.trim(),
       });
       if ("error" in result && result.error) {
@@ -455,7 +462,7 @@ export function HandleDialog({
               />
             )}
           </div>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="handle-capacity">Head per day</Label>
               <Input
@@ -477,6 +484,15 @@ export function HandleDialog({
                 onChange={(e) => setKillFee(e.target.value)}
               />
             </div>
+          </div>
+          {/*
+            TWO WAYS TO CHARGE FOR CUTTING, and a plant quotes whichever suits
+            the animal: red meat is per pound of hanging weight, poultry is per
+            bird. Both are offered because a real rate sheet proved neither
+            alone is enough, and both may be filled in — a per-pound rate plus a
+            flat per-bird handling fee is an ordinary arrangement.
+          */}
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="handle-cut">Cut and wrap, per lb</Label>
               <Input
@@ -486,6 +502,17 @@ export function HandleDialog({
                 min={0}
                 value={cutWrap}
                 onChange={(e) => setCutWrap(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="handle-cutfee">Cutting, per head</Label>
+              <Input
+                id="handle-cutfee"
+                type="number"
+                step="0.01"
+                min={0}
+                value={cutFee}
+                onChange={(e) => setCutFee(e.target.value)}
               />
             </div>
           </div>

@@ -107,6 +107,7 @@ describe("validatePriceList", () => {
     capacityPerDay: null,
     killFee: null,
     cutWrapPerLb: null,
+    cutFeePerHead: null,
     priceNotes: "",
     ...over,
   });
@@ -221,6 +222,7 @@ describe("what a real rate sheet contains", () => {
           capacityPerDay: null,
           killFee: null,
           cutWrapPerLb: null,
+          cutFeePerHead: null,
           priceNotes:
             "Cornish x $3.75 (50 to 100), $3.15 (101 to 250) ... varies by breed and batch size",
         },
@@ -242,6 +244,7 @@ describe("what a real rate sheet contains", () => {
           capacityPerDay: null,
           killFee: null,
           cutWrapPerLb: null,
+          cutFeePerHead: null,
           priceNotes: "charged by weight, not a flat per head fee",
         },
       ],
@@ -255,13 +258,83 @@ describe("what a real rate sheet contains", () => {
     // three to the cent.
     const out = validatePriceList({
       rows: [
-        { kind: "duck", capacityPerDay: null, killFee: 10.55, cutWrapPerLb: null, priceNotes: "" },
-        { kind: "goose", capacityPerDay: null, killFee: 11.55, cutWrapPerLb: null, priceNotes: "" },
-        { kind: "quail", capacityPerDay: null, killFee: 2.75, cutWrapPerLb: null, priceNotes: "" },
+        { kind: "duck", capacityPerDay: null, killFee: 10.55, cutWrapPerLb: null, cutFeePerHead: null, priceNotes: "" },
+        { kind: "goose", capacityPerDay: null, killFee: 11.55, cutWrapPerLb: null, cutFeePerHead: null, priceNotes: "" },
+        { kind: "quail", capacityPerDay: null, killFee: 2.75, cutWrapPerLb: null, cutFeePerHead: null, priceNotes: "" },
       ],
       note: "",
     });
     expect(out.rows.map((r) => r.killFee)).toEqual([10.55, 11.55, 2.75]);
     expect(out.rows.map((r) => r.kind)).toEqual(["duck", "goose", "quail"]);
+  });
+});
+
+describe("cutting, per pound and per head", () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    kind: "cattle",
+    capacityPerDay: null,
+    killFee: null,
+    cutWrapPerLb: null,
+    cutFeePerHead: null,
+    priceNotes: "",
+    ...over,
+  });
+
+  it("keeps the two cutting units apart", () => {
+    // THE COLUMN A REAL SHEET PROVED WAS MISSING. Red meat is cut by the pound
+    // of hanging weight; poultry is cut by the bird. $1.05 means completely
+    // different money depending on which, and before this there was only one
+    // slot — so a per-bird rate either went in the per-pound column and lied,
+    // or was refused and survived as prose nothing can compare.
+    const out = validatePriceList({
+      rows: [
+        row({ kind: "cattle", cutWrapPerLb: 0.9 }),
+        row({ kind: "chicken", cutFeePerHead: 1.05 }),
+      ],
+      note: "",
+    });
+    expect(out.rows[0].cutWrapPerLb).toBe(0.9);
+    expect(out.rows[0].cutFeePerHead).toBeNull();
+    expect(out.rows[1].cutFeePerHead).toBe(1.05);
+    expect(out.rows[1].cutWrapPerLb).toBeNull();
+  });
+
+  it("allows both, because a plant may charge both", () => {
+    // No CHECK forbids it. A per-pound cut plus a flat per-bird handling fee is
+    // an ordinary arrangement, and a rule against it would be this app telling
+    // a business how it may quote.
+    const out = validatePriceList({
+      rows: [row({ cutWrapPerLb: 0.9, cutFeePerHead: 5 })],
+      note: "",
+    });
+    expect(out.rows[0].cutWrapPerLb).toBe(0.9);
+    expect(out.rows[0].cutFeePerHead).toBe(5);
+  });
+
+  it("refuses a negative per-head cutting fee", () => {
+    expect(
+      validatePriceList({ rows: [row({ cutFeePerHead: -1 })], note: "" })
+        .rows[0].cutFeePerHead,
+    ).toBeNull();
+  });
+
+  it("STILL refuses a menu of cutting options, which is not a rate", () => {
+    // Pleasant Valley lists twelve chicken cutting options at nine different
+    // prices. Adding a per-head column does NOT make that representable — a
+    // menu is not a rate, and picking one of the twelve would be inventing the
+    // farm's choice. Both slots stay null and the menu stays in the note.
+    const out = validatePriceList({
+      rows: [
+        row({
+          kind: "chicken",
+          priceNotes:
+            "Quartered $1.05 per bird; 8 Pcs Cut $1.25 per bird; Deboning Thighs $0.65 per bird",
+        }),
+      ],
+      note: "",
+    });
+    expect(out.rows[0].cutFeePerHead).toBeNull();
+    expect(out.rows[0].cutWrapPerLb).toBeNull();
+    expect(out.rows[0].priceNotes).toContain("8 Pcs Cut $1.25");
   });
 });

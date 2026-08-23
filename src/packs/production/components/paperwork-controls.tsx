@@ -342,6 +342,7 @@ interface HandleRow {
   capacityPerDay: string;
   killFee: string;
   cutWrapPerLb: string;
+  cutFeePerHead: string;
   priceNotes: string;
 }
 
@@ -397,6 +398,8 @@ export function ReadPriceListDialog({
           killFee: row.killFee === null ? "" : row.killFee.toFixed(2),
           cutWrapPerLb:
             row.cutWrapPerLb === null ? "" : row.cutWrapPerLb.toFixed(2),
+          cutFeePerHead:
+            row.cutFeePerHead === null ? "" : row.cutFeePerHead.toFixed(2),
           priceNotes: row.priceNotes,
         })),
       );
@@ -456,6 +459,8 @@ export function ReadPriceListDialog({
           killFee: row.killFee === "" ? null : Number(row.killFee),
           cutWrapPerLb:
             row.cutWrapPerLb === "" ? null : Number(row.cutWrapPerLb),
+          cutFeePerHead:
+            row.cutFeePerHead === "" ? null : Number(row.cutFeePerHead),
           priceNotes: row.priceNotes,
         });
         if ("error" in result && result.error) {
@@ -586,6 +591,15 @@ export function ReadPriceListDialog({
                     <Input
                       value={row.cutWrapPerLb}
                       onChange={(e) => set(i, { cutWrapPerLb: e.target.value })}
+                    />
+                  </div>
+                  <div className="w-24 space-y-1">
+                    <Label className="text-xs">Cut/head</Label>
+                    <Input
+                      value={row.cutFeePerHead}
+                      onChange={(e) =>
+                        set(i, { cutFeePerHead: e.target.value })
+                      }
                     />
                   </div>
                   <div className="min-w-40 flex-1 space-y-1">

@@ -740,6 +740,19 @@ d("production tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  it("refuses a negative per-head cutting fee", async () => {
+    // The column a real rate sheet proved was missing. Same rule as the other
+    // two fees: a plant does not pay you to cut.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionProcessorHandles)
+          .set({ cutFeeCentsPerHead: -1 })
+          .where(eq(schema.productionProcessorHandles.id, handleA)),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("refuses a processor rated outside 1 to 5, and a negative fee", async () => {
     await expect(
       withSystem((tx) =>

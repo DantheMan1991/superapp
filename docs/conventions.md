@@ -161,6 +161,20 @@ a feature PR; **import `@/lib/money` in new code.**
   order; what makes it safe is that the wrong way round is loud and the right
   way round is harmless. Say so in the migration's header, as
   `0075_accounting_contacts_contract.sql` does.
+- **A composite FK cannot take a bare `ON DELETE SET NULL`.** Postgres nulls
+  every referencing column, `tenant_id` included, and `tenant_id` is NOT NULL on
+  every tenant table — so the delete fails with a not-null violation instead of
+  doing what the constraint says. Every composite FK in this schema is
+  `(tenant_id, x)`, so this applies to all of them. Three ways out, in the order
+  worth considering them: **RESTRICT** (no `onDelete` at all) when the parent is
+  a container and re-parenting first is the honest order; **CASCADE** when the
+  child is meaningless without the parent; **`ON DELETE SET NULL (x)`**, PG 15's
+  column-list form, when the child should survive unparented — which Drizzle
+  cannot express (`.onDelete()` takes an action), so it has to be hand-written in
+  a `--custom` migration with a comment in the schema file pointing at it. See
+  `drizzle/0192` and `production_bookings_run_fk`. **The wrong choice is silent**:
+  nothing in `tsc`, lint or `db:generate` can see it, and it only shows up the
+  first time something deletes a parent that still has children.
 - Indexes on tenant tables lead with `tenant_id`.
 - Prefer a `NOT NULL DEFAULT` over a nullable column — `metadata jsonb NOT NULL
   DEFAULT '{}'` means `metadata->>'x'` is always safe.

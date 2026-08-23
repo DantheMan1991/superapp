@@ -145,9 +145,9 @@ export const productionRuns = pgTable(
      * No `ON DELETE` clause, so it is NO ACTION: **a plant that has processed
      * your animals cannot be deleted out from under the record.** The
      * establishment number and what it was inspected under are retained
-     * records, and the design says so. (`SET NULL` is not available anyway —
-     * this is a composite FK, and nulling it would null `tenant_id` too. See
-     * `production_bookings_run_fk`.)
+     * records, and the design says so. (Not SET NULL, which would also need the
+     * PG 15 column-list form on a composite FK — the bare one nulls `tenant_id`
+     * too. See `production_bookings_run_fk`, and `drizzle/0192`.)
      */
     processorId: uuid("processor_id"),
     /**

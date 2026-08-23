@@ -248,9 +248,9 @@ export const landZones = pgTable(
     uniqueIndex("land_zones_tenant_id_id_idx").on(t.tenantId, t.id),
     index("land_zones_tenant_parcel_idx").on(t.tenantId, t.parcelId),
     index("land_zones_tenant_status_idx").on(t.tenantId, t.status),
-    // No `onDelete`, i.e. RESTRICT. A composite FK's SET NULL would null
-    // `tenant_id` too, and CASCADE would let deleting a parcel silently take
-    // its paddocks and their whole use history with it.
+    // No `onDelete`, i.e. RESTRICT. A composite FK's *bare* SET NULL would null
+    // `tenant_id` too (`drizzle/0192`), and CASCADE would let deleting a parcel
+    // silently take its paddocks and their whole use history with it.
     foreignKey({
       name: "land_zones_parcel_fk",
       columns: [t.tenantId, t.parcelId],
@@ -443,8 +443,9 @@ export const landOccupancy = pgTable(
       foreignColumns: [landZones.tenantId, landZones.id],
     }).onDelete("cascade"),
     // Composite, so a structure is always a same-tenant asset. NO onDelete:
-    // a composite SET NULL would null `tenant_id` too, and removing a pen
-    // should require dealing with what is recorded as being in it.
+    // a composite *bare* SET NULL would null `tenant_id` too (`drizzle/0192`),
+    // and removing a pen should require dealing with what is recorded as being
+    // in it.
     foreignKey({
       name: "land_occupancy_structure_fk",
       columns: [t.tenantId, t.structureAssetId],

@@ -10,6 +10,44 @@
 
 ## Build log
 
+### 2026-08-23 — `ON DELETE SET NULL` on the nesting FK could never have worked (branch `claude/hopeful-raman-823a48`)
+
+Same bug, same migration and the same reasoning as
+[scheduling.md](scheduling.md)'s entry of this date — `work_items_parent_fk` was
+copied from `schedule_items_parent_fk` deliberately, including this. Read that
+entry for the full argument; what is specific to Work:
+
+`work_items_parent_fk` is a COMPOSITE self-FK on `(tenant_id, parent_id)`
+declared `ON DELETE SET NULL`. Postgres's bare `SET NULL` nulls EVERY referencing
+column including `tenant_id`, which is NOT NULL, so deleting a parent that still
+had a child failed with *"null value in column tenant_id … violates not-null
+constraint"* instead of unparenting it. `drizzle/0192` rewrites it as PG 15's
+`ON DELETE SET NULL (parent_id)`.
+
+- **Nothing here deletes an item or a list**, so it has never been a user-facing
+  500: state changes write `closed_at`, and `setListArchived` writes
+  `archived_at` — `list-ops.ts` says so in as many words ("Nothing in this
+  module deletes a list"). The action has no caller today.
+- **THE CROSS-LIST CASE IS WHY THIS IS SET NULL AND NOT CASCADE**, and Work is
+  where it is sharpest. `setParent` checks for cycles and nothing else: a child
+  may sit on a completely different list from its parent. So the one route that
+  could ever fire this action — a list delete cascading through
+  `work_items_list_fk` onto a parent — would, under CASCADE, reach sideways and
+  silently delete a live item out of a list nobody touched. SET NULL cannot
+  destroy a row; that asymmetry decided it.
+- **`tests/nesting-parent-fk.test.ts` drives exactly that case**: parent on list
+  A, child on list B, parent deleted. The child survives, on list B, with
+  `tenant_id` intact and `parent_id` null. It also asserts the constraint
+  definition itself, because `tsc`, lint and `db:generate` cannot tell
+  `SET NULL` from `SET NULL (parent_id)`.
+- **`work.ts` still declares plain `set null`** and now carries a comment saying
+  why: `.onDelete()` takes an action, not a column list, and leaving the
+  declaration alone is what keeps the drizzle-kit snapshot in agreement so
+  `db:generate` never tries to revert 0192.
+
+Applied to the dev branch and to production before the merge, per
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
+
 ### 2026-08-18 — Work that was about itself (branch `claude/work-cannot-be-about-itself`)
 
 First time anybody has driven this module. Opened an item, typed a word into
@@ -699,6 +737,15 @@ header on why an obligation is never stored.
 
 
 ## Decisions & gotchas
+
+**A child does not have to be on its parent's list, and one FK depends on it.**
+`setParent` checks for cycles and nothing else. That is why `work_items_parent_fk`
+is `ON DELETE SET NULL (parent_id)` (hand-written in `drizzle/0192`, PG 15+) and
+not CASCADE: a list delete cascading onto a parent would otherwise take a live
+item out of an untouched list with it. The bare `SET NULL` the schema file still
+declares would null `tenant_id` too and could never run — `.onDelete()` cannot
+express a column list, so the TS stays lossy on purpose and
+`tests/nesting-parent-fk.test.ts` is the guard.
 
 **Work is visible by default; a calendar is not.** Scheduling's containers are
 private until shared, Work's are visible to members until restricted. That looks

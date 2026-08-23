@@ -742,6 +742,26 @@ export const productionProcessorHandles = pgTable(
     killFeeCents: integer("kill_fee_cents"),
     /** Cut and wrap, in cents per pound of hanging weight. Null when unquoted. */
     cutWrapCentsPerLb: integer("cut_wrap_cents_per_lb"),
+    /**
+     * Cutting, in cents PER HEAD. Null when unquoted.
+     *
+     * **A REAL RATE SHEET PROVED THIS COLUMN WAS MISSING** (2026-08-23). Every
+     * red-meat plant quotes cut-and-wrap per pound of hanging weight, which is
+     * what the column above holds — and every POULTRY plant quotes cutting per
+     * bird. Pleasant Valley's 2026 list is $1.05 to quarter a chicken and $1.25
+     * for an eight-piece cut, and there was nowhere to put either. The reader
+     * correctly refused to fold them into the per-pound column, because `$1.05`
+     * sitting there is indistinguishable from a real per-pound rate, so the
+     * figures survived only as prose in `price_notes` where nothing can compare
+     * them.
+     *
+     * **BOTH MAY BE SET, and there is no CHECK saying otherwise.** A plant that
+     * charges per pound to cut and a flat per-bird handling fee on top is an
+     * ordinary arrangement, and a constraint forbidding it would be this app
+     * telling a business how it may quote. What decides which a farm reads is
+     * the animal, not a rule here.
+     */
+    cutFeeCentsPerHead: integer("cut_fee_cents_per_head"),
     /** Anything those two numbers cannot carry — minimums, extras. */
     priceNotes: text("price_notes").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -783,6 +803,10 @@ export const productionProcessorHandles = pgTable(
     check(
       "production_processor_handles_cut_wrap_nonneg",
       sql`${t.cutWrapCentsPerLb} is null or ${t.cutWrapCentsPerLb} >= 0`,
+    ),
+    check(
+      "production_processor_handles_cut_fee_nonneg",
+      sql`${t.cutFeeCentsPerHead} is null or ${t.cutFeeCentsPerHead} >= 0`,
     ),
   ],
 );

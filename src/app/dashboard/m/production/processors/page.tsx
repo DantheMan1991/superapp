@@ -191,6 +191,9 @@ export default async function ProcessorsPage() {
                       {handles.map((handle) => {
                         const kill = centsToDisplay(handle.killFeeCents);
                         const cut = centsToDisplay(handle.cutWrapCentsPerLb);
+                        const cutHead = centsToDisplay(
+                          handle.cutFeeCentsPerHead,
+                        );
                         return (
                           <li
                             key={handle.id}
@@ -208,11 +211,23 @@ export default async function ProcessorsPage() {
                             <span className="text-muted-foreground">
                               {kill ? `${kill} a head` : "Kill fee not quoted"}
                             </span>
-                            <span className="text-muted-foreground">
-                              {cut
-                                ? `${cut} a lb cut and wrap`
-                                : "Cut and wrap not quoted"}
-                            </span>
+                            {/* Whichever ways they quoted. A plant that gave
+                                neither says so once, not twice. */}
+                            {cut && (
+                              <span className="text-muted-foreground">
+                                {cut} a lb cut and wrap
+                              </span>
+                            )}
+                            {cutHead && (
+                              <span className="text-muted-foreground">
+                                {cutHead} a head to cut
+                              </span>
+                            )}
+                            {!cut && !cutHead && (
+                              <span className="text-muted-foreground">
+                                Cutting not quoted
+                              </span>
+                            )}
                             {handle.priceNotes !== "" && (
                               <span className="text-muted-foreground">
                                 {handle.priceNotes}
@@ -230,6 +245,8 @@ export default async function ProcessorsPage() {
                                     killFeeCents: handle.killFeeCents,
                                     cutWrapCentsPerLb:
                                       handle.cutWrapCentsPerLb,
+                                    cutFeeCentsPerHead:
+                                      handle.cutFeeCentsPerHead,
                                     priceNotes: handle.priceNotes,
                                   }}
                                 />

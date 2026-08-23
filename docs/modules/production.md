@@ -71,6 +71,38 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-08-23 — What a bird costs to cut (`claude/what-a-bird-costs-to-cut`)
+
+**THE COLUMN A REAL RATE SHEET PROVED WAS MISSING.**
+`production_processor_handles.cut_fee_cents_per_head` sits beside
+`cut_wrap_cents_per_lb`, and the two are not interchangeable: **every red-meat
+plant quotes cutting per pound of hanging weight, and every poultry plant quotes
+it per bird.** Pleasant Valley's list is $1.05 to quarter a chicken and $1.25 for
+an eight-piece cut, and there was nowhere to put either — the reader correctly
+refused to fold them into the per-pound column, because `$1.05` sitting there is
+indistinguishable from a real per-pound rate, so the figures survived only as
+prose that nothing can compare.
+
+**BOTH MAY BE SET, and no CHECK says otherwise.** A per-pound cut with a flat
+per-bird handling fee on top is an ordinary arrangement; a constraint forbidding
+it would be this app telling a business how it may quote. What decides which a
+farm reads is the animal, not a rule here.
+
+**THE EXTRACTOR NOW HAS THREE FEE SLOTS AND A RULE ABOUT NOT MIXING THEM.** The
+prompt gained the distinction and, more importantly, a new rule that generalises
+the thing the first real sheet exposed:
+
+> **A MENU IS NOT A RATE.** If a sheet lists several cutting options at different
+> prices — quartered $1.05, eight-piece $1.25, deboned $1.30 — there is no single
+> cutting fee, so leave BOTH cutting slots null and put the menu in the note.
+
+**SO THIS COLUMN DOES NOT MAKE PLEASANT VALLEY'S CUTTING REPRESENTABLE, and that
+is correct.** Twelve chicken options at nine prices is a menu; picking one would
+be inventing the farm's choice. What the column fixes is the case where a plant
+names ONE cutting price for an animal — which is most of them, red meat
+especially — and which previously had to be either mis-stated or thrown away. A
+test pins the menu case so a later prompt change cannot start guessing at it.
+
 ### 2026-08-23 — A real rate sheet, and the five prices that became one (`claude/five-prices-one-row`)
 
 **THE FIRST GENUINE PAPERWORK THROUGH THE READER**: Pleasant Valley Poultry's
@@ -914,7 +946,7 @@ tests:**
 | `production_run_carcasses` | **The kill sheet, line by line** — the stage between the animal and the box | `tenant_id`, FORCE RLS. Composite FKs to the run and to the **input** (both CASCADE); `run_input_id` is REQUIRED, which makes the chain carcass → input → movement → lot total. `head_count` is 1 for a beef and 70 for a pen. `disposition` in `passed\|condemned` — two, because one line is one outcome. CHECKs: a condemned line carries no `hanging_lb`, a passed line carries no `condemn_reason`. **Writable on a finished run**, unlike everything else here |
 
 | `production_processors` | **Who does the work you do not** — a role on a party, not a new contact model | `tenant_id`, FORCE RLS. Composite FK to `parties` (CASCADE); UNIQUE per party, because two rows would be two opinions about one plant with nothing to say which is current. **No `name` column** — it is the party's, so this table cannot disagree with the rest of the app. `inspection` in `usda\|state\|custom_exempt\|uninspected\|unknown`: five, and `unknown` is a real answer rather than a missing one. `rating` 1–5 or null, and it is an OPINION — the measured half is folded, never stored |
-| `production_processor_handles` | **What one processor will take, and what it quoted** | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind)` — two rows would be two prices for one animal. `kind` is an open taxonomy from the profile's `processorHandles`, a **separate list** from `livestock.species` because what a plant takes is not what this farm raises. Fees are in cents and are a QUOTE; what was actually paid is a bill in `payables` against the same party |
+| `production_processor_handles` | **What one processor will take, and what it quoted** | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind)` — two rows would be two prices for one animal. `kind` is an open taxonomy from the profile's `processorHandles`, a **separate list** from `livestock.species` because what a plant takes is not what this farm raises. Fees are in cents and are a QUOTE; what was actually paid is a bill in `payables` against the same party | **Two cutting columns**, `cut_wrap_cents_per_lb` (red meat) and `cut_fee_cents_per_head` (poultry), because plants quote in different units and $1.05 means different money in each. Both may be set
 | `production_processor_cuts` | What a processor will produce | Composite FK to the processor (CASCADE). Free text by design — cut names are a trade's prose and every plant's list differs. `kind` empty means "anything they take". This is CAPABILITY; the per-animal cut sheet is a later slice |
 
 | `production_bookings` | **A date held with a processor — the scarce resource** | `tenant_id`, FORCE RLS. Composite FKs to the processor and to the run, **both CASCADE**; `run_id` is what the booking BECAME and is null until the day happens. `status` in `held\|confirmed\|cancelled` — three, and there is deliberately **no "it happened"**, because `run_id` answers that and a status somebody must advance would disagree with it. CHECK: a cancelled date cannot claim a run. Deposit in cents, and null is not zero — a date held on a phone call is ordinary |
@@ -1139,13 +1171,11 @@ run model, separate templates), and the processing path and eligibility flag
 - **NOTHING RATE-LIMITS IT, and it spends money per press.** Accounting's
   extractor claims a 15-second per-tenant cooldown slot inside its gating
   transaction; this has none, so a double-click is two calls.
-- **THE SCHEMA CANNOT HOLD POULTRY CUTTING, which is now certain rather than
-  suspected.** `cut_wrap_cents_per_lb` is per pound of hanging weight; every
-  poultry plant prices cutting **per bird** — $1.05 quartered, $1.25 for an
-  8-piece cut on the sheet that proved it. The reader correctly refuses the
-  field and the note carries the real figures, but two plants' cutting rates
-  cannot be compared until there is a column for it. Needs a migration and a
-  decision about whether the unit belongs on the handle row or on the fee.
+- ~~**THE SCHEMA CANNOT HOLD POULTRY CUTTING.**~~ **Fixed** —
+  `cut_fee_cents_per_head` beside `cut_wrap_cents_per_lb`, both nullable, both
+  allowed at once. **What is still not representable, correctly, is a cutting
+  MENU**: twelve chicken options at nine prices is not a rate, and picking one
+  would invent the farm's choice. Those stay in the note.
 - **THE FILE IS NOT KEPT.** The design says "the kill sheet as a DOCUMENT" and a
   kill sheet is a retained record; the bytes are currently read, sent and
   dropped. Filing it means `production` importing the Documents module — the

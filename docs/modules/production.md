@@ -906,6 +906,19 @@ run model, separate templates), and the processing path and eligibility flag
   keep emitting them and the isolation suite still asserts their CHECKs.
 - ~~**NOTHING SELECTS A PRICE ITEM YET.**~~ **Closed 2026-08-23** — the cut
   sheet quotes from it and the fee reaches the meat.
+- **A FEE NOT KNOWN AT COMPLETION CAN NEVER BE RECORDED**, and that is the
+  normal case rather than an edge one: a plant routinely invoices days after the
+  boxes go in the freezer. `completeRun` takes the figure and nothing else ever
+  sets it, so a run finished before the bill arrived carries `null` for good.
+  Slice 2d's matching is the answer — the cost correction it posts is what moves
+  a landed cost — but until it exists the honest advice is to wait for the bill
+  before finishing a run, which is the opposite of what the pack tells you to do
+  everywhere else.
+- **A RUN'S PLACE CANNOT BE CHANGED AFTER IT STARTS.** There is no edit at all
+  for a run — not the location, not the crew, not the notes. It went unnoticed
+  until the accrual needed a location and a run started from a booking had none;
+  the fallback fixed that case, and a run with no outputs carrying a location
+  still has nowhere to get one from.
 - **THE PLANT'S BILL IS NOT MATCHED TO THE RUN, so `2060` never clears.** The
   third row of the worked entry in the build log is not built: the accrual goes
   on and nothing takes it off, so the balance grows by every run that names a

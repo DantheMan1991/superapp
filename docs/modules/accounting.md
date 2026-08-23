@@ -1527,6 +1527,28 @@ row. Pulling that thread found the bigger problem.
 - **Not built:** closing a register with an unfinished reconciliation on it is
   neither blocked nor cancelled; it just cannot be completed until you reopen.
 
+**MERGED 2026-08-23, NINE DAYS AND 237 COMMITS LATER, and the delay found a
+second bug.** The code auto-merged; only the build log conflicted. But the
+banking module grew a RULES ENGINE in the meantime, and
+`applyRulesToUnreviewed` calls `categorizeTransaction` in a loop — which this
+branch had just taught to refuse a closed register.
+
+One closed register would therefore have thrown `BANK_ACCOUNT_INACTIVE` and
+**rolled back the entire bulk apply**, including every suggestion already written
+for every other account, because the whole run is one transaction. The guard was
+right; the caller had grown since.
+
+It skips and counts now — `skippedClosed`, beside the `skippedLocked` the period
+lock already had, surfaced in the same two places and carried in the audit meta.
+That is the same answer this branch already gave for a Plaid sync, for the same
+reason: **a bulk operation that spans registers must not fail because one of
+them is shut.**
+
+**The general lesson is about stale branches, not about banking.** A long-open
+branch is not just at risk of conflicting — it is at risk of being SEMANTICALLY
+wrong against code that arrived after it, in files it does not touch and git
+will merge without complaint. `rules.ts` was never in this PR's diff.
+
 
 ### 2026-08-12 — Every confirmation is a real dialog now (branch `claude/accounting-confirm-dialogs`)
 

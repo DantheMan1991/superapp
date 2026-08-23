@@ -1279,6 +1279,7 @@ export async function applyRulesAction(
           matched: r.matched,
           autoPosted: r.autoPosted,
           skippedLocked: r.skippedLocked,
+          skippedClosed: r.skippedClosed,
         },
       });
       return r;

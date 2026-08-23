@@ -8,7 +8,10 @@ import {
   type LedgerCtx,
 } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
-import { createBankAccount } from "../src/modules/accounting/banking/accounts";
+import {
+  createBankAccount,
+  setBankAccountActive,
+} from "../src/modules/accounting/banking/accounts";
 import { createVendor } from "../src/modules/accounting/payables/vendors";
 import { importTransactions } from "../src/modules/accounting/banking/import";
 import { categorizeTransaction } from "../src/modules/accounting/banking/review";
@@ -230,6 +233,91 @@ d("bank rules (DB)", () => {
     await withTenant(tenantId, async (tx) =>
       setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: null }),
     );
+  });
+
+  it("A CLOSED REGISTER SKIPS ITS ROWS RATHER THAN FAILING THE WHOLE RUN", async () => {
+    /**
+     * **A BULK APPLY SPANS EVERY REGISTER, and it runs in ONE transaction.**
+     * `categorizeTransaction` refuses a closed register — that is what
+     * `loadWritableBankAccount` is for — so an unguarded call here would throw
+     * and roll back every suggestion already written for every OTHER account.
+     * The row keeps its suggestion and waits for a person, which is what
+     * "closed" is supposed to mean: no NEW financial effect, not "this run
+     * fails".
+     *
+     * Found by merging the closed-register guard into a rules engine written
+     * five days after it. The guard was right; the caller had grown since.
+     *
+     * **The sequence is the realistic one, and the first attempt was not.**
+     * Importing a row that a rule already covers auto-posts it on the way in,
+     * so there is nothing left unreviewed to skip. Rows go in first, the rule
+     * is written afterwards, and the bulk apply is what would have posted them.
+     */
+    await importRows([
+      { date: "2026-07-11", description: "TRACTOR SUPPLY 4417", cents: -8_200 },
+    ]);
+    const supplies = await accountId("6650");
+    await withTenant(tenantId, (tx) =>
+      createRule(tx, owner, {
+        name: "Tractor Supply as Utilities",
+        appliesTo: "money_out",
+        bankAccountId: registerId,
+        matchMode: "all",
+        conditions: [
+          { field: "description", op: "contains", value: "tractor supply" },
+        ],
+        setAccountId: supplies,
+        setVendorId: null,
+        setMemo: null,
+        autoPost: true,
+      }),
+    );
+
+    const register = await withTenant(tenantId, (tx) =>
+      tx.query.bankAccounts.findFirst({
+        where: eq(schema.bankAccounts.id, registerId),
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      setBankAccountActive(tx, owner, {
+        bankAccountId: registerId,
+        expectedVersion: register!.version,
+        active: false,
+      }),
+    );
+
+    // The run COMPLETES. Before the fix this threw BANK_ACCOUNT_INACTIVE and
+    // took every suggestion in the same transaction down with it.
+    const result = await withTenant(tenantId, (tx) =>
+      applyRulesToUnreviewed(tx, owner, { bankAccountId: registerId }),
+    );
+    expect(result.skippedClosed).toBe(1);
+    expect(result.autoPosted).toBe(0);
+
+    // Still suggested, so it can be posted once the register reopens.
+    const row = (await txnsFor("TRACTOR SUPPLY 4417"))[0];
+    expect(row.status).toBe("unreviewed");
+    expect(readRuleSuggestion(row)?.accountCode).toBe("6650");
+
+    const closed = await withTenant(tenantId, (tx) =>
+      tx.query.bankAccounts.findFirst({
+        where: eq(schema.bankAccounts.id, registerId),
+      }),
+    );
+    await withTenant(tenantId, (tx) =>
+      setBankAccountActive(tx, owner, {
+        bankAccountId: registerId,
+        expectedVersion: closed!.version,
+        active: true,
+      }),
+    );
+
+    // And reopening lets it post, so skipping lost nothing.
+    const after = await withTenant(tenantId, (tx) =>
+      applyRulesToUnreviewed(tx, owner, { bankAccountId: registerId }),
+    );
+    expect(after.autoPosted).toBe(1);
+    expect(after.skippedClosed).toBe(0);
   });
 
   it("proposes a rule once the same coding is chosen by hand often enough", async () => {

@@ -185,7 +185,7 @@ export async function syncPlaidItem(
     modified: 0,
     removed: 0,
     skippedUnlinked: 0,
-    rules: { matched: 0, autoPosted: 0, skippedLocked: 0 },
+    rules: { matched: 0, autoPosted: 0, skippedLocked: 0, skippedClosed: 0 },
   };
   let cursor = item.syncCursor ?? undefined;
   let hasMore = true;
@@ -332,6 +332,7 @@ export async function syncPlaidItem(
     result.rules.matched += applied.matched;
     result.rules.autoPosted += applied.autoPosted;
     result.rules.skippedLocked += applied.skippedLocked;
+    result.rules.skippedClosed += applied.skippedClosed;
   }
   return result;
 }

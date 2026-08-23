@@ -353,6 +353,18 @@ export interface ApplyRulesResult {
   autoPosted: number;
   /** Auto-post rows left alone because their date is in a closed period. */
   skippedLocked: number;
+  /**
+   * Auto-post rows left alone because their REGISTER is closed.
+   *
+   * **A BULK APPLY SPANS EVERY REGISTER, so it must not fail because one of
+   * them is shut.** `categorizeTransaction` refuses a closed register — that is
+   * the whole point of `loadWritableBankAccount` — and this loop runs inside one
+   * transaction, so an unguarded throw here would roll back every suggestion
+   * already written for every OTHER account. Skipping is the same answer a
+   * Plaid sync gives for the same reason, and the same shape as the period lock
+   * directly above.
+   */
+  skippedClosed: number;
 }
 
 /**
@@ -371,7 +383,12 @@ export async function applyRulesToUnreviewed(
 ): Promise<ApplyRulesResult> {
   requireOwnerRole(ctx);
   const rules = (await listRules(tx, ctx.tenantId)).filter((r) => r.isActive);
-  const result: ApplyRulesResult = { matched: 0, autoPosted: 0, skippedLocked: 0 };
+  const result: ApplyRulesResult = {
+    matched: 0,
+    autoPosted: 0,
+    skippedLocked: 0,
+    skippedClosed: 0,
+  };
   if (rules.length === 0) return result;
 
   const matchable = rules.map(toMatchable);
@@ -385,13 +402,15 @@ export async function applyRulesToUnreviewed(
       e.closedThrough,
     ]),
   );
-  const entityOfAccount = new Map(
-    (
-      await tx.query.bankAccounts.findMany({
-        where: eq(schema.bankAccounts.tenantId, ctx.tenantId),
-        columns: { id: true, entityId: true },
-      })
-    ).map((a) => [a.id, a.entityId]),
+  const registers = await tx.query.bankAccounts.findMany({
+    where: eq(schema.bankAccounts.tenantId, ctx.tenantId),
+    columns: { id: true, entityId: true, isActive: true },
+  });
+  const entityOfAccount = new Map(registers.map((a) => [a.id, a.entityId]));
+  // Read alongside the entity map rather than per row: same reasoning as the
+  // period lock above, and it is the same single query.
+  const closedRegisters = new Set(
+    registers.filter((a) => !a.isActive).map((a) => a.id),
   );
 
   const txns = await tx.query.bankTransactions.findMany({
@@ -488,6 +507,15 @@ export async function applyRulesToUnreviewed(
     );
     if (closedThrough && txn.txnDate <= closedThrough) {
       result.skippedLocked += 1;
+      continue;
+    }
+    // **CHECKED HERE RATHER THAN CAUGHT BELOW.** `categorizeTransaction` would
+    // throw on a closed register, and one throw inside this transaction takes
+    // every suggestion written above it down with it. The row keeps its
+    // suggestion and waits for a person, which is what "closed" is supposed to
+    // mean: no NEW financial effect, not "this whole run fails".
+    if (closedRegisters.has(txn.bankAccountId)) {
+      result.skippedClosed += 1;
       continue;
     }
     autoPostable.push({ txnId: txn.id, match });

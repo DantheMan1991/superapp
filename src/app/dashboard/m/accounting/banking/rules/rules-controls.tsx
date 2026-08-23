@@ -175,6 +175,13 @@ export function RulesTable({
                 if (r?.skippedLocked) {
                   parts.push(`${r.skippedLocked} left for review (period closed)`);
                 }
+                // A row left alone with no trace is the same silent failure the
+                // period-lock count above exists to prevent.
+                if (r?.skippedClosed) {
+                  parts.push(
+                    `${r.skippedClosed} left for review (account closed)`,
+                  );
+                }
                 toast.success(parts.join(" · "));
                 router.refresh();
               })

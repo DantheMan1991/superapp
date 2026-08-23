@@ -128,9 +128,17 @@ export const productionAttentionSource: AttentionSource = {
 
       return {
         key: `production_booking:${row.id}`,
+        /**
+         * NO "for" BEFORE `when`, and it is not a style preference — it was
+         * "booked for in 18 days" on the live page until somebody read it.
+         * `describeBookingDate` returns a phrase that already carries its own
+         * preposition ("in 18 days", "5 days ago") or none at all ("today",
+         * "tomorrow"), so anything in front of it has to work with all four.
+         * "is booked" does; "is booked for" does not.
+         */
         title: missed
-          ? `${row.processorName} was booked for ${when} and nothing has been recorded`
-          : `${row.processorName} is booked for ${when}`,
+          ? `${row.processorName} was booked ${when} and nothing has been recorded`
+          : `${row.processorName} is booked ${when}`,
         detail:
           [
             what || null,

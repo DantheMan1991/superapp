@@ -180,7 +180,7 @@ export default async function BookingsPage() {
                             defaultCode={`${runWord} ${booking.bookedFor}`}
                             runWord={runWord}
                             kindOptions={runKindsFrom(pack.config)}
-                            today={today}
+                            bookedFor={booking.bookedFor}
                           />
                         ) : null}
                         {booking.runId ? (

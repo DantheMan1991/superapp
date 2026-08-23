@@ -381,18 +381,24 @@ export function StartRunFromBookingButton({
   defaultCode,
   runWord,
   kindOptions,
-  today,
+  bookedFor,
 }: {
   bookingId: string;
   defaultCode: string;
   runWord: string;
   kindOptions: string[];
-  today: string;
+  /**
+   * THE BOOKED DAY, not today — this is usually being filled in after the fact.
+   * Defaulting to today put 23 August on a kill that happened on the 18th, on
+   * the very screen whose whole purpose is catching up with a date that already
+   * went by. Found by driving it.
+   */
+  bookedFor: string;
 }) {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState(defaultCode);
   const [runKind, setRunKind] = useState(kindOptions[0] ?? "");
-  const [startedOn, setStartedOn] = useState(today);
+  const [startedOn, setStartedOn] = useState(bookedFor);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 

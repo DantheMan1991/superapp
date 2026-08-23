@@ -14,6 +14,76 @@
 
 ## Build log
 
+### 2026-08-23 — `ON DELETE SET NULL` on the nesting FK could never have worked (branch `claude/hopeful-raman-823a48`)
+
+Found by reading `drizzle-kit`'s constraint churn during the production pack's
+slice 1c, recorded in [production.md](production.md), and fixed here.
+
+`schedule_items_parent_fk` is a COMPOSITE self-FK on `(tenant_id, parent_id)`
+declared `ON DELETE SET NULL`. **Postgres's bare `SET NULL` nulls EVERY
+referencing column**, `tenant_id` included — and `tenant_id` is NOT NULL. So the
+behaviour the constraint declares was never reachable: deleting a parent that
+still had a child did not unparent the child, it failed with
+
+```
+null value in column "tenant_id" of relation "schedule_items"
+violates not-null constraint
+```
+
+Reproduced on the dev branch inside a rolled-back transaction before anything
+was written, and again after the fix to prove the fix.
+
+- **It has never been a user-facing 500, and that is luck rather than design.**
+  Nothing in this module deletes an item (`cancelItem` sets `cancelled_at`) or a
+  calendar (`setCalendarArchived` sets `archived_at`), so the action has no
+  caller. It would have fired the first time anybody added a delete, or the
+  first time a calendar delete cascaded onto a parent whose child sits on a
+  DIFFERENT calendar. `work_items_parent_fk` had the identical shape and is
+  fixed in the same migration — see [work.md](work.md).
+- **The fix is PG 15's column list**: `drizzle/0192` rewrites both constraints as
+  `ON DELETE SET NULL (parent_id)`, which nulls only the column named. Both
+  databases run 18.6. Nothing about what nesting MEANS changed — the intent
+  written into the schema was always "the child survives and becomes
+  top-level", and this is the smallest change that lets the constraint do it.
+- **Not CASCADE**, which `production_bookings_run_fk` chose for the same trap on
+  the same day. A booking is meaningless without its run; a step is not
+  meaningless without the meeting it was filed under, and nothing forces a child
+  onto its parent's calendar. The only route that can fire this action is a
+  cascade from above, so CASCADE would reach sideways and silently delete a live
+  item off a calendar nobody touched. SET NULL cannot destroy a row.
+- **Not RESTRICT**, which the four other composite self-FKs in this schema use
+  (`assets`, `document_folders`, `inventory_lots`, `accounts`). Those are
+  containers, where "re-parent what is inside it first" is the honest order of
+  operations. A step inside a month-end close is not a container.
+- **THE TS DECLARATION IS NOW A LOSSY DESCRIPTION OF THE CONSTRAINT.**
+  `.onDelete()` takes an action, not a column list, so `scheduling.ts` still
+  says plain `set null`. That is deliberate and it is the quiet option: the
+  `drizzle-kit` snapshot already records `set null`, so schema and snapshot
+  agree, `db:generate` sees no diff, and nothing tries to revert the migration.
+  Verified — `db:generate` says *"No schema changes"* after the change. Both
+  schema files carry a comment saying so and pointing at 0192, the same
+  arrangement as the `text_pattern_ops` index hand-written in `drizzle/0024`.
+- **`tests/nesting-parent-fk.test.ts` is the only thing that can notice a
+  regression.** `tsc`, lint and `db:generate` cannot tell `SET NULL` from `SET
+  NULL (parent_id)` — the difference lives in SQL Drizzle cannot express. The
+  test asserts the constraint definition on both tables and drives the
+  behaviour: parent deleted, child survives, `tenant_id` intact, `parent_id`
+  null.
+- **A belief that had spread through the schema got corrected too.** Five
+  comments across `assets.ts`, `inventory.ts`, `land.ts` and `production.ts`
+  justify a RESTRICT by saying a composite FK's SET NULL nulls `tenant_id`, two
+  of them concluding it is therefore *unavailable*. True of the bare form, and
+  true of every Postgres before 15. Those four tables keep RESTRICT — it stands
+  on its own reasoning — but the justification no longer claims there was no
+  choice. The rule now lives once, in
+  [conventions.md](../conventions.md) §4, with all three outcomes and when each
+  is right.
+
+Applied to the dev branch and to production before the merge, per
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md), and
+verified with `pg_get_constraintdef` on both plus `scripts/verify-rls.ts`
+(140 tables, RLS enabled, forced, policies present).
+
 ### 2026-08-18 — Driven for the first time, and the ICS feed holds up (no code change)
 
 The module was carried as compiled-and-tested. This is the record of somebody
@@ -656,6 +726,13 @@ Designed, not yet built:
 - `src/modules/scheduling/attention/source.ts` — the digest contribution.
 
 ## Decisions & gotchas
+
+**`parent_id`'s `set null` is a column-list SET NULL, and the schema file cannot
+say so.** A composite FK's bare `ON DELETE SET NULL` nulls `tenant_id` too, so it
+could never run; `drizzle/0192` hand-writes `ON DELETE SET NULL (parent_id)`
+(PG 15+). `.onDelete()` has no way to express a column list, so the TS says plain
+`set null` and matches the drizzle-kit snapshot — which is what keeps
+`db:generate` from reverting it. `tests/nesting-parent-fk.test.ts` is the guard.
 
 **A calendar is the unit of sharing, not an item.** This is the founder's call
 (2026-08-08) and it is what makes the module feel like the thing people already

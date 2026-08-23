@@ -184,10 +184,11 @@ export const assets = pgTable(
      * Containment: a freezer sits in a garage, a garage sits on the property.
      * Composite FK, so a parent is always a same-tenant row.
      *
-     * NO `onDelete` — i.e. RESTRICT. A composite FK's SET NULL would null every
-     * referencing column including `tenant_id`, which is NOT NULL, so it is not
-     * available here. Removing a container therefore requires re-parenting what
-     * is inside it first, which is the honest order of operations anyway.
+     * NO `onDelete` — i.e. RESTRICT, and it is a choice rather than a
+     * workaround. SET NULL *is* available on a composite FK, in PG 15's
+     * column-list form (the bare one nulls `tenant_id` too — `drizzle/0192`).
+     * It is not wanted: removing a container should require re-parenting what is
+     * inside it first, which is the honest order of operations anyway.
      */
     parentId: uuid("parent_id"),
     notes: text("notes").notNull().default(""),

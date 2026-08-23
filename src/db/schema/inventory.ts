@@ -184,9 +184,9 @@ export const inventoryLots = pgTable(
     /**
      * Lineage. Composite self-FK, so a parent is always a same-tenant row.
      *
-     * NO `onDelete` — i.e. RESTRICT. A composite FK's SET NULL would null
-     * `tenant_id` too, and CASCADE would let deleting one lot silently take a
-     * whole traceability chain with it.
+     * NO `onDelete` — i.e. RESTRICT. A composite FK's *bare* SET NULL would null
+     * `tenant_id` too (`drizzle/0192`), and CASCADE would let deleting one lot
+     * silently take a whole traceability chain with it.
      */
     parentLotId: uuid("parent_lot_id"),
     status: text("status").notNull().default("open"),

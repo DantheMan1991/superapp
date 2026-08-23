@@ -71,6 +71,7 @@ export const DB_BACKED_TESTS = [
   "tests/ledger.test.ts",
   "tests/mail-inbox.test.ts",
   "tests/mailbox.test.ts",
+  "tests/nesting-parent-fk.test.ts",
   "tests/payables.test.ts",
   "tests/reports.test.ts",
   "tests/retainer-billing.test.ts",

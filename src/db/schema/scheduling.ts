@@ -362,6 +362,19 @@ export const scheduleItems = pgTable(
       columns: [t.tenantId, t.calendarId],
       foreignColumns: [scheduleCalendars.tenantId, scheduleCalendars.id],
     }).onDelete("cascade"),
+    // THE `set null` BELOW IS A LOSSY DESCRIPTION OF THE REAL CONSTRAINT, and
+    // that is deliberate. Postgres's *bare* `ON DELETE SET NULL` nulls EVERY
+    // referencing column — `tenant_id` included, which is NOT NULL — so as
+    // declared it could never unparent a child: deleting a parent that had one
+    // failed with "null value in column tenant_id violates not-null
+    // constraint". `drizzle/0192` rewrites it by hand as PG 15's column-list
+    // form, `ON DELETE SET NULL (parent_id)`, which nulls only `parent_id` and
+    // finally does what this line always meant.
+    //
+    // `.onDelete()` takes an action, not a column list, so the line cannot say
+    // so. It stays as it is on purpose: the drizzle-kit snapshot already records
+    // `set null`, so schema and snapshot agree and `db:generate` never tries to
+    // revert the migration. Do not change it without reading 0192's header.
     foreignKey({
       name: "schedule_items_parent_fk",
       columns: [t.tenantId, t.parentId],

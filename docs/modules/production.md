@@ -63,6 +63,47 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-08-23 — Slice 1c driven on `Test`, and two things reading it out loud found (`claude/booked-for-in-18-days`)
+
+Two dates booked by hand on the live site, chosen so the slice's own claim could
+be tested rather than described: **one ahead** (Miller's, 20 cattle, 2026-09-10,
+$200 down, confirmed) and **one already in the past** (Valley, 180 birds,
+2026-08-18, no deposit).
+
+**THE WHOLE ARGUMENT HELD.** The past date landed in **Nothing recorded**, above
+everything else, with *Start the batch* beside it. Starting the batch moved it to
+**Done with**, the badge became *Went ahead*, the actions collapsed to *Open the
+batch* — no Edit, no Remove, because a date that became a processing day is no
+longer editable — and the section vanished. Self-clearing, without a status
+anybody set.
+
+**AND IT REACHED `What needs you`**, which is the first time a PACK has put a
+line there: *"Miller's Custom Meats is booked in 18 days · 20 head cattle ·
+Soon"*, with *Email me this each morning* switched on. The missed one was gone
+from that list too, in the same act that cleared it from the page.
+
+**The capacity warning behaved as designed**: 20 head against Miller's stated 8 a
+day produced *"They told you 8 a day, and this is 20… so nothing is stopping
+you"*, and **Book it stayed enabled**. Advisory, not a refusal. It also carries
+into the list as *"Cattle · they said 8 a day"*. Kinds in the form were correctly
+scoped to what each plant actually takes — Miller's offered only Cattle, Valley
+only Poultry — and an unpaid deposit rendered as an em dash, never `$0.00`.
+
+**TWO DEFECTS, BOTH ONLY VISIBLE BY READING THE SCREEN:**
+
+- **"Miller's Custom Meats is booked FOR in 18 days."** `describeBookingDate`
+  returns a phrase that already carries its own preposition ("in 18 days", "5
+  days ago") or none at all ("today", "tomorrow"), so anything placed in front of
+  it has to work with all four. "is booked" does; "is booked for" does not. The
+  missed variant read "was booked for 5 days ago" for the same reason.
+- **Starting a batch defaulted its date to TODAY.** On the one screen whose
+  entire purpose is catching up with a date that already went by — it put 23
+  August on a kill that happened on the 18th. It defaults to the booked day now.
+
+Neither is a logic error and both survived tsc, eslint, 63 pure tests and 38
+isolation tests. They are the class the dossier keeps recording: **the defects
+that only exist in the sentence a person reads.**
+
 ### 2026-08-23 — Slice 1c: the date you cannot lose (`claude/the-date-you-cannot-lose`)
 
 **THE SCARCE RESOURCE FINALLY HAS A ROW.** The design has said since 2026-08-13
@@ -860,11 +901,11 @@ run model, separate templates), and the processing path and eligibility flag
   it. That would be advice rather than an obligation — a digest that offers
   advice gets muted — so it wants a screen, not a digest line, and probably wants
   next season's plan to exist before it can say anything true.
-- **1c HAS NOT BEEN DRIVEN IN A BROWSER.** The three things nothing else in this
-  pack does: `startRunFromBooking`, which writes across two tables and can refuse
-  from either; the capacity warning, which is the only advisory-not-refusal copy
-  on the pack; and the missed-date section, which is the whole reason the slice
-  exists and only appears once a date has actually gone by.
+- ~~**1c HAS NOT BEEN DRIVEN IN A BROWSER.**~~ **Driven on `Test` 2026-08-23** —
+  a future date and a past one, `startRunFromBooking`, the capacity warning and
+  the `What needs you` line all exercised; see the build log. **What is still
+  unexercised: cancelling a date, and the refusal that stops a booking which
+  already became a run from being cancelled.** Neither has run outside a test.
 - ~~**SLICE 1b HAS NOT BEEN DRIVEN IN A BROWSER.**~~ **Driven on `Test`
   2026-08-23** — two butchers stood up, one USDA doing cattle and one custom
   exempt doing birds; see the build log. It found one defect (a hardcoded word in

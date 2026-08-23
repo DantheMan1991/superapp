@@ -99,6 +99,9 @@ export async function ProductionModule({
                 and how they are inspected is a question anybody on the place
                 asks; only changing it is the owner's. */}
             <Button asChild variant="outline">
+              <Link href={`${BASE}/bookings`}>Booked dates</Link>
+            </Button>
+            <Button asChild variant="outline">
               <Link href={`${BASE}/processors`}>
                 {labelFor(pack.labels, "processor", "Processor")} directory
               </Link>

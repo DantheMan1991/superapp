@@ -171,6 +171,100 @@ export function inspectionNote(status: string, word: string): string {
   return note.replace(/\{word\}/g, word.toLowerCase());
 }
 
+/**
+ * Where a booked date stands. CLOSED, and three is the whole set.
+ *
+ * **THERE IS NO "IT HAPPENED".** Whether a date turned into a processing day is
+ * answered by the booking's `run_id`, not by a status somebody has to remember
+ * to advance — and a status nobody advances is precisely how a farm ends up
+ * with a list that says everything is still pending. See the schema header.
+ */
+export const BOOKING_STATUSES = ["held", "confirmed", "cancelled"] as const;
+export type BookingStatus = (typeof BOOKING_STATUSES)[number];
+
+export const BOOKING_STATUS_LABELS: Record<string, string> = {
+  held: "Pencilled in",
+  confirmed: "Confirmed",
+  cancelled: "Cancelled",
+};
+
+export const BOOKING_STATUS_NOTES: Record<string, string> = {
+  held: "A date they are holding for you. Nothing has been committed on either side, and it can go to somebody else.",
+  confirmed:
+    "Both sides are standing behind this date. Usually because money has moved.",
+  cancelled: "Given up. It is kept so the season's history stays honest.",
+};
+
+/**
+ * What a booking needs from a person RIGHT NOW, worked out from the date and
+ * what the booking became. Never stored.
+ *
+ * `missed` is the state this whole slice exists to surface: **a date that went
+ * by with no processing day recorded against it and no cancellation.** Either
+ * the animals went and nobody wrote it down, or the date was lost. Both are
+ * worth a person's attention and neither can be discovered by looking at a
+ * status, because nothing sets one.
+ *
+ * `cancelled` and `done` are deliberately NOT urgencies. They are finished, and
+ * a list that keeps nagging about them is one somebody stops reading.
+ */
+export type BookingStanding =
+  | "cancelled"
+  | "done"
+  | "missed"
+  | "today"
+  | "soon"
+  | "upcoming";
+
+/**
+ * HOW LONG BEFORE A DATE IT STARTS ASKING FOR ATTENTION.
+ *
+ * Twenty-one days, and it is a livestock number rather than a software one. A
+ * kill date needs animals at weight, a trailer, and — where `livestock` holds a
+ * withdrawal clock — a treatment that has cleared, which is the one that cannot
+ * be fixed in the last week. Work's own horizon is seven days because a task is
+ * something you sit down and do; this is something you have to have been
+ * preparing for.
+ */
+export const BOOKING_SOON_WITHIN_DAYS = 21;
+
+export function bookingStanding(
+  booking: { status: string; bookedFor: string; runId: string | null },
+  today: string,
+): BookingStanding {
+  if (booking.status === "cancelled") return "cancelled";
+  if (booking.runId) return "done";
+  if (booking.bookedFor < today) return "missed";
+  if (booking.bookedFor === today) return "today";
+  return daysBetween(today, booking.bookedFor) <= BOOKING_SOON_WITHIN_DAYS
+    ? "soon"
+    : "upcoming";
+}
+
+/**
+ * Whole days between two `yyyy-mm-dd` dates.
+ *
+ * PARSED AS UTC MIDNIGHT ON BOTH SIDES, so the arithmetic is a subtraction of
+ * two fixed instants and no daylight-saving transition can make a day 23 hours
+ * long. The tenant's timezone has already been applied upstream — `today`
+ * arrives as a date string computed with it — and applying it twice is how an
+ * off-by-one appears for exactly the half of the year one zone is shifted.
+ */
+export function daysBetween(from: string, to: string): number {
+  const a = Date.parse(`${from}T00:00:00Z`);
+  const b = Date.parse(`${to}T00:00:00Z`);
+  return Math.round((b - a) / 86_400_000);
+}
+
+/** "in 12 days", "today", "3 days ago". Never a bare date. */
+export function describeBookingDate(bookedFor: string, today: string): string {
+  const days = daysBetween(today, bookedFor);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days === -1) return "yesterday";
+  return days > 0 ? `in ${days} days` : `${Math.abs(days)} days ago`;
+}
+
 /** Will they put YOUR label on the package. Mirrors the CHECK. */
 export const LABELLING_OPTIONS = ["unknown", "no", "yes"] as const;
 export type Labelling = (typeof LABELLING_OPTIONS)[number];

@@ -32,6 +32,13 @@ import {
   inspectionNote,
   LABELLING_OPTIONS,
   RATING_LABELS,
+  BOOKING_STATUSES,
+  BOOKING_STATUS_LABELS,
+  BOOKING_STATUS_NOTES,
+  BOOKING_SOON_WITHIN_DAYS,
+  bookingStanding,
+  daysBetween,
+  describeBookingDate,
   centsToDisplay,
   processorHandlesFrom,
   isValidSlug,
@@ -406,6 +413,18 @@ describe("processor vocabulary", () => {
     expect(centsToDisplay(90)).toBe("$0.90");
   });
 
+  it("keeps the booking set closed, with no state for \"it happened\"", () => {
+    // Three, and the absence of a fourth is the decision. Whether a date became
+    // a processing day is answered by run_id; a status somebody must remember
+    // to advance is how a farm ends up with a list that says everything is
+    // still pending.
+    expect([...BOOKING_STATUSES]).toEqual(["held", "confirmed", "cancelled"]);
+    for (const s of BOOKING_STATUSES) {
+      expect(BOOKING_STATUS_LABELS[s]).toBeTruthy();
+      expect(BOOKING_STATUS_NOTES[s]?.length ?? 0).toBeGreaterThan(20);
+    }
+  });
+
   it("anchors every rating with a word", () => {
     // "4" means nothing on its own, and a farm comparing two plants a year
     // apart needs the same anchor both times.
@@ -731,5 +750,69 @@ describe("cuttingYield", () => {
       );
     }
     expect(Object.keys(LIVE_SOURCE_NOTES).sort()).toEqual(["farm", "plant"]);
+  });
+});
+
+/**
+ * ── BOOKED DATES (slice 1c) ───────────────────────────────────────────────
+ *
+ * **`bookingStanding` IS THE WHOLE SLICE IN ONE FUNCTION.** Everything the
+ * screen groups by and everything the digest raises comes out of it, and the
+ * state that justifies the feature — `missed` — exists only because it is
+ * derived. Nothing sets it, so nothing can forget to.
+ */
+describe("bookingStanding", () => {
+  const at = (bookedFor: string, opts: Partial<{ status: string; runId: string | null }> = {}) =>
+    bookingStanding(
+      { status: "confirmed", runId: null, bookedFor, ...opts },
+      "2026-08-23",
+    );
+
+  it("RAISES A DATE THAT WENT BY WITH NOTHING RECORDED", () => {
+    // The reason this slice exists. Either the animals went and nobody wrote it
+    // down — so the yield, the cost and the traceability chain are missing — or
+    // the date was lost. Both need a person.
+    expect(at("2026-08-20")).toBe("missed");
+    expect(at("2026-08-22")).toBe("missed");
+  });
+
+  it("stops raising it the moment somebody records what happened", () => {
+    // Self-clearing, which notifications.md requires of anything that reaches a
+    // person unasked. Two ways out, and both are the right thing to do.
+    expect(at("2026-08-20", { runId: "run-1" })).toBe("done");
+    expect(at("2026-08-20", { status: "cancelled" })).toBe("cancelled");
+  });
+
+  it("a finished date is never urgent again, whichever way it finished", () => {
+    expect(at("2026-09-30", { status: "cancelled" })).toBe("cancelled");
+    expect(at("2026-09-30", { runId: "run-1" })).toBe("done");
+  });
+
+  it("separates today, soon, and far enough away to ignore", () => {
+    expect(at("2026-08-23")).toBe("today");
+    expect(at("2026-08-24")).toBe("soon");
+    // Twenty-one days is a livestock horizon, not a software one: animals at
+    // weight, a trailer, and a withdrawal that has cleared.
+    expect(BOOKING_SOON_WITHIN_DAYS).toBe(21);
+    expect(at("2026-09-13")).toBe("soon");
+    expect(at("2026-09-14")).toBe("upcoming");
+  });
+
+  it("counts days across a month end and a DST change without drifting", () => {
+    // Both sides are parsed at UTC midnight, so no transition can make a day 23
+    // hours long. The tenant's zone was already applied when `today` was made;
+    // applying it twice is how an off-by-one appears for half the year.
+    expect(daysBetween("2026-08-23", "2026-09-13")).toBe(21);
+    expect(daysBetween("2026-10-25", "2026-11-08")).toBe(14);
+    expect(daysBetween("2026-03-01", "2026-03-15")).toBe(14);
+    expect(daysBetween("2026-08-23", "2026-08-20")).toBe(-3);
+  });
+
+  it("says when in words, never a bare date", () => {
+    expect(describeBookingDate("2026-08-23", "2026-08-23")).toBe("today");
+    expect(describeBookingDate("2026-08-24", "2026-08-23")).toBe("tomorrow");
+    expect(describeBookingDate("2026-08-22", "2026-08-23")).toBe("yesterday");
+    expect(describeBookingDate("2026-09-04", "2026-08-23")).toBe("in 12 days");
+    expect(describeBookingDate("2026-08-20", "2026-08-23")).toBe("3 days ago");
   });
 });

@@ -52,6 +52,8 @@ d("production tables (RLS)", () => {
   let processorA: string;
   let processorB: string;
   let handleA: string;
+  let bookingA: string;
+  let bookingB: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -277,6 +279,32 @@ d("production tables (RLS)", () => {
         { tenantId: tenantA, processorId: processorA, name: "Bone-in ribeye" },
         { tenantId: tenantB, processorId: processorB, name: "Whole bird" },
       ]);
+
+      const bookings = await tx
+        .insert(schema.productionBookings)
+        .values([
+          {
+            tenantId: tenantA,
+            processorId: processorA,
+            bookedFor: "2026-10-14",
+            kind: "cattle",
+            headCount: 4,
+            status: "confirmed",
+            depositCents: 20000,
+            reference: "A-REF",
+          },
+          {
+            tenantId: tenantB,
+            processorId: processorB,
+            bookedFor: "2026-10-15",
+            kind: "poultry",
+            headCount: 200,
+            reference: "B-REF",
+          },
+        ])
+        .returning();
+      bookingA = bookings[0].id;
+      bookingB = bookings[1].id;
     });
   });
 
@@ -760,7 +788,175 @@ d("production tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
-  it("is default-deny on all seven tables with no tenant context", async () => {
+  // ---- booked dates ------------------------------------------------------
+
+  /**
+   * **THE COMMERCIALLY SHARPEST TABLE IN THIS PACK.** A booking says which
+   * plant a named farm is using, ON WHICH MORNING, for how many head, and what
+   * it paid to hold the slot. Slaughter dates are the scarce resource — the
+   * design says plants book six to twelve months ahead — so a competitor who
+   * could read this would know which mornings to ring for and how much of the
+   * season a neighbour has already taken.
+   */
+  it("shows a tenant only its own dates, head and deposits", async () => {
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.productionBookings),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].reference).toBe("A-REF");
+    expect(mine[0].depositCents).toBe(20000);
+
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.productionBookings),
+    );
+    expect(theirs.map((b) => b.reference)).toEqual(["B-REF"]);
+  });
+
+  it("cannot read, move or cancel another tenant's date", async () => {
+    expect(
+      await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.productionBookings)
+          .where(eq(schema.productionBookings.id, bookingB)),
+      ),
+    ).toHaveLength(0);
+
+    // Moving somebody else's slaughter date would be the worst available
+    // outcome of a leak, not merely an information one.
+    expect(
+      await asOwner((tx) =>
+        tx
+          .update(schema.productionBookings)
+          .set({ bookedFor: "2026-12-01" })
+          .where(eq(schema.productionBookings.id, bookingB))
+          .returning(),
+      ),
+    ).toHaveLength(0);
+
+    expect(
+      await asOwner((tx) =>
+        tx
+          .delete(schema.productionBookings)
+          .where(eq(schema.productionBookings.id, bookingB))
+          .returning(),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("CANNOT BOOK A DATE WITH ANOTHER TENANT'S PROCESSOR", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionBookings).values({
+          tenantId: tenantA,
+          processorId: processorB,
+          bookedFor: "2026-10-20",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot point a booking at another tenant's run", async () => {
+    // The composite FK. This is the join that will later say which processor
+    // did a given run, so a cross-tenant one would attribute one farm's yield
+    // to another farm's plant.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionBookings)
+          .set({ runId: runB })
+          .where(eq(schema.productionBookings.id, bookingA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a cancelled date that claims it became a run", async () => {
+    // A contradiction rather than an unusual arrangement, and the CHECK is what
+    // makes the ops layer's refusal true of every path to the table.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionBookings)
+          .set({ status: "cancelled", runId: runA })
+          .where(eq(schema.productionBookings.id, bookingA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a standing nothing in the app knows, and a date for no head", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionBookings)
+          .set({ status: "probably" })
+          .where(eq(schema.productionBookings.id, bookingA)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionBookings)
+          .set({ headCount: 0 })
+          .where(eq(schema.productionBookings.id, bookingA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a linked booking does not block deleting the run, or the tenant", async () => {
+    /**
+     * CASCADE, and this test is here because the first attempt was `SET NULL`
+     * and it did not work — **a composite foreign key's `ON DELETE SET NULL`
+     * nulls EVERY referencing column, `tenant_id` included, and that column is
+     * `NOT NULL`.** So the delete failed outright rather than clearing the link,
+     * which is a trap worth a test rather than only a comment.
+     *
+     * The reason CASCADE is also the RIGHT answer, not just the working one:
+     * nothing in this app deletes a run, so the only path that removes one is
+     * deleting the tenant — where the booking is being deleted anyway. The
+     * elegant argument for SET NULL was defending a state nothing can reach.
+     */
+    await withSystem(async (tx) => {
+      const [run] = await tx
+        .insert(schema.productionRuns)
+        .values({
+          tenantId: tenantA,
+          code: "A-DISPOSABLE",
+          startedOn: "2026-10-14",
+        })
+        .returning();
+      const [booking] = await tx
+        .insert(schema.productionBookings)
+        .values({
+          tenantId: tenantA,
+          processorId: processorA,
+          bookedFor: "2026-10-14",
+          runId: run.id,
+        })
+        .returning();
+
+      await tx
+        .delete(schema.productionRuns)
+        .where(eq(schema.productionRuns.id, run.id));
+
+      const after = await tx.query.productionBookings.findFirst({
+        where: eq(schema.productionBookings.id, booking.id),
+      });
+      expect(after).toBeUndefined();
+    });
+  });
+
+  it("cannot move a booking into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.productionBookings)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.productionBookings.id, bookingA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("is default-deny on all eight tables with no tenant context", async () => {
     // FORCE ROW LEVEL SECURITY: an unknown tenant sees nothing, even for the
     // connection's own role. The backstop the whole shell rests on.
     const nowhere = "00000000-0000-0000-0000-000000000000";
@@ -795,6 +991,11 @@ d("production tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.productionProcessorCuts),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.productionBookings),
       ),
     ).toHaveLength(0);
   });

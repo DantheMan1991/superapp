@@ -2,6 +2,7 @@ import "server-only";
 import { accountingAttentionSource } from "@/modules/accounting/attention/source";
 import { schedulingAttentionSource } from "@/modules/scheduling/attention/source";
 import { workAttentionSource } from "@/modules/work/attention/source";
+import { productionAttentionSource } from "@/packs/production/attention/source";
 import type { AttentionSource } from "./types";
 
 /**
@@ -39,12 +40,27 @@ import type { AttentionSource } from "./types";
  * rows copied and both sources registered, every follow-up would be reported
  * twice, once by each.
  *
+ * PRODUCTION IS THIRD, from 2026-08-23, and it is **the first source that is a
+ * PACK rather than a core module** — the composition root's job is to name
+ * concrete implementations, and where they live is not a distinction it needs to
+ * care about. `src/packs/**` is outside the module-isolation rules in
+ * `eslint.config.mjs` (which are generated from `MODULE_SLUGS`), so no rule
+ * changed; the source itself still imports only `types.ts`, exactly like the
+ * three around it.
+ *
+ * It sits below Work because a booked slaughter date is usually weeks out and
+ * Work is usually today, and above Accounting because it reaches everybody
+ * rather than owners alone. Its overdue item — a date that passed with no
+ * processing day recorded against it — is the strongest single line this list
+ * carries, since the alternative to being told is a kill day nobody wrote down.
+ *
  * Accounting is last because it reaches owners only and has no per-record
  * assignee at all.
  */
 export const attentionSources: readonly AttentionSource[] = [
   schedulingAttentionSource,
   workAttentionSource,
+  productionAttentionSource,
   accountingAttentionSource,
 ];
 

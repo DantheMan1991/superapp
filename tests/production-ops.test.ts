@@ -18,10 +18,13 @@ import {
   type ProductionCtx,
 } from "../src/packs/production/ops";
 import {
+  clearPriceItems,
   createProcessor,
   getProcessor,
   removePriceItem,
+  removePriceItems,
   setPriceItem,
+  setPriceItemKind,
 } from "../src/packs/production/processor-ops";
 import {
   addOrderLine,
@@ -1377,6 +1380,172 @@ d("production ops", () => {
         "packaging",
         "brining",
       ]);
+    });
+
+    it("MOVES MANY ROWS ONTO ONE ANIMAL AT ONCE", async () => {
+      // **108 ROWS ARRIVED MIS-FILED**, because the sheet says "Duck & Geese"
+      // and the reader could not map that to one animal. Fixing that one row at
+      // a time is not a thing anybody does, so the list would stay wrong.
+      const processor = await makeProcessor("Bulk Move Poultry");
+      const ids: string[] = [];
+      for (const label of ["Quartered", "Split", "Debone Thighs"]) {
+        const row = await asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            category: "cutting",
+            label,
+            priceCents: 105,
+            unit: "head",
+          }),
+        );
+        expect(row.kind).toBe("");
+        ids.push(row.id);
+      }
+
+      const result = await asOwner((tx) =>
+        setPriceItemKind(tx, ownerCtx(), ids, "duck"),
+      );
+      expect(result).toEqual({ moved: 3, clashed: [] });
+
+      const detail = await asOwner((tx) =>
+        getProcessor(tx, tenantId, processor.id),
+      );
+      expect(detail?.priceItems.every((i) => i.kind === "duck")).toBe(true);
+    });
+
+    it("LEAVES A ROW ALONE WHEN THE MOVE WOULD COLLIDE, and names it", async () => {
+      // The unique index is `(processor, kind, label)`, so moving "Quartered"
+      // onto an animal that already prices "Quartered" cannot happen. Refusing
+      // the whole batch would be worse than moving what can move — but the
+      // caller has to be told WHICH, because the fix is to rename or remove the
+      // one already there.
+      const processor = await makeProcessor("Collide Poultry");
+      const already = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          kind: "duck",
+          category: "cutting",
+          label: "Quartered",
+          priceCents: 105,
+          unit: "head",
+        }),
+      );
+      const loose = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          category: "cutting",
+          label: "Quartered",
+          priceCents: 150,
+          unit: "head",
+        }),
+      );
+      const alsoLoose = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          category: "cutting",
+          label: "Split",
+          priceCents: 105,
+          unit: "head",
+        }),
+      );
+
+      const result = await asOwner((tx) =>
+        setPriceItemKind(tx, ownerCtx(), [loose.id, alsoLoose.id], "duck"),
+      );
+      expect(result.moved).toBe(1);
+      expect(result.clashed).toEqual(["Quartered"]);
+
+      // The one that could not move is untouched, not lost.
+      const detail = await asOwner((tx) =>
+        getProcessor(tx, tenantId, processor.id),
+      );
+      const stillLoose = detail?.priceItems.find((i) => i.id === loose.id);
+      expect(stillLoose?.kind).toBe("");
+      expect(stillLoose?.priceCents).toBe(150);
+      expect(already.id).not.toBe(loose.id);
+    });
+
+    it("CLEARS A WHOLE LIST so a rate sheet can be re-read over it", async () => {
+      // **THE UPSERT IS WHY THIS EXISTS.** A re-read that corrects the ANIMAL
+      // writes a new row and leaves the old one, so reading the sheet again
+      // would have taken `Test` from 108 items to 183.
+      const processor = await makeProcessor("Replace Me Packing");
+      for (const label of ["Slaughter", "Quartered", "Vacuum pack"]) {
+        await asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            label,
+            unit: "head",
+            priceCents: 100,
+          }),
+        );
+      }
+      const removed = await asOwner((tx) =>
+        clearPriceItems(tx, ownerCtx(), processor.id),
+      );
+      expect(removed).toBe(3);
+      const detail = await asOwner((tx) =>
+        getProcessor(tx, tenantId, processor.id),
+      );
+      expect(detail?.priceItems).toEqual([]);
+    });
+
+    it("CLEARING A PRICE LIST DOES NOT TOUCH WHAT AN ORDER WAS QUOTED", async () => {
+      // **THE SNAPSHOT IS WHY DELETING IS SAFE.** A price item is a quote with
+      // no history behind it; what an order was quoted lives on the order line
+      // and survives this untouched, which is the whole reason it is copied
+      // there. Without that, replacing a list would rewrite last October.
+      const processor = await makeProcessor("Snapshot Survives Meats");
+      const kill = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          kind: "cattle",
+          category: "slaughter",
+          label: "Slaughter",
+          priceCents: 9500,
+          unit: "head",
+        }),
+      );
+      const run = await asOwner((tx) =>
+        startRun(tx, ownerCtx(), {
+          code: "SHEET-SURVIVE",
+          startedOn: TODAY,
+          processorId: processor.id,
+        }),
+      );
+      const order = await asOwner((tx) =>
+        createOrder(tx, ownerCtx(), {
+          processorId: processor.id,
+          runId: run.id,
+        }),
+      );
+      await asOwner((tx) =>
+        addOrderLine(tx, ownerCtx(), order.id, { priceItemId: kill.id }),
+      );
+
+      await asOwner((tx) => clearPriceItems(tx, ownerCtx(), processor.id));
+
+      const after = await asOwner((tx) => getOrder(tx, tenantId, order.id));
+      expect(after?.lines).toHaveLength(1);
+      expect(after?.lines[0].label).toBe("Slaughter");
+      expect(after?.lines[0].unitPriceCents).toBe(9500);
+      expect(after?.lines[0].priceItemId).toBeNull();
+    });
+
+    it("takes many prices off at once", async () => {
+      const processor = await makeProcessor("Bulk Remove Packing");
+      const ids: string[] = [];
+      for (const label of ["A", "B", "C"]) {
+        const row = await asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            label,
+            unit: "flat",
+            priceCents: 100,
+          }),
+        );
+        ids.push(row.id);
+      }
+      expect(
+        await asOwner((tx) => removePriceItems(tx, ownerCtx(), ids.slice(0, 2))),
+      ).toBe(2);
+      const detail = await asOwner((tx) =>
+        getProcessor(tx, tenantId, processor.id),
+      );
+      expect(detail?.priceItems.map((i) => i.label)).toEqual(["C"]);
     });
 
     it("takes the price off a processor when the processor goes", async () => {

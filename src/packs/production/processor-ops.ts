@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type {
   ProductionProcessor,
@@ -558,6 +558,153 @@ export async function setPriceItem(
     })
     .returning();
   return row;
+}
+
+/**
+ * **CLEAR A PROCESSOR'S WHOLE PRICE LIST**, so a rate sheet can be re-read over
+ * a bad one rather than beside it.
+ *
+ * **THE UPSERT IS WHY THIS HAS TO EXIST.** `setPriceItem` keys on
+ * `(processor, kind, label)`, so a re-read that corrects the ANIMAL does not
+ * correct the row — `Duck & Geese: Quartered` with no kind and `Quartered` on a
+ * duck are different keys, and recording the second leaves the first sitting
+ * there. The live `Test` tenant reached 108 items with 75 of them mis-filed
+ * exactly that way, and reading the sheet again would have made it 183.
+ *
+ * **IT DELETES AND DOES NOT ARCHIVE.** A price item is a QUOTE with no history
+ * behind it — what an order was quoted is snapshotted onto the order line and
+ * survives this untouched, which is the whole reason that snapshot exists. So
+ * there is nothing here worth keeping that is not already kept somewhere it
+ * cannot be deleted from.
+ *
+ * Returns how many went, for the audit entry and for the sentence on screen —
+ * "this will replace 108 prices" is the only thing that makes this safe to
+ * offer.
+ */
+export async function clearPriceItems(
+  tx: Tx,
+  ctx: ProductionCtx,
+  processorId: string,
+): Promise<number> {
+  requireWrite(ctx, "owner");
+  await requireProcessor(tx, ctx.tenantId, processorId);
+  const rows = await tx
+    .delete(schema.productionProcessorPriceItems)
+    .where(
+      and(
+        eq(schema.productionProcessorPriceItems.tenantId, ctx.tenantId),
+        eq(schema.productionProcessorPriceItems.processorId, processorId),
+      ),
+    )
+    .returning();
+  return rows.length;
+}
+
+/**
+ * Put the same animal on many rows at once.
+ *
+ * **108 ROWS IS ALREADY TOO MANY TO TOUCH ONE AT A TIME**, which is what the
+ * founder said when he first saw the list, and it is the reason this is not
+ * left to `setPriceItem` in a loop from the client: that would be one round
+ * trip and one audit entry per row, and a half-finished reassignment with no
+ * way to tell how far it got.
+ *
+ * **IT MOVES ROWS RATHER THAN COPYING THEM**, so a row whose new key collides
+ * with one already there would violate the unique index. Rather than refuse the
+ * whole batch, the collision is reported: the caller is told which labels
+ * already exist under the target animal, and those rows are left alone.
+ */
+/**
+ * The unique index's key, as a string. Lower-cased because two labels differing
+ * only in case are the same option to a person and two rows to Postgres — the
+ * index cannot say so, so the bulk move refuses the collision rather than
+ * letting the database refuse it with an index name.
+ */
+function keyOf(processorId: string, label: string): string {
+  return `${processorId}::${label.trim().toLowerCase()}`;
+}
+
+export async function setPriceItemKind(
+  tx: Tx,
+  ctx: ProductionCtx,
+  ids: string[],
+  kind: string,
+): Promise<{ moved: number; clashed: string[] }> {
+  requireWrite(ctx, "owner");
+  const next = kind.trim().toLowerCase();
+  if (next !== "" && !isValidSlug(next)) {
+    throw new ProductionError(
+      "INVALID_KIND",
+      "use lowercase letters, numbers and underscores",
+    );
+  }
+  if (ids.length === 0) return { moved: 0, clashed: [] };
+
+  const rows = await tx.query.productionProcessorPriceItems.findMany({
+    where: and(
+      eq(schema.productionProcessorPriceItems.tenantId, ctx.tenantId),
+      inArray(schema.productionProcessorPriceItems.id, ids),
+    ),
+  });
+  if (rows.length === 0) return { moved: 0, clashed: [] };
+
+  // Everything already under the target animal, so a clash is caught here in
+  // words rather than as an index name from the database.
+  const existing = await tx.query.productionProcessorPriceItems.findMany({
+    where: and(
+      eq(schema.productionProcessorPriceItems.tenantId, ctx.tenantId),
+      inArray(
+        schema.productionProcessorPriceItems.processorId,
+        [...new Set(rows.map((r) => r.processorId))],
+      ),
+      eq(schema.productionProcessorPriceItems.kind, next),
+    ),
+  });
+  const taken = new Set(
+    existing.map((r) => keyOf(r.processorId, r.label)),
+  );
+
+  const clashed: string[] = [];
+  let moved = 0;
+  for (const row of rows) {
+    if (row.kind === next) continue;
+    const key = keyOf(row.processorId, row.label);
+    if (taken.has(key)) {
+      clashed.push(row.label);
+      continue;
+    }
+    taken.add(key);
+    await tx
+      .update(schema.productionProcessorPriceItems)
+      .set({ kind: next, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.productionProcessorPriceItems.tenantId, ctx.tenantId),
+          eq(schema.productionProcessorPriceItems.id, row.id),
+        ),
+      );
+    moved += 1;
+  }
+  return { moved, clashed };
+}
+
+export async function removePriceItems(
+  tx: Tx,
+  ctx: ProductionCtx,
+  ids: string[],
+): Promise<number> {
+  requireWrite(ctx, "owner");
+  if (ids.length === 0) return 0;
+  const rows = await tx
+    .delete(schema.productionProcessorPriceItems)
+    .where(
+      and(
+        eq(schema.productionProcessorPriceItems.tenantId, ctx.tenantId),
+        inArray(schema.productionProcessorPriceItems.id, ids),
+      ),
+    )
+    .returning();
+  return rows.length;
 }
 
 export async function removePriceItem(

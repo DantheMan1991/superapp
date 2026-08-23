@@ -48,7 +48,11 @@ import { isPriceUnit, isValidSlug } from "../vocabulary";
 function systemPrompt(kinds: string[]): string {
   const vocabulary =
     kinds.length > 0
-      ? `This farm's own words for the animals are: ${kinds.join(", ")}. Map what the sheet says onto one of these where it plainly means the same thing — "hogs" and "pigs" are swine, "beef" and "cattle" and "steers" are cattle, "chickens" and "broilers" are poultry, "lambs" are sheep. If a line is about something not in that list, or is not about a particular animal at all, leave kind empty.`
+      ? `This farm's own words for the animals are: ${kinds.join(", ")}. Map what the sheet says onto one of these where it plainly means the same thing — "hogs" and "pigs" are swine, "beef" and "cattle" and "steers" are cattle, "lambs" are sheep.
+
+ALWAYS PICK THE MOST SPECIFIC WORD THE LIST OFFERS. If the list has both a general one and a particular one — "poultry" as well as "chicken", "turkey", "duck", "goose", "quail" — and the sheet is talking about a particular bird, use the particular one. "Broilers", "fryers" and "roasters" are chicken. Only use a general word when the sheet itself is being general, and only leave kind empty when the charge genuinely is not about an animal at all — a delivery fee, a container, a disposal charge.
+
+IF ONE LINE ON THE SHEET COVERS SEVERAL ANIMALS, REPEAT IT ONCE PER ANIMAL. "Duck & Geese: Quartered $1.05 per bird" is TWO items, identical except that one says duck and the other says goose. Do not invent a combined word and do not put the animals in the label — the label is what they charge for, the kind is which animal, and a farm looking at its chickens must not have to read past its ducks.`
       : `This farm has not listed its animals, so put the sheet's own word in kind, lowercased, with underscores instead of spaces.`;
 
   return `You are reading a meat processor's price list so a farmer does not have to retype it into their records. Fill in the tool with what the page actually says.
@@ -83,7 +87,7 @@ RULES, IN ORDER OF IMPORTANCE.
 
 5. IF THE SHEET PRICES THE SAME THING SEVERAL WAYS — by breed, by batch size, by weight band — each priced cell is its own item, and the label must say what tells it apart from the others: "Slaughter, Cornish Cross, 25-49 birds". A matrix of prices is a matrix of items. Only do this where the sheet gives a definite price per cell; a range is still rule 2.
 
-6. THE LABEL IS THE PLANT'S OWN WORDS for what is being charged for, short enough to read in a list. Do not translate it, do not tidy it, do not invent a category name for it.
+6. THE LABEL IS THE PLANT'S OWN WORDS for what is being charged for, short enough to read in a list. Do not translate it, do not tidy it, do not invent a category name for it. LEAVE THE ANIMAL OUT OF IT — "Duck & Geese: Quartered" is a label of "Quartered" on a duck item and a goose item. The one exception is rule 5, where the label is the only thing telling two priced cells apart.
 
 7. CATEGORY GROUPS THE SHEET the way the paper does: slaughter, cutting, packaging, giblets, extra. Use one of those five where it fits and "extra" where nothing does.
 
@@ -112,7 +116,7 @@ const TOOL = {
             kind: {
               type: "string",
               description:
-                "The farm's own word for the animal this price is for, lowercase with underscores. Empty when the charge is not about a particular animal.",
+                "The farm's own word for the animal this price is for, lowercase with underscores. The MOST SPECIFIC word the farm's list offers. A line covering several animals is repeated once per animal. Empty only when the charge is genuinely not about an animal.",
             },
             category: {
               type: "string",

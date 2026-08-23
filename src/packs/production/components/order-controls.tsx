@@ -19,7 +19,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -33,6 +35,7 @@ import {
 import {
   PRICE_CATEGORY_LABELS,
   PRICE_UNIT_LABELS,
+  priceCategoryRank,
   priceWithUnit,
   slugLabel,
 } from "../vocabulary";
@@ -219,6 +222,20 @@ export function AddOrderLineDialog({
 
   const chosen = options.find((o) => o.id === priceItemId);
 
+  /** The base first, then the layers, then anything nobody anticipated. */
+  const grouped = (() => {
+    const by = new Map<string, PriceItemOption[]>();
+    for (const option of options) {
+      const list = by.get(option.category);
+      if (list) list.push(option);
+      else by.set(option.category, [option]);
+    }
+    for (const list of by.values()) list.sort((a, b) => a.label.localeCompare(b.label));
+    return [...by.entries()].sort(
+      ([a], [b]) => priceCategoryRank(a) - priceCategoryRank(b) || a.localeCompare(b),
+    );
+  })();
+
   const submit = () => {
     if (!priceItemId) {
       toast.error("Pick what you want.");
@@ -262,18 +279,35 @@ export function AddOrderLineDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="line-item">The option</Label>
+            {/*
+              **GROUPED THE WAY THE SHEET IS BUILT: the base first, then the
+              layers on top of it.** Every bird gets slaughtered; cutting,
+              packaging and giblets are choices made after that, and a picker
+              that lists them all in one run of forty makes the base look like
+              an option and the options look like a base.
+
+              The animal is NOT repeated on each line — the whole picker is
+              already scoped to this sheet's animal, so printing it forty times
+              is the noise this grouping exists to remove.
+            */}
             <Select value={priceItemId} onValueChange={setPriceItemId}>
               <SelectTrigger id="line-item">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {options.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>
-                    {option.label}
-                    {option.kind !== "" ? ` · ${slugLabel(option.kind)}` : ""} —{" "}
-                    {priceWithUnit(option.priceCents, option.unit) ??
-                      "not quoted"}
-                  </SelectItem>
+                {grouped.map(([category, rows]) => (
+                  <SelectGroup key={category}>
+                    <SelectLabel>
+                      {PRICE_CATEGORY_LABELS[category] ?? slugLabel(category)}
+                    </SelectLabel>
+                    {rows.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label} —{" "}
+                        {priceWithUnit(option.priceCents, option.unit) ??
+                          "not quoted"}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 ))}
               </SelectContent>
             </Select>

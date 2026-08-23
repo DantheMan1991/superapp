@@ -16,13 +16,11 @@ import {
   inspectionNote,
   LABELLING_LABELS,
   RATING_LABELS,
-  centsToDisplay,
-  PRICE_CATEGORY_LABELS,
-  priceWithUnit,
   processorHandlesFrom,
   slugLabel,
 } from "@/packs/production/vocabulary";
 import { ReadPriceListDialog } from "@/packs/production/components/paperwork-controls";
+import { PriceList } from "@/packs/production/components/price-list";
 import {
   AddCutDialog,
   AddProcessorDialog,
@@ -31,15 +29,10 @@ import {
   PriceItemDialog,
   RemoveCutButton,
   RemoveHandleButton,
-  RemovePriceItemButton,
 } from "@/packs/production/components/processor-controls";
 
 export const dynamic = "force-dynamic";
 
-/** How a group reads. Falls back to the slug for a category nobody anticipated. */
-function categoryOf(category: string): string {
-  return PRICE_CATEGORY_LABELS[category] ?? slugLabel(category);
-}
 
 const BASE = "/dashboard/m/production";
 
@@ -252,6 +245,7 @@ export default async function ProcessorsPage() {
                           processorId={processor.id}
                           kindOptions={kindOptions}
                           word={word}
+                          existingCount={priceItems.length}
                         />
                         <PriceItemDialog
                           processorId={processor.id}
@@ -260,82 +254,21 @@ export default async function ProcessorsPage() {
                       </div>
                     )}
                   </div>
-                  {priceItems.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No prices on file. Photograph their rate sheet and it will
-                      read it — nothing is recorded until you have checked it.
-                    </p>
-                  ) : (
-                    <ul className="space-y-1 text-sm">
-                      {priceItems.map((item) => {
-                        const money = priceWithUnit(item.priceCents, item.unit);
-                        return (
-                          <li
-                            key={item.id}
-                            className="flex flex-wrap items-center gap-x-3 gap-y-1"
-                          >
-                            <span>{item.label}</span>
-                            <Badge variant="outline">
-                              {item.kind === ""
-                                ? "Anything"
-                                : slugLabel(item.kind)}
-                            </Badge>
-                            {/*
-                              **SUPPRESSED WHEN IT ONLY REPEATS THE LABEL.**
-                              Found by reading the live directory: five of
-                              Valley Poultry's rows said "Slaughter · Duck ·
-                              Slaughter · $10.55 per head". The grouping earns
-                              its place when it adds something and is noise when
-                              it does not.
-                            */}
-                            {categoryOf(item.category).toLowerCase() !==
-                              item.label.trim().toLowerCase() && (
-                              <span className="text-muted-foreground">
-                                {categoryOf(item.category)}
-                              </span>
-                            )}
-                            {/* Not quoted is a question, never $0.00. */}
-                            <span
-                              className={
-                                money ? "font-medium" : "text-muted-foreground"
-                              }
-                            >
-                              {money ?? "Not quoted"}
-                            </span>
-                            {item.minimumCents !== null && (
-                              <span className="text-muted-foreground">
-                                {centsToDisplay(item.minimumCents)} minimum
-                              </span>
-                            )}
-                            {item.notes !== "" && (
-                              <span className="text-muted-foreground">
-                                {item.notes}
-                              </span>
-                            )}
-                            {isOwner && (
-                              <span className="ml-auto flex items-center">
-                                <PriceItemDialog
-                                  processorId={processor.id}
-                                  kindOptions={kindOptions}
-                                  existing={{
-                                    id: item.id,
-                                    kind: item.kind,
-                                    category: item.category,
-                                    label: item.label,
-                                    priceCents: item.priceCents,
-                                    unit: item.unit,
-                                    minimumCents: item.minimumCents,
-                                    notes: item.notes,
-                                  }}
-                                />
-                                <RemovePriceItemButton id={item.id} />
-                              </span>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
+                  <PriceList
+                    processorId={processor.id}
+                    items={priceItems.map((item) => ({
+                      id: item.id,
+                      kind: item.kind,
+                      category: item.category,
+                      label: item.label,
+                      priceCents: item.priceCents,
+                      unit: item.unit,
+                      minimumCents: item.minimumCents,
+                      notes: item.notes,
+                    }))}
+                    kindOptions={kindOptions}
+                    isOwner={isOwner}
+                  />
                 </div>
 
                 <div className="space-y-2">

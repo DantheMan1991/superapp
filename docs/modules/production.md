@@ -166,6 +166,34 @@ this slice's filtering to exist first, because reconciling portions is
 meaningless while the sheet is still offering you turkey options for a batch of
 chickens.
 
+### 2026-08-23 — The fee that reached the meat (`claude/the-fee-that-reached-the-meat`)
+
+**THE CLAIM THE WHOLE SLICE RESTS ON, PROVEN ON THE LIVE APP.** `Batch
+2026-08-23` on `Test` — 40 broilers out of Pen 1, sent to Valley Poultry, cut
+sheet quoting $223.70, finished at the **$235.00 they actually billed**:
+
+| | |
+| --- | --- |
+| Run | `complete` · basis `weight` · inspection `custom_exempt` · `processing_fee_cents` **23500** |
+| Receipt | 168 lb of Whole broilers landed carrying **$235.00** |
+| Accrual | `Dr 5000 Cost of Goods Sold 23,500` / `Cr 2060 Services Received Not Invoiced 23,500` |
+
+**THE PEN CARRIED NO COST, WHICH IS WHY THIS IS THE CLEANEST POSSIBLE PROOF.**
+Those birds had no purchase basis and no feed posted against them, so the pot
+was the processing fee and nothing else — every cent on that receipt is money
+the plant charged, arriving on the meat. Before 2c the same run would have
+landed 168 lb carrying nothing at all.
+
+**AND THE QUOTE AND THE BILL ARE BOTH ON FILE, WHICH WAS THE POINT.** The cut
+sheet still says $223.70 and the run says $235.00. *They charged $11.30 more
+than they quoted* is now two numbers sitting next to each other rather than a
+thing somebody remembers — and slice 2d's matching is what turns it from two
+numbers into one the app reports.
+
+**THE INSPECTION CAME ACROSS TOO**: `custom_exempt`, inherited from Valley
+Poultry at completion and stamped on the batch, so `retail` will have something
+to refuse against. That path had never run either.
+
 ### 2026-08-23 — Slices 2a–2c driven on `Test`, and what the sheet forgot to say (`claude/what-the-sheet-forgot-to-say`)
 
 **DRIVEN END TO END ON THE LIVE `Test` TENANT**, and it found nine things — two
@@ -1028,7 +1056,9 @@ run model, separate templates), and the processing path and eligibility flag
   until the accrual needed a location and a run started from a booking had none;
   the fallback fixed that case, and a run with no outputs carrying a location
   still has nowhere to get one from.
-- **THE PLANT'S BILL IS NOT MATCHED TO THE RUN, so `2060` never clears.** The
+- **THE PLANT'S BILL IS NOT MATCHED TO THE RUN, so `2060` never clears** — and
+  there is now a real balance in it to prove it: `Batch 2026-08-23` on `Test`
+  put $235.00 there on 2026-08-23 and nothing will ever take it out. The
   third row of the worked entry in the build log is not built: the accrual goes
   on and nothing takes it off, so the balance grows by every run that names a
   fee. That is *deliberately* a useful state in the meantime — a non-zero

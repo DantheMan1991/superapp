@@ -28,6 +28,7 @@ import {
 } from "@/packs/inventory/ops";
 import { formatQuantity, getUnit } from "@/packs/inventory/core/units";
 import { inputBlocks, listRunItems, runDetail } from "@/packs/production/ops";
+import { AddOrderDialog } from "@/packs/production/components/order-controls";
 import {
   COST_BASIS_LABELS,
   COST_BASIS_NOTES,
@@ -35,6 +36,7 @@ import {
   INSPECTION_LABELS,
   inspectionNote,
   PATH_LABELS,
+  processorHandlesFrom,
   slugLabel,
   type RunStatus,
 } from "@/packs/production/vocabulary";
@@ -182,6 +184,15 @@ export default async function ProductionRunPage({
    * fallback is here rather than in `vocabulary.ts` so it stays visible.
    */
   const sheetWord = labelFor(pack.labels, "killSheet", "Kill sheet");
+  const cutSheetWord = labelFor(pack.labels, "cutSheet", "Order");
+  const processorWord = labelFor(pack.labels, "processor", "Processor");
+  const kindOptions = processorHandlesFrom(pack.config);
+  // One lookup rather than a find() per line — the fee was already folded once
+  // and looking it up twice is how a screen ends up printing two different
+  // answers to the same question.
+  const feeByLine = new Map(
+    (detail.quotedFee?.lines ?? []).map((line) => [line.key, line]),
+  );
 
   const carcassInputs = inputs.map((row) => ({
     id: row.id,
@@ -300,6 +311,9 @@ export default async function ProductionRunPage({
                     potCents={detail.potCents}
                     currencySymbol={currencySymbol}
                     today={today}
+                    processorName={detail.processorName}
+                    quotedFeeCents={detail.quotedFee?.cents ?? null}
+                    quotedFeeUnpriced={detail.quotedFee?.unpriced.length ?? 0}
                   />
                 )}
               </>
@@ -420,6 +434,119 @@ export default async function ProductionRunPage({
           </CardContent>
         </Card>
       </div>
+
+      {/*
+        THE CUT SHEETS — what this farm asked the plant to do, and what it comes
+        to. **THE WHOLE CARD IS `print:` VISIBLE AND EVERYTHING ELSE ON THE PAGE
+        IS NOT**, which is what makes Print hand over the sheet rather than the
+        page: the yields, the ledger figures and the controls are the farm's
+        business, and the plant needs the instructions and nothing else.
+      */}
+      {/*
+        THE CUT SHEETS ON THIS RUN — what the plant was asked to do, and what
+        that comes to.
+
+        **A SUMMARY THAT LINKS OUT RATHER THAN THE SHEET ITSELF**, because the
+        sheet has its own page: it exists before the run does (it goes over with
+        the animals at drop-off) and it has to be printable on its own. Two
+        renderings of the same lines is how a farm ends up handing over a sheet
+        that says something the app no longer thinks it says.
+      */}
+      {(detail.orders.length > 0 || (isOpen && run.processorId)) && (
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+            <div>
+              <CardTitle className="text-base">{cutSheetWord}</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                What {detail.processorName ?? "they"} were asked to do. One
+                animal can carry two — a half sold to a customer is cut to their
+                instructions, and the retained half to yours.
+              </p>
+            </div>
+            {isOpen && run.processorId && (
+              <AddOrderDialog
+                processorId={run.processorId}
+                processorName={detail.processorName ?? processorWord}
+                runId={run.id}
+                kindOptions={kindOptions}
+                sheetWord={cutSheetWord}
+              />
+            )}
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {detail.orders.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nothing asked for yet. What they cut is what you told them to
+                cut, and the plant reads this rather than guessing.
+              </p>
+            ) : (
+              <ul className="space-y-1 text-sm">
+                {detail.orders.map(({ order, lines }) => {
+                  const mine = lines
+                    .map((l) => feeByLine.get(l.id))
+                    .filter((l) => l !== undefined);
+                  const cents = mine.reduce(
+                    (total, l) => total + (l.cents ?? 0),
+                    0,
+                  );
+                  return (
+                    <li
+                      key={order.id}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b py-1.5 last:border-0"
+                    >
+                      <Link
+                        href={`${BASE}/orders/${order.id}`}
+                        className="font-medium hover:underline"
+                      >
+                        {order.title || cutSheetWord}
+                      </Link>
+                      {order.kind !== "" && (
+                        <Badge variant="outline">{slugLabel(order.kind)}</Badge>
+                      )}
+                      <span className="text-muted-foreground">
+                        {lines.length}{" "}
+                        {lines.length === 1 ? "line" : "lines"}
+                      </span>
+                      {order.headCount !== null && (
+                        <span className="text-muted-foreground">
+                          {order.headCount} head
+                        </span>
+                      )}
+                      <span className="ml-auto tabular-nums">
+                        {formatMoney(cents, currencySymbol)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {/*
+              WHAT THE SHEETS COME TO — a QUOTE, in those words. It is what the
+              finish dialog offers as a starting figure; what reaches the ledger
+              is what somebody typed after reading the plant's actual bill, and
+              keeping the two apart is what makes "they charged more than they
+              quoted" answerable.
+            */}
+            {detail.quotedFee && detail.quotedFee.unpriced.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {detail.quotedFee.unpriced.length}{" "}
+                {detail.quotedFee.unpriced.length === 1 ? "line" : "lines"} could
+                not be worked out because nobody has counted them —{" "}
+                {detail.quotedFee.unpriced.map((l) => l.label).join(", ")}. The
+                real figure is higher than what is shown.
+              </p>
+            )}
+            {run.processingFeeCents !== null && (
+              <p className="text-xs text-muted-foreground">
+                {formatMoney(run.processingFeeCents, currencySymbol)} was
+                recorded as what they charged, and it is in the cost of the meat
+                with the feed.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

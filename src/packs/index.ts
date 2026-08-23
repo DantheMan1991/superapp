@@ -199,6 +199,20 @@ export const packRegistry: Record<string, PackDefinition> = {
         describes:
           "An outside business that does part of a run for you — the one you book a date with and send the work to. A meat farm says butcher or plant; a bakery says co-packer.",
       },
+      /**
+       * The INSTRUCTION handed over with the work. Neutral for the same reason
+       * `processor` is: a farm hands a butcher a cut sheet, a bakery hands a
+       * co-packer a spec, a shop hands a subcontractor a work order. The design
+       * calls it *"the recipe"* and notes that on a half-beef sale it is often
+       * the CUSTOMER's choice rather than the business's — so the word has to be
+       * one a business can say out loud to a customer.
+       */
+      {
+        key: "cutSheet",
+        fallback: "Order",
+        describes:
+          "What you are asking the outside business to do with one lot of work — the options chosen and the instructions given, printed and handed over. A meat farm says cut sheet.",
+      },
     ],
     Component: ProductionModule,
   },

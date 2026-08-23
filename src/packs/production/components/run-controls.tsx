@@ -761,6 +761,9 @@ export function CompleteRunButton({
   potCents,
   currencySymbol,
   today,
+  processorName,
+  quotedFeeCents,
+  quotedFeeUnpriced,
 }: {
   runId: string;
   runWord: string;
@@ -768,16 +771,33 @@ export function CompleteRunButton({
   potCents: number;
   currencySymbol: string | null;
   today: string;
+  /** Null for an on-farm run, where there is nobody to have charged. */
+  processorName?: string | null;
+  /** What the cut sheets add up to, offered as a starting figure. */
+  quotedFeeCents?: number | null;
+  /** How many priced lines the sheets could not total. Shown, never hidden. */
+  quotedFeeUnpriced?: number;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  /**
+   * **THE BOX STARTS AT THE QUOTE AND IS EMPTY WHEN THERE IS NOT ONE.** Empty
+   * records NULL — nobody said what the plant charged — which is a different
+   * fact from zero, and zero would say they did it for nothing. A pre-filled
+   * `0.00` is the single easiest way to get a fee of nothing onto a box of meat.
+   */
+  const [fee, setFee] = useState(
+    quotedFeeCents != null ? (quotedFeeCents / 100).toFixed(2) : "",
+  );
 
   function submit(formData: FormData) {
     startTransition(async () => {
+      const typed = fee.trim();
       const result = await completeRunAction({
         runId,
         completedOn: String(formData.get("completedOn") ?? today),
+        processingFee: typed === "" ? null : Number(typed),
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -785,11 +805,16 @@ export function CompleteRunButton({
       }
       const basis = COST_BASIS_LABELS[result.basis ?? "none"] ?? "Not split";
       const landed = result.landed ?? 0;
+      const feeCents = result.processingFeeCents ?? null;
       toast.success(
         `${landed} ${landed === 1 ? "batch" : "batches"} landed in stock · ${formatMoney(
           result.potCents ?? 0,
           currencySymbol,
-        )} carried across · ${basis.toLowerCase()}`,
+        )} carried across${
+          feeCents !== null
+            ? `, ${formatMoney(feeCents, currencySymbol)} of it processing`
+            : ""
+        } · ${basis.toLowerCase()}`,
       );
       setOpen(false);
       router.refresh();
@@ -826,6 +851,52 @@ export function CompleteRunButton({
                 defaultValue={today}
               />
             </div>
+
+            {/*
+              WHAT THE PLANT CHARGED, and it goes in the pot with the feed.
+              Offered only when somebody else did the work: an on-farm run has
+              nobody to have charged, and this farm's own labour is deliberately
+              recorded and not costed.
+            */}
+            {processorName != null && (
+              <div className="grid gap-2">
+                <Label htmlFor="processingFee">
+                  What {processorName} charged
+                </Label>
+                <Input
+                  id="processingFee"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={fee}
+                  onChange={(e) => setFee(e.target.value)}
+                  placeholder="Leave empty if nobody has said"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {quotedFeeCents != null ? (
+                    <>
+                      The cut sheet quotes{" "}
+                      {formatMoney(quotedFeeCents, currencySymbol)}
+                      {quotedFeeUnpriced ? (
+                        <>
+                          {" "}
+                          — and could not price {quotedFeeUnpriced}{" "}
+                          {quotedFeeUnpriced === 1 ? "line" : "lines"}, so the
+                          real figure is higher
+                        </>
+                      ) : null}
+                      . Change it to what they actually billed.
+                    </>
+                  ) : (
+                    <>
+                      Goes into the cost of the meat with the feed. Empty means
+                      nobody has said yet, which is not the same as nothing.
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+
             <p className="text-xs text-muted-foreground">
               Once finished, the outputs cannot be edited here — the receipt in
               Inventory becomes the record.

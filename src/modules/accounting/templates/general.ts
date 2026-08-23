@@ -60,6 +60,10 @@ export const GENERAL_COA: CoaTemplate = {
     // with no invoice; a debit is an invoice for stock the books never received.
     // Both are month-end questions worth being asked. See ADR 0012.
     { code: "2050", name: "Goods Received Not Invoiced", type: "liability", subtype: "goods_received", isSystem: true },
+    // Services received and not yet invoiced — a plant that has cut the meat
+    // and not sent its bill. Separate from 2050 so the GRNI reconciliation,
+    // which works from stock RECEIPTS, keeps agreeing with its account.
+    { code: "2060", name: "Services Received Not Invoiced", type: "liability", subtype: "services_received", isSystem: true },
     { code: "2100", name: "Credit Card", type: "liability", subtype: "credit_card" },
     { code: "2200", name: "Sales Tax Payable", type: "liability", subtype: "sales_tax", isSystem: true },
     { code: "2300", name: "Payroll Liabilities", type: "liability", subtype: "payroll_liability" },

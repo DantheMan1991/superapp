@@ -13,10 +13,12 @@ import {
   createProcessor,
   removeCut,
   removeHandle,
+  removePriceItem,
   setHandle,
+  setPriceItem,
   updateProcessor,
 } from "./processor-ops";
-import { INSPECTIONS, LABELLING_OPTIONS } from "./vocabulary";
+import { INSPECTIONS, LABELLING_OPTIONS, PRICE_UNITS } from "./vocabulary";
 
 /**
  * The processor directory's write surface.
@@ -153,26 +155,16 @@ export async function setHandleAction(input: unknown) {
       processorId: z.string().uuid(),
       kind: z.string().trim().min(1).max(63),
       capacityPerDay: z.number().int().positive().max(1_000_000).nullable().optional(),
-      killFee: dollars,
-      cutWrapPerLb: dollars,
-      cutFeePerHead: dollars,
       priceNotes: z.string().max(2000).optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
 
-  const { processorId, killFee, cutWrapPerLb, cutFeePerHead, ...rest } =
-    parsed.data;
+  const { processorId, ...rest } = parsed.data;
   try {
     const row = await withTenant(
       ctx.tenant.id,
-      (tx) =>
-        setHandle(tx, ctxOf(ctx), processorId, {
-          ...rest,
-          killFeeCents: toCents(killFee),
-          cutWrapCentsPerLb: toCents(cutWrapPerLb),
-          cutFeeCentsPerHead: toCents(cutFeePerHead),
-        }),
+      (tx) => setHandle(tx, ctxOf(ctx), processorId, rest),
       { role: ctx.role },
     );
     await logAudit({
@@ -181,14 +173,13 @@ export async function setHandleAction(input: unknown) {
       actorClerkUserId: ctx.userId,
       targetType: "production_processor",
       targetId: processorId,
-      // The quoted price IS the point of the record, so it goes in the log.
+      // What they take and how many a day. The PRICES moved to their own rows
+      // and are audited by `price_item_set`, which carries the unit beside the
+      // figure — `105` in this entry could never have said which.
       meta: {
         handleId: row.id,
         kind: row.kind,
         capacityPerDay: row.capacityPerDay,
-        killFeeCents: row.killFeeCents,
-        cutWrapCentsPerLb: row.cutWrapCentsPerLb,
-        cutFeeCentsPerHead: row.cutFeeCentsPerHead,
       },
     });
     revalidatePath(BASE, "layout");
@@ -217,6 +208,98 @@ export async function removeHandleAction(input: unknown) {
       targetType: "production_processor",
       targetId: row.processorId,
       meta: { handleId: row.id, kind: row.kind },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setPriceItemAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      processorId: z.string().uuid(),
+      kind: z.string().trim().max(63).optional(),
+      category: z.string().trim().max(63).optional(),
+      label: z.string().trim().min(1).max(200),
+      price: dollars,
+      unit: z.enum(PRICE_UNITS),
+      minimum: dollars,
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  const { processorId, price, minimum, ...rest } = parsed.data;
+  try {
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        setPriceItem(tx, ctxOf(ctx), processorId, {
+          ...rest,
+          priceCents: toCents(price),
+          minimumCents: toCents(minimum),
+        }),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.processor.price_item_set",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_processor",
+      targetId: processorId,
+      /**
+       * **THE UNIT GOES IN THE LOG BESIDE THE PRICE, and it is not padding.**
+       * `105` on its own is unreconstructable: it is $1.05 a bird or $1.05 a
+       * pound, and those are the two numbers a dispute about a butcher's bill
+       * turns on. The label goes in for the same reason — it is what was
+       * priced, not prose about a third party.
+       */
+      meta: {
+        priceItemId: row.id,
+        kind: row.kind,
+        category: row.category,
+        label: row.label,
+        priceCents: row.priceCents,
+        unit: row.unit,
+        minimumCents: row.minimumCents,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, id: row.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function removePriceItemAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) => removePriceItem(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.processor.price_item_removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_processor",
+      targetId: row.processorId,
+      meta: {
+        priceItemId: row.id,
+        kind: row.kind,
+        label: row.label,
+        priceCents: row.priceCents,
+        unit: row.unit,
+      },
     });
     revalidatePath(BASE, "layout");
     return { ok: true };

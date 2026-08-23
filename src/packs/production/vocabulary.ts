@@ -396,3 +396,142 @@ export function centsToDisplay(cents: number | null | undefined): string | null 
   if (cents === null || cents === undefined) return null;
   return `$${(cents / 100).toFixed(2)}`;
 }
+
+// ------------------------------------------------------- what a plant charges ---
+
+/**
+ * WHAT ONE PRICE ON A RATE SHEET IS PER. **CLOSED, and it is the column the
+ * whole itemised price list exists for.**
+ *
+ * $1.05 is five different amounts of money depending on which of these it is,
+ * and slice 1e proved it the expensive way: `cut_wrap_cents_per_lb` held a
+ * per-pound rate, every poultry plant quotes cutting per bird, and `1.05` in
+ * the per-pound column was indistinguishable from a real rate. A second column
+ * fixed that one case. Enumerating the unit fixes the general one.
+ *
+ * **THE FIRST FOUR CAN BE COMPUTED FROM A RUN; THE LAST FOUR CANNOT**, and that
+ * split is what the next slice rests on:
+ *
+ *   - `head` — head count, off the carcass lines
+ *   - `live_lb` — the plant's live weight, or the trailer ticket
+ *   - `hanging_lb` — the kill sheet's hanging weight, which is what red-meat
+ *     plants quote cut-and-wrap on
+ *   - `finished_lb` — what came back packaged, off the run's outputs
+ *   - `package`, `box`, `flat`, `hour` — a number only a person knows
+ *
+ * **`head` AND `hanging_lb` TOGETHER ARE THE ARRANGEMENT MOST PLANTS QUOTE**:
+ * a flat fee per animal plus a rate per pound. It is also why a small animal
+ * costs more per pound than a large one at the same plant — the flat half
+ * spreads over less meat — which is a real fact about the business and not an
+ * artefact of this model.
+ *
+ * `flat` is once per drop-off, whatever went. Deliberately not called `batch`:
+ * the homestead profile renames a production run to *Batch*, and a unit sharing
+ * that word would read as "per run" to the one tenant using it.
+ */
+export const PRICE_UNITS = [
+  "head",
+  "live_lb",
+  "hanging_lb",
+  "finished_lb",
+  "package",
+  "box",
+  "flat",
+  "hour",
+] as const;
+export type PriceUnit = (typeof PRICE_UNITS)[number];
+
+export function isPriceUnit(value: string): value is PriceUnit {
+  return (PRICE_UNITS as readonly string[]).includes(value);
+}
+
+/** How a unit reads beside a price. Short, because it sits after a figure. */
+export const PRICE_UNIT_LABELS: Record<string, string> = {
+  head: "per head",
+  live_lb: "per lb live",
+  hanging_lb: "per lb hanging",
+  finished_lb: "per lb packaged",
+  package: "per package",
+  box: "per box",
+  flat: "flat",
+  hour: "per hour",
+};
+
+/**
+ * What each unit is measured against, for the screen that has to explain why a
+ * line could not be totalled. The four computable ones name where the number
+ * comes from; the rest say plainly that somebody has to count them.
+ */
+export const PRICE_UNIT_NOTES: Record<string, string> = {
+  head: "Counted off the kill sheet.",
+  live_lb: "The weight before slaughter — the plant's scale where it recorded one, otherwise the trailer ticket.",
+  hanging_lb: "The carcass weight off the kill sheet. What red-meat plants quote cutting against.",
+  finished_lb: "The weight of what came back packaged.",
+  package: "However many packages came back — somebody has to count them.",
+  box: "However many boxes came back — somebody has to count them.",
+  flat: "Charged once for the drop-off, whatever went.",
+  hour: "Hours the plant billed for.",
+};
+
+/**
+ * Units the app can work out for itself from a finished run. The rest need a
+ * quantity typed onto the order line, and an order that cannot total a line
+ * says so rather than assuming one of anything.
+ */
+export const COMPUTABLE_PRICE_UNITS: readonly PriceUnit[] = [
+  "head",
+  "live_lb",
+  "hanging_lb",
+  "finished_lb",
+];
+
+export function isComputablePriceUnit(unit: string): boolean {
+  return (COMPUTABLE_PRICE_UNITS as readonly string[]).includes(unit);
+}
+
+/**
+ * How a rate sheet groups itself. **A SUGGESTION, NOT A CLOSED SET** — the
+ * CHECK asks only that it be a slug. Every plant's sheet is laid out
+ * differently and the first one that charges for something nobody anticipated
+ * must not be a migration; this is the same call
+ * `production_processor_cuts.name` made about cut names, and the same one
+ * `inventory` made about an adjustment's reason.
+ */
+export const PRICE_CATEGORIES = [
+  "slaughter",
+  "cutting",
+  "packaging",
+  "giblets",
+  "extra",
+] as const;
+
+export const PRICE_CATEGORY_LABELS: Record<string, string> = {
+  slaughter: "Slaughter",
+  cutting: "Cutting",
+  packaging: "Packaging",
+  giblets: "Giblets and offal",
+  extra: "Extras",
+};
+
+/** Sheet order: the way the paper reads, with anything unanticipated last. */
+export function priceCategoryRank(category: string): number {
+  const at = (PRICE_CATEGORIES as readonly string[]).indexOf(category);
+  return at === -1 ? PRICE_CATEGORIES.length : at;
+}
+
+/**
+ * A price with its unit, for a line of a screen — `$1.05 per lb hanging`.
+ *
+ * Null in means null out, the same refusal `centsToDisplay` makes and for the
+ * same reason: an unquoted price is a question, and `$0.00 per head` would say
+ * the plant does it for nothing.
+ */
+export function priceWithUnit(
+  cents: number | null | undefined,
+  unit: string,
+): string | null {
+  const money = centsToDisplay(cents);
+  if (money === null) return null;
+  const suffix = PRICE_UNIT_LABELS[unit] ?? unit;
+  return `${money} ${suffix}`;
+}

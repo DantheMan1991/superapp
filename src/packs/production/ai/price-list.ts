@@ -6,21 +6,35 @@ import {
   readText,
   type PaperworkFile,
 } from "./paperwork";
-import { isValidSlug } from "../vocabulary";
+import { isPriceUnit, isValidSlug } from "../vocabulary";
 
 /**
- * A photographed price list, read into proposed `handles` rows.
+ * A photographed price list, read into proposed rows.
  *
  * **THE FOUNDER'S ASK, 2026-08-23**, and the second consumer of the path in
  * `paperwork.ts` rather than a second path. A plant sends a rate sheet once a
- * year; retyping it into six columns is the chore the *compute-and-commit*
- * pattern exists for.
+ * year; retyping it is the chore the *compute-and-commit* pattern exists for.
  *
  * **IT PROPOSES; IT NEVER RECORDS.** These rows are the terms of a commercial
  * relationship, and a fee changed by an extraction nobody read is worse than a
  * fee nobody typed, because it looks like it was agreed. A person confirms and
- * `setHandle` writes — with the same audit entry, carrying the quoted price,
- * that it writes when somebody types it.
+ * `setHandle` / `setPriceItem` write — with the same audit entries, carrying
+ * the quoted price, that they write when somebody types them.
+ *
+ * ── WHAT CHANGED WHEN THE MENU GOT A TABLE ──────────────────────────────────
+ *
+ * The first version had three fee slots and a rule that a MENU IS NOT A RATE:
+ * twelve chicken cutting options at nine prices had no single cutting fee, so
+ * both cutting slots were left null and the figures went into prose. That
+ * refusal was correct and it threw away most of a rate sheet.
+ *
+ * **THE RULE HAS NOT CHANGED; THE SHAPE HAS.** Every priced line is now its own
+ * row with its own UNIT, so quartered $1.05 and eight-piece $1.25 are two rows
+ * and nothing has to pick between them — picking is the farm's job on an order,
+ * not the reader's job on a sheet. What survives unchanged is the refusal
+ * underneath it: **a range is still not a price**, and $0.65–$0.90 a pound
+ * comes back null with the range in the note, because averaging it would invent
+ * a figure the plant never quoted.
  */
 
 /**
@@ -34,45 +48,63 @@ import { isValidSlug } from "../vocabulary";
 function systemPrompt(kinds: string[]): string {
   const vocabulary =
     kinds.length > 0
-      ? `This farm's own words for the animals are: ${kinds.join(", ")}. Map what the sheet says onto one of these where it plainly means the same thing — "hogs" and "pigs" are swine, "beef" and "cattle" and "steers" are cattle, "chickens" and "broilers" are poultry, "lambs" are sheep. If a row is about something not in that list, leave kind empty.`
+      ? `This farm's own words for the animals are: ${kinds.join(", ")}. Map what the sheet says onto one of these where it plainly means the same thing — "hogs" and "pigs" are swine, "beef" and "cattle" and "steers" are cattle, "chickens" and "broilers" are poultry, "lambs" are sheep. If a line is about something not in that list, or is not about a particular animal at all, leave kind empty.`
       : `This farm has not listed its animals, so put the sheet's own word in kind, lowercased, with underscores instead of spaces.`;
 
   return `You are reading a meat processor's price list so a farmer does not have to retype it into their records. Fill in the tool with what the page actually says.
 
 ${vocabulary}
 
-WHAT A PRICE LIST IS. It is what a plant charges. The two figures that matter are the SLAUGHTER FEE, charged per head, and CUT AND WRAP, charged per pound of hanging weight. Sheets also carry minimums, extras (smoking, sausage-making, vacuum packing), and sometimes a daily capacity.
+WHAT A PRICE LIST IS. It is what a plant charges, usually as a slaughter fee plus a menu of cutting, packaging and extra options. Sheets also carry minimums, capacities, and advice about booking.
+
+THERE ARE TWO LISTS TO FILL IN, AND THEY ARE DIFFERENT THINGS.
+
+- ITEMS are the prices. One row per priced thing on the sheet. This is where nearly everything goes.
+- ANIMALS is one row per kind of animal the sheet shows the plant will take, carrying only their daily capacity if the sheet states one, and any prose about that animal that is not a price — booking advice, seasonal notes, conditions.
 
 RULES, IN ORDER OF IMPORTANCE.
 
-1. LEAVE OUT WHAT YOU CANNOT READ, and leave out what is not there. Null beats a guess every time: a farmer seeing an empty fee types it in, a farmer seeing a confident wrong fee agrees to it. A row with only a kill fee is a perfectly good row.
+1. LEAVE OUT WHAT YOU CANNOT READ, and leave out what is not there. Null beats a guess every time: a farmer seeing an empty price types it in, a farmer seeing a confident wrong price agrees to it. An item with a label and no price is still worth recording — the farmer will ring them.
 
-2. NEVER CALCULATE, CONVERT OR AVERAGE. Do not turn a per-quarter price into a per-pound one, do not average a range, do not add a minimum into a fee. If a sheet gives a range like "$95-$120", report null and put the range in the price note.
+2. NEVER CALCULATE, CONVERT OR AVERAGE. Do not turn a per-quarter price into a per-pound one, do not average a range, do not add a minimum into a price. If a sheet gives a range like "$0.65-$0.90 per lb", the price is null, the unit is still per pound, and the range goes in that item's note. A range is not a price.
 
-3. THERE ARE THREE FEE SLOTS AND THEY ARE NOT INTERCHANGEABLE. killFee is SLAUGHTER, per head. cutWrapPerLb is CUTTING, per pound of hanging weight. cutFeePerHead is CUTTING, per bird or per animal. Red-meat plants quote cutting per pound; poultry plants quote it per bird. Put a cutting rate in whichever slot matches the unit the sheet states, and if the sheet does not state a unit, leave it null — do not infer one from the size of the number.
+3. EVERY PRICE CARRIES A UNIT, AND THE UNIT IS THE MOST IMPORTANT FIELD ON THE ROW. $1.05 is a completely different amount of money depending on which it is. The units are:
+   - head — per bird, per animal
+   - live_lb — per pound of live weight, before slaughter
+   - hanging_lb — per pound of hanging or carcass weight. What red-meat plants quote cutting against
+   - finished_lb — per pound of the finished, packaged product
+   - package — per package, pack or vacuum bag
+   - box — per box
+   - flat — charged once for the whole drop-off, whatever went
+   - hour — per hour of labour
+   Use the unit the sheet states. If the sheet does not state one, DO NOT INFER IT FROM THE SIZE OF THE NUMBER — leave the whole item out and describe it in the note instead.
 
-4. A MENU IS NOT A RATE. If a sheet lists several cutting options at different prices — quartered $1.05, eight-piece $1.25, deboned $1.30 — there is no single cutting fee, so leave BOTH cutting slots null and put the menu in the price note. Only fill a cutting slot when the sheet names one price for cutting that animal.
+4. A MENU IS A LIST OF ITEMS, NOT ONE PRICE. Quartered $1.05, eight-piece $1.25, deboned $1.30 is three items, each with its own label and price. Never pick one of them, never average them, and never fold them into a single cutting fee.
 
-5. ONE ROW PER ANIMAL. If a sheet prices beef, pork and lamb, that is three rows. If it gives one price for everything, that is one row with kind empty.
+5. IF THE SHEET PRICES THE SAME THING SEVERAL WAYS — by breed, by batch size, by weight band — each priced cell is its own item, and the label must say what tells it apart from the others: "Slaughter, Cornish Cross, 25-49 birds". A matrix of prices is a matrix of items. Only do this where the sheet gives a definite price per cell; a range is still rule 2.
 
-6. AMOUNTS ARE IN DOLLARS, as decimals — 95 for $95.00, 0.9 for 90 cents. Never cents, never strings with symbols.
+6. THE LABEL IS THE PLANT'S OWN WORDS for what is being charged for, short enough to read in a list. Do not translate it, do not tidy it, do not invent a category name for it.
 
-7. PUT EVERYTHING ELSE IN THE PRICE NOTE, in the sheet's own words: minimums, extras, surcharges, disposal fees, deposit terms. Do not try to model them.
+7. CATEGORY GROUPS THE SHEET the way the paper does: slaughter, cutting, packaging, giblets, extra. Use one of those five where it fits and "extra" where nothing does.
 
-If the page is not a price list at all, return no rows and say so in the note.`;
+8. AMOUNTS ARE IN DOLLARS, as decimals — 95 for $95.00, 0.9 for 90 cents. Never cents, never strings with symbols.
+
+9. A MINIMUM IS A FLOOR, NOT A PRICE. "$0.65 per lb, $10 minimum" is one item priced at 0.65 per live_lb with a minimum of 10. Do not make it two items and do not put the 10 in the price.
+
+If the page is not a price list at all, return nothing in either list and say so in the note.`;
 }
 
 const TOOL = {
   name: "record_price_list",
   description:
-    "Report the rates written on a processor's price list, and nothing that is not written on it.",
+    "Report the prices written on a processor's price list, and nothing that is not written on it.",
   input_schema: {
     type: "object",
     additionalProperties: false,
     properties: {
-      rows: {
+      items: {
         type: "array",
-        description: "One entry per kind of animal priced on the sheet.",
+        description: "One entry per priced thing on the sheet.",
         items: {
           type: "object",
           additionalProperties: false,
@@ -80,65 +112,118 @@ const TOOL = {
             kind: {
               type: "string",
               description:
-                "The farm's own word for this animal, lowercase with underscores. Empty when the sheet's subject is not one of them.",
+                "The farm's own word for the animal this price is for, lowercase with underscores. Empty when the charge is not about a particular animal.",
+            },
+            category: {
+              type: "string",
+              description:
+                "One of: slaughter, cutting, packaging, giblets, extra.",
+            },
+            label: {
+              type: "string",
+              description:
+                "What is being charged for, in the plant's own words, and specific enough to tell it apart from the other options.",
+            },
+            price: {
+              type: ["number", "null"],
+              description:
+                "The price for ONE unit, in dollars. Null if the sheet gives a range, says to ring, or cannot be read.",
+            },
+            unit: {
+              type: "string",
+              enum: [
+                "head",
+                "live_lb",
+                "hanging_lb",
+                "finished_lb",
+                "package",
+                "box",
+                "flat",
+                "hour",
+              ],
+              description:
+                "What the price is per, exactly as the sheet states it. Never inferred from the size of the number.",
+            },
+            minimum: {
+              type: ["number", "null"],
+              description:
+                "The floor in dollars, if the sheet states one for this item. Not a price.",
+            },
+            notes: {
+              type: "string",
+              description:
+                "Conditions on this one price, in the sheet's own words — a range, a season, a qualification.",
+            },
+          },
+          required: [
+            "kind",
+            "category",
+            "label",
+            "price",
+            "unit",
+            "minimum",
+            "notes",
+          ],
+        },
+      },
+      animals: {
+        type: "array",
+        description:
+          "One entry per kind of animal the sheet shows they will take. NO PRICES — those are items.",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            kind: {
+              type: "string",
+              description:
+                "The farm's own word for this animal, lowercase with underscores.",
             },
             capacityPerDay: {
               type: ["integer", "null"],
               description:
                 "Head they can take in a day, if the sheet says. Usually it does not.",
             },
-            killFee: {
-              type: ["number", "null"],
-              description:
-                "Slaughter fee PER HEAD, in dollars. Null if not given or ambiguous.",
-            },
-            cutWrapPerLb: {
-              type: ["number", "null"],
-              description:
-                "Cutting PER POUND of hanging weight, in dollars. How red-meat plants quote. Null if not given, ambiguous, or if the sheet lists a menu of cutting options rather than one price.",
-            },
-            cutFeePerHead: {
-              type: ["number", "null"],
-              description:
-                "Cutting PER BIRD or per animal, in dollars. How poultry plants quote. Null if not given, ambiguous, or if the sheet lists a menu of cutting options rather than one price.",
-            },
             priceNotes: {
               type: "string",
               description:
-                "Minimums, extras and surcharges for this animal, in the sheet's own words.",
+                "Prose about this animal that is not a price: booking advice, seasons, conditions.",
             },
           },
-          required: [
-            "kind",
-            "capacityPerDay",
-            "killFee",
-            "cutWrapPerLb",
-            "cutFeePerHead",
-            "priceNotes",
-          ],
+          required: ["kind", "capacityPerDay", "priceNotes"],
         },
       },
       note: {
         type: "string",
         description:
-          "Anything a person should know before accepting this — what was unreadable or ambiguous, or that the page is not a price list.",
+          "Anything a person should know before accepting this — what was unreadable or ambiguous, what was left out for want of a unit, or that the page is not a price list.",
       },
     },
-    required: ["rows", "note"],
+    required: ["items", "animals", "note"],
   },
 } as const;
 
+/** A priced line, as proposed. Dollars — the action converts to cents. */
+export interface ProposedPriceItem {
+  kind: string;
+  category: string;
+  label: string;
+  price: number | null;
+  unit: string;
+  minimum: number | null;
+  notes: string;
+}
+
+/** What they take, as proposed. Carries no price — see the header. */
 export interface ProposedHandle {
   kind: string;
   capacityPerDay: number | null;
-  killFee: number | null;
-  cutWrapPerLb: number | null;
-  cutFeePerHead: number | null;
   priceNotes: string;
 }
 
 export interface PriceListProposal {
-  rows: ProposedHandle[];
+  items: ProposedPriceItem[];
+  animals: ProposedHandle[];
   note: string;
 }
 
@@ -146,36 +231,69 @@ export interface PriceListProposal {
  * Never throws on shape — a malformed answer is zero rows and a note, and the
  * screen falls back to typing it in.
  *
- * **A KIND THAT IS NOT A VALID SLUG BECOMES EMPTY RATHER THAN BEING DROPPED.**
- * The row still carries a fee somebody may want, and the form makes them pick
- * what it is for. Dropping it would silently lose a price off the sheet, which
- * is the failure this whole feature exists to prevent.
+ * **A KIND THAT IS NOT A VALID SLUG BECOMES EMPTY RATHER THAN THE ROW BEING
+ * DROPPED.** The row still carries a price somebody may want, and the form makes
+ * them say what it is for. Dropping it would silently lose a price off the
+ * sheet, which is the failure this whole feature exists to prevent.
+ *
+ * **AN ITEM WITH NO USABLE UNIT IS THE ONE THING THAT IS DROPPED**, and it is
+ * the exception that proves the rule above. A price with no unit is not a
+ * price — `1.05` with nothing saying whether it is a bird or a pound is the
+ * exact ambiguity this table was built to end, and a form cannot ask a person to
+ * supply a unit they would have to guess at either. The prompt is told to
+ * describe such a line in the note instead, so it is reported rather than
+ * silently gone. An item with no LABEL goes the same way and for the same
+ * reason: a price for something unnamed cannot be checked against the paper.
  */
 export function validatePriceList(raw: unknown): PriceListProposal {
-  if (!raw || typeof raw !== "object") return { rows: [], note: "" };
+  if (!raw || typeof raw !== "object") {
+    return { items: [], animals: [], note: "" };
+  }
   const source = raw as Record<string, unknown>;
-  const rawRows = Array.isArray(source.rows) ? source.rows : [];
 
-  const rows: ProposedHandle[] = [];
-  for (const entry of rawRows.slice(0, 50)) {
+  const rawItems = Array.isArray(source.items) ? source.items : [];
+  const items: ProposedPriceItem[] = [];
+  for (const entry of rawItems.slice(0, 200)) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const unit = readText(row.unit, 63).toLowerCase();
+    if (!isPriceUnit(unit)) continue;
+    const label = readText(row.label, 200);
+    if (!label) continue;
+    const kindRaw = readText(row.kind, 63).toLowerCase().replace(/\s+/g, "_");
+    const categoryRaw = readText(row.category, 63)
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+    items.push({
+      kind: isValidSlug(kindRaw) ? kindRaw : "",
+      category: isValidSlug(categoryRaw) ? categoryRaw : "extra",
+      label,
+      // Money, in dollars, and never negative. A plant does not pay you.
+      price: readNumber(row.price, { min: 0, max: 1_000_000 }),
+      unit,
+      minimum: readNumber(row.minimum, { min: 0, max: 1_000_000 }),
+      notes: readText(row.notes, 2000),
+    });
+  }
+
+  const rawAnimals = Array.isArray(source.animals) ? source.animals : [];
+  const animals: ProposedHandle[] = [];
+  for (const entry of rawAnimals.slice(0, 50)) {
     if (!entry || typeof entry !== "object") continue;
     const row = entry as Record<string, unknown>;
     const kindRaw = readText(row.kind, 63).toLowerCase().replace(/\s+/g, "_");
-    rows.push({
+    animals.push({
       kind: isValidSlug(kindRaw) ? kindRaw : "",
       capacityPerDay: readNumber(row.capacityPerDay, {
         min: 1,
         max: 1_000_000,
         integer: true,
       }),
-      // Money, in dollars, and never negative. A plant does not pay you.
-      killFee: readNumber(row.killFee, { min: 0, max: 1_000_000 }),
-      cutWrapPerLb: readNumber(row.cutWrapPerLb, { min: 0, max: 1_000_000 }),
-      cutFeePerHead: readNumber(row.cutFeePerHead, { min: 0, max: 1_000_000 }),
       priceNotes: readText(row.priceNotes, 2000),
     });
   }
-  return { rows, note: readText(source.note, 2000) };
+
+  return { items, animals, note: readText(source.note, 2000) };
 }
 
 export async function readPriceList(

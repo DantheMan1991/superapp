@@ -5,11 +5,18 @@ import type {
   ProductionProcessor,
   ProductionProcessorCut,
   ProductionProcessorHandle,
+  ProductionProcessorPriceItem,
 } from "@/db/schema";
 import { createPartyForRole } from "@/lib/parties/role-sync";
 import { loadParty, updateParty } from "@/lib/parties";
 import { ProductionError, type ProductionCtx, requireWrite } from "./ops";
-import { INSPECTIONS, LABELLING_OPTIONS, isValidSlug } from "./vocabulary";
+import {
+  INSPECTIONS,
+  LABELLING_OPTIONS,
+  isPriceUnit,
+  isValidSlug,
+  priceCategoryRank,
+} from "./vocabulary";
 
 /**
  * The processor directory — who does the part of a run this business does not
@@ -53,9 +60,6 @@ export type ProcessorPatch = Partial<ProcessorInput> & { isActive?: boolean };
 export interface HandleInput {
   kind: string;
   capacityPerDay?: number | null;
-  killFeeCents?: number | null;
-  cutWrapCentsPerLb?: number | null;
-  cutFeeCentsPerHead?: number | null;
   priceNotes?: string;
 }
 
@@ -65,12 +69,29 @@ export interface CutInput {
   notes?: string;
 }
 
+/**
+ * One line off a rate sheet. `priceCents` and `minimumCents` are CENTS — the
+ * dollars-to-cents conversion happens in the action, as it does everywhere else
+ * in this pack, so this layer never sees a decimal it might round twice.
+ */
+export interface PriceItemInput {
+  kind?: string;
+  category?: string;
+  label: string;
+  priceCents?: number | null;
+  unit: string;
+  minimumCents?: number | null;
+  notes?: string;
+}
+
 /** A processor with everything hanging off it, for a screen. */
 export interface ProcessorDetail {
   processor: ProductionProcessor;
   name: string;
   handles: ProductionProcessorHandle[];
   cuts: ProductionProcessorCut[];
+  /** Every priced line off their sheet, in the order the paper reads. */
+  priceItems: ProductionProcessorPriceItem[];
 }
 
 /**
@@ -140,9 +161,9 @@ export async function listProcessors(
   });
   if (rows.length === 0) return [];
 
-  // Three reads, not one per processor. A farm has a handful of these, but the
+  // Four reads, not one per processor. A farm has a handful of these, but the
   // N+1 would be in the page's critical path and it costs nothing to not write.
-  const [parties, handles, cuts] = await Promise.all([
+  const [parties, handles, cuts, priceItems] = await Promise.all([
     tx.query.parties.findMany({
       where: eq(schema.parties.tenantId, tenantId),
     }),
@@ -154,6 +175,9 @@ export async function listProcessors(
       where: eq(schema.productionProcessorCuts.tenantId, tenantId),
       orderBy: [asc(schema.productionProcessorCuts.name)],
     }),
+    tx.query.productionProcessorPriceItems.findMany({
+      where: eq(schema.productionProcessorPriceItems.tenantId, tenantId),
+    }),
   ]);
   const nameById = new Map(parties.map((p) => [p.id, p.displayName]));
 
@@ -163,6 +187,9 @@ export async function listProcessors(
       name: nameById.get(processor.partyId) ?? "",
       handles: handles.filter((h) => h.processorId === processor.id),
       cuts: cuts.filter((c) => c.processorId === processor.id),
+      priceItems: sheetOrder(
+        priceItems.filter((i) => i.processorId === processor.id),
+      ),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -179,7 +206,7 @@ export async function getProcessor(
     ),
   });
   if (!processor) return null;
-  const [party, handles, cuts] = await Promise.all([
+  const [party, handles, cuts, priceItems] = await Promise.all([
     loadParty(tx, tenantId, processor.partyId),
     tx.query.productionProcessorHandles.findMany({
       where: and(
@@ -195,8 +222,41 @@ export async function getProcessor(
       ),
       orderBy: [asc(schema.productionProcessorCuts.name)],
     }),
+    tx.query.productionProcessorPriceItems.findMany({
+      where: and(
+        eq(schema.productionProcessorPriceItems.tenantId, tenantId),
+        eq(schema.productionProcessorPriceItems.processorId, id),
+      ),
+    }),
   ]);
-  return { processor, name: party?.displayName ?? "", handles, cuts };
+  return {
+    processor,
+    name: party?.displayName ?? "",
+    handles,
+    cuts,
+    priceItems: sheetOrder(priceItems),
+  };
+}
+
+/**
+ * The order the paper reads: animal, then the sheet's own grouping, then the
+ * plant's own words.
+ *
+ * Sorted HERE rather than in SQL because the grouping is a rank over an open
+ * taxonomy — `priceCategoryRank` puts the five anticipated categories in the
+ * order a rate sheet uses them and anything unanticipated last, which no
+ * `ORDER BY` can express without duplicating that list into the query.
+ */
+function sheetOrder(
+  rows: ProductionProcessorPriceItem[],
+): ProductionProcessorPriceItem[] {
+  return [...rows].sort(
+    (a, b) =>
+      a.kind.localeCompare(b.kind) ||
+      priceCategoryRank(a.category) - priceCategoryRank(b.category) ||
+      a.category.localeCompare(b.category) ||
+      a.label.localeCompare(b.label),
+  );
 }
 
 /**
@@ -339,17 +399,27 @@ export async function setHandle(
     );
   }
   await requireProcessor(tx, ctx.tenantId, processorId);
-  for (const [value, what] of [
-    [input.capacityPerDay, "how many they can take in a day"],
-    [input.killFeeCents, "the fee per head"],
-    [input.cutWrapCentsPerLb, "the cut and wrap rate"],
-    [input.cutFeeCentsPerHead, "the cutting fee per head"],
-  ] as const) {
-    if (value !== undefined && value !== null && value < 0) {
-      throw new ProductionError("PROCESSOR_INVALID", `${what} cannot be negative`);
-    }
+  if (
+    input.capacityPerDay !== undefined &&
+    input.capacityPerDay !== null &&
+    input.capacityPerDay < 0
+  ) {
+    throw new ProductionError(
+      "PROCESSOR_INVALID",
+      "how many they can take in a day cannot be negative",
+    );
   }
 
+  /**
+   * **THE THREE FEE COLUMNS ARE NEITHER READ NOR WRITTEN HERE ANY MORE.**
+   * `kill_fee_cents`, `cut_wrap_cents_per_lb` and `cut_fee_cents_per_head` are
+   * still on the table and still hold what `0196` copied out of them, because
+   * a DROP goes out AFTER the deploy that stops reading it (ADR 0014 — nothing
+   * in the deploy applies migrations and `main` auto-deploys). Leaving them out
+   * of the conflict SET rather than nulling them is deliberate: until the drop
+   * lands they stay exactly as they were, so nothing is lost if the follow-up
+   * has to wait.
+   */
   const [row] = await tx
     .insert(schema.productionProcessorHandles)
     .values({
@@ -357,9 +427,6 @@ export async function setHandle(
       processorId,
       kind,
       capacityPerDay: input.capacityPerDay ?? null,
-      killFeeCents: input.killFeeCents ?? null,
-      cutWrapCentsPerLb: input.cutWrapCentsPerLb ?? null,
-      cutFeeCentsPerHead: input.cutFeeCentsPerHead ?? null,
       priceNotes: (input.priceNotes ?? "").trim(),
     })
     .onConflictDoUpdate({
@@ -370,9 +437,6 @@ export async function setHandle(
       ],
       set: {
         capacityPerDay: input.capacityPerDay ?? null,
-        killFeeCents: input.killFeeCents ?? null,
-        cutWrapCentsPerLb: input.cutWrapCentsPerLb ?? null,
-        cutFeeCentsPerHead: input.cutFeeCentsPerHead ?? null,
         priceNotes: (input.priceNotes ?? "").trim(),
         updatedAt: new Date(),
       },
@@ -393,6 +457,121 @@ export async function removeHandle(
       and(
         eq(schema.productionProcessorHandles.tenantId, ctx.tenantId),
         eq(schema.productionProcessorHandles.id, id),
+      ),
+    )
+    .returning();
+  if (!row) throw new ProductionError("NOT_FOUND", "that is already gone");
+  return row;
+}
+
+/**
+ * Record one priced line off a rate sheet, or correct one already recorded.
+ *
+ * **AN UPSERT ON `(processor, kind, label)`, for the reason `setHandle` is one
+ * on `(processor, kind)`:** a second row saying "Quartered · chicken" would be
+ * two prices for one option with nothing to say which is current. It is also
+ * what makes next year's rate sheet re-readable over this year's — the same
+ * twelve labels come back with new figures and correct the ones on file rather
+ * than doubling them.
+ *
+ * **THE UNIT IS CHECKED HERE AS WELL AS BY THE CONSTRAINT**, and the sentence
+ * matters more than usual: a unit is the difference between $1.05 a bird and
+ * $1.05 a pound, so somebody who has typed the wrong one needs to be told which
+ * ones exist rather than shown a constraint name.
+ */
+export async function setPriceItem(
+  tx: Tx,
+  ctx: ProductionCtx,
+  processorId: string,
+  input: PriceItemInput,
+): Promise<ProductionProcessorPriceItem> {
+  requireWrite(ctx, "owner");
+  const label = input.label.trim();
+  if (!label) {
+    throw new ProductionError("PROCESSOR_INVALID", "name what they charge for");
+  }
+  const kind = (input.kind ?? "").trim().toLowerCase();
+  if (kind !== "" && !isValidSlug(kind)) {
+    throw new ProductionError(
+      "INVALID_KIND",
+      "use lowercase letters, numbers and underscores",
+    );
+  }
+  const category = (input.category ?? "extra").trim().toLowerCase();
+  if (!isValidSlug(category)) {
+    throw new ProductionError(
+      "INVALID_KIND",
+      "use lowercase letters, numbers and underscores",
+    );
+  }
+  if (!isPriceUnit(input.unit)) {
+    throw new ProductionError(
+      "PROCESSOR_INVALID",
+      "say what the price is per — a head, a pound, a package, a box, a drop-off or an hour",
+    );
+  }
+  for (const [value, what] of [
+    [input.priceCents, "the price"],
+    [input.minimumCents, "the minimum"],
+  ] as const) {
+    if (value !== undefined && value !== null && value < 0) {
+      throw new ProductionError(
+        "PROCESSOR_INVALID",
+        `${what} cannot be negative`,
+      );
+    }
+  }
+  await requireProcessor(tx, ctx.tenantId, processorId);
+
+  const priceCents = input.priceCents ?? null;
+  const minimumCents = input.minimumCents ?? null;
+  const notes = (input.notes ?? "").trim();
+
+  const [row] = await tx
+    .insert(schema.productionProcessorPriceItems)
+    .values({
+      tenantId: ctx.tenantId,
+      processorId,
+      kind,
+      category,
+      label,
+      priceCents,
+      unit: input.unit,
+      minimumCents,
+      notes,
+    })
+    .onConflictDoUpdate({
+      target: [
+        schema.productionProcessorPriceItems.tenantId,
+        schema.productionProcessorPriceItems.processorId,
+        schema.productionProcessorPriceItems.kind,
+        schema.productionProcessorPriceItems.label,
+      ],
+      set: {
+        category,
+        priceCents,
+        unit: input.unit,
+        minimumCents,
+        notes,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+  return row;
+}
+
+export async function removePriceItem(
+  tx: Tx,
+  ctx: ProductionCtx,
+  id: string,
+): Promise<ProductionProcessorPriceItem> {
+  requireWrite(ctx, "owner");
+  const [row] = await tx
+    .delete(schema.productionProcessorPriceItems)
+    .where(
+      and(
+        eq(schema.productionProcessorPriceItems.tenantId, ctx.tenantId),
+        eq(schema.productionProcessorPriceItems.id, id),
       ),
     )
     .returning();

@@ -28,7 +28,9 @@ import {
   createProcessorAction,
   removeCutAction,
   removeHandleAction,
+  removePriceItemAction,
   setHandleAction,
+  setPriceItemAction,
   updateProcessorAction,
 } from "../processor-actions";
 import {
@@ -37,6 +39,11 @@ import {
   inspectionNote,
   LABELLING_LABELS,
   LABELLING_OPTIONS,
+  PRICE_CATEGORIES,
+  PRICE_CATEGORY_LABELS,
+  PRICE_UNITS,
+  PRICE_UNIT_LABELS,
+  PRICE_UNIT_NOTES,
   RATING_LABELS,
   slugLabel,
 } from "../vocabulary";
@@ -352,11 +359,14 @@ export function EditProcessorDialog({
 }
 
 /**
- * What one processor will take, and what it quoted.
+ * What one processor will take.
  *
- * The fee fields are in DOLLARS here and cents in the database — the conversion
- * is in the action, in one place, so a form can never be the thing that decides
- * what a price means.
+ * **THE FEES LEFT THIS DIALOG when the price list was itemised**, and their
+ * absence is the point rather than an omission. A plant does not have *a*
+ * cutting fee — it has a menu — so three fee boxes here could only ever hold
+ * three of the twelve prices on the sheet, and the twelve now live in their own
+ * rows with their own units. What stays is what a fee cannot say: whether they
+ * take this animal at all, how many a day, and the prose that is not a price.
  */
 export function HandleDialog({
   processorId,
@@ -369,9 +379,6 @@ export function HandleDialog({
     id: string;
     kind: string;
     capacityPerDay: number | null;
-    killFeeCents: number | null;
-    cutWrapCentsPerLb: number | null;
-    cutFeeCentsPerHead: number | null;
     priceNotes: string;
   };
 }) {
@@ -379,19 +386,6 @@ export function HandleDialog({
   const [kind, setKind] = useState(existing?.kind ?? kindOptions[0] ?? "");
   const [capacity, setCapacity] = useState(
     existing?.capacityPerDay?.toString() ?? "",
-  );
-  const [killFee, setKillFee] = useState(
-    existing?.killFeeCents != null ? (existing.killFeeCents / 100).toFixed(2) : "",
-  );
-  const [cutWrap, setCutWrap] = useState(
-    existing?.cutWrapCentsPerLb != null
-      ? (existing.cutWrapCentsPerLb / 100).toFixed(2)
-      : "",
-  );
-  const [cutFee, setCutFee] = useState(
-    existing?.cutFeeCentsPerHead != null
-      ? (existing.cutFeeCentsPerHead / 100).toFixed(2)
-      : "",
   );
   const [priceNotes, setPriceNotes] = useState(existing?.priceNotes ?? "");
   const [pending, startTransition] = useTransition();
@@ -407,9 +401,6 @@ export function HandleDialog({
         processorId,
         kind: kind.trim(),
         capacityPerDay: numOrNull(capacity),
-        killFee: numOrNull(killFee),
-        cutWrapPerLb: numOrNull(cutWrap),
-        cutFeePerHead: numOrNull(cutFee),
         priceNotes: priceNotes.trim(),
       });
       if ("error" in result && result.error) {
@@ -433,8 +424,8 @@ export function HandleDialog({
         <DialogHeader>
           <DialogTitle>{existing ? "Edit" : "What they take"}</DialogTitle>
           <DialogDescription>
-            One row per kind, because a plant quotes a different price for a beef
-            than for a hog.
+            One row per kind. What they charge is a separate list, because a
+            plant quotes a menu rather than a price.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -462,72 +453,23 @@ export function HandleDialog({
               />
             )}
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="handle-capacity">Head per day</Label>
-              <Input
-                id="handle-capacity"
-                type="number"
-                min={1}
-                value={capacity}
-                onChange={(e) => setCapacity(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="handle-kill">Kill fee, per head</Label>
-              <Input
-                id="handle-kill"
-                type="number"
-                step="0.01"
-                min={0}
-                value={killFee}
-                onChange={(e) => setKillFee(e.target.value)}
-              />
-            </div>
-          </div>
-          {/*
-            TWO WAYS TO CHARGE FOR CUTTING, and a plant quotes whichever suits
-            the animal: red meat is per pound of hanging weight, poultry is per
-            bird. Both are offered because a real rate sheet proved neither
-            alone is enough, and both may be filled in — a per-pound rate plus a
-            flat per-bird handling fee is an ordinary arrangement.
-          */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="handle-cut">Cut and wrap, per lb</Label>
-              <Input
-                id="handle-cut"
-                type="number"
-                step="0.01"
-                min={0}
-                value={cutWrap}
-                onChange={(e) => setCutWrap(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="handle-cutfee">Cutting, per head</Label>
-              <Input
-                id="handle-cutfee"
-                type="number"
-                step="0.01"
-                min={0}
-                value={cutFee}
-                onChange={(e) => setCutFee(e.target.value)}
-              />
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            What they quoted, not what they billed. The bill is a bill, against
-            the same name, and keeping the two apart is what makes &ldquo;they
-            charged more than they said&rdquo; a question the data can answer.
-          </p>
           <div className="space-y-2">
-            <Label htmlFor="handle-notes">Minimums, extras</Label>
+            <Label htmlFor="handle-capacity">Head per day</Label>
+            <Input
+              id="handle-capacity"
+              type="number"
+              min={1}
+              value={capacity}
+              onChange={(e) => setCapacity(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="handle-notes">Anything that is not a price</Label>
             <Input
               id="handle-notes"
               value={priceNotes}
               onChange={(e) => setPriceNotes(e.target.value)}
-              placeholder="$75 minimum, smoking 90c/lb extra"
+              placeholder="Book ducks and geese by age, not by weight"
             />
           </div>
         </div>
@@ -541,6 +483,217 @@ export function HandleDialog({
   );
 }
 
+/**
+ * One priced line off a rate sheet, typed rather than extracted.
+ *
+ * **THE UNIT IS THE FIELD THAT MATTERS AND THE FORM SAYS SO.** $1.05 is a
+ * different amount of money per bird and per pound, and the pack has already
+ * paid once for a column that could only hold one of them. The note under the
+ * picker explains what each unit is measured against, because "per lb hanging"
+ * and "per lb packaged" are the same words to somebody who has not butchered.
+ *
+ * Prices are DOLLARS here and cents in the database — the conversion is in the
+ * action, in one place, so a form can never be the thing that decides what a
+ * price means. A blank price is not zero: it is a plant that said to ring them.
+ */
+export function PriceItemDialog({
+  processorId,
+  kindOptions,
+  existing,
+}: {
+  processorId: string;
+  kindOptions: string[];
+  existing?: {
+    id: string;
+    kind: string;
+    category: string;
+    label: string;
+    priceCents: number | null;
+    unit: string;
+    minimumCents: number | null;
+    notes: string;
+  };
+}) {
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState(existing?.kind ?? "");
+  const [category, setCategory] = useState(existing?.category ?? "cutting");
+  const [label, setLabel] = useState(existing?.label ?? "");
+  const [price, setPrice] = useState(
+    existing?.priceCents != null ? (existing.priceCents / 100).toFixed(2) : "",
+  );
+  const [unit, setUnit] = useState(existing?.unit ?? "head");
+  const [minimum, setMinimum] = useState(
+    existing?.minimumCents != null
+      ? (existing.minimumCents / 100).toFixed(2)
+      : "",
+  );
+  const [notes, setNotes] = useState(existing?.notes ?? "");
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  const submit = () => {
+    if (!label.trim()) {
+      toast.error("Say what they charge for.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await setPriceItemAction({
+        processorId,
+        kind,
+        category,
+        label: label.trim(),
+        price: numOrNull(price),
+        unit,
+        minimum: numOrNull(minimum),
+        notes: notes.trim(),
+      });
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Saved");
+      setOpen(false);
+      router.refresh();
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant={existing ? "ghost" : "outline"} size="sm">
+          {existing ? "Edit" : "Add a price"}
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{existing ? "Edit a price" : "Add a price"}</DialogTitle>
+          <DialogDescription>
+            One row per priced thing on their sheet. Quartered and eight-piece
+            are two prices, not one cutting fee, and picking between them is a
+            decision for an order.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="price-label">What they charge for</Label>
+            <Input
+              id="price-label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Cut, wrap and freeze"
+              disabled={Boolean(existing)}
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="price-kind">For</Label>
+              <Select
+                value={kind === "" ? "none" : kind}
+                onValueChange={(v) => setKind(v === "none" ? "" : v)}
+              >
+                <SelectTrigger id="price-kind" disabled={Boolean(existing)}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Anything they take</SelectItem>
+                  {kindOptions.map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {slugLabel(k)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="price-category">Group</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger id="price-category">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRICE_CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {PRICE_CATEGORY_LABELS[c]}
+                    </SelectItem>
+                  ))}
+                  {!(PRICE_CATEGORIES as readonly string[]).includes(
+                    category,
+                  ) && (
+                    <SelectItem value={category}>
+                      {slugLabel(category)}
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="price-amount">Price</Label>
+              <Input
+                id="price-amount"
+                type="number"
+                step="0.01"
+                min={0}
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="price-unit">Per</Label>
+              <Select value={unit} onValueChange={setUnit}>
+                <SelectTrigger id="price-unit">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRICE_UNITS.map((u) => (
+                    <SelectItem key={u} value={u}>
+                      {PRICE_UNIT_LABELS[u]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {PRICE_UNIT_NOTES[unit]}
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="price-minimum">Minimum</Label>
+            <Input
+              id="price-minimum"
+              type="number"
+              step="0.01"
+              min={0}
+              value={minimum}
+              onChange={(e) => setMinimum(e.target.value)}
+              placeholder="A floor, not a price"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="price-notes">Conditions</Label>
+            <Input
+              id="price-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Quoted as a range: $0.65 to $0.90"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            What they quoted, not what they billed. The bill is a bill, against
+            the same name, and keeping the two apart is what makes &ldquo;they
+            charged more than they said&rdquo; a question the data can answer.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button onClick={submit} disabled={pending}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 export function AddCutDialog({
   processorId,
   kindOptions,
@@ -678,6 +831,31 @@ export function RemoveCutButton({ id }: { id: string }) {
       onClick={() =>
         startTransition(async () => {
           const result = await removeCutAction({ id });
+          if ("error" in result && result.error) {
+            toast.error(result.error);
+            return;
+          }
+          toast.success("Removed");
+          router.refresh();
+        })
+      }
+    >
+      Remove
+    </Button>
+  );
+}
+
+export function RemovePriceItemButton({ id }: { id: string }) {
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const result = await removePriceItemAction({ id });
           if ("error" in result && result.error) {
             toast.error(result.error);
             return;

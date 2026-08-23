@@ -102,68 +102,113 @@ describe("validateKillSheet", () => {
 });
 
 describe("validatePriceList", () => {
-  const row = (over: Record<string, unknown> = {}) => ({
+  const item = (over: Record<string, unknown> = {}) => ({
     kind: "cattle",
-    capacityPerDay: null,
-    killFee: null,
-    cutWrapPerLb: null,
-    cutFeePerHead: null,
-    priceNotes: "",
+    category: "slaughter",
+    label: "Slaughter",
+    price: null,
+    unit: "head",
+    minimum: null,
+    notes: "",
     ...over,
   });
 
   it("takes a well-formed sheet through unchanged", () => {
     const out = validatePriceList({
-      rows: [row({ killFee: 105, cutWrapPerLb: 0.9, capacityPerDay: 8 })],
+      items: [item({ price: 105 })],
+      animals: [{ kind: "cattle", capacityPerDay: 8, priceNotes: "" }],
       note: "",
     });
-    expect(out.rows[0]).toMatchObject({
+    expect(out.items[0]).toMatchObject({
       kind: "cattle",
-      killFee: 105,
-      cutWrapPerLb: 0.9,
-      capacityPerDay: 8,
+      category: "slaughter",
+      label: "Slaughter",
+      price: 105,
+      unit: "head",
     });
+    expect(out.animals[0]).toMatchObject({ kind: "cattle", capacityPerDay: 8 });
   });
 
-  it("KEEPS A ROW WHOSE KIND IT COULD NOT PLACE, with the kind emptied", () => {
+  it("KEEPS AN ITEM WHOSE KIND IT COULD NOT PLACE, with the kind emptied", () => {
     // Dropping it would silently lose a price off the sheet, which is the exact
-    // failure this feature exists to prevent. The fee is still worth having;
+    // failure this feature exists to prevent. The price is still worth having;
     // the form makes somebody say what it is for.
     const out = validatePriceList({
-      rows: [row({ kind: "Bison (whole)", killFee: 250 })],
+      items: [item({ kind: "Bison (whole)", price: 250 })],
+      animals: [],
       note: "",
     });
-    expect(out.rows).toHaveLength(1);
-    expect(out.rows[0].kind).toBe("");
-    expect(out.rows[0].killFee).toBe(250);
+    expect(out.items).toHaveLength(1);
+    expect(out.items[0].kind).toBe("");
+    expect(out.items[0].price).toBe(250);
   });
 
   it("normalises a kind the way the slug rule does", () => {
-    expect(validatePriceList({ rows: [row({ kind: "Cattle" })] }).rows[0].kind)
-      .toBe("cattle");
-    expect(validatePriceList({ rows: [row({ kind: "dairy cow" })] }).rows[0].kind)
-      .toBe("dairy_cow");
+    const kindOf = (kind: string) =>
+      validatePriceList({ items: [item({ kind })], animals: [] }).items[0].kind;
+    expect(kindOf("Cattle")).toBe("cattle");
+    expect(kindOf("dairy cow")).toBe("dairy_cow");
   });
 
-  it("refuses a negative fee — a plant does not pay you", () => {
+  it("DROPS AN ITEM WITH NO USABLE UNIT, because a price without one is not a price", () => {
+    // The one thing that IS dropped, and the exception that proves the rule
+    // above. `1.05` with nothing saying whether it is a bird or a pound is the
+    // exact ambiguity this table exists to end, and a form cannot ask somebody
+    // to supply a unit they would have to guess at either.
     const out = validatePriceList({
-      rows: [row({ killFee: -95, cutWrapPerLb: -1 })],
+      items: [item({ unit: "each", price: 1.05 }), item({ price: 95 })],
+      animals: [],
       note: "",
     });
-    expect(out.rows[0].killFee).toBeNull();
-    expect(out.rows[0].cutWrapPerLb).toBeNull();
+    expect(out.items).toHaveLength(1);
+    expect(out.items[0].price).toBe(95);
+  });
+
+  it("drops an item with no label, because a price for something unnamed cannot be checked", () => {
+    const out = validatePriceList({
+      items: [item({ label: "   ", price: 95 })],
+      animals: [],
+      note: "",
+    });
+    expect(out.items).toEqual([]);
+  });
+
+  it("falls back to `extra` for a category it does not recognise", () => {
+    // The category is an open taxonomy and only has to be a slug. Anything
+    // that is not becomes the bucket that means nothing else fitted, rather
+    // than dropping a priced line over how the sheet grouped it.
+    const out = validatePriceList({
+      items: [item({ category: "Smoke House!" })],
+      animals: [],
+    });
+    expect(out.items[0].category).toBe("extra");
+  });
+
+  it("refuses a negative price — a plant does not pay you", () => {
+    const out = validatePriceList({
+      items: [item({ price: -95, minimum: -1 })],
+      animals: [],
+      note: "",
+    });
+    expect(out.items[0].price).toBeNull();
+    expect(out.items[0].minimum).toBeNull();
   });
 
   it("keeps a genuine zero, which is not the same as unquoted", () => {
-    // A waived kill fee is a real thing a sheet can say. Only NULL means
-    // nobody quoted one.
-    const out = validatePriceList({ rows: [row({ killFee: 0 })], note: "" });
-    expect(out.rows[0].killFee).toBe(0);
+    // A waived fee is a real thing a sheet can say. Only NULL means nobody
+    // quoted one.
+    const out = validatePriceList({
+      items: [item({ price: 0 })],
+      animals: [],
+      note: "",
+    });
+    expect(out.items[0].price).toBe(0);
   });
 
   it("survives every shape of nonsense without throwing", () => {
-    for (const junk of [null, undefined, "", 42, [], { rows: "no" }]) {
-      expect(validatePriceList(junk).rows).toEqual([]);
+    for (const junk of [null, undefined, "", 42, [], { items: "no" }]) {
+      expect(validatePriceList(junk).items).toEqual([]);
+      expect(validatePriceList(junk).animals).toEqual([]);
     }
   });
 });
@@ -205,136 +250,167 @@ describe("readText", () => {
  * ── WHAT A REAL RATE SHEET DID (2026-08-23) ───────────────────────────────
  *
  * Pleasant Valley Poultry's 2026 price list, a genuine two-page USDA poultry
- * plant sheet, was run through the live extractor. These pin the two shapes it
- * contains that a naive reader gets WRONG, because both were refused correctly
- * and a later prompt change must not start guessing at them.
+ * plant sheet, was run through the live extractor. These pin the shapes it
+ * contains that a naive reader gets WRONG.
+ *
+ * **TWO OF THEM CHANGED ANSWER WHEN THE MENU GOT A TABLE, AND ONE DID NOT** —
+ * which is the distinction worth keeping a test for. A MENU is now a list of
+ * items, because each option has its own price and its own unit. A RANGE is
+ * still nothing at all, because $0.65-$0.90 names no figure the plant would
+ * stand behind, and averaging it would invent one.
  */
 describe("what a real rate sheet contains", () => {
-  it("keeps a banded fee OUT of the number and IN the note", () => {
-    // The chicken slaughter fee on that sheet is a 4-breed x 6-batch-band
-    // matrix — 24 prices. Any single one of them in `killFee` is wrong for the
-    // other 23. The live run returned null and put the whole matrix in the
-    // note, which is the only honest answer.
-    const out = validatePriceList({
-      rows: [
-        {
-          kind: "chicken",
-          capacityPerDay: null,
-          killFee: null,
-          cutWrapPerLb: null,
-          cutFeePerHead: null,
-          priceNotes:
-            "Cornish x $3.75 (50 to 100), $3.15 (101 to 250) ... varies by breed and batch size",
-        },
-      ],
-      note: "",
-    });
-    expect(out.rows[0].killFee).toBeNull();
-    expect(out.rows[0].priceNotes).toContain("varies by breed and batch size");
+  const item = (over: Record<string, unknown> = {}) => ({
+    kind: "chicken",
+    category: "cutting",
+    label: "Quartered",
+    price: null,
+    unit: "head",
+    minimum: null,
+    notes: "",
+    ...over,
   });
 
-  it("keeps a PER-POUND slaughter fee out of the per-head field", () => {
-    // Turkey on that sheet is $0.65-$0.90 PER POUND with a $10 minimum, not a
-    // flat fee per bird. `killFee` is per head, so the only correct value is
-    // null — and 0.65 would have looked entirely plausible sitting there.
+  it("TAKES A MENU AS A LIST OF ITEMS, which it could not do before", () => {
+    // Pleasant Valley lists twelve chicken cutting options at nine prices. The
+    // old shape had one cutting column, so the only honest answer was to
+    // refuse all twelve and leave them as prose nothing could select. Each is
+    // now its own row with its own price, and nothing has to pick between
+    // them — picking is the farm's job on an order.
     const out = validatePriceList({
-      rows: [
-        {
-          kind: "turkey",
-          capacityPerDay: null,
-          killFee: null,
-          cutWrapPerLb: null,
-          cutFeePerHead: null,
-          priceNotes: "charged by weight, not a flat per head fee",
-        },
+      items: [
+        item({ label: "Quartered", price: 1.05 }),
+        item({ label: "8 Pcs Cut", price: 1.25 }),
+        item({ label: "Deboning Thighs", price: 0.65 }),
       ],
+      animals: [],
       note: "",
     });
-    expect(out.rows[0].killFee).toBeNull();
+    expect(out.items.map((r) => r.label)).toEqual([
+      "Quartered",
+      "8 Pcs Cut",
+      "Deboning Thighs",
+    ]);
+    expect(out.items.map((r) => r.price)).toEqual([1.05, 1.25, 0.65]);
+    // All per BIRD, which is how poultry plants quote cutting and the reason a
+    // single per-pound column could never have held them.
+    expect(out.items.every((r) => r.unit === "head")).toBe(true);
+  });
+
+  it("TAKES A PRICE MATRIX AS A MATRIX OF ITEMS", () => {
+    // The chicken slaughter fee is a 4-breed x 6-batch-band grid — 24 prices.
+    // The old shape returned null and put the whole grid in a note, because any
+    // one of the 24 is wrong for the other 23. Each cell now has a label that
+    // says which cell it is.
+    const out = validatePriceList({
+      items: [
+        item({
+          category: "slaughter",
+          label: "Slaughter, Cornish Cross, 50-100 birds",
+          price: 3.75,
+        }),
+        item({
+          category: "slaughter",
+          label: "Slaughter, Cornish Cross, 101-250 birds",
+          price: 3.15,
+        }),
+      ],
+      animals: [],
+      note: "",
+    });
+    expect(out.items.map((r) => r.price)).toEqual([3.75, 3.15]);
+    expect(out.items[0].label).toContain("50-100");
+  });
+
+  it("STILL REFUSES A RANGE, which is not a price however it is itemised", () => {
+    // Turkey slaughter on that sheet is $0.65-$0.90 PER POUND with a $10
+    // minimum. The unit is now expressible and the minimum has a column — but
+    // the price itself is still null, because the sheet names no figure and
+    // averaging the two ends would invent one the plant never quoted.
+    const out = validatePriceList({
+      items: [
+        item({
+          kind: "turkey",
+          category: "slaughter",
+          label: "Slaughter",
+          price: null,
+          unit: "live_lb",
+          minimum: 10,
+          notes: "$0.65 to $0.90 per lb depending on weight",
+        }),
+      ],
+      animals: [],
+      note: "",
+    });
+    expect(out.items[0].price).toBeNull();
+    expect(out.items[0].unit).toBe("live_lb");
+    expect(out.items[0].minimum).toBe(10);
+    expect(out.items[0].notes).toContain("$0.65 to $0.90");
   });
 
   it("takes the flat per-bird fees exactly as printed", () => {
     // Ducks, geese and quail ARE flat per head, and the live run returned all
     // three to the cent.
     const out = validatePriceList({
-      rows: [
-        { kind: "duck", capacityPerDay: null, killFee: 10.55, cutWrapPerLb: null, cutFeePerHead: null, priceNotes: "" },
-        { kind: "goose", capacityPerDay: null, killFee: 11.55, cutWrapPerLb: null, cutFeePerHead: null, priceNotes: "" },
-        { kind: "quail", capacityPerDay: null, killFee: 2.75, cutWrapPerLb: null, cutFeePerHead: null, priceNotes: "" },
+      items: [
+        item({ kind: "duck", category: "slaughter", label: "Slaughter", price: 10.55 }),
+        item({ kind: "goose", category: "slaughter", label: "Slaughter", price: 11.55 }),
+        item({ kind: "quail", category: "slaughter", label: "Slaughter", price: 2.75 }),
+      ],
+      animals: [],
+      note: "",
+    });
+    expect(out.items.map((r) => r.price)).toEqual([10.55, 11.55, 2.75]);
+    expect(out.items.map((r) => r.kind)).toEqual(["duck", "goose", "quail"]);
+  });
+
+  it("keeps the two cutting units apart, which is what the unit column is for", () => {
+    // Red meat is cut by the pound of hanging weight; poultry is cut by the
+    // bird. $1.05 means completely different money depending on which, and the
+    // unit now travels with the figure instead of being implied by a column
+    // name.
+    const out = validatePriceList({
+      items: [
+        item({ kind: "cattle", label: "Cut and wrap", price: 0.9, unit: "hanging_lb" }),
+        item({ kind: "chicken", label: "Quartered", price: 1.05, unit: "head" }),
+      ],
+      animals: [],
+      note: "",
+    });
+    expect(out.items[0]).toMatchObject({ price: 0.9, unit: "hanging_lb" });
+    expect(out.items[1]).toMatchObject({ price: 1.05, unit: "head" });
+  });
+
+  it("lets one plant charge per pound AND a flat fee per animal", () => {
+    // The arrangement most plants actually quote, and the reason a smaller
+    // animal costs more per pound at the same plant: the flat half spreads over
+    // less meat. Two items, no rule against either.
+    const out = validatePriceList({
+      items: [
+        item({ kind: "swine", category: "slaughter", label: "Slaughter", price: 65, unit: "head" }),
+        item({ kind: "swine", category: "cutting", label: "Cut and wrap", price: 0.85, unit: "hanging_lb" }),
+      ],
+      animals: [],
+      note: "",
+    });
+    expect(out.items.map((r) => r.unit)).toEqual(["head", "hanging_lb"]);
+  });
+
+  it("keeps prose that is not a price on the ANIMAL, not on an item", () => {
+    // The sheet's advice about booking ducks and geese by age is not a charge
+    // and has no unit. It belongs to the animal, where it stays true when the
+    // prices change.
+    const out = validatePriceList({
+      items: [],
+      animals: [
+        {
+          kind: "goose",
+          capacityPerDay: null,
+          priceNotes: "Book by age, not by weight",
+        },
       ],
       note: "",
     });
-    expect(out.rows.map((r) => r.killFee)).toEqual([10.55, 11.55, 2.75]);
-    expect(out.rows.map((r) => r.kind)).toEqual(["duck", "goose", "quail"]);
-  });
-});
-
-describe("cutting, per pound and per head", () => {
-  const row = (over: Record<string, unknown> = {}) => ({
-    kind: "cattle",
-    capacityPerDay: null,
-    killFee: null,
-    cutWrapPerLb: null,
-    cutFeePerHead: null,
-    priceNotes: "",
-    ...over,
-  });
-
-  it("keeps the two cutting units apart", () => {
-    // THE COLUMN A REAL SHEET PROVED WAS MISSING. Red meat is cut by the pound
-    // of hanging weight; poultry is cut by the bird. $1.05 means completely
-    // different money depending on which, and before this there was only one
-    // slot — so a per-bird rate either went in the per-pound column and lied,
-    // or was refused and survived as prose nothing can compare.
-    const out = validatePriceList({
-      rows: [
-        row({ kind: "cattle", cutWrapPerLb: 0.9 }),
-        row({ kind: "chicken", cutFeePerHead: 1.05 }),
-      ],
-      note: "",
-    });
-    expect(out.rows[0].cutWrapPerLb).toBe(0.9);
-    expect(out.rows[0].cutFeePerHead).toBeNull();
-    expect(out.rows[1].cutFeePerHead).toBe(1.05);
-    expect(out.rows[1].cutWrapPerLb).toBeNull();
-  });
-
-  it("allows both, because a plant may charge both", () => {
-    // No CHECK forbids it. A per-pound cut plus a flat per-bird handling fee is
-    // an ordinary arrangement, and a rule against it would be this app telling
-    // a business how it may quote.
-    const out = validatePriceList({
-      rows: [row({ cutWrapPerLb: 0.9, cutFeePerHead: 5 })],
-      note: "",
-    });
-    expect(out.rows[0].cutWrapPerLb).toBe(0.9);
-    expect(out.rows[0].cutFeePerHead).toBe(5);
-  });
-
-  it("refuses a negative per-head cutting fee", () => {
-    expect(
-      validatePriceList({ rows: [row({ cutFeePerHead: -1 })], note: "" })
-        .rows[0].cutFeePerHead,
-    ).toBeNull();
-  });
-
-  it("STILL refuses a menu of cutting options, which is not a rate", () => {
-    // Pleasant Valley lists twelve chicken cutting options at nine different
-    // prices. Adding a per-head column does NOT make that representable — a
-    // menu is not a rate, and picking one of the twelve would be inventing the
-    // farm's choice. Both slots stay null and the menu stays in the note.
-    const out = validatePriceList({
-      rows: [
-        row({
-          kind: "chicken",
-          priceNotes:
-            "Quartered $1.05 per bird; 8 Pcs Cut $1.25 per bird; Deboning Thighs $0.65 per bird",
-        }),
-      ],
-      note: "",
-    });
-    expect(out.rows[0].cutFeePerHead).toBeNull();
-    expect(out.rows[0].cutWrapPerLb).toBeNull();
-    expect(out.rows[0].priceNotes).toContain("8 Pcs Cut $1.25");
+    expect(out.animals[0].priceNotes).toContain("Book by age");
   });
 });

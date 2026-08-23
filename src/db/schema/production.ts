@@ -26,11 +26,11 @@
  *   - **Cut sheets and recipes** (slices 1 and 2). A run is one shared model;
  *     the TEMPLATES that seed it stay separate, because a cut sheet specifies
  *     treatment and a recipe specifies quantities.
- *   - **Eligibility stamping and the exemption counter** (slice 1b). The
+ *   - **Eligibility stamping and the exemption counter** (slice 1d). The
  *     CARCASS STAGE and CONDEMNATIONS landed in slice 1a — see
  *     `production_run_carcasses` below.
  *   - **The kill sheet as a DOCUMENT** — the photograph or the PDF, and the
- *     extraction that fills the carcass rows in from it (slice 1b). The rows
+ *     extraction that fills the carcass rows in from it (slice 1d). The rows
  *     had to exist before there was anywhere to extract into.
  *   - **Byproducts at net realisable value and costed internal transfers**
  *     (slice 3). Slice 0 rolls the whole input cost across every output by one
@@ -43,6 +43,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   date,
   foreignKey,
@@ -58,6 +59,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { assets } from "./assets";
+import { parties } from "./parties";
 import { inventoryItems, inventoryLots, inventoryMovements } from "./inventory";
 
 /**
@@ -526,6 +528,281 @@ export const productionRunCarcasses = pgTable(
 );
 
 /**
+ * A PLACE THAT DOES THE WORK THIS FARM DOES NOT DO ITSELF, and everything the
+ * app needs to choose between two of them.
+ *
+ * **IT IS A ROLE ON A PARTY, NOT A NEW CONTACT MODEL.** `party_id` points at the
+ * shared identity spine, the same one `customers` and `vendors` hang off. A
+ * plant that both processes your animals and invoices you is ONE party holding
+ * two role rows — the arrangement `parties` exists for — and the design this
+ * pack was sliced from settles it in a line: *"A processor is a vendor — the
+ * party spine already holds it, no new contact model."* Everything here is what
+ * a party row cannot say.
+ *
+ * **THE PACK STILL DOES NOT KNOW WHAT A BUTCHER IS.** `processor` is a declared
+ * label (`src/packs/index.ts`), so a farm reads "Butcher" and a bakery sending
+ * dough to a co-packer reads something else. What each one HANDLES is not
+ * enumerated here either — it comes from the installed profile's
+ * `packConfig.production.processorHandles`, the same arrangement `runKinds`
+ * uses, because a pack carrying a list of species would know what industry it
+ * was in (ADR 0004).
+ *
+ * **INSPECTION IS NOT A BADGE; IT DECIDES WHERE THE MEAT MAY BE SOLD.** The
+ * design is explicit that finished stock inherits a market eligibility from how
+ * it was processed, and that `retail` must refuse to list a lot into a channel
+ * that is not legal for it. This column is where that fact enters the system.
+ * It is deliberately NOT a boolean: "not inspected" and "nobody has said yet"
+ * are different states, and a boolean would quietly turn the second into the
+ * first on the very screen a legal question gets answered from. `unknown` is the
+ * default for that reason.
+ *
+ * **THE RATING IS SOMEBODY'S OPINION AND IS STORED AS ONE.** `rating` and
+ * `good_at` are what a person thinks, entered by hand, and they are the only
+ * assessment that works on day one. What the app can COMPUTE about a processor —
+ * dressing percentage, condemnation rate, turnaround — is a ratio over runs that
+ * already exist and is therefore never stored, by the same rule that keeps a
+ * yield out of every other table in this file. The two must never be merged into
+ * one number: the design warns that yield varies by animal as well as by plant,
+ * so a computed figure is evidence about a processor, not a verdict on one.
+ */
+export const productionProcessors = pgTable(
+  "production_processors",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The identity behind this processor. One processor row per party. */
+    partyId: uuid("party_id").notNull(),
+    /**
+     * `usda` | `state` | `custom_exempt` | `uninspected` | `unknown`.
+     *
+     * `custom_exempt` is its own value rather than a flavour of uninspected
+     * because it is a real legal category with real consequences: the meat is
+     * inspected for the owner and may not be resold, which is precisely the
+     * distinction a sales channel has to make.
+     */
+    inspection: text("inspection").notNull().default("unknown"),
+    /**
+     * The USDA establishment number. Empty when there is none or nobody has
+     * asked. It is a RETAINED RECORD — it goes on the label and it is what a
+     * traceback follows — so it lives in a column rather than in notes.
+     */
+    establishmentNumber: text("establishment_number").notNull().default(""),
+    /**
+     * `unknown` | `no` | `yes` — will they put YOUR label on the package.
+     *
+     * Three states for the same reason `inspection` has five: a farm that has
+     * not asked is not a farm that has been told no, and this is the question
+     * that decides whether a brand can exist at all.
+     */
+    customLabelling: text("custom_labelling").notNull().default("unknown"),
+    /** What they said about labelling, in their words. */
+    labellingNotes: text("labelling_notes").notNull().default(""),
+    /**
+     * HOW FAR AHEAD THEY BOOK, in days. Null when nobody has asked.
+     *
+     * The design calls slaughter dates the scarce resource and puts the figure
+     * at six to twelve months. It is on the processor rather than on a booking
+     * because it is a property of the plant, and it is what makes "you should be
+     * booking now" answerable before there is anything to book.
+     */
+    leadTimeDays: integer("lead_time_days"),
+    /** 1–5, or null when nobody has formed a view yet. */
+    rating: integer("rating"),
+    /** What they are good at, in the farm's own words. Never derived. */
+    goodAt: text("good_at").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_processors_tenant_id_id_idx").on(t.tenantId, t.id),
+    // One processor row per party. A second would be two opinions about the
+    // same plant, and nothing could say which was current.
+    uniqueIndex("production_processors_tenant_party_idx").on(
+      t.tenantId,
+      t.partyId,
+    ),
+    index("production_processors_tenant_idx").on(t.tenantId),
+    foreignKey({
+      name: "production_processors_party_fk",
+      columns: [t.tenantId, t.partyId],
+      foreignColumns: [parties.tenantId, parties.id],
+    }).onDelete("cascade"),
+    check(
+      "production_processors_inspection_valid",
+      sql`${t.inspection} in ('usda', 'state', 'custom_exempt', 'uninspected', 'unknown')`,
+    ),
+    check(
+      "production_processors_labelling_valid",
+      sql`${t.customLabelling} in ('unknown', 'no', 'yes')`,
+    ),
+    check(
+      "production_processors_rating_range",
+      sql`${t.rating} is null or (${t.rating} >= 1 and ${t.rating} <= 5)`,
+    ),
+    check(
+      "production_processors_lead_time_positive",
+      sql`${t.leadTimeDays} is null or ${t.leadTimeDays} > 0`,
+    ),
+  ],
+);
+
+/**
+ * WHAT ONE PROCESSOR WILL TAKE, and what it charges to take it.
+ *
+ * **THIS IS THE ROW THAT ANSWERS "SOME DO ONLY POULTRY".** A plant that kills
+ * birds and a plant that kills everything differ by how many of these rows they
+ * have, not by a column on the processor — which is what lets "who can take
+ * eight hogs in October" be a query rather than a reading exercise.
+ *
+ * **PRICE LIVES HERE, PER KIND, BECAUSE THAT IS HOW PLANTS QUOTE.** A kill fee
+ * is per head and cut-and-wrap is per pound of hanging weight, and both differ
+ * by species at the same plant. A single price on the processor would have to
+ * pick one animal and be wrong about the others.
+ *
+ * **THE FEES ARE A QUOTE, NOT A LEDGER ENTRY.** Nothing here posts. What the
+ * farm actually paid is a bill in `payables` against the same party; this is
+ * what it expected to pay. Kept apart on purpose, so that "they charged more
+ * than they quoted" stays a question the data can answer instead of one it has
+ * already overwritten.
+ */
+export const productionProcessorHandles = pgTable(
+  "production_processor_handles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    processorId: uuid("processor_id").notNull(),
+    /**
+     * What kind of animal or material. A slug, from the profile's
+     * `processorHandles` where it lists one and typed by the tenant where it
+     * does not — the format check is the only thing here with an opinion.
+     */
+    kind: text("kind").notNull(),
+    /** Head per day they can take, or null when nobody has asked. */
+    capacityPerDay: integer("capacity_per_day"),
+    /** Slaughter fee per head, in cents. Null when unquoted. */
+    killFeeCents: integer("kill_fee_cents"),
+    /** Cut and wrap, in cents per pound of hanging weight. Null when unquoted. */
+    cutWrapCentsPerLb: integer("cut_wrap_cents_per_lb"),
+    /** Anything those two numbers cannot carry — minimums, extras. */
+    priceNotes: text("price_notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_processor_handles_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    // One row per kind per processor. Two would be two prices for one animal.
+    uniqueIndex("production_processor_handles_unique_idx").on(
+      t.tenantId,
+      t.processorId,
+      t.kind,
+    ),
+    index("production_processor_handles_kind_idx").on(t.tenantId, t.kind),
+    foreignKey({
+      name: "production_processor_handles_processor_fk",
+      columns: [t.tenantId, t.processorId],
+      foreignColumns: [productionProcessors.tenantId, productionProcessors.id],
+    }).onDelete("cascade"),
+    check(
+      "production_processor_handles_kind_format",
+      sql`${t.kind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "production_processor_handles_capacity_positive",
+      sql`${t.capacityPerDay} is null or ${t.capacityPerDay} > 0`,
+    ),
+    check(
+      "production_processor_handles_kill_fee_nonneg",
+      sql`${t.killFeeCents} is null or ${t.killFeeCents} >= 0`,
+    ),
+    check(
+      "production_processor_handles_cut_wrap_nonneg",
+      sql`${t.cutWrapCentsPerLb} is null or ${t.cutWrapCentsPerLb} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * A CUT THIS PROCESSOR WILL PRODUCE.
+ *
+ * **FREE TEXT, AND THAT IS NOT LAZINESS.** "Bone-in ribeye", "breakfast links",
+ * "osso buco" — cut names are a trade's prose and every plant's list differs. A
+ * taxonomy here would be this pack asserting what meat is, and the first cut
+ * nobody anticipated would become a migration.
+ *
+ * **`kind` IS OPTIONAL AND MEANS "ONLY FOR THIS ANIMAL".** Empty says the cut is
+ * offered generally; a value narrows it, because a plant that will make sausage
+ * out of pork and not out of beef is an ordinary fact and the alternative is a
+ * note nobody can query.
+ *
+ * This is CAPABILITY, not instruction. What the farm actually asked for on a
+ * given animal is the cut sheet — the design calls it "the recipe", notes it is
+ * often the customer's choice on a half-beef sale, and it is a later slice.
+ * Keeping them apart matters: this list is what a plant CAN do, and it stays
+ * true between runs.
+ */
+export const productionProcessorCuts = pgTable(
+  "production_processor_cuts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    processorId: uuid("processor_id").notNull(),
+    /** Which animal this cut is for. Empty means "any". */
+    kind: text("kind").notNull().default(""),
+    /** The cut, as the plant names it. */
+    name: text("name").notNull(),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_processor_cuts_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    index("production_processor_cuts_processor_idx").on(
+      t.tenantId,
+      t.processorId,
+    ),
+    foreignKey({
+      name: "production_processor_cuts_processor_fk",
+      columns: [t.tenantId, t.processorId],
+      foreignColumns: [productionProcessors.tenantId, productionProcessors.id],
+    }).onDelete("cascade"),
+    check(
+      "production_processor_cuts_name_present",
+      sql`length(btrim(${t.name})) > 0`,
+    ),
+    check(
+      "production_processor_cuts_kind_format",
+      sql`${t.kind} = '' or ${t.kind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+  ],
+);
+
+/**
  * Deliberately absent, and worth saying where somebody will look for it: a
  * `cost_cents` column on either side. The input's cost is stamped on its
  * movement when the stock leaves; the output's is stamped on its receipt when
@@ -547,3 +824,13 @@ export type NewProductionRunOutput = typeof productionRunOutputs.$inferInsert;
 export type ProductionRunCarcass = typeof productionRunCarcasses.$inferSelect;
 export type NewProductionRunCarcass =
   typeof productionRunCarcasses.$inferInsert;
+export type ProductionProcessor = typeof productionProcessors.$inferSelect;
+export type NewProductionProcessor = typeof productionProcessors.$inferInsert;
+export type ProductionProcessorHandle =
+  typeof productionProcessorHandles.$inferSelect;
+export type NewProductionProcessorHandle =
+  typeof productionProcessorHandles.$inferInsert;
+export type ProductionProcessorCut =
+  typeof productionProcessorCuts.$inferSelect;
+export type NewProductionProcessorCut =
+  typeof productionProcessorCuts.$inferInsert;

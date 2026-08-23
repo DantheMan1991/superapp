@@ -186,6 +186,19 @@ export const packRegistry: Record<string, PackDefinition> = {
         describes:
           "The record of what came off the line between the animal and the box — hanging weights and anything condemned. A meat business says kill sheet; another trade would say grading.",
       },
+      /**
+       * The OUTSIDE PLACE that does the part of a run this business does not do
+       * itself. Neutral on purpose and it earns the word: a farm sends animals
+       * to a butcher, a bakery sends dough to a co-packer, a shop sends work to
+       * a subcontractor. Same relationship, same booking problem, same question
+       * of what they are good at.
+       */
+      {
+        key: "processor",
+        fallback: "Processor",
+        describes:
+          "An outside business that does part of a run for you — the one you book a date with and send the work to. A meat farm says butcher or plant; a bakery says co-packer.",
+      },
     ],
     Component: ProductionModule,
   },

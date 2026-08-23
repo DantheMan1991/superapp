@@ -70,7 +70,8 @@ export class ProductionError extends Error {
       | "LOT_REQUIRED"
       | "INPUT_BLOCKED"
       | "NOTHING_TO_LAND"
-      | "CARCASS_INVALID",
+      | "CARCASS_INVALID"
+      | "PROCESSOR_INVALID",
     message: string,
   ) {
     super(message);
@@ -106,7 +107,7 @@ const asInventory = (ctx: ProductionCtx): InventoryCtx => ctx;
  * kill sheet is copying somebody else's piece of paper into a form. It decides
  * nothing, and it creates no cost object.
  */
-function requireWrite(ctx: ProductionCtx, level: WriteLevel): void {
+export function requireWrite(ctx: ProductionCtx, level: WriteLevel): void {
   if (!allowsWrite(ctx.role, level)) {
     throw new ProductionError("FORBIDDEN", "only an owner can change this");
   }

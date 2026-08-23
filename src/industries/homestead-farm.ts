@@ -35,14 +35,6 @@ export const homesteadFarm: IndustryProfile = {
     zone: "Paddock",
     lot: "Lot",
     productionRun: "Batch",
-    /**
-     * The carcass stage, in this industry's word for it. The pack's own fallback
-     * is the same phrase, which is the one place `production` says something
-     * industry-shaped out loud — recorded as such in its dossier. A profile
-     * whose runs are bakes rather than kills overrides it here and the pack
-     * needs no change.
-     */
-    killSheet: "Kill sheet",
   },
   /**
    * A farmer is not reading a ledger all day. "Fed · 85.00" on a card has no

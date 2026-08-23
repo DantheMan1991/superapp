@@ -173,19 +173,6 @@ export const packRegistry: Record<string, PackDefinition> = {
         describes:
           "One pass of turning things into other things — a processing day, a bake, a milling. A farm says batch; a shop says job.",
       },
-      /**
-       * **THE ONE PLACE THIS PACK SAYS SOMETHING INDUSTRY-SHAPED**, and putting
-       * it here is what keeps it honest: declaring the word makes it renameable
-       * from the admin screen and findable by anybody who wonders why a bake is
-       * being asked about carcasses. The stage itself is real for any run that
-       * turns a whole thing into parts of it; only this noun is meat's.
-       */
-      {
-        key: "killSheet",
-        fallback: "Kill sheet",
-        describes:
-          "The record of what came off the line between the animal and the box — hanging weights and anything condemned. A meat business says kill sheet; another trade would say grading.",
-      },
     ],
     Component: ProductionModule,
   },

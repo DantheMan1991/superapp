@@ -10,6 +10,7 @@ import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
 import { getIndustryProfile } from "@/industries";
+import { AfterHydration } from "@/components/app/after-hydration";
 
 export const dynamic = "force-dynamic";
 
@@ -129,12 +130,18 @@ export default async function DashboardLayout({
               ← Platform admin
             </a>
           )}
+          {/* Both widgets decide DURING RENDER whether Clerk.js has loaded, and
+              the answer is always no on the server — so if that script wins the
+              race against hydration, the client renders a subtree the HTML does
+              not have. See components/app/after-hydration.tsx. */}
           <div className="flex items-center justify-between gap-2">
-            <OrganizationSwitcher
-              hidePersonal
-              afterSelectOrganizationUrl="/dashboard"
-            />
-            <UserButton />
+            <AfterHydration>
+              <OrganizationSwitcher
+                hidePersonal
+                afterSelectOrganizationUrl="/dashboard"
+              />
+              <UserButton />
+            </AfterHydration>
           </div>
         </div>
       }

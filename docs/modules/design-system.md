@@ -23,6 +23,41 @@ tokens and gets its own pass later.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-22 — The Clerk mismatch, closed (`claude/laughing-herschel-e284b2`)
+
+The open item this dossier had carried since the foundation PR — *"the dashboard
+logs a Clerk hydration mismatch in dev, from `OrganizationSwitcher` in the
+sidebar footer... it masks any real hydration bug that shows up later"* — did
+exactly what it warned it would: it got reported as a bug in two inventory pages
+that had nothing to do with it. Closed; both shells now defer the Clerk widgets
+past hydration.
+
+**IT IS A RACE, NOT A BUG IN THE FOOTER'S JSX.** `OrganizationSwitcher` and
+`UserButton` both render `clerk.loaded && <ClerkHostRenderer/>`, and `clerk.loaded`
+is read DURING RENDER. It is always false on the server, so the HTML carries an
+empty `<div class="flex items-center justify-between gap-2">`. If the remote
+`clerk.browser.js` finishes before React's first client render, the client
+produces a whole subtree that HTML does not have. Local chunks usually beat a
+remote script, which is why the mismatch is machine-dependent and why chasing it
+on a fast box finds nothing.
+
+**`AfterHydration` REMOVES THE RACE RATHER THAN WINNING IT**
+(`src/components/app/after-hydration.tsx`): server renders nothing, first client
+render renders nothing, they agree by construction, widgets mount a tick later
+exactly as they already did. `useSyncExternalStore(subscribe, () => true,
+() => false)` rather than `useState` + `useEffect` — React reads the server
+snapshot while hydrating, so no state is written from an effect, which
+`react-hooks/set-state-in-effect` rightly flags.
+
+**It is for third-party widgets that mount themselves, and nothing else.**
+Anything wrapped in it is absent from server-rendered HTML: no text, no
+navigation, no figure.
+
+Proven with a probe of the same shape — one client-only `<span>` in the footer
+reproduced the message verbatim, and wrapping it silenced it. `/dashboard`,
+`/dashboard/m/inventory/value`, `/dashboard/m/inventory/tax` and `/admin` reload
+clean, rail unchanged.
+
 ### 2026-08-10 — Foundation: tokens, primitives, grouped rail (`claude/ui-foundation`)
 
 - Warmed every neutral token to hue ~85; hue 265 now means only `--primary` and
@@ -166,6 +201,8 @@ sub-nav and a filter row stacked above the first invoice.
 - `src/components/app/icon-registry.ts` — name → icon, for icons that cross a
   server/client boundary as data
 - `src/components/app-shell.tsx` — the rail, `NavGroup[]`, the command pill
+- `src/components/app/after-hydration.tsx` — the gate both shells put Clerk's
+  self-mounting widgets behind
 - `src/app/dashboard/layout.tsx`, `src/app/admin/layout.tsx` — the two callers
   that build `navGroups`
 
@@ -227,8 +264,5 @@ What remains is the three centred states above and `(marketing)`.
   foundation PR rather than destabilise 73 pages at once. It is a prop away.
 - **`SectionRow`'s scrolling variant is still unused.** The component itself is
   in use (the Documents hub), but nothing passes `scroll` yet.
-- **The dashboard logs a Clerk hydration mismatch** in dev, from
-  `OrganizationSwitcher` in the sidebar footer. It predates this work (the footer
-  JSX is unchanged) but it masks any real hydration bug that shows up later.
 - **`--font-heading` is a seam.** One line swaps the heading face if something
   closer to Airbnb Cereal is ever wanted.

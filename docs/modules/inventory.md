@@ -30,6 +30,45 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-22 — The hydration error that was not inventory's (`claude/laughing-herschel-e284b2`)
+
+`/value` and `/tax` both logged *"Hydration failed because the server rendered
+HTML didn't match the client"* on load. **Neither page is at fault, and nothing
+in this pack was changed to fix it** — the entry is here because this is where
+the hunt started and where the next person will look.
+
+**HOW IT WAS SETTLED, since it would not reproduce on demand.** Fetching each
+page's SSR HTML from inside the loaded tab and walking it against the live DOM
+node-for-node: `<main>` matched 182 of 182 nodes, `<header>` 13 of 13, `<html>`
+and `<body>` attributes identical. The ONLY divergence in the whole document was
+the sidebar footer, where the server emits an empty
+`<div class="flex items-center justify-between gap-2">` and the client fills it
+with Clerk's `OrganizationSwitcher` and `UserButton`. A page whose every node
+matches cannot be the page that mismatched.
+
+**THE CAUSE IS A RACE IN THE SHELL, WHICH IS WHY IT LOOKED PAGE-SHAPED.** Both
+Clerk widgets render `clerk.loaded && <ClerkHostRenderer/>` — a condition read
+DURING RENDER (`@clerk/react` `hooks-*.mjs`, `withClerk`), and always false on
+the server, because `clerk.browser.js` only exists in a browser. That script is
+remote and the app's chunks are local, so on a quick machine Clerk loses the race
+and the first client render also produces nothing; when it wins, the client
+renders a subtree the HTML never had. Every dashboard page is exposed equally —
+you blame whichever one you were looking at.
+
+**Derived rather than assumed, because it would not fire here.** A probe of the
+same shape (a client component rendering one extra `<span>`, nothing on the
+server) was put in the sidebar footer: it produced that exact message, naming
+`data-probe="1"`. Wrapped in the new
+[`AfterHydration`](../../src/components/app/after-hydration.tsx), the message
+went away and the span still rendered. That is the fix, now applied to the real
+widgets in both shells — see
+[design-system.md](design-system.md), which had already recorded this as an open
+item and warned it "masks any real hydration bug that shows up later".
+
+`/value`, `/tax` and `/admin` reload clean afterwards, with the switcher, the org
+avatar and the user button all still in the rail. No inventory file changed, no
+migration, no test.
+
 ### 2026-08-22 — The lens that applies a rule (`claude/the-lens-that-applies-a-rule`)
 
 Slice 3d iii. A recorded decision now changes a report, and `paid` is the rule it

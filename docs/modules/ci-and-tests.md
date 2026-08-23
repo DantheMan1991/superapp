@@ -5,7 +5,94 @@
 > check from running on somebody's laptop and blocking them for twenty minutes.
 > Status: live · Scope: `platform`
 
+## Running the database suite with no Neon branch
+
+**You do not need a Neon branch to run the db suite, and an agent session that
+concludes otherwise has cost the slice its certification.** Everything CI does in
+its `tests` job works outside CI, because the only thing that made it
+CI-specific was `NEON_LOCAL_PROXY`, and that is just an address.
+
+1. Start Postgres. A container built from this repo's image already has a
+   cluster provisioned and stopped — `pg_lsclusters` shows it, and
+   `pg_ctlcluster 16 main start` brings it up. Set a password on `postgres` and
+   `createdb superapp_test`.
+2. Put a WebSocket proxy in front of it on `:5433`. CI runs
+   `ghcr.io/neondatabase/wsproxy`; where there is no docker daemon, the thing it
+   does is about forty lines — accept a WebSocket at `/v1`, pipe its binary
+   frames to a TCP socket, buffer whatever arrives before the socket is up.
+   **The driver must stay Neon's**, which is the whole reason for a proxy rather
+   than swapping in `pg`; see the 2026-08-15 entry below.
+3. Export exactly what the `tests` job exports — `NEON_LOCAL_PROXY`,
+   `CI_POSTGRES_OWNER_URL`, `CI_APP_USER_PASSWORD`, `TEST_DATABASE_URL`,
+   `TEST_DATABASE_URL_OWNER`, and the three fake keys. **Do not also set
+   `DATABASE_URL_OWNER`**: `migrate.ts` refuses `--dev` when the test database is
+   also the app's, which is the guard working correctly and reads like a bug.
+4. `npm run db:migrate -- --dev`, `npx tsx scripts/ci-provision-db.ts`,
+   `DATABASE_URL="$TEST_DATABASE_URL_OWNER" npm run db:seed`, then `npm test`.
+
+**On Postgres 16 step 4 fails, and it is a version gap rather than a broken
+chain.** `migrate()` runs the whole chain in ONE transaction, `0127` adds
+`'depreciation'` to `journal_entry_source`, and `0154` backfills using it —
+which PG16 refuses as *"new enum values must be committed before they can be
+used"*. PG17 relaxed that, which is why CI pins **Postgres 18 to match Neon** and
+never sees it. The workaround on an older local cluster is to apply
+`drizzle/*.sql` in order with `psql -v ON_ERROR_STOP=1 -f`, which gives each file
+its own transaction; the schema it builds is the same one, and it exercises the
+migration chain from zero just as CI does.
+
+The whole suite is ~140 seconds this way — a local round trip is sub-millisecond,
+and the suite has always been latency-bound rather than CPU-bound.
+
+**What this does NOT unlock is driving the app in a browser.** Chromium and
+Playwright are installed, but the dashboard needs a signed-in Clerk session and
+a container has no Clerk keys. That is a credentials problem, not an environment
+one, and it is why slice dossiers keep carrying "not driven in a browser" as an
+open item while every test passes.
+
 ## Build log
+
+### 2026-08-23 — A third job, for the thing CI cannot check (branch `claude/the-migration-that-never-ran`)
+
+**THE PIPELINE WAS GREEN AND THE PAGE WAS DOWN, and both were correct.** #251
+merged the production pack's carcass stage with migrations `0184`/`0185`.
+Everything here passed — lint, types, build, the whole database suite from zero,
+which applied those two migrations and exercised them. Then `main` auto-deployed
+the code, nothing applied the migrations to the app database, and
+`/dashboard/m/production` erred on every load for five hours.
+
+**Nothing this workflow runs can see that.** The suite builds its own database
+and applies the whole chain, so a migration is always applied by the time the
+tests read it. *A migration passing in CI says nothing about whether it reached
+production* — and the gap is invisible precisely because the ticks are green.
+
+The new `migrations` job does the only thing a pull-request workflow honestly
+can: it fails a PR that **adds** a `drizzle/*.sql` unless the PR carries
+`full-tests`, and prints the ordering rule (`db:migrate -- --dev`, then
+`db:migrate`, then verify `pg_class`/`pg_policies`) in the failure. The label is
+the acknowledgement, and it has the effect that matters — the database suite
+blocks the merge instead of reporting twelve minutes after it.
+
+Three details that are deliberate:
+
+- **`--diff-filter=A` only.** Editing an already-applied migration is a
+  different and worse problem; this job is about a NEW file that has to reach two
+  databases by hand.
+- **`fetch-depth: 0`**, because the base branch has to be present to diff
+  against, and the default shallow checkout has no `origin/main` to compare with.
+- **`if: github.event_name == 'pull_request'`.** On a push to `main` the merge
+  has already happened and the deploy is already going out. Failing there paints
+  `main` red and prevents nothing.
+
+**The guard checks a label, not a database.** Somebody can label a PR and still
+skip the migration. It converts an oversight into a deliberate act, which is a
+real narrowing and not a fix — the fix is a release job that applies migrations
+before Vercel promotes a build, and that is still open. The reasoning, including
+why migrating inside `build` is worse than the problem, is
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
+
+The `full-tests` label now carries two meanings — "run the database suite" and
+"I have applied this migration". That overloading is on purpose; a second label
+nobody remembers to add would be worse.
 
 ### 2026-08-15 — The database moves into the runner (branch `claude/ci-postgres-in-runner`)
 
@@ -224,7 +311,7 @@ None. No tables, no migrations.
 
 | File | What it does |
 | --- | --- |
-| `.github/workflows/ci.yml` | The two jobs and their concurrency rules |
+| `.github/workflows/ci.yml` | The three jobs and their concurrency rules. `checks` gates the merge, `migrations` refuses an unlabelled migration PR, `tests` is the database suite |
 | `vitest.config.ts` | The `pure` / `db` project split |
 | `tests/db-backed-files.ts` | Which files are database-backed |
 | `tests/db-backed-files.test.ts` | Recomputes that list and fails if it drifted |

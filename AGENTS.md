@@ -97,6 +97,16 @@ tree — a new file appears on the page with no code change):
 
 - `npm run db:migrate` / `db:seed` / `db:generate` — run as the owner URL
   (`DATABASE_URL_OWNER`).
+- **NOTHING IN THE DEPLOY APPLIES MIGRATIONS, and `main` auto-deploys.** A merged
+  PR is live within minutes; its migration is not. Apply it yourself, in this
+  order, **before** merging: `npm run db:migrate -- --dev`, then
+  `npm run db:migrate`, then verify in `pg_class`/`pg_policies` that the table is
+  there with RLS enabled AND forced and its policies present. CI cannot check
+  this — it builds its own database from zero, so every migration always applies
+  there — and the `migrations` job only refuses a migration PR that is missing
+  the `full-tests` label. Skipping the step is what took `/dashboard/m/production`
+  down for five hours on 2026-08-23; see
+  [ADR 0014](docs/decisions/0014-migrations-are-applied-before-the-merge.md).
 - `npm run db:create-role` — creates/rotates the `app_user` role the app
   connects as. Required: Neon's owner role has BYPASSRLS, so the app must
   never run as it (`DATABASE_URL` = app_user).

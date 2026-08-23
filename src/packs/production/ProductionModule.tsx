@@ -77,6 +77,15 @@ export async function ProductionModule({
 
   const isOwner = ctx.role === "owner";
   const runWord = labelFor(pack.labels, "productionRun", "Run");
+  /**
+   * **THE COLUMN APPEARS ONLY WHEN SOMETHING HAS A SHEET.** A tenant whose runs
+   * are bakes has no carcasses and never will, and a permanently empty column
+   * would be this pack asserting an industry in the one place it has no excuse
+   * to. The moment one sheet exists the column is worth its width, because a
+   * cause repeating across runs is the finding — and a per-run page can never
+   * show that.
+   */
+  const anySheet = [...summaries.values()].some((s) => s.headOnSheet > 0);
 
   return (
     <div className="space-y-6">
@@ -121,6 +130,9 @@ export async function ProductionModule({
               <TableHead className="text-right">In</TableHead>
               <TableHead className="text-right">Out</TableHead>
               <TableHead className="text-right">Yield</TableHead>
+              {anySheet && (
+                <TableHead className="text-right">Condemned</TableHead>
+              )}
               <TableHead className="text-right">Cost in</TableHead>
               <TableHead>State</TableHead>
             </TableRow>
@@ -178,6 +190,21 @@ export async function ProductionModule({
                       </span>
                     )}
                   </TableCell>
+                  {anySheet && (
+                    <TableCell className="text-right tabular-nums">
+                      {/* A run with no sheet reads "—", not "0". Nobody has
+                          said, and zero would say the plant passed everything. */}
+                      {!summary || summary.headOnSheet === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : summary.headCondemned === 0 ? (
+                        <span className="text-muted-foreground">None</span>
+                      ) : (
+                        <span className="font-medium text-destructive">
+                          {summary.headCondemned} of {summary.headOnSheet}
+                        </span>
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {summary && summary.potCents > 0
                       ? formatMoney(summary.potCents, currencySymbol)

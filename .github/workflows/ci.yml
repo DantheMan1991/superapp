@@ -1,11 +1,17 @@
 name: CI
 
 # Until this existed, every check ran on somebody's laptop and blocked them for
-# twenty minutes. Two jobs, deliberately separate:
+# twenty minutes. Three jobs, deliberately separate:
 #
 #   checks  — lint, types, build, and the PURE tests. No database, so it is safe
 #             to run many at once and safe to cancel when a newer push
 #             supersedes it. ~3 minutes. THIS is what gates a merge.
+#   migrations
+#           — refuses a pull request that ADDS a drizzle/*.sql without the
+#             `full-tests` label. Seconds, no database. It exists because
+#             nothing in the deploy applies migrations and nothing here can
+#             tell whether a person did — see ADR 0014, and the block above
+#             the job itself.
 #   tests   — the database suite. Shares ONE Neon branch with every other run, so
 #             it is serialised repo-wide and must never be cancelled midway.
 #             ~12 minutes, and it now runs AFTER a merge rather than before.
@@ -145,6 +151,89 @@ jobs:
       # db-backed-files.test.ts (recomputes which files touch the database) and
       # use-server-exports.test.ts — so both still run on every pull request.
       - run: npx vitest run --project pure
+
+  # ------------------------------------------------------------------------
+  # THE GUARD THIS INCIDENT BOUGHT (2026-08-23).
+  #
+  # #251 shipped code that queried `production_run_carcasses` together with the
+  # migration that creates it. Nothing in the deploy runs migrations — `build`
+  # is `next build`, `prebuild` copies the map worker, `vercel.json` is crons —
+  # so `main` auto-deployed the code and the table never arrived. Every load of
+  # /dashboard/m/production 500'd until #252 reverted it.
+  #
+  # The whole pipeline was green, and honestly so: nothing it runs can tell
+  # whether a migration reached the app database. That is the gap. Until the
+  # release pipeline applies migrations itself the step is a human one, and this
+  # job exists only to make forgetting it LOUD rather than silent.
+  #
+  # A migration PR must therefore carry `full-tests`, the same label the header
+  # already prescribes for "anything touching RLS, a migration, or a tenant
+  # table" — it makes the database suite BLOCK the merge instead of running
+  # after it. The label is the acknowledgement; the failure text below is where
+  # the ordering rule is written down.
+  #
+  # Deliberately only `--diff-filter=A`. Editing an already-applied migration is
+  # its own, worse problem and a different check; this one is about a NEW file
+  # that has to reach two databases by hand before the code needing it goes live.
+  migrations:
+    name: Migration checklist
+    runs-on: ubuntu-latest
+    # Pull requests only. On a push to `main` the merge has happened and the
+    # deploy is already going out — failing here would paint `main` red without
+    # preventing anything.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The base branch has to be present to diff against it.
+          fetch-depth: 0
+
+      - name: A new migration must block on the database suite
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+          added=$(git diff --name-only --diff-filter=A \
+            "origin/${BASE_REF}...HEAD" -- 'drizzle/*.sql')
+
+          if [ -z "$added" ]; then
+            echo "No new migration in this pull request."
+            exit 0
+          fi
+
+          echo "This pull request adds a migration:"
+          echo "$added" | sed 's/^/  /'
+          echo
+
+          case ",${LABELS}," in
+            *,full-tests,*)
+              echo "Labelled 'full-tests' — the database suite blocks this merge."
+              echo
+              echo "REMINDER, because CI cannot check it: the deploy applies no"
+              echo "migrations. Run 'npm run db:migrate -- --dev' AND"
+              echo "'npm run db:migrate' BEFORE merging, then verify the table in"
+              echo "pg_class/pg_policies. 'main' auto-deploys, so code querying a"
+              echo "table the app database does not have is live and erroring the"
+              echo "moment this merges."
+              exit 0
+              ;;
+          esac
+
+          echo "REFUSING: this pull request adds a migration and is not labelled 'full-tests'."
+          echo
+          echo "Two things have to happen before it merges, in this order:"
+          echo
+          echo "  1. Apply it to BOTH databases yourself. Nothing in the deploy"
+          echo "     does it: 'npm run db:migrate -- --dev', then"
+          echo "     'npm run db:migrate'. Verify the table is really there and"
+          echo "     that RLS is enabled AND forced with its policies present."
+          echo "  2. Label this pull request 'full-tests', so the database suite"
+          echo "     blocks the merge rather than reporting after it."
+          echo
+          echo "This is the step #251 skipped. The code deployed, the table did"
+          echo "not, and /dashboard/m/production was down for five hours."
+          exit 1
 
   tests:
     name: Test suite

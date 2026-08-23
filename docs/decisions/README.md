@@ -48,3 +48,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0011](0011-machine-posted-entries.md) | A posting that merely records an authorised act rides that act's permission | 2026-08-21 | Accepted |
 | [0012](0012-what-capitalises-stock.md) | What capitalises stock, and what joins the two records of its cost | 2026-08-21 | Proposed |
 | [0013](0013-inventory-tax-treatment.md) | Inventory treatment is a policy, not a property of "cash basis" | 2026-08-21 | Proposed |
+| [0014](0014-migrations-are-applied-before-the-merge.md) | Migrations are applied by hand, before the merge | 2026-08-23 | Accepted |

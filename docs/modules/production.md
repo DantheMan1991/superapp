@@ -20,8 +20,9 @@ this dossier is the build record.
 | **0** | **Run model + outputs landing in `inventory`** — the spine | **shipped 2026-08-20** |
 | **1a** | **The carcass stage** — the kill sheet, dressing percentage vs cutting yield, **and condemnations** | **shipped 2026-08-23** |
 | **1b** | **The processor directory** — who does the work you do not, what they take, what they charge, how they are inspected, what you think of them | **shipped 2026-08-23** |
-| 1c | **Booking a date** — holding the scarce resource, deposits, and the link from a booking to the run it becomes | next |
-| 1d | Meat runs: the processing path on the run, eligibility stamping, the exemption counter, and the kill sheet as a **document** (photograph or PDF → extraction → these rows) | |
+| **1c** | **Booking a date** — holding the scarce resource, deposits, and the link from a booking to the run it becomes | **shipped 2026-08-23** |
+| 1d | Meat runs: the processing path on the run, eligibility stamping, the exemption counter, and the kill sheet as a **document** (photograph or PDF → extraction → these rows) | next |
+| 1e | **A processor's price list as a document** — photograph or PDF → AI extraction → a confirmed update to that processor's `handles` rows | |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
 | 4 | Label generation, including a processor's own-label capability | |
@@ -38,6 +39,19 @@ person confirm it — has to extract INTO something, and until 1a there was no
 carcass row to put a hanging weight in. The record first, then the door onto it.
 That is the same shape `land` found when 2a became three slices.
 
+**1e IS THE SAME MACHINERY AS 1d POINTED AT A DIFFERENT TABLE, and it is
+recorded here so it is not lost** (asked for 2026-08-23, deliberately deferred).
+A processor's price list arrives as a sheet of paper or a PDF once a year, and
+retyping it into `production_processor_handles` is exactly the transcription
+chore the design's *compute-and-commit* pattern exists for: **AI extracts, a
+human confirms, then it writes.** It is a port of what `accounting` already does
+with bills and `documents` with text, and it must not be a port of anything that
+writes without the confirm step — these rows are the terms of a commercial
+relationship, and a fee silently changed by an extraction is worse than one
+nobody typed. It follows 1d rather than leading it because 1d builds the
+document → extraction → confirm path for the kill sheet, and this is the second
+consumer of it, not the first.
+
 **Slice 1 split again on 2026-08-23**, and the renumbering is worth explaining
 because it moved work forward rather than adding it. The design calls slaughter
 dates *"the scarce resource"*, says booking them is *"a first-class feature, not
@@ -48,6 +62,78 @@ livestock production"* — and the roadmap had processors appearing only at slic
 becomes 1d, unchanged.
 
 ## Build log
+
+### 2026-08-23 — Slice 1c: the date you cannot lose (`claude/the-date-you-cannot-lose`)
+
+**THE SCARCE RESOURCE FINALLY HAS A ROW.** The design has said since 2026-08-13
+that slaughter dates are it, that plants book six to twelve months ahead with
+deposits involved, that losing a date is expensive, and that booking one is *"a
+first-class feature, not a date column on an animal"*. `production_bookings` is
+that feature. A column on a pen could not hold a deposit, could not survive the
+pen being split across two dates, and could not exist before the animals do —
+which is exactly when the date has to be booked.
+
+**A BOOKING IS A PLAN; A RUN IS THE FACT — and that split is the whole design.**
+`run_id` is what the booking became, null until the day happens, and there is
+deliberately **no `delivered` or `completed` status**. A status somebody must
+remember to advance is a second answer to a question `run_id` already answers,
+and the two would disagree within a season. What the split buys is the item this
+slice exists for, and it is derived rather than stored:
+
+> **a date that has passed with no run recorded against it and no cancellation.**
+
+Either the animals went and nobody wrote it down — so the yield, the cost and
+the traceability chain for that kill are all missing — or the date was lost.
+Nothing has to remember to flag it, and it clears two ways, both of which are the
+correct thing to do: record what happened, or cancel the booking. That is exactly
+the self-clearing shape [notifications.md](notifications.md) requires.
+
+**THE FIRST ATTENTION SOURCE THAT IS A PACK.** `src/packs/production/attention/source.ts`
+puts those rows in the morning digest and on *What needs you*, which is what
+makes the bookings page something nobody has to remember to open. Three notes on
+it:
+
+- **It goes to everybody, and that costs something.** A booking has no assignee
+  and inventing one would be a column nobody fills — a processing day is two or
+  three people and the design says so. So a three-person farm gets the line three
+  times. Accepted, because the failure in the other direction is a kill date
+  nobody was told about, and because it disappears for all three the moment any
+  one of them acts.
+- **The horizon is 21 days, three times Work's seven.** A livestock number, not a
+  software one: animals at weight, a trailer, and a withdrawal that has cleared —
+  the last of which cannot be fixed in the final week.
+- **No rule in `eslint.config.mjs` changed.** Its module-isolation patterns are
+  generated from `MODULE_SLUGS`, which covers `src/modules/**` only, and the
+  registry is the documented composition root whose job is naming concrete
+  implementations. The source still imports `types.ts` and nothing else.
+
+**`startRunFromBooking` IS WHAT MAKES A PROCESSOR MEASURABLE AT ALL.** Slice 1b
+could record what a plant charges and what the farm thinks of it, but could not
+compute one measured figure, because nothing joined a run to a plant. Booking →
+run is that join. It is **not** total yet — it covers runs that came from a
+booking — and slice 1d, which puts the processing path on the run itself, is what
+finishes it. Any screen showing a measured comparison before then has to say
+which runs it covered. The run starts EMPTY on purpose: a booking made in March
+cannot know which pen will be ready in October, and carrying the promised head
+over as a real input would be this pack inventing a movement nobody made.
+
+**THE CAPACITY WARNING IS A SENTENCE, NEVER A REFUSAL.** Promising twenty hogs to
+a plant that said eight a day is often correct — two days, a stale figure, or an
+exception they agreed to. This app has no standing to overrule a farm about what
+another business agreed to, so it says the two numbers disagree. Same call `land`
+makes between declared and measured acreage.
+
+**AND A COMPOSITE-FK GOTCHA WORTH CARRYING, caught by a test that was written to
+prove the opposite.** `production_bookings_run_fk` was first declared
+`ON DELETE SET NULL`, on the elegant argument that a booking should outlive the
+run it became because it records a date held and a deposit paid. It does not
+work: **on a COMPOSITE foreign key, `SET NULL` nulls *every* referencing column,
+`tenant_id` included, and that column is `NOT NULL`** — so the delete fails
+outright rather than clearing the link. (PG 15 added `SET NULL (run_id)`;
+drizzle's `onDelete` takes an action, not a column list.) It is CASCADE now, and
+that is also the *right* answer rather than merely the working one: **nothing in
+this app deletes a run**, so the elegant argument was defending a state nothing
+can reach — the same mistake this pack removed a guard for once already.
 
 ### 2026-08-23 — Slice 1b driven on `Test`, and the word the note forgot (`claude/the-word-the-note-forgot`)
 
@@ -557,6 +643,8 @@ tests:**
 | `production_processor_handles` | **What one processor will take, and what it quoted** | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind)` — two rows would be two prices for one animal. `kind` is an open taxonomy from the profile's `processorHandles`, a **separate list** from `livestock.species` because what a plant takes is not what this farm raises. Fees are in cents and are a QUOTE; what was actually paid is a bill in `payables` against the same party |
 | `production_processor_cuts` | What a processor will produce | Composite FK to the processor (CASCADE). Free text by design — cut names are a trade's prose and every plant's list differs. `kind` empty means "anything they take". This is CAPABILITY; the per-animal cut sheet is a later slice |
 
+| `production_bookings` | **A date held with a processor — the scarce resource** | `tenant_id`, FORCE RLS. Composite FKs to the processor and to the run, **both CASCADE**; `run_id` is what the booking BECAME and is null until the day happens. `status` in `held\|confirmed\|cancelled` — three, and there is deliberately **no "it happened"**, because `run_id` answers that and a status somebody must advance would disagree with it. CHECK: a cancelled date cannot claim a run. Deposit in cents, and null is not zero — a date held on a phone call is ordinary |
+
 **Everything else lives in `inventory`:**
 
 | The question | Answered by |
@@ -595,6 +683,12 @@ run model, separate templates), and the processing path and eligibility flag
   packs exist
 - `src/packs/production/ops.ts` — reads and writes, takes a `Tx`.
   `completeRun` is the whole slice in one transaction
+- `src/packs/production/booking-ops.ts` — dates. **`missedBookings` is the read
+  the slice exists for**, and it is two predicates: the day has passed, and
+  nothing says what happened
+- `src/packs/production/attention/source.ts` — **the first attention source that
+  is a pack, not a core module.** Puts a missed date in the morning digest.
+  Imports `@/lib/attention-sources/types` and nothing else
 - `src/packs/production/processor-ops.ts` — the directory. **Split out because
   nothing in it touches a run, a movement or a cost**, the same reason
   `inventory` split `ledger-ops.ts`. A processor is a standing fact that stays
@@ -754,14 +848,23 @@ run model, separate templates), and the processing path and eligibility flag
 
 ## Open items
 
-- **BOOKING A DATE IS THE NEXT SLICE AND IT IS THE POINT OF THE DIRECTORY.**
-  1b records who the processors are; nothing yet holds a date with one. The
-  design calls dates the scarce resource, notes plants book six to twelve months
-  ahead with deposits involved, and says losing a date is expensive. The seam is
-  already there: `schedule_item_links` takes an `extension_slug` and an
-  `entity_type`, so a booking becomes a calendar event without a cross-module
-  column, and `production_processors.lead_time_days` is what makes "you should be
-  booking now" answerable before there is anything to book.
+- ~~**BOOKING A DATE IS THE NEXT SLICE.**~~ **Shipped 1c.** What it did NOT do:
+  **a booking is not on the calendar.** `schedule_item_links` takes an
+  `extension_slug` and an `entity_type`, so a booking could become a real
+  calendar event without a cross-module column — it does not yet, and a kill day
+  is exactly the thing somebody expects to see in a week view. The attention
+  source covers the "do not lose it" half; the calendar covers the "see it beside
+  everything else" half, and only the first is built.
+- **NOTHING SAYS "YOU SHOULD BE BOOKING NOW."** `production_processors.lead_time_days`
+  exists and is filled in (300 for Miller's), but no obligation is derived from
+  it. That would be advice rather than an obligation — a digest that offers
+  advice gets muted — so it wants a screen, not a digest line, and probably wants
+  next season's plan to exist before it can say anything true.
+- **1c HAS NOT BEEN DRIVEN IN A BROWSER.** The three things nothing else in this
+  pack does: `startRunFromBooking`, which writes across two tables and can refuse
+  from either; the capacity warning, which is the only advisory-not-refusal copy
+  on the pack; and the missed-date section, which is the whole reason the slice
+  exists and only appears once a date has actually gone by.
 - ~~**SLICE 1b HAS NOT BEEN DRIVEN IN A BROWSER.**~~ **Driven on `Test`
   2026-08-23** — two butchers stood up, one USDA doing cattle and one custom
   exempt doing birds; see the build log. It found one defect (a hardcoded word in

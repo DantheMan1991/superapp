@@ -803,6 +803,157 @@ export const productionProcessorCuts = pgTable(
 );
 
 /**
+ * A DATE HELD WITH A PROCESSOR — the scarce resource, and the one this pack was
+ * told is the loudest unmet need in small livestock production.
+ *
+ * **IT IS NOT A DATE COLUMN ON AN ANIMAL, AND THE DESIGN SAYS SO IN THOSE
+ * WORDS.** Plants book six to twelve months ahead, deposits are involved, and
+ * losing a date is expensive — you do not get another one in October. A column
+ * on a pen could not hold a deposit, could not survive the pen being split
+ * across two dates, and could not exist at all before the animals do, which is
+ * exactly when the date has to be booked.
+ *
+ * **A BOOKING IS A PLAN; A RUN IS THE FACT.** `run_id` is what the booking
+ * BECAME, and it is null until the day happens. That split is what makes the
+ * most useful thing here derivable rather than stored: **a booking whose date
+ * has passed with no run and no cancellation is the farm having lost track of a
+ * kill day**, and nothing has to remember to set a flag for it to show up. It is
+ * the shape `notifications.md` requires — an obligation that self-clears the
+ * moment somebody records what happened.
+ *
+ * So there is no `delivered` or `completed` status, deliberately. A status
+ * somebody must remember to advance is a second answer to a question `run_id`
+ * already answers, and the two would disagree within a season.
+ *
+ * **`run_id` IS ALSO THE FIRST THING THAT SAYS WHICH PROCESSOR DID A RUN.**
+ * Slice 1b could record what a plant charges and what the farm thinks of it but
+ * could not compute a single measured figure about it, because nothing joined a
+ * run to a plant. Booking → run is that join, for every run that came from a
+ * booking. Slice 1d puts the processing path on the run itself and makes it
+ * total; until then a measured comparison covers booked runs only, and any
+ * screen showing one has to say which.
+ *
+ * **MANY BOOKINGS MAY POINT AT ONE RUN**, and that is not an oversight: two
+ * bookings at the same plant on the same morning — a beef and four hogs — are
+ * one processing day. What must not happen is a CANCELLED booking claiming a
+ * run, which is a contradiction rather than an unusual arrangement, and the
+ * CHECK below refuses it.
+ */
+export const productionBookings = pgTable(
+  "production_bookings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    processorId: uuid("processor_id").notNull(),
+    /**
+     * The day they will take them. A DATE and not a timestamp: a plant gives
+     * you a day, and the hour it turns out to be is not a fact the farm holds
+     * when the booking is made.
+     */
+    bookedFor: date("booked_for").notNull(),
+    /**
+     * What is going. Empty when nobody has said — which is a real state for a
+     * date held speculatively, and the reason this is not NOT NULL with a
+     * default that would invent an animal.
+     */
+    kind: text("kind").notNull().default(""),
+    /** How many head are promised. Null when the date is held loosely. */
+    headCount: integer("head_count"),
+    /**
+     * `held` | `confirmed` | `cancelled`. CLOSED, and three is the whole set.
+     *
+     * `held` is a date pencilled in; `confirmed` is one the plant and the farm
+     * both stand behind, usually because money moved. There is no fourth state
+     * for "it happened" — see the header.
+     */
+    status: text("status").notNull().default("held"),
+    /** The plant's own booking reference, as they gave it. */
+    reference: text("reference").notNull().default(""),
+    /**
+     * What was put down to hold it, in cents, and when.
+     *
+     * **THIS IS THE MONEY AT RISK, WHICH IS WHY LOSING A DATE COSTS SOMETHING.**
+     * Null is not zero here either: a date held on a phone call with nothing
+     * paid is an ordinary arrangement, and a `$0.00` would say the deposit was
+     * waived rather than that nobody asked.
+     */
+    depositCents: integer("deposit_cents"),
+    depositPaidOn: date("deposit_paid_on"),
+    /** The run this became. Null until the day happens. */
+    runId: uuid("run_id"),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_bookings_tenant_id_id_idx").on(t.tenantId, t.id),
+    // The query the whole slice exists for: what is coming up, and what went by
+    // without anybody saying what happened.
+    index("production_bookings_tenant_date_idx").on(t.tenantId, t.bookedFor),
+    index("production_bookings_tenant_processor_idx").on(
+      t.tenantId,
+      t.processorId,
+    ),
+    foreignKey({
+      name: "production_bookings_processor_fk",
+      columns: [t.tenantId, t.processorId],
+      foreignColumns: [productionProcessors.tenantId, productionProcessors.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "production_bookings_run_fk",
+      columns: [t.tenantId, t.runId],
+      foreignColumns: [productionRuns.tenantId, productionRuns.id],
+      /**
+       * CASCADE, matching every other reference to a run in this pack.
+       *
+       * **`SET NULL` WAS TRIED FIRST AND IS NOT EXPRESSIBLE HERE — a gotcha
+       * worth carrying.** On a COMPOSITE foreign key, `ON DELETE SET NULL`
+       * nulls *every* referencing column, `tenant_id` included, and that column
+       * is `NOT NULL`. So the delete does not null the link, it fails outright.
+       * (Postgres 15 added `SET NULL (run_id)` to name the column; drizzle's
+       * `onDelete` takes an action, not a column list, so reaching for it would
+       * mean hand-writing this constraint and keeping the generator away from
+       * it forever.)
+       *
+       * The argument for `SET NULL` — that a booking should outlive the run it
+       * became, because it records a date held and a deposit paid — is defending
+       * a state nothing can reach: **nothing in this app deletes a run.** The
+       * only path that removes one is deleting the tenant, where the booking is
+       * being deleted anyway. A guard against an impossible state is the thing
+       * this pack removed once already.
+       */
+    }).onDelete("cascade"),
+    check(
+      "production_bookings_status_valid",
+      sql`${t.status} in ('held', 'confirmed', 'cancelled')`,
+    ),
+    check(
+      "production_bookings_head_positive",
+      sql`${t.headCount} is null or ${t.headCount} > 0`,
+    ),
+    check(
+      "production_bookings_deposit_nonneg",
+      sql`${t.depositCents} is null or ${t.depositCents} >= 0`,
+    ),
+    check(
+      "production_bookings_kind_format",
+      sql`${t.kind} = '' or ${t.kind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    // A cancelled date cannot have become a processing day.
+    check(
+      "production_bookings_cancelled_has_no_run",
+      sql`${t.status} <> 'cancelled' or ${t.runId} is null`,
+    ),
+  ],
+);
+
+/**
  * Deliberately absent, and worth saying where somebody will look for it: a
  * `cost_cents` column on either side. The input's cost is stamped on its
  * movement when the stock leaves; the output's is stamped on its receipt when
@@ -834,3 +985,5 @@ export type ProductionProcessorCut =
   typeof productionProcessorCuts.$inferSelect;
 export type NewProductionProcessorCut =
   typeof productionProcessorCuts.$inferInsert;
+export type ProductionBooking = typeof productionBookings.$inferSelect;
+export type NewProductionBooking = typeof productionBookings.$inferInsert;

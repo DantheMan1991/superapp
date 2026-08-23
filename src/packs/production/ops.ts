@@ -71,7 +71,8 @@ export class ProductionError extends Error {
       | "INPUT_BLOCKED"
       | "NOTHING_TO_LAND"
       | "CARCASS_INVALID"
-      | "PROCESSOR_INVALID",
+      | "PROCESSOR_INVALID"
+      | "BOOKING_INVALID",
     message: string,
   ) {
     super(message);

@@ -26,9 +26,12 @@
  *   - **Cut sheets and recipes** (slices 1 and 2). A run is one shared model;
  *     the TEMPLATES that seed it stay separate, because a cut sheet specifies
  *     treatment and a recipe specifies quantities.
- *   - **Eligibility stamping, the exemption counter and kill-sheet capture**
- *     (slice 1) — including CONDEMNATIONS, which is where delivered head stops
- *     equalling sellable carcasses. See docs/modules/production.md.
+ *   - **Eligibility stamping and the exemption counter** (slice 1b). The
+ *     CARCASS STAGE and CONDEMNATIONS landed in slice 1a — see
+ *     `production_run_carcasses` below.
+ *   - **The kill sheet as a DOCUMENT** — the photograph or the PDF, and the
+ *     extraction that fills the carcass rows in from it (slice 1b). The rows
+ *     had to exist before there was anywhere to extract into.
  *   - **Byproducts at net realisable value and costed internal transfers**
  *     (slice 3). Slice 0 rolls the whole input cost across every output by one
  *     stated basis; crediting the tallow at NRV first is a later refinement of
@@ -359,11 +362,180 @@ export const productionRunOutputs = pgTable(
 );
 
 /**
+ * THE KILL SHEET, LINE BY LINE — and the stage that was missing between the
+ * animal and the box.
+ *
+ * Slice 0 could give one honest ratio, packaged over live, and said so: telling
+ * **dressing percentage** (live → hanging) apart from **cutting yield**
+ * (hanging → packaged) needs the carcass recorded as a stage of its own. This is
+ * that stage. The two ratios a butcher actually argues about are folded from
+ * these rows and, as ever, stored nowhere.
+ *
+ * **AND IT IS WHERE A CONDEMNATION GOES.** Slice 0 deferred condemnations here
+ * for a reason that is really a reason about this table: a `condemned_head`
+ * count on the run would make the head reconcile while making the yield wrong in
+ * a NEW way, because the condemned animal's live weight is still in the
+ * denominator and nothing short of PER-ANIMAL WEIGHTS can take it out.
+ * `live_lb` on this row is those per-animal weights, and it is the only thing
+ * that makes a condemnation-adjusted ratio honest rather than an average
+ * subtracted from a total.
+ *
+ * **ONE LINE IS ONE DISPOSITION.** A sheet reading "100 birds, 3 condemned for
+ * airsacculitis" is two rows, not one row with a count on it. That is what keeps
+ * `hanging_lb` meaning one thing — a condemned carcass yields nothing sellable,
+ * so a line that carries a hanging weight is a line that passed, and the CHECK
+ * below says so. A partial condemnation (a bruised quarter trimmed, a liver
+ * pulled) is NOT a third disposition: the carcass passed, and what did not come
+ * off it is a byproduct that failed to materialise, which is slice 3's business.
+ *
+ * **A LINE IS NOT ALWAYS ONE ANIMAL.** `head_count` is 1 for a beef — where the
+ * sheet really is per animal, with a tag on it — and 70 for a pen of broilers,
+ * where no plant on earth weighs birds individually. Both shapes are the same
+ * row, which is the same call `livestock` made when it decided an individual is
+ * a lot of one.
+ *
+ * **TWO LIVE WEIGHTS ARE ALLOWED TO DISAGREE, AND THEY ARE NEVER SUMMED.** The
+ * input row's `weight_lb` is what left the farm; `live_lb` here is what the
+ * plant's scale said hours later. Cattle drop 3–5% on a trailer, so those two
+ * numbers differ for a real reason — the same reason `land` reports a measured
+ * acreage beside a declared one and never overwrites it. The fold prefers the
+ * kill sheet where it is complete and falls back to the trailer ticket where it
+ * is not, and the screen says which scale it used.
+ */
+export const productionRunCarcasses = pgTable(
+  "production_run_carcasses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull(),
+    /**
+     * WHICH INPUT THESE CAME OUT OF, and it is REQUIRED.
+     *
+     * An input already requires a batch, so this makes the chain total:
+     * carcass → input → movement → lot → every parent lot behind it. Inspected
+     * meat is the case that needs it — "this package came from that pen" is the
+     * one claim the whole chain exists to make — and a run that took two pens
+     * needs it for a much more ordinary reason: a condemnation belongs to one of
+     * them, and a sheet that cannot say which cannot tell you which pen has a
+     * problem.
+     */
+    runInputId: uuid("run_input_id").notNull(),
+    /**
+     * The animal's identifier as the sheet gives it — an ear tag, a scale ticket
+     * number, a carcass number. Empty for a batch line, because 70 broilers do
+     * not have 70 identities and inventing them would be a worse record than
+     * none.
+     */
+    tag: text("tag").notNull().default(""),
+    /** How many animals this line covers. 1 for a beef, 70 for a pen. */
+    headCount: integer("head_count").notNull().default(1),
+    /**
+     * TOTAL live weight for this line off the PLANT's scale, or null when the
+     * plant did not weigh them. Not the farm's weight — that is on the input.
+     *
+     * This is the column condemnations were waiting for. Without it, taking a
+     * condemned animal out of a denominator means subtracting an average, which
+     * is precisely the unauditable fudge this pack refuses everywhere else.
+     */
+    liveLb: numeric("live_lb", { precision: 18, scale: 4, mode: "number" }),
+    /**
+     * TOTAL hanging (dressed) weight for this line, or null when it was not
+     * weighed hot. **Must be null on a condemned line** — see the CHECK, and the
+     * reason: a condemned carcass produces nothing sellable, and a weight
+     * recorded against one is a number that will find its way into a numerator.
+     */
+    hangingLb: numeric("hanging_lb", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }),
+    /** `passed` or `condemned`. CLOSED — see the header on why there is no third. */
+    disposition: text("disposition").notNull().default("passed"),
+    /**
+     * Why it was condemned, in the plant's own words. FREE TEXT, because it is
+     * another party's judgement and this app has no standing to reword it into a
+     * taxonomy.
+     *
+     * **OPTIONAL, DELIBERATELY.** `inventory` made an adjustment's reason
+     * required because the reason is the diagnostic and the farm is the one who
+     * knows it. Here the farm is reading somebody else's paperwork, and a sheet
+     * can be smudged, abbreviated or silent — so refusing to record the FACT of a
+     * condemnation until somebody supplies a cause would trade a real number for
+     * an invented one. That is the same call `livestock` made when it decided an
+     * unknown withdrawal is not a zero. The screen counts the unstated ones
+     * instead.
+     */
+    condemnReason: text("condemn_reason").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_run_carcasses_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("production_run_carcasses_tenant_run_idx").on(t.tenantId, t.runId),
+    index("production_run_carcasses_tenant_input_idx").on(
+      t.tenantId,
+      t.runInputId,
+    ),
+    foreignKey({
+      name: "production_run_carcasses_run_fk",
+      columns: [t.tenantId, t.runId],
+      foreignColumns: [productionRuns.tenantId, productionRuns.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "production_run_carcasses_input_fk",
+      columns: [t.tenantId, t.runInputId],
+      foreignColumns: [productionRunInputs.tenantId, productionRunInputs.id],
+    }).onDelete("cascade"),
+    check(
+      "production_run_carcasses_head_positive",
+      sql`${t.headCount} > 0`,
+    ),
+    check(
+      "production_run_carcasses_live_positive",
+      sql`${t.liveLb} is null or ${t.liveLb} > 0`,
+    ),
+    check(
+      "production_run_carcasses_hanging_positive",
+      sql`${t.hangingLb} is null or ${t.hangingLb} > 0`,
+    ),
+    check(
+      "production_run_carcasses_disposition_valid",
+      sql`${t.disposition} in ('passed', 'condemned')`,
+    ),
+    // A condemned carcass yields nothing sellable. Letting it carry a hanging
+    // weight would put pounds nobody can sell into a cutting yield's
+    // denominator — the ratio would read low and the reason would be invisible.
+    check(
+      "production_run_carcasses_condemned_unweighed",
+      sql`${t.disposition} = 'passed' or ${t.hangingLb} is null`,
+    ),
+    // A reason belongs to a condemnation. On a passed line it would be a
+    // sentence about something that did not happen.
+    check(
+      "production_run_carcasses_reason_when_condemned",
+      sql`${t.disposition} = 'condemned' or length(btrim(${t.condemnReason})) = 0`,
+    ),
+  ],
+);
+
+/**
  * Deliberately absent, and worth saying where somebody will look for it: a
  * `cost_cents` column on either side. The input's cost is stamped on its
  * movement when the stock leaves; the output's is stamped on its receipt when
  * it lands. Both are `inventory`'s, both are events, and a copy here would be
  * a second number that has to agree with the ledger forever.
+ *
+ * Absent for the same class of reason on the carcass table: a dressing
+ * percentage, a cutting yield, or a condemnation RATE. Every one of those is a
+ * ratio over the weights already here, and the rule this pack was built on is
+ * that a yield is never stored in any form.
  */
 
 export type ProductionRun = typeof productionRuns.$inferSelect;
@@ -372,3 +544,6 @@ export type ProductionRunInput = typeof productionRunInputs.$inferSelect;
 export type NewProductionRunInput = typeof productionRunInputs.$inferInsert;
 export type ProductionRunOutput = typeof productionRunOutputs.$inferSelect;
 export type NewProductionRunOutput = typeof productionRunOutputs.$inferInsert;
+export type ProductionRunCarcass = typeof productionRunCarcasses.$inferSelect;
+export type NewProductionRunCarcass =
+  typeof productionRunCarcasses.$inferInsert;

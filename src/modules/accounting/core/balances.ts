@@ -3,6 +3,7 @@ import { and, asc, eq, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { Account } from "@/db/schema";
 import { toSafeCents } from "../lib/money";
+import { resolveBasisLens } from "@/lib/basis-lens/resolve";
 import { cashBasisAdjustment } from "./cash-basis";
 import { ledgerScopeConditions } from "./consolidation";
 import { listEntities, type EntityScope } from "./entities";
@@ -101,6 +102,30 @@ export async function getBalances(
   const ld = schema.lineDimensions;
   const cash = opts.basis === "cash";
 
+  /**
+   * **SOMETHING OUTSIDE ACCOUNTING MAY SAY AN ENTRY DOES NOT BELONG IN THIS
+   * BASIS.** The slot is `@/lib/basis-lens`; this module does not know or care
+   * what fills it, which is the whole point — see that file's header, and slice
+   * 3b's rule that `approveBill` copies a line verbatim so the bill path never
+   * learns what a stock receipt is.
+   *
+   * **A PROVIDER MAY ONLY DROP AN ENTRY WHOLE.** Both legs go together, so the
+   * base cannot be unbalanced by one — the failure ADR 0007 names as the one to
+   * design against, and the only thing that would notice is a trial balance
+   * nobody ran.
+   *
+   * Asked on both bases so a future provider can speak to accrual; nothing does
+   * today, and `resolveBasisLens` returns empty in one query when nothing has
+   * been elected, which is nearly every tenant.
+   */
+  const lens = await resolveBasisLens(tx, {
+    tenantId,
+    basis: cash ? "cash" : "accrual",
+    asOf: opts.asOf,
+    from: opts.from,
+    to: opts.to,
+  });
+
   const conditions = [
     eq(jl.tenantId, tenantId),
     eq(je.status, "posted" as const),
@@ -127,6 +152,10 @@ export async function getBalances(
              and reversed_src.id = ${je.reversesEntryId}
              and reversed_src.source in ('invoice', 'bill')
         )`
+      : undefined,
+    // ...and whatever a lens said does not belong in this basis at all.
+    lens.excludedEntryIds.length
+      ? notInArray(je.id, lens.excludedEntryIds)
       : undefined,
   ].filter(Boolean);
 
@@ -182,6 +211,7 @@ export async function getBalances(
       to: opts.to,
       accountIds: opts.accountIds,
       groupByDimensionType: opts.groupByDimensionType,
+      substitutedLineAccounts: lens.substitutedLineAccounts,
     }),
   );
 }

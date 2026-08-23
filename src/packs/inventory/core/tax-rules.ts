@@ -43,11 +43,20 @@ export type TimingRule = (typeof TIMING_RULES)[number];
 /**
  * What the report lens can actually honour today.
  *
- * **ONE ENTRY, AND IT IS THE ONE THAT MEANS "LEAVE EVERYTHING ALONE".** Widen
- * this as the lens learns a rule, never ahead of it: the list is what stops a
- * recorded decision from being a lie about what the reports do.
+ * **WIDEN THIS ONLY ALONGSIDE THE LENS, NEVER AHEAD OF IT**: the list is what
+ * stops a recorded decision from being a lie about what the reports do.
+ *
+ * - `consumed` means "leave everything alone", so it needed no lens at all.
+ * - `paid` arrived with slice 3d iii — see `packs/inventory/basis-lens.ts`,
+ *   which also says what each of the remaining rules would still need. It
+ *   applies **on a cash-basis report only**; ADR 0013's own "least sure of"
+ *   asks whether some basis/treatment pairs are incoherent, and answering that
+ *   quietly in code is not a thing to do.
  */
-export const IMPLEMENTED_TIMING_RULES: readonly TimingRule[] = ["consumed"];
+export const IMPLEMENTED_TIMING_RULES: readonly TimingRule[] = [
+  "consumed",
+  "paid",
+];
 
 export function isTimingRule(value: string): value is TimingRule {
   return (TIMING_RULES as readonly string[]).includes(value);
@@ -55,6 +64,21 @@ export function isTimingRule(value: string): value is TimingRule {
 
 export function isImplementedRule(value: string): value is TimingRule {
   return (IMPLEMENTED_TIMING_RULES as readonly string[]).includes(value);
+}
+
+/**
+ * **WHICH RULES MOVE COST OFF THE BALANCE SHEET, and therefore need somewhere
+ * to put it.** `consumed` does not: nothing substitutes, so nothing needs an
+ * account, and demanding one would make a tenant answer a question their rule
+ * never asks.
+ *
+ * **SHARED BY THE WRITE AND THE LENS ON PURPOSE.** `setTaxRule` refuses to save
+ * one without an account and `basis-lens.ts` refuses to report one — two checks
+ * because an account can be deactivated after the fact, but ONE definition of
+ * which rules care. Two would be the `carriedValue` mistake again.
+ */
+export function isSubstitutingRule(value: string): boolean {
+  return value !== "consumed" && isTimingRule(value);
 }
 
 /**

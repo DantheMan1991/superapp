@@ -57,6 +57,49 @@ payment in the window, so a bill never paid never gets its line back at all.
 
 7 tests, the first coverage `isCodableAccount` has had. No migration.
 
+### 2026-08-22 — A slot in the one function every report goes through (`claude/the-lens-that-applies-a-rule`)
+
+`getBalances` and `cashBasisAdjustment` can now be told, by something outside
+this module, that an entry does not belong in a basis and that a line belongs
+under a different account. `inventory` slice 3d iii is the first thing that
+fills it.
+
+**THIS MODULE STILL DOES NOT KNOW INVENTORY EXISTS.** That rule was earned in
+slice 3b — `approveBill` copies a bill line's account verbatim and the pack sets
+that account at match time, precisely so the bill path never learns what a stock
+receipt is — and `getBalances` is the last place to give it up, because every
+report goes through it. So core names the slot in vocabulary that is true of any
+lens, `src/lib/basis-lens/` holds the types and the registry, and the pack is
+named in exactly one file. Core to lib to pack, the direction `mail-extensions`
+and `attention-sources` already set.
+
+**WHAT A PROVIDER MAY DO IS DELIBERATELY SMALL.** Drop an entry WHOLE, re-point
+a line. Not an amount, not a date, not one leg of a pair. Each of those
+unbalances a report, which ADR 0007 names as the failure to design against, and
+the only thing that would ever notice is a trial balance nobody ran.
+
+**A FAILING PROVIDER BREAKS THE REPORT.** `attention-sources/resolve.ts`'s
+posture rather than `mail-extensions`'s, and for a sharper version of its
+reason: folding a failure to "no adjustment" would hand somebody a profit and
+loss computed on a treatment they never elected, that balances, that looks like
+every other report, and that says nothing about having fallen back. The wrapper
+carries the provider's own message rather than burying it in `cause` — a test
+caught that by asserting on the reason instead of the wrapper, which is the
+`LEDGER_ACCOUNTS` lesson again.
+
+**THE `accountIds` TRAP ADR 0013 PREDICTED DOES NOT BITE, and it is worth
+recording why** so nobody re-fixes it. The ADR warned that `getBalances` filters
+on `jl.accountId` inside the query, before anything is substituted, so a report
+asking only for the destination account would filter out the lines about to
+become it. It does not happen: substitution occurs only inside
+`cashBasisAdjustment`, which applies its own `accountIds` filter LAST, over rows
+it has already re-pointed. Exclusion is by entry id and is independent of the
+account filter entirely.
+
+No migration, no schema change. The accrual path is still byte-identical: the
+lens declines on accrual, which leaves ADR 0013's question about incoherent
+basis/treatment pairs open rather than answering it in code.
+
 ### 2026-08-22 — A method is not a toggle, and ADR 0013 was carrying its own refutation (`claude/a-method-is-not-a-toggle`)
 
 The brief could not be answered — no accountant available — so the question came

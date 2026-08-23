@@ -166,6 +166,19 @@ exist; no individual pack may**, which is the same rule `src/packs/index.ts`
 already lives by. Still needed for nav contributions and entity-type
 registration.
 
+**Used a second time on 2026-08-22, in the other direction: a CORE MODULE named
+the slot and a PACK filled it.** `accounting` must not learn that inventory
+exists — slice 3b earned that rule, and `getBalances` is the last place to give
+it up because every report goes through it. So core named a slot in vocabulary
+true of any basis lens (*some entries do not belong in this basis; some lines
+belong under a different account*),
+[src/lib/basis-lens/](../src/lib/basis-lens/types.ts) holds the types and the
+registry, and `packs/inventory/basis-lens.ts` fills it. **Core imports the lib,
+never the pack** — the direction `mail-extensions` and `attention-sources`
+already run in. What a provider is permitted to do is deliberately tiny: drop an
+entry WHOLE, re-point a line, and nothing else, because anything wider
+unbalances a report.
+
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's
 tables directly.

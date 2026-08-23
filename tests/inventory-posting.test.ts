@@ -4,11 +4,16 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import { getBalances, getDefaultEntityId } from "../src/modules/accounting/core";
 import { approveBill } from "../src/modules/accounting/payables/bills";
+import { recordBillPayment } from "../src/modules/accounting/payables/payments";
+import { createBankAccount } from "../src/modules/accounting/banking/accounts";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
   adjustLotCost,
   adjustStock,
   carriedCostByLot,
+  clearTaxRule,
+  listTaxRules,
+  setTaxRule,
   createItem,
   createLot,
   issueStock,
@@ -55,6 +60,7 @@ d("inventory posting", () => {
   let cogsAccountId: string;
   let grniAccountId: string;
   let freezerId: string;
+  let bankLedgerId: string;
 
   const asOwner = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantId, fn, { role: "owner", userId: OWNER });
@@ -107,6 +113,14 @@ d("inventory posting", () => {
           billDate: "2026-09-01",
           status: "draft",
           createdByClerkUserId: OWNER,
+          /**
+           * **`total_cents` IS A STORED COLUMN and this helper never set it**,
+           * which nothing noticed until a test tried to PAY one of these bills
+           * and got `BILL_OVERPAYMENT` against a remaining balance of zero.
+           * `createBill` maintains it from the lines; this fixture inserts rows
+           * directly, so it has to say so itself.
+           */
+          totalCents: amountCents,
         })
         .returning();
       const line = await tx
@@ -124,6 +138,34 @@ d("inventory posting", () => {
         })
         .returning();
       return { billId: bill[0].id, billLineId: line[0].id };
+    });
+  };
+
+  /**
+   * Approve-then-pay, so a bill has a payment the cash lens can find.
+   *
+   * **The paid-from has to be a REGISTER, not just an asset account with the
+   * right code.** `assertPaidFromAccount` looks in `bank_accounts`, so the
+   * seeded `1000 Checking Account` is refused — a real register is created in
+   * `beforeAll` instead. Found by the test failing, which is the cheap way.
+   */
+  const payBill = async (
+    billId: string,
+    amountCents: number,
+    paymentDate: string,
+  ) => {
+    return asOwner(async (tx) => {
+      const bill = await tx.query.bills.findFirst({
+        where: and(eq(schema.bills.tenantId, tenantId), eq(schema.bills.id, billId)),
+      });
+      return recordBillPayment(tx, ledgerOwner(), {
+        billId,
+        expectedVersion: bill!.version,
+        paymentDate,
+        amountCents,
+        paidFromAccountId: bankLedgerId,
+        method: "bank_transfer",
+      });
     });
   };
 
@@ -164,6 +206,16 @@ d("inventory posting", () => {
     inventoryAccountId = accounts.find((a) => a.code === "1300")!.id;
     cogsAccountId = accounts.find((a) => a.code === "5000")!.id;
     grniAccountId = accounts.find((a) => a.subtype === "goods_received")!.id;
+
+    // A real bank register, because `assertPaidFromAccount` looks in
+    // `bank_accounts` rather than at an account's code or type.
+    const bank = await withTenant(tenantId, (tx) =>
+      createBankAccount(tx, ledgerOwner(), {
+        name: "Ops Checking",
+        kind: "checking",
+      }),
+    );
+    bankLedgerId = bank.ledgerAccount.id;
   });
 
   afterAll(async () => {
@@ -2063,6 +2115,210 @@ it("NOBODY INVOICES YOU FOR WHAT YOU MADE", async () => {
           ),
       );
       expect(counted.entries).toBe(Number(n));
+    });
+
+
+    // ---- slice 3d iii: the lens that applies a rule -----------------------
+
+    /**
+     * **THE INVARIANT THIS SLICE RESTS ON: THE REPORT STILL BALANCES.**
+     * ADR 0007 names an unbalanced cash-basis report as the failure to design
+     * against, and a lens that drops entries and re-points lines is the most
+     * direct way to cause one. Every test below asserts it, because the
+     * trial balance is the only thing that would ever notice.
+     */
+    const balanceAt = async (basis: "accrual" | "cash", asOf: string) =>
+      asOwner((tx) =>
+        getBalances(tx, tenantId, {
+          scope: { kind: "combined" },
+          asOf,
+          basis,
+        }),
+      );
+    const balanceOf = (basis: "accrual" | "cash") =>
+      balanceAt(basis, "2027-12-31");
+    const netAcross = (rows: { netCents: number }[]) =>
+      rows.reduce((sum, r) => sum + r.netCents, 0);
+    const netOfIn = (rows: { accountId: string; netCents: number }[], id: string) =>
+      rows.filter((r) => r.accountId === id).reduce((s, r) => s + r.netCents, 0);
+
+    it("DOES NOTHING AT ALL when nothing has been elected", async () => {
+      // The common case, and it must stay the common case: no rows, no lens,
+      // and the cash report is whatever it was before this slice existed.
+      const before = await balanceOf("cash");
+      expect(netAcross(before)).toBe(0);
+      expect(await asOwner((tx) => listTaxRules(tx, tenantId))).toHaveLength(0);
+    });
+
+    it("MOVES THE COST TO THE PAYMENT DATE, AND STILL BALANCES", async () => {
+      /**
+       * The whole slice in one test. A delivery is received, matched to a bill,
+       * approved and paid, and the feed is eaten.
+       *
+       * On `consumed` the cash report carries the stock as an asset and the
+       * cost lands when it is issued. On `paid` neither of those entries exists
+       * at all and the bill line is recognised under the FEED account instead
+       * of Goods Received Not Invoiced.
+       */
+      const item = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Lens feed",
+          stockingUnit: "lb",
+          itemKind: "lens_feed",
+        }),
+      );
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `LENS-${Date.now()}`,
+          source: "purchased",
+        }),
+      );
+      const receipt = await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 100,
+          costCents: 20_000,
+          occurredOn: "2027-03-01",
+          locationAssetId: freezerId,
+        }),
+      );
+      const { billId, billLineId } = await makeBill(20_000);
+      await asOwner((tx) =>
+        allocateBillLineToStock(tx, ownerCtx(), {
+          billLineId,
+          matches: [
+            { movementId: receipt.movement.id, quantityMatched: 100 },
+          ],
+        }),
+      );
+      await asOwner(async (tx) => {
+        const bill = await tx.query.bills.findFirst({
+          where: and(
+            eq(schema.bills.tenantId, tenantId),
+            eq(schema.bills.id, billId),
+          ),
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: bill!.version,
+        });
+      });
+      await payBill(billId, 20_000, "2027-04-15");
+      await asOwner((tx) =>
+        issueStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: lot.id,
+          quantity: 100,
+          occurredOn: "2027-03-20",
+          locationAssetId: freezerId,
+        }),
+      );
+
+      const onConsumed = await balanceOf("cash");
+      expect(netAcross(onConsumed)).toBe(0);
+      /**
+       * **A MID-DATE SNAPSHOT IS THE ONLY WAY TO SEE THE ASSET AT ALL.** By the
+       * end of the year this batch has been received AND fully issued, so its
+       * contribution to Inventory nets to zero under either rule and an
+       * end-date assertion proves nothing. Between the receipt and the issue it
+       * is $200 on the balance sheet under `consumed` and must be nothing at
+       * all under `paid`.
+       */
+      const midConsumed = await balanceAt("cash", "2027-03-10");
+      expect(netAcross(midConsumed)).toBe(0);
+
+      // Now the election. The account it substitutes TO is the thing a report
+      // is useless without, per ADR 0013 A.5.
+      const feedExpense = await asOwner(async (tx) => {
+        const rows = await tx
+          .insert(schema.accounts)
+          .values({
+            tenantId,
+            code: "6101",
+            name: "Feed",
+            accountType: "expense",
+          })
+          .returning();
+        return rows[0].id;
+      });
+      await asOwner((tx) =>
+        setTaxRule(tx, ownerCtx(), {
+          itemKind: "lens_feed",
+          timingRule: "paid",
+          expenseAccountId: feedExpense,
+          decidedBy: "Their accountant",
+        }),
+      );
+
+      const onPaid = await balanceOf("cash");
+      const midPaid = await balanceAt("cash", "2027-03-10");
+      // **THE INVARIANT, at both dates.** Entries dropped whole, lines moved
+      // sideways, so nothing can have gone out of balance.
+      expect(netAcross(onPaid)).toBe(0);
+      expect(netAcross(midPaid)).toBe(0);
+
+      // The cost is on the feed account now, and it was not before.
+      expect(netOfIn(onConsumed, feedExpense)).toBe(0);
+      expect(netOfIn(onPaid, feedExpense)).toBe(20_000);
+      /**
+       * **AND IT CAME OFF CONSUMPTION**, measured differentially because this
+       * file shares one tenant: an absolute assertion about `5000` here would
+       * be a claim about every test above it as much as about this one.
+       */
+      expect(
+        netOfIn(onConsumed, cogsAccountId) - netOfIn(onPaid, cogsAccountId),
+      ).toBe(20_000);
+
+      // The stock never reached the balance sheet at all — visible only in the
+      // window where it was actually sitting there.
+      expect(
+        netOfIn(midConsumed, inventoryAccountId) -
+          netOfIn(midPaid, inventoryAccountId),
+      ).toBe(20_000);
+      expect(
+        netOfIn(midPaid, grniAccountId) - netOfIn(midConsumed, grniAccountId),
+      ).toBe(20_000);
+
+      // **THE ACCRUAL BOOKS ARE UNTOUCHED**, which is the property `getBalances`
+      // documents about itself and the reason the lens declines on accrual
+      // rather than answering ADR 0013's open question in code.
+      const accrual = await balanceOf("accrual");
+      expect(netAcross(accrual)).toBe(0);
+      expect(netOfIn(accrual, feedExpense)).toBe(0);
+    });
+
+    it("REFUSES TO REPORT when a rule has nowhere to put the cost", async () => {
+      /**
+       * A substituting rule has to substitute TO something. "Everything to cost
+       * of goods" produces a report that balances and is useless at return
+       * time — ADR 0013 A.5 — so falling back to any account would be exactly
+       * the invisible wrongness this whole ADR exists to prevent.
+       *
+       * It fails the REPORT rather than the setting, because the account can be
+       * removed after the rule was recorded.
+       */
+      await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: "Homeless",
+          stockingUnit: "lb",
+          itemKind: "no_home",
+        }),
+      );
+      await asOwner((tx) =>
+        setTaxRule(tx, ownerCtx(), {
+          itemKind: "no_home",
+          timingRule: "paid",
+          expenseAccountId: null,
+        }),
+      );
+      await expect(balanceOf("cash")).rejects.toThrow(
+        /no expense account has been recorded/i,
+      );
+      // And it says which lens failed rather than surfacing a raw query error.
+      await expect(balanceOf("cash")).rejects.toThrow(/inventory/i);
+      await asOwner((tx) => clearTaxRule(tx, ownerCtx(), "no_home"));
     });
 
     it("keeps a correction out of a valuation dated before it", async () => {

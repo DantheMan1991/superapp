@@ -52,6 +52,7 @@ import {
 } from "./core/valuation";
 import {
   isImplementedRule,
+  isSubstitutingRule,
   isTimingRule,
   resolveTaxRule,
   type ResolvedTaxRule,
@@ -102,7 +103,8 @@ export class InventoryError extends Error {
       | "POSTING_OFF"
       | "POSTING_LOCKED"
       | "INVALID_TIMING_RULE"
-      | "TIMING_RULE_UNAVAILABLE",
+      | "TIMING_RULE_UNAVAILABLE"
+      | "TAX_RULE_NEEDS_ACCOUNT",
     message: string,
   ) {
     super(message);
@@ -1840,6 +1842,27 @@ export async function setTaxRule(
     throw new InventoryError(
       "TIMING_RULE_UNAVAILABLE",
       `The reports cannot apply "${input.timingRule}" yet, so recording it here would mean a setting that says one thing and does another. Only "when it is used" is applied today.`,
+    );
+  }
+
+  /**
+   * **A SUBSTITUTING RULE NEEDS SOMEWHERE TO PUT THE COST, AND THE PLACE TO SAY
+   * SO IS HERE.** Found by driving: the rule saved happily with no account, and
+   * the refusal arrived later on a REPORT — a long way from the decision that
+   * caused it, and on a screen whose reader may not be the person who chose.
+   *
+   * The report still refuses too, and that is not redundancy: an account can be
+   * deactivated after a rule was recorded, so the late check is the only one
+   * that can be sure. This one just means the common case fails where somebody
+   * can fix it.
+   */
+  if (
+    isSubstitutingRule(input.timingRule) &&
+    !input.expenseAccountId
+  ) {
+    throw new InventoryError(
+      "TAX_RULE_NEEDS_ACCOUNT",
+      "Pick the expense account this cost should land in. A rule that moves cost off the balance sheet has to say where it goes, and \"everything to cost of goods\" is no use at return time.",
     );
   }
 

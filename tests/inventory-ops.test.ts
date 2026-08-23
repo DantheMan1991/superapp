@@ -1535,7 +1535,10 @@ d("inventory ops", () => {
        */
       await expect(
         asOwner((tx) =>
-          setTaxRule(tx, ownerCtx(), { itemKind: "feed", timingRule: "paid" }),
+          setTaxRule(tx, ownerCtx(), {
+            itemKind: "feed",
+            timingRule: "later_of_paid_and_consumed",
+          }),
         ),
       ).rejects.toMatchObject({ code: "TIMING_RULE_UNAVAILABLE" });
     });
@@ -1549,6 +1552,42 @@ d("inventory ops", () => {
           }),
         ),
       ).rejects.toMatchObject({ code: "INVALID_TIMING_RULE" });
+    });
+
+    it("REFUSES A SUBSTITUTING RULE WITH NOWHERE TO PUT THE COST", async () => {
+      /**
+       * Found by driving: the rule saved happily with no account, and the
+       * refusal arrived later on a REPORT — a long way from the decision that
+       * caused it, and on a screen whose reader may not be whoever chose.
+       *
+       * The report still refuses too. That is not redundancy: an account can be
+       * deactivated after a rule was recorded, so the late check is the only one
+       * that can be sure. This one just means the common case fails where
+       * somebody can fix it.
+       */
+      await expect(
+        asOwner((tx) =>
+          setTaxRule(tx, ownerCtx(), {
+            itemKind: "feed",
+            timingRule: "paid",
+            expenseAccountId: null,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "TAX_RULE_NEEDS_ACCOUNT" });
+    });
+
+    it("asks for no account under the rule that needs none", async () => {
+      // `consumed` substitutes nothing, so demanding an account would make a
+      // tenant answer a question their rule never asks.
+      await expect(
+        asOwner((tx) =>
+          setTaxRule(tx, ownerCtx(), {
+            itemKind: "feed",
+            timingRule: "consumed",
+            expenseAccountId: null,
+          }),
+        ),
+      ).resolves.toMatchObject({ timingRule: "consumed" });
     });
 
     it("refuses a staff member — a tax election is not a chore", async () => {

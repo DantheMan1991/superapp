@@ -81,14 +81,18 @@ describe("resolveTaxRule", () => {
 });
 
 describe("timing rules", () => {
-  it("SETTABLE IS NARROWER THAN LISTED, and only by one", () => {
+  it("SETTABLE IS NARROWER THAN LISTED", () => {
     /**
      * The list exists so a person deciding can see the shape of the question;
      * the implemented set is what the report lens can honour. **Widen the
      * second only as the lens learns a rule.** A setting that claims to change
      * a report and does not is the failure ADR 0013 was written to end.
+     *
+     * This assertion is SUPPOSED to fail when the lens grows, and it did once:
+     * slice 3d iii added `paid` and this test failing is what marked the
+     * change. That is the coupling working, not a brittle test.
      */
-    expect(IMPLEMENTED_TIMING_RULES).toEqual(["consumed"]);
+    expect(IMPLEMENTED_TIMING_RULES).toEqual(["consumed", "paid"]);
     expect(TIMING_RULES.length).toBeGreaterThan(
       IMPLEMENTED_TIMING_RULES.length,
     );
@@ -103,8 +107,10 @@ describe("timing rules", () => {
 
   it("refuses a rule that is not a moment the ledger can date", () => {
     expect(isTimingRule("when_the_accountant_says")).toBe(false);
-    expect(isImplementedRule("paid")).toBe(false);
-    expect(isTimingRule("paid")).toBe(true);
+    // Listed, dateable, and still not built: the lens would have to compare two
+    // dates per line and place the result in whichever window it falls in.
+    expect(isImplementedRule("later_of_paid_and_consumed")).toBe(false);
+    expect(isTimingRule("later_of_paid_and_consumed")).toBe(true);
   });
 
   it("gives every rule a label and a note, including the unbuilt ones", () => {

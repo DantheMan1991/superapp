@@ -26,6 +26,7 @@ import {
 import { setTaxRuleAction, clearTaxRuleAction } from "../actions";
 import {
   IMPLEMENTED_TIMING_RULES,
+  isSubstitutingRule,
   TIMING_RULES,
   TIMING_RULE_LABELS,
   TIMING_RULE_NOTES,
@@ -84,6 +85,8 @@ export function TaxRuleForm({
   );
 
   const what = itemKind ? `“${itemKind}”` : "everything else";
+  /** Every rule but `consumed` moves cost, and `setTaxRule` refuses without one. */
+  const needsAccount = isSubstitutingRule(rule);
 
   function submit(formData: FormData) {
     startTransition(async () => {
@@ -182,10 +185,18 @@ export function TaxRuleForm({
               </Select>
               {/* "All of it to cost of goods sold" balances and is no use at
                   return time, where feed, seed and veterinary supplies are
-                  separate lines. ADR 0013 A.5. */}
+                  separate lines. ADR 0013 A.5.
+
+                  **THE HINT FOLLOWS THE RULE, and it did not until somebody
+                  picked "paid" and read it.** It said the account could stay
+                  undecided, which is true under "when it is used" and wrong
+                  under every other rule — where the server refuses to save at
+                  all. A field that tells you it is optional and then refuses is
+                  worse than one that never explained itself. */}
               <p className="text-xs text-muted-foreground">
-                Only used by a rule that moves cost off the balance sheet. Under
-                “when it is used” nothing substitutes, so this can stay undecided.
+                {needsAccount
+                  ? "Required for this rule. The cost has to land somewhere you chose — feed, seed and veterinary supplies are separate lines at return time, so “all of it to cost of goods” is no use."
+                  : "Only used by a rule that moves cost off the balance sheet. Under “when it is used” nothing substitutes, so this can stay undecided."}
               </p>
             </div>
 

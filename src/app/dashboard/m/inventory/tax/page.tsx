@@ -100,16 +100,26 @@ export default async function InventoryTaxPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
-            This does not change your reports yet
+            {/* **THIS CARD SAID "does not change your reports yet" UNTIL THE
+                LENS SHIPPED, and it kept saying it after.** Caught by opening
+                the page an hour later. A screen that under-claims is not the
+                safe direction: somebody reading it would set a rule believing
+                it was inert, and their cash-basis reports would move. */}
+            What this changes, and what it does not
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>
-            Right now every category is deducted when the stock is used, which is
-            what the books already do. This page is where a different answer gets
-            recorded when somebody qualified gives you one. The reports will
-            start applying it when that part is built, and nothing here will
-            silently change a number before then.
+            Anything set to <strong>when it is used</strong> leaves your reports
+            exactly as they are, and that is where every category starts.
+          </p>
+          <p>
+            Set a category to <strong>when it is paid for</strong>{" "}
+            and your cash-basis reports change: that stock stops appearing on the balance
+            sheet, and its cost lands on the day the supplier&apos;s bill was
+            paid, under the account named beside it.{" "}
+            <strong>Your accrual reports are untouched</strong> — the books are
+            the books.
           </p>
           <p>
             {/* The whole reason the setting exists: the software must not hold

@@ -124,34 +124,36 @@ export function MakeDefaultButton({
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
+
+  // The ask happens BEFORE the transition, never inside it. Opening the dialog
+  // is a state update, and one made inside a transition cannot commit while
+  // that same transition is parked on the promise the dialog resolves — the
+  // button would sit there doing nothing at all.
+  async function makeDefault() {
+    // The consequence stated before it happens: this is where money lands from
+    // now on, not a cosmetic marker.
+    const asked = await confirm({
+      title: `Make ${name} the default company?`,
+      description:
+        "From now on every invoice, bill, bank transaction and recurring journal posts into its books. Entries already posted do not move.",
+      confirmLabel: "Make it the default",
+    });
+    if (!asked) return;
+    startTransition(async () => {
+      const result = await setDefaultEntityAction({ entityId });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(`${name} is now the default`);
+      router.refresh();
+    });
+  }
+
   return (
     <>
       {confirmDialog}
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={pending}
-        onClick={() =>
-          startTransition(async () => {
-            // The consequence stated before it happens: this is where money
-            // lands from now on, not a cosmetic marker.
-            const ok = await confirm({
-              title: `Make ${name} the default company?`,
-              description:
-                "From now on every invoice, bill, bank transaction and recurring journal posts into its books. Entries already posted do not move.",
-              confirmLabel: "Make it the default",
-            });
-            if (!ok) return;
-            const result = await setDefaultEntityAction({ entityId });
-            if ("error" in result) {
-              toast.error(result.error);
-              return;
-            }
-            toast.success(`${name} is now the default`);
-            router.refresh();
-          })
-        }
-      >
+      <Button size="sm" variant="outline" disabled={pending} onClick={makeDefault}>
         <Star className="h-3.5 w-3.5" />
         Make default
       </Button>

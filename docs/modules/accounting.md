@@ -474,6 +474,39 @@ later.
 8 tests in `tests/ledger.test.ts` pin the boundary — including the ones that
 prove what did NOT change. Migration `0176` adds the three enum values.
 
+### 2026-08-22 — Make default asked nothing and did nothing (branch `claude/sleepy-ardinghelli-211fde`)
+
+The **Make default** button on `/dashboard/m/accounting/companies` was inert.
+No dialog, no toast, no request, no error — click it and the page sat there.
+
+- **The confirm was awaited INSIDE `startTransition`.** Opening the dialog is a
+  state update; made inside a transition it cannot commit while that same
+  transition is parked on the promise only the answered dialog resolves. The two
+  wait on each other and the click goes nowhere. Ask first, then start the
+  transition — the shape banking and reconcile have used since they were
+  written:
+
+      async function act() {
+        const asked = await confirm({ ... });
+        if (!asked) return;
+        startTransition(async () => { ... });
+      }
+
+- **The irony is the point.** `useConfirm` exists because a suppressed
+  `window.confirm` returns false and the button silently does nothing (see
+  2026-08-12). This is the identical silence with the deadlock in our own code
+  instead of the browser's, which is why the warning is now the loudest
+  paragraph in the hook's doc comment rather than a note on one call site.
+- **The whole repo was swept**, structurally rather than by eye — every
+  `startTransition(...)` body parsed to its matching paren and searched for an
+  awaited dialog. `companies-controls.tsx` was the only one: every other
+  `await confirm(` in the app — banking disconnect, reconcile cancel and reopen,
+  invoice issue/void/delete, unapply payment, the inventory posting toggle and
+  unpick, the retail void — already guards ahead of the transition.
+- **Found from the retail side.** The same bug was written into
+  `VoidSaleButton` in the retail pack and caught there first; this is its twin,
+  and the two were the only instances.
+
 ### 2026-08-17 — A payment row that would not say whose account it was (branch `claude/payment-rows-name-the-company`)
 
 Found while finishing the drive of the mirror case. The invoice's payment row

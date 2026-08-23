@@ -34,6 +34,18 @@ import {
  *
  * which is the line `window.confirm` occupied, so what a reader has to check
  * is that the message is right rather than that the control flow still is.
+ *
+ * NEVER AWAIT IT INSIDE `startTransition`. Opening the dialog is a state
+ * update, and one made inside a transition cannot commit while that same
+ * transition is parked on the promise only the answered dialog resolves. The
+ * two wait on each other: no dialog, no toast, no request, no error — the same
+ * silent nothing this hook exists to end, this time with the deadlock in our
+ * own code rather than the browser's. Ask first, then start the transition:
+ *
+ *     async function act() {
+ *       if (!(await confirm({ ... }))) return;
+ *       startTransition(async () => { ... });
+ *     }
  */
 
 export interface ConfirmOptions {

@@ -23,11 +23,95 @@ this dossier is the build record.
 | **3c** | **The screen: matching, the GRNI reconciliation, and the switch that turns posting on** | **shipped 2026-08-22** |
 | **3d** | **Cost-adjustment corrections** — `inventory_cost_adjustments`, ADR 0012 §A.4 | **shipped 2026-08-22** |
 | **3d ii** | **Recording a tax decision** — `inventory_tax_treatments`, resolution, screen | **shipped 2026-08-22** |
-| 3d iii | The lens that APPLIES a rule other than `consumed` | next, and **specified rather than vague**: the two obstacles are in Open items. Not blocked on an accountant — [the brief](../briefs/inventory-tax-treatment.md) is a per-client template, and a tenant electing nothing keeps today's behaviour |
+| **3d iii** | **The lens** — `paid` applies on a cash-basis report, through a seam core owns and a pack fills | **shipped 2026-08-22** |
+| 3d iv | `billed`, `sold` and the two `later_of` rules | each needs different machinery — see `packs/inventory/basis-lens.ts` |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 
 ## Build log
+
+### 2026-08-22 — The lens that applies a rule (`claude/the-lens-that-applies-a-rule`)
+
+Slice 3d iii. A recorded decision now changes a report, and `paid` is the rule it
+learned. `IMPLEMENTED_TIMING_RULES` widened from one to two, which is the whole
+public shape of this slice.
+
+**ACCOUNTING CORE STILL DOES NOT KNOW INVENTORY EXISTS, and that cost a seam.**
+`getBalances` is the one function every report goes through, and teaching it
+about `item_kind` would have undone the rule slice 3b paid for — `approveBill`
+copies a line verbatim precisely so the bill path never learns what a stock
+receipt is. So core names a slot in vocabulary true of any lens (*some entries do
+not belong in this basis; some lines belong under a different account*),
+`src/lib/basis-lens/` holds it, and the registry there is the only file naming
+the pack. Same direction as `mail-extensions` and `attention-sources`: **core to
+lib to pack, never core to pack.**
+
+**A PROVIDER MAY DROP AN ENTRY WHOLE AND RE-POINT A LINE. IT MAY NOT TOUCH AN
+AMOUNT OR A DATE.** That is not politeness — an entry dropped by one leg, or a
+line re-priced, unbalances the report, which ADR 0007 names as the failure to
+design against and which only a trial balance nobody ran would notice.
+
+**A FAILING PROVIDER BREAKS THE REPORT RATHER THAN BEING SWALLOWED**, which is
+`attention-sources/resolve.ts`'s posture and not `mail-extensions`'s. Folding to
+"no adjustment" would hand somebody a profit and loss computed on a treatment
+they did not elect, that balances, that looks like every other report, and that
+says nothing about having fallen back.
+
+**`paid` NEEDED NO DATE LOGIC AT ALL, WHICH IS THE OPPOSITE OF WHAT THIS DOSSIER
+PREDICTED.** The open item said the lens would have to split a shared control leg
+pro rata. It does not — `cashBasisAdjustment` already recognises a document's
+lines against the PAYMENT that lands in the window, so on a cash basis `paid` is
+a change of ACCOUNT and not of timing. The control-leg problem is real and
+belongs to `billed`, the rule that needs a line to stay on its accrual date.
+**The prediction was right about the obstacle and wrong about which rule hits
+it.**
+
+**CASH BASIS ONLY, and that is deliberately not an answer.** ADR 0013's own
+"least sure of" asks whether some basis/treatment pairs are incoherent; `paid` on
+accrual is the likeliest, and `getBalances` documents the accrual path as
+byte-identical to before. The lens declines on accrual and the question stays
+open. Driven both ways on the dev farm: accrual `1300` at $1,359.93, cash at
+$0.00, both in balance.
+
+**Three things clicking found, and the first is the one that matters:**
+
+1. **The page still said "This does not change your reports yet"** — written an
+   hour earlier when it was true, and left standing when it stopped being. A
+   screen that UNDER-claims is not the safe direction: somebody would set a rule
+   believing it inert and watch their cash reports move.
+2. **A substituting rule could be saved with no expense account**, and the
+   refusal then arrived on a report, far from the decision and possibly in front
+   of a different person. `setTaxRule` refuses now — and the report still
+   refuses too, because an account can be deactivated after the fact.
+3. **The account field said it could stay undecided** while the server was about
+   to refuse without it. The hint follows the rule now.
+
+**AND ONE THING CI FOUND THAT CLICKING DID NOT.** The save-time guard above
+broke the test for the REPORT-time guard — which had recorded a rule with no
+account, a state `setTaxRule` now refuses. It passed locally only because the
+guard was added after that suite last ran, and re-running the suite that tested
+the guard is not the same as re-running the suite the guard breaks.
+
+The fix was better than the test. With the save-time guard in place a null
+account is nearly unreachable, so the report check was defending a state the app
+cannot produce — while the state it CAN produce went unguarded: **this chart
+never hard-deletes a referenced account, it deactivates**, so a rule can end up
+pointed at a retired one. A report that quietly recognised cost into it would
+balance, look ordinary, and put money somewhere the business had stopped using.
+The lens checks the account is present AND active now. **A guard whose test needs
+an impossible fixture is guarding the wrong thing.**
+
+**`total_cents` on a bill is a stored column the posting-test fixture never
+set**, which nothing noticed until a test tried to PAY one and got
+`BILL_OVERPAYMENT` against a remaining balance of zero. Fixed in the fixture.
+
+3 posting tests, 2 ops, and the pure suite's implemented-rules assertion moved by
+design. No migration.
+
+**Still not built, and each for its own reason** — `basis-lens.ts` carries the
+list: `billed` needs the shared control leg split pro rata; `sold` needs
+recognition against a retail sale rather than a document or a payment;
+`later_of_*` needs per-line dates the adjustment does not carry at all.
 
 ### 2026-08-22 — Where a decision gets recorded (`claude/where-a-decision-gets-recorded`)
 
@@ -681,6 +765,13 @@ commitment against a live animal to delivered without sitting on a shelf.
   while a kill day stamped NULL on the meat. **If a future slice adds another
   way for money to reach a batch, this predicate is the thing to change**, and
   changing it fixes both callers at once, which is the whole point of it.
+- **A BASIS-LENS PROVIDER MAY DROP AN ENTRY WHOLE AND RE-POINT A LINE, AND
+  NOTHING ELSE.** Not an amount, not a date, not one leg of a pair. Every one of
+  those unbalances a report, and the only thing that would notice is a trial
+  balance nobody ran. See `src/lib/basis-lens/types.ts`.
+- **A FAILING LENS MUST BREAK THE REPORT.** Folding to "no adjustment" hands
+  somebody a balanced, ordinary-looking report computed on a treatment they did
+  not elect. `attention-sources/resolve.ts`'s posture, for its reason.
 - **THE TIMING-RULE LIST IS MOMENTS THE LEDGER CAN DATE, NOT TAX TREATMENTS.**
   Every value in `TIMING_RULES` names a column that exists. A list of treatments
   would be a reading of the regulations maintained by people who cannot read
@@ -804,17 +895,23 @@ commitment against a live animal to delivered without sitting on a shelf.
   solving when a rule other than `consumed` exists to re-time it to, which makes
   it slice 3d iii rather than a fix somebody can do this afternoon — see the
   next item for what it will have to solve.
-- **NOTHING APPLIES A TAX RULE YET.** Stage 3d ii records the decision and
-  resolves it; the lens is 3d iii. **Two things reading `cash-basis.ts` turned
-  up that it will have to solve, neither of which ADR 0013 had reckoned with:**
-  an entry has ONE control leg shared across mixed lines, so keeping a
-  capitalising line at its accrual date means splitting that leg pro rata; and
-  `cashBasisAdjustment` only runs for documents with a payment in the window, so
-  a bill never paid never gets its line back at all.
-- **THE EXPENSE ACCOUNT IS RECORDABLE AND UNREAD.** Under `consumed` nothing
-  substitutes, so nothing needs it. It is captured now because ADR 0013 §A.5
-  calls it a prerequisite rather than a refinement, and because asking an
-  accountant twice is worse than asking once.
+- ~~Nothing applies a tax rule yet~~ — **closed 2026-08-22 for `paid`.** The two
+  obstacles this item predicted turned out to belong to OTHER rules: `paid`
+  needed no date logic, because `cashBasisAdjustment` already recognises a
+  document against the payment in the window. The shared control leg is
+  `billed`'s problem, and the payment-in-window limit is what makes `paid`
+  correct rather than what blocks it.
+- **THREE RULES ARE STILL LISTED AND UNBUILT**, each for a different reason, all
+  named in `packs/inventory/basis-lens.ts`. `IMPLEMENTED_TIMING_RULES` refuses
+  them on the way in, so none can be silently wrong.
+- **THE LENS DECLINES ON ACCRUAL, and that is an open QUESTION rather than a
+  settled answer.** ADR 0013's "least sure of" asks whether some basis/treatment
+  pairs are incoherent. A tenant on accrual who elects `paid` currently sees no
+  change at all, which is defensible and is also the shape of a setting that does
+  nothing — the thing this whole area keeps guarding against.
+- ~~The expense account is recordable and unread~~ — **read as of 2026-08-22.**
+  `paid` substitutes to it, `setTaxRule` refuses a substituting rule without one,
+  and the lens refuses to report if it has gone away since.
 - **A COST CORRECTION CANNOT BE UNPICKED.** By design — appended, never edited —
   and the remedy is an equal-and-opposite correction, which nothing on the screen
   suggests. The same gap a posted count has.

@@ -98,6 +98,7 @@ function toResult(err: unknown): { error: string } {
       // would turn "we have not built that" into "you typed it wrong".
       case "INVALID_TIMING_RULE":
       case "TIMING_RULE_UNAVAILABLE":
+      case "TAX_RULE_NEEDS_ACCOUNT":
         return { error: err.message };
       // Both are written for a person where they are thrown, and both are about
       // what the person is holding rather than about the data.

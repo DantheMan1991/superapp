@@ -22,7 +22,7 @@ this dossier is the build record.
 | **1b** | **The processor directory** — who does the work you do not, what they take, what they charge, how they are inspected, what you think of them | **shipped 2026-08-23** |
 | **1c** | **Booking a date** — holding the scarce resource, deposits, and the link from a booking to the run it becomes | **shipped 2026-08-23** |
 | **1d** | **The processing path on the run**, eligibility stamped onto the meat, and the on-farm exemption counted | **shipped 2026-08-23** |
-| 1e | **Paperwork, extracted** — a kill sheet AND a processor's price list, as photograph or PDF → AI extraction → **a human confirms** → the rows | next |
+| **1e** | **Paperwork, extracted** — a kill sheet AND a processor's price list, as photograph or PDF → AI extraction → **a human confirms** → the rows | **shipped 2026-08-23** |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
 | 4 | Label generation, including a processor's own-label capability | |
@@ -70,6 +70,68 @@ livestock production"* — and the roadmap had processors appearing only at slic
 becomes 1d, unchanged.
 
 ## Build log
+
+### 2026-08-23 — Slice 1e: reading somebody else's piece of paper (`claude/paperwork-somebody-else-wrote`)
+
+**ONE PATH, TWO CONSUMERS, WHICH IS WHY THEY SHIPPED TOGETHER.** A kill sheet
+and a processor's price list are the same problem — a photograph or a PDF
+arrives, somebody would otherwise retype it, and what it says has to land in a
+table. They differ only in which table. Building the path twice would have meant
+arguing about the confirm step twice, and the second argument is the one that
+gets lost.
+
+**NOTHING THE MODEL SAYS IS EVER WRITTEN.** `ai/paperwork.ts` and both consumers
+return a PROPOSAL. A person reads it against the paper still in their hand,
+edits any field, unticks any row, and presses Record — which calls
+`addRunCarcassAction` and `setHandleAction`, **the ordinary write paths**, one
+row at a time, with the same validation, the same refusals and the same audit
+entries as typing it in. There is no privileged path into these tables. The
+reason is specific rather than philosophical:
+
+- a carcass row is **a statement about whether meat was fit to sell**, made by a
+  licensed plant. An extraction that quietly recorded a condemnation — or
+  quietly failed to — would be this app putting words in an inspector's mouth.
+- a handle row is **the terms of a commercial relationship**. A fee changed by
+  an extraction nobody read is worse than a fee nobody typed, because it looks
+  like it was agreed.
+
+**THE PROMPTS' REAL JOB IS TEACHING IT WHEN TO SAY NOTHING.** A model asked to
+read a smudged sheet will produce a plausible number for every cell, and a
+plausible hanging weight is indistinguishable from a real one once it is in the
+table. Every instruction is aimed at the same thing — leave it out, never
+calculate, never convert, never average, copy the plant's own words — and the
+screen says an empty box means it would not guess.
+
+**AND THE PROMPT IS NOT A GUARD.** Every rule the prompts state is re-applied in
+`validateKillSheet` / `validatePriceList`, because a prompt is a request and the
+validator is the thing that is true. A condemned line arrives with its hanging
+weight stripped whatever the model said, because the table's CHECK says so and a
+proposal that violated it would become a form somebody fills in and then gets a
+constraint violation from.
+
+**A REAL BUG, CAUGHT BY A TEST WRITTEN TO ASSERT THE PRINCIPLE.** `readNumber("")`
+returned **0**, because `Number("")` is 0 — which is precisely the failure this
+whole slice exists to prevent: a blank cell on a rate sheet becoming a confident
+`$0.00` fee that reads as *"they waived it"* rather than *"nobody said"*. Fixed,
+and the empty-and-whitespace cases are now asserted.
+
+**`normalizeImageForVision` MOVED OUT OF `accounting/ai/` INTO `src/lib/`.**
+Nothing in it was ever accounting's — it is "make an image safe and cheap to send
+to the vision API", the same job for a bill, a kill sheet and anything after
+them. A pack reaching into a core MODULE to get it would have been the first
+arrow of its kind in this codebase, drawn for a utility rather than for a
+boundary that meant anything. It keeps its lazy `sharp` import and the incident
+that produced it.
+
+**Thinking is ADAPTIVE here**, unlike the accounting call site which pins it off
+to preserve a budget tuned on an older model. This is a new call site and reading
+a handwritten, column-misaligned kill sheet is exactly what thinking is for.
+
+**THE FILE IS NOT KEPT, and that is a gap rather than a decision.** The design
+says "the kill sheet as a DOCUMENT", and a kill sheet genuinely is a retained
+record. Filing it would make `production` the first pack to import a core module,
+which deserves to be decided on its own merits rather than smuggled in behind an
+AI feature. Recorded as an open item.
 
 ### 2026-08-23 — Slice 1d driven on `Test`, and the meat already in the freezer (`claude/the-meat-already-in-the-freezer`)
 
@@ -843,6 +905,12 @@ run model, separate templates), and the processing path and eligibility flag
   packs exist
 - `src/packs/production/ops.ts` — reads and writes, takes a `Tx`.
   `completeRun` is the whole slice in one transaction
+- `src/packs/production/ai/paperwork.ts` — **the shared read path, and the
+  rule: nothing in `ai/` ever writes.** Read its header before adding a third
+  consumer
+- `src/lib/vision-image.ts` — image normalisation for the vision API. **Moved
+  here from `accounting/ai/` in 1e** so a pack need not import a module. Keeps
+  the lazy `sharp` import and the production incident that caused it
 - `src/packs/production/exemption-ops.ts` — the on-farm cap, counted at read
   time. **Read the header before changing what counts**: four choices are argued
   there, and each could have gone the other way
@@ -1010,6 +1078,23 @@ run model, separate templates), and the processing path and eligibility flag
   the slice makes lives in `tests/production-ops.test.ts`.
 
 ## Open items
+
+- **NEITHER READER HAS BEEN GIVEN A REAL PHOTOGRAPH.** The validators are
+  covered by 15 tests and the model call is injectable, so everything below the
+  network is exercised — but no actual kill sheet or rate sheet has been through
+  it, and `ANTHROPIC_API_KEY` plus a photograph is the only way to learn what a
+  real one produces. It is also the first thing here that **spends money per
+  press**, and nothing rate-limits it: accounting's extractor has a 15-second
+  per-tenant cooldown and this does not.
+- **THE FILE IS NOT KEPT.** The design says "the kill sheet as a DOCUMENT" and a
+  kill sheet is a retained record; the bytes are currently read, sent and
+  dropped. Filing it means `production` importing the Documents module — the
+  first pack to import a core module — which is an architectural decision that
+  should be made deliberately rather than as a side effect of an AI feature.
+- **THE PRICE-LIST READER WILL HAPPILY REPLACE A FEE NOBODY MEANT TO CHANGE.**
+  `setHandle` is an upsert, so recording a row for a kind that already has one
+  overwrites it. The dialog says so in a sentence; it does not show the fee that
+  is about to be replaced beside the new one, which is what it should do.
 
 - ~~**BOOKING A DATE IS THE NEXT SLICE.**~~ **Shipped 1c.** What it did NOT do:
   **a booking is not on the calendar.** `schedule_item_links` takes an

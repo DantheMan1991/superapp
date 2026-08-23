@@ -20,6 +20,7 @@ import {
   processorHandlesFrom,
   slugLabel,
 } from "@/packs/production/vocabulary";
+import { ReadPriceListDialog } from "@/packs/production/components/paperwork-controls";
 import {
   AddCutDialog,
   AddProcessorDialog,
@@ -164,12 +165,19 @@ export default async function ProcessorsPage() {
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-medium">What they take</h3>
                     {isOwner && (
-                      <HandleDialog
+                      <div className="flex items-center gap-2">
+                        <ReadPriceListDialog
+                          processorId={processor.id}
+                          kindOptions={kindOptions}
+                          word={word}
+                        />
+                        <HandleDialog
                         processorId={processor.id}
-                        kindOptions={kindOptions.filter(
-                          (k) => !handles.some((h) => h.kind === k),
-                        )}
-                      />
+                          kindOptions={kindOptions.filter(
+                            (k) => !handles.some((h) => h.kind === k),
+                          )}
+                        />
+                      </div>
                     )}
                   </div>
                   {handles.length === 0 ? (

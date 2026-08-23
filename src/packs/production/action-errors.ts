@@ -35,6 +35,7 @@ export function toResult(err: unknown): { error: string } {
       case "CARCASS_INVALID":
       case "PROCESSOR_INVALID":
       case "BOOKING_INVALID":
+      case "PAPERWORK_INVALID":
         return { error: err.message };
     }
   }

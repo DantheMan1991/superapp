@@ -59,6 +59,7 @@ import {
   CarcassDialog,
   RemoveCarcassButton,
 } from "@/packs/production/components/carcass-controls";
+import { ReadKillSheetDialog } from "@/packs/production/components/paperwork-controls";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
@@ -506,6 +507,14 @@ export default async function ProductionRunPage({
               carcass to exist between the animal and the box.
             </p>
           </div>
+          {/* Reading the page and typing it in sit side by side on purpose:
+              the reader is a shortcut through the same form, not a second way
+              of recording a carcass. */}
+          <ReadKillSheetDialog
+            runId={run.id}
+            inputs={carcassInputs}
+            sheetWord={sheetWord}
+          />
           <CarcassDialog
             runId={run.id}
             inputs={carcassInputs}

@@ -1489,6 +1489,66 @@ before the PR opened.
   confirm they resolve (`/reports/sales-tax` answers 307 to `/sign-in`), which is
   as far as an agent session gets: the page bodies execute only behind a Clerk
   session. Compiled-and-tested, not seen, per the standing note in Open items.
+### 2026-08-12 — A closed bank account was a state with no way out (branch `claude/accounting-inactive-bank-accounts`)
+
+Found while verifying the confirm dialogs: starting a reconciliation on a
+deactivated register failed with **"That bank account no longer exists"** — it
+existed, it was inactive, and the message sent the reader looking for a deleted
+row. Pulling that thread found the bigger problem.
+
+- **`setBankAccountActiveAction` had existed since session 3 and NOTHING called
+  it.** `is_active` could only be changed by reaching into the database. So the
+  state was reachable (a server action is a public endpoint) but unreachable
+  from the UI, and once in it there was no way back: no reconcile, four rows
+  stuck in "to review", and every write button still on the page erroring or
+  silently doing nothing. A state the app can enter and cannot leave is worse
+  than a state it does not have.
+- **"Closed" now means one thing: no NEW financial effect on this register.**
+  `loadWritableBankAccount` is the single guard, and it covers posting a
+  categorised transaction, accepting suggestions, quick-adding, importing a
+  CSV, matching a feed row to an entry, and starting a reconciliation. Before
+  this, only `startReconciliation` checked — so "inactive" meant "you cannot
+  reconcile" and nothing else, while posting straight through it still worked.
+- **Excluding and restoring are DELIBERATELY still allowed**, and that carve-out
+  is the point rather than an oversight: it is queue housekeeping with no ledger
+  effect, and it is the only way to clear the rows a closed account is holding.
+  Corrections to things already posted (unmatch, void, cancel a reconciliation)
+  stay allowed too — closing an account must never strand a mistake made before
+  it closed. The DB test asserts both halves, refusal AND carve-out, because a
+  guard that is too wide fails silently in the direction nobody tests.
+- **A Plaid sync SKIPS a closed register rather than failing.** One item usually
+  covers several accounts; its rows land in `skippedUnlinked`, the count already
+  surfaced for an account the feed knows and the books do not.
+- **`BANK_ACCOUNT_INACTIVE` is its own code**, and its message names the way out
+  rather than the diagnosis. `BANK_ACCOUNT_NOT_FOUND` keeps meaning what it says.
+- **The badge says "closed", not "inactive"**, and the page carries a sentence
+  explaining what still works. Customers, vendors and products keep "inactive" —
+  that is the right word in their domain and the wrong one for a bank account.
+- **Not built:** closing a register with an unfinished reconciliation on it is
+  neither blocked nor cancelled; it just cannot be completed until you reopen.
+
+**MERGED 2026-08-23, NINE DAYS AND 237 COMMITS LATER, and the delay found a
+second bug.** The code auto-merged; only the build log conflicted. But the
+banking module grew a RULES ENGINE in the meantime, and
+`applyRulesToUnreviewed` calls `categorizeTransaction` in a loop — which this
+branch had just taught to refuse a closed register.
+
+One closed register would therefore have thrown `BANK_ACCOUNT_INACTIVE` and
+**rolled back the entire bulk apply**, including every suggestion already written
+for every other account, because the whole run is one transaction. The guard was
+right; the caller had grown since.
+
+It skips and counts now — `skippedClosed`, beside the `skippedLocked` the period
+lock already had, surfaced in the same two places and carried in the audit meta.
+That is the same answer this branch already gave for a Plaid sync, for the same
+reason: **a bulk operation that spans registers must not fail because one of
+them is shut.**
+
+**The general lesson is about stale branches, not about banking.** A long-open
+branch is not just at risk of conflicting — it is at risk of being SEMANTICALLY
+wrong against code that arrived after it, in files it does not touch and git
+will merge without complaint. `rules.ts` was never in this PR's diff.
+
 
 ### 2026-08-12 — Every confirmation is a real dialog now (branch `claude/accounting-confirm-dialogs`)
 

@@ -36,6 +36,7 @@ export type LedgerErrorCode =
   | "SETTINGS_MISSING"
   | "TXN_NOT_UNREVIEWED"
   | "BANK_ACCOUNT_NOT_FOUND"
+  | "BANK_ACCOUNT_INACTIVE"
   | "RECON_ACTIVE_EXISTS"
   | "RECON_NOT_OPEN"
   | "RECON_NOT_BALANCED"
@@ -164,6 +165,10 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   TXN_NOT_UNREVIEWED:
     "That bank transaction was already handled — refresh the page.",
   BANK_ACCOUNT_NOT_FOUND: "That bank account no longer exists.",
+  // Distinct from NOT_FOUND on purpose: the account is right there, and the
+  // reader needs the way out rather than a message telling them it is gone.
+  BANK_ACCOUNT_INACTIVE:
+    "That account is closed. Reopen it from the account page to record anything new — everything already in the books stays either way.",
   RECON_ACTIVE_EXISTS:
     "A reconciliation is already in progress for this account.",
   RECON_NOT_OPEN: "That reconciliation is not open.",

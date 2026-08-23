@@ -22,7 +22,7 @@ import {
 import { MAX_AMOUNT_CENTS, isValidIsoDate } from "../lib/money";
 import {
   createBankAccount,
-  loadBankAccount,
+  loadWritableBankAccount,
   setBankAccountActive,
   updateBankAccount,
 } from "./accounts";
@@ -265,7 +265,7 @@ export async function parseCsvPreviewAction(
   try {
     requireOwnerRole(ctx);
     await withTenant(ctx.tenantId, (tx) =>
-      loadBankAccount(tx, ctx.tenantId, parsed.data.bankAccountId),
+      loadWritableBankAccount(tx, ctx.tenantId, parsed.data.bankAccountId),
     );
     let rows: string[][];
     try {
@@ -693,7 +693,7 @@ export async function quickAddTransactionAction(
   const p = parsed.data;
   try {
     await withTenant(ctx.tenantId, async (tx) => {
-      const bankAccount = await loadBankAccount(tx, ctx.tenantId, p.bankAccountId);
+      const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, p.bankAccountId);
       const a = p.amountCents;
       const lines =
         p.direction === "expense"
@@ -1279,6 +1279,7 @@ export async function applyRulesAction(
           matched: r.matched,
           autoPosted: r.autoPosted,
           skippedLocked: r.skippedLocked,
+          skippedClosed: r.skippedClosed,
         },
       });
       return r;

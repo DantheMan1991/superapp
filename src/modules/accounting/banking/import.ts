@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { schema, type Tx } from "@/db";
 import { requireOwnerRole, type LedgerCtx } from "../core";
-import { loadBankAccount } from "./accounts";
+import { loadWritableBankAccount } from "./accounts";
 import { applyRulesToUnreviewed, type ApplyRulesResult } from "./rules";
 import type { NormalizedTxn } from "./csv-parse";
 
@@ -28,7 +28,7 @@ export async function importTransactions(
   rules: ApplyRulesResult;
 }> {
   requireOwnerRole(ctx);
-  const bankAccount = await loadBankAccount(tx, ctx.tenantId, args.bankAccountId);
+  const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, args.bankAccountId);
   let imported = 0;
   const CHUNK = 500;
   for (let i = 0; i < args.txns.length; i += CHUNK) {

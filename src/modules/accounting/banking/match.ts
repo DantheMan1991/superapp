@@ -3,7 +3,7 @@ import { and, eq, gte, inArray, lte, ne, notExists, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { addDaysIso } from "../lib/dates";
-import { loadBankAccount } from "./accounts";
+import { loadWritableBankAccount } from "./accounts";
 
 /**
  * Bank-feed matching — closes the double-count trap. A recorded invoice
@@ -279,7 +279,7 @@ export async function matchTransactionToEntry(
   if (!txn || txn.status !== "unreviewed") {
     throw new LedgerError("TXN_NOT_UNREVIEWED", "transaction not reviewable");
   }
-  const bankAccount = await loadBankAccount(tx, ctx.tenantId, txn.bankAccountId);
+  const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, txn.bankAccountId);
   const candidates = await findMatchCandidates(tx, ctx.tenantId, {
     ledgerAccountId: bankAccount.accountId,
     amountCents: txn.amountCents,

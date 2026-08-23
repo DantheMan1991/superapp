@@ -52,7 +52,12 @@ export function ImportWizard({
   const [done, setDone] = useState<{
     imported: number;
     skippedDuplicates: number;
-    rules?: { matched: number; autoPosted: number; skippedLocked: number };
+    rules?: {
+      matched: number;
+      autoPosted: number;
+      skippedLocked: number;
+      skippedClosed: number;
+    };
   } | null>(null);
   const [mapping, setMapping] = useState({
     dateCol: NONE,
@@ -169,6 +174,9 @@ export function ImportWizard({
                   : ""}
                 {done.rules.skippedLocked > 0
                   ? `, ${done.rules.skippedLocked} left for review because the period is closed`
+                  : ""}
+                {done.rules.skippedClosed > 0
+                  ? `, ${done.rules.skippedClosed} left for review because the account is closed`
                   : ""}
                 .
               </>

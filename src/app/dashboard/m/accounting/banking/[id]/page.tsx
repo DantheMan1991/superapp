@@ -18,7 +18,12 @@ import {
 import { findMatchCandidatesBatch } from "@/modules/accounting/banking/match";
 import { readAiSuggestion } from "@/modules/accounting/banking/review";
 import { readRuleSuggestion } from "@/modules/accounting/banking/rules";
-import { RegisterTabs, ReviewTable, SuggestButton } from "./register-controls";
+import {
+  BankAccountActiveToggle,
+  RegisterTabs,
+  ReviewTable,
+  SuggestButton,
+} from "./register-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -214,23 +219,36 @@ export default async function BankRegisterPage({
                 connected
               </Badge>
             )}
-            {!bankAccount.isActive && <Badge variant="outline">inactive</Badge>}
+            {!bankAccount.isActive && <Badge variant="outline">closed</Badge>}
             {isOwner && (
               <>
-                <Button asChild size="sm" variant="outline">
-                  <Link href={`/dashboard/m/accounting/banking/${id}/import`}>
-                    Import CSV
-                  </Link>
-                </Button>
-                <SuggestButton
+                {/* A closed register takes nothing new, so the controls that
+                    would create something are not offered — the server refuses
+                    them anyway, and a button that always errors is worse than
+                    no button. Reopening is the one thing left to do. */}
+                {bankAccount.isActive && (
+                  <>
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/dashboard/m/accounting/banking/${id}/import`}>
+                        Import CSV
+                      </Link>
+                    </Button>
+                    <SuggestButton
+                      bankAccountId={id}
+                      disabled={countOf("unreviewed") === 0}
+                    />
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/dashboard/m/accounting/banking/${id}/reconcile`}>
+                        Reconcile
+                      </Link>
+                    </Button>
+                  </>
+                )}
+                <BankAccountActiveToggle
                   bankAccountId={id}
-                  disabled={countOf("unreviewed") === 0}
+                  version={bankAccount.version}
+                  active={bankAccount.isActive}
                 />
-                <Button asChild size="sm" variant="outline">
-                  <Link href={`/dashboard/m/accounting/banking/${id}/reconcile`}>
-                    Reconcile
-                  </Link>
-                </Button>
               </>
             )}
           </>
@@ -238,6 +256,16 @@ export default async function BankRegisterPage({
       />
 
       <AccountingNav />
+
+      {!bankAccount.isActive && (
+        <Card className="border-warning/40 bg-warning/8">
+          <CardContent className="py-3 text-sm">
+            This account is closed. Everything already in the books stays, and
+            you can still read and tidy the list below — but nothing new posts
+            to it until you reopen it.
+          </CardContent>
+        </Card>
+      )}
 
       <RegisterTabs
         bankAccountId={id}

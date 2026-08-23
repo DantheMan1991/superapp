@@ -8,7 +8,7 @@ import {
   requireOwnerRole,
   type LedgerCtx,
 } from "../core";
-import { loadBankAccount } from "./accounts";
+import { loadWritableBankAccount } from "./accounts";
 
 /** Shape of the ai_suggestion jsonb on bank_transactions. */
 export interface StoredAiSuggestion {
@@ -66,7 +66,7 @@ export async function categorizeTransaction(
 }> {
   requireOwnerRole(ctx);
   const txn = await loadUnreviewedTxn(tx, ctx.tenantId, args.transactionId);
-  const bankAccount = await loadBankAccount(tx, ctx.tenantId, txn.bankAccountId);
+  const bankAccount = await loadWritableBankAccount(tx, ctx.tenantId, txn.bankAccountId);
   if (args.accountId === bankAccount.accountId) {
     throw new LedgerError("ACCOUNT_NOT_FOUND", "cannot categorize to the register's own account");
   }

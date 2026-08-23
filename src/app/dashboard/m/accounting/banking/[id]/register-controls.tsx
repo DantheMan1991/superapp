@@ -37,12 +37,76 @@ import {
   excludeTransactionAction,
   matchTransactionToEntryAction,
   restoreTransactionAction,
+  setBankAccountActiveAction,
   suggestCategoriesAction,
   unmatchTransactionAction,
 } from "@/modules/accounting/banking/actions";
 import { formatCents } from "@/modules/accounting/lib/money";
+import { useConfirm } from "@/components/app/use-confirm";
 
 const ACCEPT_THRESHOLD = 0.7;
+
+/**
+ * Close a register, or reopen one.
+ *
+ * `setBankAccountActiveAction` has existed since session 3 and NOTHING called
+ * it, so `is_active` could only be changed by reaching into the database —
+ * which is how a closed account with four rows stuck in "to review", no way to
+ * reconcile and no way back was found in the first place. A state the app can
+ * enter and cannot leave is worse than a state it does not have.
+ */
+export function BankAccountActiveToggle({
+  bankAccountId,
+  version,
+  active,
+}: {
+  bankAccountId: string;
+  version: number;
+  active: boolean;
+}) {
+  const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
+  const [pending, startTransition] = useTransition();
+
+  async function toggle() {
+    const asked = active
+      ? await confirm({
+          title: "Close this account?",
+          description:
+            "Nothing is deleted and no balance changes — the account stops taking new transactions, imports and reconciliations. You can reopen it whenever you like.",
+          confirmLabel: "Close account",
+        })
+      : await confirm({
+          title: "Reopen this account?",
+          description:
+            "It starts taking new transactions, imports and reconciliations again.",
+          confirmLabel: "Reopen account",
+        });
+    if (!asked) return;
+    startTransition(async () => {
+      const result = await setBankAccountActiveAction({
+        bankAccountId,
+        expectedVersion: version,
+        active: !active,
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(active ? "Account closed" : "Account reopened");
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={toggle} disabled={pending}>
+        {active ? "Close account" : "Reopen account"}
+      </Button>
+      {confirmDialog}
+    </>
+  );
+}
 
 export function SuggestButton({
   bankAccountId,

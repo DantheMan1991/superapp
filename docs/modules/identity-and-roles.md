@@ -11,6 +11,26 @@
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 
+### 2026-08-23 — Give `verify-rls` the npm script its docblock already claimed (`claude/goofy-wilson-6651f3`)
+
+Docs-and-wiring only; no behaviour change to the script itself.
+
+- **`package.json` gains `"db:verify-rls": "tsx scripts/verify-rls.ts"`.** The
+  script's header docblock has documented `npm run db:verify-rls` since the day
+  it was written, but the script was never added — the documented command died
+  with `npm error Missing script: "db:verify-rls"`, and the only thing that
+  actually ran it was `npx tsx scripts/verify-rls.ts`.
+- **Why it mattered.** docs/security.md §8 requires this check after every
+  migration and [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md)'s
+  migrate-before-merge procedure leans on it. A documented command that errors
+  is a step people skip, which is precisely the "the check was skipped, so a
+  table reached production with RLS off" failure the script exists to prevent.
+- **AGENTS.md and docs/security.md §8 now name the npm command** where they
+  previously said "verify in `pg_class`/`pg_policies`" or gave the `npx` form.
+- Verified against the dev branch: `npm run db:verify-rls -- --dev` reports 140
+  tables, all ENABLED/FORCED with policies, and the table-dump form
+  (`-- --dev memberships`) prints the three `memberships` policies.
+
 ### 2026-08-05 — Make the Clerk role mirror trustworthy for background jobs (`claude/identity-role-mirror`)
 
 Prerequisite 1 of notifications. A daily digest runs with no session, so it
@@ -70,7 +90,8 @@ and the stored role had never had to be right, because nothing read it.
 - `src/db/index.ts` — `withTenant(id, fn, { role, userId })` turns a resolved
   role into an RLS setting.
 - `scripts/verify-rls.ts` — post-migration proof that every table is ENABLED,
-  FORCED and has policies. Run against both databases after every migration.
+  FORCED and has policies. `npm run db:verify-rls -- [--dev] [table]`; run
+  against both databases after every migration.
 
 ## Decisions & gotchas
 

@@ -12,6 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
+    "db:verify-rls": "tsx scripts/verify-rls.ts",
     "mailbox:probe": "tsx scripts/migadu-probe.ts",
     "jmap:probe": "tsx scripts/jmap-probe.ts",
     "mail:fixture": "tsx scripts/mail-fixture.ts",

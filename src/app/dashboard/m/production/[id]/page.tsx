@@ -41,11 +41,22 @@ import {
   formatRatio,
 } from "@/packs/production/core/yield";
 import {
+  LIVE_SOURCE_NOTES,
+  STAGE_REFUSALS,
+  formatCondemned,
+  reasonLabel,
+} from "@/packs/production/core/carcass";
+import {
   AddInputForm,
   AddOutputForm,
   CompleteRunButton,
   RemoveOutputButton,
 } from "@/packs/production/components/run-controls";
+import {
+  CarcassDialog,
+  RemoveCarcassButton,
+} from "@/packs/production/components/carcass-controls";
+import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +77,52 @@ const BASE = "/dashboard/m/production";
  *     livestock screens since it was built and has refused nothing, because
  *     nothing existed to refuse. It refuses here.
  */
+/**
+ * One stage ratio, or the sentence that stands where it would have been.
+ *
+ * **THE REFUSAL IS RENDERED AT THE SAME SIZE AS THE ANSWER**, which is the rule
+ * `livestock` arrived at for FCR: for a farm's first season the reason is the
+ * useful half, and *"the sheet accounts for fewer head than went in"* is an
+ * instruction where a blank cell is a shrug.
+ */
+function StageRatio({
+  title,
+  ratio,
+  detail,
+  refusal,
+  caveat,
+}: {
+  title: string;
+  ratio: number | null;
+  detail: string;
+  refusal: string | null;
+  caveat?: string | null;
+}) {
+  return (
+    <div className="rounded-md border p-4">
+      <p className="text-sm font-medium text-muted-foreground">{title}</p>
+      {ratio === null ? (
+        <>
+          <div className="mt-1 text-2xl font-semibold text-muted-foreground">—</div>
+          <p className="mt-1 text-xs text-muted-foreground">{refusal}</p>
+        </>
+      ) : (
+        <>
+          <div className="mt-1 text-2xl font-semibold tabular-nums">
+            {formatRatio(ratio)}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+          {caveat && (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-500">
+              {caveat}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default async function ProductionRunPage({
   params,
 }: {
@@ -110,10 +167,31 @@ export default async function ProductionRunPage({
 
   if (!data) notFound();
   const { detail, items, lots, locations, pack, balances, blocks } = data;
-  const { run, inputs, outputs, yieldResult } = detail;
+  const { run, inputs, outputs, yieldResult, carcasses, tally } = detail;
   const isOwner = ctx.role === "owner";
   const isOpen = run.status === "in_progress";
   const runWord = labelFor(pack.labels, "productionRun", "Run");
+  /**
+   * **THE ONE PLACE THIS PACK SAYS SOMETHING INDUSTRY-SHAPED OUT LOUD**, and it
+   * is a label rather than a rule, which is the cheapest form for it to take. A
+   * profile whose runs are bakes overrides it and nothing else changes; the
+   * fallback is here rather than in `vocabulary.ts` so it stays visible.
+   */
+  const sheetWord = labelFor(pack.labels, "killSheet", "Kill sheet");
+
+  const carcassInputs = inputs.map((row) => ({
+    id: row.id,
+    label: `${row.lotCode ?? "—"} · ${row.itemName} · ${formatQuantity(
+      row.quantity,
+      row.unit,
+    )}`,
+  }));
+  const carcassById = new Map(carcassInputs.map((i) => [i.id, i.label]));
+  // Both are null together — there is nothing to reconcile a sheet against when
+  // no input on the run is counted. Pulled out so the narrowing survives into
+  // the JSX below.
+  const headIn = tally.headIn;
+  const headUnaccounted = tally.headUnaccounted;
 
   const itemById = new Map(items.map((i) => [i.id, i]));
   const itemOptions = items.map((i) => ({
@@ -221,6 +299,22 @@ export default async function ProductionRunPage({
                   {formatLb(yieldResult.yield.inLb)} in. Measured on this run —
                   never a stored factor, because the next one will differ.
                 </p>
+                {/**
+                 * **THE DENOMINATOR STILL SAYS EVERYTHING THAT WENT IN, and the
+                 * sheet does not change it.** That was slice 0's call and it was
+                 * the right one: a run that lost one to condemnation should read
+                 * as a low yield that is visible, not a normal one with a hidden
+                 * correction. What was missing was the explanation, and the
+                 * sheet is it — so the number stays put and gains a sentence.
+                 */}
+                {tally.headCondemned > 0 && (
+                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-500">
+                    {formatCondemned(tally)}, and they are still in the pounds
+                    that went in. This number is meant to read low when that
+                    happens — the {sheetWord.toLowerCase()} below says by how
+                    much and why.
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -364,6 +458,256 @@ export default async function ProductionRunPage({
                 ))}
               </TableBody>
             </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/**
+       * THE CARCASS STAGE, BETWEEN THE ANIMAL AND THE BOX — and it sits between
+       * them on the page for the same reason it sits between them in the model.
+       *
+       * Everything here is folded from the sheet's own rows. Nothing on it is
+       * stored: not the dressing percentage, not the cutting yield, not the
+       * condemnation rate. A stored one would be a factor, and a factor is the
+       * unauditable fudge this pack was built to refuse.
+       */}
+      <Card>
+        <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+          <div>
+            <CardTitle className="text-base">{sheetWord}</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              What hung, what was condemned, and the two ratios that need a
+              carcass to exist between the animal and the box.
+            </p>
+          </div>
+          <CarcassDialog
+            runId={run.id}
+            inputs={carcassInputs}
+            sheetWord={sheetWord}
+            trigger={
+              <Button variant="outline" size="sm">
+                Add a line
+              </Button>
+            }
+          />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {carcasses.length === 0 ? (
+            <EmptyState
+              icon={<ChevronLeft className="h-5 w-5" />}
+              title={`No ${sheetWord.toLowerCase()} yet`}
+              description={
+                inputs.length === 0
+                  ? "Nothing has gone into this run, so there are no carcasses to record. Add what went in first."
+                  : "The sheet usually arrives days after the run, sometimes by post — so this can be filled in long after the boxes have landed, and nothing about the cost moves when it is. Until then the overall yield is the only ratio this run can state."
+              }
+            />
+          ) : (
+            <>
+              {/**
+               * **THE RECONCILIATION LINE IS ALWAYS ON, AND IT IS FIRST.** Both
+               * ratios refuse while the sheet does not account for what went in,
+               * so a person needs to see the gap before they see two dashes and
+               * conclude the feature is broken.
+               */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                <span className="font-medium">
+                  {tally.headOnSheet} head on the sheet
+                </span>
+                {headIn !== null && headUnaccounted !== null && (
+                  <span
+                    className={
+                      headUnaccounted === 0
+                        ? "text-muted-foreground"
+                        : "text-amber-700 dark:text-amber-500"
+                    }
+                  >
+                    {headUnaccounted === 0
+                      ? `matches the ${headIn} that went in`
+                      : headUnaccounted > 0
+                        ? `${headUnaccounted} of the ${headIn} that went in are not on it yet`
+                        : `${Math.abs(headUnaccounted)} more than the ${headIn} that went in`}
+                  </span>
+                )}
+                <span className="text-muted-foreground">
+                  {tally.headPassed} passed
+                </span>
+                <span
+                  className={
+                    tally.headCondemned > 0
+                      ? "font-medium text-destructive"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {formatCondemned(tally)}
+                </span>
+              </div>
+
+              {/**
+               * **THE CAUSES LEAD WHEN THERE ARE ANY**, above the ratios and
+               * above the list — `inventory`'s counting page made the same call
+               * and the reasoning carries: three birds condemned is a number,
+               * and the same cause twice is the thing to act on. The unstated
+               * ones are counted in rather than dropped, so the causes always
+               * add up to the count beside them.
+               */}
+              {tally.headCondemned > 0 && (
+                <div className="rounded-md border border-destructive/40 p-3">
+                  <p className="text-sm font-medium">Why they were condemned</p>
+                  <ul className="mt-2 space-y-1">
+                    {tally.byReason.map((group) => (
+                      <li
+                        key={group.reason || "__unstated__"}
+                        className="flex items-baseline justify-between gap-4 text-sm"
+                      >
+                        <span
+                          className={
+                            group.reason === "" ? "text-muted-foreground" : ""
+                          }
+                        >
+                          {reasonLabel(group.reason)}
+                        </span>
+                        <span className="tabular-nums">{group.head} head</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {tally.headCondemnedUnstated > 0 && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      A cause nobody wrote down is still a condemnation. It is
+                      counted here rather than guessed at.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <StageRatio
+                  title="Dressing percentage"
+                  ratio={detail.dressing.dressing?.ratio ?? null}
+                  detail={
+                    detail.dressing.dressing
+                      ? `${formatLb(detail.dressing.dressing.toLb)} hanging out of ${formatLb(
+                          detail.dressing.dressing.fromLb,
+                        )} live. ${LIVE_SOURCE_NOTES[detail.dressing.dressing.liveSource]}`
+                      : ""
+                  }
+                  refusal={
+                    detail.dressing.refusedBecause
+                      ? STAGE_REFUSALS[detail.dressing.refusedBecause]
+                      : null
+                  }
+                  /* A low ratio with a hidden reason is how a real condemnation
+                     gets read as a bad kill, every time, forever. */
+                  caveat={
+                    detail.dressing.dressing?.includesCondemned
+                      ? `${tally.headCondemned} condemned head are still in the live weight, because only the farm's own scale covered them — so this reads low by about that much. Per-carcass live weights from the plant would take them out properly.`
+                      : null
+                  }
+                />
+                <StageRatio
+                  title="Cutting yield"
+                  ratio={detail.cutting.cutting?.ratio ?? null}
+                  detail={
+                    detail.cutting.cutting
+                      ? `${formatLb(detail.cutting.cutting.toLb)} packaged out of ${formatLb(
+                          detail.cutting.cutting.fromLb,
+                        )} hanging. What the cutting room did, with the animal's own conformation out of it.`
+                      : ""
+                  }
+                  refusal={
+                    detail.cutting.refusedBecause
+                      ? STAGE_REFUSALS[detail.cutting.refusedBecause]
+                      : null
+                  }
+                />
+              </div>
+
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tag</TableHead>
+                    <TableHead>Came out of</TableHead>
+                    <TableHead className="text-right">Head</TableHead>
+                    <TableHead className="text-right">Live (plant)</TableHead>
+                    <TableHead className="text-right">Hanging</TableHead>
+                    <TableHead>Outcome</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {carcasses.map((row) => {
+                    const condemned = row.disposition === "condemned";
+                    return (
+                      <TableRow key={row.id}>
+                        <TableCell className="font-medium">
+                          {row.tag || (
+                            <span className="text-muted-foreground">
+                              Batch line
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {carcassById.get(row.runInputId) ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {row.headCount}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {formatLb(row.liveLb)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatLb(row.hangingLb)}
+                        </TableCell>
+                        <TableCell>
+                          {condemned ? (
+                            <span className="text-sm text-destructive">
+                              Condemned
+                              {row.condemnReason ? ` · ${row.condemnReason}` : ""}
+                            </span>
+                          ) : (
+                            <Badge variant="outline">Passed</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {/* Editable and removable on a FINISHED run too. The
+                              sheet is a transcription of somebody else's paper,
+                              not a ledger entry, and it routinely arrives after
+                              the boxes have landed. */}
+                          <div className="flex justify-end gap-1">
+                            <CarcassDialog
+                              runId={run.id}
+                              inputs={carcassInputs}
+                              sheetWord={sheetWord}
+                              existing={{
+                                id: row.id,
+                                runInputId: row.runInputId,
+                                tag: row.tag,
+                                headCount: row.headCount,
+                                liveLb: row.liveLb,
+                                hangingLb: row.hangingLb,
+                                condemned,
+                                condemnReason: row.condemnReason,
+                                notes: row.notes,
+                              }}
+                              trigger={
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-muted-foreground"
+                                >
+                                  Correct
+                                </Button>
+                              }
+                            />
+                            <RemoveCarcassButton id={row.id} />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </>
           )}
         </CardContent>
       </Card>

@@ -4,13 +4,17 @@ import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import {
   ProductionError,
+  addRunCarcass,
   addRunInput,
   addRunOutput,
   completeRun,
   inputBlocks,
+  listRunCarcasses,
   listRunOutputs,
+  removeRunCarcass,
   runDetail,
   startRun,
+  updateRunCarcass,
   type ProductionCtx,
 } from "../src/packs/production/ops";
 import {
@@ -822,5 +826,326 @@ d("production ops", () => {
         userId: STAFF,
       }),
     ).rejects.toThrow(ProductionError);
+  });
+
+  /**
+   * ── THE KILL SHEET (slice 1a) ────────────────────────────────────────────
+   *
+   * Three things here cannot be seen by a pure test and are the reason this
+   * block exists:
+   *
+   *   1. **`head_in` is read off the INPUT's ledger row**, so the sheet is
+   *      reconciled against what actually left the pen rather than against a
+   *      number somebody retyped.
+   *   2. **A finished run still accepts a sheet.** Everything else on this pack
+   *      refuses once the cost has landed; the sheet arrives days later and
+   *      posts nothing, so it must not.
+   *   3. **The merged row is what gets validated**, not the patch — the trap
+   *      `livestock` hit on treatments, reachable here one field at a time.
+   */
+  async function penForSheet(code: string, head: number, liveLb: number) {
+    const pen = await penWithCost(code, head);
+    const run = await asOwner((tx) =>
+      startRun(tx, ownerCtx(), {
+        code: `SHEET-${code}`,
+        runKind: "butchering",
+        startedOn: TODAY,
+      }),
+    );
+    const input = await asOwner((tx) =>
+      addRunInput(
+        tx,
+        ownerCtx(),
+        {
+          runId: run.id,
+          itemId: pen.itemId,
+          lotId: pen.inventoryLotId,
+          quantity: head,
+          weightLb: liveLb,
+          occurredOn: TODAY,
+        },
+        TODAY,
+      ),
+    );
+    return { pen, run, input };
+  }
+
+  it("folds both stage ratios off the sheet, with the condemned out of each", async () => {
+    /**
+     * **THE SLICE, END TO END.** 100 birds go in at 600 lb on the farm's own
+     * scale. The plant weighs them: 97 pass at 582 lb live and hang at 407.4 lb,
+     * three are condemned for airsacculitis.
+     *
+     * Dressing is 407.4 / 582 — the condemned birds in NEITHER number, which is
+     * the only honest way to leave them out. Cutting is the boxes over the same
+     * 407.4. And the OVERALL yield's denominator is untouched at 600, because
+     * slice 0 chose to state it plainly and a run that lost one to condemnation
+     * should read low visibly rather than be quietly corrected.
+     */
+    const { run, input } = await penForSheet("SHEET-A", 100, 600);
+    const birds = await meatItem("Sheet broilers");
+
+    await asOwner((tx) =>
+      addRunOutput(tx, ownerCtx(), {
+        runId: run.id,
+        itemId: birds.id,
+        quantity: 300,
+      }),
+    );
+    await asOwner((tx) =>
+      addRunCarcass(tx, ownerCtx(), {
+        runId: run.id,
+        runInputId: input.id,
+        headCount: 97,
+        liveLb: 582,
+        hangingLb: 407.4,
+      }),
+    );
+    await asOwner((tx) =>
+      addRunCarcass(tx, ownerCtx(), {
+        runId: run.id,
+        runInputId: input.id,
+        headCount: 3,
+        liveLb: 18,
+        condemned: true,
+        condemnReason: "airsacculitis",
+      }),
+    );
+
+    const detail = await asOwner((tx) =>
+      runDetail(tx, tenantId, run.id, TODAY),
+    );
+
+    expect(detail!.tally.headIn).toBe(100);
+    expect(detail!.tally.headOnSheet).toBe(100);
+    expect(detail!.tally.headUnaccounted).toBe(0);
+    expect(detail!.tally.headCondemned).toBe(3);
+    expect(detail!.tally.byReason).toEqual([
+      { reason: "airsacculitis", head: 3 },
+    ]);
+
+    expect(detail!.dressing.dressing?.liveSource).toBe("plant");
+    expect(detail!.dressing.dressing?.includesCondemned).toBe(false);
+    expect(detail!.dressing.dressing?.fromLb).toBe(582);
+    expect(detail!.dressing.dressing?.toLb).toBe(407.4);
+
+    expect(detail!.cutting.cutting?.fromLb).toBe(407.4);
+    expect(detail!.cutting.cutting?.toLb).toBe(300);
+
+    // Untouched by the sheet, and deliberately so.
+    expect(detail!.yieldResult.yield?.inLb).toBe(600);
+    expect(detail!.yieldResult.yield?.outLb).toBe(300);
+  });
+
+  it("reconciles the sheet against the head that actually left the pen", async () => {
+    // `head_in` comes from the input's own ledger row. Sixty carcasses under a
+    // hundred birds' boxes is the case that reads OVER 100% if nothing refuses.
+    const { run, input } = await penForSheet("SHEET-B", 100, 600);
+    const birds = await meatItem("Short sheet broilers");
+
+    await asOwner((tx) =>
+      addRunOutput(tx, ownerCtx(), {
+        runId: run.id,
+        itemId: birds.id,
+        quantity: 300,
+      }),
+    );
+    await asOwner((tx) =>
+      addRunCarcass(tx, ownerCtx(), {
+        runId: run.id,
+        runInputId: input.id,
+        headCount: 60,
+        hangingLb: 252,
+      }),
+    );
+
+    const detail = await asOwner((tx) =>
+      runDetail(tx, tenantId, run.id, TODAY),
+    );
+    expect(detail!.tally.headUnaccounted).toBe(40);
+    expect(detail!.dressing.refusedBecause).toBe("SHEET_INCOMPLETE");
+    expect(detail!.cutting.refusedBecause).toBe("SHEET_INCOMPLETE");
+
+    // Finish the sheet and both answers arrive, with nothing else changed.
+    await asOwner((tx) =>
+      addRunCarcass(tx, ownerCtx(), {
+        runId: run.id,
+        runInputId: input.id,
+        headCount: 40,
+        hangingLb: 168,
+      }),
+    );
+    const after = await asOwner((tx) => runDetail(tx, tenantId, run.id, TODAY));
+    expect(after!.tally.headUnaccounted).toBe(0);
+    expect(after!.dressing.dressing?.toLb).toBe(420);
+    expect(after!.dressing.dressing?.liveSource).toBe("farm");
+    expect(after!.cutting.cutting?.fromLb).toBe(420);
+  });
+
+  it("ACCEPTS A SHEET ON A FINISHED RUN, and moves no money doing it", async () => {
+    /**
+     * **THE ONE THING ON THIS PACK A COMPLETE RUN STILL TAKES.** The design says
+     * the sheet arrives days after the run, from a party who is not this farm —
+     * so a sheet that could only be entered before the boxes landed would be a
+     * sheet that was never entered. It posts nothing, which is what makes that
+     * safe: the landed cost is identical before and after.
+     */
+    const { run, input } = await penForSheet("SHEET-C", 50, 300);
+    const birds = await meatItem("Late sheet broilers");
+
+    await asOwner((tx) =>
+      addRunOutput(tx, ownerCtx(), {
+        runId: run.id,
+        itemId: birds.id,
+        quantity: 210,
+      }),
+    );
+    await asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY));
+
+    const before = await asOwner((tx) => runDetail(tx, tenantId, run.id, TODAY));
+    expect(before!.run.status).toBe("complete");
+    expect(before!.dressing.refusedBecause).toBe("NO_SHEET");
+
+    await asOwner((tx) =>
+      addRunCarcass(tx, ownerCtx(), {
+        runId: run.id,
+        runInputId: input.id,
+        headCount: 50,
+        liveLb: 295,
+        hangingLb: 210,
+      }),
+    );
+
+    const after = await asOwner((tx) => runDetail(tx, tenantId, run.id, TODAY));
+    expect(after!.dressing.dressing?.fromLb).toBe(295);
+    expect(after!.dressing.dressing?.toLb).toBe(210);
+    // Nothing about the money moved. The sheet explains the run; it does not
+    // restate it.
+    expect(after!.landedCents).toBe(before!.landedCents);
+    expect(after!.potCents).toBe(before!.potCents);
+  });
+
+  it("refuses an input belonging to a different run", async () => {
+    // The FK only says the input exists. Attributing this farm's carcasses to
+    // the wrong pen is the one claim the traceability chain exists to prevent.
+    const first = await penForSheet("SHEET-D", 10, 60);
+    const second = await penForSheet("SHEET-E", 10, 60);
+
+    await expect(
+      asOwner((tx) =>
+        addRunCarcass(tx, ownerCtx(), {
+          runId: first.run.id,
+          runInputId: second.input.id,
+          headCount: 1,
+        }),
+      ),
+    ).rejects.toThrow(/which of this run's inputs/);
+  });
+
+  it("refuses a hanging weight on a condemned carcass, and on the way in", async () => {
+    const { run, input } = await penForSheet("SHEET-F", 10, 60);
+    await expect(
+      asOwner((tx) =>
+        addRunCarcass(tx, ownerCtx(), {
+          runId: run.id,
+          runInputId: input.id,
+          headCount: 1,
+          condemned: true,
+          hangingLb: 4,
+        }),
+      ),
+    ).rejects.toThrow(/nothing off it can be sold/);
+  });
+
+  it("validates the MERGED row on a correction, not the patch", async () => {
+    /**
+     * The trap `livestock` hit on treatments, and it is reachable here one field
+     * at a time: condemning a line that already carries a hanging weight, or
+     * adding a weight to a line that is still condemned. Validating the patch
+     * alone would let either through and leave a condemned carcass with pounds
+     * on it — which is exactly the row the CHECK exists to forbid.
+     */
+    const { run, input } = await penForSheet("SHEET-G", 10, 60);
+    const carcass = await asOwner((tx) =>
+      addRunCarcass(tx, ownerCtx(), {
+        runId: run.id,
+        runInputId: input.id,
+        headCount: 1,
+        hangingLb: 40,
+      }),
+    );
+
+    await expect(
+      asOwner((tx) =>
+        updateRunCarcass(tx, ownerCtx(), carcass.id, { condemned: true }),
+      ),
+    ).rejects.toThrow(/nothing off it can be sold/);
+
+    // Clearing the weight in the same act is what a condemnation actually is.
+    const condemned = await asOwner((tx) =>
+      updateRunCarcass(tx, ownerCtx(), carcass.id, {
+        condemned: true,
+        hangingLb: null,
+        condemnReason: "bruising",
+      }),
+    );
+    expect(condemned.disposition).toBe("condemned");
+    expect(condemned.hangingLb).toBeNull();
+    expect(condemned.condemnReason).toBe("bruising");
+
+    // And passing it again drops the cause, because a reason on a passed line
+    // is a sentence about something that did not happen.
+    const passed = await asOwner((tx) =>
+      updateRunCarcass(tx, ownerCtx(), carcass.id, { condemned: false }),
+    );
+    expect(passed.disposition).toBe("passed");
+    expect(passed.condemnReason).toBe("");
+  });
+
+  it("lets a member transcribe, correct and remove a line", async () => {
+    // Copying somebody else's piece of paper into a form decides nothing and
+    // creates no cost object, so it is a chore rather than an owner's job.
+    const { run, input } = await penForSheet("SHEET-H", 10, 60);
+    const asStaff = <T,>(fn: (tx: Tx) => Promise<T>) =>
+      withTenant(tenantId, fn, { role: "staff", userId: STAFF });
+
+    const carcass = await asStaff((tx) =>
+      addRunCarcass(tx, staffCtx(), {
+        runId: run.id,
+        runInputId: input.id,
+        tag: "A-114",
+        headCount: 1,
+        hangingLb: 40,
+      }),
+    );
+    expect(carcass.tag).toBe("A-114");
+
+    const corrected = await asStaff((tx) =>
+      updateRunCarcass(tx, staffCtx(), carcass.id, { hangingLb: 42 }),
+    );
+    expect(corrected.hangingLb).toBe(42);
+    // A correction is in place — there is no second row, because a weight typed
+    // wrong never happened.
+    expect(await asStaff((tx) => listRunCarcasses(tx, tenantId, run.id))).toHaveLength(
+      1,
+    );
+
+    await asStaff((tx) => removeRunCarcass(tx, staffCtx(), carcass.id));
+    expect(await asStaff((tx) => listRunCarcasses(tx, tenantId, run.id))).toHaveLength(
+      0,
+    );
+  });
+
+  it("refuses a line covering no head at all", async () => {
+    const { run, input } = await penForSheet("SHEET-I", 10, 60);
+    await expect(
+      asOwner((tx) =>
+        addRunCarcass(tx, ownerCtx(), {
+          runId: run.id,
+          runInputId: input.id,
+          headCount: 0,
+        }),
+      ),
+    ).rejects.toThrow(/at least one head/);
   });
 });

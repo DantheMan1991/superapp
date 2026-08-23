@@ -18,7 +18,8 @@ this dossier is the build record.
 | # | Slice | State |
 | --- | --- | --- |
 | **0** | **Run model + outputs landing in `inventory`** — the spine | **shipped 2026-08-20** |
-| 1 | Meat runs: both paths, eligibility stamping, exemption counter, kill-sheet capture — **and condemnations** | next |
+| **1a** | **The carcass stage** — the kill sheet, dressing percentage vs cutting yield, **and condemnations** | **shipped 2026-08-23** |
+| 1b | Meat runs: the processing path on the run, eligibility stamping, the exemption counter, and the kill sheet as a **document** (photograph or PDF → extraction → these rows) | next |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
 | 4 | Label generation | |
@@ -28,7 +29,105 @@ Commitments (pre-sold halves, pre-ordered fresh birds) are shared with `retail`
 and slice with it. A pre-sold half is never inventory and is never an output
 lot.
 
+**Slice 1 split in two when it came to be built**, agreed 2026-08-23, and the
+reason is an ordering constraint rather than a preference: the extraction half of
+kill-sheet capture — photograph the plant's paperwork, let AI read it, have a
+person confirm it — has to extract INTO something, and until 1a there was no
+carcass row to put a hanging weight in. The record first, then the door onto it.
+That is the same shape `land` found when 2a became three slices.
+
 ## Build log
+
+### 2026-08-23 — Slice 1a: the carcass stage, and where a condemnation finally goes (`claude/homestead-farm-modulas-elewgg`)
+
+**ONE HONEST RATIO BECAME TWO, and the pack stopped owing the design an
+explanation.** Slice 0 could say packaged over live and said no more, on purpose:
+telling **dressing percentage** (live → hanging) from **cutting yield** (hanging
+→ packaged) needs the carcass recorded as a stage of its own, and the design
+names those two as the ratios a butcher actually argues about. `production_run_carcasses`
+is that stage. Both ratios are folded in `core/carcass.ts` and stored nowhere,
+which is the rule this pack was built on.
+
+**CONDEMNATIONS WERE DEFERRED FOR AN ARITHMETIC REASON, AND THE ARITHMETIC IS
+WHAT SETTLED THEM.** Slice 0's note is worth re-reading, because the fix is
+exactly the shape it predicted: a `condemned_head` column would have made the
+head reconcile while leaving the condemned animal's live weight in the
+denominator, and *nothing short of per-animal weights can take it out*. So
+`live_lb` sits on the carcass row, and there is exactly ONE honest adjustment —
+
+> **Sum only the animals that PASSED, on both sides of the ratio.**
+
+The condemned animals are then in neither number, nothing is averaged, and no
+correction is applied to anything. It works only when the plant weighed the
+carcasses. When it did not, the app **declines to adjust and says so**:
+`includesCondemned` is true, the denominator is the farm's own trailer weight
+with everything that left the yard in it, and the screen names the gap. A real
+condemnation reading as a bad kill forever is the failure that flag exists to
+prevent.
+
+**TWO LIVE WEIGHTS ARE ALLOWED TO DISAGREE, AND THEY ARE NEVER SUMMED.** The
+input's `weight_lb` is what left the farm; the carcass's `live_lb` is what the
+plant's scale said hours later, and shrink makes them differ by 3–5% for a real
+reason the design already recorded. The fold **chooses** — the plant's when it
+covers every passed carcass, the farm's otherwise — and prints which. That is
+`land`'s declared-versus-measured acreage rule generalised off geometry: report
+both, prefer the one that answers the question, never overwrite.
+
+**THE NEW REFUSAL IS THE ONE THAT WOULD HAVE READ OVER 100%.** Sixty birds
+transcribed off a sheet of a hundred puts all the boxes over some of the
+carcasses, and `SHEET_INCOMPLETE` catches it. The sheet reconciles against
+`head_in` read off the input's own ledger row — not a number retyped — and the
+count comes through the count dimension's base, so five dozen is sixty rather
+than five. Ten refusals now, each with a sentence.
+
+**A FINISHED RUN ACCEPTS A KILL SHEET, and it is the first thing on this pack
+that does.** Everything else refuses once the cost has landed, because everything
+else stamped something. A carcass row stamps nothing — no quantity, no cost, no
+movement — and the design is explicit that the sheet *arrives days after the run,
+from a party who is not this farm*. A sheet enterable only before the boxes
+landed would be a sheet nobody ever entered. So it follows `livestock_weights`
+rather than `production_run_outputs`: corrected in place, because a number typed
+wrong never happened. An ops test asserts the landed cost is byte-identical
+before and after.
+
+**ONE LINE IS ONE DISPOSITION**, which is what keeps `hanging_lb` meaning one
+thing. "100 birds, 3 condemned" is two rows, not one with a count on it, and a
+condemned line carries no hanging weight — CHECKed in the database and refused in
+words by ops. A partial condemnation is deliberately NOT a third state: the
+carcass passed, and the bruised quarter that never came off it is a byproduct
+that failed to materialise, which is slice 3's business.
+
+**THE CAUSES ARE OPTIONAL AND THE UNSTATED ONES ARE COUNTED.** `inventory` made
+an adjustment's reason required because the reason is the diagnostic and the farm
+is the one who knows it; here the farm is reading somebody else's paperwork,
+which can be smudged, abbreviated or silent. Refusing to record the FACT of a
+condemnation until somebody supplies a cause would trade a real number for an
+invented one — `livestock`'s *an unknown is not a zero*, a second time. They
+group under an empty key rather than being dropped, so the causes always add up
+to the count beside them.
+
+- **The overall yield's denominator did not move, and that is the whole point.**
+  Slice 0 chose to state it plainly as everything that went in so a condemnation
+  reads as a visibly low yield rather than a normal one with a hidden correction.
+  What was missing was the explanation. The sheet is the explanation; the number
+  stays exactly where it was and gains a sentence beside it.
+- **The condemnation column is on the LIST, and only once a sheet exists.** A
+  cause repeating across runs is the finding the design asks for — *the variance
+  across batches is the learning* — and a per-run page can never show it. A
+  tenant whose runs are bakes never sees the column.
+- **A run with no sheet reads "—", never "0".** Zero would say the plant passed
+  everything.
+- Migration `0184` needed **no hand-reordering** — ninth check, and this time the
+  answer was no. Both composite-FK targets (`production_runs`,
+  `production_run_inputs`) were created back in `0168`, which is what the rule
+  actually asks: *check whether the target is created in the same migration*.
+  `0185` is the RLS pair.
+- 25 new pure tests, 8 new ops tests, 7 new isolation tests. `killSheet` declared
+  in `src/packs/index.ts` and set by the homestead profile.
+- **NOT DRIVEN IN A BROWSER.** No database is reachable from this container, so
+  the db-backed suites skipped locally and CI is the first run of them. Recorded
+  as the top open item rather than glossed — five of the last six slices had a
+  defect only clicking found.
 
 ### 2026-08-22 — The question this pack was answering for itself (`claude/a-cost-you-can-put-right`)
 
@@ -221,6 +320,7 @@ tests:**
 | `production_runs` | One pass of turning things into other things | `tenant_id`, FORCE RLS. `run_kind` open taxonomy (P1), values from the profile. `status` in `in_progress\|complete` — two, because the only state that matters is whether the cost is still held here. `cost_basis` is stamped at completion and never re-derived. `crew_size` / `labour_hours` are recorded and **not costed** |
 | `production_run_inputs` | **What went in. A JOIN, not a second ledger** | Composite FKs to the run (CASCADE) and to `inventory_movements`. UNIQUE per movement — two rows would put one cost in two runs, the same rule `livestock_feed_draws` follows. Its only own column is `weight_lb` |
 | `production_run_outputs` | What came out — **and the one place holding a quantity before the ledger does** | Composite FKs to the run (CASCADE), the item, the lot, the receipt and the location. CHECK: `lot_id` and `inventory_movement_id` are null together — landed means both. Frozen once landed |
+| `production_run_carcasses` | **The kill sheet, line by line** — the stage between the animal and the box | `tenant_id`, FORCE RLS. Composite FKs to the run and to the **input** (both CASCADE); `run_input_id` is REQUIRED, which makes the chain carcass → input → movement → lot total. `head_count` is 1 for a beef and 70 for a pen. `disposition` in `passed\|condemned` — two, because one line is one outcome. CHECKs: a condemned line carries no `hanging_lb`, a passed line carries no `condemn_reason`. **Writable on a finished run**, unlike everything else here |
 
 **Everything else lives in `inventory`:**
 
@@ -233,16 +333,22 @@ tests:**
 | Is this pen clear to process? | `livestock`, through the run-input handler |
 
 **Not columns, deliberately** — each would have no reader today: a yield or a
-ratio (folded, and a stored one is the fudge this pack exists to refuse), a
-`cost_cents` on either side (the movements hold it), condemned head (slice 1),
-byproduct NRV and labour cost (slice 3), cut sheets and recipes (slices 1 and 2
-— one shared run model, separate templates).
+ratio (folded, and a stored one is the fudge this pack exists to refuse — which
+now covers dressing percentage, cutting yield AND the condemnation rate), a
+`cost_cents` on any of the three tables (the movements hold it), byproduct NRV
+and labour cost (slice 3), cut sheets and recipes (slices 1b and 2 — one shared
+run model, separate templates), and the processing path and eligibility flag
+(slice 1b).
 
 ## Key files & seams
 
 - `src/packs/production/core/yield.ts` — pure. **The report only this product
   can produce, and its five refusals.** Read this before changing anything about
   what a yield means
+- `src/packs/production/core/carcass.ts` — pure. **The two stage ratios, and the
+  single honest condemnation adjustment.** Read this before changing anything
+  about what a dressing percentage means, and in particular before being tempted
+  to subtract an average condemned weight from a total
 - `src/packs/production/core/roll.ts` — pure. The pro-rata off a lot, the basis
   rule, and the largest-remainder split. **Read this before changing anything
   about what an output cost**
@@ -262,8 +368,12 @@ byproduct NRV and labour cost (slice 3), cut sheets and recipes (slices 1 and 2
   does
 - `src/packs/inventory/core/costing.ts` → `lotCarried` — the net-of-released
   fold, and the partial-processing bug it prevents
+- `src/packs/production/components/carcass-controls.tsx` — the sheet's one
+  dialog, used for both adding and correcting. **The form changes shape when a
+  carcass is condemned** rather than taking a number it will throw away
 - `src/db/schema/production.ts` · `drizzle/0168_soft_screwball.sql` ·
-  `drizzle/0169_production_rls.sql`
+  `drizzle/0169_production_rls.sql` · `drizzle/0184_rare_the_anarchist.sql` ·
+  `drizzle/0185_production_run_carcasses_rls.sql`
 - `tests/production.test.ts` · `tests/production-ops.test.ts` ·
   `tests/isolation/production.test.ts`
 
@@ -274,22 +384,59 @@ byproduct NRV and labour cost (slice 3), cut sheets and recipes (slices 1 and 2
   and folded at read time. This is `inventory`'s rule as much as this pack's,
   and it is the single most likely thing a future slice will be tempted to
   "optimise".
-- **CONDEMNATIONS ARE SLICE 1, AND THIS SLICE DOES NOT PRETEND THEY ARE NOT
-  REAL.** The design is explicit that delivered head ≠ sellable carcasses and
-  that yields will not reconcile without somewhere to put it. Two things made
-  slice 1 the right home. First, a condemnation is a fact that arrives on the
-  KILL SHEET, from a party who is not this farm, often days after the run — so
-  it needs the sheet capture and the per-animal identity slice 1 builds, not a
-  column somebody guesses at on the day. Second, and more decisive: a
-  `condemned_head` column here would make the head reconcile (it already does —
-  every head left through `removeHead`) while making the YIELD wrong in a NEW
-  way. The condemned animal's live weight is in the denominator, and nothing
-  short of per-animal weights can take it out; subtracting an average would be
-  exactly the unauditable fudge this pack refuses for conversion factors. **So
-  slice 0 states its denominator plainly — *everything that went in* — and
-  refuses to adjust it.** A run that lost one to condemnation reads as a low
-  yield with no explanation, which is honest and visible, rather than a normal
-  yield with a hidden correction.
+- ~~**CONDEMNATIONS ARE SLICE 1**~~ — **built 2026-08-23, and slice 0's stated
+  reason is what decided the shape.** That note said a `condemned_head` column
+  would make the head reconcile while leaving the condemned animal's live weight
+  in the denominator, and that *nothing short of per-animal weights can take it
+  out*. It was right, so `live_lb` went on the carcass row and there is exactly
+  **one** adjustment: sum only the animals that PASSED, on both sides of the
+  ratio. Nothing is averaged and nothing is corrected. When the plant did not
+  weigh the carcasses the app **declines to adjust**, flags
+  `includesCondemned`, and names the gap on screen.
+- **THE OVERALL YIELD'S DENOMINATOR IS STILL *EVERYTHING THAT WENT IN*, and the
+  kill sheet did not change it.** Slice 0 chose that so a run which lost one to
+  condemnation reads as a visibly low yield rather than a normal one with a
+  hidden correction, and it is still the right call — a softened headline number
+  is how a real loss stops being noticed. What was missing was the explanation
+  beside it. The sheet supplies that, and the two stage ratios say where the
+  pounds actually went.
+- **ONE CARCASS LINE IS ONE DISPOSITION.** "100 birds, 3 condemned" is two rows,
+  never one row with a count on it, and that is what keeps `hanging_lb` meaning a
+  single thing: a line carrying a hanging weight is a line that passed. **A
+  partial condemnation is not a third state** — a bruised quarter trimmed off an
+  otherwise good carcass means the carcass PASSED, and what did not come off it
+  is a byproduct that failed to materialise, which is slice 3's business.
+- **TWO LIVE WEIGHTS, CHOSEN BETWEEN AND NEVER SUMMED.** The input's `weight_lb`
+  is the trailer ticket; the carcass's `live_lb` is the plant's scale hours
+  later. Animals lose 3–5% in between, so they disagree for a real reason. The
+  fold takes the plant's when it covers every passed carcass — because only then
+  can a condemnation be left out properly — and the farm's otherwise, and the
+  screen prints which. This is `land`'s declared-versus-measured acreage rule
+  arriving somewhere with no geometry in it: report both, prefer the one that
+  answers the question, never overwrite.
+- **A CONDEMNATION'S CAUSE IS OPTIONAL, WHICH IS THE OPPOSITE OF WHAT
+  `inventory` DECIDED FOR AN ADJUSTMENT'S REASON.** The difference is who knows
+  it. A farm adjusting its own stock knows why; a farm transcribing a plant's
+  sheet is reading somebody else's handwriting, and refusing to record the FACT
+  of a condemnation until a cause is supplied trades a real number for an
+  invented one. `livestock`'s *an unknown is not a zero*, applied to a cause
+  rather than a clock. The unstated ones are grouped and counted, never dropped,
+  so the causes always add to the count beside them.
+- **A FINISHED RUN ACCEPTS A KILL SHEET.** The only write on this pack that a
+  complete run does not refuse, and the reason it is safe is that a carcass row
+  posts nothing: no quantity, no cost, no movement. The design says the sheet
+  arrives days after the run from a party who is not this farm, so a sheet
+  enterable only before the boxes landed would be a sheet nobody entered.
+  Corrections are in place, following `livestock_weights` — a number typed wrong
+  never happened — rather than `production_run_outputs`, which freezes because a
+  receipt exists.
+- **`killSheet` IS THE ONE PLACE THIS PACK SAYS SOMETHING INDUSTRY-SHAPED**, and
+  it is a renameable label declared in `src/packs/index.ts` rather than a rule.
+  The STAGE is general — anything that turns a whole thing into parts of it has
+  one — but the noun is meat's, and pretending otherwise with a euphemism would
+  make every comment in `core/carcass.ts` worse. Declaring it is what makes it
+  changeable from the admin screen; the homestead profile sets it, and a bakery
+  profile would set something else with no code change.
 - **`unknown` BLOCKS, AND THERE IS NO OVERRIDE.** A treatment with no period
   looked up stops a run exactly as a future date does. A farm that genuinely
   knows the period enters it — which is the same act as overriding, and leaves a
@@ -350,13 +497,48 @@ byproduct NRV and labour cost (slice 3), cut sheets and recipes (slices 1 and 2
 - **Migration `0168` hand-reordered — eighth check, third yes.** Only the two FKs
   pointing at `production_runs` needed it; the four targeting `inventory_*` and
   `assets` were fine where drizzle put them. The rule is *check whether the
-  target is created in the same migration*, not *always reorder*.
+  target is created in the same migration*, not *always reorder*. **`0184`
+  needed none — ninth check, and applying the rule rather than the habit is what
+  gave the answer**: both of its composite-FK targets were created back in
+  `0168`, so drizzle's ordering was already correct.
 - **An isolation test cannot cover a pack's ops.** That suite builds fixtures
   under `withSystem` on purpose, so this pack needs BOTH files — and every claim
   the slice makes lives in `tests/production-ops.test.ts`.
 
 ## Open items
 
+- **SLICE 1a HAS NOT BEEN DRIVEN IN A BROWSER, AND NO DB-BACKED TEST HAS RUN.**
+  The container this was built in has no database reachable, so
+  `production-ops` and the isolation suite skipped locally and CI is their first
+  execution. Listed first because it is the largest known risk in the slice:
+  **five of the last six slices across this profile had at least one defect that
+  only clicking found**, and one of those had a passing test over the wrong
+  behaviour. The screens most likely to be wrong are the ones with a state
+  nothing else has — a sheet on a FINISHED run, and the form that changes shape
+  when a carcass is condemned.
+- **NOTHING EXTRACTS A KILL SHEET FROM A PHOTOGRAPH YET**, which is the other
+  half of what the design calls kill-sheet capture and is slice 1b. The rows
+  exist to extract into now, which is the ordering that made 1a first. The
+  design is explicit about the shape: AI extracts, a human confirms, then it
+  posts — the *compute-and-commit* case, and a port of what accounting already
+  does with bills and Documents already does with text.
+- **A CONDEMNED CARCASS'S COST STAYS IN THE POT.** The pen's accumulated cost
+  crossed onto the run when the animals left, and the roll splits all of it
+  across the outputs — so the boxes that DID come off the line carry the
+  condemned bird's share of the feed. That is arguably right (the loss is a real
+  cost of producing what survived) and arguably wrong (it makes the per-pound
+  figure include an event that had nothing to do with cutting), and it is a
+  genuine accounting decision rather than a column. Nothing on the screen says
+  which way it went, which is the part that is definitely wrong.
+- **A LOW CONDEMNATION RATE IS NOT COMPARED AGAINST ANYTHING.** The rate is on
+  the run and on the list, and whether 3% is good is exactly the question the
+  advisor could answer from this farm's own history — the profile's AI thesis,
+  and the digest is where it would go. Nothing feeds it there yet.
+- **THE SHEET RECONCILES AGAINST HEAD, NOT AGAINST WEIGHT.** A run whose inputs
+  are counted gets `SHEET_INCOMPLETE`; a run whose inputs are stocked by mass
+  gets no reconciliation at all, because there is no head to count. That is
+  correct and it means a mass-stocked meat item — a pig bought by the pound —
+  has an unpoliced sheet.
 - **NEVER PLURALISE A RENAMABLE LABEL.** Recorded here because it will be
   tempting again: `productionRun` is a word the tenant owns, the homestead
   profile calls it *Batch*, and `+ "s"` produced "No batchs yet" on the first
@@ -372,9 +554,9 @@ byproduct NRV and labour cost (slice 3), cut sheets and recipes (slices 1 and 2
   not, so "what did this bake cost" is a page rather than a P&L dimension. It
   should probably become one, and that is an accounting decision rather than a
   column.
-- **Dressing percentage and cutting yield are not told apart.** One overall
-  ratio is what slice 0 can honestly give; separating live → hanging → packaged
-  needs the carcass recorded as a stage, which is the kill sheet. Slice 1.
+- ~~Dressing percentage and cutting yield are not told apart~~ — **closed
+  2026-08-23.** Both are folded in `core/carcass.ts` off the carcass stage, and
+  each refuses with a stated reason rather than approximating.
 - **Nothing compares two runs.** Processor comparison is the differentiated
   report and it needs history — the design's own honest caveat is that
   separating processor effect from animal effect takes several runs, and at 2–4
@@ -385,12 +567,13 @@ byproduct NRV and labour cost (slice 3), cut sheets and recipes (slices 1 and 2
   factor between them that does not depend on what is in the bucket. Milk
   therefore always needs its weight typed, and nothing on the form explains
   that yet.
-- **The run list fetches every summary row.** Two grouped queries whatever the
+- **The run list fetches every summary row.** Three grouped queries whatever the
   run count, but uncapped — fine at twenty runs, wrong at a farm with years of
-  history.
-- **Nothing links a run to its kill sheet, its photographs or its paperwork.**
-  Documents already does text extraction and accounting already does
-  compute-and-commit on bills; the port is slice 1's.
+  history. Slice 1a added the third and did not make the cap any less overdue.
+- **Nothing links a run to its kill sheet as a FILE — the photograph, the PDF,
+  the posted original.** Slice 1a took what the sheet SAYS; the sheet itself is
+  still unattached, and for inspected meat the paperwork is a retained record. It
+  is the same port as the extraction above and belongs with it in slice 1b.
 - **Nothing warns that a run is about to consume the last of a pen**, or that a
   withdrawal on a pen somebody is planning around clears next week. Both are the
   deviation-surfacing the design wants and neither is a rule anybody is asked

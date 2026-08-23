@@ -5,19 +5,26 @@ import { withSystem, withTenant, schema, type Tx } from "../../src/db";
 import { d } from "./_shared";
 
 /**
- * `production` RLS — the run, and both ends of what it joins.
+ * `production` RLS — the run, both ends of what it joins, and the carcass
+ * between them.
  *
  * **THESE ROWS ARE HALF A TRACEABILITY CHAIN.** An input names the batch of
- * animals that went in; an output names the batch of meat that came out;
- * together they are what says this package came from that pen, and that claim
- * ends up on a processor's paperwork. `inventory_movements` is FORCEd in its own
- * right for exactly that reason, and these are the other end of the same chain.
+ * animals that went in; an output names the batch of meat that came out; a
+ * carcass row is the animal in between, with its tag on it. Together they are
+ * what says this package came from that pen, and that claim ends up on a
+ * processor's paperwork. `inventory_movements` is FORCEd in its own right for
+ * exactly that reason, and these are the other end of the same chain.
  *
  * So what has to be UNREPRESENTABLE rather than merely refused: a run input
  * pointing at another tenant's movement, an output landing in another tenant's
- * batch, and a run happening in another tenant's building. All three are
- * composite FKs, which is why they fail even under `withSystem` where RLS is not
- * watching.
+ * batch, a carcass attributed to another tenant's pen, and a run happening in
+ * another tenant's building. All four are composite FKs, which is why they fail
+ * even under `withSystem` where RLS is not watching.
+ *
+ * The carcass CHECKs are certified here too, at the level they are enforced. The
+ * ops layer refuses a condemned carcass with a hanging weight in words a person
+ * can read; the constraint is what makes that true of every path to the table,
+ * including this one.
  */
 d("production tables (RLS)", () => {
   const STAMP = `iso-prod-${process.pid}`;
@@ -37,7 +44,9 @@ d("production tables (RLS)", () => {
   let movementB: string;
   let assetB: string;
   let inputA: string;
+  let inputB: string;
   let outputA: string;
+  let carcassA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -151,6 +160,7 @@ d("production tables (RLS)", () => {
         ])
         .returning();
       inputA = inputs[0].id;
+      inputB = inputs[1].id;
 
       const outputs = await tx
         .insert(schema.productionRunOutputs)
@@ -172,6 +182,31 @@ d("production tables (RLS)", () => {
         ])
         .returning();
       outputA = outputs[0].id;
+
+      const carcasses = await tx
+        .insert(schema.productionRunCarcasses)
+        .values([
+          {
+            tenantId: tenantA,
+            runId: runA,
+            runInputId: inputA,
+            tag: "A-114",
+            headCount: 1,
+            liveLb: 1120,
+            hangingLb: 690,
+          },
+          {
+            tenantId: tenantB,
+            runId: runB,
+            runInputId: inputB,
+            tag: "B-114",
+            headCount: 1,
+            liveLb: 1100,
+            hangingLb: 680,
+          },
+        ])
+        .returning();
+      carcassA = carcasses[0].id;
     });
   });
 
@@ -381,7 +416,115 @@ d("production tables (RLS)", () => {
 
   // ---- default deny -----------------------------------------------------
 
-  it("is default-deny on all three tables with no tenant context", async () => {
+  // ---- the kill sheet ---------------------------------------------------
+
+  /**
+   * **THE LAST LINK IN THE CHAIN, AND THE ONE THAT NAMES AN ANIMAL.** An input
+   * says a pen went in and an output says boxes came out; a carcass row is what
+   * sits between them, carrying a tag, a weight and — when a plant condemned it
+   * — the reason. A row visible across a boundary would attribute one farm's
+   * condemnation to another farm's animals, which is worse than an ordinary
+   * leak: a condemnation is a statement about whether meat was fit to sell.
+   */
+  it("shows a tenant only its own kill sheet", async () => {
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.productionRunCarcasses),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].tag).toBe("A-114");
+
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.productionRunCarcasses),
+    );
+    expect(theirs).toHaveLength(1);
+    expect(theirs[0].tag).toBe("B-114");
+  });
+
+  it("cannot hang a carcass off another tenant's run", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionRunCarcasses).values({
+          tenantId: tenantA,
+          runId: runB,
+          runInputId: inputA,
+          headCount: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot attribute a carcass to another tenant's input", async () => {
+    // The composite FK, and it is the one that matters most here: this is the
+    // row that says which pen the animal came out of.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionRunCarcasses).values({
+          tenantId: tenantA,
+          runId: runA,
+          runInputId: inputB,
+          headCount: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a condemned carcass carrying a hanging weight", async () => {
+    // The CHECK is the backstop under the ops guard. A condemned carcass yields
+    // nothing sellable, so pounds against one would find their way into a
+    // numerator that only sellable meat belongs in.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionRunCarcasses).values({
+          tenantId: tenantA,
+          runId: runA,
+          runInputId: inputA,
+          headCount: 1,
+          disposition: "condemned",
+          hangingLb: 690,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a cause on a carcass that passed", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionRunCarcasses).values({
+          tenantId: tenantA,
+          runId: runA,
+          runInputId: inputA,
+          headCount: 1,
+          condemnReason: "bruising",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a line covering no head", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionRunCarcasses).values({
+          tenantId: tenantA,
+          runId: runA,
+          runInputId: inputA,
+          headCount: 0,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot move a carcass into another tenant", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.productionRunCarcasses)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.productionRunCarcasses.id, carcassA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("is default-deny on all four tables with no tenant context", async () => {
     // FORCE ROW LEVEL SECURITY: an unknown tenant sees nothing, even for the
     // connection's own role. The backstop the whole shell rests on.
     const nowhere = "00000000-0000-0000-0000-000000000000";
@@ -396,6 +539,11 @@ d("production tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.productionRunOutputs),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.productionRunCarcasses),
       ),
     ).toHaveLength(0);
   });

@@ -145,9 +145,31 @@ export const INSPECTION_NOTES: Record<string, string> = {
     "Cut for the owner of the animal and stamped not for sale. It may be eaten by whoever owned it live, which is why halves are sold before the kill and never after.",
   uninspected:
     "No inspection. What may be done with this is narrow and varies by state — typically direct to the person eating it, in state, with no resale.",
+  // `{word}` is the tenant's own name for the place — see `inspectionNote`.
   unknown:
-    "Nobody has recorded how this processor is inspected, so nothing here can say where its meat may be sold. It is the first thing to ask them.",
+    "Nobody has recorded how this {word} is inspected, so nothing here can say where its meat may be sold. It is the first thing to ask them.",
 };
+
+/**
+ * An inspection note in the tenant's own vocabulary.
+ *
+ * **FOUND BY DRIVING IT, AND IT IS THE EXACT MISTAKE THIS SLICE ARGUES
+ * AGAINST.** Every other string on the directory resolves through
+ * `labelFor(pack.labels, "processor", …)`, so a farm reads "butcher"
+ * throughout — except this one note, which had "processor" baked into it and
+ * said so on the screen directly under a heading that said Butcher. A pack that
+ * declares a renameable word and then hardcodes it in the one paragraph a person
+ * actually reads has not really made it renameable.
+ *
+ * Only `unknown` interpolates today; the other four describe a legal status
+ * rather than a place and name nothing. The substitution is unconditional
+ * anyway, so the next note that needs the word gets it by writing `{word}`
+ * rather than by remembering to change this function.
+ */
+export function inspectionNote(status: string, word: string): string {
+  const note = INSPECTION_NOTES[status] ?? "";
+  return note.replace(/\{word\}/g, word.toLowerCase());
+}
 
 /** Will they put YOUR label on the package. Mirrors the CHECK. */
 export const LABELLING_OPTIONS = ["unknown", "no", "yes"] as const;

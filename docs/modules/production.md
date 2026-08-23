@@ -27,15 +27,6 @@ this dossier is the build record.
 | 4 | Label generation, including a processor's own-label capability | |
 | 5 | Processor comparison, throughput analysis | needs history |
 
-**Slice 1 split again on 2026-08-23**, and the renumbering is worth explaining
-because it moved work forward rather than adding it. The design calls slaughter
-dates *"the scarce resource"*, says booking them is *"a first-class feature, not
-a date column on an animal"*, and calls it *"the loudest unmet need in small
-livestock production"* — and the roadmap had processors appearing only at slice
-5, as a **report**. Nothing created the processor record; nothing held a date.
-1b is the directory that had to exist first, and 1c is the dates. What was 1b
-becomes 1d, unchanged.
-
 Commitments (pre-sold halves, pre-ordered fresh birds) are shared with `retail`
 and slice with it. A pre-sold half is never inventory and is never an output
 lot.
@@ -47,7 +38,61 @@ person confirm it — has to extract INTO something, and until 1a there was no
 carcass row to put a hanging weight in. The record first, then the door onto it.
 That is the same shape `land` found when 2a became three slices.
 
+**Slice 1 split again on 2026-08-23**, and the renumbering is worth explaining
+because it moved work forward rather than adding it. The design calls slaughter
+dates *"the scarce resource"*, says booking them is *"a first-class feature, not
+a date column on an animal"*, and calls it *"the loudest unmet need in small
+livestock production"* — and the roadmap had processors appearing only at slice
+5, as a **report**. Nothing created the processor record; nothing held a date.
+1b is the directory that had to exist first, and 1c is the dates. What was 1b
+becomes 1d, unchanged.
+
 ## Build log
+
+### 2026-08-23 — Slice 1b driven on `Test`, and the word the note forgot (`claude/the-word-the-note-forgot`)
+
+Two butchers stood up by hand on the live site, chosen to be the comparison the
+design says a farm actually makes:
+
+| | Miller's Custom Meats | Valley Poultry Processing |
+| --- | --- | --- |
+| Inspection | USDA, EST 4712 | Custom exempt |
+| Takes | Cattle, 8/day | Poultry, 400/day |
+| Kill fee | $105.00 a head | $4.50 a head |
+| Cut and wrap | $0.90 a lb | *not quoted* |
+| Label | Yours | Not established |
+| Books ahead | 300 days | — |
+
+**"Some do only poultry" is now a row rather than a sentence**, which was the
+whole argument for putting `handles` in its own table.
+
+**ONE DEFECT, AND IT IS THE EXACT MISTAKE THIS SLICE ARGUES AGAINST.** The note
+under the inspection field read *"Nobody has recorded how this **processor** is
+inspected"* — on a screen headed **Butcher directory**, under a button saying
+*Add a butcher*, beside a caveat that already said "butcher". Every other string
+resolves through `labelFor`; this one had the pack's default baked into it, in
+the one paragraph a person actually reads. A pack that declares a renameable
+word and then hardcodes it there has not really made it renameable.
+`inspectionNote(status, word)` now substitutes `{word}`, and the test asserts
+that **no** rendered note contains "processor" when the tenant's word is
+something else — which catches the next one written the same way.
+
+**Everything else held.** The upsert corrected rather than duplicated: editing
+Miller's cattle fee from $95 to $105 left one row, and the audit log shows it as
+two `handle_set` entries on the same `handleId` — 9500 then 10500. That is the
+column earning its place: *when did the quote change* is answerable, and the
+prose (`good_at`, `price_notes`) is correctly absent from the meta. An unquoted
+fee rendered **"Cut and wrap not quoted"** and never `$0.00`. `Cattle` came
+pre-selected from the profile's `processorHandles`, and the kind was locked on
+edit.
+
+**Worth knowing, not yet fixed:** the *Only for* dropdown on a cut offers every
+kind in the profile, not just the ones this processor takes — so "Dry-cured
+bacon · Swine only" now sits on a butcher whose only handle is cattle, and
+nothing flags it. Arguably right (you can learn what they make before recording
+what they take) and arguably a record that contradicts itself. Left as it is
+because the honest fix is a warning rather than a refusal, and there is nothing
+yet reading these rows that would be misled.
 
 ### 2026-08-23 — Slice 1b: the processor directory, and the roadmap gap it closed (`claude/the-processor-and-the-date`)
 
@@ -717,12 +762,18 @@ run model, separate templates), and the processing path and eligibility flag
   `entity_type`, so a booking becomes a calendar event without a cross-module
   column, and `production_processors.lead_time_days` is what makes "you should be
   booking now" answerable before there is anything to book.
-- **SLICE 1b HAS NOT BEEN DRIVEN IN A BROWSER**, and it is a bigger surface than
-  1a was: three tables, six actions, two dialogs that change shape. The pieces
-  most likely to be wrong are the ones nothing else in this pack does — the
-  handle upsert (asking about a kind already recorded is a correction, not a
-  second row), and the rename, which writes to `parties` rather than to this
-  pack's own table and can refuse on a version conflict it did not raise itself.
+- ~~**SLICE 1b HAS NOT BEEN DRIVEN IN A BROWSER.**~~ **Driven on `Test`
+  2026-08-23** — two butchers stood up, one USDA doing cattle and one custom
+  exempt doing birds; see the build log. It found one defect (a hardcoded word in
+  the inspection note) and confirmed the upsert corrects rather than duplicates.
+  **The rename is still unexercised**: nothing has renamed a processor, so the
+  write that goes to `parties` and can refuse on a version conflict this pack did
+  not raise has never run outside a test. So is `Remove`, on either child.
+- **A CUT CAN NAME A KIND THE PROCESSOR DOES NOT TAKE.** The *Only for* dropdown
+  offers every kind in the profile, so "Dry-cured bacon · Swine only" now sits on
+  a butcher whose only handle is cattle. Nothing flags it. The honest fix is a
+  warning rather than a refusal — you can learn what a plant makes before
+  recording what it takes — and nothing reads these rows yet, so it waits.
 - **NOTHING LINKS A RUN TO THE PROCESSOR THAT DID IT**, so the measured half of a
   processor's rating cannot be computed at all — not merely unbuilt. Dressing
   percentage, condemnation rate and turnaround per processor all wait on the

@@ -321,6 +321,15 @@ export async function startRunFromBooking(
     code: args.code,
     runKind: args.runKind,
     startedOn: args.startedOn,
+    /**
+     * **THE PROCESSING PATH, CARRIED ACROSS WITHOUT ASKING.** The booking
+     * already names the plant; making somebody re-pick it on the next screen
+     * would be a second chance to get it wrong, and this is the column that
+     * decides what the meat may be sold as. A run started any other way defaults
+     * to on-farm, which is the honest default: if nobody named a processor,
+     * nobody processed it but this farm.
+     */
+    processorId: booking.processorId,
   });
 
   const [row] = await tx

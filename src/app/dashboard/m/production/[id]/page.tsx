@@ -32,6 +32,9 @@ import {
   COST_BASIS_LABELS,
   COST_BASIS_NOTES,
   RUN_STATUS_LABELS,
+  INSPECTION_LABELS,
+  inspectionNote,
+  PATH_LABELS,
   slugLabel,
   type RunStatus,
 } from "@/packs/production/vocabulary";
@@ -245,6 +248,29 @@ export default async function ProductionRunPage({
             <Badge variant={isOpen ? "default" : "outline"}>
               {RUN_STATUS_LABELS[run.status as RunStatus] ?? run.status}
             </Badge>
+            {/*
+              THE PROCESSING PATH, beside the status because it is the other
+              thing that governs what came out of this run. Derived from whether
+              a processor is named — never a column of its own, because two
+              answers to one question disagree.
+            */}
+            <Badge variant="outline">
+              {detail.processorName
+                ? `${PATH_LABELS.sent_out} · ${detail.processorName}`
+                : PATH_LABELS.on_farm}
+            </Badge>
+            {run.inspection && (
+              <Badge
+                variant={
+                  run.inspection === "uninspected" ||
+                  run.inspection === "unknown"
+                    ? "outline"
+                    : "secondary"
+                }
+              >
+                {INSPECTION_LABELS[run.inspection] ?? run.inspection}
+              </Badge>
+            )}
             {isOpen && (
               <>
                 <AddInputForm
@@ -716,7 +742,27 @@ export default async function ProductionRunPage({
         <CardHeader>
           <CardTitle className="text-base">What came out</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          {/*
+            WHERE THIS MEAT MAY BE SOLD, said beside the boxes rather than only
+            as a badge at the top. The design calls this the existential one:
+            "retail should refuse to list a lot into a channel that is not legal
+            for it. Selling uninspected product through the wrong channel can end
+            a poultry enterprise, and nothing on the market prevents it."
+
+            The same value is stamped onto each output lot as it lands, so the
+            eligibility travels with the meat rather than having to be re-derived
+            from a plant's paperwork a year later. `retail`'s refusal is the next
+            consumer of it and is not built yet.
+          */}
+          {run.inspection && outputs.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {inspectionNote(
+                run.inspection,
+                labelFor(pack.labels, "processor", "Processor"),
+              )}
+            </p>
+          )}
           {outputs.length === 0 ? (
             <EmptyState
               icon={<ChevronLeft className="h-5 w-5" />}

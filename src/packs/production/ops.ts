@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -120,6 +120,12 @@ export interface RunInput {
   code: string;
   runKind?: string;
   startedOn: string;
+  /**
+   * Who is doing it, or absent for on-farm. THE PROCESSING PATH — see the
+   * column comment on `production_runs.processor_id`. Usually arrives from a
+   * booking rather than being picked here.
+   */
+  processorId?: string | null;
   locationAssetId?: string | null;
   performedBy?: string;
   crewSize?: number | null;
@@ -144,6 +150,7 @@ export async function startRun(
       code: input.code.trim(),
       runKind,
       startedOn: input.startedOn,
+      processorId: input.processorId ?? null,
       locationAssetId: input.locationAssetId ?? null,
       performedBy: input.performedBy?.trim() ?? "",
       crewSize: input.crewSize ?? null,
@@ -918,6 +925,26 @@ export async function completeRun(
     })),
   );
 
+  /**
+   * HOW THIS RUN WAS INSPECTED, decided once, here, on the day the meat lands.
+   *
+   * A run with no processor was done on this farm and nothing inspected it. A
+   * run with one inherits whatever that plant is inspected under RIGHT NOW —
+   * and the value is then frozen on the run, because a plant's status can be
+   * corrected, lapse or be upgraded later, and re-deriving this would silently
+   * change what a box already in somebody's freezer may be sold as.
+   */
+  let inspection = "uninspected";
+  if (run.processorId) {
+    const processor = await tx.query.productionProcessors.findFirst({
+      where: and(
+        eq(schema.productionProcessors.tenantId, ctx.tenantId),
+        eq(schema.productionProcessors.id, run.processorId),
+      ),
+    });
+    inspection = processor?.inspection ?? "unknown";
+  }
+
   for (const output of outputs) {
     const { movement, lotId } = await receiveStock(tx, asInventory(ctx), {
       itemId: output.itemId,
@@ -930,6 +957,39 @@ export async function completeRun(
       extensionSlug: "production",
       notes: output.notes,
     });
+    /**
+     * **THE LOT INHERITS THE ELIGIBILITY, AND THIS IS THE LINE THE DESIGN CALLS
+     * EXISTENTIAL:** *"`retail` should refuse to list a lot into a channel that
+     * is not legal for it. Selling uninspected product through the wrong
+     * channel can end a poultry enterprise, and nothing on the market prevents
+     * it."*
+     *
+     * Written into `inventory_lots.metadata`, the P2 extension bag, rather than
+     * a column: `inventory` must not learn what an inspection is. It is
+     * STAMPED rather than joined for the same reason it is stored on the run —
+     * a box in a freezer is governed by what was true when it was packed, not
+     * by what the plant's paperwork says next year.
+     */
+    // `receiveStock` only omits a lot when the item is not lot-tracked, and a
+    // production output always is — but the type says nullable, and inventing
+    // a non-null assertion on the line that stamps a legal eligibility is not
+    // the place to be clever.
+    if (lotId) {
+      await tx
+      .update(schema.inventoryLots)
+      .set({
+        metadata: sql`${schema.inventoryLots.metadata} || ${JSON.stringify({
+          production: { inspection, runId: run.id },
+        })}::jsonb`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.inventoryLots.tenantId, ctx.tenantId),
+          eq(schema.inventoryLots.id, lotId),
+        ),
+      );
+    }
     await tx
       .update(schema.productionRunOutputs)
       .set({ lotId, inventoryMovementId: movement.id, updatedAt: new Date() })
@@ -947,6 +1007,7 @@ export async function completeRun(
       status: "complete",
       completedOn,
       costBasis: roll.basis,
+      inspection,
       updatedAt: new Date(),
     })
     .where(
@@ -1130,6 +1191,12 @@ export interface RunOutputRow {
 
 export interface RunDetail {
   run: ProductionRun;
+  /**
+   * The name of the place that did it, or null for on-farm. Read alongside
+   * `run.processorId` — which IS the processing path — so a screen never has to
+   * join for a name it is about to print next to it.
+   */
+  processorName: string | null;
   inputs: RunInputRow[];
   outputs: RunOutputRow[];
   /** The kill sheet, line by line, oldest first. Empty on a run that has none. */
@@ -1182,6 +1249,30 @@ export async function runDetail(
     listRunOutputs(tx, tenantId, runId),
     listRunCarcasses(tx, tenantId, runId),
   ]);
+
+  // The plant's name, for the screen. Two hops rather than one because the name
+  // lives on the party — `production_processors` deliberately has no `name`
+  // column, so it cannot disagree with the rest of the app.
+  let processorName: string | null = null;
+  if (run.processorId) {
+    const row = await tx
+      .select({ name: schema.parties.displayName })
+      .from(schema.productionProcessors)
+      .innerJoin(
+        schema.parties,
+        and(
+          eq(schema.parties.tenantId, schema.productionProcessors.tenantId),
+          eq(schema.parties.id, schema.productionProcessors.partyId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.productionProcessors.tenantId, tenantId),
+          eq(schema.productionProcessors.id, run.processorId),
+        ),
+      );
+    processorName = row[0]?.name ?? null;
+  }
   const items = await itemsById(
     tx,
     tenantId,
@@ -1251,6 +1342,7 @@ export async function runDetail(
 
   return {
     run,
+    processorName,
     inputs,
     outputs: outputRows,
     carcasses,

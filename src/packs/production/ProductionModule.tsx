@@ -9,6 +9,12 @@ import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   Table,
   TableBody,
   TableCell,
@@ -20,9 +26,12 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { listLocations } from "@/packs/inventory/ops";
 import { listRuns, runSummaries } from "./ops";
+import { exemptionUsage } from "./exemption-ops";
 import {
   RUN_STATUS_LABELS,
   runKindsFrom,
+  exemptionsFrom,
+  exemptionNote,
   slugLabel,
   type RunStatus,
 } from "./vocabulary";
@@ -58,7 +67,7 @@ export async function ProductionModule({
   const today = todayInTimezone(ctx.tenant.timezone);
   const currencySymbol = ctx.tenant.currencySymbol;
 
-  const { runs, summaries, pack, locations } = await withTenant(
+  const { runs, summaries, pack, locations, exemptions } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const [runs, pack, locations] = await Promise.all([
@@ -71,7 +80,13 @@ export async function ProductionModule({
         ctx.tenant.id,
         runs.map((r) => r.id),
       );
-      return { runs, summaries, pack, locations };
+      const exemptions = await exemptionUsage(
+        tx,
+        ctx.tenant.id,
+        exemptionsFrom(pack.config),
+        Number(today.slice(0, 4)),
+      );
+      return { runs, summaries, pack, locations, exemptions };
     },
     { role: ctx.role },
   );
@@ -117,6 +132,61 @@ export async function ProductionModule({
           </div>
         }
       />
+
+      {/*
+        THE ON-FARM EXEMPTION, COUNTED. Shown from zero rather than only when it
+        gets close: a farm needs to see it has a thousand left as much as it
+        needs to see it has forty, and a warning that appears for the first time
+        at 800 is one nobody has planned against. The design calls this figure
+        one the pilot is "already managed to a line".
+
+        A tenant whose profile declares no exemption renders nothing at all — no
+        heading, no empty card — because a bakery has no such limit and a panel
+        saying "0 of 0" would be this pack asserting an industry.
+      */}
+      {exemptions.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {exemptions.map((rule) => (
+            <Card key={rule.kind}>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
+                  <span>Done here this year · {slugLabel(rule.kind)}</span>
+                  {rule.standing !== "clear" && (
+                    <Badge
+                      variant={
+                        rule.standing === "close" ? "secondary" : "destructive"
+                      }
+                    >
+                      {rule.standing === "close"
+                        ? "Getting close"
+                        : rule.standing === "at"
+                          ? "At the limit"
+                          : "Over"}
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <p className="text-2xl font-semibold tabular-nums">
+                  {rule.used}
+                  <span className="text-base font-normal text-muted-foreground">
+                    {" "}
+                    of {rule.annualHead}
+                  </span>
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {exemptionNote(
+                    rule.standing,
+                    rule.used,
+                    rule.annualHead,
+                    labelFor(pack.labels, "processor", "Processor"),
+                  )}
+                </p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {runs.length === 0 ? (
         <EmptyState

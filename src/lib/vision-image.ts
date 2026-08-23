@@ -1,7 +1,15 @@
 import "server-only";
 
 /**
- * Vision payload normalization. The Claude API caps images at 5MB and
+ * Vision payload normalization.
+ *
+ * **MOVED OUT OF `accounting/ai/` ON 2026-08-23**, when `production` needed to
+ * read a photographed kill sheet and a photographed price list. Nothing in here
+ * was ever accounting's: it is "make an image safe and cheap to send to the
+ * vision API", which is the same job for a bill, a kill sheet and anything
+ * after them. A pack reaching into a MODULE to get it would have been the first
+ * arrow of its kind in the codebase, drawn for a utility rather than for a
+ * boundary that meant something. The Claude API caps images at 5MB and
  * ~1600px is where its accuracy plateaus; oversized uploads (phone
  * photos) are downscaled to a JPEG before the call — ~3x token savings,
  * no visible extraction quality loss. PDFs pass through untouched.

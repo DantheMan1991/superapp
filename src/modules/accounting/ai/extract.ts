@@ -12,7 +12,7 @@ import {
   EXTRACT_TOOL,
   buildExtractContent,
 } from "./extract-prompt";
-import { normalizeImageForVision } from "./extract-image";
+import { normalizeImageForVision } from "@/lib/vision-image";
 import { validateExtraction, type DocumentExtraction } from "./extract-validate";
 
 const COOLDOWN_MS = 15_000;

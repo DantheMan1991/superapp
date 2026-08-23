@@ -71,6 +71,40 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-08-23 — Slice 1d driven on `Test`, and the meat already in the freezer (`claude/the-meat-already-in-the-freezer`)
+
+All three parts render, and the one that had never been seen before is the
+counter: **"Done here this year · Poultry — 100 of 1000 — 900 left of 1000 this
+year."** That number is the whole three-party chain working — `livestock` said
+the lot was poultry through the P5 slot, the profile said the cap was a thousand,
+and `exemption-ops` multiplied them. Nothing is stored, so nothing can drift. No
+badge appears at 10%, which is correct: the warning starts at 80%.
+
+The finished run reads **Finished · Done here · Not inspected**, and *What came
+out* now carries the sentence that governs it: *"No inspection. What may be done
+with this is narrow and varies by state — typically direct to the person eating
+it, in state, with no resale."* It states the shape of the restriction and
+asserts no state's specifics, which is the line the design draws.
+
+**AND DRIVING IT FOUND A HALF-STAMPED STATE, which is the dangerous shape.**
+0190 backfilled the RUN's inspection but not the lots': every lot that landed
+before this slice shipped had `metadata = {}`, while every lot landing after it
+carries the eligibility. A reader finding the key on newer lots and nothing on
+older ones has to guess what an absent key means, and the two available guesses
+are "inspected" and "not inspected" — one of which is the enterprise-ending
+answer. `retail`'s guardrail is the next consumer of exactly this key.
+
+`0191` backfills them from the run's own inspection, and is idempotent by
+`NOT (metadata ? 'production')` — re-running changes nothing, and it can never
+overwrite a stamp the application wrote. It is filling a gap, not claiming
+authority over lots that already have an answer. Both databases verified: every
+landed output lot now reads `{"inspection":"uninspected","runId":"…"}`.
+
+**Still unexercised:** a run that was actually SENT OUT. Everything driven so far
+is on-farm, so `Sent out · <plant>`, an inspection inherited from a processor
+rather than defaulted, and the exemption counter correctly *not* counting a
+sent-out run have all been tested but never seen.
+
 ### 2026-08-23 — Slice 1d: which path the meat took (`claude/which-path-the-meat-took`)
 
 **THE PATH IS A NULLABLE FOREIGN KEY, AND THAT IS THE WHOLE MODEL.**

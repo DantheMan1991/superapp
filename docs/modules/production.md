@@ -26,6 +26,8 @@ this dossier is the build record.
 | **2a** | **The itemised price list** — what a plant charges, one row per priced thing, each carrying the UNIT that says what the figure means | **shipped 2026-08-23** |
 | **2b** | **The cut sheet as an order** — pick the items for a batch, print it for the plant | **shipped 2026-08-23** |
 | **2c** | **The processing fee reaches inventory cost**, per plant — flat per animal plus per pound, accrued at completion | **shipped 2026-08-23** |
+| **2e** | **One row per bird** — the animal in the column not the label, grouped, filtered, and editable in bulk | **shipped 2026-08-23** |
+| 2f | **The whole-bird remainder** — 10 of 100 go back whole, the rest get cut up, and the sheet reconciles | |
 | 2d | The plant's BILL, matched to the run: clear the accrual and make the variance a number | |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
@@ -81,6 +83,88 @@ file had reached 1,658 lines and the log was 60% of it. Nothing was superseded
 by the move: the two live weights, the condemnation adjustment, the withdrawal
 guard, the booking model and the migration that never ran are all argued there,
 and that is the file to read before changing any of them.
+
+### 2026-08-23 — Slice 2e: one row per bird, and a list you can find things in (`claude/one-row-per-bird`)
+
+**108 ITEMS OFF ONE REAL RATE SHEET, AND 75 OF THEM MIS-FILED.** The founder
+read the live list and said the thing that decides this slice: *"a giant list of
+turkey geese etc when all i need to look at is chicken if that is the batch."*
+The counts were worse than the complaint — 29 rows with no animal at all, 46
+under `poultry` on a sheet that distinguishes chicken from turkey from duck, and
+exactly **one** row under `chicken`.
+
+**THE ANIMAL WAS IN THE LABEL, WHICH IS WHY NOTHING COULD FILTER ON IT.**
+`Duck & Geese: Quartered $1.05` — the reader met a line covering two animals,
+could not map it to one `kind`, and correctly put the words in the label
+instead. Correct, and useless: a farm looking at its chickens had to read past
+its ducks.
+
+**A LINE COVERING SEVERAL ANIMALS IS NOW SEVERAL ROWS.** One per animal,
+identical but for the kind, and the animal comes out of the label. The
+alternative — a list of kinds on one row — was considered and refused: it needs
+an array column or a join table, it breaks the unique index, and every filter
+becomes an overlap instead of an equals. **It is per SPECIES, not per animal**:
+a batch of 1000 chickens is still one row, and 108 items becomes roughly 125.
+
+**AND THE READER NOW PREFERS THE SPECIFIC WORD.** The profile offers `poultry`
+AND `chicken`, `turkey`, `duck`, `goose`, `quail`; the prompt was happy to file
+everything under the general one. It is now told to take the most specific word
+the farm's list offers, and that broilers, fryers and roasters are chicken.
+
+**REPLACING A LIST HAD TO EXIST BEFORE ANY OF THIS WAS SAFE.** `setPriceItem`
+upserts on `(processor, kind, label)`, so a re-read that CORRECTS the animal
+does not correct the row — `Duck & Geese: Quartered` with no kind and
+`Quartered` on a duck are different keys, and recording the second leaves the
+first sitting there. Re-reading Pleasant Valley's sheet would have taken `Test`
+from 108 rows to 183. `clearPriceItems` plus a **Replace the N already on file**
+switch on the read dialog, defaulting ON when there is a list, because a rate
+sheet IS the whole list.
+
+**DELETING IS SAFE ONLY BECAUSE THE ORDER LINE SNAPSHOTS.** What a sheet was
+quoted lives on `production_order_lines` and survives its price item being
+deleted — `price_item_id` goes null and the label, price, unit and minimum stay.
+That is the whole reason the snapshot exists, and a test now pins it, because
+"replace the list" would otherwise rewrite last October.
+
+**BULK EDITING IS NOT A CONVENIENCE HERE.** The founder's words again: *"there
+has to be bulk editing or something."* 108 rows arrived wrong; fixing them one
+at a time is not a thing anybody does, so the list would simply stay wrong.
+`setPriceItemKind` moves many rows onto one animal in a single call — and where
+a move would collide with the unique index it **leaves that row alone and names
+it**, rather than refusing the whole batch or failing with an index name. Naming
+is what makes it actionable: the fix is to rename or remove the one already
+there.
+
+**THE LIST IS GROUPED BY ANIMAL AND CLOSED BY DEFAULT.** The groups are
+whatever animals this plant has prices for, in the farm's own words — nothing
+here decides what an animal is. **The unsorted group sorts LAST and is labelled
+`Needs sorting`**, because it is the pile you are meant to empty and must not
+sit at the top pretending to be a category.
+
+**AND THE CUT SHEET'S PICKER IS SCOPED TO THE BATCH'S ANIMAL**, which is most
+of what makes the list usable at all: a chicken sheet offers chicken prices and
+the genuinely-any ones — a delivery charge, a container — and nothing about
+ducks. A sheet that has not said which animal still offers everything, because
+there is nothing to filter on and hiding rows would be worse than a long list.
+
+**THE PICKER IS GROUPED BASE-THEN-LAYERS**, which is the other half of what the
+founder described: *"every bird gets the flat per bird item, but then there are
+layers to add."* That axis already existed as `category`; the picker was
+rendering forty options in one run, which makes the base look like an option.
+Slaughter first, then cutting, then packaging, then giblets, then anything
+unanticipated — `priceCategoryRank`'s order, the same one the paper uses.
+
+**NO MIGRATION.** Everything here is the `kind` column being used properly, a
+delete path, and three screens. 5 new tests.
+
+**WHAT THIS SLICE DELIBERATELY DID NOT DO: the whole-bird remainder.** *"10 of
+the 100 birds might need to be whole birds and then some will get cut up."*
+That is the head reconciliation on the cut sheet — cutting lines carrying
+portions, the remainder derived and shown, an over-accounted sheet flagged — and
+it is the same shape the kill sheet already uses. It is slice 2f and it wants
+this slice's filtering to exist first, because reconciling portions is
+meaningless while the sheet is still offering you turkey options for a batch of
+chickens.
 
 ### 2026-08-23 — Slices 2a–2c driven on `Test`, and what the sheet forgot to say (`claude/what-the-sheet-forgot-to-say`)
 
@@ -623,6 +707,12 @@ run model, separate templates), and the processing path and eligibility flag
 - `src/packs/production/components/cut-sheet.tsx` — one rendering of one sheet,
   shared by the page and the printout. **Two renderings is how a farm hands over
   a sheet the app no longer agrees with**
+- `src/packs/production/components/price-list.tsx` — the rate sheet, grouped by
+  animal and editable in bulk. **Read the header before flattening it again**:
+  one real sheet is 108 rows, and the unsorted group sorting LAST is deliberate
+- `src/packs/production/processor-ops.ts` → `clearPriceItems`,
+  `setPriceItemKind`. **`clearPriceItems` is what makes re-reading a sheet
+  possible at all**, because the upsert cannot correct an animal
 - `src/packs/inventory/ledger-ops.ts` → `postServiceAccrual`,
   `resolveServicesAccruedAccount`. **The entry that makes the output receipt
   honest**, and the argument for `2060` over `2050`
@@ -786,6 +876,25 @@ run model, separate templates), and the processing path and eligibility flag
   the fact is not a quote, and the one question this table exists to keep
   answerable is whether the plant charged more than it said. Somebody who quoted
   the wrong option takes the line off and adds the right one.
+- **ONE ROW PER SPECIES, NOT A LIST OF SPECIES ON A ROW.** A sheet line covering
+  "Duck & Geese" becomes a duck row and a goose row. The alternative needs an
+  array column or a join table, breaks the `(processor, kind, label)` index, and
+  turns every filter into an overlap. The duplication is per SPECIES — a batch
+  of 1000 chickens is one row — and a plant that later charges differently for
+  geese is then one edit rather than a fork in a list.
+- **THE READER TAKES THE MOST SPECIFIC ANIMAL THE PROFILE OFFERS.** Given both
+  `poultry` and `chicken`, a sheet talking about broilers is chicken. The
+  general word is for a sheet being general, and empty is for a charge that is
+  not about an animal at all. Filing 46 rows under `poultry` is how a list stops
+  being searchable.
+- **A BULK MOVE THAT WOULD COLLIDE LEAVES THAT ROW ALONE AND NAMES IT.** Not
+  refusing the batch, and not failing with an index name. The label is what
+  makes it actionable, because the fix is to rename or remove the one already
+  there.
+- **CLEARING A PRICE LIST IS SAFE BECAUSE THE ORDER LINE SNAPSHOTS.** What a
+  sheet was quoted survives its price item being deleted. If a future change
+  makes an order line read through to the price item, replacing a list starts
+  rewriting history and this stops being true.
 - **A UNIT BELONGS ON THE PRICE, NOT IN A COLUMN NAME**, and this pack paid
   twice to learn it. `cut_wrap_cents_per_lb` meant per pound because of its
   name; a poultry plant quotes cutting per bird, so a second column was added on

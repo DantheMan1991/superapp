@@ -90,10 +90,23 @@ export function CutSheet({
               refuses a second line for one option and the index makes that
               true of every path — this is what stops somebody meeting either.
             */}
+            {/*
+              **FILTERED TO THIS SHEET'S ANIMAL, and that is most of what makes
+              a 108-item list usable.** A sheet for chickens offers chicken
+              prices and the genuinely-any ones — a delivery charge, a
+              container — and nothing about ducks. A sheet that has not said
+              which animal offers everything, because there is nothing to
+              filter on and hiding rows would be worse than a long list.
+
+              Already-added options come out too: the write refuses a second
+              line for one option, and this is what stops anybody meeting that.
+            */}
             <AddOrderLineDialog
               orderId={order.id}
               options={priceOptions.filter(
-                (o) => !lines.some((l) => l.priceItemId === o.id),
+                (o) =>
+                  !lines.some((l) => l.priceItemId === o.id) &&
+                  (order.kind === "" || o.kind === "" || o.kind === order.kind),
               )}
               sheetWord={sheetWord}
             />

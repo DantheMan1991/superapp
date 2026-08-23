@@ -10,12 +10,15 @@ import { toResult } from "./action-errors";
 import type { ProductionCtx } from "./ops";
 import {
   addCut,
+  clearPriceItems,
   createProcessor,
   removeCut,
   removeHandle,
   removePriceItem,
+  removePriceItems,
   setHandle,
   setPriceItem,
+  setPriceItemKind,
   updateProcessor,
 } from "./processor-ops";
 import { INSPECTIONS, LABELLING_OPTIONS, PRICE_UNITS } from "./vocabulary";
@@ -270,6 +273,109 @@ export async function setPriceItemAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, id: row.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Clear a processor's whole price list.
+ *
+ * **THE CONFIRM SAYS HOW MANY, and the count comes back for the toast**, which
+ * is the only thing that makes an action like this safe to put on a screen.
+ */
+export async function clearPriceItemsAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ processorId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const removed = await withTenant(
+      ctx.tenant.id,
+      (tx) => clearPriceItems(tx, ctxOf(ctx), parsed.data.processorId),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.processor.price_list_cleared",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_processor",
+      targetId: parsed.data.processorId,
+      // HOW MANY went is the whole record here — the rows themselves are gone
+      // and each one's own removal is not separately logged.
+      meta: { removed },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, removed };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Put the same animal on many rows at once. */
+export async function setPriceItemKindAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      ids: z.array(z.string().uuid()).min(1).max(500),
+      kind: z.string().trim().max(63),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => setPriceItemKind(tx, ctxOf(ctx), parsed.data.ids, parsed.data.kind),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.processor.price_items_rekinded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_processor",
+      targetId: parsed.data.ids[0],
+      meta: {
+        kind: parsed.data.kind,
+        asked: parsed.data.ids.length,
+        moved: result.moved,
+        clashed: result.clashed.length,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, ...result };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Take many prices off at once. */
+export async function removePriceItemsAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ ids: z.array(z.string().uuid()).min(1).max(500) })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const removed = await withTenant(
+      ctx.tenant.id,
+      (tx) => removePriceItems(tx, ctxOf(ctx), parsed.data.ids),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.processor.price_items_removed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_processor",
+      targetId: parsed.data.ids[0],
+      meta: { asked: parsed.data.ids.length, removed },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, removed };
   } catch (err) {
     return toResult(err);
   }

@@ -24,7 +24,11 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { addRunCarcassAction } from "../actions";
-import { setHandleAction, setPriceItemAction } from "../processor-actions";
+import {
+  clearPriceItemsAction,
+  setHandleAction,
+  setPriceItemAction,
+} from "../processor-actions";
 import {
   readKillSheetAction,
   readPriceListAction,
@@ -378,15 +382,31 @@ export function ReadPriceListDialog({
   processorId,
   kindOptions,
   word,
+  existingCount,
 }: {
   processorId: string;
   kindOptions: string[];
   word: string;
+  /** How many prices are already on file, so the replace copy can say so. */
+  existingCount: number;
 }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ItemRow[] | null>(null);
   const [animals, setAnimals] = useState<AnimalRow[] | null>(null);
   const [note, setNote] = useState("");
+  /**
+   * **REPLACE, BECAUSE A RE-READ OTHERWISE LANDS BESIDE THE OLD LIST.**
+   * `setPriceItem` keys on `(processor, kind, label)`, so a read that corrects
+   * the ANIMAL does not correct the row — it writes a new one and leaves the
+   * old. The live `Test` tenant reached 108 items with 75 mis-filed exactly
+   * that way, and reading the sheet again would have made it 183.
+   *
+   * Defaults ON when there is already a list, because re-reading a sheet is
+   * almost always "this is the current one" rather than "add these to what is
+   * there". The count is in the copy so the choice is made with the number in
+   * front of you.
+   */
+  const [replace, setReplace] = useState(existingCount > 0);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -503,6 +523,21 @@ export function ReadPriceListDialog({
         toast.error(`${message} (${saved} recorded before this)`);
         router.refresh();
       };
+      /**
+       * CLEARED FIRST, so the rows that follow are the whole list rather than
+       * an addition to one. Not in the same transaction as the writes — each
+       * row still goes through `setPriceItemAction` one at a time, which is the
+       * rule this path exists under — so a refusal halfway leaves the list
+       * short rather than doubled. Short and visible beats doubled and
+       * plausible.
+       */
+      if (replace) {
+        const cleared = await clearPriceItemsAction({ processorId });
+        if ("error" in cleared && cleared.error) {
+          toast.error(cleared.error);
+          return;
+        }
+      }
       for (const row of keepAnimals) {
         const result = await setHandleAction({
           processorId,
@@ -612,6 +647,26 @@ export function ReadPriceListDialog({
 
           {note !== "" && (
             <p className="text-sm text-muted-foreground">{note}</p>
+          )}
+
+          {existingCount > 0 && (
+            <div className="flex items-start gap-3 rounded-md border p-3">
+              <Switch
+                checked={replace}
+                onCheckedChange={(v: boolean) => setReplace(v)}
+                aria-label="Replace the whole price list"
+              />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  Replace the {existingCount} already on file
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  A rate sheet is the whole list, so this is usually what you
+                  want. Left off, anything this page names differently from what
+                  is on file is added beside it rather than instead of it.
+                </p>
+              </div>
+            </div>
           )}
 
           {items && items.length > 0 && (

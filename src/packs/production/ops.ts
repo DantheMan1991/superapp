@@ -5,7 +5,6 @@ import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   InventoryItem,
   ProductionRun,
-  ProductionRunCarcass,
   ProductionRunInput,
   ProductionRunOutput,
 } from "@/db/schema";
@@ -26,16 +25,6 @@ import { RUN_INPUT_HANDLERS } from "@/packs/run-handlers";
 import type { RunInputBlock } from "./core/handler";
 import { isValidSlug } from "./vocabulary";
 import { runYield, type YieldResult } from "./core/yield";
-import {
-  cuttingYield,
-  dressingPercentage,
-  tallyCarcasses,
-  type CarcassLine,
-  type CarcassTally,
-  type CuttingResult,
-  type DressingResult,
-  type SheetInput,
-} from "./core/carcass";
 import { lotShareCents, rollRun, type RollBasis } from "./core/roll";
 
 /**
@@ -69,8 +58,7 @@ export class ProductionError extends Error {
       | "ITEM_INVALID"
       | "LOT_REQUIRED"
       | "INPUT_BLOCKED"
-      | "NOTHING_TO_LAND"
-      | "CARCASS_INVALID",
+      | "NOTHING_TO_LAND",
     message: string,
   ) {
     super(message);
@@ -101,10 +89,6 @@ const asInventory = (ctx: ProductionCtx): InventoryCtx => ctx;
  * processing day is 2–3 people and none of them is necessarily the owner; the
  * whole point of recording boxes as they come off the line is that whoever is
  * holding the box can do it.
- *
- * The three carcass calls are MEMBER for a plainer reason still: transcribing a
- * kill sheet is copying somebody else's piece of paper into a form. It decides
- * nothing, and it creates no cost object.
  */
 function requireWrite(ctx: ProductionCtx, level: WriteLevel): void {
   if (!allowsWrite(ctx.role, level)) {
@@ -586,268 +570,6 @@ export async function removeRunOutput(
   return rows[0];
 }
 
-// -------------------------------------------------------------- carcasses ---
-
-export interface CarcassArgs {
-  runId: string;
-  /** Which input these came out of. Required — it is the traceability link. */
-  runInputId: string;
-  tag?: string;
-  headCount?: number;
-  liveLb?: number | null;
-  hangingLb?: number | null;
-  condemned?: boolean;
-  condemnReason?: string;
-  notes?: string;
-}
-
-/**
- * THE ONE THING ON THIS PACK A FINISHED RUN STILL ACCEPTS, and it is not an
- * oversight.
- *
- * Everything else here refuses once a run is complete, because everything else
- * has stamped something on the ledger and unwriting it would restate what
- * happened. **A carcass row stamps nothing.** It holds no quantity, no cost and
- * no movement — it is a transcription of a piece of paper, and the design says
- * plainly that the paper *arrives days after the run*, from a party who is not
- * this farm, sometimes by post. A sheet that could only be entered before the
- * boxes landed would be a sheet that was never entered.
- *
- * So this follows `livestock_weights` rather than `production_run_outputs`: a
- * measurement is not a ledger entry, a number typed wrong never happened, and it
- * is corrected in place. What it CANNOT do is move a figure that has already
- * been stamped — completing a run does not consult the sheet, and a sheet
- * entered afterwards changes no cost anywhere. It changes what the run can
- * explain about itself, which is the whole point of it.
- */
-function carcassGuards(input: CarcassArgs): {
-  headCount: number;
-  liveLb: number | null;
-  hangingLb: number | null;
-  condemned: boolean;
-  condemnReason: string;
-} {
-  const headCount = Math.trunc(input.headCount ?? 1);
-  if (!Number.isFinite(headCount) || headCount <= 0) {
-    throw new ProductionError(
-      "CARCASS_INVALID",
-      "a line has to cover at least one head",
-    );
-  }
-  const condemned = input.condemned === true;
-  const hangingLb = input.hangingLb ?? null;
-  if (condemned && hangingLb !== null) {
-    // Mirrors the CHECK, and the reason is worth throwing for rather than
-    // letting Postgres phrase: a condemned carcass yields nothing sellable, so
-    // pounds recorded against one would end up in a numerator that only
-    // sellable meat belongs in.
-    throw new ProductionError(
-      "CARCASS_INVALID",
-      "a condemned carcass has no hanging weight — nothing off it can be sold, so there are no pounds to record",
-    );
-  }
-  const condemnReason = condemned ? (input.condemnReason?.trim() ?? "") : "";
-  return {
-    headCount,
-    liveLb: input.liveLb ?? null,
-    hangingLb,
-    condemned,
-    condemnReason,
-  };
-}
-
-export async function addRunCarcass(
-  tx: Tx,
-  ctx: ProductionCtx,
-  input: CarcassArgs,
-): Promise<ProductionRunCarcass> {
-  requireWrite(ctx, "member");
-  // Deliberately NOT `openRunOrThrow` — see `carcassGuards` above.
-  const run = await getRun(tx, ctx.tenantId, input.runId);
-  if (!run) throw new ProductionError("NOT_FOUND", "that run no longer exists");
-
-  const runInput = await tx.query.productionRunInputs.findFirst({
-    where: and(
-      eq(schema.productionRunInputs.tenantId, ctx.tenantId),
-      eq(schema.productionRunInputs.id, input.runInputId),
-    ),
-  });
-  // Checked here as well as by the FK, because the FK only says the input
-  // exists. An input belonging to a DIFFERENT run would attribute this farm's
-  // carcasses to the wrong pen, which is the one claim the chain exists to make
-  // truthfully.
-  if (!runInput || runInput.runId !== run.id) {
-    throw new ProductionError(
-      "CARCASS_INVALID",
-      "pick which of this run's inputs the carcass came out of",
-    );
-  }
-
-  const guarded = carcassGuards(input);
-  const rows = await tx
-    .insert(schema.productionRunCarcasses)
-    .values({
-      tenantId: ctx.tenantId,
-      runId: run.id,
-      runInputId: runInput.id,
-      tag: input.tag?.trim().slice(0, 120) ?? "",
-      headCount: guarded.headCount,
-      liveLb: guarded.liveLb,
-      hangingLb: guarded.hangingLb,
-      disposition: guarded.condemned ? "condemned" : "passed",
-      condemnReason: guarded.condemnReason,
-      notes: input.notes?.trim() ?? "",
-    })
-    .returning();
-  return rows[0];
-}
-
-/** Correct a transcribed line. In place — a number typed wrong never happened. */
-export async function updateRunCarcass(
-  tx: Tx,
-  ctx: ProductionCtx,
-  id: string,
-  patch: Omit<CarcassArgs, "runId" | "runInputId">,
-): Promise<ProductionRunCarcass> {
-  requireWrite(ctx, "member");
-  const existing = await tx.query.productionRunCarcasses.findFirst({
-    where: and(
-      eq(schema.productionRunCarcasses.tenantId, ctx.tenantId),
-      eq(schema.productionRunCarcasses.id, id),
-    ),
-  });
-  if (!existing) throw new ProductionError("NOT_FOUND", "that line is gone");
-
-  /**
-   * MERGED FIRST, VALIDATED AFTER — `livestock` learned this on treatments and
-   * the trap is the same one. Clearing a condemnation without clearing its
-   * hanging weight, or adding a hanging weight to a line that is still
-   * condemned, are both reachable one field at a time, and validating the PATCH
-   * rather than the resulting ROW would let either through.
-   */
-  const merged: CarcassArgs = {
-    runId: existing.runId,
-    runInputId: existing.runInputId,
-    tag: patch.tag === undefined ? existing.tag : patch.tag,
-    headCount: patch.headCount === undefined ? existing.headCount : patch.headCount,
-    liveLb: patch.liveLb === undefined ? existing.liveLb : patch.liveLb,
-    hangingLb:
-      patch.hangingLb === undefined ? existing.hangingLb : patch.hangingLb,
-    condemned:
-      patch.condemned === undefined
-        ? existing.disposition === "condemned"
-        : patch.condemned,
-    condemnReason:
-      patch.condemnReason === undefined
-        ? existing.condemnReason
-        : patch.condemnReason,
-    notes: patch.notes === undefined ? existing.notes : patch.notes,
-  };
-  const guarded = carcassGuards(merged);
-
-  const rows = await tx
-    .update(schema.productionRunCarcasses)
-    .set({
-      tag: merged.tag?.trim().slice(0, 120) ?? "",
-      headCount: guarded.headCount,
-      liveLb: guarded.liveLb,
-      hangingLb: guarded.hangingLb,
-      disposition: guarded.condemned ? "condemned" : "passed",
-      condemnReason: guarded.condemnReason,
-      notes: merged.notes?.trim() ?? "",
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(schema.productionRunCarcasses.tenantId, ctx.tenantId),
-        eq(schema.productionRunCarcasses.id, id),
-      ),
-    )
-    .returning();
-  return rows[0];
-}
-
-export async function removeRunCarcass(
-  tx: Tx,
-  ctx: ProductionCtx,
-  id: string,
-): Promise<ProductionRunCarcass> {
-  requireWrite(ctx, "member");
-  const rows = await tx
-    .delete(schema.productionRunCarcasses)
-    .where(
-      and(
-        eq(schema.productionRunCarcasses.tenantId, ctx.tenantId),
-        eq(schema.productionRunCarcasses.id, id),
-      ),
-    )
-    .returning();
-  if (rows.length === 0) {
-    throw new ProductionError("NOT_FOUND", "that line is gone");
-  }
-  return rows[0];
-}
-
-export async function listRunCarcasses(
-  tx: Tx,
-  tenantId: string,
-  runId: string,
-): Promise<ProductionRunCarcass[]> {
-  return tx.query.productionRunCarcasses.findMany({
-    where: and(
-      eq(schema.productionRunCarcasses.tenantId, tenantId),
-      eq(schema.productionRunCarcasses.runId, runId),
-    ),
-    // `id` breaks the tie because `now()` is TRANSACTION time in Postgres: two
-    // lines transcribed in one transaction share a timestamp exactly, and the
-    // row order of a kill sheet should not depend on which one the planner
-    // happened to reach first.
-    orderBy: (c, { asc: byAsc }) => [byAsc(c.createdAt), byAsc(c.id)],
-  });
-}
-
-/**
- * The sheet's rows in the shape the fold wants.
- *
- * A thin mapping, and it lives here rather than in `core/carcass.ts` because the
- * core file must stay pure: it may not know what a drizzle row looks like, and
- * `disposition` is a string in the database and a boolean in the arithmetic.
- */
-function carcassLines(rows: ProductionRunCarcass[]): CarcassLine[] {
-  return rows.map((row) => ({
-    key: row.id,
-    inputKey: row.runInputId,
-    headCount: row.headCount,
-    liveLb: row.liveLb,
-    hangingLb: row.hangingLb,
-    condemned: row.disposition === "condemned",
-    reason: row.condemnReason,
-  }));
-}
-
-/**
- * What each input put in, for reconciling the sheet against it.
- *
- * **`headIn` IS THE COUNT DIMENSION'S BASE, NOT THE RAW QUANTITY.** Five dozen
- * is sixty, and a reconciliation that compared five against sixty carcasses
- * would refuse a sheet that was perfectly correct. `head` and `each` both convert
- * to themselves, so the ordinary case passes straight through.
- *
- * Anything not counted contributes null: a hundred pounds of flour has no head
- * to account for, and claiming a reconciliation over it would be inventing one.
- */
-function sheetInputs(inputs: RunInputRow[]): SheetInput[] {
-  return inputs.map((row) => {
-    const dimension = getUnit(row.unit)?.dimension;
-    return {
-      key: row.id,
-      headIn:
-        dimension === "count" ? convert(row.quantity, row.unit, "each") : null,
-      liveLb: weightLbOf(row.quantity, row.unit, row.weightLb),
-    };
-  });
-}
-
 // --------------------------------------------------------------- complete ---
 
 export interface CompletionResult {
@@ -1130,25 +852,7 @@ export interface RunDetail {
   run: ProductionRun;
   inputs: RunInputRow[];
   outputs: RunOutputRow[];
-  /** The kill sheet, line by line, oldest first. Empty on a run that has none. */
-  carcasses: ProductionRunCarcass[];
-  /** Head passed, head condemned, and the causes. Folded, never stored. */
-  tally: CarcassTally;
-  /** Live → hanging, or the reason there is not one. */
-  dressing: DressingResult;
-  /** Hanging → packaged, or the reason there is not one. */
-  cutting: CuttingResult;
-  /**
-   * The OVERALL yield — packaged over everything that went in — or the reason
-   * there is not one. Folded, never stored.
-   *
-   * **ITS DENOMINATOR IS UNCHANGED BY THE KILL SHEET AND THAT IS DELIBERATE.**
-   * Slice 0 chose to state it plainly as *everything that went in* and refuse to
-   * adjust it, so that a run which lost one to condemnation reads as a low yield
-   * that is visible rather than a normal one with a hidden correction. The sheet
-   * does not soften that number; it supplies the EXPLANATION that used to be
-   * missing beside it, and the two stage ratios that say where the pounds went.
-   */
+  /** The yield, or the reason there is not one. Folded, never stored. */
   yieldResult: YieldResult;
   /** What went in, in cents. */
   potCents: number;
@@ -1175,10 +879,9 @@ export async function runDetail(
   const run = await getRun(tx, tenantId, runId);
   if (!run) return null;
 
-  const [inputs, outputs, carcasses] = await Promise.all([
+  const [inputs, outputs] = await Promise.all([
     listRunInputs(tx, tenantId, runId),
     listRunOutputs(tx, tenantId, runId),
-    listRunCarcasses(tx, tenantId, runId),
   ]);
   const items = await itemsById(
     tx,
@@ -1236,31 +939,16 @@ export async function runDetail(
     .map((i) => i.lotId)
     .filter((id): id is string => id !== null);
 
-  // Folded once and handed to both stage ratios. Counting the sheet twice is how
-  // a screen ends up saying "3 condemned" beside a ratio that used a different
-  // three.
-  const lines = carcassLines(carcasses);
-  const sheet = sheetInputs(inputs);
-  const tally = tallyCarcasses(lines, sheet);
-  const outputWeights = outputRows.map((o) => ({
-    key: o.output.id,
-    lb: o.weightLb,
-  }));
-
   return {
     run,
     inputs,
     outputs: outputRows,
-    carcasses,
-    tally,
-    dressing: dressingPercentage(lines, sheet, tally),
-    cutting: cuttingYield(lines, outputWeights, tally),
     yieldResult: runYield(
       inputs.map((i) => ({
         key: i.id,
         lb: weightLbOf(i.quantity, i.unit, i.weightLb),
       })),
-      outputWeights,
+      outputRows.map((o) => ({ key: o.output.id, lb: o.weightLb })),
     ),
     potCents,
     unpricedInputs,
@@ -1280,25 +968,15 @@ export interface RunSummary {
   yieldResult: YieldResult;
   potCents: number;
   landedCents: number;
-  /**
-   * Head condemned across this run's kill sheet, and the head the sheet covers.
-   *
-   * **ON THE LIST BECAUSE THAT IS WHERE A PATTERN IS VISIBLE.** One run
-   * condemning three birds is a fact; four runs in a row condemning three is the
-   * thing worth acting on, and the design says exactly that about batch results
-   * — the variance across runs is the learning. A per-run page can never show it.
-   */
-  headCondemned: number;
-  headOnSheet: number;
 }
 
 /**
  * One line per run for the list page: how much went in, how much came out, and
  * the ratio between them.
  *
- * A FIXED NUMBER OF QUERIES whatever the run count — the same rule the livestock
- * list follows, because a page with twenty runs must not be a page with
- * twenty-one queries.
+ * Four queries for the whole page whatever the run count — the same rule the
+ * livestock list follows, because a page with twenty runs must not be a page
+ * with twenty-one queries.
  */
 export async function runSummaries(
   tx: Tx,
@@ -1308,7 +986,7 @@ export async function runSummaries(
   const out = new Map<string, RunSummary>();
   if (runIds.length === 0) return out;
 
-  const [inputRows, outputRows, carcassRows] = await Promise.all([
+  const [inputRows, outputRows] = await Promise.all([
     tx
       .select({
         runId: schema.productionRunInputs.runId,
@@ -1382,32 +1060,14 @@ export async function runSummaries(
           inArray(schema.productionRunOutputs.runId, runIds),
         ),
       ),
-    tx
-      .select({
-        runId: schema.productionRunCarcasses.runId,
-        headCount: schema.productionRunCarcasses.headCount,
-        disposition: schema.productionRunCarcasses.disposition,
-      })
-      .from(schema.productionRunCarcasses)
-      .where(
-        and(
-          eq(schema.productionRunCarcasses.tenantId, tenantId),
-          inArray(schema.productionRunCarcasses.runId, runIds),
-        ),
-      ),
   ]);
 
   for (const runId of runIds) {
     const ins = inputRows.filter((r) => r.runId === runId);
     const outs = outputRows.filter((r) => r.runId === runId);
-    const sheet = carcassRows.filter((r) => r.runId === runId);
     out.set(runId, {
       inputCount: ins.length,
       outputCount: outs.length,
-      headCondemned: sheet
-        .filter((r) => r.disposition === "condemned")
-        .reduce((total, r) => total + r.headCount, 0),
-      headOnSheet: sheet.reduce((total, r) => total + r.headCount, 0),
       yieldResult: runYield(
         ins.map((r) => ({
           key: r.id,

@@ -9,14 +9,11 @@ import { logAudit } from "@/lib/audit";
 import { todayInTimezone } from "@/lib/timezone";
 import {
   ProductionError,
-  addRunCarcass,
   addRunInput,
   addRunOutput,
   completeRun,
-  removeRunCarcass,
   removeRunOutput,
   startRun,
-  updateRunCarcass,
   updateRunOutput,
   type ProductionCtx,
 } from "./ops";
@@ -54,7 +51,6 @@ function toResult(err: unknown): { error: string } {
       case "LOT_REQUIRED":
       case "INPUT_BLOCKED":
       case "NOTHING_TO_LAND":
-      case "CARCASS_INVALID":
         return { error: err.message };
     }
   }
@@ -258,133 +254,6 @@ export async function removeRunOutputAction(input: unknown) {
       (tx) => removeRunOutput(tx, ctxOf(ctx), parsed.data.id),
       { role: ctx.role },
     );
-    revalidatePath(BASE, "layout");
-    return { ok: true };
-  } catch (err) {
-    return toResult(err);
-  }
-}
-
-/**
- * The kill sheet's write surface.
- *
- * **ALL THREE ARE AUDITED, INCLUDING THE EDITS, and outputs are not.** The
- * difference is what the row says. An output is a box of meat and the ledger is
- * its record; a carcass line is a statement about whether an animal was fit to
- * sell, made by a licensed plant and transcribed here. Removing one, or editing
- * a condemnation back to a pass, erases that statement — so the fact that
- * somebody did it is worth keeping even though the row is not.
- *
- * `disposition` goes in the meta and the reason does NOT: the cause is free text
- * off somebody else's paperwork, and the audit log takes identifiers, never
- * prose.
- */
-const carcassFields = {
-  tag: z.string().max(120).optional(),
-  headCount: z.number().int().positive().max(1_000_000).optional(),
-  liveLb: weight,
-  hangingLb: weight,
-  condemned: z.boolean().optional(),
-  condemnReason: z.string().max(500).optional(),
-  notes: z.string().max(2000).optional(),
-};
-
-export async function addRunCarcassAction(input: unknown) {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, PACK);
-  const parsed = z
-    .object({
-      runId: z.string().uuid(),
-      runInputId: z.string().uuid(),
-      ...carcassFields,
-    })
-    .safeParse(input);
-  if (!parsed.success) return { error: "Check the details and try again." };
-
-  try {
-    const row = await withTenant(
-      ctx.tenant.id,
-      (tx) => addRunCarcass(tx, ctxOf(ctx), parsed.data),
-      { role: ctx.role },
-    );
-    await logAudit({
-      action: "production.carcass.recorded",
-      tenantId: ctx.tenant.id,
-      actorClerkUserId: ctx.userId,
-      targetType: "production_run",
-      targetId: parsed.data.runId,
-      meta: {
-        carcassId: row.id,
-        runInputId: parsed.data.runInputId,
-        headCount: row.headCount,
-        disposition: row.disposition,
-      },
-    });
-    revalidatePath(BASE, "layout");
-    return { ok: true };
-  } catch (err) {
-    return toResult(err);
-  }
-}
-
-export async function updateRunCarcassAction(input: unknown) {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, PACK);
-  const parsed = z
-    .object({ id: z.string().uuid(), ...carcassFields })
-    .safeParse(input);
-  if (!parsed.success) return { error: "Check the details and try again." };
-
-  const { id, ...patch } = parsed.data;
-  try {
-    const row = await withTenant(
-      ctx.tenant.id,
-      (tx) => updateRunCarcass(tx, ctxOf(ctx), id, patch),
-      { role: ctx.role },
-    );
-    await logAudit({
-      action: "production.carcass.corrected",
-      tenantId: ctx.tenant.id,
-      actorClerkUserId: ctx.userId,
-      targetType: "production_run",
-      targetId: row.runId,
-      meta: {
-        carcassId: row.id,
-        headCount: row.headCount,
-        disposition: row.disposition,
-      },
-    });
-    revalidatePath(BASE, "layout");
-    return { ok: true };
-  } catch (err) {
-    return toResult(err);
-  }
-}
-
-export async function removeRunCarcassAction(input: unknown) {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, PACK);
-  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
-  if (!parsed.success) return { error: "Check the details and try again." };
-
-  try {
-    const row = await withTenant(
-      ctx.tenant.id,
-      (tx) => removeRunCarcass(tx, ctxOf(ctx), parsed.data.id),
-      { role: ctx.role },
-    );
-    await logAudit({
-      action: "production.carcass.removed",
-      tenantId: ctx.tenant.id,
-      actorClerkUserId: ctx.userId,
-      targetType: "production_run",
-      targetId: row.runId,
-      meta: {
-        carcassId: row.id,
-        headCount: row.headCount,
-        disposition: row.disposition,
-      },
-    });
     revalidatePath(BASE, "layout");
     return { ok: true };
   } catch (err) {

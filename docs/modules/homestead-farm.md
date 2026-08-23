@@ -116,54 +116,6 @@ What it **does** break:
 
 ## Build log
 
-### 2026-08-23 — Production slice 1a: the carcass, and the honest way to subtract a condemnation (`claude/homestead-farm-modulas-elewgg`)
-- **The pack's largest deferred item came back and the deferral's own reasoning
-  built it.** Slice 0 refused to model a condemnation and wrote down exactly why:
-  a head count would reconcile while leaving the condemned animal's live weight
-  in the denominator, and *nothing short of per-animal weights can take it out*.
-  That sentence is the design. `live_lb` on the carcass row, and one adjustment —
-  **sum only the animals that passed, on both sides** — with nothing averaged
-  anywhere. **A deferral that records its reason is worth more than one that
-  records a date**, and this is the second time in this profile that a slice was
-  written straight out of an old note.
-- **Where the app CANNOT adjust, it says so instead of adjusting badly.** With no
-  per-carcass live weights the denominator is the farm's trailer ticket, condemned
-  birds and all, so the ratio genuinely reads low — 67.9% where the plant's scale
-  would have said 70.0%. A flag and a sentence carry that. The alternative, an
-  average subtracted from a total, is the fudge this pack was created to refuse,
-  and it would have been invisible forever.
-- **PROVENANCE, A FIFTH TIME, AND NOW IT IS TWO SCALES.** Feed cost carries
-  measured-versus-allocated, weights carry their method, conversion carries both,
-  a withdrawal carries where it came from — and now a live weight carries whether
-  it came off the farm's scale or the plant's. They disagree by the 3–5% an animal
-  loses on a trailer, which this dossier recorded as a hazard back in the Land
-  design. **`land`'s rule about a declared acreage beside a measured one turned
-  out to be about weights too**: report both, prefer the one that answers the
-  question, never overwrite.
-- **The headline number deliberately did not improve.** The overall yield still
-  divides by everything that went in, so a condemnation still reads as a low
-  yield. That was slice 0's call and it survived being revisited — a softened
-  headline is how a real loss stops being noticed. What the sheet added is the
-  explanation that used to be missing beside it.
-- **The design's "one mechanism, two names" was tested and half-held.** The
-  carcass stage is general; the word for it is not, so `killSheet` is a
-  renameable label and the only place `production` says something
-  industry-shaped out loud. Recorded as such rather than hidden behind a
-  euphemism.
-- **The whole suite ran green, isolation included — and the first attempt said it
-  could not.** No `DATABASE_URL` was set, which was true, and "so the database
-  tests cannot run here" was the wrong conclusion drawn from it: the runner has
-  Postgres installed and CI's own local-proxy path works outside CI. Worth
-  carrying past this slice — **before recording a capability as absent, check
-  whether the thing is missing or merely unconfigured**, which is the same
-  mistake in a different costume as `land` asking the founder to trace a
-  boundary a county had already drawn. Written up in
-  [ci-and-tests.md](ci-and-tests.md).
-- **Still not driven in a browser**, and that blocker is a Clerk session rather
-  than a database. Kept as the top open item, because five of the last six
-  slices in this profile had a defect that only clicking found.
-- Dossier: [production.md](production.md).
-
 ### 2026-08-21 — Retail slice 1: the till, and the column that makes a retry safe (`claude/the-till-that-cannot-double-post`)
 - **Profit per market day is a number now**, not a promise. Slice 0 recorded what
   a day cost; this records what it took, and the design's argument about the dud
@@ -788,8 +740,8 @@ own words condensed, not reinterpreted.
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slices 0–1 built**, [livestock.md](livestock.md) |
 | Gardens/crops | `crops` pack | **yes** | **done** — [category design](#category-design--crops--garden-brainstormed-2026-08-13) |
-| Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) · **slices 0–1a built**, [production.md](production.md) |
-| Baking | `production` pack — shared run, separate template | no | **done** — same design; the shared run is built, the recipe template is slice 2 |
+| Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) |
+| Baking | `production` pack — shared run, separate template | no | **done** — same design |
 | Retail | `inventory` (**slices 0–1 built**, [inventory.md](inventory.md)) + `retail` packs | no | **done** — [inventory](#category-design--inventory-brainstormed-2026-08-13) · [retail](#category-design--retail-brainstormed-2026-08-13) |
 | Marketing | core CRM + email; thin pack at most | no | first pass |
 | Accounting | **core module, already built** — seed + config | — | first pass |
@@ -852,18 +804,14 @@ a category-design section below and a slice order.
   communication (email + CRM), vendor scheduling (scheduling + party spine).
 - **Explicitly deferred as code:** marketing — see *Explicitly deferred*.
 
-**Six of the seven are being built**, as of 2026-08-23: `assets`, `land`,
-`inventory`, `livestock`, `production` and `retail` have all shipped slices —
-each has its own dossier and slice order. **`crops` is the one that is still only
-a design**, and it is now the sole remaining pack.
-
-The risk the first version of this paragraph named — that designing stays
-comfortable while building does not — is answered for six packs and still open
-for the seventh. Worth saying plainly: `crops` is last because the garden is the
-smallest enterprise on the pilot farm, not because it is hard, and the longer it
-waits the more likely it is that a season passes with no bed history in it. That
-is the cold-start argument this profile made about `livestock`, arriving for the
-one pack that never got it.
+**Four of the seven are being built.** `assets` has shipped register,
+containment, depreciation, disposal and maintenance
+([assets.md](assets.md)); `land` has shipped slice 0
+([land.md](land.md)) and carries the slice order the design lacked. The other
+five are still designs. The risk the earlier version of this paragraph named —
+that designing stays comfortable while building does not — has not gone away, it
+has just moved down the list to `livestock` — which is now unblocked, and is the
+pack the pilot farm actually lives in.
 
 Notes worth keeping from the first pass, because they are the load-bearing
 design calls and the ones most likely to be got wrong twice:
@@ -1879,8 +1827,7 @@ clock**, which the health model already anticipates as a second clock.
 | # | Slice | Why here |
 | --- | --- | --- |
 | 0 | Run model + outputs landing in `inventory` | The spine; unblocks the meat path |
-| 1a | The carcass stage: the kill sheet, dressing vs cutting yield, condemnations | The stage the two ratios need, and the only honest home for a condemnation |
-| 1b | Meat runs: the processing path, eligibility stamping, the exemption counter, the sheet as a document | The legal machinery — and the extraction needed somewhere to extract into |
+| 1 | Meat runs: both paths, eligibility stamping, exemption counter, kill-sheet capture | The pilot's largest enterprise, and the legal machinery |
 | 2 | Recipes + bake batches + results feedback | The requested workspace |
 | 3 | Cost roll, byproducts at NRV, costed internal transfers | Makes enterprise P&L honest |
 | 4 | Label generation | Legal deliverable, cheap once recipes exist |

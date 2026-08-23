@@ -14,7 +14,6 @@ import {
   priceCategoryRank,
   type PriceUnit,
 } from "./vocabulary";
-import { feeTotal, type FeeLine, type FeeTotal, type RunMeasures } from "./core/fee";
 
 /**
  * THE CUT SHEET — what this farm asked one plant to do with one lot of animals.
@@ -29,8 +28,15 @@ import { feeTotal, type FeeLine, type FeeTotal, type RunMeasures } from "./core/
  * a number on this table reaches the ledger.** An order is a QUOTE — the same
  * standing the price items have and for the same reason. What crosses into cost
  * is `production_runs.processing_fee_cents`, stamped by `completeRun` from a
- * figure a person confirmed, and `orderFee` below is what proposes it. The
- * order itself never changes because a run completed.
+ * figure a person confirmed. The order itself never changes because a run
+ * completed.
+ *
+ * **THE FEE IS FOLDED IN `runDetail`, NOT HERE**, and that is deliberate rather
+ * than an oversight about where it belongs. That function already has the
+ * orders and the run's measures in hand; a second entry point would be a second
+ * way to answer one question, which is the shape this codebase keeps finding
+ * disagrees with itself within a season. `core/fee.ts` is the arithmetic, and
+ * it is pure.
  *
  * **WRITES ARE MEMBER, WHICH IS THE OPPOSITE CALL FROM `setPriceItem`.**
  * Recording what a plant charges is the terms of a commercial relationship and
@@ -71,17 +77,6 @@ export interface OrderDetail {
   /** The plant's name, from the party. Never copied onto this table. */
   processorName: string;
   lines: ProductionOrderLine[];
-}
-
-function orderLineFee(line: ProductionOrderLine): FeeLine {
-  return {
-    key: line.id,
-    label: line.label,
-    unitPriceCents: line.unitPriceCents,
-    unit: line.unit !== null && isPriceUnit(line.unit) ? line.unit : null,
-    minimumCents: line.minimumCents,
-    quantity: line.quantity,
-  };
 }
 
 /**
@@ -498,60 +493,6 @@ export async function attachOrdersToRun(
     )
     .returning();
   return rows.length;
-}
-
-/**
- * What the sheets on this run add up to, and what they could not answer.
- *
- * **THIS IS A READ, AND IT PROPOSES.** Nothing about it writes, and
- * `completeRun` takes a figure from the person rather than from here — the same
- * arrangement the paperwork readers have, for a smaller reason: a plant's
- * actual bill routinely differs from its rate sheet, and a fee that appeared on
- * the ledger without anybody looking at it would be a quote pretending to be an
- * invoice.
- */
-export async function orderFee(
-  tx: Tx,
-  tenantId: string,
-  runId: string,
-  measures: RunMeasures,
-): Promise<FeeTotal> {
-  const lines = await tx
-    .select({
-      id: schema.productionOrderLines.id,
-      label: schema.productionOrderLines.label,
-      unitPriceCents: schema.productionOrderLines.unitPriceCents,
-      unit: schema.productionOrderLines.unit,
-      minimumCents: schema.productionOrderLines.minimumCents,
-      quantity: schema.productionOrderLines.quantity,
-    })
-    .from(schema.productionOrderLines)
-    .innerJoin(
-      schema.productionOrders,
-      and(
-        eq(
-          schema.productionOrderLines.orderId,
-          schema.productionOrders.id,
-        ),
-        eq(
-          schema.productionOrderLines.tenantId,
-          schema.productionOrders.tenantId,
-        ),
-      ),
-    )
-    .where(
-      and(
-        eq(schema.productionOrders.tenantId, tenantId),
-        eq(schema.productionOrders.runId, runId),
-      ),
-    );
-
-  return feeTotal(
-    lines.map((l) =>
-      orderLineFee(l as unknown as ProductionOrderLine),
-    ),
-    measures,
-  );
 }
 
 async function requireProcessor(

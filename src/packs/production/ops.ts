@@ -970,10 +970,10 @@ export async function completeRun(
    *
    * **IT ARRIVES AS AN ARGUMENT RATHER THAN BEING READ OFF THE ORDER**, and
    * that is the confirm step this pack applies to everything a machine
-   * proposes. `orderFee` works out what the cut sheets come to and the screen
-   * offers it; a plant's actual bill routinely differs from its rate sheet, and
-   * a figure that reached the ledger without anybody looking at it would be a
-   * quote pretending to be an invoice.
+   * proposes. `runDetail`'s `quotedFee` works out what the cut sheets come to
+   * and the screen offers it; a plant's actual bill routinely differs from its
+   * rate sheet, and a figure that reached the ledger without anybody looking at
+   * it would be a quote pretending to be an invoice.
    */
   processingFeeCents?: number | null,
 ): Promise<CompletionResult> {

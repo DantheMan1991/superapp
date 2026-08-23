@@ -124,10 +124,16 @@ to the count beside them.
   `0185` is the RLS pair.
 - 25 new pure tests, 8 new ops tests, 7 new isolation tests. `killSheet` declared
   in `src/packs/index.ts` and set by the homestead profile.
-- **NOT DRIVEN IN A BROWSER.** No database is reachable from this container, so
-  the db-backed suites skipped locally and CI is the first run of them. Recorded
-  as the top open item rather than glossed — five of the last six slices had a
-  defect only clicking found.
+- **The whole suite ran green — 3,470 tests, isolation included** — against a
+  Postgres built from zero inside this container. The first attempt at this
+  slice reported the db-backed suites as unrun because no `DATABASE_URL` was
+  set, which was true and was the wrong conclusion: **the runner has Postgres
+  installed and CI's own local-proxy path works on a laptop too.** Written up in
+  [ci-and-tests.md](ci-and-tests.md) so the next session does not repeat it.
+- **STILL NOT DRIVEN IN A BROWSER**, and that one is not a missing database: the
+  app needs a signed-in Clerk session and there are no Clerk keys here. Kept as
+  the top open item — five of the last six slices had a defect only clicking
+  found, and every one of them had passing tests over it.
 
 ### 2026-08-22 — The question this pack was answering for itself (`claude/a-cost-you-can-put-right`)
 
@@ -507,15 +513,15 @@ run model, separate templates), and the processing path and eligibility flag
 
 ## Open items
 
-- **SLICE 1a HAS NOT BEEN DRIVEN IN A BROWSER, AND NO DB-BACKED TEST HAS RUN.**
-  The container this was built in has no database reachable, so
-  `production-ops` and the isolation suite skipped locally and CI is their first
-  execution. Listed first because it is the largest known risk in the slice:
-  **five of the last six slices across this profile had at least one defect that
-  only clicking found**, and one of those had a passing test over the wrong
-  behaviour. The screens most likely to be wrong are the ones with a state
-  nothing else has — a sheet on a FINISHED run, and the form that changes shape
-  when a carcass is condemned.
+- **SLICE 1a HAS NOT BEEN DRIVEN IN A BROWSER.** Every test passes — the ops
+  suite and the isolation certification included, against a database built from
+  zero — and that is exactly the state the last five defects in this profile
+  were found in. **Five of the last six slices had at least one defect that only
+  clicking found, and one had a passing test over the wrong behaviour.** The
+  screens most likely to be wrong are the ones in a state nothing else on this
+  pack has: a sheet on a FINISHED run, and the form that changes shape when a
+  carcass is condemned. The blocker is a signed-in Clerk session rather than a
+  database.
 - **NOTHING EXTRACTS A KILL SHEET FROM A PHOTOGRAPH YET**, which is the other
   half of what the design calls kill-sheet capture and is slice 1b. The rows
   exist to extract into now, which is the ordering that made 1a first. The

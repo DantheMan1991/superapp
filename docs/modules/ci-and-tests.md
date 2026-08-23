@@ -5,6 +5,50 @@
 > check from running on somebody's laptop and blocking them for twenty minutes.
 > Status: live · Scope: `platform`
 
+## Running the database suite with no Neon branch
+
+**You do not need a Neon branch to run the db suite, and an agent session that
+concludes otherwise has cost the slice its certification.** Everything CI does in
+its `tests` job works outside CI, because the only thing that made it
+CI-specific was `NEON_LOCAL_PROXY`, and that is just an address.
+
+1. Start Postgres. A container built from this repo's image already has a
+   cluster provisioned and stopped — `pg_lsclusters` shows it, and
+   `pg_ctlcluster 16 main start` brings it up. Set a password on `postgres` and
+   `createdb superapp_test`.
+2. Put a WebSocket proxy in front of it on `:5433`. CI runs
+   `ghcr.io/neondatabase/wsproxy`; where there is no docker daemon, the thing it
+   does is about forty lines — accept a WebSocket at `/v1`, pipe its binary
+   frames to a TCP socket, buffer whatever arrives before the socket is up.
+   **The driver must stay Neon's**, which is the whole reason for a proxy rather
+   than swapping in `pg`; see the 2026-08-15 entry below.
+3. Export exactly what the `tests` job exports — `NEON_LOCAL_PROXY`,
+   `CI_POSTGRES_OWNER_URL`, `CI_APP_USER_PASSWORD`, `TEST_DATABASE_URL`,
+   `TEST_DATABASE_URL_OWNER`, and the three fake keys. **Do not also set
+   `DATABASE_URL_OWNER`**: `migrate.ts` refuses `--dev` when the test database is
+   also the app's, which is the guard working correctly and reads like a bug.
+4. `npm run db:migrate -- --dev`, `npx tsx scripts/ci-provision-db.ts`,
+   `DATABASE_URL="$TEST_DATABASE_URL_OWNER" npm run db:seed`, then `npm test`.
+
+**On Postgres 16 step 4 fails, and it is a version gap rather than a broken
+chain.** `migrate()` runs the whole chain in ONE transaction, `0127` adds
+`'depreciation'` to `journal_entry_source`, and `0154` backfills using it —
+which PG16 refuses as *"new enum values must be committed before they can be
+used"*. PG17 relaxed that, which is why CI pins **Postgres 18 to match Neon** and
+never sees it. The workaround on an older local cluster is to apply
+`drizzle/*.sql` in order with `psql -v ON_ERROR_STOP=1 -f`, which gives each file
+its own transaction; the schema it builds is the same one, and it exercises the
+migration chain from zero just as CI does.
+
+The whole suite is ~140 seconds this way — a local round trip is sub-millisecond,
+and the suite has always been latency-bound rather than CPU-bound.
+
+**What this does NOT unlock is driving the app in a browser.** Chromium and
+Playwright are installed, but the dashboard needs a signed-in Clerk session and
+a container has no Clerk keys. That is a credentials problem, not an environment
+one, and it is why slice dossiers keep carrying "not driven in a browser" as an
+open item while every test passes.
+
 ## Build log
 
 ### 2026-08-15 — The database moves into the runner (branch `claude/ci-postgres-in-runner`)

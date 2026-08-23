@@ -150,9 +150,18 @@ What it **does** break:
   renameable label and the only place `production` says something
   industry-shaped out loud. Recorded as such rather than hidden behind a
   euphemism.
-- **Not driven in a browser, and no DB-backed test has run** — this container has
-  no database. Listed as the top open item, because five of the last six slices
-  in this profile had a defect that only clicking found.
+- **The whole suite ran green, isolation included — and the first attempt said it
+  could not.** No `DATABASE_URL` was set, which was true, and "so the database
+  tests cannot run here" was the wrong conclusion drawn from it: the runner has
+  Postgres installed and CI's own local-proxy path works outside CI. Worth
+  carrying past this slice — **before recording a capability as absent, check
+  whether the thing is missing or merely unconfigured**, which is the same
+  mistake in a different costume as `land` asking the founder to trace a
+  boundary a county had already drawn. Written up in
+  [ci-and-tests.md](ci-and-tests.md).
+- **Still not driven in a browser**, and that blocker is a Clerk session rather
+  than a database. Kept as the top open item, because five of the last six
+  slices in this profile had a defect that only clicking found.
 - Dossier: [production.md](production.md).
 
 ### 2026-08-21 — Retail slice 1: the till, and the column that makes a retry safe (`claude/the-till-that-cannot-double-post`)

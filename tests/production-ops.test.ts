@@ -18,6 +18,11 @@ import {
   type ProductionCtx,
 } from "../src/packs/production/ops";
 import {
+  createProcessor,
+  getProcessor,
+  setPriceItem,
+} from "../src/packs/production/processor-ops";
+import {
   adjustLotCost,
   carriedCostByLot,
   createItem,
@@ -1147,5 +1152,243 @@ d("production ops", () => {
         }),
       ),
     ).rejects.toThrow(/at least one head/);
+  });
+
+  /**
+   * ── THE ITEMISED PRICE LIST ────────────────────────────────────────────────
+   *
+   * The claims here are all about a table that did not exist until a rate sheet
+   * proved that three fee columns could not hold one. None of them is visible
+   * to a pure test: the upsert, the refusals and the sheet order are all
+   * database behaviour.
+   */
+  describe("what a processor charges, line by line", () => {
+    const makeProcessor = async (name: string) =>
+      asOwner((tx) => createProcessor(tx, ownerCtx(), { name }));
+
+    it("records a menu as a menu — several prices for one animal", async () => {
+      // **THE WHOLE POINT.** Quartered $1.05 and eight-piece $1.25 are two
+      // rows. Under the old shape there was one cutting column per animal, so
+      // the honest answer was to record neither and leave both as prose.
+      const processor = await makeProcessor("Menu Poultry");
+      for (const [label, price] of [
+        ["Quartered", 105],
+        ["8 Pcs Cut", 125],
+        ["Deboning Thighs", 65],
+      ] as const) {
+        await asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            kind: "poultry",
+            category: "cutting",
+            label,
+            priceCents: price,
+            unit: "head",
+          }),
+        );
+      }
+      const detail = await asOwner((tx) =>
+        getProcessor(tx, tenantId, processor.id),
+      );
+      expect(detail?.priceItems.map((i) => i.priceCents)).toEqual([
+        125, 65, 105,
+      ]);
+      expect(detail?.priceItems.every((i) => i.unit === "head")).toBe(true);
+    });
+
+    it("corrects a price rather than adding a second one for the same thing", async () => {
+      // An upsert on (processor, kind, label), which is what makes next year's
+      // rate sheet re-readable over this year's: the same labels come back with
+      // new figures and correct what is on file rather than doubling it.
+      const processor = await makeProcessor("Upsert Meats");
+      const first = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          kind: "cattle",
+          category: "cutting",
+          label: "Cut and wrap",
+          priceCents: 85,
+          unit: "hanging_lb",
+        }),
+      );
+      const second = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          kind: "cattle",
+          category: "cutting",
+          label: "Cut and wrap",
+          priceCents: 90,
+          unit: "hanging_lb",
+        }),
+      );
+      expect(second.id).toBe(first.id);
+      expect(second.priceCents).toBe(90);
+      const detail = await asOwner((tx) =>
+        getProcessor(tx, tenantId, processor.id),
+      );
+      expect(detail?.priceItems).toHaveLength(1);
+    });
+
+    it("keeps the SAME LABEL for two animals apart", async () => {
+      // "Slaughter" for cattle and "Slaughter" for swine are two prices, and
+      // the unique index is on (kind, label) rather than label alone precisely
+      // so the second does not overwrite the first.
+      const processor = await makeProcessor("Two Species Packing");
+      for (const [kind, price] of [
+        ["cattle", 9500],
+        ["swine", 6500],
+      ] as const) {
+        await asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            kind,
+            category: "slaughter",
+            label: "Slaughter",
+            priceCents: price,
+            unit: "head",
+          }),
+        );
+      }
+      const detail = await asOwner((tx) =>
+        getProcessor(tx, tenantId, processor.id),
+      );
+      expect(detail?.priceItems.map((i) => i.priceCents)).toEqual([9500, 6500]);
+    });
+
+    it("keeps NULL apart from zero, because they are different answers", async () => {
+      // An unquoted price is a question nobody asked; a zero says they waived
+      // it. The rule the whole pack applies to money, at the one table where a
+      // rate sheet routinely says "call us".
+      const processor = await makeProcessor("Null Not Zero Abattoir");
+      const unquoted = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          category: "extra",
+          label: "Smoking",
+          unit: "finished_lb",
+        }),
+      );
+      expect(unquoted.priceCents).toBeNull();
+      const waived = await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          category: "extra",
+          label: "Disposal",
+          priceCents: 0,
+          unit: "flat",
+        }),
+      );
+      expect(waived.priceCents).toBe(0);
+    });
+
+    it("refuses a unit the app cannot interpret", async () => {
+      const processor = await makeProcessor("Bad Unit Butchers");
+      await expect(
+        asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            category: "cutting",
+            label: "Cutting",
+            priceCents: 105,
+            unit: "per_animal",
+          }),
+        ),
+      ).rejects.toThrow(/what the price is per/);
+    });
+
+    it("refuses a price for something unnamed, and a negative one", async () => {
+      const processor = await makeProcessor("Refusals Ltd");
+      await expect(
+        asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            label: "   ",
+            unit: "head",
+          }),
+        ),
+      ).rejects.toThrow(/name what they charge for/);
+      await expect(
+        asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            label: "Slaughter",
+            unit: "head",
+            priceCents: -1,
+          }),
+        ),
+      ).rejects.toThrow(/cannot be negative/);
+    });
+
+    it("REFUSES A PRICE FROM STAFF, as it refuses a handle", async () => {
+      // Transcribing a kill sheet is a chore and is MEMBER. What a plant
+      // charges is the terms of a commercial relationship, and the contrast is
+      // deliberate.
+      const processor = await makeProcessor("Owner Only Meats");
+      await expect(
+        withTenant(
+          tenantId,
+          (tx) =>
+            setPriceItem(tx, staffCtx(), processor.id, {
+              label: "Slaughter",
+              unit: "head",
+              priceCents: 9500,
+            }),
+          { role: "staff", userId: STAFF },
+        ),
+      ).rejects.toThrow(ProductionError);
+    });
+
+    it("reads the sheet in the order the paper reads", async () => {
+      // Animal, then the sheet's own grouping, then the plant's own words —
+      // and a category nobody anticipated sorts LAST rather than first, because
+      // the rank is over an open taxonomy.
+      const processor = await makeProcessor("Sheet Order Processing");
+      for (const [category, label] of [
+        ["brining", "Brine"],
+        ["packaging", "Vacuum pack"],
+        ["slaughter", "Slaughter"],
+        ["cutting", "Cut and wrap"],
+      ] as const) {
+        await asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            kind: "cattle",
+            category,
+            label,
+            unit: "head",
+            priceCents: 100,
+          }),
+        );
+      }
+      const detail = await asOwner((tx) =>
+        getProcessor(tx, tenantId, processor.id),
+      );
+      expect(detail?.priceItems.map((i) => i.category)).toEqual([
+        "slaughter",
+        "cutting",
+        "packaging",
+        "brining",
+      ]);
+    });
+
+    it("takes the price off a processor when the processor goes", async () => {
+      // The cascade, and it is what stops a price outliving the plant that
+      // quoted it.
+      const processor = await makeProcessor("Gone Tomorrow Packing");
+      await asOwner((tx) =>
+        setPriceItem(tx, ownerCtx(), processor.id, {
+          label: "Slaughter",
+          unit: "head",
+          priceCents: 9500,
+        }),
+      );
+      await withSystem((tx) =>
+        tx
+          .delete(schema.productionProcessors)
+          .where(eq(schema.productionProcessors.id, processor.id)),
+      );
+      const left = await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.productionProcessorPriceItems)
+          .where(
+            eq(
+              schema.productionProcessorPriceItems.processorId,
+              processor.id,
+            ),
+          ),
+      );
+      expect(left).toHaveLength(0);
+    });
   });
 });

@@ -17,6 +17,8 @@ import {
   LABELLING_LABELS,
   RATING_LABELS,
   centsToDisplay,
+  PRICE_CATEGORY_LABELS,
+  priceWithUnit,
   processorHandlesFrom,
   slugLabel,
 } from "@/packs/production/vocabulary";
@@ -26,8 +28,10 @@ import {
   AddProcessorDialog,
   EditProcessorDialog,
   HandleDialog,
+  PriceItemDialog,
   RemoveCutButton,
   RemoveHandleButton,
+  RemovePriceItemButton,
 } from "@/packs/production/components/processor-controls";
 
 export const dynamic = "force-dynamic";
@@ -101,7 +105,7 @@ export default async function ProcessorsPage() {
         />
       ) : (
         <div className="space-y-4">
-          {processors.map(({ processor, name, handles, cuts }) => (
+          {processors.map(({ processor, name, handles, cuts, priceItems }) => (
             <Card key={processor.id}>
               <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
                 <div className="space-y-1">
@@ -165,19 +169,12 @@ export default async function ProcessorsPage() {
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-medium">What they take</h3>
                     {isOwner && (
-                      <div className="flex items-center gap-2">
-                        <ReadPriceListDialog
-                          processorId={processor.id}
-                          kindOptions={kindOptions}
-                          word={word}
-                        />
-                        <HandleDialog
+                      <HandleDialog
                         processorId={processor.id}
-                          kindOptions={kindOptions.filter(
-                            (k) => !handles.some((h) => h.kind === k),
-                          )}
-                        />
-                      </div>
+                        kindOptions={kindOptions.filter(
+                          (k) => !handles.some((h) => h.kind === k),
+                        )}
+                      />
                     )}
                   </div>
                   {handles.length === 0 ? (
@@ -188,69 +185,135 @@ export default async function ProcessorsPage() {
                     </p>
                   ) : (
                     <ul className="space-y-1 text-sm">
-                      {handles.map((handle) => {
-                        const kill = centsToDisplay(handle.killFeeCents);
-                        const cut = centsToDisplay(handle.cutWrapCentsPerLb);
-                        const cutHead = centsToDisplay(
-                          handle.cutFeeCentsPerHead,
-                        );
+                      {handles.map((handle) => (
+                        <li
+                          key={handle.id}
+                          className="flex flex-wrap items-center gap-x-3 gap-y-1"
+                        >
+                          <span className="font-medium">
+                            {slugLabel(handle.kind)}
+                          </span>
+                          {handle.capacityPerDay !== null && (
+                            <span className="text-muted-foreground">
+                              {handle.capacityPerDay}/day
+                            </span>
+                          )}
+                          {handle.priceNotes !== "" && (
+                            <span className="text-muted-foreground">
+                              {handle.priceNotes}
+                            </span>
+                          )}
+                          {isOwner && (
+                            <span className="ml-auto flex items-center">
+                              <HandleDialog
+                                processorId={processor.id}
+                                kindOptions={kindOptions}
+                                existing={{
+                                  id: handle.id,
+                                  kind: handle.kind,
+                                  capacityPerDay: handle.capacityPerDay,
+                                  priceNotes: handle.priceNotes,
+                                }}
+                              />
+                              <RemoveHandleButton id={handle.id} />
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/*
+                  WHAT THEY CHARGE, LINE BY LINE.
+
+                  **THE MENU IS THE DATA.** Until this list existed a plant had
+                  three fee columns and a paragraph of prose, so twelve chicken
+                  options at nine prices survived as text nothing could select,
+                  compare or total. Grouped by animal and then the way the paper
+                  groups itself, because that is the order somebody checking it
+                  against the sheet in their hand reads in.
+
+                  **A PRICE WITHOUT ITS UNIT IS NOT SHOWN, EVER**, which is why
+                  `priceWithUnit` renders both or neither. $1.05 on its own is
+                  the exact ambiguity this list was built to end.
+                */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-medium">What they charge</h3>
+                    {isOwner && (
+                      <div className="flex items-center gap-2">
+                        <ReadPriceListDialog
+                          processorId={processor.id}
+                          kindOptions={kindOptions}
+                          word={word}
+                        />
+                        <PriceItemDialog
+                          processorId={processor.id}
+                          kindOptions={kindOptions}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {priceItems.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No prices on file. Photograph their rate sheet and it will
+                      read it — nothing is recorded until you have checked it.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1 text-sm">
+                      {priceItems.map((item) => {
+                        const money = priceWithUnit(item.priceCents, item.unit);
                         return (
                           <li
-                            key={handle.id}
+                            key={item.id}
                             className="flex flex-wrap items-center gap-x-3 gap-y-1"
                           >
-                            <span className="font-medium">
-                              {slugLabel(handle.kind)}
-                            </span>
-                            {handle.capacityPerDay !== null && (
-                              <span className="text-muted-foreground">
-                                {handle.capacityPerDay}/day
-                              </span>
-                            )}
-                            {/* A missing fee reads as a question, never as $0.00. */}
+                            <span>{item.label}</span>
+                            <Badge variant="outline">
+                              {item.kind === ""
+                                ? "Anything"
+                                : slugLabel(item.kind)}
+                            </Badge>
                             <span className="text-muted-foreground">
-                              {kill ? `${kill} a head` : "Kill fee not quoted"}
+                              {PRICE_CATEGORY_LABELS[item.category] ??
+                                slugLabel(item.category)}
                             </span>
-                            {/* Whichever ways they quoted. A plant that gave
-                                neither says so once, not twice. */}
-                            {cut && (
+                            {/* Not quoted is a question, never $0.00. */}
+                            <span
+                              className={
+                                money ? "font-medium" : "text-muted-foreground"
+                              }
+                            >
+                              {money ?? "Not quoted"}
+                            </span>
+                            {item.minimumCents !== null && (
                               <span className="text-muted-foreground">
-                                {cut} a lb cut and wrap
+                                {centsToDisplay(item.minimumCents)} minimum
                               </span>
                             )}
-                            {cutHead && (
+                            {item.notes !== "" && (
                               <span className="text-muted-foreground">
-                                {cutHead} a head to cut
-                              </span>
-                            )}
-                            {!cut && !cutHead && (
-                              <span className="text-muted-foreground">
-                                Cutting not quoted
-                              </span>
-                            )}
-                            {handle.priceNotes !== "" && (
-                              <span className="text-muted-foreground">
-                                {handle.priceNotes}
+                                {item.notes}
                               </span>
                             )}
                             {isOwner && (
                               <span className="ml-auto flex items-center">
-                                <HandleDialog
+                                <PriceItemDialog
                                   processorId={processor.id}
                                   kindOptions={kindOptions}
                                   existing={{
-                                    id: handle.id,
-                                    kind: handle.kind,
-                                    capacityPerDay: handle.capacityPerDay,
-                                    killFeeCents: handle.killFeeCents,
-                                    cutWrapCentsPerLb:
-                                      handle.cutWrapCentsPerLb,
-                                    cutFeeCentsPerHead:
-                                      handle.cutFeeCentsPerHead,
-                                    priceNotes: handle.priceNotes,
+                                    id: item.id,
+                                    kind: item.kind,
+                                    category: item.category,
+                                    label: item.label,
+                                    priceCents: item.priceCents,
+                                    unit: item.unit,
+                                    minimumCents: item.minimumCents,
+                                    notes: item.notes,
                                   }}
                                 />
-                                <RemoveHandleButton id={handle.id} />
+                                <RemovePriceItemButton id={item.id} />
                               </span>
                             )}
                           </li>

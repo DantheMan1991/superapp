@@ -711,16 +711,18 @@ export const productionProcessors = pgTable(
  * have, not by a column on the processor — which is what lets "who can take
  * eight hogs in October" be a query rather than a reading exercise.
  *
- * **PRICE LIVES HERE, PER KIND, BECAUSE THAT IS HOW PLANTS QUOTE.** A kill fee
- * is per head and cut-and-wrap is per pound of hanging weight, and both differ
- * by species at the same plant. A single price on the processor would have to
- * pick one animal and be wrong about the others.
+ * **PRICE NO LONGER LIVES HERE.** It did — a kill fee per head and two cutting
+ * fees — and three columns turned out to be three of the thirty numbers on a
+ * real rate sheet. What a plant charges is a MENU, so it moved to
+ * `production_processor_price_items`, one row per priced thing, each carrying
+ * the unit that says what the figure means.
  *
- * **THE FEES ARE A QUOTE, NOT A LEDGER ENTRY.** Nothing here posts. What the
- * farm actually paid is a bill in `payables` against the same party; this is
- * what it expected to pay. Kept apart on purpose, so that "they charged more
- * than they quoted" stays a question the data can answer instead of one it has
- * already overwritten.
+ * The three columns below are still here and are read by nothing: a DROP goes
+ * out AFTER the deploy that stops reading it (ADR 0014), so they are frozen at
+ * whatever `0196` copied out of them until the follow-up lands.
+ *
+ * What is left is what a price cannot say: whether they take this animal at
+ * all, how many a day, and the prose that is not a price.
  */
 export const productionProcessorHandles = pgTable(
   "production_processor_handles",
@@ -738,12 +740,18 @@ export const productionProcessorHandles = pgTable(
     kind: text("kind").notNull(),
     /** Head per day they can take, or null when nobody has asked. */
     capacityPerDay: integer("capacity_per_day"),
-    /** Slaughter fee per head, in cents. Null when unquoted. */
+    /**
+     * **SUPERSEDED, AND AWAITING ITS DROP.** Slaughter fee per head, in cents.
+     * Copied into `production_processor_price_items` by `0196` and read by
+     * nothing since. See the header.
+     */
     killFeeCents: integer("kill_fee_cents"),
-    /** Cut and wrap, in cents per pound of hanging weight. Null when unquoted. */
+    /** SUPERSEDED. Cut and wrap, in cents per pound of hanging weight. */
     cutWrapCentsPerLb: integer("cut_wrap_cents_per_lb"),
     /**
-     * Cutting, in cents PER HEAD. Null when unquoted.
+     * SUPERSEDED. Cutting, in cents PER HEAD.
+     *
+     * **ITS SHORT LIFE IS THE ARGUMENT FOR THE TABLE THAT REPLACED IT.**
      *
      * **A REAL RATE SHEET PROVED THIS COLUMN WAS MISSING** (2026-08-23). Every
      * red-meat plant quotes cut-and-wrap per pound of hanging weight, which is
@@ -755,11 +763,10 @@ export const productionProcessorHandles = pgTable(
      * figures survived only as prose in `price_notes` where nothing can compare
      * them.
      *
-     * **BOTH MAY BE SET, and there is no CHECK saying otherwise.** A plant that
-     * charges per pound to cut and a flat per-bird handling fee on top is an
-     * ordinary arrangement, and a constraint forbidding it would be this app
-     * telling a business how it may quote. What decides which a farm reads is
-     * the animal, not a rule here.
+     * **AND IT WAS STILL NOT ENOUGH**, which is the lesson. A second column
+     * made ONE cutting price expressible per animal; the same sheet lists
+     * twelve chicken options at nine prices, and a third column would have
+     * fixed nothing. The unit belongs ON the price, not in a column name.
      */
     cutFeeCentsPerHead: integer("cut_fee_cents_per_head"),
     /** Anything those two numbers cannot carry — minimums, extras. */
@@ -871,6 +878,139 @@ export const productionProcessorCuts = pgTable(
     check(
       "production_processor_cuts_kind_format",
       sql`${t.kind} = '' or ${t.kind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+  ],
+);
+
+/**
+ * ONE PRICED THING ON A PROCESSOR'S RATE SHEET.
+ *
+ * **THE MENU IS THE DATA, AND UNTIL THIS TABLE IT WAS PROSE.** Slice 1e's
+ * reader met a real USDA poultry sheet and refused, correctly, to fold twelve
+ * chicken cutting options at nine prices into one per-bird column: *a menu is
+ * not a rate*. That refusal was right and it left the figures in
+ * `price_notes`, where nothing can select them, compare them or total them. The
+ * rule does not change here — it stops being a refusal and becomes a shape.
+ * Quartered $1.05 and eight-piece $1.25 are two rows, and picking between them
+ * is the farm's job on an order rather than the extractor's job on a sheet.
+ *
+ * **`unit` IS THE LOAD-BEARING COLUMN, and it is closed.** $1.05 means five
+ * entirely different amounts of money depending on whether it is per bird, per
+ * pound of hanging weight, per pound of what came back packaged, per package or
+ * per box — and the whole reason the handle table needed a second cutting
+ * column was that two of those had been collapsed into one. Enumerating them is
+ * what lets a processing fee be COMPUTED from an order rather than typed, which
+ * is the point of the next slice: `head` and `hanging_lb` together are the
+ * flat-per-animal-plus-per-pound arrangement most plants quote, and they are
+ * the reason a smaller animal costs more per pound.
+ *
+ * **`category` IS OPEN AND `label` IS FREE TEXT**, for the reason
+ * `production_processor_cuts` gives about cut names: what a plant charges for is
+ * a trade's prose, every sheet differs, and a taxonomy here would make the first
+ * unanticipated fee a migration. `category` exists only so a sheet groups the
+ * way the paper does.
+ *
+ * **A PRICE MAY BE NULL, AND THAT IS NOT A ZERO.** "Smoking — call for price"
+ * is an ordinary line on a rate sheet, and a `$0.00` would say it was free.
+ * The line still prints on an order; it just cannot be totalled, and the order
+ * says so rather than guessing.
+ *
+ * **STILL A QUOTE, NOT A LEDGER ENTRY** — the rule the handle table states, and
+ * it is not weakened by being itemised. What the farm was actually charged is a
+ * bill in `payables` against the same party. Kept apart on purpose, so that
+ * "they charged more than they quoted" stays a question the data can answer
+ * instead of one it has already overwritten.
+ */
+export const productionProcessorPriceItems = pgTable(
+  "production_processor_price_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    processorId: uuid("processor_id").notNull(),
+    /**
+     * Which animal this price is for. Empty means "anything they take", the
+     * same convention `production_processor_cuts.kind` uses, and it is the
+     * right default for a disposal fee or a delivery charge that does not care
+     * what the animal was.
+     */
+    kind: text("kind").notNull().default(""),
+    /**
+     * How the sheet groups it — `slaughter`, `cutting`, `packaging`, `giblets`,
+     * `extra`. An open taxonomy: see `PRICE_CATEGORIES` for the suggested set
+     * and the reason it is only a suggestion.
+     */
+    category: text("category").notNull().default("extra"),
+    /** What it is, in the plant's own words. */
+    label: text("label").notNull(),
+    /** What they charge, in cents, for one `unit`. Null when unquoted. */
+    priceCents: integer("price_cents"),
+    /** CLOSED. See `PRICE_UNITS` — the whole point of this table. */
+    unit: text("unit").notNull(),
+    /**
+     * The floor, in cents. A turkey killed at $0.65 a pound with a $10 minimum
+     * is one row, not two, and without this the small bird is quoted at $4.55.
+     */
+    minimumCents: integer("minimum_cents"),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_processor_price_items_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    /**
+     * One price per named thing per animal. A second row saying "Quartered ·
+     * chicken" would be two prices for one option with nothing to say which is
+     * current — the same rule the handle table's unique index states, and what
+     * lets this year's rate sheet be re-read over last year's as a correction
+     * rather than a duplicate.
+     */
+    uniqueIndex("production_processor_price_items_unique_idx").on(
+      t.tenantId,
+      t.processorId,
+      t.kind,
+      t.label,
+    ),
+    index("production_processor_price_items_processor_idx").on(
+      t.tenantId,
+      t.processorId,
+    ),
+    foreignKey({
+      name: "production_processor_price_items_processor_fk",
+      columns: [t.tenantId, t.processorId],
+      foreignColumns: [productionProcessors.tenantId, productionProcessors.id],
+    }).onDelete("cascade"),
+    check(
+      "production_processor_price_items_kind_format",
+      sql`${t.kind} = '' or ${t.kind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "production_processor_price_items_category_format",
+      sql`${t.category} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "production_processor_price_items_label_present",
+      sql`length(btrim(${t.label})) > 0`,
+    ),
+    check(
+      "production_processor_price_items_unit_valid",
+      sql`${t.unit} in ('head', 'live_lb', 'hanging_lb', 'finished_lb', 'package', 'box', 'flat', 'hour')`,
+    ),
+    check(
+      "production_processor_price_items_price_nonneg",
+      sql`${t.priceCents} is null or ${t.priceCents} >= 0`,
+    ),
+    check(
+      "production_processor_price_items_minimum_nonneg",
+      sql`${t.minimumCents} is null or ${t.minimumCents} >= 0`,
     ),
   ],
 );
@@ -1058,5 +1198,9 @@ export type ProductionProcessorCut =
   typeof productionProcessorCuts.$inferSelect;
 export type NewProductionProcessorCut =
   typeof productionProcessorCuts.$inferInsert;
+export type ProductionProcessorPriceItem =
+  typeof productionProcessorPriceItems.$inferSelect;
+export type NewProductionProcessorPriceItem =
+  typeof productionProcessorPriceItems.$inferInsert;
 export type ProductionBooking = typeof productionBookings.$inferSelect;
 export type NewProductionBooking = typeof productionBookings.$inferInsert;

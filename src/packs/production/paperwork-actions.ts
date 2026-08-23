@@ -21,10 +21,11 @@ import { processorHandlesFrom } from "./vocabulary";
  * Reading somebody else's paperwork.
  *
  * **NEITHER ACTION WRITES A SINGLE ROW.** They return a proposal for a person to
- * correct and confirm; the confirm calls `addRunCarcassAction` or
- * `setHandleAction`, which are the ordinary write paths with the ordinary
- * validation and the ordinary audit entries. See `ai/paperwork.ts` for why that
- * is not negotiable on these two tables in particular.
+ * correct and confirm; the confirm calls `addRunCarcassAction`,
+ * `setHandleAction` or `setPriceItemAction` — the ordinary write paths, one row
+ * at a time, with the ordinary validation and the ordinary audit entries. See
+ * `ai/paperwork.ts` for why that is not negotiable on these tables in
+ * particular.
  *
  * **THE AUDIT ENTRY RECORDS THAT A MODEL WAS ASKED, and nothing it said.** How
  * many rows came back is a fact about the request; the fees and the
@@ -143,7 +144,8 @@ export async function readPriceListAction(input: unknown) {
         kind: "price_list",
         model: CLAUDE_MODEL,
         mimeType: parsed.data.mimeType,
-        rows: proposal.rows.length,
+        items: proposal.items.length,
+        animals: proposal.animals.length,
       },
     });
     return { ok: true, proposal };

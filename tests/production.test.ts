@@ -46,6 +46,16 @@ import {
   daysBetween,
   describeBookingDate,
   centsToDisplay,
+  COMPUTABLE_PRICE_UNITS,
+  isComputablePriceUnit,
+  isPriceUnit,
+  PRICE_CATEGORIES,
+  PRICE_CATEGORY_LABELS,
+  PRICE_UNITS,
+  PRICE_UNIT_LABELS,
+  PRICE_UNIT_NOTES,
+  priceCategoryRank,
+  priceWithUnit,
   processorHandlesFrom,
   isValidSlug,
   runKindsFrom,
@@ -767,6 +777,85 @@ describe("cuttingYield", () => {
  * state that justifies the feature — `missed` — exists only because it is
  * derived. Nothing sets it, so nothing can forget to.
  */
+describe("what a plant charges", () => {
+  it("keeps the unit set CLOSED, and keeps all eight in it", () => {
+    // **THE COLUMN THE ITEMISED PRICE LIST EXISTS FOR.** $1.05 is a different
+    // amount of money in each of these, and the pack has already paid once for
+    // a column that could only hold one of them: `cut_wrap_cents_per_lb` was
+    // per pound, every poultry plant quotes cutting per bird, and a real rate
+    // sheet is what proved it. Mirrors the CHECK on
+    // production_processor_price_items.unit.
+    expect([...PRICE_UNITS]).toEqual([
+      "head",
+      "live_lb",
+      "hanging_lb",
+      "finished_lb",
+      "package",
+      "box",
+      "flat",
+      "hour",
+    ]);
+  });
+
+  it("has a short label and an explanation for every unit", () => {
+    // A unit with no label renders as a slug beside a price. A unit with no
+    // note leaves "per lb hanging" and "per lb packaged" as the same words to
+    // somebody who has not butchered.
+    for (const unit of PRICE_UNITS) {
+      expect(PRICE_UNIT_LABELS[unit]).toBeTruthy();
+      expect(PRICE_UNIT_NOTES[unit]?.length ?? 0).toBeGreaterThan(20);
+    }
+  });
+
+  it("knows which units a finished run can work out for itself", () => {
+    // The split the next slice rests on: these four come off the carcass rows
+    // and the outputs, and the rest are a number only a person knows. Getting
+    // this wrong in either direction is a fee invented or a fee lost.
+    expect(COMPUTABLE_PRICE_UNITS.every(isComputablePriceUnit)).toBe(true);
+    for (const unit of ["head", "live_lb", "hanging_lb", "finished_lb"]) {
+      expect(isComputablePriceUnit(unit)).toBe(true);
+    }
+    for (const unit of ["package", "box", "flat", "hour"]) {
+      expect(isComputablePriceUnit(unit)).toBe(false);
+    }
+  });
+
+  it("refuses a unit it does not know, however plausible", () => {
+    expect(isPriceUnit("head")).toBe(true);
+    expect(isPriceUnit("lb")).toBe(false);
+    expect(isPriceUnit("each")).toBe(false);
+    expect(isPriceUnit("")).toBe(false);
+  });
+
+  it("ranks the categories the way a rate sheet reads, with the unexpected last", () => {
+    // The category is an OPEN taxonomy — the first plant charging for something
+    // nobody anticipated must not be a migration — so the order is a rank
+    // rather than an enum, and anything unanticipated sorts to the end instead
+    // of to the top.
+    expect(priceCategoryRank("slaughter")).toBeLessThan(
+      priceCategoryRank("cutting"),
+    );
+    expect(priceCategoryRank("extra")).toBeLessThan(
+      priceCategoryRank("brining"),
+    );
+    for (const category of PRICE_CATEGORIES) {
+      expect(PRICE_CATEGORY_LABELS[category]).toBeTruthy();
+    }
+  });
+
+  it("NEVER PRINTS A PRICE WITHOUT ITS UNIT, and prints nothing for an unquoted one", () => {
+    // Both halves matter. A bare $1.05 is the ambiguity the table was built to
+    // end; a $0.00 says the plant works for nothing, when the truth is that
+    // nobody asked. Same refusal `centsToDisplay` makes.
+    expect(priceWithUnit(105, "head")).toBe("$1.05 per head");
+    expect(priceWithUnit(90, "hanging_lb")).toBe("$0.90 per lb hanging");
+    expect(priceWithUnit(null, "head")).toBeNull();
+    expect(priceWithUnit(undefined, "head")).toBeNull();
+    // A genuine zero is a real answer — they waived it — and does print.
+    expect(priceWithUnit(0, "flat")).toBe("$0.00 flat");
+  });
+});
+
 describe("bookingStanding", () => {
   const at = (bookedFor: string, opts: Partial<{ status: string; runId: string | null }> = {}) =>
     bookingStanding(

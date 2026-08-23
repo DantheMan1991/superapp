@@ -24,12 +24,18 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { addRunCarcassAction } from "../actions";
-import { setHandleAction } from "../processor-actions";
+import { setHandleAction, setPriceItemAction } from "../processor-actions";
 import {
   readKillSheetAction,
   readPriceListAction,
 } from "../paperwork-actions";
-import { slugLabel } from "../vocabulary";
+import {
+  PRICE_CATEGORIES,
+  PRICE_CATEGORY_LABELS,
+  PRICE_UNITS,
+  PRICE_UNIT_LABELS,
+  slugLabel,
+} from "../vocabulary";
 
 /**
  * The confirm step, which is the entire safety story of this slice.
@@ -336,17 +342,38 @@ export function ReadKillSheetDialog({
   );
 }
 
-interface HandleRow {
+interface ItemRow {
+  keep: boolean;
+  kind: string;
+  category: string;
+  label: string;
+  price: string;
+  unit: string;
+  minimum: string;
+  notes: string;
+}
+
+interface AnimalRow {
   keep: boolean;
   kind: string;
   capacityPerDay: string;
-  killFee: string;
-  cutWrapPerLb: string;
-  cutFeePerHead: string;
   priceNotes: string;
 }
 
-/** Read a processor's price list into its `handles` rows. */
+/**
+ * Read a processor's price list into priced ITEMS and the animals they take.
+ *
+ * **TWO LISTS, BECAUSE THEY ARE TWO DIFFERENT FACTS.** A rate sheet says both
+ * *we take turkeys* and *quartering a chicken is $1.05*, and until the price
+ * items table existed the second had nowhere to go but prose. The first still
+ * belongs on the handle row — it is what a plant will take, and it stays true
+ * when the prices change.
+ *
+ * **THE CONFIRM IS STILL THE ENTIRE SAFETY STORY.** Every field is editable,
+ * every row has a tick, and Record calls `setPriceItemAction` and
+ * `setHandleAction` one row at a time — the ordinary write paths, with the
+ * ordinary refusals and the ordinary audit entries.
+ */
 export function ReadPriceListDialog({
   processorId,
   kindOptions,
@@ -357,7 +384,8 @@ export function ReadPriceListDialog({
   word: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<HandleRow[] | null>(null);
+  const [items, setItems] = useState<ItemRow[] | null>(null);
+  const [animals, setAnimals] = useState<AnimalRow[] | null>(null);
   const [note, setNote] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -389,105 +417,167 @@ export function ReadPriceListDialog({
         return;
       }
       setNote(proposal.note);
-      setRows(
-        proposal.rows.map((row) => ({
+      setItems(
+        proposal.items.map((row) => ({
+          keep: true,
+          kind: row.kind,
+          category: row.category,
+          label: row.label,
+          price: row.price === null ? "" : row.price.toFixed(2),
+          unit: row.unit,
+          minimum: row.minimum === null ? "" : row.minimum.toFixed(2),
+          notes: row.notes,
+        })),
+      );
+      setAnimals(
+        proposal.animals.map((row) => ({
           keep: true,
           kind: row.kind,
           capacityPerDay:
             row.capacityPerDay === null ? "" : String(row.capacityPerDay),
-          killFee: row.killFee === null ? "" : row.killFee.toFixed(2),
-          cutWrapPerLb:
-            row.cutWrapPerLb === null ? "" : row.cutWrapPerLb.toFixed(2),
-          cutFeePerHead:
-            row.cutFeePerHead === null ? "" : row.cutFeePerHead.toFixed(2),
           priceNotes: row.priceNotes,
         })),
       );
-      if (proposal.rows.length === 0) {
+      if (proposal.items.length === 0 && proposal.animals.length === 0) {
         toast.error("Nothing could be read off that page.");
       }
     });
   };
 
   /**
-   * **FIVE PRICES, ONE ROW — FOUND BY A REAL RATE SHEET.**
+   * **A CLASH IS TWO TICKED ROWS THAT WOULD WRITE INTO ONE**, and refusing it
+   * is the fix a real rate sheet forced on 2026-08-23: five poultry rows all
+   * mapping to `poultry` were written into a single handle, each overwriting
+   * the last, and the dialog reported "5 recorded".
    *
-   * `setHandle` upserts on `(processor, kind)`. A real poultry plant's sheet
-   * prices chickens, turkeys, ducks, geese and quail separately, and every one
-   * of them is `poultry` in this farm's vocabulary — so recording all five
-   * wrote five rows into ONE, each silently overwriting the last, and reported
-   * "5 recorded". The survivor was whichever happened to be last.
-   *
-   * The dialog already warned that recording a kind already on file replaces
-   * it. It said nothing about rows in the SAME batch colliding with each other,
-   * which is the case that actually arises.
+   * The two keys differ because the two unique indexes differ — an item is one
+   * price per `(kind, label)`, an animal is one row per `kind` — and that is
+   * itself the point of itemising: quartered and eight-piece are now two
+   * labels rather than two claims on one column.
    */
-  const collidingKinds = (() => {
+  const clashesIn = (keys: (string | null)[]) => {
     const seen = new Set<string>();
     const clashes = new Set<string>();
-    for (const row of rows ?? []) {
-      if (!row.keep || row.kind === "") continue;
-      if (seen.has(row.kind)) clashes.add(row.kind);
-      seen.add(row.kind);
+    for (const key of keys) {
+      if (key === null) continue;
+      if (seen.has(key)) clashes.add(key);
+      seen.add(key);
     }
     return clashes;
-  })();
+  };
+  const itemKey = (row: ItemRow) =>
+    row.keep && row.label.trim() !== ""
+      ? [row.kind, row.label.trim().toLowerCase()].join(" ")
+      : null;
+  const itemClashes = clashesIn((items ?? []).map(itemKey));
+  const animalClashes = clashesIn(
+    (animals ?? []).map((r) => (r.keep && r.kind !== "" ? r.kind : null)),
+  );
 
   const confirm = () => {
-    if (!rows) return;
-    const keep = rows.filter((r) => r.keep && r.kind !== "");
-    if (keep.length === 0) {
-      toast.error("Nothing ticked, or nothing has been said what it is for.");
+    const keepItems = (items ?? []).filter(
+      (r) => r.keep && r.label.trim() !== "",
+    );
+    const keepAnimals = (animals ?? []).filter((r) => r.keep && r.kind !== "");
+    if (keepItems.length === 0 && keepAnimals.length === 0) {
+      toast.error("Nothing ticked, or nothing named.");
       return;
     }
-    if (collidingKinds.size > 0) {
+    if (itemClashes.size > 0) {
       toast.error(
-        `Two ticked rows are both ${[...collidingKinds]
+        "Two ticked prices have the same name for the same animal — recording both would keep only the last. Give them different names or untick one.",
+      );
+      return;
+    }
+    if (animalClashes.size > 0) {
+      toast.error(
+        `Two ticked animals are both ${[...animalClashes]
           .map(slugLabel)
-          .join(" and ")} — one price per kind, so recording both would keep only the last. Give them different kinds or untick one.`,
+          .join(" and ")} — one row per kind, so recording both would keep only the last.`,
       );
       return;
     }
     startTransition(async () => {
       let saved = 0;
-      for (const row of keep) {
+      const fail = (message: string) => {
+        toast.error(`${message} (${saved} recorded before this)`);
+        router.refresh();
+      };
+      for (const row of keepAnimals) {
         const result = await setHandleAction({
           processorId,
           kind: row.kind,
           capacityPerDay:
             row.capacityPerDay === "" ? null : Number(row.capacityPerDay),
-          killFee: row.killFee === "" ? null : Number(row.killFee),
-          cutWrapPerLb:
-            row.cutWrapPerLb === "" ? null : Number(row.cutWrapPerLb),
-          cutFeePerHead:
-            row.cutFeePerHead === "" ? null : Number(row.cutFeePerHead),
           priceNotes: row.priceNotes,
         });
-        if ("error" in result && result.error) {
-          toast.error(`${result.error} (${saved} recorded before this)`);
-          router.refresh();
-          return;
-        }
+        // Stop at the first refusal rather than pressing on: the rows come off
+        // one page, and a half-recorded page is worse than an unrecorded one
+        // because nothing on the screen says which half.
+        if ("error" in result && result.error) return fail(result.error);
+        saved += 1;
+      }
+      for (const row of keepItems) {
+        const result = await setPriceItemAction({
+          processorId,
+          kind: row.kind,
+          category: row.category,
+          label: row.label,
+          price: row.price === "" ? null : Number(row.price),
+          unit: row.unit,
+          minimum: row.minimum === "" ? null : Number(row.minimum),
+          notes: row.notes,
+        });
+        if ("error" in result && result.error) return fail(result.error);
         saved += 1;
       }
       toast.success(`${saved} recorded`);
-      setRows(null);
+      setItems(null);
+      setAnimals(null);
       setOpen(false);
       router.refresh();
     });
   };
 
-  const set = (i: number, patch: Partial<HandleRow>) =>
-    setRows((prev) =>
+  const setItem = (i: number, patch: Partial<ItemRow>) =>
+    setItems((prev) =>
       prev ? prev.map((r, j) => (j === i ? { ...r, ...patch } : r)) : prev,
     );
+  const setAnimal = (i: number, patch: Partial<AnimalRow>) =>
+    setAnimals((prev) =>
+      prev ? prev.map((r, j) => (j === i ? { ...r, ...patch } : r)) : prev,
+    );
+
+  const kindSelect = (value: string, onChange: (next: string) => void) => (
+    <Select
+      value={value === "" ? "none" : value}
+      onValueChange={(v) => onChange(v === "none" ? "" : v)}
+    >
+      <SelectTrigger>
+        <SelectValue placeholder="Say what for" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">Anything</SelectItem>
+        {kindOptions.map((k) => (
+          <SelectItem key={k} value={k}>
+            {slugLabel(k)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  const anything = (items?.length ?? 0) + (animals?.length ?? 0) > 0;
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) setRows(null);
+        if (!next) {
+          setItems(null);
+          setAnimals(null);
+        }
       }}
     >
       <DialogTrigger asChild>
@@ -495,7 +585,7 @@ export function ReadPriceListDialog({
           Read a price list
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Read this {word.toLowerCase()}&apos;s prices</DialogTitle>
           <DialogDescription>
@@ -524,89 +614,160 @@ export function ReadPriceListDialog({
             <p className="text-sm text-muted-foreground">{note}</p>
           )}
 
-          {rows && rows.length > 0 && (
+          {items && items.length > 0 && (
             <div className="space-y-2">
               <p className="text-sm font-medium">
-                {rows.length} read. Check them against the sheet. There is one
-                price per kind, so recording a kind replaces whatever is on file
-                for it — and two ticked rows of the same kind would keep only the
-                last, which is why a clash is refused.
+                {items.length} priced. Check them against the sheet — above all
+                the unit, because the same figure means different money per head
+                and per pound. Recording a name already on file for that animal
+                replaces it.
               </p>
-              {rows.map((row, i) => (
+              {items.map((row, i) => {
+                const key = itemKey(row);
+                return (
+                  <div
+                    key={i}
+                    className="flex flex-wrap items-end gap-2 rounded-md border p-2"
+                  >
+                    <Switch
+                      checked={row.keep}
+                      onCheckedChange={(v: boolean) => setItem(i, { keep: v })}
+                      aria-label="Record this price"
+                    />
+                    <div className="min-w-44 flex-1 space-y-1">
+                      <Label className="text-xs">
+                        What they charge for
+                        {key !== null && itemClashes.has(key) && (
+                          <span className="ml-1 font-medium text-destructive">
+                            · clashes
+                          </span>
+                        )}
+                      </Label>
+                      <Input
+                        value={row.label}
+                        onChange={(e) => setItem(i, { label: e.target.value })}
+                      />
+                    </div>
+                    <div className="w-32 space-y-1">
+                      <Label className="text-xs">For</Label>
+                      {kindSelect(row.kind, (kind) => setItem(i, { kind }))}
+                    </div>
+                    <div className="w-32 space-y-1">
+                      <Label className="text-xs">Group</Label>
+                      <Select
+                        value={row.category}
+                        onValueChange={(v) => setItem(i, { category: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PRICE_CATEGORIES.map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {PRICE_CATEGORY_LABELS[c]}
+                            </SelectItem>
+                          ))}
+                          {!(PRICE_CATEGORIES as readonly string[]).includes(
+                            row.category,
+                          ) && (
+                            <SelectItem value={row.category}>
+                              {slugLabel(row.category)}
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-24 space-y-1">
+                      <Label className="text-xs">Price</Label>
+                      <Input
+                        value={row.price}
+                        onChange={(e) => setItem(i, { price: e.target.value })}
+                      />
+                    </div>
+                    <div className="w-36 space-y-1">
+                      <Label className="text-xs">Per</Label>
+                      <Select
+                        value={row.unit}
+                        onValueChange={(v) => setItem(i, { unit: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PRICE_UNITS.map((u) => (
+                            <SelectItem key={u} value={u}>
+                              {PRICE_UNIT_LABELS[u]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-24 space-y-1">
+                      <Label className="text-xs">Minimum</Label>
+                      <Input
+                        value={row.minimum}
+                        onChange={(e) => setItem(i, { minimum: e.target.value })}
+                      />
+                    </div>
+                    <div className="min-w-40 flex-1 space-y-1">
+                      <Label className="text-xs">Conditions</Label>
+                      <Input
+                        value={row.notes}
+                        onChange={(e) => setItem(i, { notes: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {animals && animals.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium">
+                What the sheet says they take. No prices here — those are above.
+                There is one row per kind, so recording a kind replaces whatever
+                is on file for it.
+              </p>
+              {animals.map((row, i) => (
                 <div
                   key={i}
                   className="flex flex-wrap items-end gap-2 rounded-md border p-2"
                 >
                   <Switch
                     checked={row.keep}
-                    onCheckedChange={(v: boolean) => set(i, { keep: v })}
-                    aria-label="Record this row"
+                    onCheckedChange={(v: boolean) => setAnimal(i, { keep: v })}
+                    aria-label="Record this animal"
                   />
                   <div className="w-36 space-y-1">
                     <Label className="text-xs">
                       What
-                      {row.keep && collidingKinds.has(row.kind) && (
+                      {row.keep && animalClashes.has(row.kind) && (
                         <span className="ml-1 font-medium text-destructive">
                           · clashes
                         </span>
                       )}
                     </Label>
-                    <Select
-                      value={row.kind === "" ? "none" : row.kind}
-                      onValueChange={(v) =>
-                        set(i, { kind: v === "none" ? "" : v })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Say what for" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Not said</SelectItem>
-                        {kindOptions.map((k) => (
-                          <SelectItem key={k} value={k}>
-                            {slugLabel(k)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {kindSelect(row.kind, (kind) => setAnimal(i, { kind }))}
                   </div>
-                  <div className="w-20 space-y-1">
+                  <div className="w-24 space-y-1">
                     <Label className="text-xs">Per day</Label>
                     <Input
                       value={row.capacityPerDay}
                       onChange={(e) =>
-                        set(i, { capacityPerDay: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="w-24 space-y-1">
-                    <Label className="text-xs">Kill fee</Label>
-                    <Input
-                      value={row.killFee}
-                      onChange={(e) => set(i, { killFee: e.target.value })}
-                    />
-                  </div>
-                  <div className="w-24 space-y-1">
-                    <Label className="text-xs">Cut/lb</Label>
-                    <Input
-                      value={row.cutWrapPerLb}
-                      onChange={(e) => set(i, { cutWrapPerLb: e.target.value })}
-                    />
-                  </div>
-                  <div className="w-24 space-y-1">
-                    <Label className="text-xs">Cut/head</Label>
-                    <Input
-                      value={row.cutFeePerHead}
-                      onChange={(e) =>
-                        set(i, { cutFeePerHead: e.target.value })
+                        setAnimal(i, { capacityPerDay: e.target.value })
                       }
                     />
                   </div>
                   <div className="min-w-40 flex-1 space-y-1">
-                    <Label className="text-xs">Minimums, extras</Label>
+                    <Label className="text-xs">
+                      Anything that is not a price
+                    </Label>
                     <Input
                       value={row.priceNotes}
-                      onChange={(e) => set(i, { priceNotes: e.target.value })}
+                      onChange={(e) =>
+                        setAnimal(i, { priceNotes: e.target.value })
+                      }
                     />
                   </div>
                 </div>
@@ -616,10 +777,7 @@ export function ReadPriceListDialog({
         </div>
 
         <DialogFooter>
-          <Button
-            onClick={confirm}
-            disabled={pending || !rows || rows.length === 0}
-          >
+          <Button onClick={confirm} disabled={pending || !anything}>
             Record these
           </Button>
         </DialogFooter>

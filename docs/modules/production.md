@@ -23,6 +23,9 @@ this dossier is the build record.
 | **1c** | **Booking a date** — holding the scarce resource, deposits, and the link from a booking to the run it becomes | **shipped 2026-08-23** |
 | **1d** | **The processing path on the run**, eligibility stamped onto the meat, and the on-farm exemption counted | **shipped 2026-08-23** |
 | **1e** | **Paperwork, extracted** — a kill sheet AND a processor's price list, as photograph or PDF → AI extraction → **a human confirms** → the rows | **shipped 2026-08-23** |
+| **2a** | **The itemised price list** — what a plant charges, one row per priced thing, each carrying the UNIT that says what the figure means | **shipped 2026-08-23** |
+| 2b | The cut sheet as an order: pick the items for a batch, print it for the plant | |
+| 2c | **The processing fee reaches inventory cost**, per plant — flat per animal plus per pound, accrued at completion and trued up by the bill | |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
 | 4 | Label generation, including a processor's own-label capability | |
@@ -70,6 +73,83 @@ livestock production"* — and the roadmap had processors appearing only at slic
 becomes 1d, unchanged.
 
 ## Build log
+
+### 2026-08-23 — Slice 2a: the menu is the data (`claude/what-the-menu-actually-costs`)
+
+**THE REFUSAL BECOMES A SHAPE.** Slice 1e's reader met a real USDA poultry sheet
+and would not fold twelve chicken cutting options at nine prices into one
+per-bird column, because *a menu is not a rate*. That was right and it threw
+away most of a rate sheet: the figures survived in `price_notes` as prose
+nothing could select, compare or total. `production_processor_price_items` is
+one row per priced thing, and picking between them stops being the reader's job
+on a sheet and becomes the farm's job on an order.
+
+**THE RULE UNDERNEATH IT DID NOT MOVE, AND A TEST PINS THAT IT DID NOT.** A
+MENU is now a list; a RANGE is still nothing. Pleasant Valley's turkey slaughter
+is $0.65–$0.90 a pound with a $10 minimum — the unit is now expressible and the
+minimum has a column, and the PRICE is still null, because the sheet names no
+figure and averaging the two ends would invent one the plant never quoted.
+
+**`unit` IS THE WHOLE POINT, AND IT IS CLOSED.** Eight values: `head`,
+`live_lb`, `hanging_lb`, `finished_lb`, `package`, `box`, `flat`, `hour`. $1.05
+is five different amounts of money across them, and this pack has already paid
+once for a column that could hold only one — `cut_wrap_cents_per_lb` was per
+pound, every poultry plant quotes cutting per bird, and adding
+`cut_fee_cents_per_head` a day earlier fixed exactly one case out of twelve. The
+lesson recorded on that column now: **the unit belongs ON the price, not in a
+column name.** The first four are computable from a finished run and the last
+four are a number only a person knows, which is the split the fee roll rests on.
+
+**`category` AND `label` ARE OPEN, and that is the same call
+`production_processor_cuts` made about cut names.** What a plant charges for is a
+trade's prose, every sheet is laid out differently, and a taxonomy here would
+make the first unanticipated fee a migration. `priceCategoryRank` sorts the five
+anticipated groups the way a rate sheet reads them and anything else last —
+a rank rather than an `ORDER BY`, because no SQL can express "unanticipated goes
+to the end" without duplicating the list into the query.
+
+**THE THREE FEE COLUMNS ARE SUPERSEDED AND STILL THERE, ON PURPOSE.** `0196`
+copies them into price items with the units they always implied; `setHandle`
+stops reading AND writing them, and leaves them out of its conflict `SET` rather
+than nulling them, so they stay exactly as they were until the DROP. That drop
+is a follow-up PR after this one's deploy — nothing in the deploy applies
+migrations and `main` auto-deploys (ADR 0014), so dropping a column in the same
+migration takes the processor page down for the minutes in between. What stays
+on the handle is what a price cannot say: whether they take this animal, how
+many a day, and the prose that is not a price.
+
+**THE EXTRACTOR NOW FILLS TWO LISTS, AND THE SPLIT IS THE FIX FOR A REAL BUG.**
+A rate sheet says both *we take turkeys* and *quartering a chicken is $1.05*;
+those are two facts with two lifetimes, and the second used to be crammed into
+the first. The clash check from `five-prices-one-row` survives at both grains —
+an item clashes on `(kind, label)`, an animal on `kind` — and itemising is what
+makes most of the old clashes disappear: quartered and eight-piece were two
+claims on one column and are now two labels.
+
+The prompt gained rule 5, which generalises what the first real sheet exposed:
+
+> **IF THE SHEET PRICES THE SAME THING SEVERAL WAYS** — by breed, by batch size,
+> by weight band — each priced cell is its own item, and the label must say what
+> tells it apart. A matrix of prices is a matrix of items.
+
+That is the chicken slaughter grid — 4 breeds × 6 batch bands, 24 prices — which
+the old shape could only put in a note verbatim. It is now 24 rows a person
+ticks through, or unticks.
+
+**THE ONE THING THE VALIDATOR DROPS IS A PRICE WITH NO UNIT**, and it is the
+exception that proves the rule the rest of the file follows. Everything else
+survives with a field emptied, because dropping a row silently loses a price off
+the sheet. But `1.05` with nothing saying whether it is a bird or a pound is the
+exact ambiguity this table was built to end, and a form cannot ask somebody to
+supply a unit they would have to guess at either. The prompt is told to describe
+such a line in the note, so it is reported rather than gone.
+
+Migrations `0194` (table), `0195` (RLS), `0196` (backfill). No hand-reordering
+needed — **tenth check, third yes to the question and second no in a row**: the
+composite FK target `production_processors(tenant_id, id)` was created back in
+`0184`, so drizzle's ordering was already right. 22 new tests (11 pure, 8
+db-backed ops, 6 isolation) plus the price-list suite rewritten around the new
+shape.
 
 ### 2026-08-23 — What a bird costs to cut (`claude/what-a-bird-costs-to-cut`)
 
@@ -946,7 +1026,8 @@ tests:**
 | `production_run_carcasses` | **The kill sheet, line by line** — the stage between the animal and the box | `tenant_id`, FORCE RLS. Composite FKs to the run and to the **input** (both CASCADE); `run_input_id` is REQUIRED, which makes the chain carcass → input → movement → lot total. `head_count` is 1 for a beef and 70 for a pen. `disposition` in `passed\|condemned` — two, because one line is one outcome. CHECKs: a condemned line carries no `hanging_lb`, a passed line carries no `condemn_reason`. **Writable on a finished run**, unlike everything else here |
 
 | `production_processors` | **Who does the work you do not** — a role on a party, not a new contact model | `tenant_id`, FORCE RLS. Composite FK to `parties` (CASCADE); UNIQUE per party, because two rows would be two opinions about one plant with nothing to say which is current. **No `name` column** — it is the party's, so this table cannot disagree with the rest of the app. `inspection` in `usda\|state\|custom_exempt\|uninspected\|unknown`: five, and `unknown` is a real answer rather than a missing one. `rating` 1–5 or null, and it is an OPINION — the measured half is folded, never stored |
-| `production_processor_handles` | **What one processor will take, and what it quoted** | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind)` — two rows would be two prices for one animal. `kind` is an open taxonomy from the profile's `processorHandles`, a **separate list** from `livestock.species` because what a plant takes is not what this farm raises. Fees are in cents and are a QUOTE; what was actually paid is a bill in `payables` against the same party | **Two cutting columns**, `cut_wrap_cents_per_lb` (red meat) and `cut_fee_cents_per_head` (poultry), because plants quote in different units and $1.05 means different money in each. Both may be set
+| `production_processor_handles` | **What one processor will take** | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind)`. `kind` is an open taxonomy from the profile's `processorHandles`, a **separate list** from `livestock.species` because what a plant takes is not what this farm raises. **The three fee columns are superseded** — copied out by `0196`, read and written by nothing, awaiting their DROP in a follow-up PR. What is left is `capacity_per_day` and the prose that is not a price |
+| `production_processor_price_items` | **One priced thing off a rate sheet** — the menu, as data | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind, label)` — two rows for one named option would be two prices with nothing to say which is current, and it is what makes next year's sheet re-readable over this year's as a correction. **`unit` is CLOSED** (`head`, `live_lb`, `hanging_lb`, `finished_lb`, `package`, `box`, `flat`, `hour`) and is the whole point: $1.05 is five different amounts of money across them. `category` and `label` are OPEN, the same call `..._cuts` made about cut names. `price_cents` NULL is "call them", never zero; `minimum_cents` is a floor, not a price. Still a QUOTE — what was paid is a bill in `payables` against the same party
 | `production_processor_cuts` | What a processor will produce | Composite FK to the processor (CASCADE). Free text by design — cut names are a trade's prose and every plant's list differs. `kind` empty means "anything they take". This is CAPABILITY; the per-animal cut sheet is a later slice |
 
 | `production_bookings` | **A date held with a processor — the scarce resource** | `tenant_id`, FORCE RLS. Composite FKs to the processor and to the run, **both CASCADE**; `run_id` is what the booking BECAME and is null until the day happens. `status` in `held\|confirmed\|cancelled` — three, and there is deliberately **no "it happened"**, because `run_id` answers that and a status somebody must advance would disagree with it. CHECK: a cancelled date cannot claim a run. Deposit in cents, and null is not zero — a date held on a phone call is ordinary |
@@ -1007,7 +1088,13 @@ run model, separate templates), and the processing path and eligibility flag
 - `src/packs/production/processor-ops.ts` — the directory. **Split out because
   nothing in it touches a run, a movement or a cost**, the same reason
   `inventory` split `ledger-ops.ts`. A processor is a standing fact that stays
-  true between runs
+  true between runs. `sheetOrder` is why the price list sorts in TypeScript
+  rather than SQL: the grouping is a rank over an open taxonomy
+- `src/packs/production/vocabulary.ts` → `PRICE_UNITS` and
+  `COMPUTABLE_PRICE_UNITS`. **Read the header on `PRICE_UNITS` before adding a
+  ninth**, and before assuming a unit can be worked out from a run — the split
+  between the four that can and the four that cannot is what the fee roll rests
+  on
 - `src/packs/production/action-errors.ts` — `toResult`, shared by both actions
   files. **It is here because a `"use server"` module may export nothing but
   async functions**, so this could not live in `actions.ts` once a second one
@@ -1027,7 +1114,10 @@ run model, separate templates), and the processing path and eligibility flag
 - `src/packs/production/components/carcass-controls.tsx` — the sheet's one
   dialog, used for both adding and correcting. **The form changes shape when a
   carcass is condemned** rather than taking a number it will throw away
-- `src/db/schema/production.ts` · `drizzle/0168_soft_screwball.sql` ·
+- `src/db/schema/production.ts` · `drizzle/0194_wide_winter_soldier.sql` ·
+  `drizzle/0195_production_processor_price_items_rls.sql` ·
+  `drizzle/0196_backfill_processor_price_items.sql` ·
+  `drizzle/0168_soft_screwball.sql` ·
   `drizzle/0169_production_rls.sql` · `drizzle/0184_rare_the_anarchist.sql` ·
   `drizzle/0185_production_run_carcasses_rls.sql`
 - `tests/production.test.ts` · `tests/production-ops.test.ts` ·
@@ -1086,6 +1176,30 @@ run model, separate templates), and the processing path and eligibility flag
   Corrections are in place, following `livestock_weights` — a number typed wrong
   never happened — rather than `production_run_outputs`, which freezes because a
   receipt exists.
+- **A UNIT BELONGS ON THE PRICE, NOT IN A COLUMN NAME**, and this pack paid
+  twice to learn it. `cut_wrap_cents_per_lb` meant per pound because of its
+  name; a poultry plant quotes cutting per bird, so a second column was added on
+  2026-08-23 — and the same sheet lists twelve chicken options at nine prices, so
+  a third would have fixed nothing either. `PRICE_UNITS` is closed, and it is
+  closed rather than free text because a unit the app cannot interpret is a
+  figure it cannot total, compare or explain.
+- **A MENU IS A LIST OF ITEMS; A RANGE IS STILL NOTHING.** The half of slice
+  1e's rule that changed and the half that did not. Quartered $1.05 and
+  eight-piece $1.25 are two rows, because each names a price the plant will
+  stand behind. $0.65–$0.90 a pound is one row with a NULL price and the range
+  in its note, because averaging the ends invents a figure nobody quoted. A test
+  pins both, so a later prompt change cannot start averaging.
+- **THE PRICE ITEM'S `category` AND `label` ARE OPEN AND ITS `unit` IS CLOSED**,
+  in one table, and the asymmetry is the decision. What a plant charges FOR is a
+  trade's prose that differs on every sheet; what a price is PER is arithmetic
+  this app has to do. Free text in the first place costs nothing and a taxonomy
+  would cost a migration; free text in the second place is the ambiguity the
+  table exists to end.
+- **THE SUPERSEDED FEE COLUMNS ARE LEFT OUT OF `setHandle`'s CONFLICT `SET`
+  RATHER THAN NULLED.** Read by nothing and written by nothing, so they hold
+  exactly what `0196` copied out of them until the DROP lands. Nulling them
+  would have been tidier and would have destroyed the only copy if the follow-up
+  ever had to wait — which is the whole reason expand/contract exists.
 - **`killSheet` IS THE ONE PLACE THIS PACK SAYS SOMETHING INDUSTRY-SHAPED**, and
   it is a renameable label declared in `src/packs/index.ts` rather than a rule.
   The STAGE is general — anything that turns a whole thing into parts of it has
@@ -1171,20 +1285,39 @@ run model, separate templates), and the processing path and eligibility flag
 - **NOTHING RATE-LIMITS IT, and it spends money per press.** Accounting's
   extractor claims a 15-second per-tenant cooldown slot inside its gating
   transaction; this has none, so a double-click is two calls.
-- ~~**THE SCHEMA CANNOT HOLD POULTRY CUTTING.**~~ **Fixed** —
-  `cut_fee_cents_per_head` beside `cut_wrap_cents_per_lb`, both nullable, both
-  allowed at once. **What is still not representable, correctly, is a cutting
-  MENU**: twelve chicken options at nine prices is not a rate, and picking one
-  would invent the farm's choice. Those stay in the note.
+- ~~**THE SCHEMA CANNOT HOLD POULTRY CUTTING.**~~ ~~**What is still not
+  representable is a cutting MENU.**~~ **Both closed 2026-08-23** —
+  `production_processor_price_items`, one row per priced thing with its own
+  unit. What is still not representable, and correctly, is a RANGE.
+- **THE THREE FEE COLUMNS ON `production_processor_handles` HAVE NOT BEEN
+  DROPPED.** Superseded, backfilled, read and written by nothing, and still on
+  the table — the contract half of an expand/contract that must go out as its
+  own PR after this one's deploy (ADR 0014). Until it does, `db:generate` will
+  keep emitting them and the isolation suite still asserts their CHECKs.
+- **NOTHING SELECTS A PRICE ITEM YET.** The list is recordable, comparable and
+  totalable, and nothing totals it: the cut sheet as an order is 2b and the fee
+  reaching inventory cost is 2c. **The four computable units exist for 2c** —
+  `head` and `hanging_lb` together are the flat-per-animal-plus-per-pound
+  arrangement most plants quote, and the reason a smaller animal costs more per
+  pound — and nothing reads them until it is built.
+- **THE ITEMISED SHEET IS NOT COMPARED BETWEEN TWO PLANTS**, which is the
+  question the farm actually has and the reason the figures were worth
+  structuring. It wants slice 5's screen; the data is now shaped for it, and
+  before it can say anything true it needs the units reconciled — one plant's
+  per-bird cutting fee against another's per-pound one is not a comparison
+  without a weight.
 - **THE FILE IS NOT KEPT.** The design says "the kill sheet as a DOCUMENT" and a
   kill sheet is a retained record; the bytes are currently read, sent and
   dropped. Filing it means `production` importing the Documents module — the
   first pack to import a core module — which is an architectural decision that
   should be made deliberately rather than as a side effect of an AI feature.
-- **THE PRICE-LIST READER WILL HAPPILY REPLACE A FEE NOBODY MEANT TO CHANGE.**
-  `setHandle` is an upsert, so recording a row for a kind that already has one
-  overwrites it. The dialog says so in a sentence; it does not show the fee that
-  is about to be replaced beside the new one, which is what it should do.
+- **THE PRICE-LIST READER WILL HAPPILY REPLACE A PRICE NOBODY MEANT TO CHANGE.**
+  Both `setHandle` and `setPriceItem` are upserts, so re-reading a sheet
+  overwrites what is on file for a matching row. The dialog says so in a
+  sentence; it does not show the price that is about to be replaced beside the
+  new one, which is what it should do — and it matters more now than it did with
+  three fee columns, because a re-read of a thirty-line sheet silently restates
+  thirty prices.
 
 - ~~**BOOKING A DATE IS THE NEXT SLICE.**~~ **Shipped 1c.** What it did NOT do:
   **a booking is not on the calendar.** `schedule_item_links` takes an

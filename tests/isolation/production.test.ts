@@ -52,6 +52,7 @@ d("production tables (RLS)", () => {
   let processorA: string;
   let processorB: string;
   let handleA: string;
+  let priceItemA: string;
   let bookingA: string;
   let bookingB: string;
 
@@ -274,6 +275,31 @@ d("production tables (RLS)", () => {
         ])
         .returning();
       handleA = handles[0].id;
+
+      const priceItems = await tx
+        .insert(schema.productionProcessorPriceItems)
+        .values([
+          {
+            tenantId: tenantA,
+            processorId: processorA,
+            kind: "cattle",
+            category: "cutting",
+            label: "Cut and wrap",
+            priceCents: 90,
+            unit: "hanging_lb",
+          },
+          {
+            tenantId: tenantB,
+            processorId: processorB,
+            kind: "poultry",
+            category: "cutting",
+            label: "Quartered",
+            priceCents: 105,
+            unit: "head",
+          },
+        ])
+        .returning();
+      priceItemA = priceItems[0].id;
 
       await tx.insert(schema.productionProcessorCuts).values([
         { tenantId: tenantA, processorId: processorA, name: "Bone-in ribeye" },
@@ -661,6 +687,94 @@ d("production tables (RLS)", () => {
       tx.select().from(schema.productionProcessorCuts),
     );
     expect(myCuts.map((c) => c.name)).toEqual(["Bone-in ribeye"]);
+  });
+
+  it("cannot see another tenant's rate sheet, line by line", async () => {
+    // **A WORSE LEAK THAN THE HANDLE ROW IT CAME OUT OF.** A handle carried one
+    // fee; this carries the whole sheet with the plant's own words on it, which
+    // is exactly the document a farm should not be able to read over its
+    // neighbour's shoulder.
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.productionProcessorPriceItems),
+    );
+    expect(mine.map((i) => i.label)).toEqual(["Cut and wrap"]);
+    expect(mine.map((i) => i.priceCents)).toEqual([90]);
+
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.productionProcessorPriceItems),
+    );
+    expect(theirs.map((i) => i.label)).toEqual(["Quartered"]);
+  });
+
+  it("cannot hang a price item off another tenant's processor", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionProcessorPriceItems).values({
+          tenantId: tenantA,
+          processorId: processorB,
+          kind: "cattle",
+          label: "Slaughter",
+          unit: "head",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot price one named thing twice for the same animal", async () => {
+    // Two prices for one option, with nothing to say which is current — the
+    // rule the handle's unique index states, at the finer grain the itemised
+    // sheet needs. Quartered and eight-piece are two LABELS; quartered twice is
+    // a contradiction.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionProcessorPriceItems).values({
+          tenantId: tenantA,
+          processorId: processorA,
+          kind: "cattle",
+          label: "Cut and wrap",
+          unit: "hanging_lb",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a price with no unit the app knows about", async () => {
+    // **THE CONSTRAINT THIS TABLE EXISTS FOR.** A figure whose unit the app
+    // cannot interpret is the exact ambiguity that made a per-bird cutting rate
+    // indistinguishable from a per-pound one, and it would render on screen as
+    // a bare number with a slug after it.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionProcessorPriceItems)
+          .set({ unit: "per_animal_ish" })
+          .where(eq(schema.productionProcessorPriceItems.id, priceItemA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a negative price and a negative minimum", async () => {
+    for (const patch of [{ priceCents: -1 }, { minimumCents: -1 }]) {
+      await expect(
+        withSystem((tx) =>
+          tx
+            .update(schema.productionProcessorPriceItems)
+            .set(patch)
+            .where(eq(schema.productionProcessorPriceItems.id, priceItemA)),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("refuses a price for something unnamed", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionProcessorPriceItems)
+          .set({ label: "   " })
+          .where(eq(schema.productionProcessorPriceItems.id, priceItemA)),
+      ),
+    ).rejects.toThrow();
   });
 
   it("cannot read, update or delete another tenant's processor", async () => {
@@ -1061,6 +1175,11 @@ d("production tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.productionProcessorCuts),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.productionProcessorPriceItems),
       ),
     ).toHaveLength(0);
     expect(

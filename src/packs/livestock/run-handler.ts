@@ -66,6 +66,34 @@ export const livestockRunHandler: RunInputHandler<Tx> = {
     return claimed;
   },
 
+  /**
+   * The species in each lot, for `production`'s exemption counter.
+   *
+   * **THIS PACK ANSWERS "poultry"; IT DOES NOT KNOW WHY IT WAS ASKED.** The cap
+   * — a thousand birds a year on the pilot — is the profile's, in
+   * `packConfig.production.exemptions`, and the counting is production's. All
+   * this side owns is the fact that these animals are birds, which is the one
+   * thing neither of the other two can see.
+   */
+  async kinds(tx, tenantId, lotIds) {
+    const out = new Map<string, string>();
+    if (lotIds.length === 0) return out;
+    const rows = await tx
+      .select({
+        inventoryLotId: schema.livestockLots.inventoryLotId,
+        species: schema.livestockLots.species,
+      })
+      .from(schema.livestockLots)
+      .where(
+        and(
+          eq(schema.livestockLots.tenantId, tenantId),
+          inArray(schema.livestockLots.inventoryLotId, lotIds),
+        ),
+      );
+    for (const row of rows) out.set(row.inventoryLotId, row.species);
+    return out;
+  },
+
   async blocks(tx, tenantId, lotIds, today) {
     const out = new Map<string, RunInputBlock>();
     if (lotIds.length === 0) return out;

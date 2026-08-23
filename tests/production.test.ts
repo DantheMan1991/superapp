@@ -37,6 +37,12 @@ import {
   BOOKING_STATUS_NOTES,
   BOOKING_SOON_WITHIN_DAYS,
   bookingStanding,
+  exemptionsFrom,
+  exemptionStanding,
+  exemptionNote,
+  EXEMPTION_WARN_AT,
+  pathOf,
+  PATH_LABELS,
   daysBetween,
   describeBookingDate,
   centsToDisplay,
@@ -814,5 +820,94 @@ describe("bookingStanding", () => {
     expect(describeBookingDate("2026-08-22", "2026-08-23")).toBe("yesterday");
     expect(describeBookingDate("2026-09-04", "2026-08-23")).toBe("in 12 days");
     expect(describeBookingDate("2026-08-20", "2026-08-23")).toBe("3 days ago");
+  });
+});
+
+/**
+ * ── THE PROCESSING PATH AND THE EXEMPTION (slice 1d) ──────────────────────
+ *
+ * The path is derived from one column and the exemption is a ratio over runs.
+ * Neither is stored as its own answer, which is the rule the rest of this pack
+ * has followed since slice 0.
+ */
+describe("processing path", () => {
+  it("is on-farm exactly when no processor is named", () => {
+    // Null is NOT missing data here. It is the other half of the choice the
+    // design describes: on-farm uninspected, or sent out to a butcher.
+    expect(pathOf(null)).toBe("on_farm");
+    expect(pathOf("some-processor-id")).toBe("sent_out");
+    expect(PATH_LABELS.on_farm).toBe("Done here");
+    expect(PATH_LABELS.sent_out).toBe("Sent out");
+  });
+});
+
+describe("exemptionsFrom", () => {
+  it("reads a cap from the profile and never invents one", () => {
+    // A pack carrying "poultry: 1000" would know both what a bird is and whose
+    // law it is under. The pilot's figure lives in the profile.
+    expect(exemptionsFrom({ exemptions: [{ kind: "poultry", annualHead: 1000 }] }))
+      .toEqual([{ kind: "poultry", annualHead: 1000 }]);
+    expect(exemptionsFrom(undefined)).toEqual([]);
+    expect(exemptionsFrom({})).toEqual([]);
+    expect(exemptionsFrom({ exemptions: "poultry" })).toEqual([]);
+  });
+
+  it("drops a malformed rule instead of trusting it", () => {
+    // tenant_modules.config is jsonb with no shape constraint, and this figure
+    // decides whether a screen tells a farm it may keep processing birds. A
+    // half-typed rule must not become a cap of NaN or of zero.
+    expect(
+      exemptionsFrom({
+        exemptions: [
+          { kind: "poultry", annualHead: 1000 },
+          { kind: "swine" },
+          { annualHead: 50 },
+          { kind: "beef", annualHead: 0 },
+          { kind: "goat", annualHead: "many" },
+          "nonsense",
+        ],
+      }),
+    ).toEqual([{ kind: "poultry", annualHead: 1000 }]);
+  });
+});
+
+describe("exemptionStanding", () => {
+  it("warns with room left to do something about it", () => {
+    // 80%, and the reason is a lead time rather than a round number: a
+    // processor books six to twelve months ahead, so being told at 999 is being
+    // told far too late to send the next batch out instead.
+    expect(EXEMPTION_WARN_AT).toBe(0.8);
+    expect(exemptionStanding(0, 1000)).toBe("clear");
+    expect(exemptionStanding(799, 1000)).toBe("clear");
+    expect(exemptionStanding(800, 1000)).toBe("close");
+    expect(exemptionStanding(999, 1000)).toBe("close");
+  });
+
+  it("separates AT the limit from OVER it", () => {
+    // Different sentences, because they are different situations: one means
+    // every batch from here goes out, the other means meat has already been
+    // processed that cannot be sold the way somebody may be assuming.
+    expect(exemptionStanding(1000, 1000)).toBe("at");
+    expect(exemptionStanding(1001, 1000)).toBe("over");
+  });
+
+  it("says nothing when there is no cap to be near", () => {
+    expect(exemptionStanding(50, 0)).toBe("clear");
+  });
+
+  it("has a sentence for every standing, and never a bare number", () => {
+    for (const [used, cap] of [[0, 1000], [850, 1000], [1000, 1000], [1200, 1000]]) {
+      const note = exemptionNote(
+        exemptionStanding(used, cap),
+        used,
+        cap,
+        "Butcher",
+      );
+      expect(note.length).toBeGreaterThan(15);
+      // The tenant's word, never the pack's default.
+      expect(note).not.toContain("Processor");
+    }
+    expect(exemptionNote("over", 1200, 1000, "Butcher")).toContain("200 more");
+    expect(exemptionNote("close", 850, 1000, "Butcher")).toContain("150 left");
   });
 });

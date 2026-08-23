@@ -103,6 +103,23 @@ export const homesteadFarm: IndustryProfile = {
        * A plant that only does birds simply has one of these rows.
        */
       processorHandles: ["cattle", "swine", "poultry", "sheep", "goat"],
+      /**
+       * HOW MANY MAY BE PROCESSED ON THIS FARM IN A YEAR WITHOUT INSPECTION.
+       *
+       * **A THOUSAND BIRDS, and the pilot sits at exactly that** — the design
+       * notes it is "already managed to a line", which is why the number is
+       * worth counting rather than merely mentioning. It is the federal poultry
+       * producer/grower exemption's figure; states layer their own rules on top
+       * and some are stricter, so a farm elsewhere edits
+       * `tenant_modules.config` and nothing is deployed.
+       *
+       * **ONLY POULTRY IS LISTED, deliberately.** There is no equivalent
+       * head-count exemption for beef or pork — custom-exempt slaughter has no
+       * annual number, it has a rule about who may eat it — so listing them
+       * with a cap would invent a limit that does not exist. An empty list is
+       * the correct answer for a species this does not apply to.
+       */
+      exemptions: [{ kind: "poultry", annualHead: 1000 }],
     },
     /**
      * Where this farm sells. All direct-to-consumer today — one farmers market

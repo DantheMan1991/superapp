@@ -956,6 +956,63 @@ d("production tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  // ---- the processing path ----------------------------------------------
+
+  it("CANNOT SAY ANOTHER TENANT'S PLANT PROCESSED THIS FARM'S RUN", async () => {
+    /**
+     * The composite FK, and it guards more than a name. `production_runs.
+     * processor_id` IS the processing path, and the inspection stamped from it
+     * decides where the meat may legally be sold. A cross-tenant one would let
+     * one farm's uninspected run inherit another farm's USDA establishment.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionRuns)
+          .set({ processorId: processorB })
+          .where(eq(schema.productionRuns.id, runA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an inspection nothing in the app knows", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionRuns)
+          .set({ inspection: "probably_fine" })
+          .where(eq(schema.productionRuns.id, runA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("REFUSES TO FINISH A RUN WITHOUT SAYING HOW IT WAS INSPECTED", async () => {
+    // The CHECK, and it is the one that keeps the eligibility answerable for
+    // every finished run rather than most of them. A complete run with a null
+    // inspection is a box of meat nothing can say the legal status of.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionRuns)
+          .set({ status: "complete", inspection: null })
+          .where(eq(schema.productionRuns.id, runA)),
+      ),
+    ).rejects.toThrow();
+
+    // The same update WITH an inspection is fine — proving the refusal is about
+    // the missing value and not about finishing a run at all.
+    await withSystem(async (tx) => {
+      await tx
+        .update(schema.productionRuns)
+        .set({ status: "complete", inspection: "uninspected" })
+        .where(eq(schema.productionRuns.id, runA));
+      await tx
+        .update(schema.productionRuns)
+        .set({ status: "in_progress", inspection: null })
+        .where(eq(schema.productionRuns.id, runA));
+    });
+  });
+
   it("is default-deny on all eight tables with no tenant context", async () => {
     // FORCE ROW LEVEL SECURITY: an unknown tenant sees nothing, even for the
     // connection's own role. The backstop the whole shell rests on.

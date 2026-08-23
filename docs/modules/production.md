@@ -21,8 +21,8 @@ this dossier is the build record.
 | **1a** | **The carcass stage** — the kill sheet, dressing percentage vs cutting yield, **and condemnations** | **shipped 2026-08-23** |
 | **1b** | **The processor directory** — who does the work you do not, what they take, what they charge, how they are inspected, what you think of them | **shipped 2026-08-23** |
 | **1c** | **Booking a date** — holding the scarce resource, deposits, and the link from a booking to the run it becomes | **shipped 2026-08-23** |
-| 1d | Meat runs: the processing path on the run, eligibility stamping, the exemption counter, and the kill sheet as a **document** (photograph or PDF → extraction → these rows) | next |
-| 1e | **A processor's price list as a document** — photograph or PDF → AI extraction → a confirmed update to that processor's `handles` rows | |
+| **1d** | **The processing path on the run**, eligibility stamped onto the meat, and the on-farm exemption counted | **shipped 2026-08-23** |
+| 1e | **Paperwork, extracted** — a kill sheet AND a processor's price list, as photograph or PDF → AI extraction → **a human confirms** → the rows | next |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
 | 4 | Label generation, including a processor's own-label capability | |
@@ -39,8 +39,16 @@ person confirm it — has to extract INTO something, and until 1a there was no
 carcass row to put a hanging weight in. The record first, then the door onto it.
 That is the same shape `land` found when 2a became three slices.
 
-**1e IS THE SAME MACHINERY AS 1d POINTED AT A DIFFERENT TABLE, and it is
-recorded here so it is not lost** (asked for 2026-08-23, deliberately deferred).
+**1e NOW CARRIES BOTH EXTRACTIONS, and merging them is the point.** The kill
+sheet was in 1d and the price list was on its own; they are the same path —
+document in, AI reads it, **a person confirms**, then it writes — differing only
+in which table they land in (`production_run_carcasses` and
+`production_processor_handles`). Building that path once with two consumers is
+cheaper than building it twice, and it keeps the confirm step from being
+re-litigated on the second one.
+
+**The price-list half was asked for on 2026-08-23 and is recorded so it is not
+lost.**
 A processor's price list arrives as a sheet of paper or a PDF once a year, and
 retyping it into `production_processor_handles` is exactly the transcription
 chore the design's *compute-and-commit* pattern exists for: **AI extracts, a
@@ -62,6 +70,83 @@ livestock production"* — and the roadmap had processors appearing only at slic
 becomes 1d, unchanged.
 
 ## Build log
+
+### 2026-08-23 — Slice 1d: which path the meat took (`claude/which-path-the-meat-took`)
+
+**THE PATH IS A NULLABLE FOREIGN KEY, AND THAT IS THE WHOLE MODEL.**
+`production_runs.processor_id` names the plant, or is null because this farm did
+it itself. The design put the path on the run and said why in one line: *"The
+same batch of birds may be processed on-farm uninspected or sent out to a
+butcher, decided at booking. Modelling the path on the animal or the species is
+wrong."* Null is not missing data here — it is the other half of the choice, and
+`pathOf()` derives the answer rather than a second column disagreeing with the
+first.
+
+**INSPECTION IS STAMPED WHEN THE MEAT LANDS, and it is the second derived thing
+in this table that is stored.** `cost_basis` was the first, for the same reason.
+A plant's status can be corrected, lapse or be upgraded, and re-deriving this
+later would silently change what a box already in somebody's freezer may legally
+be sold as. **What was true on the day is what governs the meat**, so it is
+written down on the day. A run with no processor stamps `uninspected`: the farm
+did it, and nothing inspected it.
+
+**THE LOT INHERITS IT**, into `inventory_lots.metadata` — the P2 bag, not a
+column, because `inventory` must not learn what an inspection is. That is the
+line the design calls existential: *"`retail` should refuse to list a lot into a
+channel that is not legal for it. Selling uninspected product through the wrong
+channel can end a poultry enterprise, and nothing on the market prevents it."*
+**`retail`'s refusal is the next consumer and is NOT built** — what exists now is
+the fact travelling with the meat, and a sentence beside the boxes saying what it
+means.
+
+**THE EXEMPTION COUNTER IS THREE PARTIES WHO EACH KNOW ONE THING.** The design
+says the pilot *"sits at exactly 1,000 birds — i.e. already managed to a line"*,
+and that recording runs yields the count for free. It does:
+
+- **`livestock` says which species is in a lot**, through a new `kinds()` method
+  on the P5 slot. It is not told why it was asked.
+- **the profile says which kinds carry a cap** — `packConfig.production.exemptions`,
+  `[{ kind: "poultry", annualHead: 1000 }]`. Only poultry is listed, deliberately:
+  there is no equivalent head-count exemption for beef or pork, and inventing one
+  would be worse than omitting it.
+- **`exemption-ops.ts` multiplies them.** Nothing is stored, so nothing can
+  drift, and a tenant with no livestock has no handler claiming a lot — the whole
+  feature is silently inert, which is correct for a bakery.
+
+Four counting choices, each of which could have gone the other way, are argued in
+that file's header: **inputs not outputs** (the limit is on birds, not packages),
+**complete runs only**, **`processor_id IS NULL`**, and **`started_on` not
+`completed_on`** (a run finished in January over December's birds belongs to
+December). It warns at **80%**, and that number is a lead time rather than a round
+one: a processor books six to twelve months ahead, so being told at 999 is being
+told far too late to send the next batch out instead.
+
+**THREE THINGS THE MIGRATION NEEDED BY HAND**, all worth knowing before the next
+one:
+
+- **`drizzle-kit` wanted to DROP and re-ADD four unrelated constraints** on
+  `audit_log`, `interview_sessions`, `schedule_items` and `work_items` — snapshot
+  churn, not a change. Checked against production with `pg_get_constraintdef`:
+  all four already had exactly the definition it wanted to re-add. Dropping three
+  other modules' foreign keys inside a production-pack migration is risk with no
+  upside, so they were stripped.
+- **A backfill had to run before the CHECK.**
+  `production_runs_finished_states_inspection` says a complete run must say how
+  it was inspected, and every run that completed before this migration says
+  nothing — so the migration fails on every database that has one. `uninspected`
+  is truthful for all of them: none had a processor, because there was no column
+  to name one in.
+- **`ON DELETE` was left off `production_runs_processor_fk` on purpose**, so it
+  is NO ACTION: a plant that has processed your animals cannot be deleted out
+  from under the record. `SET NULL` was not available anyway — composite FK, same
+  trap as 1c.
+
+**And a bug in two other modules fell out of reading that churn.**
+`schedule_items_parent_fk` and `work_items_parent_fk` are composite FKs declared
+`ON DELETE SET NULL`, which is the exact shape that cannot work. Verified on the
+dev branch inside a rolled-back transaction: deleting a parent schedule item that
+has a child fails with *"null value in column tenant_id violates not-null
+constraint"*. Live on production, out of scope here, and raised as its own task.
 
 ### 2026-08-23 — Slice 1c driven on `Test`, and two things reading it out loud found (`claude/booked-for-in-18-days`)
 
@@ -675,7 +760,7 @@ tests:**
 
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
-| `production_runs` | One pass of turning things into other things | `tenant_id`, FORCE RLS. `run_kind` open taxonomy (P1), values from the profile. `status` in `in_progress\|complete` — two, because the only state that matters is whether the cost is still held here. `cost_basis` is stamped at completion and never re-derived. `crew_size` / `labour_hours` are recorded and **not costed** |
+| `production_runs` | One pass of turning things into other things | `tenant_id`, FORCE RLS. `run_kind` open taxonomy (P1), values from the profile. `status` in `in_progress\|complete` — two, because the only state that matters is whether the cost is still held here. `cost_basis` is stamped at completion and never re-derived. `crew_size` / `labour_hours` are recorded and **not costed** | **`processor_id`** is the processing path — null means on-farm, and null is a real answer. **`inspection`** is stamped at completion and never re-derived, because a plant's status can change and a box in a freezer is governed by what was true when it was packed
 | `production_run_inputs` | **What went in. A JOIN, not a second ledger** | Composite FKs to the run (CASCADE) and to `inventory_movements`. UNIQUE per movement — two rows would put one cost in two runs, the same rule `livestock_feed_draws` follows. Its only own column is `weight_lb` |
 | `production_run_outputs` | What came out — **and the one place holding a quantity before the ledger does** | Composite FKs to the run (CASCADE), the item, the lot, the receipt and the location. CHECK: `lot_id` and `inventory_movement_id` are null together — landed means both. Frozen once landed |
 | `production_run_carcasses` | **The kill sheet, line by line** — the stage between the animal and the box | `tenant_id`, FORCE RLS. Composite FKs to the run and to the **input** (both CASCADE); `run_input_id` is REQUIRED, which makes the chain carcass → input → movement → lot total. `head_count` is 1 for a beef and 70 for a pen. `disposition` in `passed\|condemned` — two, because one line is one outcome. CHECKs: a condemned line carries no `hanging_lb`, a passed line carries no `condemn_reason`. **Writable on a finished run**, unlike everything else here |
@@ -724,6 +809,9 @@ run model, separate templates), and the processing path and eligibility flag
   packs exist
 - `src/packs/production/ops.ts` — reads and writes, takes a `Tx`.
   `completeRun` is the whole slice in one transaction
+- `src/packs/production/exemption-ops.ts` — the on-farm cap, counted at read
+  time. **Read the header before changing what counts**: four choices are argued
+  there, and each could have gone the other way
 - `src/packs/production/booking-ops.ts` — dates. **`missedBookings` is the read
   the slice exists for**, and it is two predicates: the day has passed, and
   nothing says what happened

@@ -132,6 +132,40 @@ export const productionRuns = pgTable(
      * a historical run describe a split it never had.
      */
     costBasis: text("cost_basis"),
+    /**
+     * WHO DID IT, or null when this business did it itself.
+     *
+     * **THIS COLUMN IS THE PROCESSING PATH**, and the design is explicit that
+     * the path belongs to the run: *"The same batch of birds may be processed
+     * on-farm uninspected or sent out to a butcher, decided at booking.
+     * Modelling the path on the animal or the species is wrong."* Null is not
+     * missing data — it is the on-farm path, which is the whole other half of
+     * the choice.
+     *
+     * No `ON DELETE` clause, so it is NO ACTION: **a plant that has processed
+     * your animals cannot be deleted out from under the record.** The
+     * establishment number and what it was inspected under are retained
+     * records, and the design says so. (`SET NULL` is not available anyway —
+     * this is a composite FK, and nulling it would null `tenant_id` too. See
+     * `production_bookings_run_fk`.)
+     */
+    processorId: uuid("processor_id"),
+    /**
+     * How this run was inspected, STAMPED WHEN THE OUTPUTS LAND. Null while the
+     * run is open.
+     *
+     * **STORED, AND IT IS THE SECOND DERIVED THING IN THIS TABLE THAT IS** —
+     * `cost_basis` is the first, for the same reason. A processor's inspection
+     * status can be corrected, lapse, or be upgraded, and re-deriving this
+     * later would silently change what a lot of meat sitting in a freezer is
+     * legally allowed to be sold as. What was true on the day is what governs
+     * the meat, so it is written down on the day.
+     *
+     * Values are `INSPECTIONS` (`usda`, `state`, `custom_exempt`,
+     * `uninspected`, `unknown`). A run with no processor stamps `uninspected`:
+     * the farm did it itself, and nothing inspected it.
+     */
+    inspection: text("inspection"),
     notes: text("notes").notNull().default(""),
     /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
     metadata: jsonb("metadata").notNull().default({}),
@@ -164,6 +198,21 @@ export const productionRuns = pgTable(
     check(
       "production_runs_basis_valid",
       sql`${t.costBasis} is null or ${t.costBasis} in ('weight', 'quantity', 'none')`,
+    ),
+    foreignKey({
+      name: "production_runs_processor_fk",
+      columns: [t.tenantId, t.processorId],
+      foreignColumns: [productionProcessors.tenantId, productionProcessors.id],
+    }),
+    check(
+      "production_runs_inspection_valid",
+      sql`${t.inspection} is null or ${t.inspection} in ('usda', 'state', 'custom_exempt', 'uninspected', 'unknown')`,
+    ),
+    // A finished run has to say how it was inspected, because that is what
+    // decides where its meat may be sold. An open one has nothing to say yet.
+    check(
+      "production_runs_finished_states_inspection",
+      sql`${t.status} <> 'complete' or ${t.inspection} is not null`,
     ),
     // A run cannot finish before it started. Same day is ordinary — a farm kill
     // day starts and ends on a Saturday.

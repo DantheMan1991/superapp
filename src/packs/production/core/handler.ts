@@ -119,4 +119,26 @@ export interface RunInputHandler<Tx> {
     ctx: RunHandlerCtx,
     input: RunConsumeInput,
   ): Promise<string>;
+  /**
+   * What KIND of thing is in each of these lots, keyed by lot id.
+   *
+   * **ADDED FOR THE EXEMPTION COUNTER (slice 1d), and it is the same boundary
+   * problem the rest of this file solves.** An on-farm processing exemption is
+   * counted per species — the pilot's is a thousand birds a year — and
+   * `production` cannot ask what a bird is: it does not require `livestock`,
+   * and a pack that knew "poultry" would know what industry it was in.
+   *
+   * So production asks a neutral question and gets a slug back. Which slugs
+   * carry a cap, and what the cap is, comes from the installed profile's
+   * `packConfig.production.exemptions` — three parties, none of which knows
+   * more than it should. A lot nobody claims has no kind, counts toward
+   * nothing, and that is the correct answer for a sack of flour.
+   *
+   * Only asked about lots this handler claimed, the same as `blocks`.
+   */
+  kinds(
+    tx: Tx,
+    tenantId: string,
+    lotIds: string[],
+  ): Promise<Map<string, string>>;
 }

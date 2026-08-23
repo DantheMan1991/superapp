@@ -172,6 +172,102 @@ export function inspectionNote(status: string, word: string): string {
 }
 
 /**
+ * WHICH PATH THE MEAT TOOK. Derived from whether a run names a processor —
+ * never a column of its own, because two answers to one question disagree.
+ *
+ * The design puts the path on the RUN and says why in one line: *"The same
+ * batch of birds may be processed on-farm uninspected or sent out to a butcher,
+ * decided at booking. Modelling the path on the animal or the species is
+ * wrong."*
+ */
+export type ProcessingPath = "on_farm" | "sent_out";
+
+export const PATH_LABELS: Record<ProcessingPath, string> = {
+  on_farm: "Done here",
+  sent_out: "Sent out",
+};
+
+export function pathOf(processorId: string | null): ProcessingPath {
+  return processorId ? "sent_out" : "on_farm";
+}
+
+/**
+ * One exemption a profile has declared: a kind, and how many of it may be
+ * processed on-farm in a year.
+ *
+ * **THE PACK DECLARES THE SHAPE AND NOT ONE VALUE.** A pack carrying "poultry:
+ * 1000" would know both what a bird is and whose law it is under. The pilot's
+ * figure is in `homestead-farm.ts`; a farm in another state edits
+ * `tenant_modules.config` and nothing is deployed.
+ */
+export interface ExemptionRule {
+  kind: string;
+  annualHead: number;
+}
+
+export function exemptionsFrom(config: unknown): ExemptionRule[] {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return [];
+  const value = (config as Record<string, unknown>).exemptions;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const kind = (raw as Record<string, unknown>).kind;
+    const annualHead = (raw as Record<string, unknown>).annualHead;
+    if (typeof kind !== "string" || kind === "") return [];
+    if (typeof annualHead !== "number" || !Number.isFinite(annualHead)) return [];
+    if (annualHead <= 0) return [];
+    return [{ kind, annualHead }];
+  });
+}
+
+/** Where a year-to-date count sits against its cap. */
+export type ExemptionStanding = "clear" | "close" | "at" | "over";
+
+/**
+ * **AT 80% IT STARTS SAYING SOMETHING.** The design's own framing is that the
+ * pilot is *"already managed to a line"* — a farm at 1,000 birds knows the
+ * number matters, and being told at 999 is being told too late to send the next
+ * batch out to inspection instead. A processor books six to twelve months
+ * ahead, so the warning has to arrive while there is still time to make a phone
+ * call, not while the birds are on the trailer.
+ */
+export const EXEMPTION_WARN_AT = 0.8;
+
+export function exemptionStanding(
+  used: number,
+  cap: number,
+): ExemptionStanding {
+  if (cap <= 0) return "clear";
+  if (used > cap) return "over";
+  if (used === cap) return "at";
+  return used / cap >= EXEMPTION_WARN_AT ? "close" : "clear";
+}
+
+/**
+ * What to say about it. Sentences, because the number alone does not tell
+ * somebody what to do about it — and the app states the SHAPE of the limit
+ * without asserting anybody's law, which varies and is not ours to declare.
+ */
+export function exemptionNote(
+  standing: ExemptionStanding,
+  used: number,
+  cap: number,
+  word: string,
+): string {
+  const left = cap - used;
+  switch (standing) {
+    case "over":
+      return `That is ${used - cap} more than the ${cap} this year. Anything already processed cannot be undone; what it changes is where that meat may legally be sold, and every batch from here has to go to a ${word.toLowerCase()}.`;
+    case "at":
+      return `That is the whole ${cap} for this year. Every batch from here has to go to a ${word.toLowerCase()}, and dates get booked months ahead.`;
+    case "close":
+      return `${left} left of ${cap} this year. Worth booking a ${word.toLowerCase()} now rather than when it runs out — good ones are booked six to twelve months ahead.`;
+    case "clear":
+      return `${left} left of ${cap} this year.`;
+  }
+}
+
+/**
  * Where a booked date stands. CLOSED, and three is the whole set.
  *
  * **THERE IS NO "IT HAPPENED".** Whether a date turned into a processing day is

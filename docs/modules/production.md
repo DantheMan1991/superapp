@@ -71,6 +71,58 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-08-23 — A real rate sheet, and the five prices that became one (`claude/five-prices-one-row`)
+
+**THE FIRST GENUINE PAPERWORK THROUGH THE READER**: Pleasant Valley Poultry's
+2026 price list — a real two-page USDA poultry plant sheet, 277 KB, uploaded to
+the live app against `Valley Poultry Processing`. What it produced is worth
+recording in full, because the useful half is what it REFUSED.
+
+| Row | Kill fee returned | Right? |
+| --- | --- | --- |
+| Chickens | *empty* | **Yes.** The sheet prices them as a 4-breed × 6-batch-band matrix — 24 numbers. Any one of them is wrong for the other 23. The whole matrix went into the note verbatim. |
+| Turkeys | *empty* | **Yes.** Priced **per pound** ($0.65–$0.90) with a $10 minimum, not per head. `0.65` would have looked entirely plausible in a per-head field. |
+| Ducks | **$10.55** | Exact |
+| Geese | **$11.55** | Exact |
+| Quail | **$2.75** | Exact |
+
+Every cut-and-wrap field came back empty, and that is also correct: **this plant
+prices cutting per BIRD** ($1.05 quartered, $1.25 for an 8-piece cut), and the
+column is per pound of hanging weight. `$1.05` in a per-pound field would have
+been indistinguishable from a real rate. The notes captured the cutting fees,
+the packaging fees, the seasonal minimums and the plant's advice about booking
+duck and geese by age.
+
+So the prompts' central instruction — *leave it out rather than guess* — held on
+the first real document, in exactly the two places a naive reader gets it wrong.
+
+**AND THEN THE DEFECT, WHICH ONLY REAL DATA COULD HAVE FOUND.** All five rows
+came back as `poultry`, because that was the only bird in the profile's
+vocabulary. `setHandle` upserts on `(processor, kind)`. **Recording all five
+would have written five rows into ONE**, each silently overwriting the last,
+leaving quail's $2.75 as the price of all poultry — and reporting "5 recorded".
+Nothing was recorded; the dialog was closed instead.
+
+Two fixes:
+
+- **The confirm refuses a clash and marks it inline.** The dialog already warned
+  that recording a kind already on file replaces it; it said nothing about rows
+  in the SAME batch colliding with each other, which is the case that actually
+  arises. Now a ticked duplicate is labelled *· clashes* and Record refuses,
+  naming the kind.
+- **`processorHandles` widened** to `chicken, turkey, duck, goose, quail`
+  alongside `poultry`. $2.75 a quail against $11.55 a goose is not a rounding
+  difference, and one bucket could not hold them. `livestock.species` still says
+  `poultry` — a farm counts birds in a pen as birds — and the two lists being
+  separate is exactly what let one move without disturbing the other.
+
+**Still unfixed, and now certain rather than suspected: the schema cannot hold
+poultry cutting.** `cut_wrap_cents_per_lb` is per pound; every poultry plant
+prices cutting per bird. The reader is right to refuse the field and the note
+carries the real figures, but a farm cannot compare two plants' cutting rates
+until there is a column for it. That is a migration and a modelling decision,
+recorded as an open item rather than guessed at here.
+
 ### 2026-08-23 — Slice 1e: reading somebody else's piece of paper (`claude/paperwork-somebody-else-wrote`)
 
 **ONE PATH, TWO CONSUMERS, WHICH IS WHY THEY SHIPPED TOGETHER.** A kill sheet
@@ -1079,13 +1131,21 @@ run model, separate templates), and the processing path and eligibility flag
 
 ## Open items
 
-- **NEITHER READER HAS BEEN GIVEN A REAL PHOTOGRAPH.** The validators are
-  covered by 15 tests and the model call is injectable, so everything below the
-  network is exercised — but no actual kill sheet or rate sheet has been through
-  it, and `ANTHROPIC_API_KEY` plus a photograph is the only way to learn what a
-  real one produces. It is also the first thing here that **spends money per
-  press**, and nothing rate-limits it: accounting's extractor has a 15-second
-  per-tenant cooldown and this does not.
+- ~~**NEITHER READER HAS BEEN GIVEN A REAL PHOTOGRAPH.**~~ **The price-list
+  reader has** — a real two-page USDA poultry rate sheet, 2026-08-23, and it
+  refused correctly in both places a naive reader gets wrong. See the build log.
+  **The KILL-SHEET reader still has not**, and it is the harder of the two:
+  handwriting on a clipboard rather than a typeset PDF.
+- **NOTHING RATE-LIMITS IT, and it spends money per press.** Accounting's
+  extractor claims a 15-second per-tenant cooldown slot inside its gating
+  transaction; this has none, so a double-click is two calls.
+- **THE SCHEMA CANNOT HOLD POULTRY CUTTING, which is now certain rather than
+  suspected.** `cut_wrap_cents_per_lb` is per pound of hanging weight; every
+  poultry plant prices cutting **per bird** — $1.05 quartered, $1.25 for an
+  8-piece cut on the sheet that proved it. The reader correctly refuses the
+  field and the note carries the real figures, but two plants' cutting rates
+  cannot be compared until there is a column for it. Needs a migration and a
+  decision about whether the unit belongs on the handle row or on the fee.
 - **THE FILE IS NOT KEPT.** The design says "the kill sheet as a DOCUMENT" and a
   kill sheet is a retained record; the bytes are currently read, sent and
   dropped. Filing it means `production` importing the Documents module — the

@@ -102,7 +102,32 @@ export const homesteadFarm: IndustryProfile = {
        * handles lambs is a normal thing to do in the season before you own any.
        * A plant that only does birds simply has one of these rows.
        */
-      processorHandles: ["cattle", "swine", "poultry", "sheep", "goat"],
+      /**
+       * **WIDENED 2026-08-23 AFTER A REAL RATE SHEET WOULD NOT FIT IN IT.**
+       *
+       * It was `cattle, swine, poultry, sheep, goat`. Pleasant Valley Poultry's
+       * 2026 price list — a genuine USDA poultry plant — prices **chickens,
+       * turkeys, ducks, geese and quail separately**, and $2.75 a quail against
+       * $11.55 a goose is not a rounding difference. With one `poultry` bucket
+       * all five collapsed onto one row and four of the prices were lost.
+       *
+       * `livestock.species` above deliberately still says `poultry`: a farm
+       * counts birds in a pen as birds. This list is what a PLANT quotes for,
+       * which is a finer question, and the two being separate lists is exactly
+       * what let one move without disturbing the other.
+       */
+      processorHandles: [
+        "cattle",
+        "swine",
+        "sheep",
+        "goat",
+        "poultry",
+        "chicken",
+        "turkey",
+        "duck",
+        "goose",
+        "quail",
+      ],
       /**
        * HOW MANY MAY BE PROCESSED ON THIS FARM IN A YEAR WITHOUT INSPECTION.
        *

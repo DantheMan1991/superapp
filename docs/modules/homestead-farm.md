@@ -116,6 +116,31 @@ What it **does** break:
 
 ## Build log
 
+### 2026-08-23 — Production slice 1b: the processor directory, and two profile keys (`claude/the-processor-and-the-date`)
+
+The build record is in [production.md](production.md); what belongs here is what
+the PROFILE now says, because both additions are the industry speaking rather
+than the pack.
+
+- **`labels.processor` → "Butcher".** The pack's own word is "Processor", which
+  is what the paperwork says and what a bakery sending dough to a co-packer would
+  read. Nobody on a farm rings "the processor". Second label this profile
+  overrides, after `killSheet`.
+- **`packConfig.production.processorHandles` → cattle, swine, poultry, sheep,
+  goat.** **Deliberately a different list from `packConfig.livestock.species`**,
+  which is cattle, swine and poultry — and the difference is the useful part, not
+  duplication waiting to be tidied away. That list is what this farm RAISES; this
+  one is what the plants around here will TAKE, and choosing a butcher because it
+  handles lambs is a normal thing to do in the season before you own any. It also
+  could not be shared even if it were desirable: `production` must not require
+  `livestock`.
+
+The design section below already settled the shape — *"a processor is a vendor,
+the party spine already holds it"* — and it held up unchanged. What it did not
+anticipate is the rating: the founder asked for "what are they good at", which is
+a subjective field the design never mentions, and it is stored as an opinion
+beside measured figures that are folded and never stored.
+
 ### 2026-08-23 — Production slice 1a: the carcass, and the honest way to subtract a condemnation (`claude/homestead-farm-modulas-elewgg`)
 - **The pack's largest deferred item came back and the deferral's own reasoning
   built it.** Slice 0 refused to model a condemnation and wrote down exactly why:
@@ -788,7 +813,7 @@ own words condensed, not reinterpreted.
 | Equipment | `assets` pack, `asset_kind = 'equipment'` | no | **done** — same design |
 | Livestock | `livestock` pack | **yes** | **done** — [category design](#category-design--livestock-brainstormed-2026-08-13) · **slices 0–1 built**, [livestock.md](livestock.md) |
 | Gardens/crops | `crops` pack | **yes** | **done** — [category design](#category-design--crops--garden-brainstormed-2026-08-13) |
-| Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) · **slices 0–1a built**, [production.md](production.md) |
+| Butchering | `production` pack | no | **done** — [category design](#category-design--production-brainstormed-2026-08-13) · **slices 0–1b built**, [production.md](production.md) |
 | Baking | `production` pack — shared run, separate template | no | **done** — same design; the shared run is built, the recipe template is slice 2 |
 | Retail | `inventory` (**slices 0–1 built**, [inventory.md](inventory.md)) + `retail` packs | no | **done** — [inventory](#category-design--inventory-brainstormed-2026-08-13) · [retail](#category-design--retail-brainstormed-2026-08-13) |
 | Marketing | core CRM + email; thin pack at most | no | first pass |

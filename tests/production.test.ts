@@ -26,6 +26,13 @@ import {
   COST_BASES,
   RUN_STATUSES,
   SLUG_FORMAT,
+  INSPECTIONS,
+  INSPECTION_LABELS,
+  INSPECTION_NOTES,
+  LABELLING_OPTIONS,
+  RATING_LABELS,
+  centsToDisplay,
+  processorHandlesFrom,
   isValidSlug,
   runKindsFrom,
   slugLabel,
@@ -325,6 +332,68 @@ describe("vocabulary", () => {
 
   it("turns a slug into words", () => {
     expect(slugLabel("bake_day")).toBe("Bake day");
+  });
+});
+
+/**
+ * ── THE PROCESSOR DIRECTORY (slice 1b) ────────────────────────────────────
+ *
+ * Small surface, and every test here guards a decision rather than a mechanism.
+ */
+describe("processor vocabulary", () => {
+  it("keeps the inspection set closed, and keeps `unknown` in it", () => {
+    // Five values, and the fifth is the one that matters. "Not inspected" and
+    // "nobody has said yet" are different states; a boolean would collapse the
+    // second into the first on the very screen a legal question is answered
+    // from. Mirrors the CHECK on production_processors.inspection.
+    expect([...INSPECTIONS]).toEqual([
+      "usda",
+      "state",
+      "custom_exempt",
+      "uninspected",
+      "unknown",
+    ]);
+    expect([...LABELLING_OPTIONS]).toEqual(["unknown", "no", "yes"]);
+  });
+
+  it("has a sentence for every inspection status", () => {
+    // A status with no note would render as a bare word on the screen that
+    // decides where meat may be sold. Every one of them has to explain itself.
+    for (const value of INSPECTIONS) {
+      expect(INSPECTION_LABELS[value]).toBeTruthy();
+      expect(INSPECTION_NOTES[value]?.length ?? 0).toBeGreaterThan(20);
+    }
+  });
+
+  it("reads what processors handle from the profile, never inventing one", () => {
+    // Same rule as runKinds, and deliberately a SEPARATE list: what a plant
+    // will take is not what this farm raises.
+    expect(
+      processorHandlesFrom({ processorHandles: ["cattle", "sheep"] }),
+    ).toEqual(["cattle", "sheep"]);
+    expect(processorHandlesFrom(undefined)).toEqual([]);
+    expect(processorHandlesFrom({ processorHandles: "cattle" })).toEqual([]);
+    // Reading the wrong key is the mistake a copy-paste would make.
+    expect(processorHandlesFrom({ runKinds: ["butchering"] })).toEqual([]);
+  });
+
+  it("never renders an unquoted fee as $0.00", () => {
+    // THE ONE THAT WOULD MISLEAD A PERSON. A fee nobody has asked about is a
+    // question; zero says the plant works for nothing, and a farm comparing two
+    // quotes would pick the one that had not answered.
+    expect(centsToDisplay(null)).toBeNull();
+    expect(centsToDisplay(undefined)).toBeNull();
+    expect(centsToDisplay(0)).toBe("$0.00");
+    expect(centsToDisplay(9500)).toBe("$95.00");
+    expect(centsToDisplay(90)).toBe("$0.90");
+  });
+
+  it("anchors every rating with a word", () => {
+    // "4" means nothing on its own, and a farm comparing two plants a year
+    // apart needs the same anchor both times.
+    for (const n of [1, 2, 3, 4, 5]) {
+      expect(RATING_LABELS[n]).toBeTruthy();
+    }
   });
 });
 

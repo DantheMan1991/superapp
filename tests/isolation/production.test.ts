@@ -47,6 +47,11 @@ d("production tables (RLS)", () => {
   let inputB: string;
   let outputA: string;
   let carcassA: string;
+  let partyA: string;
+  let partyB: string;
+  let processorA: string;
+  let processorB: string;
+  let handleA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -207,6 +212,71 @@ d("production tables (RLS)", () => {
         ])
         .returning();
       carcassA = carcasses[0].id;
+
+      // ---- the processor directory ----
+      const parties = await tx
+        .insert(schema.parties)
+        .values([
+          {
+            tenantId: tenantA,
+            kind: "organization",
+            displayName: "A Packing Co",
+          },
+          {
+            tenantId: tenantB,
+            kind: "organization",
+            displayName: "B Packing Co",
+          },
+        ])
+        .returning();
+      partyA = parties[0].id;
+      partyB = parties[1].id;
+
+      const processors = await tx
+        .insert(schema.productionProcessors)
+        .values([
+          {
+            tenantId: tenantA,
+            partyId: partyA,
+            inspection: "usda",
+            establishmentNumber: "EST 38",
+            rating: 4,
+            goodAt: "sausage",
+          },
+          {
+            tenantId: tenantB,
+            partyId: partyB,
+            inspection: "custom_exempt",
+            establishmentNumber: "EST 99",
+          },
+        ])
+        .returning();
+      processorA = processors[0].id;
+      processorB = processors[1].id;
+
+      const handles = await tx
+        .insert(schema.productionProcessorHandles)
+        .values([
+          {
+            tenantId: tenantA,
+            processorId: processorA,
+            kind: "cattle",
+            killFeeCents: 9500,
+          },
+          {
+            tenantId: tenantB,
+            processorId: processorB,
+            kind: "poultry",
+            killFeeCents: 400,
+          },
+        ])
+        .returning();
+      handleA = handles[0].id;
+
+      await tx.insert(schema.productionProcessorCuts).values([
+        { tenantId: tenantA, processorId: processorA, name: "Bone-in ribeye" },
+        { tenantId: tenantB, processorId: processorB, name: "Whole bird" },
+      ]);
     });
   });
 
@@ -524,7 +594,173 @@ d("production tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
-  it("is default-deny on all four tables with no tenant context", async () => {
+  // ---- the processor directory ------------------------------------------
+
+  /**
+   * WHAT A LEAKED ROW HERE WOULD GIVE AWAY IS NOT A WEIGHT, and that is why
+   * these tables get the same treatment as the traceability chain above. They
+   * hold one farm's NEGOTIATED PRICES from a named local plant, beside its
+   * candid private opinion of a business it has to keep working with. Handing
+   * that to a neighbouring farm is commercially harmful in a way a leaked
+   * hanging weight is not.
+   */
+  it("shows a tenant only its own processors, prices and cuts", async () => {
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.productionProcessors),
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0].establishmentNumber).toBe("EST 38");
+    expect(mine[0].goodAt).toBe("sausage");
+
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.productionProcessors),
+    );
+    expect(theirs).toHaveLength(1);
+    expect(theirs[0].establishmentNumber).toBe("EST 99");
+
+    // The price is the row worth naming separately: it is the one a competitor
+    // would actually want.
+    const myFees = await asStaff((tx) =>
+      tx.select().from(schema.productionProcessorHandles),
+    );
+    expect(myFees.map((h) => h.killFeeCents)).toEqual([9500]);
+    const theirFees = await asOtherTenant((tx) =>
+      tx.select().from(schema.productionProcessorHandles),
+    );
+    expect(theirFees.map((h) => h.killFeeCents)).toEqual([400]);
+
+    const myCuts = await asStaff((tx) =>
+      tx.select().from(schema.productionProcessorCuts),
+    );
+    expect(myCuts.map((c) => c.name)).toEqual(["Bone-in ribeye"]);
+  });
+
+  it("cannot read, update or delete another tenant's processor", async () => {
+    const seen = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.productionProcessors)
+        .where(eq(schema.productionProcessors.id, processorB)),
+    );
+    expect(seen).toHaveLength(0);
+
+    const updated = await asOwner((tx) =>
+      tx
+        .update(schema.productionProcessors)
+        .set({ rating: 1 })
+        .where(eq(schema.productionProcessors.id, processorB))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+
+    const deleted = await asOwner((tx) =>
+      tx
+        .delete(schema.productionProcessors)
+        .where(eq(schema.productionProcessors.id, processorB))
+        .returning(),
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("CANNOT ATTACH A PROCESSOR TO ANOTHER TENANT'S PARTY", async () => {
+    // The composite FK. A processor is a role on the identity spine, so this is
+    // the insert that would make one farm's directory point at another farm's
+    // contact — and it fails even under withSystem, where RLS is not watching.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionProcessors).values({
+          tenantId: tenantA,
+          partyId: partyB,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot hang a price or a cut off another tenant's processor", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionProcessorHandles).values({
+          tenantId: tenantA,
+          processorId: processorB,
+          kind: "cattle",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionProcessorCuts).values({
+          tenantId: tenantA,
+          processorId: processorB,
+          name: "Brisket",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot quote one kind twice at the same processor", async () => {
+    // Two prices for one animal, with nothing to say which is current. The ops
+    // layer turns a repeat into a correction; the index is what makes that true
+    // of every path to the table.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionProcessorHandles).values({
+          tenantId: tenantA,
+          processorId: processorA,
+          kind: "cattle",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a processor rated outside 1 to 5, and a negative fee", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionProcessors)
+          .set({ rating: 6 })
+          .where(eq(schema.productionProcessors.id, processorA)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionProcessorHandles)
+          .set({ killFeeCents: -1 })
+          .where(eq(schema.productionProcessorHandles.id, handleA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an inspection status nothing in the app knows about", async () => {
+    // The column decides where meat may legally be sold. A value the app cannot
+    // interpret would render as a blank badge on the screen that answers that
+    // question, so the database refuses it rather than the form alone.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionProcessors)
+          .set({ inspection: "probably_fine" })
+          .where(eq(schema.productionProcessors.id, processorA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot move a processor into another tenant", async () => {
+    // THROWS rather than returning zero rows, for the same reason the run does:
+    // the row is visible to this tenant, so USING passes and it is the NEW
+    // values that leave — which WITH CHECK refuses with 42501. Written the other
+    // way round first, and the suite said so.
+    await expect(
+      asOwner((tx) =>
+        tx
+          .update(schema.productionProcessors)
+          .set({ tenantId: tenantB })
+          .where(eq(schema.productionProcessors.id, processorA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("is default-deny on all seven tables with no tenant context", async () => {
     // FORCE ROW LEVEL SECURITY: an unknown tenant sees nothing, even for the
     // connection's own role. The backstop the whole shell rests on.
     const nowhere = "00000000-0000-0000-0000-000000000000";
@@ -544,6 +780,21 @@ d("production tables (RLS)", () => {
     expect(
       await withTenant(nowhere, (tx) =>
         tx.select().from(schema.productionRunCarcasses),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.productionProcessors),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.productionProcessorHandles),
+      ),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.productionProcessorCuts),
       ),
     ).toHaveLength(0);
   });

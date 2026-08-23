@@ -6,9 +6,9 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
+import { toResult } from "./action-errors";
 import { todayInTimezone } from "@/lib/timezone";
 import {
-  ProductionError,
   addRunCarcass,
   addRunInput,
   addRunOutput,
@@ -34,39 +34,6 @@ import {
 
 const PACK = "production";
 const BASE = "/dashboard/m/production";
-
-function toResult(err: unknown): { error: string } {
-  if (err instanceof ProductionError) {
-    switch (err.code) {
-      case "FORBIDDEN":
-        return { error: "Only an owner can start or finish a run." };
-      case "NOT_FOUND":
-        return { error: "That no longer exists." };
-      case "INVALID_KIND":
-        return { error: "Use lowercase letters, numbers and underscores." };
-      // Every one of these is written for a person at the point it is thrown,
-      // and the withdrawal refusal in particular is repeated word for word from
-      // the pack that owns the clock. Rewording it here would be this pack
-      // paraphrasing a legal statement it does not own.
-      case "RUN_CLOSED":
-      case "RUN_INVALID":
-      case "ITEM_INVALID":
-      case "LOT_REQUIRED":
-      case "INPUT_BLOCKED":
-      case "NOTHING_TO_LAND":
-      case "CARCASS_INVALID":
-        return { error: err.message };
-    }
-  }
-  if (err instanceof Error && err.name === "InventoryError") {
-    return { error: err.message };
-  }
-  if (err instanceof Error && err.name === "LivestockError") {
-    return { error: err.message };
-  }
-  console.error("production action failed", err);
-  return { error: "Something went wrong saving that." };
-}
 
 const requiredDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const quantity = z.number().positive().max(100_000_000).multipleOf(0.0001);

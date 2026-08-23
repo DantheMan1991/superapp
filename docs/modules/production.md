@@ -19,11 +19,22 @@ this dossier is the build record.
 | --- | --- | --- |
 | **0** | **Run model + outputs landing in `inventory`** — the spine | **shipped 2026-08-20** |
 | **1a** | **The carcass stage** — the kill sheet, dressing percentage vs cutting yield, **and condemnations** | **shipped 2026-08-23** |
-| 1b | Meat runs: the processing path on the run, eligibility stamping, the exemption counter, and the kill sheet as a **document** (photograph or PDF → extraction → these rows) | next |
+| **1b** | **The processor directory** — who does the work you do not, what they take, what they charge, how they are inspected, what you think of them | **shipped 2026-08-23** |
+| 1c | **Booking a date** — holding the scarce resource, deposits, and the link from a booking to the run it becomes | next |
+| 1d | Meat runs: the processing path on the run, eligibility stamping, the exemption counter, and the kill sheet as a **document** (photograph or PDF → extraction → these rows) | |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
-| 4 | Label generation | |
+| 4 | Label generation, including a processor's own-label capability | |
 | 5 | Processor comparison, throughput analysis | needs history |
+
+**Slice 1 split again on 2026-08-23**, and the renumbering is worth explaining
+because it moved work forward rather than adding it. The design calls slaughter
+dates *"the scarce resource"*, says booking them is *"a first-class feature, not
+a date column on an animal"*, and calls it *"the loudest unmet need in small
+livestock production"* — and the roadmap had processors appearing only at slice
+5, as a **report**. Nothing created the processor record; nothing held a date.
+1b is the directory that had to exist first, and 1c is the dates. What was 1b
+becomes 1d, unchanged.
 
 Commitments (pre-sold halves, pre-ordered fresh birds) are shared with `retail`
 and slice with it. A pre-sold half is never inventory and is never an output
@@ -37,6 +48,81 @@ carcass row to put a hanging weight in. The record first, then the door onto it.
 That is the same shape `land` found when 2a became three slices.
 
 ## Build log
+
+### 2026-08-23 — Slice 1b: the processor directory, and the roadmap gap it closed (`claude/the-processor-and-the-date`)
+
+**THE DESIGN CALLED BOOKING A DATE "THE LOUDEST UNMET NEED IN SMALL LIVESTOCK
+PRODUCTION" AND THE ROADMAP HAD NO SLICE FOR IT.** Processors appeared once, at
+slice 5, as a *report* — "processor comparison, throughput analysis, needs
+history". Nothing created the processor record and nothing held a date. That is
+the gap this slice starts closing; 1c is the dates themselves.
+
+**A PROCESSOR IS A ROLE ON A PARTY, WHICH THE DESIGN HAD ALREADY SETTLED** —
+*"the party spine already holds it, no new contact model."* So
+`production_processors.party_id` points at `parties`, the same spine `customers`
+and `vendors` hang off, and the plant that both processes your animals and
+invoices you is one party with two role rows.
+
+**AND THE NAME IS NOT IN THIS TABLE.** `customers` and `vendors` each still
+carry their own `name` beside the party's — `role-sync.ts` calls that the "both
+exist" stage of an expand/deploy/contract nobody has finished — and there was no
+reason to open a third copy of that problem. A rename here updates the party and
+nothing else, so this table cannot disagree with the rest of the app.
+
+**THREE TABLES, AND THE SPLIT IS WHAT MAKES "SOME DO ONLY POULTRY" A QUERY.**
+A plant that kills birds and a plant that kills everything differ by how many
+`production_processor_handles` rows they have, not by a column. Price lives on
+that row too, per kind, because that is how plants quote: a kill fee per head and
+cut-and-wrap per pound, both different for a beef than for a hog. A single price
+on the processor would have to pick one animal and be wrong about the rest.
+
+**INSPECTION IS NOT A BADGE AND IT IS NOT A BOOLEAN.** Five values, and the fifth
+is the one that matters: `unknown` is a real answer. A farm that has not asked is
+not a farm that has been told no, and a boolean would turn the second into the
+first on the very screen a legal question gets answered from. `custom_exempt` is
+its own value rather than a flavour of uninspected, because it is inspected for
+the owner and may not be resold — precisely the distinction
+[`retail`'s channel guardrail](retail.md) will have to make. Each status carries
+a sentence describing the SHAPE of its restriction and asserts no state's
+specifics, which vary and are not this app's to declare.
+
+**THE RATING IS SPLIT IN TWO ON PURPOSE, AND ONLY HALF OF IT EXISTS YET.**
+`rating` and `good_at` are somebody's opinion, stored as one, and they are the
+only assessment that works on day one. What the app can COMPUTE — dressing
+percentage, condemnation rate, turnaround — is a ratio over runs and is therefore
+never stored, by the rule that keeps a yield out of every other table here. **The
+computed half is not merely unbuilt, it is not yet possible**: nothing says WHICH
+processor did a given run, because that link arrives with the booking. The screen
+says so in words rather than showing an empty chart, since a chart with no data
+reads as "no difference" instead of "not asked". The design's own caveat applies
+when it does arrive — yield varies by animal as well as by plant, so a computed
+figure is evidence about a processor, never a verdict on one.
+
+**TWO THINGS THIS SLICE CAUGHT THAT WERE NOT ABOUT PROCESSORS AT ALL:**
+
+- **`drizzle-kit` generates an unrunnable migration whenever a new table
+  references another NEW table on `(tenant_id, id)`.** It emits every CREATE
+  TABLE, then every FOREIGN KEY, then every index — so the composite FK is added
+  before the unique index that makes those columns referenceable, and Postgres
+  refuses with *"there is no unique constraint matching given keys for referenced
+  table"*. `0186` was hand-reordered. Slice 1a asked itself this question and the
+  answer was no, because both of ITS targets already existed; this is the first
+  time in the pack that the answer was yes. `scripts/dry-run-migration.ts` is new
+  and is how it was found — it applies migration files in a transaction and rolls
+  back, so a broken file is a message rather than a half-migrated database.
+- **`toResult` moved out of `actions.ts` into `action-errors.ts`.** A
+  `"use server"` module may export nothing but async functions, so the moment a
+  second actions file needed that mapping the choice was a shared module or a
+  second copy — and two copies of the mapping from error codes to sentences is
+  how two screens start describing the same refusal differently. Its `FORBIDDEN`
+  message is now "Only an owner can change this", where it used to name starting
+  and finishing a run; it serves both files.
+
+Writes are OWNER here, and the contrast with slice 1a is deliberate: transcribing
+a kill sheet is a chore, but recording what a plant charges and what you think of
+it is a decision. Every write is audited, and the prose never is — `good_at`,
+`notes`, `labelling_notes` and `price_notes` stay in the row, the same rule the
+condemn reason follows.
 
 ### 2026-08-23 — Slice 1a driven on `Test`, and for once it found nothing (`claude/driven-on-test`)
 
@@ -422,6 +508,10 @@ tests:**
 | `production_run_outputs` | What came out — **and the one place holding a quantity before the ledger does** | Composite FKs to the run (CASCADE), the item, the lot, the receipt and the location. CHECK: `lot_id` and `inventory_movement_id` are null together — landed means both. Frozen once landed |
 | `production_run_carcasses` | **The kill sheet, line by line** — the stage between the animal and the box | `tenant_id`, FORCE RLS. Composite FKs to the run and to the **input** (both CASCADE); `run_input_id` is REQUIRED, which makes the chain carcass → input → movement → lot total. `head_count` is 1 for a beef and 70 for a pen. `disposition` in `passed\|condemned` — two, because one line is one outcome. CHECKs: a condemned line carries no `hanging_lb`, a passed line carries no `condemn_reason`. **Writable on a finished run**, unlike everything else here |
 
+| `production_processors` | **Who does the work you do not** — a role on a party, not a new contact model | `tenant_id`, FORCE RLS. Composite FK to `parties` (CASCADE); UNIQUE per party, because two rows would be two opinions about one plant with nothing to say which is current. **No `name` column** — it is the party's, so this table cannot disagree with the rest of the app. `inspection` in `usda\|state\|custom_exempt\|uninspected\|unknown`: five, and `unknown` is a real answer rather than a missing one. `rating` 1–5 or null, and it is an OPINION — the measured half is folded, never stored |
+| `production_processor_handles` | **What one processor will take, and what it quoted** | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind)` — two rows would be two prices for one animal. `kind` is an open taxonomy from the profile's `processorHandles`, a **separate list** from `livestock.species` because what a plant takes is not what this farm raises. Fees are in cents and are a QUOTE; what was actually paid is a bill in `payables` against the same party |
+| `production_processor_cuts` | What a processor will produce | Composite FK to the processor (CASCADE). Free text by design — cut names are a trade's prose and every plant's list differs. `kind` empty means "anything they take". This is CAPABILITY; the per-animal cut sheet is a later slice |
+
 **Everything else lives in `inventory`:**
 
 | The question | Answered by |
@@ -460,6 +550,18 @@ run model, separate templates), and the processing path and eligibility flag
   packs exist
 - `src/packs/production/ops.ts` — reads and writes, takes a `Tx`.
   `completeRun` is the whole slice in one transaction
+- `src/packs/production/processor-ops.ts` — the directory. **Split out because
+  nothing in it touches a run, a movement or a cost**, the same reason
+  `inventory` split `ledger-ops.ts`. A processor is a standing fact that stays
+  true between runs
+- `src/packs/production/action-errors.ts` — `toResult`, shared by both actions
+  files. **It is here because a `"use server"` module may export nothing but
+  async functions**, so this could not live in `actions.ts` once a second one
+  needed it — see `tests/use-server-exports.test.ts` for what happens otherwise
+- `scripts/dry-run-migration.ts` — applies migration files in a transaction and
+  rolls back. **`db:generate` emits FKs before the indexes they reference**, so a
+  new table pointing at another new table on `(tenant_id, id)` produces a file
+  that cannot run; this is how to find that out without a half-migrated database
 - `src/packs/production/actions.ts` — `requireTenant` + `requireModuleEnabled` +
   `withTenant({ role })` on every action
 - `src/app/dashboard/m/production/[id]/page.tsx` — the run detail route
@@ -607,6 +709,25 @@ run model, separate templates), and the processing path and eligibility flag
 
 ## Open items
 
+- **BOOKING A DATE IS THE NEXT SLICE AND IT IS THE POINT OF THE DIRECTORY.**
+  1b records who the processors are; nothing yet holds a date with one. The
+  design calls dates the scarce resource, notes plants book six to twelve months
+  ahead with deposits involved, and says losing a date is expensive. The seam is
+  already there: `schedule_item_links` takes an `extension_slug` and an
+  `entity_type`, so a booking becomes a calendar event without a cross-module
+  column, and `production_processors.lead_time_days` is what makes "you should be
+  booking now" answerable before there is anything to book.
+- **SLICE 1b HAS NOT BEEN DRIVEN IN A BROWSER**, and it is a bigger surface than
+  1a was: three tables, six actions, two dialogs that change shape. The pieces
+  most likely to be wrong are the ones nothing else in this pack does — the
+  handle upsert (asking about a kind already recorded is a correction, not a
+  second row), and the rename, which writes to `parties` rather than to this
+  pack's own table and can refuse on a version conflict it did not raise itself.
+- **NOTHING LINKS A RUN TO THE PROCESSOR THAT DID IT**, so the measured half of a
+  processor's rating cannot be computed at all — not merely unbuilt. Dressing
+  percentage, condemnation rate and turnaround per processor all wait on the
+  booking link. The screen says so in words; do not replace that with an empty
+  chart, which reads as "no difference" rather than "not asked".
 - ~~**SLICE 1a HAS NOT BEEN DRIVEN IN A BROWSER.**~~ **Driven on `Test`
   2026-08-23** — the kill sheet transcribed line by line on the finished
   Butchering run, including the condemned line. Nothing was found; see the build

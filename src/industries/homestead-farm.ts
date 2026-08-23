@@ -43,6 +43,12 @@ export const homesteadFarm: IndustryProfile = {
      * needs no change.
      */
     killSheet: "Kill sheet",
+    /**
+     * What this industry calls the outside place. "Processor" is the technical
+     * word and the paperwork uses it, but nobody on a farm rings "the
+     * processor" — they ring the butcher.
+     */
+    processor: "Butcher",
   },
   /**
    * A farmer is not reading a ledger all day. "Fed · 85.00" on a card has no
@@ -87,6 +93,16 @@ export const homesteadFarm: IndustryProfile = {
      */
     production: {
       runKinds: ["butchering", "baking", "milling", "processing"],
+      /**
+       * What the plants around here will take — NOT what this farm raises.
+       *
+       * The two lists differ on purpose and the difference is the useful part:
+       * `livestock.species` above is cattle, swine and poultry, and this one
+       * carries sheep and goats as well, because choosing a butcher because it
+       * handles lambs is a normal thing to do in the season before you own any.
+       * A plant that only does birds simply has one of these rows.
+       */
+      processorHandles: ["cattle", "swine", "poultry", "sheep", "goat"],
     },
     /**
      * Where this farm sells. All direct-to-consumer today — one farmers market

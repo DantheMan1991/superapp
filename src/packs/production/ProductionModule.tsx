@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -93,14 +94,24 @@ export async function ProductionModule({
         title="Production"
         description={`What went in, what came out, and the yield between them. Every ${runWord.toLowerCase()} lands its outputs in Inventory carrying the cost of what it consumed.`}
         actions={
-          isOwner ? (
-            <StartRunForm
-              runWord={runWord}
-              kindOptions={runKindsFrom(pack.config)}
-              locations={locations.map((l) => ({ id: l.id, name: l.name }))}
-              today={today}
-            />
-          ) : null
+          <div className="flex items-center gap-2">
+            {/* Visible to everybody, not just an owner. Reading who takes what
+                and how they are inspected is a question anybody on the place
+                asks; only changing it is the owner's. */}
+            <Button asChild variant="outline">
+              <Link href={`${BASE}/processors`}>
+                {labelFor(pack.labels, "processor", "Processor")} directory
+              </Link>
+            </Button>
+            {isOwner ? (
+              <StartRunForm
+                runWord={runWord}
+                kindOptions={runKindsFrom(pack.config)}
+                locations={locations.map((l) => ({ id: l.id, name: l.name }))}
+                today={today}
+              />
+            ) : null}
+          </div>
         }
       />
 

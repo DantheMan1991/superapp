@@ -99,7 +99,19 @@ exercised. The fee then computed on the live run — `40 head measured × $4.50`
 `38 packages counted × $1.15` = **$223.70** — with "measured" and "counted"
 rendering differently and the uncounted line reported rather than assumed.
 
-**AND THE REFUSAL THAT LOOKED LIKE A BUG WAS NOT ONE.** Completing the run
+**THE ONE THAT WAS A REAL DEFECT IN 2c ITSELF, and only a two-company tenant
+could have found it.** Completing a run with a fee refused every time, with
+*"stock has to say where it is before its cost can be posted"* — on a run whose
+stock HAD said. The accrual resolved the company from the RUN's location, and a
+run started from a booking never has one: `startRunFromBooking` knows a date and
+a plant, not a freezer. It now falls back to where the outputs went, which is
+not a guess — the receipts resolved a company from exactly that location moments
+earlier, and where they genuinely disagree `resolveMovementEntity` still
+refuses. **The pack's own test tenant keeps one company, where a null location
+resolves fine**, so the test for this lives in `inventory-posting.test.ts`
+beside the two-company fixture that can see it.
+
+**AND THE REFUSAL THAT LOOKED LIKE A BUG THE FIRST TIME WAS NOT ONE.** Completing the run
 failed repeatedly with what appeared to be a hang. It was
 `resolveMovementEntity` refusing correctly: `Test` keeps TWO companies and the
 output had no location, so *"This business keeps more than one set of books, so
@@ -172,7 +184,14 @@ out loud rather than by running anything. The two structural gaps were found the
 same way — by trying to do the thing rather than by asserting that it could be
 done.
 
-Migration `0202`. 4 new tests. Everything else in this entry is copy or a picker.
+**HOW THE SILENT FAILURE WAS FINALLY READ:** the action returned 200 every
+time and the error toast expired before a screenshot could catch it. A
+`MutationObserver` on `[data-sonner-toast]`, armed before the click, is what
+produced the sentence — worth keeping, because Sonner unmounts its region when
+empty and "no toaster on the page" reads exactly like "no error".
+
+Migration `0202`. 5 new tests. Everything else in this entry is copy or a
+picker.
 
 ### 2026-08-23 — Slices 2b and 2c: the sheet you hand over, and what it costs the meat (`claude/what-the-menu-actually-costs`)
 

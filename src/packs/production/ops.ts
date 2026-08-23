@@ -1137,7 +1137,25 @@ export async function completeRun(
       sourceId: run.id,
       amountCents: feeCents,
       occurredOn: completedOn,
-      locationAssetId: run.locationAssetId,
+      /**
+       * **THE RUN'S PLACE, FALLING BACK TO WHERE THE MEAT WENT — and the
+       * fallback is the whole point.** Found on the live `Test` tenant, which
+       * keeps two companies: `resolveMovementEntity` needs a location to say
+       * whose books this belongs to, and a run started from a booking never
+       * sets one, because `startRunFromBooking` knows a date and a plant and
+       * not a freezer. So every completion with a fee refused — with a message
+       * about stock having to say where it is, on a run whose stock HAD said.
+       *
+       * The outputs have already landed by now and each one resolved a company
+       * from its own location, so borrowing the first is not a guess: it is the
+       * same answer the receipts just used. Where they genuinely disagree
+       * `resolveMovementEntity` still refuses, which is correct — a fee split
+       * across two companies' books is a question nobody has asked yet.
+       */
+      locationAssetId:
+        run.locationAssetId ??
+        outputs.find((o) => o.locationAssetId !== null)?.locationAssetId ??
+        null,
       memo: `Processing accrued — ${run.code}`,
     });
   }

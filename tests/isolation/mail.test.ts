@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../../src/db";
 import { recentCorrespondents } from "../../src/modules/email/contacts/recent";
 import { accountingMailExtension } from "../../src/modules/accounting/mail/extension";
-import { d, seedParty } from "./_shared";
+import { d, seedEntity, seedParty } from "./_shared";
 
 /**
  * Mail (the inbox): RLS for the seven tables the email module owns.
@@ -756,6 +756,7 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
       ids[tag] = await withTenant(
         tenant,
         async (tx) => {
+          const entityId = await seedEntity(tx, tenant, `ph-${tag}`);
           const partyId = await seedParty(tx, tenant, `Placeholder Co ${tag}`);
           await tx.insert(schema.partyContactPoints).values({
             tenantId: tenant,
@@ -777,11 +778,14 @@ d("mail isolation (RLS + composite tenant FKs)", () => {
             .insert(schema.invoices)
             .values({
               tenantId: tenant,
+              entityId: entityId,
               customerId: customer.id,
               invoiceNumber: `PH-${tag.toUpperCase()}-1`,
               status: "issued",
               issueDate: "2026-08-01",
               dueDate: "2026-08-31",
+              // `subtotal + tax = total` is a CHECK from `0147`.
+              subtotalCents: 10_000,
               totalCents: 10_000,
               createdByClerkUserId: `user-${tag}`,
             })

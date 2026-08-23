@@ -8,12 +8,13 @@ import { PageHeader } from "@/components/app/page-header";
 import { Panel } from "@/components/app/panel";
 import { EmptyState } from "@/components/app/empty-state";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
+import { isCodableAccount } from "@/modules/accounting/core";
 import { listRecurringEntries } from "@/modules/accounting/recurring/generate";
 import { parseRecurringEntryTemplate } from "@/modules/accounting/recurring/template";
 import { formatCentsSigned, todayInTimezone } from "@/modules/accounting/lib/money";
 import {
   computeLineAmounts,
-  invoiceTotalCents,
+  invoiceSubtotalCents,
 } from "@/modules/accounting/invoicing/lines";
 import {
   AddRecurringEntryButton,
@@ -80,15 +81,7 @@ export default async function RecurringEntriesPage() {
       customers,
       journalAccounts: accounts,
       incomeAccounts: accounts.filter((a) => a.accountType === "income"),
-      codableAccounts: accounts.filter(
-        (a) =>
-          !registerIds.has(a.id) &&
-          a.subtype !== "opening_balance" &&
-          !(
-            a.isSystem &&
-            ["accounts_receivable", "accounts_payable"].includes(a.subtype)
-          ),
-      ),
+      codableAccounts: accounts.filter((a) => isCodableAccount(a, registerIds)),
     };
   });
 
@@ -114,7 +107,10 @@ export default async function RecurringEntriesPage() {
     if (parsed.kind === "bill") {
       return parsed.lines.reduce((s, l) => s + l.amountCents, 0);
     }
-    return invoiceTotalCents(computeLineAmounts(parsed.lines));
+    // Pre-tax on purpose: this is a size hint for the list, and the template's
+    // rate is resolved live at generation, so a tax figure here would be a
+    // guess at next month's rate rather than a fact.
+    return invoiceSubtotalCents(computeLineAmounts(parsed.lines));
   }
 
   const KIND_LABEL = {

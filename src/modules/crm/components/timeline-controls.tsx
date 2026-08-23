@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Check, Loader2, Plus, Trash2, Undo2 } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,13 +25,11 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { CrmActivityKind } from "@/db/schema";
-import type { GroupableTask } from "../core/timeline";
 import { dueBucket } from "../core/timeline";
 import {
   createTaskAction,
   deleteActivityAction,
   logActivityAction,
-  setTaskCompleteAction,
 } from "../timeline-actions";
 
 const KIND_LABELS: Record<CrmActivityKind, string> = {
@@ -333,46 +331,19 @@ export function AddTaskButton({
   );
 }
 
-/** Tick or untick one follow-up. */
-export function TaskToggle({ task }: { task: GroupableTask }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const done = !!task.completedAt;
-
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      disabled={pending}
-      aria-label={done ? `Reopen ${task.title}` : `Complete ${task.title}`}
-      onClick={() =>
-        startTransition(async () => {
-          const result = await setTaskCompleteAction({
-            taskId: task.id,
-            expectedVersion: task.version,
-            complete: !done,
-            partyId: task.partyId,
-            dealId: task.dealId,
-          });
-          if ("error" in result) {
-            toast.error(result.error);
-            return;
-          }
-          toast.success(done ? "Reopened" : "Done");
-          router.refresh();
-        })
-      }
-    >
-      {pending ? (
-        <Loader2 className="size-4 animate-spin" />
-      ) : done ? (
-        <Undo2 className="size-4" />
-      ) : (
-        <Check className="size-4" />
-      )}
-    </Button>
-  );
-}
+/*
+ * `TaskToggle` LIVED HERE AND IS GONE (2026-08-15).
+ *
+ * It ticked a follow-up and did nothing else, which is why a follow-up on a
+ * record read as a stub: to reassign one or move its date you had to open Work.
+ * Replaced by the shared `WorkItemRow`, which carries done, reopen, reassign
+ * and re-due — and which the assets pack uses too, so the same work behaves the
+ * same way wherever it is met.
+ *
+ * The optimistic `version` survived the move: the shared verb takes an optional
+ * `expectedVersion` and the timeline passes it. See
+ * src/components/app/work-item-row.tsx and src/lib/work/actions.ts.
+ */
 
 /** Remove a logged entry. See `deleteActivity` for why this one is deletable. */
 export function DeleteActivityButton({

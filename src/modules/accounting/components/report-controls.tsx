@@ -39,6 +39,9 @@ export function ReportControls({
   accounts,
   spread,
   showSpread,
+  entity,
+  entities,
+  offerConsolidated,
 }: {
   mode: "range" | "asOf";
   today: string;
@@ -74,6 +77,29 @@ export function ReportControls({
    */
   spread?: string;
   showSpread?: boolean;
+  /** Currently scoped company id, or "" / undefined for all of them. */
+  entity?: string;
+  /**
+   * The tenant's legal entities (ADR 0010). The control renders only when
+   * there are TWO OR MORE — a client with one company must never learn the
+   * concept exists, and a picker with a single option is furniture that
+   * suggests a decision nobody has to make.
+   *
+   * It is a URL parameter rather than an ambient selection on purpose: a report
+   * whose scope came from a control three screens away is a report whose reader
+   * cannot tell whose books they are looking at, which is the failure ADR 0010
+   * names as the worst possible signature. The chosen company is stamped in the
+   * page footer and in every CSV, exactly as the basis is.
+   */
+  entities?: Array<{ id: string; name: string }>;
+  /**
+   * Offer "All companies (consolidated)" beside combined (ADR 0010 slice 3).
+   *
+   * Comes from `resolveReportEntity`, never decided here: the reports that
+   * decline it do so for reasons about what they read, and a picker that
+   * offered it on one of them would produce a 404 rather than a report.
+   */
+  offerConsolidated?: boolean;
 }) {
   const [range, setRange] = useState({ from: from ?? today, to: to ?? today });
   const [preset, setPreset] = useState<RangePreset>("custom");
@@ -149,6 +175,30 @@ export function ReportControls({
             className="h-9"
             defaultValue={asOf ?? today}
           />
+        </div>
+      )}
+
+      {entities && entities.length > 1 && (
+        <div className="space-y-1.5">
+          <Label htmlFor="entity" className="text-xs text-muted-foreground">
+            Company
+          </Label>
+          <select
+            id="entity"
+            name="entity"
+            defaultValue={entity ?? ""}
+            className="border-input h-9 w-52 rounded-md border bg-transparent px-3 text-sm shadow-xs"
+          >
+            <option value="">All companies (combined)</option>
+            {offerConsolidated && (
+              <option value="consolidated">All companies (consolidated)</option>
+            )}
+            {entities.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 

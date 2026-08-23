@@ -22,7 +22,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
-import { accounts, journalEntries, journalLines } from "./ledger";
+import { accounts, entities, journalEntries, journalLines } from "./ledger";
 // One-way: payables knows nothing of banking, so the payee FK does not cycle.
 import { vendors } from "./payables";
 
@@ -70,6 +70,25 @@ export const bankAccounts = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * Which company owns this register (ADR 0010).
+     *
+     * A BANK ACCOUNT BELONGS TO EXACTLY ONE COMPANY — an account is a thing
+     * with a balance, and a balance belongs on one balance sheet. The LEDGER
+     * account it clears stays part of the shared chart, so two companies each
+     * have their own register on their own account code (1000, 1010) while the
+     * chart itself is still managed in one place.
+     *
+     * The posting engine enforces the consequence: a journal line may not touch
+     * a register owned by a different company than the entry (`postEntry`).
+     * Paying one company's bill from another's account is an INTERCOMPANY
+     * transaction and needs a linked pair of entries, which is slice 2 — until
+     * then it is refused rather than mis-recorded.
+     *
+     * NOT NULL in the database since `0146`; it arrived nullable in `0145`,
+     * because migrations precede deploys.
+     */
+    entityId: uuid("entity_id").notNull(),
     /** The ledger account this register clears. 1:1 (unique below). */
     accountId: uuid("account_id").notNull(),
     name: text("name").notNull(),
@@ -94,6 +113,12 @@ export const bankAccounts = pgTable(
     // One register per ledger account — reconciliation math depends on it.
     uniqueIndex("bank_accounts_tenant_account_idx").on(t.tenantId, t.accountId),
     index("bank_accounts_tenant_idx").on(t.tenantId),
+    index("bank_accounts_tenant_entity_idx").on(t.tenantId, t.entityId),
+    foreignKey({
+      name: "bank_accounts_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
+    }),
     foreignKey({
       name: "bank_accounts_account_fk",
       columns: [t.tenantId, t.accountId],

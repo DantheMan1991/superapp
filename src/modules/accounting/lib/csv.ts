@@ -44,9 +44,36 @@ function basisRow(basis: AccountingBasis): string[] {
   return [`${basis === "cash" ? "Cash" : "Accrual"} basis`];
 }
 
+/**
+ * The company row, appended for the same reason as the basis row and only when
+ * there is a question to answer.
+ *
+ * A tenant with several legal entities can produce two correct and entirely
+ * different balance sheets for the same date, so a file that does not say whose
+ * books it holds is worse than no file. Callers pass a label ONLY when the
+ * tenant has more than one company — for everybody else the export is
+ * byte-identical to what it was, which is the same promise the picker makes on
+ * screen (ADR 0010).
+ */
+function entityRows(
+  entityLabel: string | undefined,
+  consolidationNote?: string,
+): string[][] {
+  return [
+    ...(entityLabel ? [[`Company: ${entityLabel}`]] : []),
+    // The residual travels with the file for the same reason the basis does: a
+    // consolidated statement showing an affiliate balance is exactly what an
+    // accountant queries, and the answer should be in their hand rather than in
+    // a screen they were not looking at (ADR 0010 slice 3).
+    ...(consolidationNote ? [[consolidationNote]] : []),
+  ];
+}
+
 export function pnlToCsvRows(
   report: ProfitAndLossReport,
   basis: AccountingBasis = "accrual",
+  entityLabel?: string,
+  consolidationNote?: string,
 ): string[][] {
   const header: string[] = ["Account"];
   if (report.columns) {
@@ -70,12 +97,19 @@ export function pnlToCsvRows(
     }
     return cells;
   });
-  return [header, ...body, basisRow(basis)];
+  return [
+    header,
+    ...body,
+    basisRow(basis),
+    ...entityRows(entityLabel, consolidationNote),
+  ];
 }
 
 export function balanceSheetToCsvRows(
   report: BalanceSheetReport,
   basis: AccountingBasis = "accrual",
+  entityLabel?: string,
+  consolidationNote?: string,
 ): string[][] {
   const header = ["Account", `As of ${report.asOf}`];
   if (report.comparison) header.push(`As of ${report.comparison.asOf}`);
@@ -84,12 +118,19 @@ export function balanceSheetToCsvRows(
     if (report.comparison) cells.push(amount(row.comparisonCents));
     return cells;
   });
-  return [header, ...body, basisRow(basis)];
+  return [
+    header,
+    ...body,
+    basisRow(basis),
+    ...entityRows(entityLabel, consolidationNote),
+  ];
 }
 
 export function trialBalanceToCsvRows(
   tb: TrialBalance,
   asOf: string,
+  entityLabel?: string,
+  consolidationNote?: string,
 ): string[][] {
   const rows: string[][] = [
     ["Code", "Account", "Type", `Debit (as of ${asOf})`, `Credit (as of ${asOf})`],
@@ -110,10 +151,14 @@ export function trialBalanceToCsvRows(
     centsToCsvAmount(tb.totalDebitCents),
     centsToCsvAmount(tb.totalCreditCents),
   ]);
+  rows.push(...entityRows(entityLabel, consolidationNote));
   return rows;
 }
 
-export function cashActivityToCsvRows(report: CashActivityReport): string[][] {
+export function cashActivityToCsvRows(
+  report: CashActivityReport,
+  entityLabel?: string,
+): string[][] {
   const rows: string[][] = [
     ["Account", "Opening", "In", "Out", "Net", "Closing"],
   ];
@@ -138,6 +183,7 @@ export function cashActivityToCsvRows(report: CashActivityReport): string[][] {
       centsToCsvAmount(group.totals.closingCents),
     ]);
   }
+  rows.push(...entityRows(entityLabel));
   return rows;
 }
 
@@ -150,7 +196,11 @@ export function cashActivityToCsvRows(report: CashActivityReport): string[][] {
  * produced them, so "this is only part of the period" has to travel with the
  * data rather than sit next to the download button.
  */
-export function generalLedgerToCsvRows(report: GeneralLedgerReport): string[][] {
+export function generalLedgerToCsvRows(
+  report: GeneralLedgerReport,
+  entityLabel?: string,
+  consolidationNote?: string,
+): string[][] {
   const rows: string[][] = [];
   if (report.truncated) {
     rows.push([
@@ -205,5 +255,6 @@ export function generalLedgerToCsvRows(report: GeneralLedgerReport): string[][] 
     centsToCsvAmount(report.totalCreditCents),
     "",
   ]);
+  rows.push(...entityRows(entityLabel, consolidationNote));
   return rows;
 }

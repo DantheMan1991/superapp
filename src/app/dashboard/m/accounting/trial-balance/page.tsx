@@ -18,7 +18,15 @@ import {
 import Link from "next/link";
 import { Lock, Scale } from "lucide-react";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
-import { getSettings, getTrialBalance } from "@/modules/accounting/core";
+import {
+  getSettings,
+  getTrialBalance,
+  groupClosedThrough,
+  residualIfConsolidated,
+  resolveBasis,
+} from "@/modules/accounting/core";
+import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import {
   formatCents,
   isValidIsoDate,
@@ -30,23 +38,67 @@ export const dynamic = "force-dynamic";
 export default async function TrialBalancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ asOf?: string; basis?: string }>;
+  searchParams: Promise<{ asOf?: string; basis?: string; entity?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
   const sp = await searchParams;
 
-  // Anything that is not exactly "cash" is accrual: an unreadable query string
-  // must never silently produce the other basis.
-  const basis = sp.basis === "cash" ? "cash" : "accrual";
 
-  const { tb, asOf, settings } = await withTenant(ctx.tenant.id, async (tx) => {
-    const settings = await getSettings(tx, ctx.tenant.id);
-    const today = todayInTimezone(ctx.tenant.timezone);
-    const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
-    const tb = await getTrialBalance(tx, ctx.tenant.id, asOf, basis);
-    return { tb, asOf, settings };
-  });
+  const { tb, basis, asOf, entityView, residual, closedThrough, closedLabel } =
+    await withTenant(
+    ctx.tenant.id,
+    async (tx) => {
+      const today = todayInTimezone(ctx.tenant.timezone);
+      const asOf = sp.asOf && isValidIsoDate(sp.asOf) ? sp.asOf : today;
+      // See the P&L page: the URL wins, otherwise the basis they file on.
+      const basis = resolveBasis(sp.basis, (await getSettings(tx, ctx.tenant.id)).defaultBasis);
+      // OFFERED: this is the report where elimination is provable, because a
+      // consolidated trial balance still has to balance — and it does, since a
+      // pair's two affiliate legs are +X and -X and removing them removes zero.
+      const entityView = await reportEntityOr404(
+        tx,
+        ctx.tenant.id,
+        sp.entity,
+        "offered",
+      );
+      const tb = await getTrialBalance(
+        tx,
+        ctx.tenant.id,
+        asOf,
+        entityView.scope,
+        basis,
+      );
+      const residual = await residualIfConsolidated(
+        tx,
+        ctx.tenant.id,
+        entityView.scope,
+        { asOf },
+      );
+      // The lock, said correctly for whatever this report is showing.
+      const scope = entityView.scope;
+      const scoped =
+        scope.kind === "one"
+          ? entityView.entities.filter((e) => e.id === scope.entityId)
+          : entityView.entities;
+      const closedThrough = groupClosedThrough(scoped);
+      const closedLabel =
+        entityView.showPicker && scoped.length === 1
+          ? `${scoped[0].name} `
+          : entityView.showPicker
+            ? "All companies "
+            : "";
+      return {
+        tb,
+        basis,
+        asOf,
+        entityView,
+        residual,
+        closedThrough,
+        closedLabel,
+      };
+    },
+  );
 
   const inBalance = tb.totalNetCents === 0;
 
@@ -58,6 +110,7 @@ export default async function TrialBalancePage({
           <>
             Every account&apos;s balance as of {asOf} — the two columns must
             agree. {basis === "cash" ? "Cash" : "Accrual"} basis.
+            {entityView.stampLabel ? ` · ${entityView.stampLabel}` : ""}
           </>
         }
         actions={
@@ -83,6 +136,34 @@ export default async function TrialBalancePage({
             </label>
             <Input id="asOf" name="asOf" type="date" defaultValue={asOf} className="h-9" />
           </div>
+          {entityView.entities.length > 1 && (
+            <div className="space-y-1.5">
+              <label
+                htmlFor="entity"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Company
+              </label>
+              <select
+                id="entity"
+                name="entity"
+                defaultValue={sp.entity ?? ""}
+                className="border-input h-9 w-52 rounded-md border bg-transparent px-3 text-sm shadow-xs"
+              >
+                <option value="">All companies (combined)</option>
+                {entityView.offerConsolidated && (
+                  <option value="consolidated">
+                    All companies (consolidated)
+                  </option>
+                )}
+                {entityView.entities.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="space-y-1.5">
             <label htmlFor="basis" className="text-xs font-medium text-muted-foreground">
               Basis
@@ -106,12 +187,19 @@ export default async function TrialBalancePage({
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         >
           <Lock className="h-3.5 w-3.5" />
-          {settings.closedThrough
-            ? `Closed through ${settings.closedThrough}`
-            : "Books open"}
+          {/* WHOSE lock, on a report that may be showing several companies
+              (ADR 0010 slice 4). Scoped to one company it is that company's
+              date; across the group it is the date EVERY company is closed
+              through, which is null the moment one of them is still open —
+              see groupClosedThrough for why the earliest is the honest one. */}
+          {closedThrough
+            ? `${closedLabel}closed through ${closedThrough}`
+            : `${closedLabel}books open`}
           {" · manage on the Close page"}
         </Link>
       </div>
+
+      <ConsolidationNote residual={residual} />
 
       <DataTable
         isEmpty={tb.rows.length === 0}

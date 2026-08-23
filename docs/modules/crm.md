@@ -14,6 +14,44 @@ touches accounting's live AR/AP tables.
 
 ## Build log
 
+### 2026-08-15 — Follow-ups is a CRM page again (`claude/crm-followups-tab`)
+- **`/dashboard/m/crm/tasks` was a redirect into Work; it is a page again**, and
+  the tab is back in the CRM strip.
+- **Slice 5b's reasoning still holds — it just did not mean what it was taken to
+  mean.** A CRM-filtered list would silently drop unattached follow-ups ("ring
+  the accountant back"), so **Work** is the complete list of what somebody owes.
+  That does not imply CRM may not have a view of its own work, and the two
+  claims were thrown out together. Working a record and then being ejected into
+  another module to see what is outstanding on it is the friction the founder
+  reported.
+- **It scopes deliberately and says so.** Follow-ups attached to a record, with
+  standing copy pointing at Work for everything else — the link only renders if
+  Work is switched on, because a dead link to a module a tenant does not have is
+  worse than none.
+- Rows are the shared `WorkItemRow`, so the verbs here are the same ones on the
+  record page and on an asset ([extension-model.md §4b](../extension-model.md)).
+- `listOpenTasksOnRecords` filters in JS rather than SQL: `toFollowUp` already
+  resolves the CRM link out of `row.links`, and a join would give two
+  definitions of "is this a CRM follow-up" to keep in step. Noted as revisitable
+  if open-work volume ever makes the round trip matter.
+
+### 2026-08-15 — Follow-ups gain the shared work verbs (`claude/shared-entity-work`)
+- **The complaint that started it:** raising a follow-up on a record felt like
+  leaving CRM. Investigating showed the record page never navigates — the add
+  dialog is inline and the follow-up renders in the timeline. What was missing
+  were the VERBS: `TaskToggle` could tick and untick, and nothing else, so
+  reassigning one or moving its date meant opening Work.
+- `TaskToggle` is gone, replaced by the shared `WorkItemRow`
+  (`src/components/app/work-item-row.tsx`), which carries done, reopen,
+  reassign and re-due. The timeline keeps its own layout — it interleaves notes
+  and follow-ups, which is better for CRM than a generic panel — and shares only
+  the verbs.
+- **The optimistic `version` survived the move.** The shared action takes an
+  optional `expectedVersion` and the timeline passes it, so the concurrency
+  guarantee follow-ups have carried since slice 1 is unchanged.
+- The record page now passes the assignable members it already loaded for the
+  add dialog through to each row.
+
 ### 2026-08-12 — Merge follows the recurrence tables (branch `claude/accounting-recurring-converge`)
 
 Accounting folded `recurring_invoices` into `recurring_entries`, and

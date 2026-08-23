@@ -1,7 +1,8 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { COA_TEMPLATES } from "./general";
+import { provisionEntity } from "../core/entities";
 import { provisionCatalogue } from "./catalogue";
 
 /**
@@ -22,6 +23,36 @@ export async function provisionAccounting(
     .insert(schema.accountingSettings)
     .values({ tenantId, coaTemplate: template.slug })
     .onConflictDoNothing();
+
+  // FIRST, because every journal entry needs one and `postEntry` refuses
+  // without it. `drizzle/0142` gave every tenant that existed then a default
+  // company; this is the same row for every tenant created after it, and the
+  // backfill for anything the migration missed. Named after the tenant — the
+  // single-company client never sees it (ADR 0010).
+  const tenant = await tx.query.tenants.findFirst({
+    where: eq(schema.tenants.id, tenantId),
+    columns: { name: true },
+  });
+  await provisionEntity(tx, tenantId, tenant?.name ?? "My company");
+
+  /**
+   * ADOPT ANY ASSETS THAT PREDATE THE BOOKS.
+   *
+   * The assets pack declares `requires: []`, so a tenant can have been listing
+   * equipment for months with no accounting and therefore no company — those
+   * rows carry a null `entity_id`. Opening the books is exactly the moment they
+   * acquire one, and doing it here means depreciation works on the first press
+   * rather than failing with a message about a column.
+   *
+   * Guarded to nulls, so an asset that already names a company is never moved:
+   * re-provisioning is idempotent everywhere else in this file and stays so.
+   */
+  await tx
+    .update(schema.assets)
+    .set({ entityId: sql`(select id from entities where tenant_id = ${tenantId} and is_default)` })
+    .where(
+      and(eq(schema.assets.tenantId, tenantId), isNull(schema.assets.entityId)),
+    );
 
   const existing = await tx
     .select({ id: schema.accounts.id, code: schema.accounts.code })

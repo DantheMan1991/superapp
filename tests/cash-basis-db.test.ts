@@ -23,6 +23,14 @@ import {
 } from "../src/modules/accounting/payables/bills";
 import { recordBillPayment } from "../src/modules/accounting/payables/payments";
 
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+const COMBINED = { kind: "combined" } as const;
+
 /**
  * Cash basis against the database (ADR 0007).
  *
@@ -63,7 +71,7 @@ d("cash basis (DB)", () => {
     basis: "accrual" | "cash",
   ): Promise<number> {
     const rows = await withTenant(tenantId, (tx) =>
-      getBalances(tx, tenantId, { ...window, basis }),
+      getBalances(tx, tenantId, { scope: COMBINED, ...window, basis }),
     );
     return rows
       .filter((r) => r.accountId === accountIdToRead)
@@ -229,7 +237,7 @@ d("cash basis (DB)", () => {
   it("a cash-basis trial balance still balances", async () => {
     for (const asOf of ["2026-01-31", "2026-02-28", "2026-03-31", "2026-12-31"]) {
       const tb = await withTenant(tenantId, (tx) =>
-        getTrialBalance(tx, tenantId, asOf, "cash"),
+        getTrialBalance(tx, tenantId, asOf, COMBINED, "cash"),
       );
       expect(tb.totalNetCents).toBe(0);
       expect(tb.totalDebitCents).toBe(tb.totalCreditCents);
@@ -238,27 +246,27 @@ d("cash basis (DB)", () => {
 
   it("the P&L report carries the basis through to net income", async () => {
     const accrualJan = await withTenant(tenantId, (tx) =>
-      getProfitAndLoss(tx, tenantId, { ...JAN, basis: "accrual" }),
+      getProfitAndLoss(tx, tenantId, { scope: COMBINED, ...JAN, basis: "accrual" }),
     );
     const cashJan = await withTenant(tenantId, (tx) =>
-      getProfitAndLoss(tx, tenantId, { ...JAN, basis: "cash" }),
+      getProfitAndLoss(tx, tenantId, { scope: COMBINED, ...JAN, basis: "cash" }),
     );
     // January: 100,000 income less 50,000 expense on accrual; nothing on cash.
     expect(accrualJan.netIncomeCents).toBe(50_000);
     expect(cashJan.netIncomeCents).toBe(0);
 
     const cashFeb = await withTenant(tenantId, (tx) =>
-      getProfitAndLoss(tx, tenantId, { ...FEB, basis: "cash" }),
+      getProfitAndLoss(tx, tenantId, { scope: COMBINED, ...FEB, basis: "cash" }),
     );
     expect(cashFeb.netIncomeCents).toBe(20_000); // 40,000 in, 20,000 out
   });
 
   it("defaults to accrual when no basis is given — nothing existing changes", async () => {
     const withoutBasis = await withTenant(tenantId, (tx) =>
-      getBalances(tx, tenantId, JAN),
+      getBalances(tx, tenantId, { scope: COMBINED, ...JAN }),
     );
     const explicit = await withTenant(tenantId, (tx) =>
-      getBalances(tx, tenantId, { ...JAN, basis: "accrual" }),
+      getBalances(tx, tenantId, { scope: COMBINED, ...JAN, basis: "accrual" }),
     );
     const key = (r: { accountId: string; netCents: number }) =>
       `${r.accountId}:${r.netCents}`;

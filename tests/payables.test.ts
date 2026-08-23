@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import {
   assertEntryNotSourceManaged,
+  getDefaultEntityId,
   setClosedThrough,
   startReconciliation,
   toggleReconciliationLine,
@@ -64,6 +65,9 @@ import {
   listDocumentsForTarget,
 } from "../src/modules/accounting/documents/links";
 import { loadDocument } from "../src/modules/accounting/documents/documents";
+
+/** One legal entity per fixture, so combined IS its books (ADR 0010). */
+const COMBINED = { kind: "combined" } as const;
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -555,16 +559,16 @@ d("payables (DB)", () => {
     it("closed period blocks approval", async () => {
       const expense = await accountId("6000");
       const bill = await makeBill([line(1000, expense)], { billDate: "2026-01-15" });
-      await withTenant(tenantId, (tx) =>
-        setClosedThrough(tx, owner, { date: "2026-01-31" }),
+      await withTenant(tenantId, async (tx) =>
+        setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: "2026-01-31" }),
       );
       await expect(
         withTenant(tenantId, (tx) =>
           approveBill(tx, owner, { billId: bill.id, expectedVersion: bill.version }),
         ),
       ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
-      await withTenant(tenantId, (tx) =>
-        setClosedThrough(tx, owner, { date: null }),
+      await withTenant(tenantId, async (tx) =>
+        setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: null }),
       );
     });
 
@@ -1184,13 +1188,13 @@ d("payables (DB)", () => {
       );
       // As of BEFORE the payment: open, 31-60 days past due.
       const before = await withTenant(tenantId, (tx) =>
-        getApAging(tx, tenantId, "2026-06-20"),
+        getApAging(tx, tenantId, "2026-06-20", COMBINED),
       );
       const row = before.rows.find((r) => r.label === "Aging Vendor");
       expect(row?.perColumnCents).toEqual([0, 0, 9_000, 0, 0, 9_000]);
       // As of AFTER the payment: gone.
       const after = await withTenant(tenantId, (tx) =>
-        getApAging(tx, tenantId, "2026-07-20"),
+        getApAging(tx, tenantId, "2026-07-20", COMBINED),
       );
       expect(after.rows.find((r) => r.label === "Aging Vendor")).toBeUndefined();
     });

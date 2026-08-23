@@ -15,6 +15,7 @@ const STAMP_ACC = `iso-acc-${process.pid}`;
 
 interface AccFixture {
   accountId: string;
+  entityId: string;
   entryId: string;
   lineId: string;
   memberId: string;
@@ -22,6 +23,7 @@ interface AccFixture {
   invoiceId: string;
   termId: string;
   productId: string;
+  taxRateId: string;
 }
 
 d("accounting isolation (RLS + composite tenant FKs)", () => {
@@ -32,6 +34,10 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
   async function seedAccounting(tenantId: string, tag: string): Promise<AccFixture> {
     return withTenant(tenantId, async (tx) => {
       await tx.insert(schema.accountingSettings).values({ tenantId });
+      const [entity] = await tx
+        .insert(schema.entities)
+        .values({ tenantId, name: `Company ${tag}`, isDefault: true })
+        .returning();
       const [cash] = await tx
         .insert(schema.accounts)
         .values({
@@ -56,6 +62,7 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.journalEntries)
         .values({
           tenantId,
+          entityId: entity.id,
           entryDate: "2026-07-01",
           memo: `secret entry of ${tag}`,
           status: "posted",
@@ -85,10 +92,19 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         dimensionType: "property",
         memberId: member.id,
       });
-      // The catalogue: three reference lists, one of each per tenant.
+      // The catalogue: four reference lists, one of each per tenant.
       const [term] = await tx
         .insert(schema.paymentTerms)
         .values({ tenantId, name: `Net 30 ${tag}`, dueInDays: 30, isDefault: true })
+        .returning();
+      const [taxRate] = await tx
+        .insert(schema.salesTaxRates)
+        .values({
+          tenantId,
+          name: `State ${tag}`,
+          ratePpm: 72_500,
+          isDefault: true,
+        })
         .returning();
       await tx.insert(schema.paymentMethods).values({
         tenantId,
@@ -120,17 +136,23 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.invoices)
         .values({
           tenantId,
+          entityId: entity.id,
           customerId: customer.id,
           invoiceNumber: `INV-${tag}`,
           status: "issued",
           issueDate: "2026-07-01",
           dueDate: "2026-07-15",
-          totalCents: 50_000,
+          taxRateId: taxRate.id,
+          taxRatePpm: 72_500,
+          subtotalCents: 50_000,
+          taxCents: 3_625,
+          totalCents: 53_625,
           createdByClerkUserId: `user-${tag}`,
         })
         .returning();
       return {
         accountId: cash.id,
+        entityId: entity.id,
         entryId: entry.id,
         lineId: lines[0].id,
         memberId: member.id,
@@ -138,6 +160,7 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         invoiceId: invoice.id,
         termId: term.id,
         productId: product.id,
+        taxRateId: taxRate.id,
       };
     });
   }
@@ -186,6 +209,9 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
       expect(terms.every((r) => r.tenantId === tenantA)).toBe(true);
       const methods = await tx.select().from(schema.paymentMethods);
       expect(methods.every((r) => r.tenantId === tenantA)).toBe(true);
+      const taxRates = await tx.select().from(schema.salesTaxRates);
+      expect(taxRates.length).toBeGreaterThan(0);
+      expect(taxRates.every((r) => r.tenantId === tenantA)).toBe(true);
     });
   });
 
@@ -214,7 +240,88 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
       withTenant(tenantA, (tx) =>
         tx.insert(schema.journalEntries).values({
           tenantId: tenantB,
+          entityId: fx.b.entityId,
           entryDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  /* -- entities (ADR 0010) ------------------------------------------------
+   *
+   * The wall between two CLIENTS. Note what these do NOT certify: two entities
+   * of the SAME tenant are not separated by RLS and are not meant to be — that
+   * separation is a required `EntityScope` argument in application code, which
+   * `tests/entities-db.test.ts` proves instead. The database's job here is that
+   * one client's companies are invisible to another, and that no entry can name
+   * a company belonging to somebody else.
+   */
+
+  it("unscoped selects on entities return only the tenant's rows", async () => {
+    const rows = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.entities),
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.tenantId === tenantA)).toBe(true);
+    expect(rows.some((r) => r.id === fx.b.entityId)).toBe(false);
+  });
+
+  it("cannot INSERT an entity attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.entities).values({
+          tenantId: tenantB,
+          name: "smuggled company",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot UPDATE the other tenant's entity", async () => {
+    // The write half. Renaming somebody else's company would rename what their
+    // reports and exports say the books belong to.
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.entities)
+        .set({ name: "renamed by A" })
+        .where(eq(schema.entities.id, fx.b.entityId))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const stillB = await withTenant(tenantB, (tx) =>
+      tx.query.entities.findFirst({ where: eq(schema.entities.id, fx.b.entityId) }),
+    );
+    expect(stillB?.name).toBe("Company B");
+  });
+
+  it("composite FK: cannot post an entry into the OTHER tenant's company", async () => {
+    // The money test. tenant_id passes RLS (it is A's own), but
+    // (tenant_id, entity_id) is not a pair that exists, so the FK refuses —
+    // a cross-tenant set of books is unrepresentable, not merely unwritten.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.journalEntries).values({
+          tenantId: tenantA,
+          entityId: fx.b.entityId,
+          entryDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: an invoice cannot name the OTHER tenant's company", async () => {
+    // Slice 1b put a company on the document itself, so the same guarantee the
+    // entry has now covers invoices, bills and registers.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.invoices).values({
+          tenantId: tenantA,
+          entityId: fx.b.entityId,
+          customerId: fx.a.customerId,
+          invoiceNumber: "INV-SMUGGLE",
+          issueDate: "2026-07-01",
           createdByClerkUserId: "attacker",
         }),
       ),
@@ -384,6 +491,51 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
     ).rejects.toThrow();
   });
 
+  it("cannot INSERT a tax rate attributed to the other tenant", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.salesTaxRates).values({
+          tenantId: tenantB,
+          name: "Smuggled rate",
+          ratePpm: 10_000,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot UPDATE the other tenant's tax rate", async () => {
+    // The write half of the certification: A's context must not be able to
+    // change what B charges its customers.
+    const updated = await withTenant(tenantA, (tx) =>
+      tx
+        .update(schema.salesTaxRates)
+        .set({ ratePpm: 1 })
+        .where(eq(schema.salesTaxRates.id, fx.b.taxRateId))
+        .returning(),
+    );
+    expect(updated).toHaveLength(0);
+    const untouched = await withTenant(tenantB, (tx) =>
+      tx.query.salesTaxRates.findFirst({
+        where: eq(schema.salesTaxRates.id, fx.b.taxRateId),
+      }),
+    );
+    expect(untouched!.ratePpm).toBe(72_500);
+  });
+
+  it("composite FK: an invoice cannot take the OTHER tenant's tax rate", async () => {
+    // tenant_id passes RLS (it is A's own), but (tenant_id, tax_rate_id) does
+    // not exist as a pair — the FK must reject it. Without this, one tenant's
+    // rate could decide another's tax.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx
+          .update(schema.invoices)
+          .set({ taxRateId: fx.b.taxRateId })
+          .where(eq(schema.invoices.id, fx.a.invoiceId)),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("no context → default deny on all accounting tables", async () => {
     const counts = await withSystem(async (tx) => {
       await tx.execute(sql`select set_config('app.role', '', true)`);
@@ -398,6 +550,7 @@ d("accounting isolation (RLS + composite tenant FKs)", () => {
         tx.select().from(schema.products),
         tx.select().from(schema.paymentTerms),
         tx.select().from(schema.paymentMethods),
+        tx.select().from(schema.salesTaxRates),
       ]);
     });
     for (const rows of counts) expect(rows).toHaveLength(0);

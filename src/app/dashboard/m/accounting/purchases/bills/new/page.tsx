@@ -7,6 +7,11 @@ import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { listVendors } from "@/modules/accounting/payables/vendors";
 import { todayInTimezone } from "@/modules/accounting/lib/money";
 import { PurchasesNav } from "../../purchases-nav";
+import {
+  getDefaultEntityId,
+  isCodableAccount,
+  listEntities,
+} from "@/modules/accounting/core";
 import { BillBuilder } from "../bill-builder";
 
 export const dynamic = "force-dynamic";
@@ -33,14 +38,10 @@ export default async function NewBillPage() {
     const registerIds = new Set(registers.map((r) => r.accountId));
     return {
       vendors,
+      entities: await listEntities(tx, tenantId),
+      defaultEntityId: await getDefaultEntityId(tx, tenantId),
       today: todayInTimezone(ctx.tenant.timezone),
-      accounts: accounts.filter(
-        (a) =>
-          !registerIds.has(a.id) &&
-          a.subtype !== "opening_balance" &&
-          !(a.isSystem &&
-            ["accounts_receivable", "accounts_payable"].includes(a.subtype)),
-      ),
+      accounts: accounts.filter((a) => isCodableAccount(a, registerIds)),
     };
   });
 
@@ -54,6 +55,8 @@ export default async function NewBillPage() {
       <PurchasesNav />
       <BillBuilder
         vendors={data.vendors.map((v) => ({ id: v.id, name: v.name }))}
+        entities={data.entities.map((e) => ({ id: e.id, name: e.name }))}
+        defaultEntityId={data.defaultEntityId}
         accounts={data.accounts.map((a) => ({ id: a.id, code: a.code, name: a.name }))}
         today={data.today}
       />

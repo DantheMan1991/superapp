@@ -46,11 +46,119 @@ export const journalEntrySource = pgEnum("journal_entry_source", [
   "opening_balance",
   "recurring",
   "reversal",
+  /**
+   * Posted by the `assets` pack from a depreciation schedule. Added in
+   * drizzle/0127, alone in its own migration — an enum value cannot be used in
+   * the transaction that adds it.
+   *
+   * Deliberately NOT in MANAGED_SOURCES (core/guards.ts): invoice and bill
+   * entries are protected from journal-voiding because that would desync a
+   * document's status and aging, whereas a depreciation entry owns no document
+   * and reversing one is an ordinary correction.
+   */
+  "depreciation",
+  /**
+   * Posted by the `inventory` pack from a stock movement — perpetual inventory,
+   * slice 3. Three values rather than one because they are three different
+   * postings with three different offsets, and a single `inventory` source
+   * would make the ledger unable to say which without joining back to the
+   * movement.
+   *
+   * **THESE THREE ARE IN `MACHINE_SOURCES` (core/guards.ts), which makes them a
+   * privilege boundary** — an entry naming one of them posts without the owner
+   * check, because the authorisation happened where the stock moved. See
+   * [ADR 0011](../../../docs/decisions/0011-machine-posted-entries.md) before
+   * adding a fourth.
+   *
+   * That this is an ENUM rather than free text is load-bearing for that ADR: a
+   * source cannot be invented at a call site, only chosen from here, so the set
+   * of things that could ever bypass the owner check is fixed at compile time
+   * and by a migration.
+   */
+  "inventory_receipt",
+  "inventory_issue",
+  "inventory_adjustment",
+  /**
+   * A correction to what a batch COST — ADR 0012 §A.4, `inventory` slice 3d.
+   * `source_id` names an `inventory_cost_adjustments` row rather than a
+   * movement, which is why it could not reuse `inventory_adjustment`: that one
+   * means a quantity changed, and two sources pointing into two different
+   * tables would leave the ledger unable to say which.
+   *
+   * **DELIBERATELY NOT IN `MACHINE_SOURCES`, and that is the answer to the
+   * warning above.** Re-stating what stock cost moves money between the balance
+   * sheet and the P&L on somebody's say-so, so it is an owner's decision and
+   * `requireOwnerRole` is exactly the check it should meet. The other three are
+   * in that set because issuing feed is a staff chore; this is not one, and
+   * widening a privilege boundary to admit an act that does not need it is how
+   * the boundary stops meaning anything.
+   */
+  "inventory_cost_adjustment",
+  /**
+   * BOTH HALVES of an intercompany pair (ADR 0010 slice 2). Added in
+   * `drizzle/0150`, alone in its own migration for the reason `depreciation`
+   * was: an enum value cannot be USED in the transaction that adds it, and
+   * Drizzle runs every pending migration in one.
+   *
+   * Both legs carry it, including the one that settles a bill — the bill's
+   * `bill_payments` row still points at that entry, so AP, aging and status
+   * derivation are unaffected, and the source now says what the entry actually
+   * is rather than hiding half a transfer behind `bill_payment`.
+   *
+   * NOT in MANAGED_SOURCES: `assertNotIntercompanyLeg` covers these by their
+   * link and is stricter, refusing a one-sided REVERSE as well as a void.
+   */
+  "intercompany",
 ]);
 
 export const entryEditPolicy = pgEnum("entry_edit_policy", [
   "standard",
   "strict_append_only",
+]);
+
+/**
+ * **THE BASIS THE BUSINESS FILES ON**, and the default every report opens on.
+ *
+ * NOT a second set of books and not a posting rule — the ledger is always
+ * accrual ([ADR 0007](../../../docs/decisions/0007-cash-basis-reporting.md)) and
+ * cash is derived at read time. This says only which lens a report should reach
+ * for when nobody has said otherwise.
+ *
+ * It exists because the previous answer was `sp.basis === "cash" ? "cash" :
+ * "accrual"` in three separate report pages: a hardcoded literal, so a farm
+ * that files on cash opened every report on the basis it does NOT file on, and
+ * had to re-pick each time. Two correct-but-different profit figures, with the
+ * wrong one loading by default, is the shape of an error somebody eventually
+ * acts on.
+ */
+export const accountingBasis = pgEnum("accounting_basis", ["accrual", "cash"]);
+
+/**
+ * **HOW INVENTORY REACHES THE BOOKS**, per
+ * [ADR 0013](../../../docs/decisions/0013-inventory-tax-treatment.md).
+ *
+ * Orthogonal to `accounting_basis`, and deliberately so: a business's reporting
+ * basis does not determine its inventory treatment. A qualifying small business
+ * has more than one option available, and two businesses both correctly on the
+ * cash method can owe different answers â€” which is why an earlier draft that
+ * made this a property of the word "cash" was wrong.
+ *
+ * - `none` â€” **the default, and where every tenant is today.** Inventory does
+ *   not post at all. Cost accumulation still runs (it is always on, and wanted
+ *   regardless of tax basis); it simply does not reach the ledger. Correct for
+ *   any tenant not using accounting, and the only safe default for a change
+ *   that alters how purchases hit live books.
+ * - `capitalise` â€” stock is an asset. The receipt posts
+ *   `Dr Inventory / Cr Goods Received Not Invoiced`, the bill line clears GRNI,
+ *   and cost lands in the consumption account when stock is issued (ADR 0012).
+ *
+ * `expense_on_payment` is named in ADR 0013 and is NOT here yet: it needs the
+ * cash lens to substitute capitalising lines, which is its own change. Adding it
+ * costs one enum value and one migration.
+ */
+export const inventoryTreatment = pgEnum("inventory_treatment", [
+  "none",
+  "capitalise",
 ]);
 
 /** Chart of accounts. Never hard-deleted once referenced — deactivate instead. */
@@ -92,6 +200,79 @@ export const accounts = pgTable(
   ],
 );
 
+/**
+ * A LEGAL ENTITY inside the tenant — the thing that owns a set of books.
+ * See docs/decisions/0010-entities-inside-a-tenant.md.
+ *
+ * The tenant is the CLIENT RELATIONSHIP; this is the company that files a
+ * return. Every tenant has at least one, the common case is exactly one, and
+ * that client never learns the word — the picker only appears at two.
+ *
+ * WHAT THIS IS NOT, because three other things in this codebase are also called
+ * an entity:
+ *   - NOT a `dimension_members` row. A dimension slices one set of books; this
+ *     IS one. The test is whether the trial balance has to balance within it —
+ *     North Pasture, no; an LLC, always. `dimensionMembers.packEntityId` means
+ *     a pack's own row and is unrelated.
+ *   - NOT a `parties` row. A party is somebody the tenant deals with.
+ *   - NOT a tenant. RLS is the wall between CLIENTS and that is untouched;
+ *     between two entities of one client, separation is application code, which
+ *     ADR 0010 names as its own strongest cost.
+ *
+ * The chart of accounts, vendors, customers and contacts stay TENANT-WIDE and
+ * shared — that sharing is most of what "manage ten LLCs in one place" means.
+ */
+export const entities = pgTable(
+  "entities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** What the picker and every report footer show. */
+    name: text("name").notNull(),
+    /** The name on the return, when it differs from what people call it. */
+    legalName: text("legal_name").notNull().default(""),
+    /**
+     * Where an entry lands when nothing chose. Exactly one per tenant, by the
+     * partial unique index below rather than by care — `payment_terms` and
+     * `sales_tax_rates` draw the same line.
+     */
+    isDefault: boolean("is_default").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    /**
+     * The period lock, PER SET OF BOOKS (ADR 0010 slice 4). Null = never closed.
+     *
+     * It moved here from `accounting_settings` because ten LLCs close in
+     * different months — one bookkeeper finishing Maple's June while Oak's is
+     * still missing a bank statement is the ordinary case, and a tenant-wide
+     * scalar made it one decision for all of them.
+     *
+     * DERIVED STATE, written ONLY by completeClose/reopenClose, exactly as the
+     * tenant-wide scalar was. That is what keeps drift between the lock and the
+     * close history unrepresentable.
+     */
+    closedThrough: date("closed_through", { mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Target of the composite FK from journal_entries. MUST exist before that
+    // constraint is added — drizzle-kit emits every FK before every index, so
+    // the generated migration is hand-reordered.
+    uniqueIndex("entities_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("entities_tenant_name_idx").on(t.tenantId, t.name),
+    index("entities_tenant_idx").on(t.tenantId),
+    uniqueIndex("entities_tenant_default_idx")
+      .on(t.tenantId)
+      .where(sql`${t.isDefault}`),
+  ],
+);
+
 export const journalEntries = pgTable(
   "journal_entries",
   {
@@ -99,6 +280,22 @@ export const journalEntries = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * The legal entity whose books this entry belongs to (ADR 0010).
+     *
+     * ON THE ENTRY, NEVER ON THE LINE. An entry belongs to one entity and
+     * therefore still balances on its own, so the posting invariant at the
+     * heart of this module is untouched. An intercompany transaction is a
+     * linked PAIR of entries (slice 2), not one entry spanning two entities.
+     *
+     * NOT NULL in the database since `drizzle/0144`. It arrived NULLABLE in
+     * `0142` and was closed a release later, because migrations go out AHEAD of
+     * the deploy and the deploy running while `0142` landed did not write the
+     * column — a NOT NULL there rejects every invoice issued in that window.
+     * Same expand/contract split `0123` made for its `total = subtotal + tax`
+     * CHECK. Worth knowing before adding the next required column here.
+     */
+    entityId: uuid("entity_id").notNull(),
     /** The bookkeeping day (no timezone). ISO string, compared lexically. */
     entryDate: date("entry_date", { mode: "string" }).notNull(),
     memo: text("memo").notNull().default(""),
@@ -107,6 +304,29 @@ export const journalEntries = pgTable(
     /** Soft back-pointer to the source document (invoice, bank txn, …). */
     sourceId: uuid("source_id"),
     idempotencyKey: text("idempotency_key"),
+    /**
+     * The two halves of an INTERCOMPANY transaction share this (ADR 0010
+     * slice 2). Null on every ordinary entry, which is nearly all of them.
+     *
+     * Money moving between two companies of one client cannot be one entry: as
+     * `Dr AP (Oak) / Cr Checking (Maple)` tagged to a single company it leaves
+     * Oak's balance sheet showing cash leaving an account it does not own and
+     * Maple's showing nothing, while the ledger still balances. So it is a PAIR
+     * — one entry per company, each balancing on its own against a shared
+     * `due_from_affiliate` / `due_to_affiliate` account — written together or
+     * not at all.
+     *
+     * A GROUPING KEY, not a foreign key: it points at no row, because the thing
+     * it identifies is the pair itself. Consolidation (slice 3) eliminates by
+     * following it rather than by matching amounts, which is what makes
+     * elimination mechanical instead of a judgement call.
+     *
+     * EXACTLY TWO ENTRIES PER ID, enforced by a deferred constraint trigger in
+     * `drizzle/0149` — the same backstop shape the balance check uses. A
+     * half-written pair leaves one company owing an affiliate that nobody is
+     * owed by, which no report would notice.
+     */
+    intercompanyId: uuid("intercompany_id"),
     reversesEntryId: uuid("reverses_entry_id"),
     postedAt: timestamp("posted_at", { withTimezone: true }),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
@@ -122,7 +342,17 @@ export const journalEntries = pgTable(
   (t) => [
     uniqueIndex("journal_entries_tenant_id_id_idx").on(t.tenantId, t.id),
     index("journal_entries_tenant_date_idx").on(t.tenantId, t.entryDate),
+    // Every entity-scoped report filters on exactly this shape.
+    index("journal_entries_tenant_entity_date_idx").on(
+      t.tenantId,
+      t.entityId,
+      t.entryDate,
+    ),
     index("journal_entries_tenant_status_idx").on(t.tenantId, t.status),
+    // Both halves are fetched by this, and consolidation walks it.
+    index("journal_entries_tenant_intercompany_idx")
+      .on(t.tenantId, t.intercompanyId)
+      .where(sql`${t.intercompanyId} is not null`),
     uniqueIndex("journal_entries_tenant_idem_idx")
       .on(t.tenantId, t.idempotencyKey)
       .where(sql`${t.idempotencyKey} is not null`),
@@ -134,6 +364,14 @@ export const journalEntries = pgTable(
       name: "journal_entries_reverses_fk",
       columns: [t.tenantId, t.reversesEntryId],
       foreignColumns: [t.tenantId, t.id],
+    }),
+    // Composite, so an entry naming another tenant's entity is unrepresentable
+    // rather than merely unwritten. NO ACTION: an entity with books is never
+    // deleted, only deactivated.
+    foreignKey({
+      name: "journal_entries_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
     }),
   ],
 );
@@ -254,6 +492,8 @@ export const dimensionMembers = pgTable(
  * ---------------------------------------------------------------------- */
 
 export type Account = typeof accounts.$inferSelect;
+
+export type Entity = typeof entities.$inferSelect;
 
 export type JournalEntry = typeof journalEntries.$inferSelect;
 

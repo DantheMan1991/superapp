@@ -24,7 +24,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { parties } from "./parties";
-import { accounts, dimensionMembers, entryEditPolicy, journalEntries, journalLines } from "./ledger";
+import { accountingBasis, accounts, dimensionMembers, entities, entryEditPolicy, inventoryTreatment, journalEntries, journalLines } from "./ledger";
 import { billLines, vendors } from "./payables";
 
 export const invoiceStatus = pgEnum("invoice_status", [
@@ -174,6 +174,66 @@ export const paymentMethods = pgTable(
   ],
 );
 
+/**
+ * A sales tax rate the business charges, as a list the tenant owns.
+ *
+ * Deliberately FLAT — a named rate and a number, no jurisdictions and no nexus
+ * rules. Resolving a rate from a delivery address is an address-resolution
+ * product (a rate service, an agency registry, a filing calendar, economic
+ * nexus thresholds); this is the list a small business keeps in its head. When
+ * a combined rate needs splitting for a return, that is a
+ * `sales_tax_rate_components` child table and per-component tax lines, both
+ * additive to this shape.
+ *
+ * UNLIKE `payment_terms` AND `payment_methods`, NOTHING IS SEEDED. "Net 30" is
+ * a sensible default everywhere; there is no tax rate that is right anywhere,
+ * and a seeded 0% or 7% is a wrong number on somebody's invoice. A tenant with
+ * no rates simply has no tax controls, which is the correct state for most of
+ * them — so `provisionCatalogue` does not touch this table and the "Add the
+ * standard set" restore does not apply to it.
+ */
+export const salesTaxRates = pgTable(
+  "sales_tax_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /**
+     * The rate in PARTS PER MILLION of the taxable amount: 7.25% → 72_500.
+     *
+     * Basis points are not enough and that is arithmetic, not fussiness —
+     * 8.875% (New York City) is 887.5 basis points, which is not an integer.
+     * Percent × 10,000 carries four decimal places of percent, which covers
+     * every real US rate. Integer because every other number in this module is.
+     */
+    ratePpm: integer("rate_ppm").notNull(),
+    /** The one offered first on a new invoice. At most one per tenant. */
+    isDefault: boolean("is_default").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    version: integer("version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sales_tax_rates_tenant_id_id_idx").on(t.tenantId, t.id),
+    uniqueIndex("sales_tax_rates_tenant_name_idx").on(t.tenantId, t.name),
+    // At most one default, enforced by the database rather than by care —
+    // the same partial unique `payment_terms` uses.
+    uniqueIndex("sales_tax_rates_tenant_default_idx")
+      .on(t.tenantId)
+      .where(sql`${t.isDefault} = true`),
+    // 0% is legitimate (a zero-rated category still wants naming); over 100%
+    // is somebody typing 725 for 7.25%.
+    check("sales_tax_rates_rate_ppm", sql`${t.ratePpm} between 0 and 1000000`),
+  ],
+);
+
 export const customers = pgTable(
   "customers",
   {
@@ -246,59 +306,6 @@ export const customers = pgTable(
   ],
 );
 
-/**
- * RETIRED 2026-08-12. Folded into `recurringEntries` below (`0121`/`0122`),
- * which carries the same rows under `kind = 'invoice'` with the same ids.
- *
- * Nothing reads it. It is still declared because the TABLE still exists: a
- * DROP must follow the deploy that stopped selecting it, never precede it
- * (docs/conventions.md 4), so `drizzle/0123` and the deletion of this block
- * are a separate PR that lands after the fold has deployed.
- */
-export const recurringInvoices = pgTable(
-  "recurring_invoices",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
-    customerId: uuid("customer_id").notNull(),
-    name: text("name").notNull(),
-    /** {lines: [{description, quantity, unitPriceCents, incomeAccountId,
-     * dimensionMemberIds?}], memo, dueInDays} */
-    template: jsonb("template").notNull(),
-    frequency: recurringFrequency("frequency").notNull().default("monthly"),
-    dayOfMonth: integer("day_of_month").notNull(),
-    nextRunDate: date("next_run_date", { mode: "string" }).notNull(),
-    isActive: boolean("is_active").notNull().default(true),
-    lastGeneratedAt: timestamp("last_generated_at", { withTimezone: true }),
-    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
-    version: integer("version").notNull().default(1),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("recurring_invoices_tenant_id_id_idx").on(t.tenantId, t.id),
-    index("recurring_invoices_tenant_next_idx")
-      .on(t.tenantId, t.nextRunDate)
-      .where(sql`${t.isActive} = true`),
-    foreignKey({
-      name: "recurring_invoices_customer_fk",
-      columns: [t.tenantId, t.customerId],
-      foreignColumns: [customers.tenantId, customers.id],
-    }),
-    // 1–28 keeps month advancement a total function (no clamping logic).
-    check(
-      "recurring_invoices_day_of_month",
-      sql`${t.dayOfMonth} between 1 and 28`,
-    ),
-  ],
-);
-
 /* ------------------------------------------------------------------------
  * Recurring entries live HERE rather than in payables.ts, and the reason is
  * a dependency cycle rather than taste: an invoice template references
@@ -329,10 +336,10 @@ export const recurringEntryKind = pgEnum("recurring_entry_kind", [
  * re-validated at generation — accounts, customers and vendors may all have
  * deactivated since it was saved.
  *
- * `recurring_invoices` and `invoices.recurring_invoice_id` still EXIST at the
- * time of writing and are no longer read. They go in a separate migration in a
- * separate PR, because a DROP must follow the deploy that stopped selecting
- * them (docs/conventions.md 4).
+ * `recurring_invoices` and `invoices.recurring_invoice_id` are GONE
+ * (`drizzle/0147`). They outlived the fold by one release because a DROP must
+ * follow the deploy that stopped selecting them, never precede it
+ * (docs/conventions.md 4).
  */
 export const recurringEntries = pgTable(
   "recurring_entries",
@@ -435,6 +442,21 @@ export const invoices = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * Which company's books this document belongs to (ADR 0010).
+     *
+     * THE DOCUMENT DECIDES, and every entry it ever posts follows it — issuance
+     * and each payment. Before this column those entries took the tenant's
+     * DEFAULT company and inherited from each other, which meant moving the
+     * default between issuing and being paid split one document's AR across two
+     * balance sheets. Now there is nothing to inherit from.
+     *
+     * NOT NULL in the database since `drizzle/0146`. It arrived nullable in
+     * `0145` and was closed a release later, because migrations precede deploys
+     * and the deploy running while `0145` landed did not write it. Worth knowing
+     * before adding the next required column here.
+     */
+    entityId: uuid("entity_id").notNull(),
     customerId: uuid("customer_id").notNull(),
     invoiceNumber: text("invoice_number").notNull(),
     status: invoiceStatus("status").notNull().default("draft"),
@@ -444,16 +466,45 @@ export const invoices = pgTable(
     /** Stop chasing this one invoice — a dispute, or a payment plan agreed by
      * phone. Distinct from muting the customer, which is standing. */
     remindersMuted: boolean("reminders_muted").notNull().default(false),
-    /** Denormalized Σ line amounts; recomputed in the same tx as line writes. */
+    /* ----------------------------------------------------------------------
+     * Sales tax (2026-08-13). The three columns below are FROZEN at write:
+     * they record the tax this invoice charges, not a live view of the rate.
+     * Editing or deactivating a rate afterwards must never re-price a document
+     * somebody has already been sent, and must never make the invoice on
+     * screen disagree with the entry in the ledger.
+     * -------------------------------------------------------------------- */
+    /** Which rate was chosen. Null = no tax on this invoice. */
+    taxRateId: uuid("tax_rate_id"),
+    /**
+     * The rate AS APPLIED, copied rather than referenced. This is the freeze:
+     * `sales_tax_rates.rate_ppm` may change tomorrow, and this invoice still
+     * means what it meant. See salesTaxRates for what ppm is.
+     */
+    taxRatePpm: integer("tax_rate_ppm").notNull().default(0),
+    /** Σ taxable line amounts × the rate, rounded ONCE (invoicing/tax.ts). */
+    taxCents: bigint("tax_cents", { mode: "number" }).notNull().default(0),
+    /** Σ line amounts, before tax. */
+    subtotalCents: bigint("subtotal_cents", { mode: "number" })
+      .notNull()
+      .default(0),
+    /**
+     * What the customer owes: `subtotal_cents + tax_cents`.
+     *
+     * The MEANING has not changed since session 4 — it has always been the
+     * amount owed — which is why the overpayment guard, aging, the MoneyBar,
+     * reminders, the PDF balance and bank matching all keep working with tax
+     * switched on. Only the value moved.
+     *
+     * `total = subtotal + tax` is a CHECK from `drizzle/0147`. It could not
+     * ship with `0123`: a migration goes out AHEAD of the deploy
+     * (docs/conventions.md 4), and the deployment running then wrote
+     * `total_cents` without touching `subtotal_cents`, so the constraint would
+     * have rejected every draft edit in that window. Every write path has
+     * written all three together since, which is what made it safe to add.
+     */
     totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
     /** The issuance entry. Null while draft; survives void (audit trail). */
     journalEntryId: uuid("journal_entry_id"),
-    /**
-     * DEPRECATED, dropped in the follow-up PR. Superseded by
-     * `recurring_entry_id` below; kept for this deploy because a DROP must
-     * follow the deploy that stops selecting the column, never precede it.
-     */
-    recurringInvoiceId: uuid("recurring_invoice_id"),
     /** The template that generated this invoice, in the unified table. */
     recurringEntryId: uuid("recurring_entry_id"),
     createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
@@ -470,11 +521,17 @@ export const invoices = pgTable(
     // The numbering race arbiter.
     uniqueIndex("invoices_tenant_number_idx").on(t.tenantId, t.invoiceNumber),
     index("invoices_tenant_status_idx").on(t.tenantId, t.status),
+    index("invoices_tenant_entity_idx").on(t.tenantId, t.entityId),
     index("invoices_tenant_customer_idx").on(t.tenantId, t.customerId),
     // One invoice per issuance entry — mirrors bank_transactions.
     uniqueIndex("invoices_tenant_entry_idx")
       .on(t.tenantId, t.journalEntryId)
       .where(sql`${t.journalEntryId} is not null`),
+    foreignKey({
+      name: "invoices_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
+    }),
     foreignKey({
       name: "invoices_customer_fk",
       columns: [t.tenantId, t.customerId],
@@ -486,16 +543,28 @@ export const invoices = pgTable(
       foreignColumns: [journalEntries.tenantId, journalEntries.id],
     }),
     foreignKey({
-      name: "invoices_recurring_fk",
-      columns: [t.tenantId, t.recurringInvoiceId],
-      foreignColumns: [recurringInvoices.tenantId, recurringInvoices.id],
-    }),
-    foreignKey({
       name: "invoices_recurring_entry_fk",
       columns: [t.tenantId, t.recurringEntryId],
       foreignColumns: [recurringEntries.tenantId, recurringEntries.id],
     }),
+    // NO ACTION, like every other reference-list FK here: a rate named on an
+    // issued invoice may not be deleted out from under it.
+    foreignKey({
+      name: "invoices_tax_rate_fk",
+      columns: [t.tenantId, t.taxRateId],
+      foreignColumns: [salesTaxRates.tenantId, salesTaxRates.id],
+    }),
     check("invoices_total_nonnegative", sql`${t.totalCents} >= 0`),
+    // The arithmetic the document states, enforced rather than trusted. Owed
+    // since `0123` and deferred for the reason on `totalCents` above.
+    check(
+      "invoices_total_is_subtotal_plus_tax",
+      sql`${t.totalCents} = ${t.subtotalCents} + ${t.taxCents}`,
+    ),
+    // Safe in the same migration as the column: the previous deployment never
+    // writes this, and its DEFAULT 0 satisfies the constraint. The
+    // total = subtotal + tax CHECK is not, and waits for the follow-up.
+    check("invoices_tax_nonnegative", sql`${t.taxCents} >= 0`),
   ],
 );
 
@@ -517,6 +586,19 @@ export const invoiceLines = pgTable(
     unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
     /** App-computed round(quantity × unitPrice); 0 = posts nothing. */
     amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    /**
+     * Whether the invoice's tax rate applies to THIS line.
+     *
+     * One rate per invoice, taxability per line — the split that lets a trade
+     * bill exempt labour and taxed materials on one document, which is the
+     * common case wherever services are exempt and goods are not. It is a
+     * boolean rather than a second rate on purpose: two rates on one invoice is
+     * a different feature (per-component tax lines) and this is not half of it.
+     *
+     * DEFAULT false so every line that existed before tax did reads as
+     * untaxed, which is what those invoices charged.
+     */
+    isTaxable: boolean("is_taxable").notNull().default(false),
     incomeAccountId: uuid("income_account_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -676,8 +758,11 @@ export const accountingSettings = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    /** Entries dated on or before this are locked (reversal-only). */
-    closedThrough: date("closed_through", { mode: "string" }),
+    // `closed_through` lived here from session 7 until ADR 0010 slice 4, and
+    // was dropped from the database by `drizzle/0153` once this file had
+    // stopped declaring it and that deploy was live. The lock is a property of
+    // a SET OF BOOKS, and a tenant can hold several: it is
+    // `entities.closed_through` now.
     coaTemplate: text("coa_template").notNull().default("general"),
     fiscalYearStartMonth: integer("fiscal_year_start_month")
       .notNull()
@@ -685,6 +770,29 @@ export const accountingSettings = pgTable(
     entryEditPolicy: entryEditPolicy("entry_edit_policy")
       .notNull()
       .default("standard"),
+    /**
+     * Which basis a report opens on when the URL does not say.
+     *
+     * **DEFAULTS TO `accrual`, so nothing that exists today changes** — the same
+     * property ADR 0007 preserved when it added the lens at all. A tenant that
+     * files on cash sets it once instead of re-picking on every report.
+     *
+     * This is a PRESENTATION preference and nothing else. It must never reach
+     * `postEntry`, alter what is stored, or decide what a pack posts: the ledger
+     * is accrual for every tenant regardless of what this says.
+     */
+    defaultBasis: accountingBasis("default_basis").notNull().default("accrual"),
+    /**
+     * Whether and how the `inventory` pack posts to this tenant's ledger.
+     *
+     * **Defaults to `none` â€” nothing changes for anybody until an owner turns
+     * it on.** Perpetual posting rewrites how every purchase reaches the books,
+     * and switching that on by migration for tenants already keeping accounts
+     * is not a default anybody should get without asking.
+     */
+    inventoryTreatment: inventoryTreatment("inventory_treatment")
+      .notNull()
+      .default("none"),
     // `bookkeeping_timezone` lived here from 0007 until 0088. The business
     // day is `tenants.timezone` now — one clock, readable by every module.
     /**
@@ -764,7 +872,6 @@ export type InvoiceLine = typeof invoiceLines.$inferSelect;
 
 export type InvoicePayment = typeof invoicePayments.$inferSelect;
 
-export type RecurringInvoice = typeof recurringInvoices.$inferSelect;
 
 export type RecurringEntry = typeof recurringEntries.$inferSelect;
 
@@ -773,3 +880,5 @@ export type Product = typeof products.$inferSelect;
 export type PaymentTerm = typeof paymentTerms.$inferSelect;
 
 export type PaymentMethod = typeof paymentMethods.$inferSelect;
+
+export type SalesTaxRate = typeof salesTaxRates.$inferSelect;

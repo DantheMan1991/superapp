@@ -14,10 +14,11 @@ import { get } from "@vercel/blob";
 
 import { withTenant, withSystem, schema } from "../src/db";
 import {
+  deleteDraft,
+  getDefaultEntityId,
+  type LedgerCtx,
   LedgerError,
   postEntry,
-  deleteDraft,
-  type LedgerCtx,
 } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
@@ -67,6 +68,14 @@ import {
   createInvoiceDraft,
   deleteInvoiceDraft,
 } from "../src/modules/accounting/invoicing/invoices";
+
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+let entityId: string;
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -394,6 +403,7 @@ async function makeDraftEntry(): Promise<string> {
   const expense = await accountId("6000");
   const { entry } = await withTenant(tenantId, (tx) =>
     postEntry(tx, owner, {
+      entityId,
       status: "draft",
       entryDate: "2026-07-10",
       memo: "doc test draft",
@@ -419,6 +429,9 @@ d("documents (DB)", () => {
     owner = { tenantId, userId: "owner-user", role: "owner" };
     staff = { tenantId, userId: "staff-user", role: "staff" };
     await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
+    entityId = await withTenant(tenantId, (tx) =>
+      getDefaultEntityId(tx, tenantId),
+    );
   });
 
   afterAll(async () => {

@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
 import { schema, withTenant, type Tx } from "@/db";
 import { CLAUDE_MODEL, CLAUDE_THINKING_OFF, getClaude } from "@/lib/claude";
 import { logAuditInTx } from "@/lib/audit";
-import { LedgerError, type LedgerCtx } from "../core";
+import { LedgerError, isCodableAccount, type LedgerCtx } from "../core";
 import { loadBill, loadBillLines } from "../payables/bills";
 import { loadVendor } from "../payables/vendors";
 import {
@@ -82,13 +82,9 @@ export async function gatherBillCodingInputs(
     where: eq(schema.bankAccounts.tenantId, ctx.tenantId),
   });
   const registerLedgerIds = new Set(registers.map((r) => r.accountId));
-  const eligible = accounts.filter(
-    (a) =>
-      !registerLedgerIds.has(a.id) &&
-      a.subtype !== "opening_balance" &&
-      !(a.isSystem &&
-        (a.subtype === "accounts_receivable" || a.subtype === "accounts_payable")),
-  );
+  // The same predicate the bill form uses, so the model cannot suggest a
+  // category a person is not offered — an affiliate account among them.
+  const eligible = accounts.filter((a) => isCodableAccount(a, registerLedgerIds));
 
   // Few-shot: this vendor's prior approved-bill lines (description → code),
   // joined back through bills.journal_entry_id.

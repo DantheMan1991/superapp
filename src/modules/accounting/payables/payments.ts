@@ -5,8 +5,10 @@ import type { Bill, BillPayment } from "@/db/schema";
 import {
   LedgerError,
   postEntry,
+  postIntercompanyPair,
   requireOwnerRole,
   voidEntry,
+  voidIntercompanyPair,
   type LedgerCtx,
 } from "../core";
 import { toSafeCents } from "../lib/money";
@@ -96,22 +98,68 @@ export async function recordBillPayment(
   }
   const apAccountId = await findApAccount(tx, ctx.tenantId);
   const vendor = await loadVendor(tx, ctx.tenantId, bill.vendorId);
+  const memo = `Bill payment — ${vendor.name}${bill.billNumber ? ` ${bill.billNumber}` : ""}`;
 
   // Pre-generate the payment id so the entry can reference it as sourceId
   // and the payment row is born with its real entry id (invoicing mirror).
   const paymentId = crypto.randomUUID();
-  const { entry } = await postEntry(tx, ctx, {
-    status: "posted",
-    entryDate: args.paymentDate,
-    memo: `Bill payment — ${vendor.name}${bill.billNumber ? ` ${bill.billNumber}` : ""}`,
-    source: "bill_payment",
-    sourceId: paymentId,
-    idempotencyKey: `billpay:${paymentId}`,
-    lines: [
-      { accountId: apAccountId, amountCents: args.amountCents },
-      { accountId: args.paidFromAccountId, amountCents: -args.amountCents },
-    ],
+
+  /**
+   * WHOSE ACCOUNT IS PAYING, which decides whether this is one entry or two.
+   *
+   * ADR 0010 calls paying one company's bill out of another's account the thing
+   * a multi-LLC client does constantly, and slice 1b refused it rather than
+   * mis-record it. This is the recording.
+   */
+  const payingRegister = await tx.query.bankAccounts.findFirst({
+    where: and(
+      eq(schema.bankAccounts.tenantId, ctx.tenantId),
+      eq(schema.bankAccounts.accountId, args.paidFromAccountId),
+    ),
+    columns: { entityId: true },
   });
+  const payerEntityId = payingRegister?.entityId ?? bill.entityId;
+
+  let entry;
+  if (payerEntityId === bill.entityId) {
+    // The ordinary case, byte-identical to what it always was.
+    ({ entry } = await postEntry(tx, ctx, {
+      entityId: bill.entityId,
+      status: "posted",
+      entryDate: args.paymentDate,
+      memo,
+      source: "bill_payment",
+      sourceId: paymentId,
+      idempotencyKey: `billpay:${paymentId}`,
+      lines: [
+        { accountId: apAccountId, amountCents: args.amountCents },
+        { accountId: args.paidFromAccountId, amountCents: -args.amountCents },
+      ],
+    }));
+  } else {
+    /**
+     * INTERCOMPANY. The bill's company settles its AP against an affiliate; the
+     * paying company's cash leaves and it is owed the amount back.
+     *
+     * `bill_payments.journalEntryId` points at the BILL'S leg, so aging, status
+     * derivation and unapply keep working off the payment row exactly as they
+     * did — none of them ask what source the entry wears.
+     */
+    const pair = await postIntercompanyPair(tx, ctx, {
+      fromEntityId: payerEntityId,
+      toEntityId: bill.entityId,
+      amountCents: args.amountCents,
+      entryDate: args.paymentDate,
+      memo: `${memo} (paid by another company)`,
+      sourceId: paymentId,
+      idempotencyKey: `billpay:${paymentId}`,
+      payerLines: [
+        { accountId: args.paidFromAccountId, amountCents: -args.amountCents },
+      ],
+      payeeLines: [{ accountId: apAccountId, amountCents: args.amountCents }],
+    });
+    entry = pair.to;
+  }
   const [payment] = await tx
     .insert(schema.billPayments)
     .values({
@@ -176,7 +224,15 @@ export async function unapplyBillPayment(
     ),
   });
   if (entry && entry.status === "posted") {
-    await voidEntry(tx, ctx, { entryId: entry.id, expectedVersion: entry.version });
+    // BOTH LEGS, when the money came from (or went to) another company. The
+    // payment row points at this company's leg; voiding only that one leaves
+    // the affiliate holding a balance nothing explains — see
+    // `voidIntercompanyPair`.
+    if (entry.intercompanyId) {
+      await voidIntercompanyPair(tx, ctx, entry.intercompanyId);
+    } else {
+      await voidEntry(tx, ctx, { entryId: entry.id, expectedVersion: entry.version });
+    }
   }
   await tx
     .delete(schema.billPayments)

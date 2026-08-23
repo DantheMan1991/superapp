@@ -152,8 +152,32 @@ rules as any other table — `tenant_id`, FORCE RLS, isolation test. See
 [security.md §4](security.md).
 
 **P5 — Declared extension points.** A core module or pack names a slot; others
-fill it. This is the one that does not exist yet and will be needed first for
-nav contributions and entity-type registration.
+fill it. **First built 2026-08-20**, by `production` slice 0: `production` cannot
+require `livestock` (a bakery running runs over purchased flour is a legitimate
+composition) and `livestock` cannot require `production` (a farm that never
+processes anything still has a withdrawal clock), yet a run must consult that
+clock and must take head out through `livestock`'s own verb. So
+[production/core/handler.ts](../src/packs/production/core/handler.ts) declares
+the slot — **types only, so filling it drags nothing into a bundle** —
+`livestock/run-handler.ts` fills it, and
+[run-handlers.ts](../src/packs/run-handlers.ts) is the ONLY file that knows both
+packs exist. That last part is the pattern: **a registry may know several packs
+exist; no individual pack may**, which is the same rule `src/packs/index.ts`
+already lives by. Still needed for nav contributions and entity-type
+registration.
+
+**Used a second time on 2026-08-22, in the other direction: a CORE MODULE named
+the slot and a PACK filled it.** `accounting` must not learn that inventory
+exists — slice 3b earned that rule, and `getBalances` is the last place to give
+it up because every report goes through it. So core named a slot in vocabulary
+true of any basis lens (*some entries do not belong in this basis; some lines
+belong under a different account*),
+[src/lib/basis-lens/](../src/lib/basis-lens/types.ts) holds the types and the
+registry, and `packs/inventory/basis-lens.ts` fills it. **Core imports the lib,
+never the pack** — the direction `mail-extensions` and `attention-sources`
+already run in. What a provider is permitted to do is deliberately tiny: drop an
+entry WHOLE, re-point a line, and nothing else, because anything wider
+unbalances a report.
 
 What is **not** sanctioned: adding a column to a core table for one industry,
 branching on `tenant.industry` inside core, or a pack reading another pack's
@@ -161,9 +185,53 @@ tables directly.
 
 ---
 
+## 4b. Work is raised and worked where it lives
+
+Added 2026-08-15, after the founder spotted the pattern one slice before it
+would have been repeated.
+
+> **A pack never builds its own task engine, and never sends somebody to Work
+> to act on what it raised.** It calls the Layer 0 verbs and renders the shared
+> row.
+
+The data seam for this has existed since CRM slice 5b — `src/lib/work/
+entity-work.ts` and `items.ts` sit outside the Work module precisely so anything
+may write work. What did not exist was **actions**: the only `"use server"` file
+was `src/modules/work/actions.ts`, and a module may not import another module,
+so every consumer wrapped its own subset.
+
+The result was invisible until there were two consumers. CRM wrapped two verbs
+— tick and delete — so a follow-up on a record was something you had to leave
+CRM to reassign or re-date. The assets pack was about to wrap a different two,
+and the product would have grown a third inconsistent work surface.
+
+| Layer | What it provides |
+| --- | --- |
+| `src/lib/work/entity-work.ts`, `items.ts` | The write path. Since slice 5b |
+| `src/lib/work/actions.ts` | **The verbs.** Add, done/reopen, reassign, re-due |
+| `src/components/app/work-item-row.tsx` | **The affordances.** One row, one behaviour everywhere |
+
+**Share the verbs, not the container.** CRM's timeline interleaves notes and
+follow-ups and is better for CRM than a generic panel would be; the assets page
+wants a plain list. Forcing one layout would have made every surface look the
+same, which is a different and worse trade than making the same work *behave*
+the same.
+
+**The guard is the owning feature, not Work.** `extensionSlug` says which module
+or pack the record belongs to, and that is what must be switched on. Work being
+off does not stop a follow-up being raised; the item simply has no second home
+to appear in.
+
 ## 5. Shapes to build
 
 Not yet implemented. Recorded here so the first pack does not improvise.
+
+> **Since 2026-08-13 there is a concrete plan.** The mechanism — how a pack is
+> registered and switched on, how a profile installs one — is settled in
+> [ADR 0009](decisions/0009-packs-are-modules-profiles-install-them.md) and
+> written up in [modules/packs-and-profiles.md](modules/packs-and-profiles.md).
+> The first profile is [modules/homestead-farm.md](modules/homestead-farm.md).
+> This section stays as the statement of intent; those are the build record.
 
 ```
 src/modules/      Layer 1 — core tools. Industry-blind.

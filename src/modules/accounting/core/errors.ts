@@ -13,6 +13,20 @@ export type LedgerErrorCode =
   | "ENTRY_IMMUTABLE"
   | "STALE_VERSION"
   | "DIMENSION_INVALID"
+  | "ENTITY_MISSING"
+  | "ENTITY_NOT_FOUND"
+  | "ENTITY_INACTIVE"
+  | "ENTITY_IS_DEFAULT"
+  | "ENTITY_NAME_INVALID"
+  | "ENTITY_NAME_TAKEN"
+  | "SCOPE_NOT_OFFERED"
+  | "CROSS_ENTITY_REGISTER"
+  | "AFFILIATE_ACCOUNTS_MISSING"
+  | "INTERCOMPANY_SAME_COMPANY"
+  | "INTERCOMPANY_AMOUNT_INVALID"
+  | "INTERCOMPANY_NOT_FOUND"
+  | "INTERCOMPANY_INCOMPLETE"
+  | "ENTRY_INTERCOMPANY"
   | "DUPLICATE_CODE"
   | "COA_SELF_PARENT"
   | "COA_CYCLE"
@@ -46,6 +60,9 @@ export type LedgerErrorCode =
   | "TERM_NOT_FOUND"
   | "PAYMENT_METHOD_INVALID"
   | "PAYMENT_METHOD_TAKEN"
+  | "TAX_RATE_NAME_TAKEN"
+  | "TAX_RATE_NOT_FOUND"
+  | "TAX_RATE_INVALID"
   | "REMINDER_OFFSETS_INVALID"
   | "REMINDER_SCHEDULE_EMPTY"
   | "REMINDER_NOT_TESTABLE"
@@ -116,6 +133,27 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
     "This entry is locked (closed period, reconciled, or strict mode). Create a reversal instead.",
   STALE_VERSION: "This entry changed since you opened it — reload and try again.",
   DIMENSION_INVALID: "One of the selected tags is invalid or inactive.",
+  ENTITY_MISSING:
+    "This business has no company set up to keep books for. Toggle the module off and on again.",
+  ENTITY_NOT_FOUND: "That company no longer exists.",
+  ENTITY_INACTIVE: "That company is inactive — reactivate it first.",
+  ENTITY_IS_DEFAULT:
+    "This is the default company — make another one the default first.",
+  ENTITY_NAME_INVALID: "Give the company a name.",
+  ENTITY_NAME_TAKEN: "A company already has that name.",
+  SCOPE_NOT_OFFERED:
+    "This report has no consolidated view — nothing it reads is affected by transfers between your companies. Pick a company, or all companies combined.",
+  AFFILIATE_ACCOUNTS_MISSING:
+    "This business is missing the Due from / Due to Affiliates accounts. Toggle the accounting module off and on again to add them.",
+  INTERCOMPANY_SAME_COMPANY: "Pick two different companies.",
+  INTERCOMPANY_AMOUNT_INVALID: "Enter an amount above zero.",
+  INTERCOMPANY_NOT_FOUND: "That transfer no longer exists.",
+  INTERCOMPANY_INCOMPLETE:
+    "Say what the receiving company got — cash into an account, or what was paid for on its behalf.",
+  ENTRY_INTERCOMPANY:
+    "This is one half of a transfer between two of your companies. Undo it from the transfer, so both sides move together.",
+  CROSS_ENTITY_REGISTER:
+    "That bank account belongs to a different company. Use one of this company's own accounts — money moving between two of your companies is a transfer, and recording it properly needs both sides.",
   DUPLICATE_CODE: "That account code is already in use.",
   COA_SELF_PARENT: "An account cannot be its own parent.",
   COA_CYCLE: "That parent choice would create a loop in the account tree.",
@@ -160,6 +198,10 @@ const FRIENDLY: Record<LedgerErrorCode, string> = {
   TERM_NOT_FOUND: "That payment term no longer exists.",
   PAYMENT_METHOD_INVALID: "Give the payment method a name.",
   PAYMENT_METHOD_TAKEN: "That payment method already exists.",
+  TAX_RATE_NAME_TAKEN: "A tax rate already has that name.",
+  TAX_RATE_NOT_FOUND: "That tax rate no longer exists.",
+  TAX_RATE_INVALID:
+    "That tax rate is inactive or no longer exists — pick another one.",
   REMINDER_OFFSETS_INVALID:
     "That reminder schedule isn't valid — each entry is a whole number of days near the due date.",
   REMINDER_SCHEDULE_EMPTY:

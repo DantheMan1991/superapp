@@ -1,0 +1,313 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { withTenant } from "@/db";
+import { requireTenant } from "@/lib/auth";
+import { requireModuleEnabled } from "@/lib/modules";
+import { logAudit } from "@/lib/audit";
+import { todayInTimezone } from "@/lib/timezone";
+import {
+  ProductionError,
+  addRunInput,
+  addRunOutput,
+  completeRun,
+  removeRunOutput,
+  startRun,
+  updateRunOutput,
+  type ProductionCtx,
+} from "./ops";
+
+/**
+ * Production's write surface.
+ *
+ * `requireModuleEnabled` checks PRODUCTION and only production, even though
+ * every action here writes through `inventory` and some of them through
+ * `livestock`'s handler. That is the rule — the guard is the owning feature
+ * (extension-model §4b) — and the dependency graph is what guarantees
+ * `inventory` is on. `livestock` is deliberately NOT guaranteed and deliberately
+ * not checked: a run that meets no animals never asks it anything.
+ */
+
+const PACK = "production";
+const BASE = "/dashboard/m/production";
+
+function toResult(err: unknown): { error: string } {
+  if (err instanceof ProductionError) {
+    switch (err.code) {
+      case "FORBIDDEN":
+        return { error: "Only an owner can start or finish a run." };
+      case "NOT_FOUND":
+        return { error: "That no longer exists." };
+      case "INVALID_KIND":
+        return { error: "Use lowercase letters, numbers and underscores." };
+      // Every one of these is written for a person at the point it is thrown,
+      // and the withdrawal refusal in particular is repeated word for word from
+      // the pack that owns the clock. Rewording it here would be this pack
+      // paraphrasing a legal statement it does not own.
+      case "RUN_CLOSED":
+      case "RUN_INVALID":
+      case "ITEM_INVALID":
+      case "LOT_REQUIRED":
+      case "INPUT_BLOCKED":
+      case "NOTHING_TO_LAND":
+        return { error: err.message };
+    }
+  }
+  if (err instanceof Error && err.name === "InventoryError") {
+    return { error: err.message };
+  }
+  if (err instanceof Error && err.name === "LivestockError") {
+    return { error: err.message };
+  }
+  console.error("production action failed", err);
+  return { error: "Something went wrong saving that." };
+}
+
+const requiredDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const quantity = z.number().positive().max(100_000_000).multipleOf(0.0001);
+const weight = z
+  .number()
+  .positive()
+  .max(100_000_000)
+  .multipleOf(0.0001)
+  .nullable()
+  .optional();
+
+function ctxOf(ctx: Awaited<ReturnType<typeof requireTenant>>): ProductionCtx {
+  return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
+}
+
+export async function startRunAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      code: z.string().trim().min(1).max(120),
+      runKind: z.string().min(1).max(63).optional(),
+      startedOn: requiredDate,
+      locationAssetId: z.string().uuid().nullable().optional(),
+      performedBy: z.string().max(200).optional(),
+      crewSize: z.number().int().positive().max(1000).nullable().optional(),
+      labourHours: z
+        .number()
+        .positive()
+        .max(100_000)
+        .multipleOf(0.01)
+        .nullable()
+        .optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const run = await withTenant(
+      ctx.tenant.id,
+      (tx) => startRun(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.run.started",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_run",
+      targetId: run.id,
+      meta: { code: run.code, runKind: run.runKind, startedOn: run.startedOn },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, runId: run.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Put something into a run.
+ *
+ * **THIS IS THE ACTION THE WITHDRAWAL CLOCK REFUSES**, and the audit entry
+ * matters for the same reason the treatment ones do: it is the record of what
+ * left a pen on which day, and it is what a processor's paperwork has to agree
+ * with.
+ */
+export async function addRunInputAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      runId: z.string().uuid(),
+      itemId: z.string().uuid(),
+      lotId: z.string().uuid(),
+      quantity,
+      weightLb: weight,
+      occurredOn: requiredDate,
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  const today = todayInTimezone(ctx.tenant.timezone);
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => addRunInput(tx, ctxOf(ctx), parsed.data, today),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.run.input_added",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_run",
+      targetId: parsed.data.runId,
+      // Identifiers and quantities, never the notes — those are free text about
+      // an animal and belong only in the row.
+      meta: {
+        lotId: parsed.data.lotId,
+        quantity: parsed.data.quantity,
+        weightLb: parsed.data.weightLb ?? null,
+        occurredOn: parsed.data.occurredOn,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    // Stock left a shelf, and on a farm it left a pen as well.
+    revalidatePath("/dashboard/m/inventory", "layout");
+    revalidatePath("/dashboard/m/livestock", "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function addRunOutputAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      runId: z.string().uuid(),
+      // Exactly one of these. `addRunOutput` enforces it rather than a Zod
+      // union, so the rule has one home and the ops layer cannot be called past
+      // it — the same arrangement `createLivestockLotAction` uses.
+      itemId: z.string().uuid().optional(),
+      newItemName: z.string().min(1).max(200).optional(),
+      newItemUnit: z.string().min(1).max(63).optional(),
+      newItemKind: z.string().min(1).max(63).optional(),
+      quantity,
+      weightLb: weight,
+      lotCode: z.string().max(120).optional(),
+      locationAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => addRunOutput(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updateRunOutputAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      quantity: quantity.optional(),
+      weightLb: weight,
+      lotCode: z.string().max(120).optional(),
+      locationAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  const { id, ...patch } = parsed.data;
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => updateRunOutput(tx, ctxOf(ctx), id, patch),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function removeRunOutputAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => removeRunOutput(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Finish the run and land everything.
+ *
+ * The result carries the numbers back so the toast can say what actually
+ * happened — how it was split, and how much money went onto the shelf. A screen
+ * that says "Saved" after the act that decides what a pound of pork chop cost is
+ * the mistake `inventory` corrected on the page that never mentioned money.
+ */
+export async function completeRunAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ runId: z.string().uuid(), completedOn: requiredDate })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        completeRun(tx, ctxOf(ctx), parsed.data.runId, parsed.data.completedOn),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.run.completed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_run",
+      targetId: parsed.data.runId,
+      meta: {
+        completedOn: parsed.data.completedOn,
+        costBasis: result.basis,
+        potCents: result.potCents,
+        landed: result.landed,
+        unpricedInputs: result.unpricedInputs,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/inventory", "layout");
+    return {
+      ok: true,
+      basis: result.basis,
+      potCents: result.potCents,
+      landed: result.landed,
+      unpricedInputs: result.unpricedInputs,
+    };
+  } catch (err) {
+    return toResult(err);
+  }
+}

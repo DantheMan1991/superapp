@@ -7,14 +7,15 @@ import { decryptSecret, encryptSecret } from "../src/lib/crypto";
 import {
   completeReconciliation,
   editEntry,
+  getDefaultEntityId,
   getReconciliationView,
+  type LedgerCtx,
+  toggleReconciliationLine,
+  postEntry,
   reopenReconciliation,
   reverseEntry,
   startReconciliation,
-  toggleReconciliationLine,
   voidEntry,
-  postEntry,
-  type LedgerCtx,
 } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
@@ -43,6 +44,14 @@ import {
   suggestCategoriesForBankAccount,
 } from "../src/modules/accounting/ai/suggest";
 import { validateSuggestions } from "../src/modules/accounting/ai/validate";
+
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+let entityId: string;
 
 /**
  * Session 3 certification: CSV parsing (pure), AI validation (pure),
@@ -333,6 +342,9 @@ d("banking (DB)", () => {
     owner = { tenantId, userId: "owner", role: "owner" };
     staff = { tenantId, userId: "staff", role: "staff" };
     await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
+    entityId = await withTenant(tenantId, (tx) =>
+      getDefaultEntityId(tx, tenantId),
+    );
   });
 
   afterAll(async () => {
@@ -358,6 +370,7 @@ d("banking (DB)", () => {
     const obe = await accountId("3000");
     await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "posted",
         entryDate: "2026-01-01",
         source: "opening_balance",
@@ -373,6 +386,7 @@ d("banking (DB)", () => {
       withTenant(tenantId, (tx) =>
         tx.insert(schema.bankAccounts).values({
           tenantId,
+          entityId,
           accountId: ledgerAccount.id,
           name: "Duplicate register",
           kind: "checking",
@@ -845,6 +859,7 @@ d("banking (DB)", () => {
     const utilities = await accountId("6650");
     const { entry } = await withTenant(tenantId, (tx) =>
       postEntry(tx, owner, {
+        entityId,
         status: "posted",
         entryDate: "2026-04-01",
         source: "manual",

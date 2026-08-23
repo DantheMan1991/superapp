@@ -6,6 +6,7 @@ import { preferredContactValue } from "@/lib/parties/contact-values";
 import { listContactPoints } from "@/lib/parties/contacts";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
 import { renderInvoicePdf } from "./invoice-pdf";
+import { invoiceTaxFields } from "./invoices";
 import {
   buildInvoiceEmail,
   invoiceSendIdempotencyKey,
@@ -127,6 +128,8 @@ export async function sendInvoiceEmail(
   });
   const businessName = tenant?.name ?? "";
 
+  const tax = await invoiceTaxFields(tx, ctx.tenantId, invoice);
+
   const pdf = await renderInvoicePdf({
     businessName,
     invoiceNumber: invoice.invoiceNumber,
@@ -135,6 +138,7 @@ export async function sendInvoiceEmail(
     dueDate: invoice.dueDate,
     memo: invoice.memo,
     totalCents: invoice.totalCents,
+    ...tax,
     paidCents,
     customerName: customer?.name ?? "",
     customerAddress: customer?.address ?? "",

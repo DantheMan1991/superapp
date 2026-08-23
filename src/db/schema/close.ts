@@ -19,6 +19,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
+import { entities } from "./ledger";
 
 export const periodCloseStatus = pgEnum("period_close_status", [
   "completed",
@@ -32,7 +33,17 @@ export const periodCloses = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
-    /** The date this close set accounting_settings.closed_through to. */
+    /**
+     * WHICH COMPANY'S BOOKS THIS CLOSED (ADR 0010 slice 4). A close is an act
+     * performed on one set of books, so it belongs to an entity the way an
+     * invoice, a bill and a register already do.
+     *
+     * NOT NULL since `drizzle/0153`, the contract half — it arrived nullable in
+     * `0152` because the build running while that migration landed still
+     * inserted closes without a company.
+     */
+    entityId: uuid("entity_id").notNull(),
+    /** The date this close set the company's closed_through to. */
     periodEnd: date("period_end", { mode: "string" }).notNull(),
     status: periodCloseStatus("status").notNull().default("completed"),
     /**
@@ -67,11 +78,21 @@ export const periodCloses = pgTable(
   },
   (t) => [
     uniqueIndex("period_closes_tenant_id_id_idx").on(t.tenantId, t.id),
-    // One LIVE close per period end; reopened rows remain as history.
-    uniqueIndex("period_closes_tenant_period_completed_idx")
-      .on(t.tenantId, t.periodEnd)
+    // One LIVE close per period end PER COMPANY; reopened rows remain as
+    // history. The entity is in the key because two companies closing the same
+    // June is the ordinary case, not a collision (ADR 0010 slice 4).
+    uniqueIndex("period_closes_tenant_entity_period_completed_idx")
+      .on(t.tenantId, t.entityId, t.periodEnd)
       .where(sql`${t.status} = 'completed'`),
     index("period_closes_tenant_idx").on(t.tenantId),
+    index("period_closes_tenant_entity_idx").on(t.tenantId, t.entityId),
+    // Composite, so a close can never name another tenant's company — the
+    // pattern every entity reference in this schema uses.
+    foreignKey({
+      name: "period_closes_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
+    }).onDelete("restrict"),
   ],
 );
 

@@ -3,7 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import { logAuditInTx } from "../src/lib/audit";
-import { postEntry, type LedgerCtx } from "../src/modules/accounting/core";
+import {
+  getDefaultEntityId,
+  postEntry,
+  type LedgerCtx,
+} from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
 import {
   buildBooksCsvFiles,
@@ -28,7 +32,6 @@ function minimalBooksData(): BooksData {
   const settings = {
     id: "s1",
     tenantId: "t1",
-    closedThrough: "2026-06-30",
     coaTemplate: "general",
     fiscalYearStartMonth: 1,
     entryEditPolicy: "standard",
@@ -42,6 +45,15 @@ function minimalBooksData(): BooksData {
     updatedAt: new Date(),
   } as BooksData["settings"];
   return {
+    entities: [
+      {
+        id: "e1", tenantId: "t1", name: "Fixture Co", legalName: "",
+        isDefault: true, isActive: true,
+        // The period lock lives here since ADR 0010 slice 4.
+        closedThrough: "2026-06-30",
+        createdAt: new Date(), updatedAt: new Date(),
+      },
+    ],
     accounts: [
       {
         id: "a1", tenantId: "t1", code: "1000", name: 'Checking, "Main"',
@@ -64,6 +76,7 @@ function minimalBooksData(): BooksData {
     invoices: [],
     invoiceLines: [],
     invoicePayments: [],
+    salesTaxRates: [],
     recurringEntries: [],
     vendors: [],
     bills: [],
@@ -93,15 +106,26 @@ describe("books export CSV builders (pure)", () => {
     ).toBe("documents/files/abcdef12_receipt.pdf");
   });
 
-  it("settings.csv carries exactly the five policy fields — never the email token or cooldowns", () => {
+  it("settings.csv carries exactly the four policy fields — never the email token or cooldowns", () => {
     const files = buildBooksCsvFiles(minimalBooksData());
     const settingsFile = files.find((f) => f.zipPath === "ledger/settings.csv")!;
-    expect(settingsFile.content).toContain("closed_through");
     expect(settingsFile.content).toContain("bookkeeping_timezone");
+    // `closed_through` LEFT this file in ADR 0010 slice 4: the period lock is
+    // per company now and lives on entities.csv. Left here it would be an
+    // always-blank column reading as "never closed".
+    expect(settingsFile.content).not.toContain("closed_through");
     expect(settingsFile.content).not.toContain("SECRET-TOKEN-MUST-NOT-LEAK");
     expect(settingsFile.content).not.toContain("token");
     expect(settingsFile.content).not.toContain("ai_last");
     expect(settingsFile.content).not.toContain("export_last");
+  });
+
+  it("entities.csv carries each company's own period lock", () => {
+    const files = buildBooksCsvFiles(minimalBooksData());
+    const entitiesFile = files.find((f) => f.zipPath === "ledger/entities.csv")!;
+    // APPENDED, so a process reading this file by column position is unaffected.
+    expect(entitiesFile.content).toContain("is_active,closed_through");
+    expect(entitiesFile.content).toContain("2026-06-30");
   });
 
   it("settings.csv reports the TENANT's timezone", () => {
@@ -244,6 +268,7 @@ async function seedTenant(name: string, slug: string): Promise<string> {
     });
     const owner: LedgerCtx = { tenantId: id, userId: `${slug}-owner`, role: "owner" };
     await postEntry(tx, owner, {
+      entityId: await getDefaultEntityId(tx, id),
       entryDate: "2026-07-01",
       memo: `secret memo of ${name}`,
       status: "posted",

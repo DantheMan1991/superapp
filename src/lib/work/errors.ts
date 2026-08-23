@@ -17,6 +17,8 @@ export type WorkErrorCode =
   | "DEFAULT_IS_PERMANENT"
   | "NOT_ASSIGNABLE"
   | "WOULD_CYCLE"
+  /** Work cannot be about itself — the attach picker offered it, until it did not. */
+  | "SELF_LINK"
   /**
    * Somebody else changed the row since it was read.
    *

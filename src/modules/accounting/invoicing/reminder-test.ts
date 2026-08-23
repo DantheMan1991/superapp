@@ -12,6 +12,7 @@ import {
   testSubject,
 } from "./reminder-email";
 import { renderReminderMessage } from "./reminder-render";
+import { invoiceTaxFields } from "./invoices";
 import { nextReminder, parseOffsets } from "./reminder-schedule";
 import type { DueReminder } from "./reminder-run";
 
@@ -176,6 +177,9 @@ export async function sendTestReminder(
     businessName: tenant?.name ?? "",
     customerAddress: customer?.address ?? "",
     customerEmail: preferredContactValue(contacts, "email") ?? "",
+    // The same resolver the sweep uses, so the preview shows the tax the real
+    // reminder would attach.
+    tax: await invoiceTaxFields(tx, ctx.tenantId, invoice),
     lines: lines.map((l) => ({
       description: l.description,
       quantity: l.quantity,

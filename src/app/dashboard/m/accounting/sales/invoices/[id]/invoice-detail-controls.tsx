@@ -52,7 +52,13 @@ export function InvoiceActions({
   paymentMethods,
 }: {
   invoice: InvoiceRef;
-  depositOptions: Array<{ id: string; label: string }>;
+  /**
+   * Every active register plus Undeposited Funds. `otherCompany` is set only
+   * when the account belongs to somebody else — depositing into one is an
+   * INTERCOMPANY payment (ADR 0010, the mirror of the bill case), recorded as a
+   * linked pair rather than refused, and the dialog says so before it happens.
+   */
+  depositOptions: Array<{ id: string; label: string; otherCompany?: string }>;
   today: string;
   canAct: boolean;
   /** The tenant's own list. Codes are what get stored on the payment. */
@@ -65,12 +71,17 @@ export function InvoiceActions({
   const [pay, setPay] = useState({
     date: today,
     amount: (invoice.balanceCents / 100).toFixed(2),
-    depositAccountId: depositOptions[0]?.id ?? "",
+    // Default to one of THIS company's own accounts, so the ordinary payment
+    // stays one click and banking it into an affiliate is always deliberate.
+    depositAccountId:
+      (depositOptions.find((o) => !o.otherCompany) ?? depositOptions[0])?.id ?? "",
     // Whatever the tenant listed first, rather than a hardcoded "check" that
     // might not be one of their methods at all.
     method: paymentMethods[0]?.code ?? "other",
     memo: "",
   });
+
+  const chosenDeposit = depositOptions.find((o) => o.id === pay.depositAccountId);
 
   async function run(kind: "issue" | "void" | "delete") {
     const asked =
@@ -231,10 +242,20 @@ export function InvoiceActions({
                     {depositOptions.map((o) => (
                       <SelectItem key={o.id} value={o.id}>
                         {o.label}
+                        {o.otherCompany ? ` — ${o.otherCompany}` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {chosenDeposit?.otherCompany && (
+                  // Said BEFORE it happens, the way the bill dialog says it.
+                  <p className="text-xs text-muted-foreground">
+                    The money is going into {chosenDeposit.otherCompany}&apos;s
+                    account. It will be recorded on both sides:{" "}
+                    {chosenDeposit.otherCompany} owes this company the amount
+                    until it is settled.
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>Method</Label>
@@ -279,7 +300,25 @@ export function InvoiceActions({
   );
 }
 
-function UnapplyButton({ paymentId, version }: { paymentId: string; version: number }) {
+/**
+ * A PLAIN NAMED EXPORT, not `InvoiceActions.Unapply`.
+ *
+ * It was attached as a property of `InvoiceActions` and rendered as
+ * `<InvoiceActions.Unapply />` from the invoice page — which is a SERVER
+ * component. Properties hung on a "use client" export do not survive the RSC
+ * boundary: the server sees a client reference, `.Unapply` is undefined on it,
+ * and React throws #130 ("element type is invalid"). The whole page 500s.
+ *
+ * It only ever rendered when an invoice had a payment, which is why nothing
+ * caught it — found by recording the first one on the live Test tenant.
+ */
+export function UnapplyPaymentButton({
+  paymentId,
+  version,
+}: {
+  paymentId: string;
+  version: number;
+}) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const [pending, startTransition] = useTransition();
@@ -316,8 +355,6 @@ function UnapplyButton({ paymentId, version }: { paymentId: string; version: num
     </>
   );
 }
-
-InvoiceActions.Unapply = UnapplyButton;
 
 /**
  * Email the invoice to the customer, PDF attached.

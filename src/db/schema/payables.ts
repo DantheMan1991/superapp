@@ -23,7 +23,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { parties } from "./parties";
-import { accounts, journalEntries } from "./ledger";
+import { accounts, entities, journalEntries } from "./ledger";
 
 export const billStatus = pgEnum("bill_status", [
   "draft",
@@ -87,6 +87,13 @@ export const bills = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * Which company's books this document belongs to (ADR 0010). The document
+     * decides, and its approval and every payment follow it. NOT NULL in the
+     * database since `0146` — it arrived nullable in `0145`, because migrations
+     * precede deploys.
+     */
+    entityId: uuid("entity_id").notNull(),
     vendorId: uuid("vendor_id").notNull(),
     /** The VENDOR's invoice number — the real-world dedup key. */
     billNumber: text("bill_number").notNull().default(""),
@@ -113,6 +120,7 @@ export const bills = pgTable(
   (t) => [
     uniqueIndex("bills_tenant_id_id_idx").on(t.tenantId, t.id),
     index("bills_tenant_status_idx").on(t.tenantId, t.status),
+    index("bills_tenant_entity_idx").on(t.tenantId, t.entityId),
     index("bills_tenant_vendor_idx").on(t.tenantId, t.vendorId),
     // One bill per approval entry — mirrors invoices.
     uniqueIndex("bills_tenant_entry_idx")
@@ -122,6 +130,11 @@ export const bills = pgTable(
     index("bills_tenant_vendor_number_idx")
       .on(t.tenantId, t.vendorId, t.billNumber)
       .where(sql`${t.billNumber} <> ''`),
+    foreignKey({
+      name: "bills_entity_fk",
+      columns: [t.tenantId, t.entityId],
+      foreignColumns: [entities.tenantId, entities.id],
+    }),
     foreignKey({
       name: "bills_vendor_fk",
       columns: [t.tenantId, t.vendorId],

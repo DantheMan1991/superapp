@@ -10,6 +10,55 @@
 
 ## Build log
 
+### 2026-08-18 — Work that was about itself (branch `claude/work-cannot-be-about-itself`)
+
+First time anybody has driven this module. Opened an item, typed a word into
+**What this is about**, pressed the search button — and the item's own title came
+back as a candidate. Attaching it produced a chip on the item pointing at the
+item, and **nothing refused it**.
+
+- **The attach picker searches every enabled module, and Work is one of them.**
+  That is the design working as intended — Work is both the HOST rendering the
+  picker and a CONTRIBUTOR answering it, which is the round trip slice 5 exists
+  for. What nobody had asked was whether the host should offer ITSELF.
+- **The guard is in `attachLink`, not in the picker.** Layer 0's shared work
+  actions reach that function from any module, so a rule enforced in the sheet
+  is a rule the next consumer does not get — the same argument that put
+  `assertNoForeignRegisters` in the posting engine rather than in each screen.
+  `SELF_LINK` joins the error union; the message is "Work cannot be about
+  itself."
+- **`searchLinkTargets` takes an optional `excludeItemId`** so the choice is not
+  offered either. Optional because the search is also reachable before there is
+  an item to exclude; the engine refuses regardless.
+- `tests/work-ops.test.ts` gains the case, beside the one that proves attaching
+  a DIFFERENT work item still resolves through Work's own contributor — the two
+  together are the boundary.
+
+**What else the drive covered, and found nothing wrong with:** the list with its
+urgency grouping (Overdue / Later / No date), state changes through the row
+dropdown, the board with all five columns and its empty-state, the item sheet's
+title/notes/dates/assignee, and the Lists page — where the default list
+correctly has no archive control. An item added with a due date landed in the
+right group and moved to In progress cleanly.
+
+### 2026-08-15 — Layer 0 gains work ACTIONS, not just a write path (`claude/shared-entity-work`)
+- `src/lib/work/actions.ts` — the entity-scoped verbs (add, done/reopen,
+  reassign, re-due) as `"use server"` at Layer 0, callable by any module or
+  pack.
+- **Why it was missing and why that mattered.** The write path has been shared
+  since slice 5a, but the only `"use server"` file was
+  `src/modules/work/actions.ts` — and a module may not import another module, so
+  every consumer wrapped its own subset. CRM wrapped two verbs; the assets pack
+  was about to wrap a different two. The divergence was invisible until there
+  were two consumers.
+- **The guard is the OWNING feature, not Work.** `extensionSlug` names the
+  module or pack the record belongs to, and that is what must be enabled. Work
+  being switched off does not stop a follow-up being raised — the item simply
+  has no second home to appear in.
+- `expectedVersion` is threaded through, enforced the way CRM does it: an empty
+  patch through `updateEntityWork` whose only job is to fail when the row moved.
+- Rule recorded in [extension-model.md §4b](../extension-model.md).
+
 Newest first. One entry per session/PR that touched this module. Every PR
 that changes this module MUST add an entry here (rule in AGENTS.md).
 

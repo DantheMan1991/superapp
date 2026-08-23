@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { neonConfig, Pool } from "@neondatabase/serverless";
 import ws from "ws";
+import { assertNoBypassRls, provisionAppUser } from "./lib/app-role";
 
 /**
  * Creates (or re-keys) the `app_user` database role the application connects
@@ -62,42 +63,24 @@ async function main() {
   const password = randomBytes(24).toString("base64url");
   // Identifier is fixed and the password is generated here — nothing
   // user-controlled is interpolated.
-  const roleExists =
-    (
-      await pool.query(
-        "select 1 from pg_roles where rolname = 'app_user'",
-      )
-    ).rowCount! > 0;
+  // Shared with scripts/ci-provision-db.ts so the two cannot drift — see
+  // scripts/lib/app-role.ts for why that matters more than it looks.
+  const query = (text: string) => pool.query(text);
+  const roleExisted =
+    (await pool.query("select 1 from pg_roles where rolname = 'app_user'"))
+      .rowCount! > 0;
 
-  if (roleExists) {
-    await pool.query(`ALTER ROLE app_user WITH LOGIN PASSWORD '${password}'`);
-    console.log("app_user role exists — password rotated.");
-  } else {
-    await pool.query(
-      `CREATE ROLE app_user WITH LOGIN PASSWORD '${password}' NOCREATEDB NOCREATEROLE`,
-    );
-    console.log("app_user role created.");
-  }
-
-  await pool.query(`GRANT USAGE ON SCHEMA public TO app_user`);
-  await pool.query(
-    `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_user`,
-  );
-  await pool.query(
-    `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user`,
-  );
-  await pool.query(
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_user`,
-  );
-  await pool.query(
-    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user`,
+  await provisionAppUser(query, password);
+  console.log(
+    roleExisted
+      ? "app_user role exists — password rotated."
+      : "app_user role created.",
   );
 
-  const check = await pool.query(
-    `select rolbypassrls from pg_roles where rolname = 'app_user'`,
-  );
-  if (check.rows[0]?.rolbypassrls) {
-    console.error("Unexpected: app_user has BYPASSRLS. Aborting.");
+  try {
+    await assertNoBypassRls(query);
+  } catch (err) {
+    console.error(`Unexpected: ${(err as Error).message}`);
     process.exit(1);
   }
   await pool.end();

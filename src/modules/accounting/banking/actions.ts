@@ -114,6 +114,13 @@ const createBankAccountSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     kind: z.enum(["checking", "savings", "credit_card"]),
+    /**
+     * Which company owns the register (ADR 0010). Optional over the wire and
+     * resolved to the tenant's default. Chosen ONCE — there is no update path,
+     * because every entry that has cleared through the account belongs to the
+     * company that owned it at the time.
+     */
+    entityId: z.string().uuid().optional(),
     institution: z.string().trim().max(120).optional(),
     last4: z.string().regex(/^\d{0,4}$/).optional(),
     openingBalanceCents: z
@@ -708,6 +715,9 @@ export async function quickAddTransactionAction(
             ];
       const status = ctx.role === "owner" ? ("posted" as const) : ("draft" as const);
       const { entry } = await postEntry(tx, ctx, {
+        // THE REGISTER'S company — this is money in one account, so there is
+        // nothing to pick.
+        entityId: bankAccount.entityId,
         status,
         entryDate: p.txnDate,
         memo: p.memo ?? "",

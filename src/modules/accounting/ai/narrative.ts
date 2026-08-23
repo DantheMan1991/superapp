@@ -61,17 +61,33 @@ export async function gatherCloseNarrativeInputs(
   const periodStart = closePeriodStart(close, settings.fiscalYearStartMonth);
   const periodEnd = close.periodEnd;
 
+  /**
+   * THE COMPANY THE CLOSE COVERS (ADR 0010 slice 4). The rule this comment held
+   * in slice 1 has not changed — the narrative describes the same books the
+   * close covers — but a close now covers ONE company, so the narrative does
+   * too. Anything else would be a story about Maple's month told over Oak's
+   * numbers.
+   *
+   */
+  const scope = { kind: "one", entityId: close.entityId } as const;
   const pnl = await getProfitAndLoss(tx, ctx.tenantId, {
+    scope,
     from: periodStart,
     to: periodEnd,
     compare: "prev-period",
   });
   const cash = await getCashActivity(tx, ctx.tenantId, {
+    scope,
     from: periodStart,
     to: periodEnd,
   });
-  const bs = await getBalanceSheet(tx, ctx.tenantId, { asOf: periodEnd });
-  const checklist = await getCloseChecklist(tx, ctx.tenantId, periodEnd);
+  const bs = await getBalanceSheet(tx, ctx.tenantId, { scope, asOf: periodEnd });
+  const checklist = await getCloseChecklist(
+    tx,
+    ctx.tenantId,
+    close.entityId,
+    periodEnd,
+  );
 
   // Largest posted entries in the period, by total debit magnitude.
   const topEntries = await tx

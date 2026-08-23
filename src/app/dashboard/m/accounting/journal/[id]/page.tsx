@@ -17,7 +17,11 @@ import {
 import { PageHeader } from "@/components/app/page-header";
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
-import { getSettings } from "@/modules/accounting/core";
+import {
+  getClosedThrough,
+  getSettings,
+  listEntities,
+} from "@/modules/accounting/core";
 import { formatCents, todayInTimezone } from "@/modules/accounting/lib/money";
 import { EntryActions } from "../entry-actions";
 import { EntryEditor } from "../entry-editor";
@@ -95,14 +99,45 @@ export default async function EntryPage({
             eq(schema.journalEntries.reversesEntryId, id),
           ),
         });
-    return { entry, lines, accounts, settings, reversal };
+    // Register ownership, so an EDIT offers the same accounts a create does.
+    // The entry's company is fixed, so the filter is exact here.
+    const registers = await tx.query.bankAccounts.findMany({
+      where: eq(schema.bankAccounts.tenantId, ctx.tenant.id),
+      columns: { accountId: true, entityId: true },
+    });
+    const ownerOf = new Map(registers.map((r) => [r.accountId, r.entityId]));
+    return {
+      entry,
+      lines,
+      accounts: accounts.map((a) => ({
+        ...a,
+        ...(ownerOf.has(a.id) ? { registerEntityId: ownerOf.get(a.id)! } : {}),
+      })),
+      settings,
+      closedThrough: await getClosedThrough(tx, ctx.tenant.id, entry.entityId),
+      // WHICH COMPANY'S BOOKS this entry is in. The journal LIST grew a Company
+      // column in slice 1 and the detail page never did — so a two-company
+      // tenant could open an entry and not be told whose books it belongs to,
+      // on the page where they void and reverse it. Undefined at one company.
+      companyName: await (async () => {
+        const entities = await listEntities(tx, ctx.tenant.id, {
+          includeInactive: true,
+        });
+        return entities.length > 1
+          ? (entities.find((e) => e.id === entry.entityId)?.name ?? null)
+          : null;
+      })(),
+      reversal,
+    };
   });
   if (!data) notFound();
   const { entry, lines, accounts, settings, reversal } = data;
 
   const isOwner = ctx.role === "owner";
+  // THE ENTRY'S OWN COMPANY decides whether it sits in a closed period (ADR
+  // 0010 slice 4) — a tenant-wide date would lock an entry whose books are open.
   const inClosedPeriod =
-    !!settings.closedThrough && entry.entryDate <= settings.closedThrough;
+    !!data.closedThrough && entry.entryDate <= data.closedThrough;
   const canMutatePosted =
     settings.entryEditPolicy === "standard" && !inClosedPeriod;
   const editing =
@@ -124,6 +159,7 @@ export default async function EntryPage({
           title="Journal entry"
           description={
             <>
+              {data.companyName ? `${data.companyName} · ` : ""}
               {entry.entryDate} · {entry.source.replaceAll("_", " ")}
               {entry.memo ? ` · ${entry.memo}` : ""}
             </>
@@ -213,6 +249,7 @@ export default async function EntryPage({
             entry={{
               id: entry.id,
               version: entry.version,
+              entityId: entry.entityId,
               entryDate: entry.entryDate,
               memo: entry.memo,
               lines: lines.map((l) => ({

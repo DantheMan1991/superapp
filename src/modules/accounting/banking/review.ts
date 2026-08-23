@@ -107,6 +107,10 @@ export async function categorizeTransaction(
       ),
     );
   const { entry } = await postEntry(tx, ctx, {
+    // THE REGISTER'S company. A bank transaction is money that moved through
+    // one company's account, so there is nothing to choose and nothing to
+    // inherit — it is a property of the account the row arrived on.
+    entityId: bankAccount.entityId,
     status: "posted",
     entryDate: txn.txnDate,
     memo: args.memo ?? txn.description,

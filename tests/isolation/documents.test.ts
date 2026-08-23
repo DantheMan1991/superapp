@@ -2,7 +2,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../../src/db";
-import { d, seedParty } from "./_shared";
+import { d, seedEntity, seedParty } from "./_shared";
 
 /**
  * Documents (session 5): RLS isolation for documents/document_links plus
@@ -42,13 +42,14 @@ d("documents isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.accounts)
         .values({ tenantId, code: "1000", name: `Checking ${tag}`, accountType: "asset", subtype: "bank" })
         .returning();
+      const entityId = await seedEntity(tx, tenantId, tag);
       const [entry] = await tx
         .insert(schema.journalEntries)
-        .values({ tenantId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
+        .values({ tenantId, entityId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
         .returning();
       const [bank] = await tx
         .insert(schema.bankAccounts)
-        .values({ tenantId, accountId: cash.id, name: `Bank ${tag}`, kind: "checking" })
+        .values({ tenantId, entityId, accountId: cash.id, name: `Bank ${tag}`, kind: "checking" })
         .returning();
       const [txn] = await tx
         .insert(schema.bankTransactions)
@@ -64,7 +65,7 @@ d("documents isolation (RLS + composite tenant FKs)", () => {
         .returning();
       const [invoice] = await tx
         .insert(schema.invoices)
-        .values({ tenantId, customerId: customer.id, invoiceNumber: `INV-${tag}`, issueDate: "2026-07-01", createdByClerkUserId: `user-${tag}` })
+        .values({ tenantId, entityId, customerId: customer.id, invoiceNumber: `INV-${tag}`, issueDate: "2026-07-01", createdByClerkUserId: `user-${tag}` })
         .returning();
       const [doc] = await tx
         .insert(schema.documents)

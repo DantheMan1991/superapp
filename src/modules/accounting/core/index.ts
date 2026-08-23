@@ -2,11 +2,15 @@ export { LedgerError, friendlyMessage, type LedgerErrorCode } from "./errors";
 export type { EntryLineInput, LedgerCtx, NewEntryInput, PostResult } from "./types";
 export {
   assertEntryNotSourceManaged,
+  assertNotIntercompanyLeg,
   assertPeriodOpen,
+  getClosedThrough,
   getSettings,
   requireOwnerRole,
+  requirePostingRight,
   requireReviewRole,
   setClosedThrough,
+  MACHINE_SOURCES,
 } from "./guards";
 export {
   addCloseNote,
@@ -31,19 +35,47 @@ export {
   voidEntry,
 } from "./posting";
 export {
-  getBalances,
-  getTrialBalance,
-  ledgerIsBalanced,
-  type AccountingBasis,
-  type BalanceRow,
-  type TrialBalance,
-  type TrialBalanceRow,
-} from "./balances";
+  createEntity,
+  entityForRegisterAccount,
+  entityScopeCondition,
+  entityScopeLabel,
+  getDefaultEntityId,
+  groupClosedThrough,
+  listEntities,
+  provisionEntity,
+  resolveEntityScope,
+  resolveReportEntity,
+  setDefaultEntity,
+  updateEntity,
+  type Consolidation,
+  type EntityScope,
+  type FilterScope,
+  type ReportEntityView,
+} from "./entities";
+// `asFilterScope` is deliberately NOT re-exported: it is the one way past the
+// compile error FilterScope exists to cause, and it stays inside core/.
+export {
+  consolidationResidual,
+  residualIfConsolidated,
+  residualNote,
+  type ConsolidationResidual,
+} from "./consolidation";
+export {
+  affiliateBalances,
+  loadIntercompanyEntries,
+  postIntercompanyPair,
+  reverseIntercompanyPair,
+  voidIntercompanyPair,
+  type AffiliateBalance,
+  type IntercompanyPair,
+} from "./intercompany";
+export { getBalances, getTrialBalance, ledgerIsBalanced, ledgerIsBalancedPerEntity, resolveBasis, type AccountingBasis, type BalanceRow, type TrialBalance, type TrialBalanceRow } from "./balances";
 export {
   MAX_COA_DEPTH,
   NORMAL_BALANCE,
   createAccount,
   deactivateAccount,
+  isCodableAccount,
   listAccounts,
   updateAccount,
   type AccountTypeValue,
@@ -72,7 +104,15 @@ export {
   getCashActivity,
   getGeneralLedger,
   getProfitAndLoss,
+  getTaxSummary,
 } from "./reports";
+export {
+  buildTaxSummary,
+  type TaxRateName,
+  type TaxSummaryInvoice,
+  type TaxSummaryRateRow,
+  type TaxSummaryReport,
+} from "./tax-summary";
 export {
   BS_GROUP_BY_SUBTYPE,
   PNL_SECTION_BY_SUBTYPE,

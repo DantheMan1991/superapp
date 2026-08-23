@@ -4,7 +4,7 @@ import { schema, withTenant, type Tx } from "@/db";
 import type { RecurringEntry } from "@/db/schema";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError, requireOwnerRole, type LedgerCtx } from "../core";
-import { getSettings } from "../core/guards";
+import { getDefaultEntityId, listEntities } from "../core/entities";
 import { postEntry } from "../core/posting";
 import { createBillDraft } from "../payables/bills";
 import { createInvoiceDraft } from "../invoicing/invoices";
@@ -111,12 +111,21 @@ async function assertTemplateReferences(
  */
 export async function generateRecurringEntries(
   ctx: LedgerCtx,
+  options: { unattended?: boolean } = {},
 ): Promise<RecurringEntryResult> {
   requireOwnerRole(ctx);
 
-  const { due, today, closedThrough } = await withTenant(ctx.tenantId, async (tx) => {
+  const { due, today, closedByEntity } = await withTenant(ctx.tenantId, async (tx) => {
     const today = todayInTimezone(await getTenantTimezone(tx, ctx.tenantId));
-    const settings = await getSettings(tx, ctx.tenantId);
+    // PER COMPANY since ADR 0010 slice 4: a template resolves its own company
+    // below, and the lock that matters is that company's. One tenant-wide date
+    // would defer Maple's monthly journal to a draft because Oak closed June.
+    const closedByEntity = new Map(
+      (await listEntities(tx, ctx.tenantId, { includeInactive: true })).map((e) => [
+        e.id,
+        e.closedThrough,
+      ]),
+    );
     const due = await tx.query.recurringEntries.findMany({
       where: and(
         eq(schema.recurringEntries.tenantId, ctx.tenantId),
@@ -124,7 +133,7 @@ export async function generateRecurringEntries(
         lte(schema.recurringEntries.nextRunDate, today),
       ),
     });
-    return { due, today, closedThrough: settings.closedThrough };
+    return { due, today, closedByEntity };
   });
 
   const result: RecurringEntryResult = {
@@ -136,6 +145,20 @@ export async function generateRecurringEntries(
   };
 
   for (const entry of due) {
+    /**
+     * WHO the generated records belong to.
+     *
+     * When somebody presses Generate now, it is them. On the nightly sweep
+     * there is nobody at the keyboard, so the records are attributed to
+     * whoever WROTE THE SCHEDULE DOWN — which is the truthful answer, and the
+     * only person who ever decided any of this. `created_by_clerk_user_id` is
+     * NOT NULL on all three targets, so it needs a real id rather than a
+     * sentinel; using the template's author also means the History panel names
+     * a person who can explain the row, instead of "A teammate".
+     */
+    const actor: LedgerCtx = options.unattended
+      ? { ...ctx, userId: entry.createdByClerkUserId }
+      : ctx;
     try {
       const outcome = await withTenant(ctx.tenantId, async (tx) => {
         const template = parseRecurringEntryTemplate(entry.template);
@@ -152,6 +175,20 @@ export async function generateRecurringEntries(
           );
         }
         await assertTemplateReferences(tx, ctx.tenantId, template);
+
+        /**
+         * A TEMPLATE RESOLVES ITS COMPANY; A DOCUMENT FREEZES ONE. The same
+         * split `recurring_entries` already makes for a sales-tax rate — a
+         * template is a standing instruction, so a template naming no company
+         * follows the tenant's default as it stands at generation, while the
+         * invoice or bill it produces freezes whatever it was given.
+         *
+         * Resolved ONCE per template rather than per catch-up month, so a
+         * twelve-month catch-up cannot straddle two sets of books.
+         */
+        const entityId =
+          template.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId));
+        const closedThrough = closedByEntity.get(entityId) ?? null;
 
         let next = entry.nextRunDate;
         let runs = 0;
@@ -172,7 +209,8 @@ export async function generateRecurringEntries(
             const status = wantsPost && !inClosedPeriod ? "posted" : "draft";
             if (wantsPost && inClosedPeriod) deferred += 1;
 
-            await postEntry(tx, ctx, {
+            await postEntry(tx, actor, {
+              entityId,
               status,
               entryDate: next,
               memo: template.memo ?? entry.name,
@@ -194,19 +232,29 @@ export async function generateRecurringEntries(
             // before AR posts, and generation never touches the ledger, which
             // is what makes it immune to PERIOD_CLOSED. That rule came with
             // `recurring_invoices` and survives the move unchanged.
-            await createInvoiceDraft(tx, ctx, {
+            await createInvoiceDraft(tx, actor, {
+              entityId,
               customerId: entry.customerId!,
               issueDate: next,
               dueDate: addDaysIso(next, template.dueInDays),
               memo: template.memo ?? entry.name,
               lines: template.lines,
+              // Re-resolved against the live rate every month by
+              // `createInvoiceDraft`, which is the point: a template says
+              // "charge the state rate", and a rate correction should reach
+              // the invoice it has not generated yet. A rate deactivated since
+              // the template was written throws TAX_RATE_INVALID, which the
+              // loop reports against this template and carries on — the same
+              // treatment an inactive account already gets.
+              taxRateId: template.taxRateId ?? null,
               recurringEntryId: entry.id,
             });
           } else {
             // Bills are ALWAYS drafts. Approving a bill is what posts it, and
             // that approval is the control an owner already exercises over
             // money going out — generating an approved bill would remove it.
-            await createBillDraft(tx, ctx, {
+            await createBillDraft(tx, actor, {
+              entityId,
               vendorId: entry.vendorId!,
               billDate: next,
               dueDate: addDaysIso(next, template.dueInDays),

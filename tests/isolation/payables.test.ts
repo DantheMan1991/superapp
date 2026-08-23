@@ -2,7 +2,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../../src/db";
-import { d, seedParty } from "./_shared";
+import { d, seedEntity, seedParty } from "./_shared";
 
 /**
  * Payables (session 6): RLS isolation for vendors/bills/bill_lines/
@@ -13,6 +13,7 @@ import { d, seedParty } from "./_shared";
 const STAMP_PAY = `iso-pay-${process.pid}`;
 
 interface PayFixture {
+  entityId: string;
   vendorId: string;
   /** The vendor's party. Needed so the smuggling test can present a VALID FK. */
   partyId: string;
@@ -40,9 +41,10 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.accounts)
         .values({ tenantId, code: "6000", name: `Expense ${tag}`, accountType: "expense", subtype: "operating_expense" })
         .returning();
+      const entityId = await seedEntity(tx, tenantId, tag);
       const [entry] = await tx
         .insert(schema.journalEntries)
-        .values({ tenantId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
+        .values({ tenantId, entityId, entryDate: "2026-07-01", memo: `entry ${tag}`, createdByClerkUserId: `user-${tag}` })
         .returning();
       const partyId = await seedParty(tx, tenantId, `Vendor ${tag}`);
       const [vendor] = await tx
@@ -51,7 +53,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .returning();
       const [bill] = await tx
         .insert(schema.bills)
-        .values({ tenantId, vendorId: vendor.id, billDate: "2026-07-01", createdByClerkUserId: `user-${tag}` })
+        .values({ tenantId, entityId, vendorId: vendor.id, billDate: "2026-07-01", createdByClerkUserId: `user-${tag}` })
         .returning();
       const [billLine] = await tx
         .insert(schema.billLines)
@@ -67,6 +69,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
         .values({ tenantId, origin: "accounting", blobPathname: `acct/${tenantId}/receipts/pay-${tag}.pdf`, fileName: `${tag}.pdf`, mimeType: "application/pdf", sizeBytes: 10, sha256: `pay-${tag}` })
         .returning();
       return {
+        entityId,
         vendorId: vendor.id,
         partyId,
         billId: bill.id,
@@ -134,7 +137,22 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
       withTenant(tenantA, (tx) =>
         tx.insert(schema.bills).values({
           tenantId: tenantB,
+          entityId: fx.b.entityId,
           vendorId: fx.b.vendorId,
+          billDate: "2026-07-01",
+          createdByClerkUserId: "attacker",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: A's bill cannot name B's company", async () => {
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.bills).values({
+          tenantId: tenantA,
+          entityId: fx.b.entityId,
+          vendorId: fx.a.vendorId,
           billDate: "2026-07-01",
           createdByClerkUserId: "attacker",
         }),
@@ -147,6 +165,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
       withTenant(tenantA, (tx) =>
         tx.insert(schema.bills).values({
           tenantId: tenantA,
+          entityId: fx.a.entityId,
           vendorId: fx.b.vendorId,
           billDate: "2026-07-01",
           createdByClerkUserId: "attacker",
@@ -157,6 +176,7 @@ d("payables isolation (RLS + composite tenant FKs)", () => {
       withTenant(tenantA, (tx) =>
         tx.insert(schema.bills).values({
           tenantId: tenantA,
+          entityId: fx.a.entityId,
           vendorId: fx.a.vendorId,
           journalEntryId: fx.b.entryId,
           billDate: "2026-07-01",

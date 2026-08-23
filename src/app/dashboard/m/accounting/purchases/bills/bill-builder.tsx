@@ -59,6 +59,8 @@ interface LineRow {
 export interface BuilderBill {
   id: string;
   version: number;
+  /** Read-only once the draft exists — the company is fixed at creation. */
+  entityId?: string;
   vendorId: string;
   billNumber: string;
   billDate: string;
@@ -93,12 +95,21 @@ function emptyRow(): LineRow {
 
 export function BillBuilder({
   vendors,
+  entities = [],
+  defaultEntityId = null,
   accounts,
   today,
   bill,
   initialDuplicates,
 }: {
   vendors: BuilderVendor[];
+  /**
+   * The tenant's companies (ADR 0010) — shown at two or more, fixed once the
+   * draft exists. Which company owes this bill decides which balance sheet the
+   * liability lands on and which accounts may pay it.
+   */
+  entities?: Array<{ id: string; name: string }>;
+  defaultEntityId?: string | null;
   accounts: BuilderAccount[];
   today: string;
   /** When set, edits this draft instead of creating. */
@@ -111,6 +122,9 @@ export function BillBuilder({
   // prop directly so the dropdown does not reorder under the user mid-edit.
   const [vendorList] = useState(vendors);
   const [vendorId, setVendorId] = useState(bill?.vendorId ?? "");
+  const [entityId, setEntityId] = useState(
+    bill?.entityId ?? defaultEntityId ?? "",
+  );
   const [newVendorName, setNewVendorName] = useState("");
   const [number, setNumber] = useState(bill?.billNumber ?? "");
   const [billDate, setBillDate] = useState(bill?.billDate ?? today);
@@ -189,6 +203,7 @@ export function BillBuilder({
         accountId: p.row.accountId || null,
       }));
       const payload = {
+        entityId: entityId || undefined,
         vendorId: resolvedVendorId,
         billNumber: number.trim() || undefined,
         billDate,
@@ -241,6 +256,24 @@ export function BillBuilder({
               . Nothing is blocked — just double-check before approving.
             </span>
           </p>
+        )}
+
+        {!bill && entities.length > 1 && (
+          <div className="space-y-1.5 sm:max-w-xs">
+            <Label>Company</Label>
+            <Select value={entityId || undefined} onValueChange={setEntityId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Which company owes this?" />
+              </SelectTrigger>
+              <SelectContent>
+                {entities.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
 
         <div className="grid gap-3 sm:grid-cols-4">

@@ -22,6 +22,7 @@ import {
 import { AccountingNav } from "@/modules/accounting/components/accounting-nav";
 import { DocumentAttachments } from "@/modules/accounting/components/document-attachments";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
+import { listEntities } from "@/modules/accounting/core";
 import { loadInvoiceLines } from "@/modules/accounting/invoicing/invoices";
 import { paidCentsFor } from "@/modules/accounting/invoicing/payments";
 import {
@@ -41,10 +42,16 @@ import {
   listPaymentMethods,
   listPaymentTerms,
   listProducts,
+  listSalesTaxRates,
 } from "@/modules/accounting/invoicing/catalogue";
+import { describeTaxRate } from "@/modules/accounting/invoicing/tax";
 import { nextReminder } from "@/modules/accounting/invoicing/reminder-schedule";
 import { InvoiceRemindersPanel } from "@/modules/accounting/components/invoice-reminders-panel";
-import { InvoiceActions, SendInvoiceButton } from "./invoice-detail-controls";
+import {
+  InvoiceActions,
+  SendInvoiceButton,
+  UnapplyPaymentButton,
+} from "./invoice-detail-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -96,11 +103,25 @@ export default async function InvoiceDetailPage({
       orderBy: asc(schema.invoicePayments.paymentDate),
     });
     const paid = await paidCentsFor(tx, ctx.tenant.id, invoice.id);
+    /**
+     * EVERY active register, including other companies' — and that reverses
+     * what slice 1b did here, exactly as slice 2 reversed it on the bill.
+     *
+     * Slice 1b filtered this list because depositing one company's payment into
+     * another's account was refused, so offering it was offering a choice that
+     * always failed. It is recorded now, as a linked intercompany pair — the
+     * mirror of the bill case — so it is a real option. The dialog labels whose
+     * account each one is; `recordPayment` decides from the register which
+     * shape to write.
+     */
     const bankAccounts = await tx.query.bankAccounts.findMany({
       where: and(
         eq(schema.bankAccounts.tenantId, ctx.tenant.id),
         eq(schema.bankAccounts.isActive, true),
       ),
+    });
+    const companies = await listEntities(tx, ctx.tenant.id, {
+      includeInactive: true,
     });
     const undeposited = accounts.find(
       (a) => a.subtype === "undeposited_funds" && a.isSystem,
@@ -136,6 +157,10 @@ export default async function InvoiceDetailPage({
       listProducts(tx, ctx.tenant.id, { activeOnly: true }),
       listPaymentTerms(tx, ctx.tenant.id, { activeOnly: true }),
     ]);
+    // ALL rates, not just active: the editor must be able to show a draft the
+    // rate of which was retired since, and the display below names the rate an
+    // issued invoice charged whatever its state now is.
+    const taxRateRows = await listSalesTaxRates(tx, ctx.tenant.id);
     const methodRows = await listPaymentMethods(tx, ctx.tenant.id, {
       activeOnly: true,
     });
@@ -165,9 +190,18 @@ export default async function InvoiceDetailPage({
         name: t.name,
         dueInDays: t.dueInDays,
       })),
+      // The editor offers active rates, plus whichever this draft already
+      // holds — otherwise opening a draft would silently drop its rate.
+      taxRates: taxRateRows
+        .filter((r) => r.isActive || r.id === invoice.taxRateId)
+        .map((r) => ({ id: r.id, name: r.name, ratePpm: r.ratePpm })),
+      defaultTaxRateId: taxRateRows.find((r) => r.isDefault)?.id ?? null,
+      taxRateName:
+        taxRateRows.find((r) => r.id === invoice.taxRateId)?.name ?? "Sales tax",
       paymentMethods: methodRows.map((m) => ({ code: m.code, name: m.name })),
       customerEmail: preferredContactValue(contacts, "email") ?? "",
       bankAccounts,
+      companies,
       undeposited,
       customersActive,
       today: todayInTimezone(ctx.tenant.timezone),
@@ -180,8 +214,42 @@ export default async function InvoiceDetailPage({
   const accountName = new Map(data.accounts.map((a) => [a.id, `${a.code} · ${a.name}`]));
   const editing = sp.edit === "1" && invoice.status === "draft";
 
+  /**
+   * WHOSE ACCOUNT A PAYMENT LANDED IN, when it was not this invoice's own
+   * company — the mirror of the same line on the bill page. Undefined at one
+   * company and for the ordinary payment.
+   *
+   * Found by driving the mirror case: the row read "→ 1040 · Test Operating"
+   * on an Oak Row invoice and said nothing about the money having gone to an
+   * affiliate. It was legible there only because that tenant named the register
+   * after its company.
+   */
+  const recipientOf = (depositAccountId: string): string | undefined => {
+    if (data.companies.length < 2) return undefined;
+    const register = data.bankAccounts.find((b) => b.accountId === depositAccountId);
+    if (!register || register.entityId === invoice.entityId) return undefined;
+    return (
+      data.companies.find((c) => c.id === register.entityId)?.name ??
+      "another company"
+    );
+  };
+
   const depositOptions = [
-    ...data.bankAccounts.map((b) => ({ id: b.accountId, label: b.name })),
+    ...data.bankAccounts.map((b) => ({
+      id: b.accountId,
+      label: b.name,
+      // Named only when it is somebody ELSE'S account, because that is the only
+      // time the answer changes what gets written — and a label on every row
+      // would be noise for the single-company tenant.
+      otherCompany:
+        b.entityId === invoice.entityId
+          ? undefined
+          : (data.companies.find((c) => c.id === b.entityId)?.name ??
+            "another company"),
+    })),
+    // Undeposited Funds last and never labelled: it is a chart account rather
+    // than a register, so it has no owner and both companies' unbanked cheques
+    // sit in it.
     ...(data.undeposited
       ? [{ id: data.undeposited.id, label: "Undeposited Funds" }]
       : []),
@@ -279,6 +347,8 @@ export default async function InvoiceDetailPage({
           today={data.today}
           products={data.products}
           terms={data.terms}
+          taxRates={data.taxRates}
+          defaultTaxRateId={data.defaultTaxRateId}
           invoice={{
             id: invoice.id,
             version: invoice.version,
@@ -287,10 +357,12 @@ export default async function InvoiceDetailPage({
             issueDate: invoice.issueDate,
             dueDate: invoice.dueDate,
             memo: invoice.memo,
+            taxRateId: invoice.taxRateId,
             lines: lines.map((l) => ({
               description: l.description,
               quantity: l.quantity,
               unitPriceCents: l.unitPriceCents,
+              isTaxable: l.isTaxable,
               incomeAccountId: l.incomeAccountId,
             })),
           }}
@@ -314,7 +386,19 @@ export default async function InvoiceDetailPage({
                 <TableBody>
                   {lines.map((l) => (
                     <TableRow key={l.id}>
-                      <TableCell className="text-sm">{l.description || "—"}</TableCell>
+                      <TableCell className="text-sm">
+                        {l.description || "—"}
+                        {/* Only when the invoice charges tax — a "T" on every
+                            line of an untaxed invoice is noise. */}
+                        {invoice.taxRateId && l.isTaxable && (
+                          <span
+                            className="ml-1.5 text-xs text-muted-foreground"
+                            title="Sales tax charged on this line"
+                          >
+                            T
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right font-mono text-sm">
                         {l.quantity}
                       </TableCell>
@@ -329,6 +413,31 @@ export default async function InvoiceDetailPage({
                       </TableCell>
                     </TableRow>
                   ))}
+                  {/* Subtotal and tax appear only when there IS tax — on an
+                      untaxed invoice they would be two rows saying nothing,
+                      and the same rule the PDF follows. */}
+                  {invoice.taxCents !== 0 && (
+                    <>
+                      <TableRow className="border-t">
+                        <TableCell className="text-sm text-muted-foreground">
+                          Subtotal
+                        </TableCell>
+                        <TableCell colSpan={3} />
+                        <TableCell className="text-right font-mono text-sm text-muted-foreground">
+                          {formatCentsSigned(invoice.subtotalCents)}
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {describeTaxRate(data.taxRateName, invoice.taxRatePpm)}
+                        </TableCell>
+                        <TableCell colSpan={3} />
+                        <TableCell className="text-right font-mono text-sm text-muted-foreground">
+                          {formatCentsSigned(invoice.taxCents)}
+                        </TableCell>
+                      </TableRow>
+                    </>
+                  )}
                   <TableRow className="border-t-2 font-semibold">
                     <TableCell className="text-sm">Total</TableCell>
                     <TableCell colSpan={3} />
@@ -375,6 +484,14 @@ export default async function InvoiceDetailPage({
                         <span className="font-mono text-xs">{p.paymentDate}</span> ·{" "}
                         {p.method.replaceAll("_", " ")} →{" "}
                         {accountName.get(p.depositAccountId) ?? "account"}
+                        {recipientOf(p.depositAccountId) && (
+                          // The same words the ledger entry carries in its
+                          // memo, so the row and the journal agree.
+                          <span className="text-muted-foreground">
+                            {" · received by "}
+                            {recipientOf(p.depositAccountId)}
+                          </span>
+                        )}
                         {p.memo ? ` · ${p.memo}` : ""}
                       </span>
                       <span className="flex items-center gap-3">
@@ -382,7 +499,7 @@ export default async function InvoiceDetailPage({
                           {formatCentsSigned(p.amountCents)}
                         </span>
                         {isOwner && (
-                          <InvoiceActions.Unapply
+                          <UnapplyPaymentButton
                             paymentId={p.id}
                             version={p.version}
                           />

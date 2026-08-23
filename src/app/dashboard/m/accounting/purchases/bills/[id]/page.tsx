@@ -22,6 +22,7 @@ import { listRecordHistory } from "@/modules/accounting/history/list";
 import { RecordHistory } from "@/modules/accounting/components/record-history";
 import { EntityThreads } from "@/modules/email/components/entity-threads";
 import { loadBillLines, findPossibleDuplicates } from "@/modules/accounting/payables/bills";
+import { isCodableAccount, listEntities } from "@/modules/accounting/core";
 import { paidCentsFor } from "@/modules/accounting/payables/payments";
 import { readBillCoding } from "@/modules/accounting/ai/bill-validate";
 import {
@@ -84,12 +85,23 @@ export default async function BillDetailPage({
       orderBy: (p, { asc }) => [asc(p.paymentDate)],
     });
     const paid = await paidCentsFor(tx, tenantId, bill.id);
+    /**
+     * EVERY active register, including other companies' — and that reverses
+     * what slice 1b did here on purpose.
+     *
+     * Slice 1b filtered this list because paying one company's bill from
+     * another's account was refused, so offering it was offering a choice that
+     * always failed. Slice 2 records it instead, as a linked intercompany pair,
+     * so it is now a real option. The dialog labels whose account each one is;
+     * `recordBillPayment` decides from the register which shape to write.
+     */
     const registers = await tx.query.bankAccounts.findMany({
       where: and(
         eq(schema.bankAccounts.tenantId, tenantId),
         eq(schema.bankAccounts.isActive, true),
       ),
     });
+    const companies = await listEntities(tx, tenantId, { includeInactive: true });
     const vendors = await tx.query.vendors.findMany({
       where: and(
         eq(schema.vendors.tenantId, tenantId),
@@ -117,6 +129,7 @@ export default async function BillDetailPage({
         : []),
     ]);
     return {
+      companies,
       bill,
       vendor,
       lines,
@@ -134,16 +147,45 @@ export default async function BillDetailPage({
   if (!data) notFound();
   const { bill, vendor, lines, payments } = data;
 
+  /**
+   * WHOSE ACCOUNT A PAYMENT CAME OUT OF, when it was not this bill's own
+   * company. Undefined at one company, and undefined for the ordinary payment,
+   * so the row is exactly what it was in every case but the one that needs
+   * explaining.
+   *
+   * The register's NAME is not the answer: it reads as an explanation only when
+   * a tenant happens to have called the account after its company. "Main
+   * Checking" on somebody else's books looks like your own.
+   */
+  const payerOf = (paidFromAccountId: string): string | undefined => {
+    if (data.companies.length < 2) return undefined;
+    const register = data.registers.find((r) => r.accountId === paidFromAccountId);
+    if (!register || register.entityId === bill.entityId) return undefined;
+    return data.companies.find((c) => c.id === register.entityId)?.name ?? "another company";
+  };
+
   const accountName = new Map(
     data.allAccounts.map((a) => [a.id, `${a.code} · ${a.name}`]),
   );
   const registerIds = new Set(data.registers.map((r) => r.accountId));
+  /**
+   * What may be PICKED, plus whatever the lines are already coded to.
+   *
+   * **A SELECT CANNOT SHOW A VALUE THAT IS NOT AMONG ITS OPTIONS.** Matching a
+   * bill to a delivery codes its line to Goods Received Not Invoiced, and GRNI
+   * is deliberately excluded from the pickable list so nobody hand-codes to it
+   * — so a matched line rendered with an EMPTY account box, on a screen whose
+   * own footnote says "approval requires accounts on every line". It looked
+   * uncoded and was not.
+   *
+   * Already-used accounts are added back for display. They stay out of the list
+   * for every other line, which is the part that mattered.
+   */
+  const usedAccountIds = new Set(
+    data.lines.map((l) => l.accountId).filter((id): id is string => !!id),
+  );
   const codableAccounts = data.accounts.filter(
-    (a) =>
-      !registerIds.has(a.id) &&
-      a.subtype !== "opening_balance" &&
-      !(a.isSystem &&
-        ["accounts_receivable", "accounts_payable"].includes(a.subtype)),
+    (a) => isCodableAccount(a, registerIds) || usedAccountIds.has(a.id),
   );
   const coding = readBillCoding(bill.aiCoding);
   const isOwner = ctx.role === "owner";
@@ -296,6 +338,15 @@ export default async function BillDetailPage({
                   ledgerAccountId: r.accountId,
                   name: r.name,
                   kind: r.kind,
+                  // Named only when it is somebody ELSE'S account, because
+                  // that is the only time the answer changes what gets
+                  // written — and a label on every row would be noise for
+                  // the single-company tenant.
+                  otherCompany:
+                    r.entityId === bill.entityId
+                      ? undefined
+                      : (data.companies.find((c) => c.id === r.entityId)?.name ??
+                        "another company"),
                 }))}
               />
             )}
@@ -314,6 +365,14 @@ export default async function BillDetailPage({
                       {p.paymentDate} · {p.method.replaceAll("_", " ")}
                       {" · "}
                       {accountName.get(p.paidFromAccountId) ?? "account"}
+                      {payerOf(p.paidFromAccountId) && (
+                        // The same words the ledger entry carries in its memo,
+                        // so the row and the journal agree.
+                        <span className="text-muted-foreground">
+                          {" · paid by "}
+                          {payerOf(p.paidFromAccountId)}
+                        </span>
+                      )}
                       {p.memo && ` · ${p.memo}`}
                     </span>
                     <span className="flex items-center gap-2">

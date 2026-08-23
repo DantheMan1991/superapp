@@ -9,20 +9,27 @@ import { logAuditInTx } from "@/lib/audit";
 import { LedgerError, friendlyMessage, type LedgerCtx } from "../core";
 import { MAX_AMOUNT_CENTS } from "../lib/money";
 import { MAX_DUE_IN_DAYS } from "./terms";
+import { taxRateInputSchema } from "./tax";
 import {
   createPaymentMethod,
   createPaymentTerm,
   createProduct,
+  createSalesTaxRate,
   renamePaymentMethod,
   setDefaultPaymentTerm,
+  setDefaultSalesTaxRate,
   setPaymentMethodActive,
   setPaymentTermActive,
   setProductActive,
+  setSalesTaxRateActive,
   updateProduct,
+  updateSalesTaxRate,
 } from "./catalogue";
+import { provisionCatalogue } from "../templates/catalogue";
+import { requireOwnerRole } from "../core";
 
 /**
- * Owner settings for the three reference lists.
+ * Owner settings for the four reference lists.
  *
  * Its own file rather than more of `invoicing/actions.ts`, which is already
  * long: these are settings writes, they share no helpers with the invoice
@@ -157,6 +164,45 @@ const termSchema = z.object({
   dueInDays: z.number().int().min(0).max(MAX_DUE_IN_DAYS),
 });
 
+/**
+ * Put the standard terms and methods back.
+ *
+ * `provisionCatalogue` runs from ONE place — a superadmin switching the
+ * accounting module on — so every tenant whose accounting was already on when
+ * these lists shipped got nothing, and had no way to ask for them. All seven
+ * live tenants were in that state, which made "pick a payment term" a control
+ * with nothing behind it.
+ *
+ * Exposing the same function the provisioner calls, rather than a second copy
+ * of the defaults, is what keeps this from drifting. It is idempotent and
+ * additive: a name or code you already have is left alone, and it never
+ * demotes a default you chose.
+ */
+export async function restoreCatalogueDefaultsAction(): Promise<
+  ActionResult<{ termsCreated: number; methodsCreated: number }>
+> {
+  const ctx = await gate();
+  try {
+    requireOwnerRole(ctx);
+    const created = await withTenant(ctx.tenantId, async (tx) => {
+      const counts = await provisionCatalogue(tx, ctx.tenantId);
+      await logAuditInTx(tx, {
+        action: "catalogue.defaults_restored",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "tenant",
+        targetId: ctx.tenantId,
+        meta: counts,
+      });
+      return counts;
+    });
+    revalidateCatalogue();
+    return { ok: true, data: created };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
 export async function createPaymentTermAction(
   input: z.infer<typeof termSchema>,
 ): Promise<ActionResult<{ id: string }>> {
@@ -275,6 +321,126 @@ export async function setPaymentMethodActiveAction(
         active: parsed.data.active,
       }),
     );
+    revalidateCatalogue();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/* -- sales tax rates ------------------------------------------------------ */
+
+/**
+ * Every rate write is audited, unlike a product or a term.
+ *
+ * A rate decides what a business collects on behalf of a tax authority, and
+ * "when did we start charging 7.25%" is a question somebody eventually has to
+ * answer from records rather than memory. Identifiers and the rate only — S9.
+ */
+export async function createSalesTaxRateAction(
+  input: z.infer<typeof taxRateInputSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  const ctx = await gate();
+  const parsed = taxRateInputSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const rate = await withTenant(ctx.tenantId, async (tx) => {
+      const r = await createSalesTaxRate(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "invoice.tax_rate_created",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "sales_tax_rate",
+        targetId: r.id,
+        meta: { ratePpm: r.ratePpm },
+      });
+      return r;
+    });
+    revalidateCatalogue();
+    return { ok: true, data: { id: rate.id } };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+const updateTaxRateSchema = z.object({
+  rateId: z.string().uuid(),
+  expectedVersion: z.number().int().min(1),
+  patch: taxRateInputSchema,
+});
+
+export async function updateSalesTaxRateAction(
+  input: z.infer<typeof updateTaxRateSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = updateTaxRateSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      const r = await updateSalesTaxRate(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "invoice.tax_rate_updated",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "sales_tax_rate",
+        targetId: r.id,
+        meta: { ratePpm: r.ratePpm },
+      });
+    });
+    revalidateCatalogue();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function setDefaultSalesTaxRateAction(
+  input: { rateId: string },
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = z.object({ rateId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      await setDefaultSalesTaxRate(tx, ctx, parsed.data);
+      await logAuditInTx(tx, {
+        action: "invoice.default_tax_rate_changed",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "sales_tax_rate",
+        targetId: parsed.data.rateId,
+      });
+    });
+    revalidateCatalogue();
+    return { ok: true };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export async function setSalesTaxRateActiveAction(
+  input: z.infer<typeof setActiveSchema>,
+): Promise<ActionResult> {
+  const ctx = await gate();
+  const parsed = setActiveSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    await withTenant(ctx.tenantId, async (tx) => {
+      const r = await setSalesTaxRateActive(tx, ctx, {
+        rateId: parsed.data.id,
+        expectedVersion: parsed.data.expectedVersion,
+        active: parsed.data.active,
+      });
+      await logAuditInTx(tx, {
+        action: parsed.data.active
+          ? "invoice.tax_rate_activated"
+          : "invoice.tax_rate_deactivated",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "sales_tax_rate",
+        targetId: r.id,
+      });
+    });
     revalidateCatalogue();
     return { ok: true };
   } catch (err) {

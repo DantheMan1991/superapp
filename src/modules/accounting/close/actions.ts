@@ -61,7 +61,18 @@ const dateStr = z
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .refine(isValidIsoDate, "Not a real calendar date");
 
-const completeSchema = z.object({ periodEnd: dateStr });
+/**
+ * WHICH COMPANY IS BEING CLOSED (ADR 0010 slice 4). Required over the wire and
+ * validated against the tenant's own entities by `completeClose` — a close is
+ * an act on one set of books, and the page always knows which. It is not
+ * optional-meaning-default: a close is the one write in this module that a
+ * person deliberately performs on a named company, so guessing would be the
+ * worst place to guess.
+ */
+const completeSchema = z.object({
+  entityId: z.string().uuid(),
+  periodEnd: dateStr,
+});
 
 export async function completeCloseAction(
   input: z.infer<typeof completeSchema>,
@@ -79,6 +90,7 @@ export async function completeCloseAction(
         targetType: "period_close",
         targetId: r.close.id,
         meta: {
+          entityId: parsed.data.entityId,
           periodEnd: parsed.data.periodEnd,
           blockerCount: r.checklist.blockerCount,
           before: r.close.previousClosedThrough,

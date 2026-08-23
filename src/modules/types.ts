@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { TenantContext } from "@/lib/auth";
+import type { LabelDefinition } from "@/lib/packs/resolve";
 
 /**
  * A module = a togglable feature rendered inside the client dashboard shell.
@@ -26,6 +27,12 @@ export interface ModuleDefinition {
    * never has to know a module's name to lay it out.
    */
   layout?: "standard" | "full";
+  /**
+   * Words this feature lets a tenant rename. Declared so the admin screen can
+   * LIST what is customisable instead of somebody having to grep for
+   * `labelFor`, and so a test can catch a key used but never declared.
+   */
+  labels?: LabelDefinition[];
   /**
    * Server component rendered at /dashboard/m/[slug].
    *

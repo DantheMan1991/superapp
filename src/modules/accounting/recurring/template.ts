@@ -32,6 +32,17 @@ export const recurringJournalLineSchema = z.object({
 
 export const recurringJournalTemplateSchema = z.object({
   kind: z.literal("journal"),
+  /**
+   * Which company this template generates into (ADR 0010).
+   *
+   * OPTIONAL, for the reason `taxRateId` is: every template written before
+   * companies existed must still validate, and one that stopped parsing would
+   * silently stop generating. Absent means the tenant's DEFAULT company, and a
+   * template RESOLVES that at generation rather than freezing it — same split
+   * as the tax rate, opposite of the document it produces.
+   */
+  entityId: z.string().uuid().nullable().optional(),
+
   // Two lines minimum, because one line cannot balance — the same floor the
   // posting engine enforces (TOO_FEW_LINES).
   lines: z.array(recurringJournalLineSchema).min(2).max(100),
@@ -40,6 +51,17 @@ export const recurringJournalTemplateSchema = z.object({
 
 export const recurringBillTemplateSchema = z.object({
   kind: z.literal("bill"),
+  /**
+   * Which company this template generates into (ADR 0010).
+   *
+   * OPTIONAL, for the reason `taxRateId` is: every template written before
+   * companies existed must still validate, and one that stopped parsing would
+   * silently stop generating. Absent means the tenant's DEFAULT company, and a
+   * template RESOLVES that at generation rather than freezing it — same split
+   * as the tax rate, opposite of the document it produces.
+   */
+  entityId: z.string().uuid().nullable().optional(),
+
   lines: z.array(billLineSchema).min(1).max(100),
   memo: z.string().trim().max(2000).optional(),
   dueInDays: z.number().int().min(0).max(365),
@@ -55,9 +77,32 @@ export const recurringBillTemplateSchema = z.object({
  */
 export const recurringInvoiceTemplateSchema = z.object({
   kind: z.literal("invoice"),
+  /**
+   * Which company this template generates into (ADR 0010).
+   *
+   * OPTIONAL, for the reason `taxRateId` is: every template written before
+   * companies existed must still validate, and one that stopped parsing would
+   * silently stop generating. Absent means the tenant's DEFAULT company, and a
+   * template RESOLVES that at generation rather than freezing it — same split
+   * as the tax rate, opposite of the document it produces.
+   */
+  entityId: z.string().uuid().nullable().optional(),
+
   lines: z.array(invoiceLineSchema).min(1).max(100),
   memo: z.string().trim().max(2000).optional(),
   dueInDays: z.number().int().min(0).max(365),
+  /**
+   * The tax rate generated invoices carry. OPTIONAL, so every template written
+   * before sales tax existed still validates — a template that stopped parsing
+   * would silently stop generating, which is the worst available failure for a
+   * monthly invoice.
+   *
+   * The rate ID is stored, not the ppm: a template is a standing instruction
+   * ("bill this at the state rate"), so a rate correction SHOULD reach next
+   * month's invoice. That is the opposite of an issued invoice, which freezes.
+   * The generated invoice then freezes it, as any other invoice does.
+   */
+  taxRateId: z.string().uuid().nullable().optional(),
 });
 
 export const recurringEntryTemplateSchema = z.discriminatedUnion("kind", [

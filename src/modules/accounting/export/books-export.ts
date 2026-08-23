@@ -6,6 +6,12 @@ import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError, type LedgerCtx } from "../core";
 import { getSettings } from "../core/guards";
 import { getTrialBalance } from "../core/balances";
+import { residualIfConsolidated, residualNote } from "../core/consolidation";
+import {
+  entityScopeLabel,
+  listEntities,
+  type EntityScope,
+} from "../core/entities";
 import { getBalanceSheet, getProfitAndLoss } from "../core/reports";
 import {
   balanceSheetToCsvRows,
@@ -23,6 +29,17 @@ import {
 } from "./export-csv";
 
 const COOLDOWN_MS = 60_000;
+
+/** A company name reduced to something safe inside a zip path. */
+function statementFilePart(label: string): string {
+  return (
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "company"
+  );
+}
 
 export interface BooksExportGathered {
   csvFiles: BooksCsvFile[];
@@ -63,6 +80,7 @@ export async function gatherBooksExport(
 
   const tid = ctx.tenantId;
   const data = {
+    entities: await listEntities(tx, tid, { includeInactive: true }),
     accounts: await tx.query.accounts.findMany({
       where: eq(schema.accounts.tenantId, tid),
       orderBy: asc(schema.accounts.code),
@@ -114,6 +132,12 @@ export async function gatherBooksExport(
     invoicePayments: await tx.query.invoicePayments.findMany({
       where: eq(schema.invoicePayments.tenantId, tid),
     }),
+    // Without these, `tax_rate` on an invoice row is a uuid nobody can read
+    // and the tax columns cannot be checked against anything.
+    salesTaxRates: await tx.query.salesTaxRates.findMany({
+      where: eq(schema.salesTaxRates.tenantId, tid),
+      orderBy: asc(schema.salesTaxRates.name),
+    }),
     recurringEntries: await tx.query.recurringEntries.findMany({
       where: eq(schema.recurringEntries.tenantId, tid),
     }),
@@ -154,31 +178,86 @@ export async function gatherBooksExport(
   const csvFiles = buildBooksCsvFiles(data);
 
   // Human-readable statements as of the export date.
+  //
+  // ONE SET PER COMPANY, AND A COMBINED SET, once a tenant has more than one
+  // legal entity (ADR 0010). A tax return is filed per entity, so a books
+  // export that could only produce the combined statements would be incomplete
+  // for exactly the client this feature was built for — and "take your books
+  // and go" has to mean the books somebody actually files from. For the
+  // single-entity tenant the loop runs once with no label, so every filename
+  // and every byte is what it was.
   const fyStart = fiscalYearStart(opts.todayIso, settings.fiscalYearStartMonth);
-  const pnl = await getProfitAndLoss(tx, tid, {
-    from: fyStart,
-    to: opts.todayIso,
-  });
-  csvFiles.push({
-    zipPath: `reports/profit-and-loss_${fyStart}_${opts.todayIso}.csv`,
-    description: "Profit & loss, fiscal year to export date",
-    content: toCsv(pnlToCsvRows(pnl)),
-    rowCount: pnl.rows.length,
-  });
-  const bs = await getBalanceSheet(tx, tid, { asOf: opts.todayIso });
-  csvFiles.push({
-    zipPath: `reports/balance-sheet_${opts.todayIso}.csv`,
-    description: "Balance sheet as of export date",
-    content: toCsv(balanceSheetToCsvRows(bs)),
-    rowCount: bs.rows.length,
-  });
-  const tb = await getTrialBalance(tx, tid, opts.todayIso);
-  csvFiles.push({
-    zipPath: `reports/trial-balance_${opts.todayIso}.csv`,
-    description: "Trial balance as of export date",
-    content: toCsv(trialBalanceToCsvRows(tb, opts.todayIso)),
-    rowCount: tb.rows.length,
-  });
+  const multi = data.entities.length > 1;
+  const runs: Array<{ scope: EntityScope; label: string | undefined }> = multi
+    ? [
+        ...data.entities.map((e) => ({
+          scope: { kind: "one" as const, entityId: e.id },
+          label: e.name,
+        })),
+        {
+          scope: { kind: "combined" as const },
+          label: entityScopeLabel({ kind: "combined" }, data.entities),
+        },
+        // AND A CONSOLIDATED SET (slice 3), which is the one an accountant
+        // asked for: the group's figures with intercompany eliminated. It sits
+        // BESIDE the combined set rather than replacing it — combined is the
+        // plain sum and still means exactly what it meant, and an export whose
+        // "combined" files quietly started eliminating would change what every
+        // archived zip says.
+        {
+          scope: { kind: "consolidated" as const },
+          label: entityScopeLabel({ kind: "consolidated" }, data.entities),
+        },
+      ]
+    : [{ scope: { kind: "combined" as const }, label: undefined }];
+
+  for (const run of runs) {
+    const part = run.label ? `_${statementFilePart(run.label)}` : "";
+    const suffix = run.label ? ` — ${run.label}` : "";
+    // Null on every run but the consolidated one, and on that one only when a
+    // hand-written affiliate journal left something elimination could not
+    // follow. The two windows differ for the same reason they differ on the
+    // pages: a P&L covers the period, a balance sheet is cumulative.
+    const periodResidual = await residualIfConsolidated(tx, tid, run.scope, {
+      from: fyStart,
+      to: opts.todayIso,
+    });
+    const asOfResidual = await residualIfConsolidated(tx, tid, run.scope, {
+      asOf: opts.todayIso,
+    });
+    const periodNote = periodResidual ? residualNote(periodResidual) : undefined;
+    const asOfNote = asOfResidual ? residualNote(asOfResidual) : undefined;
+    const pnl = await getProfitAndLoss(tx, tid, {
+      scope: run.scope,
+      from: fyStart,
+      to: opts.todayIso,
+    });
+    csvFiles.push({
+      zipPath: `reports/profit-and-loss_${fyStart}_${opts.todayIso}${part}.csv`,
+      description: `Profit & loss, fiscal year to export date${suffix}`,
+      content: toCsv(pnlToCsvRows(pnl, "accrual", run.label, periodNote)),
+      rowCount: pnl.rows.length,
+    });
+    const bs = await getBalanceSheet(tx, tid, {
+      scope: run.scope,
+      asOf: opts.todayIso,
+    });
+    csvFiles.push({
+      zipPath: `reports/balance-sheet_${opts.todayIso}${part}.csv`,
+      description: `Balance sheet as of export date${suffix}`,
+      content: toCsv(balanceSheetToCsvRows(bs, "accrual", run.label, asOfNote)),
+      rowCount: bs.rows.length,
+    });
+    const tb = await getTrialBalance(tx, tid, opts.todayIso, run.scope);
+    csvFiles.push({
+      zipPath: `reports/trial-balance_${opts.todayIso}${part}.csv`,
+      description: `Trial balance as of export date${suffix}`,
+      content: toCsv(
+        trialBalanceToCsvRows(tb, opts.todayIso, run.label, asOfNote),
+      ),
+      rowCount: tb.rows.length,
+    });
+  }
 
   // Soft-deleted (trashed) documents included: this is the retention artifact.
   const docs = opts.includeFiles

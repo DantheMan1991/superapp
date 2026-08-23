@@ -4,24 +4,35 @@ import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import { logAuditInTx } from "../src/lib/audit";
 import {
-  LedgerError,
   createAccount,
   deactivateAccount,
   editEntry,
   getBalances,
+  getDefaultEntityId,
   getLedgerIntegrity,
+  getSettings,
   getTrialBalance,
+  type LedgerCtx,
+  LedgerError,
   ledgerIsBalanced,
   postDraft,
   postEntry,
+  resolveBasis,
   reverseEntry,
   setClosedThrough,
   updateAccount,
   upsertDimensionMember,
   voidEntry,
-  type LedgerCtx,
 } from "../src/modules/accounting/core";
 import { provisionAccounting } from "../src/modules/accounting/templates/apply";
+
+/**
+ * Slice 1 fixtures have one legal entity per tenant, so combined IS that
+ * entity's books (ADR 0010). `tests/entities-db.test.ts` is the one that runs
+ * two and proves each balances on its own.
+ */
+const COMBINED = { kind: "combined" } as const;
+let entityId: string;
 
 /**
  * Certification of the Core Ledger Platform:
@@ -94,11 +105,293 @@ d("core ledger platform", () => {
     owner = { tenantId, userId: "owner-user", role: "owner" };
     staff = { tenantId, userId: "staff-user", role: "staff" };
     await withTenant(tenantId, (tx) => provisionAccounting(tx, tenantId));
+    entityId = await withTenant(tenantId, (tx) =>
+      getDefaultEntityId(tx, tenantId),
+    );
   });
 
   afterAll(async () => {
     await withSystem(async (tx) => {
       await tx.delete(schema.tenants).where(eq(schema.tenants.id, tenantId));
+    });
+  });
+
+// ------------------------------------------------- machine-posted entries
+
+  describe("machine-posted entries (ADR 0011)", () => {
+    /**
+     * **THIS IS A PRIVILEGE BOUNDARY AND IT IS A SET OF STRINGS.** Adding a
+     * source to `MACHINE_SOURCES` is a one-line diff that grants unowned
+     * posting rights to a whole class of entries, so what it does and — more
+     * importantly — what it does NOT do is pinned here.
+     */
+    let expenseId: string;
+    let cashId: string;
+
+    beforeAll(async () => {
+      const accounts = await withTenant(tenantId, (tx) =>
+        tx.select().from(schema.accounts).where(eq(schema.accounts.tenantId, tenantId)),
+      );
+      expenseId = accounts.find((a) => a.code === "5000")!.id;
+      cashId = accounts.find((a) => a.accountType === "asset")!.id;
+    });
+
+    it("lets STAFF post an entry a machine source produced", async () => {
+      /**
+       * The whole reason the seam exists. A staff member issuing feed was
+       * already authorised by the pack's write level; refusing here would only
+       * produce a half-written transaction — the movement recorded, the
+       * journal line refused.
+       */
+      const { entry } = await withTenant(tenantId, (tx) =>
+        postEntry(tx, staff, {
+          entityId,
+          status: "posted",
+          entryDate: "2026-03-01",
+          source: "inventory_issue",
+          idempotencyKey: `${STAMP}-machine-staff`,
+          lines: pair(expenseId, cashId, 500),
+        }),
+      );
+      expect(entry.status).toBe("posted");
+      expect(entry.source).toBe("inventory_issue");
+    });
+
+    it("STILL REFUSES A PLAIN JOURNAL FROM STAFF", async () => {
+      // The rule that was loosened must not have been deleted.
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-02",
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("treats an UNNAMED source as manual, and so as owner-only", async () => {
+      /**
+       * The fail-safe direction. `source` defaults to "manual", so a future
+       * caller that forgets to name itself gets the STRICTER rule rather than
+       * the looser one.
+       */
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-03",
+            source: undefined,
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("refuses a source that is real but NOT in the machine set", async () => {
+      /**
+       * `bank_import` is a legitimate source and still an owner's business.
+       * Being machine-produced is not the test — being produced by an act the
+       * operational layer already authorised is.
+       *
+       * Note what could NOT be written here: a made-up source like
+       * `"inventory"`. `entry_source` is a Postgres ENUM, so an invented value
+       * fails to compile rather than reaching this check — which is a large
+       * part of why ADR 0011's set is safe to have at all.
+       */
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-04",
+            source: "bank_import",
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("NEVER LETS AN EXPERT POST, machine source or not", async () => {
+      /**
+       * An outside accountant is read plus close-review by definition. The
+       * loosening is for the people doing the work, not for the one reviewing
+       * it — an accountant issuing feed is not a thing that should happen.
+       */
+      const expert: LedgerCtx = { tenantId, userId: "expert-user", role: "expert" };
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, expert, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-05",
+            source: "inventory_issue",
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("still refuses a machine entry into a CLOSED period", async () => {
+      /**
+       * The seam moves WHO may post, and nothing else. Every other guard the
+       * ledger has still runs — a closed period is still closed, and a staff
+       * member cannot reopen one by coming through a pack.
+       */
+      await withTenant(tenantId, (tx) =>
+        setClosedThrough(tx, owner, { entityId, date: "2026-04-30" }),
+      );
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-04-15",
+            source: "inventory_issue",
+            lines: pair(expenseId, cashId, 500),
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
+      await withTenant(tenantId, (tx) =>
+        setClosedThrough(tx, owner, { entityId, date: null }),
+      );
+    });
+
+    it("still refuses an UNBALANCED machine entry", async () => {
+      await expect(
+        withTenant(tenantId, (tx) =>
+          postEntry(tx, staff, {
+            entityId,
+            status: "posted",
+            entryDate: "2026-03-06",
+            source: "inventory_issue",
+            lines: [{ accountId: expenseId, amountCents: 500 }],
+          }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("records the staff member who caused it, rather than an owner", async () => {
+      // The audit trail must say what is true. ADR 0011 rejected elevating the
+      // pack's role precisely so this row is not a lie.
+      const { entry } = await withTenant(tenantId, (tx) =>
+        postEntry(tx, staff, {
+          entityId,
+          status: "posted",
+          entryDate: "2026-03-07",
+          source: "inventory_receipt",
+          idempotencyKey: `${STAMP}-machine-audit`,
+          lines: pair(expenseId, cashId, 500),
+        }),
+      );
+      expect(entry.createdByClerkUserId).toBe("staff-user");
+    });
+  });
+
+// ------------------------------------------------- the basis they file on
+
+  describe("resolveBasis", () => {
+    /**
+     * Pure, and the whole of the default-basis feature's decision-making. It
+     * replaced `sp.basis === "cash" ? "cash" : "accrual"`, repeated in three
+     * report pages — a hardcoded literal that opened every report on accrual,
+     * including for a business that files on cash.
+     */
+    it("takes the URL over the default, IN BOTH DIRECTIONS", () => {
+      /**
+       * The asymmetric version of this is the bug worth guarding: if an
+       * explicit `?basis=accrual` fell through to a cash default, a report
+       * somebody sent their accountant would change meaning depending on who
+       * opened it. A report URL is exactly the thing people paste to eachother.
+       */
+      expect(resolveBasis("cash", "accrual")).toBe("cash");
+      expect(resolveBasis("accrual", "cash")).toBe("accrual");
+    });
+
+    it("falls to the tenant default when the URL says nothing", () => {
+      expect(resolveBasis(undefined, "cash")).toBe("cash");
+      expect(resolveBasis(undefined, "accrual")).toBe("accrual");
+      expect(resolveBasis(null, "cash")).toBe("cash");
+      expect(resolveBasis("", "cash")).toBe("cash");
+    });
+
+    it("FALLS TO THE TENANT DEFAULT ON GARBAGE, not to accrual", () => {
+      /**
+       * The rule this replaces said an unreadable query string "must never
+       * silently produce the other basis". That intent is kept and its
+       * reference point corrected: the other basis means other than the one
+       * this business files on.
+       */
+      expect(resolveBasis("CASH", "cash")).toBe("cash");
+      expect(resolveBasis("nonsense", "cash")).toBe("cash");
+      expect(resolveBasis("nonsense", "accrual")).toBe("accrual");
+    });
+  });
+
+  describe("default basis setting", () => {
+    it("is accrual for a freshly provisioned tenant", async () => {
+      // Nothing that exists today changes — the same property ADR 0007
+      // preserved when it added the lens at all.
+      const settings = await withTenant(tenantId, (tx) =>
+        getSettings(tx, tenantId),
+      );
+      expect(settings.defaultBasis).toBe("accrual");
+    });
+
+    it("stores cash and reads it back", async () => {
+      await withSystem((tx) =>
+        tx
+          .update(schema.accountingSettings)
+          .set({ defaultBasis: "cash" })
+          .where(eq(schema.accountingSettings.tenantId, tenantId)),
+      );
+      const settings = await withTenant(tenantId, (tx) =>
+        getSettings(tx, tenantId),
+      );
+      expect(settings.defaultBasis).toBe("cash");
+      expect(resolveBasis(undefined, settings.defaultBasis)).toBe("cash");
+    });
+
+    it("CHANGES NOTHING ABOUT WHAT IS POSTED", async () => {
+      /**
+       * The guard that keeps this a presentation preference. The ledger is
+       * accrual for every tenant whatever the setting says — if this ever
+       * starts deciding what gets stored, ADR 0007's single-set-of-books
+       * property is gone.
+       */
+      const accounts = await withTenant(tenantId, (tx) =>
+        tx.select().from(schema.accounts).where(eq(schema.accounts.tenantId, tenantId)),
+      );
+      const exp = accounts.find((a) => a.code === "5000")!.id;
+      const cashAcct = accounts.find((a) => a.accountType === "asset")!.id;
+      const { entry } = await withTenant(tenantId, (tx) =>
+        postEntry(tx, owner, {
+          entityId,
+          status: "posted",
+          entryDate: "2026-05-01",
+          idempotencyKey: `${STAMP}-basis-neutral`,
+          lines: pair(exp, cashAcct, 1_000),
+        }),
+      );
+      expect(entry.status).toBe("posted");
+      // Still readable on BOTH bases, unchanged by the preference.
+      const accrual = await withTenant(tenantId, (tx) =>
+        getBalances(tx, tenantId, {
+          scope: COMBINED,
+          asOf: "2026-05-31",
+          basis: "accrual",
+        }),
+      );
+      expect(accrual.some((r) => r.accountId === exp)).toBe(true);
+
+      await withSystem((tx) =>
+        tx
+          .update(schema.accountingSettings)
+          .set({ defaultBasis: "accrual" })
+          .where(eq(schema.accountingSettings.tenantId, tenantId)),
+      );
     });
   });
 
@@ -113,6 +406,7 @@ d("core ledger platform", () => {
           .insert(schema.journalEntries)
           .values({
             tenantId,
+            entityId,
             entryDate: "2026-01-10",
             status: "posted",
             postedAt: new Date(),
@@ -135,6 +429,7 @@ d("core ledger platform", () => {
             .insert(schema.journalEntries)
             .values({
               tenantId,
+              entityId,
               entryDate: "2026-01-10",
               status: "posted",
               postedAt: new Date(),
@@ -157,6 +452,7 @@ d("core ledger platform", () => {
           .insert(schema.journalEntries)
           .values({
             tenantId,
+            entityId,
             entryDate: "2026-01-10",
             status: "draft",
             createdByClerkUserId: "raw",
@@ -175,6 +471,7 @@ d("core ledger platform", () => {
           .insert(schema.journalEntries)
           .values({
             tenantId,
+            entityId,
             entryDate: "2026-01-10",
             status: "draft",
             createdByClerkUserId: "raw",
@@ -204,6 +501,7 @@ d("core ledger platform", () => {
             .insert(schema.journalEntries)
             .values({
               tenantId,
+              entityId,
               entryDate: "2026-01-10",
               status: "posted",
               postedAt: new Date(),
@@ -229,6 +527,7 @@ d("core ledger platform", () => {
           .insert(schema.journalEntries)
           .values({
             tenantId,
+            entityId,
             entryDate: "2026-01-11",
             status: "posted",
             postedAt: new Date(),
@@ -277,6 +576,7 @@ d("core ledger platform", () => {
               .insert(schema.journalEntries)
               .values({
                 tenantId,
+                entityId,
                 entryDate: "2026-01-12",
                 status: "posted",
                 postedAt: new Date(),
@@ -308,6 +608,7 @@ d("core ledger platform", () => {
       const exp = await accountId("6300");
       const { entry, deduped } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-02-01",
           memo: "office supplies",
@@ -330,6 +631,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-01",
             lines: [
@@ -347,6 +649,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, staff, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-02",
             lines: pair(exp, cash, 100),
@@ -355,6 +658,7 @@ d("core ledger platform", () => {
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
       const { entry } = await withTenant(tenantId, (tx) =>
         postEntry(tx, staff, {
+          entityId,
           status: "draft",
           entryDate: "2026-02-02",
           lines: pair(exp, cash, 100),
@@ -382,6 +686,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-03",
             lines: pair(misc.id, cash, 100),
@@ -391,6 +696,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-03",
             lines: pair(crypto.randomUUID(), cash, 100),
@@ -403,11 +709,12 @@ d("core ledger platform", () => {
       const cash = await accountId("1000");
       const exp = await accountId("6400");
       await withTenant(tenantId, (tx) =>
-        setClosedThrough(tx, owner, { date: "2026-02-28" }),
+        setClosedThrough(tx, owner, { entityId: entityId, date: "2026-02-28" }),
       );
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-02-15",
             lines: pair(exp, cash, 100),
@@ -416,13 +723,14 @@ d("core ledger platform", () => {
       ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
       const { entry } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-01",
           lines: pair(exp, cash, 100),
         }),
       );
       expect(entry.status).toBe("posted");
-      await withTenant(tenantId, (tx) => setClosedThrough(tx, owner, { date: null }));
+      await withTenant(tenantId, (tx) => setClosedThrough(tx, owner, { entityId: entityId, date: null }));
     });
 
     it("idempotency: same key returns the same entry", async () => {
@@ -431,6 +739,7 @@ d("core ledger platform", () => {
       const key = `${STAMP}-idem-1`;
       const first = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-02",
           idempotencyKey: key,
@@ -439,6 +748,7 @@ d("core ledger platform", () => {
       );
       const second = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-02",
           idempotencyKey: key,
@@ -457,6 +767,7 @@ d("core ledger platform", () => {
       const attempt = () =>
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-03-03",
             idempotencyKey: key,
@@ -482,6 +793,7 @@ d("core ledger platform", () => {
       const exp = await accountId("6000");
       const { entry } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-04",
           memo: "before",
@@ -539,19 +851,20 @@ d("core ledger platform", () => {
       // Void: effect disappears.
       const { entry: toVoid } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-05",
           lines: pair(exp, cash, 11100),
         }),
       );
       const feesBefore = await withTenant(tenantId, (tx) =>
-        getBalances(tx, tenantId, { accountIds: [exp] }),
+        getBalances(tx, tenantId, { scope: COMBINED, accountIds: [exp] }),
       );
       await withTenant(tenantId, (tx) =>
         voidEntry(tx, owner, { entryId: toVoid.id, expectedVersion: toVoid.version }),
       );
       const feesAfter = await withTenant(tenantId, (tx) =>
-        getBalances(tx, tenantId, { accountIds: [exp] }),
+        getBalances(tx, tenantId, { scope: COMBINED, accountIds: [exp] }),
       );
       const net = (rows: { netCents: number }[]) =>
         rows.reduce((a, r) => a + r.netCents, 0);
@@ -560,6 +873,7 @@ d("core ledger platform", () => {
       // Reverse: original stays posted, pair nets to zero, second reverse dedups.
       const { entry: toReverse } = await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-03-06",
           lines: pair(exp, cash, 3300),
@@ -588,6 +902,7 @@ d("core ledger platform", () => {
       const exp = await accountId("6200");
       const { entry } = await withTenant(tenantId, (tx) =>
         postEntry(tx, staff, {
+          entityId,
           status: "draft",
           entryDate: "2026-03-09",
           lines: pair(exp, cash, 800),
@@ -742,6 +1057,7 @@ d("core ledger platform", () => {
       );
       await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2026-04-01",
           lines: [
@@ -752,6 +1068,7 @@ d("core ledger platform", () => {
       );
       const grouped = await withTenant(tenantId, (tx) =>
         getBalances(tx, tenantId, {
+          scope: COMBINED,
           accountIds: [exp],
           groupByDimensionType: "property",
         }),
@@ -775,6 +1092,7 @@ d("core ledger platform", () => {
       await expect(
         withTenant(tenantId, (tx) =>
           postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-04-02",
             lines: [
@@ -797,6 +1115,7 @@ d("core ledger platform", () => {
       await expectDbReject(
         withTenant(tenantId, async (tx) => {
           await postEntry(tx, owner, {
+            entityId,
             status: "posted",
             entryDate: "2026-04-03",
             memo: marker,
@@ -869,11 +1188,11 @@ d("core ledger platform", () => {
   describe("balances & integrity", () => {
     it("trial balance sums to zero and matches the fixture", async () => {
       const tb = await withTenant(tenantId, (tx) =>
-        getTrialBalance(tx, tenantId, "2026-12-31"),
+        getTrialBalance(tx, tenantId, "2026-12-31", COMBINED),
       );
       expect(tb.totalNetCents).toBe(0);
       expect(tb.totalDebitCents).toBe(tb.totalCreditCents);
-      expect(await withTenant(tenantId, (tx) => ledgerIsBalanced(tx, tenantId))).toBe(
+      expect(await withTenant(tenantId, (tx) => ledgerIsBalanced(tx, tenantId, COMBINED))).toBe(
         true,
       );
     });
@@ -883,16 +1202,17 @@ d("core ledger platform", () => {
       const exp = await accountId("6550");
       await withTenant(tenantId, (tx) =>
         postEntry(tx, owner, {
+          entityId,
           status: "posted",
           entryDate: "2027-06-01",
           lines: pair(exp, cash, 7700),
         }),
       );
       const before = await withTenant(tenantId, (tx) =>
-        getBalances(tx, tenantId, { accountIds: [exp], asOf: "2026-12-31" }),
+        getBalances(tx, tenantId, { scope: COMBINED, accountIds: [exp], asOf: "2026-12-31" }),
       );
       const after = await withTenant(tenantId, (tx) =>
-        getBalances(tx, tenantId, { accountIds: [exp], asOf: "2027-12-31" }),
+        getBalances(tx, tenantId, { scope: COMBINED, accountIds: [exp], asOf: "2027-12-31" }),
       );
       const net = (rows: { netCents: number }[]) =>
         rows.reduce((a, r) => a + r.netCents, 0);
@@ -913,6 +1233,7 @@ d("core ledger platform", () => {
     try {
       await withTenant(tenantId, (tx) =>
         postEntry(tx, staff, {
+          entityId,
           status: "posted",
           entryDate: "2026-05-01",
           lines: [],

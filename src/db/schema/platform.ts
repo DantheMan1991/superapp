@@ -76,6 +76,29 @@ export const tenants = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     industry: text("industry").notNull().default("general"),
+    /**
+     * Layer 3 vocabulary: this tenant's own words, overriding the installed
+     * profile's. `{ "zone": "Paddock", "livestockLot": "Flock" }`.
+     *
+     * TENANT-WIDE, and that is a correction. These first lived under a `labels`
+     * key on each pack's `tenant_modules.config` row, reasoning that renaming a
+     * word for one pack should not silently rename it in another. That was
+     * backwards: `zone` is `land`'s word that `livestock` also displays, so a
+     * per-pack override would have changed one screen and not the other. On a
+     * farm a paddock is a paddock everywhere. Moved here 2026-08-15, while
+     * there was still no data in the wrong shape to migrate.
+     *
+     * Which keys mean anything is declared by the features themselves — see
+     * `LabelDefinition` in src/lib/packs/resolve.ts. Unknown keys are IGNORED
+     * rather than rejected, because a pack being switched off must not make a
+     * tenant's saved words invalid.
+     *
+     * Written only through `withSystem` after `requireTenantOwner`: `tenants`
+     * is SELECT-only for members and must stay that way, because RLS is
+     * row-level and any member UPDATE policy permissive enough for this would
+     * also expose `status` and `clerk_org_id`.
+     */
+    labels: jsonb("labels").notNull().default({}),
     status: tenantStatus("status").notNull().default("onboarding"),
     contactName: text("contact_name"),
     contactEmail: text("contact_email"),
@@ -94,6 +117,27 @@ export const tenants = pgTable(
      * send time is separable from what day the business is having.
      */
     timezone: text("timezone").notNull().default("America/New_York"),
+    /**
+     * What to put in front of money on screen — "$", "£", or null for none.
+     *
+     * **PLATFORM-LEVEL, for the same reason `timezone` is**: money shown two
+     * ways inside one workspace is worse than either way consistently, and a
+     * per-module setting guarantees exactly that. See docs/modules/timezone.md
+     * for the argument the first time it was made.
+     *
+     * NULL IS THE DEFAULT AND MEANS NO SYMBOL, which is the house style
+     * `formatCents` was written for: it serves debit/credit columns whose
+     * headers carry the currency, and a symbol in that grid is noise to a
+     * bookkeeper. An industry profile turns it on for tenants who are not
+     * reading a ledger all day — a farmer looking at "Fed · 85.00" has no
+     * column header to tell him that is money.
+     *
+     * NOT a currency CODE, and not an exchange rate. This is presentation
+     * only: the platform is single-currency and nothing here converts
+     * anything. A real multi-currency story needs the amount to carry its
+     * currency, which is a different and much larger change.
+     */
+    currencySymbol: text("currency_symbol"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

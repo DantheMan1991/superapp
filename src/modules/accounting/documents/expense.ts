@@ -1,7 +1,12 @@
 import "server-only";
 import { and, eq, isNotNull, like } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
-import { LedgerError, postEntry, type LedgerCtx } from "../core";
+import {
+  LedgerError,
+  entityForRegisterAccount,
+  postEntry,
+  type LedgerCtx,
+} from "../core";
 import { loadDocument } from "./documents";
 import { attachDocument } from "./links";
 
@@ -71,6 +76,16 @@ export async function recordExpenseFromReceipt(
 
   const status = ctx.role === "owner" ? ("posted" as const) : ("draft" as const);
   const { entry, deduped } = await postEntry(tx, ctx, {
+    // WHICHEVER COMPANY OWNS THE ACCOUNT IT WAS PAID FROM. A receipt is not a
+    // document with a company of its own — it is evidence of money leaving an
+    // account, and that account has an owner. Falls back to the default only
+    // when the paid-from account is not a register at all (petty cash booked
+    // straight to a plain ledger account), where there is nothing to read.
+    entityId: await entityForRegisterAccount(
+      tx,
+      ctx.tenantId,
+      input.paidFromAccountId,
+    ),
     status,
     entryDate: input.entryDate,
     memo: input.memo ?? "",

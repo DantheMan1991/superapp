@@ -13,6 +13,1482 @@ export for the accountant.
 
 ## Build log
 
+### 2026-08-22 — The bug that was not there (`claude/the-bug-that-was-not-there`)
+
+**A claim this repo repeated three times does not survive being derived.**
+
+[ADR 0013](../decisions/0013-inventory-tax-treatment.md) has said since it was
+written that the cash lens re-recognising a capitalising line at the payment date
+*"is simply a bug and needs fixing whatever else is decided"*. That sentence went
+into the inventory dossier's open items and into two pull request descriptions.
+Nobody, including me twice, worked the case through.
+
+Worked through, it does not hold. In cash mode `getBalances` drops the whole
+invoice/bill entry, and the adjustment re-adds the non-control lines with an
+offsetting control leg at the payment date — so a bill line coded to `1300`
+produces `Dr 1300 / Cr Cash` on the day the money left. Balanced, and
+**recognising an asset on the date it was paid for is not obviously wrong on a
+report labelled cash basis.**
+
+It only breaks for a tenant who ALSO brought that stock in through the pack,
+which capitalises it a second time. That tenant is double-counting inventory on
+any basis, and the timing of the lens is the least of it.
+
+**So the reachable defect was the CODING, and it is now closed.**
+`isCodableAccount` excludes the inventory subtype, for the identical reason it
+already excluded GRNI: ADR 0012 §A.1 says the RECEIPT capitalises and the BILL
+clears, so a line pointed straight at Inventory is the "both capitalise" failure
+that ADR opens with. The GRNI exclusion was written the day somebody got bitten
+by GRNI; the Inventory one should have been written in the same commit and was
+not.
+
+**A read of both databases found ZERO bill lines ever coded that way**, so this
+is prophylactic rather than a repair. Worth saying: the fix is small because the
+problem was small, not because the problem was solved cleverly.
+
+What remains true is narrower and is not a standalone fix: **the lens has no
+concept of a capitalising line**, so it treats one as something to re-time. That
+only needs solving once a rule other than `consumed` exists to re-time it TO,
+which puts it inside the tax axis. Two things that work will have to solve, both
+found by reading rather than guessing: an entry has ONE control leg shared across
+mixed lines, so keeping a capitalising line at its accrual date means splitting
+that leg pro rata; and `cashBasisAdjustment` only runs for documents with a
+payment in the window, so a bill never paid never gets its line back at all.
+
+7 tests, the first coverage `isCodableAccount` has had. No migration.
+
+### 2026-08-22 — A slot in the one function every report goes through (`claude/the-lens-that-applies-a-rule`)
+
+`getBalances` and `cashBasisAdjustment` can now be told, by something outside
+this module, that an entry does not belong in a basis and that a line belongs
+under a different account. `inventory` slice 3d iii is the first thing that
+fills it.
+
+**THIS MODULE STILL DOES NOT KNOW INVENTORY EXISTS.** That rule was earned in
+slice 3b — `approveBill` copies a bill line's account verbatim and the pack sets
+that account at match time, precisely so the bill path never learns what a stock
+receipt is — and `getBalances` is the last place to give it up, because every
+report goes through it. So core names the slot in vocabulary that is true of any
+lens, `src/lib/basis-lens/` holds the types and the registry, and the pack is
+named in exactly one file. Core to lib to pack, the direction `mail-extensions`
+and `attention-sources` already set.
+
+**WHAT A PROVIDER MAY DO IS DELIBERATELY SMALL.** Drop an entry WHOLE, re-point
+a line. Not an amount, not a date, not one leg of a pair. Each of those
+unbalances a report, which ADR 0007 names as the failure to design against, and
+the only thing that would ever notice is a trial balance nobody ran.
+
+**A FAILING PROVIDER BREAKS THE REPORT.** `attention-sources/resolve.ts`'s
+posture rather than `mail-extensions`'s, and for a sharper version of its
+reason: folding a failure to "no adjustment" would hand somebody a profit and
+loss computed on a treatment they never elected, that balances, that looks like
+every other report, and that says nothing about having fallen back. The wrapper
+carries the provider's own message rather than burying it in `cause` — a test
+caught that by asserting on the reason instead of the wrapper, which is the
+`LEDGER_ACCOUNTS` lesson again.
+
+**THE `accountIds` TRAP ADR 0013 PREDICTED DOES NOT BITE, and it is worth
+recording why** so nobody re-fixes it. The ADR warned that `getBalances` filters
+on `jl.accountId` inside the query, before anything is substituted, so a report
+asking only for the destination account would filter out the lines about to
+become it. It does not happen: substitution occurs only inside
+`cashBasisAdjustment`, which applies its own `accountIds` filter LAST, over rows
+it has already re-pointed. Exclusion is by entry id and is independent of the
+account filter entirely.
+
+No migration, no schema change. The accrual path is still byte-identical: the
+lens declines on accrual, which leaves ADR 0013's question about incoherent
+basis/treatment pairs open rather than answering it in code.
+
+### 2026-08-22 — A method is not a toggle, and ADR 0013 was carrying its own refutation (`claude/a-method-is-not-a-toggle`)
+
+The brief could not be answered — no accountant available — so the question came
+back as a cross-model review instead. Three of its points landed, and two of
+those were things [ADR 0013](../decisions/0013-inventory-tax-treatment.md)
+already knew and had not acted on. **The ADR was revised in place**, which is
+allowed only because it was never Accepted.
+
+**One column was carrying two questions.** The shipped enum is
+`none | capitalise` — whether stock POSTS, a book decision. The ADR's enum was
+`capitalise | expense_on_payment` — how a report LENS re-times, a tax decision.
+Different axes. Adding the second to the first would have been the category error
+the ADR rejects for the basis enum two sections further down. Nobody caught it,
+including two passes over this file.
+
+**"NIMS needs machinery that does not exist here" was true for one day.** Slice 3b
+shipped `bill_line_stock_allocations` the next morning, and receipt → allocation →
+bill → `bill_payments.payment_date` has been a complete indexed chain ever since.
+The ADR refused to implement a later-of rule on a premise that had already
+expired, and the brief repeated the refusal without checking it.
+
+**Treatment was business-wide in the same document that refuted business-wide.**
+Its Context names merchandise held for resale as the case that behaves
+differently; its Decision put one setting on the tenant. It is per `item_kind`
+now, which is the key the expense-account mapping already needed.
+
+**The list is now EVENTS THE SOFTWARE CAN DATE, not tax treatments.** `billed`,
+`paid`, `consumed`, `sold`, and the two later-of combinations. Every one is a
+date the ledger already holds, which is the test for whether a rule belongs on
+the list. A list of treatments would be a reading of the regulations maintained
+by people who cannot read them, and every gap in it would be invisible; a list of
+dates is checkable by looking at the ledger.
+
+**One disputed paragraph is left standing with the disagreement recorded beside
+it** rather than edited to whichever reading was argued most recently. Nobody
+here can settle what the materials-and-supplies rule turns on, and the point of
+the events list is that the design no longer depends on the answer.
+
+The brief is a per-client template now. It stops calling `capitalise` the safe
+choice — doing nothing is still adopting a method — and it asks for a table by
+category rather than one answer.
+
+### 2026-08-22 — The question only an accountant can answer (`claude/the-question-only-an-accountant-can-answer`)
+
+`docs/briefs/inventory-tax-treatment.md`, and a `docs/briefs/` section to put it
+in. **No code behaviour changes.**
+
+[ADR 0013](../decisions/0013-inventory-tax-treatment.md) has said since 2026-08-21
+that nothing in it should be Accepted without an accountant's sign-off, and that
+*"the list is the thing to hand them first"*. It has been Proposed ever since,
+and slice 3d's second half — the `expense_on_payment` lens — has been blocked
+behind it. **Nobody had written the ask down.** A blocker with no artefact is a
+blocker nobody can clear, and the software has been sitting a week's work behind
+a twenty-minute conversation.
+
+**A brief is a different kind of document and gets a section of its own.** The
+four that existed all face inward. This one leaves the building: it goes to
+somebody who has never seen the repo, under the founder's name, and it is
+useless if it reads like a design doc. So `docs/briefs/` is registered in
+`build-docs.ts` with a blurb that says exactly that. An unregistered folder
+already rendered — the walker takes the whole tree — but it would have shown up
+title-cased with no blurb beside four that have one, which reads as unfinished
+rather than as a deliberate fourth kind.
+
+**It is written plainly ON PURPOSE, and that is the one rule to keep if it is
+ever edited.** No em dashes, short sentences, contractions, no internal
+shorthand, no "deliberately". The house style in every other doc here is dense
+and explanatory because the reader is us. This reader is an accountant with
+twenty minutes, and prose that reads as machine written undercuts the person
+sending it.
+
+**It asks rather than proposes**, which is the whole point. It sets out what the
+software does today, the three treatments (two built, one named and missing),
+what happens if nobody decides, and the method-change gap that is not covered at
+all. It does not recommend one. The one place it pushes is to say that the list
+itself may be wrong and that saying so is the most valuable answer — because ADR
+0013's own "least sure of" section says the cuts are the accountant's call.
+
+The ADR now points at the brief and the brief points back. The ADR is the
+reasoning; the brief is the ask.
+
+### 2026-08-22 — The `.so` the tracer cannot see (branch `claude/the-so-the-tracer-cannot-see`)
+
+The deployment half of the sharp incident, and the interesting part is WHY it
+was invisible.
+
+`sharp` is already on Next's default external list, so it was never bundled —
+the production error even names the external module,
+`Failed to load external module sharp-20c6a5da84e2135f`, and the local build
+writes that same id into the route's trace. Tracing followed it into
+`node_modules` and copied what JavaScript requires, which includes
+`@img/sharp-linux-x64`. That is why the `.node` binary LOADED.
+
+**What it could not copy is the shared library that binary links against.**
+`@img/sharp-libvips-linux-x64` is required by nothing in JavaScript: the `.node`
+names it at the ELF level and the loader resolves it at dlopen time. Nothing in
+the module graph mentions it, so nothing traced it, so it was absent on the
+function:
+
+```
+ERR_DLOPEN_FAILED: libvips-cpp.so.8.18.3: cannot open shared object file
+```
+
+The repair is `outputFileTracingIncludes`, which this config already uses for
+exactly this class of problem — the PDF fonts, with a comment reading *"a
+failure that cannot reproduce locally, where the repo is simply there."* Same
+shape, one degree worse: **this machine is Windows, so the linux-x64 packages
+are not even installed here.** There is no way of running the app on the
+founder's laptop that could have caught it.
+
+- Only **linux-x64** is listed. Shipping every platform's binaries would put
+  ~100MB of macOS and Windows libvips into a Linux function for nothing. Moving
+  to arm64 breaks this, and the dlopen failure will say so.
+- **Both** packages are named, not only libvips — a trace that gets one and not
+  the other is the failure being fixed.
+- **A NEW ROUTE THAT PROCESSES AN IMAGE MUST ADD ITSELF.** The four listed are
+  everything reaching `ai/extract.ts` today: the inbound email hook, the receipts
+  inbox and its detail page, and the document browser.
+
+**The load failure now says what it is.** All anybody could see was
+`digest: '508730998'`; the message was in a Vercel log nobody was reading, and
+finding it took a deliberate hunt. A native library that will not load is an
+infrastructure fault rather than a bad upload, and the error says so and points
+at the config. The failure is deliberately not cached, so a redeploy that fixes
+the install does not need a cold start to be believed.
+
+**Verified as far as this machine allows, and no further.** The tracing
+mechanism is proven locally — the PDF fonts appear in the route that includes
+them and are absent from one that does not. The sharp globs themselves cannot
+resolve here, because the packages are not installed on Windows. **Whether
+receipt extraction actually works is a question only production can answer**,
+by extracting one.
+
+**STILL UNCONFIRMED ON 2026-08-22, and the attempt is worth recording because it
+will be made again.** The obvious test — press Read on a receipt that is already
+in the inbox — cannot be done, for two reasons that compound:
+
+- **The Read button only renders for `pending` or `failed`**
+  ([receipts-controls.tsx:321](../../src/app/dashboard/m/accounting/receipts/receipts-controls.tsx:321)),
+  and every document in the Test tenant is `done`. `extractDocumentAction` itself
+  has no such guard; the UI does.
+- **A PDF never touches sharp at all.**
+  [extract-image.ts:63](../../src/modules/accounting/ai/extract-image.ts:63)
+  returns early for `application/pdf`, so re-reading one proves nothing. The only
+  image in the tenant is a trashed email-signature logo, and it is `done` too.
+
+Only three things call extraction — the inbound email hook, upload registration,
+and the Read button — so **confirming this needs a NEW image document**: upload a
+photo to `/dashboard/m/accounting/receipts`, or forward one to the email-in
+address. Registration auto-runs extraction, so the answer arrives immediately:
+either the fields come back, or the row shows `failed` and the error now says
+whether it is the deploy or the file.
+
+### 2026-08-22 — A native module took the payables actions down with it (branch `claude/approve-a-matched-bill`)
+
+**Approving a bill returned a 500 on the live app**, with nothing but a digest
+to go on. The Vercel log had the whole story:
+
+```
+Could not load the "sharp" module using the linux-x64 runtime
+ERR_DLOPEN_FAILED: libvips-cpp.so.8.18.3: cannot open shared object file
+digest: '508730998'
+```
+
+`ai/extract-image.ts` had a top-level `import sharp from "sharp"`,
+`ai/extract.ts` imports that file, and `payables/actions.ts` reaches
+`extract.ts` — so a native optional dependency failing to load **took every
+server action in the payables module with it.** Nothing about approving a bill
+touches an image.
+
+The import is lazy now, cached so a page normalising several images pays the
+load once. **This does not fix the install** — sharp genuinely cannot load on
+that runtime — it makes the blast radius honest: a missing libvips now breaks
+image normalisation, which is what it actually affects, instead of accounting.
+
+**The deployment side is still open.** `npm install --os=linux --cpu=x64 sharp`,
+or declaring it in `serverExternalPackages`, is the real repair, and receipt
+extraction from photographs stays broken in production until somebody does it.
+
+**Also fixed, and found by the same drive:** a bill line coded to Goods Received
+Not Invoiced rendered with an EMPTY account box. GRNI is deliberately excluded
+from `isCodableAccount` so nobody hand-codes to it — but a `Select` cannot
+display a value that is not among its options, so a matched line looked uncoded
+on a screen whose own footnote reads *"approval requires accounts on every
+line"*. Accounts already used by the bill's lines are added back for display and
+stay out of the list for everything else.
+
+### 2026-08-21 — The basis you file on (branch `claude/the-basis-you-file-on`)
+
+**`accounting_settings.default_basis`**, and the end of a hardcoded literal that
+had been quietly answering a question it was not qualified to answer.
+
+Three report pages each resolved basis identically:
+
+```ts
+const basis = sp.basis === "cash" ? "cash" : "accrual";
+```
+
+So a business that **files on cash opened every report on accrual**, every time,
+and had to re-pick on each one. Two correct-but-different profit figures, with
+the wrong one loading by default, is the shape of an error somebody eventually
+acts on — and ADR 0007 exists precisely because most small businesses file cash.
+
+- **`resolveBasis(param, tenantDefault)`** is pure and is the whole decision.
+  **An explicit parameter wins in BOTH directions**: a link to `?basis=accrual`
+  produces accrual even for a cash-default tenant, because a report URL is
+  exactly the thing people paste to their accountant and it must not change
+  meaning depending on who opens it. Anything unreadable falls to the tenant
+  default rather than to accrual — the old comment said an unreadable query
+  string "must never silently produce the other basis", and this keeps that
+  intent while fixing its reference point.
+- **Resolution moved INSIDE the transaction**, because that is where the
+  settings row is readable. Each page now returns `basis` from its data block
+  rather than computing it in the request scope.
+- **`DefaultBasisNote` is shown at the moment somebody demonstrates the
+  preference** — the report they have just switched to Cash — rather than on a
+  settings screen. A default basis is set once in the life of a business and
+  then never again, which makes a settings screen the place it goes to be
+  undiscovered. It renders only when the report's basis differs from the saved
+  default, so it is absent for everybody already on the right one and disappears
+  the moment it is used.
+- **Owner-only and audited** (`ledger.default_basis_set`). It changes the figure
+  every other person in the business sees first.
+- **It is a PRESENTATION preference and the tests pin that.** It never reaches
+  `postEntry`, never changes what is stored and never decides what a pack posts
+  — the ledger is accrual for every tenant whatever it says. If this ever starts
+  deciding what gets stored, ADR 0007's single-set-of-books property is gone.
+- Defaults to `accrual`, so nothing that exists today changes.
+- Migration `0177`. 6 new tests.
+
+**Driven**, and worth recording how: the P&L 404'd with the change applied and
+rendered on a stashed tree, which read as a clear break. It was a stale dev
+server — stashing forced the recompile that actually fixed it. **A stash/restore
+A-B test is not a controlled experiment when a dev server is compiling in
+between.**
+
+Found while looking, not fixed here: **`/dashboard/m/accounting/reports` is
+linked from the accounting nav and 404s.** The index page exists; something in
+it refuses. Pre-existing.
+
+### 2026-08-21 — A pack posts, and core never learns it exists (branch `claude/what-the-shelf-is-worth`)
+
+`inventory` slice 3b. Three changes land in this module and none of them teaches
+it about inventory.
+
+- **`2050 Goods Received Not Invoiced`**, subtype `goods_received`, added to the
+  general chart and backfilled into existing tenants by `0178` — `0151`'s shape
+  exactly, guarded on both subtype and code, driven off `accounting_settings`
+  because that is what "uses accounting" means.
+- **`accounting_settings.inventory_treatment`**, defaulting to `none`. Nothing
+  posts until an owner asks for it.
+- **`BS_GROUP_BY_SUBTYPE` gains `goods_received`**, and this one is worth
+  keeping: `bsGroupFor` does NOT error on an unmapped subtype, it falls back to
+  "Other Liabilities" — so a missing entry here is invisible until a client
+  reads their own balance sheet. `isCodableAccount` excludes it too, because
+  hand-coding a bill line to GRNI would clear a balance no receipt created.
+
+**`approveBill` is untouched.** It copies a bill line's account verbatim, so the
+inventory pack sets the line to GRNI when it matches the line to a delivery, and
+the bill path never has to know. The alternative — `approveBill` reading a pack's
+allocation table — would put a Layer 1 industry-blind module in the business of
+reading Layer 2a, which `docs/extension-model.md` forbids in as many words.
+
+**Two live bugs found while mapping the seams**, both in this module's blast
+radius and both silent: an unmapped subtype falling into Other Liabilities as
+above, and `editEntry` being able to rewrite a bill's posted entry from the
+journal screen with no source guard — `assertEntryNotSourceManaged` is called by
+the void action but not the edit path. The second is recorded in
+`docs/modules/inventory.md`'s open items because an allocation has to survive it,
+but it is an accounting-side gap and predates this slice.
+
+### 2026-08-21 — The pass-through rule that was an observation, and the repair that was also too broad (branch `claude/what-the-shelf-is-worth`)
+
+Two ADRs, design only — no code in this change; the rules land with `inventory`
+slice 3b.
+
+- **[ADR 0012](../decisions/0012-what-capitalises-stock.md)** — what capitalises
+  stock, and what joins the two records of its cost. Accrual only.
+- **[ADR 0013](../decisions/0013-inventory-tax-treatment.md)** — inventory
+  treatment is a POLICY, not a property of the word "cash".
+
+**The bug.** [ADR 0007](../decisions/0007-cash-basis-reporting.md) says
+everything that is not an invoice or a bill *"is already cash-dated and passes
+through untouched"*. **That was never a decision. It was an observation that, at
+the time, happened to be true** — written down as a rule, so nothing failed when
+it stopped holding. Perpetual inventory is the first thing in this build that
+capitalises, and traced through the lens a stock purchase comes out wrong twice:
+the bill's capitalising line is re-recognised as an ASSET at the payment date,
+because `cash-basis.ts` builds recognition from every non-control line and does
+not care about account type
+([cash-basis.ts:247](../../src/modules/accounting/core/cash-basis.ts:247)); and
+the consumption entry has no AR/AP leg, so it passes through untouched.
+
+**The repair that was also wrong.** The first fix was to substitute capitalising
+lines to an expense account and drop the movement entries on cash basis — which
+produces "deduct at payment". That is a plausible treatment for feed bought by a
+qualifying farmer. **It is not what "cash basis" means**: a qualifying small
+business has more than one option, and the answers differ. Two businesses both
+correctly on the cash method can owe different results.
+
+**And it was already wrong in this repo, not hypothetically.** The `retail` pack
+shipped the same day and sells goods out of `inventory`. Merchandise held for
+resale is exactly the category where sale still matters.
+
+So the mechanism ships and the opinion becomes a setting:
+`accounting_settings.inventory_treatment`, orthogonal to basis, defaulting to
+`capitalise` — which changes nothing for anybody today. `expense_on_payment` is
+the second value. **Non-incidental materials and supplies is NAMED AND
+DELIBERATELY NOT IMPLEMENTED**, because approximating it would produce a
+confident wrong number in the one place where wrong means an amended return.
+
+The names stay industry-neutral: not `farm_cash_payment_basis`. `accounting` is
+core, and core carries no trade-specific nouns — the farm profile *selects* a
+treatment rather than getting its name written into the ledger.
+
+**`expense_on_payment` cannot ship without per-item expense mapping.** It has to
+substitute *to* something, and everything-to-COGS balances while being useless
+for preparing a return. Resolution is item → `item_kind` → tenant default, reusing
+the taxonomy that already exists at
+[inventory.ts:73](../../src/db/schema/inventory.ts:73).
+
+**The implementation trap, named because it will look like a rounding
+difference:** `getBalances` filters `accountIds` inside the query
+([balances.ts:89](../../src/modules/accounting/core/balances.ts:89)), before
+anything is substituted — so a report asking only for the expense account would
+filter out the lines that were about to become it.
+
+The accrual path stays byte-identical; every rule is inside the `cash` branch.
+
+### 2026-08-21 — Who may cause a posting (branch `claude/what-the-shelf-is-worth`)
+
+**`postEntry` no longer asks only WHO is posting; it asks WHAT produced the
+entry.** See [ADR 0011](../decisions/0011-machine-posted-entries.md).
+
+`requireOwnerRole(ctx)` at the one posted-entry call site became
+`requirePostingRight(ctx, input.source)`. An ordinary journal is still an
+owner's decision and a plain `manual` entry from staff is still refused. A small
+explicit set — `MACHINE_SOURCES` in `core/guards.ts` — posts without the owner
+check.
+
+**Why this module had to change for a pack.** `inventory` slice 3 makes stock
+movements post, and those movements are deliberately not owner-level:
+`livestock` settled the write levels on 2026-08-15 ("movements and merges are
+chores"), `retail`'s till exists so a **staff member** sells at a market stall,
+and production runs are recorded by whoever ran them. Under the old rule, adding
+perpetual posting would silently have made feeding animals, selling at a market
+and processing a batch all owner-only — three deliberate decisions reversed, and
+features already live broken. The check was firing after the decision it was
+meant to influence had already been made and authorised elsewhere; all it could
+have produced is a half-written transaction, the movement recorded and the
+journal line refused.
+
+**What makes it safe, in three layers.** `source` is absent from
+`entryInputSchema`, so nothing over the wire can name one; it defaults to
+`manual`, so a caller that forgets gets the STRICTER rule; and
+`journal_entry_source` is a Postgres ENUM, so a source cannot be invented at a
+call site, only chosen. A test meant to assert that a made-up source is refused
+**could not be written — it does not compile.** The day `source` becomes
+client-settable, this becomes a privilege escalation and the check has to move.
+
+**An expert still never posts**, machine-sourced or not, and every other guard
+is untouched: closed periods, balance, active accounts, entity postability. The
+audit row records the staff member who caused it rather than a borrowed owner —
+ADR 0011 rejected elevating `ctx.role` precisely because that would make the
+trail lie.
+
+`depreciation` is a machine source by every argument in the ADR and is
+deliberately NOT in the set: it runs from an owner's screen today, and loosening
+a rule no caller is asking about only widens what has to be reasoned about
+later.
+
+8 tests in `tests/ledger.test.ts` pin the boundary — including the ones that
+prove what did NOT change. Migration `0176` adds the three enum values.
+
+### 2026-08-22 — Make default asked nothing and did nothing (branch `claude/sleepy-ardinghelli-211fde`)
+
+The **Make default** button on `/dashboard/m/accounting/companies` was inert.
+No dialog, no toast, no request, no error — click it and the page sat there.
+
+- **The confirm was awaited INSIDE `startTransition`.** Opening the dialog is a
+  state update; made inside a transition it cannot commit while that same
+  transition is parked on the promise only the answered dialog resolves. The two
+  wait on each other and the click goes nowhere. Ask first, then start the
+  transition — the shape banking and reconcile have used since they were
+  written:
+
+      async function act() {
+        const asked = await confirm({ ... });
+        if (!asked) return;
+        startTransition(async () => { ... });
+      }
+
+- **The irony is the point.** `useConfirm` exists because a suppressed
+  `window.confirm` returns false and the button silently does nothing (see
+  2026-08-12). This is the identical silence with the deadlock in our own code
+  instead of the browser's, which is why the warning is now the loudest
+  paragraph in the hook's doc comment rather than a note on one call site.
+- **The whole repo was swept**, structurally rather than by eye — every
+  `startTransition(...)` body parsed to its matching paren and searched for an
+  awaited dialog. `companies-controls.tsx` was the only one: every other
+  `await confirm(` in the app — banking disconnect, reconcile cancel and reopen,
+  invoice issue/void/delete, unapply payment, the inventory posting toggle and
+  unpick, the retail void — already guards ahead of the transition.
+- **Found from the retail side.** The same bug was written into
+  `VoidSaleButton` in the retail pack and caught there first; this is its twin,
+  and the two were the only instances.
+
+### 2026-08-17 — A payment row that would not say whose account it was (branch `claude/payment-rows-name-the-company`)
+
+Found while finishing the drive of the mirror case. The invoice's payment row
+read **"2026-08-18 · check → 1040 · Test Operating"** on an OAK ROW invoice, with
+nothing saying the money had gone to an affiliate.
+
+- **The register's name is not the answer**, and that is the whole point. It
+  reads as an explanation only because this tenant happened to name the account
+  after its company; "Main Checking" on somebody else's books looks exactly like
+  your own. The row now says **"· received by Test"** — and the bill's row, which
+  had the identical gap since slice 2, says **"· paid by Test"**.
+- **The same words the ledger entry already carries in its memo** (`received by
+  another company` / `paid by another company`), so the document and the journal
+  agree rather than describing the same event two ways.
+- Both sides in one change, because it is one omission with two instances — the
+  bill half had simply never been driven with an affiliate payment on screen.
+- Undefined at one company and for the ordinary payment, so every row that does
+  not need explaining is byte-identical to what it was.
+
+**Third time this shape has come up** — the Journal header that named the tenant
+(slice 1), the close detail page that named no company (slice 4), and now this.
+(A fourth followed on 2026-08-18: the asset list, which showed several
+companies' assets with no column saying whose.)
+The pattern worth naming: **a screen that shows a document's own data is safe;
+one that shows a RELATIONSHIP to another company has to say which.** Every
+instance has been found by driving and none by a test, because the fixtures all
+have one company and the string is correct there.
+
+### 2026-08-17 — The first invoice payment ever rendered, and it 500'd (branch `claude/unapply-across-the-rsc-boundary`)
+
+Found by driving the mirror case on the live Test tenant, one minute after it
+deployed. The payment RECORDED — the toast said so and the ledger is exactly
+right — and then the invoice page threw `Something went wrong`.
+
+- **`InvoiceActions.Unapply` was a property hung on a `"use client"` export**,
+  rendered from the invoice page, which is a SERVER component. Properties do not
+  survive the RSC boundary: the server sees a client reference, `.Unapply` is
+  `undefined` on it, and React throws #130 (*element type is invalid*). It is a
+  plain named export now.
+- **NOTHING TO DO WITH INTERCOMPANY.** Any invoice payment would have done it —
+  the branch only renders when `payments.length > 0`, and on this tenant no
+  invoice had ever had one. That is the whole reason it survived: `tsc` is happy
+  (the property exists on the module's own type), the build is happy, ~2,800
+  tests are happy, and the one thing that fails is a person clicking Record
+  payment. The dossier already lists this area as thinly driven.
+- The books were checked directly while the page was down, and were correct:
+  `Oak Row Cr AR 1,250 / Dr Due from Affiliates 1,250`, `Test Dr Test Operating
+  1,250 / Cr Due to Affiliates 1,250`, both legs linked and posted, invoice
+  `paid`. **The feature worked; only the page that shows it did not.**
+
+### 2026-08-17 — The mirror case, and the one-sided void it found (branch `claude/invoice-payment-intercompany`)
+
+The last thing ADR 0010 listed as refused rather than recorded: a customer pays
+Oak Row's invoice and the cheque goes into Test's account. No migration —
+`postIntercompanyPair` already had the shape.
+
+- **THE MIRROR, and note which way round it goes.** The invoice's company clears
+  its receivable and is now OWED by the company that took the money in:
+
+  ```
+  Oak Row   Dr Due from Affiliates  1,000   <- Oak is owed by Test
+            Cr Accounts Receivable  1,000      (the invoice is settled)
+  Test      Dr Checking             1,000      (Test's cash arrived)
+            Cr Due to Affiliates    1,000   <- Test now owes Oak
+  ```
+
+  So the INVOICE'S company is the `from` side even though no money left it.
+  `postIntercompanyPair` names that argument for the bill case, where the
+  payer's cash really does move; **what the two shapes actually share is which
+  company ends up holding the asset**, and that is what the parameter decides.
+- **`invoice_payments.journalEntryId` points at the INVOICE'S leg**, so status
+  derivation, A/R aging and unapply keep reading the payment row exactly as they
+  did — the same choice `bill_payments` made in slice 2.
+- **Undeposited Funds falls through to the ordinary single-entry path**, because
+  it is a chart account rather than a register and has no owner. Two companies'
+  unbanked cheques share 1250 exactly as their receivables share 1200.
+- **The Deposit-to picker offers every register again**, reversing what slice 1b
+  did here — the same reversal slice 2 made on the bill's Paid-from, for the
+  same reason: the choice used to always fail and now records something. The
+  dialog names whose account it is and says what will happen before it happens.
+
+**THE BUG THIS FOUND, which predates it and was live in the bill path since
+slice 2.** `assertNotIntercompanyLeg` lived only in `actions.ts`, so the journal
+screens were covered and `unapplyBillPayment` was not: it went straight to
+`voidEntry` and **voided one leg of a pair**. Proved against the dev database
+before writing the fix — the two legs came back `['posted', 'void']`. The paying
+company was left with its cash gone and a Due-from balance that
+`affiliateBalances` cannot even report, because a group with one surviving entry
+reads as half a pair and is skipped.
+
+- **The guard moved into the ENGINE** — `voidEntry` and `reverseEntry` both
+  refuse a bare leg now. Same lesson as `assertNoForeignRegisters`: a rule
+  enforced per screen is a rule the next caller does not get, and unapply was
+  the next caller.
+- **`voidIntercompanyPair` is the undo that takes both**, and it is distinct
+  from `reverseIntercompanyPair` on purpose: unapply says the payment did not
+  happen, which removes it from every report, while a reversal says it happened
+  and is being corrected. Both unapply paths route through it.
+- `voidEntryUnchecked` is core-internal and deliberately not re-exported from
+  `core/index.ts`, the way `asFilterScope` is not — its only caller is the pair
+  void, which has already established that it is taking both sides.
+- The mutability tiers still apply to EACH leg, so a reconciled line or a closed
+  period on either side refuses and the whole transaction rolls back.
+
+**One test changed its mind, which is worth recording rather than hiding.** The
+slice-1b case asserting `CROSS_ENTITY_REGISTER` on exactly this payment is gone,
+replaced by one asserting the pair — that refusal was right while there was no
+way to record the thing. The refusal for a HAND-WRITTEN journal touching a
+foreign register is unchanged and still asserted: the guard did not move, the
+recording path grew a second shape. Two downstream figures moved with it, and
+both are now explained in place: `affiliateBalances` nets to 20,000 rather than
+25,000 because the fixture contains 5,000 running the other way, which is the
+netting the derived-not-stored design exists to do.
+
+`tests/entities-db.test.ts` is 41 cases: the pair and its direction, the payment
+row pointing at the invoice's leg, consolidation eliminating it to a plain bank
+deposit, unapply voiding both legs, and the engine refusing a one-sided void.
+
+### 2026-08-17 — `0153`: the lock's contract half, and the scalar goes (branch `claude/close-contract-migration`)
+
+The contract half of ADR 0010 slice 4, run AFTER the deploy that writes
+per-company locks — and the two statements in it could not ship together in
+`0152` for OPPOSITE reasons, which is the pairing worth remembering.
+
+- **`period_closes.entity_id` SET NOT NULL** could not precede the deploy:
+  migrations run ahead of it, and the build live while `0152` landed still
+  inserted closes with no company, so the constraint would have rejected every
+  close in that window. Fourth time this repo has made that split —
+  `0123`/`0125`, `0142`/`0144`, `0145`/`0146`, now `0152`/`0153`.
+- **`accounting_settings.closed_through` DROP** could not precede it either, for
+  the mirror reason: Drizzle builds its SELECT list from `schema.ts`, so a
+  running old build would 500 on every settings read. The schema stopped
+  declaring it in the slice-4 PR, that deploy is live (`48aa06b`), and only then
+  is the column safe to remove. The `0147` lesson.
+- **`0152`'s FIRST backfill is deliberately NOT re-run, and that is the one real
+  decision in the file.** It copied the tenant-wide scalar onto every company.
+  Re-running it now would copy a STALE scalar over live per-company locks —
+  production's scalar still read 2026-06-30 while Oak Row LLC had since closed
+  through 2026-07-31, so a re-run would have silently reopened a month somebody
+  closed. **A backfill is only safe to repeat while it is still the source of
+  truth**, and this one stopped being that the moment the deploy went live. The
+  SECOND backfill (entity_id on close rows) does re-run, guarded, because it
+  only touches NULLs.
+- **Checked before writing it, not assumed:** zero rows on either database had a
+  NULL `entity_id`, so the window produced nothing to repair and the guarded
+  re-run was the no-op it was expected to be.
+- **The null branches the nullable column forced are gone with it** — the
+  `closeEntity` helper in `core/close.ts`, the narrative's combined-scope
+  fallback, the "All companies" cell in the close history, and the blank
+  `entity` columns in the export. A branch for a state the database can no
+  longer hold is worse than none.
+- **Verified on BOTH databases after applying:** `entity_id` NOT NULL with zero
+  nulls, `accounting_settings.closed_through` gone, `entities.closed_through`
+  still nullable (null means never closed), and production's two locks intact
+  and DIFFERENT — Oak Row LLC through 2026-07-31, Test through 2026-06-30.
+  `verify-rls` clean across **115 tables**. The live app was driven afterwards:
+  the Close page and the hub card both render, which is the check a DROP
+  actually needs — the running build must not select the column that just left.
+- The isolation suite's close INSERT case now gives the attacker row **B's own
+  company**, so the composite FK has nothing to object to and RLS is the only
+  thing that can reject it. A test that could pass for two reasons was proving
+  half of what it claimed.
+
+### 2026-08-17 — A close that would not say whose it was (branch `claude/close-names-its-company`)
+
+Found by driving slice 4 on the live Test tenant, minutes after it deployed —
+the same way every bug in slices 1 and 2 was found, and the same shape as the
+first of them.
+
+- **The close detail page read "Close through 2026-07-31"** above Oak Row LLC's
+  checklist snapshot, with nothing anywhere on the page naming Oak Row. It is
+  the Journal header bug again (2026-08-16): a string that is correct at one
+  company, unfalsifiable in every fixture, and authoritative-looking on the one
+  screen where somebody signs a month off. The title and the breadcrumb both
+  name the company now, and only when there is more than one.
+- **The journal ENTRY page had the same hole, one slice older.** The journal
+  LIST grew a Company column in slice 1; the detail page never did. So a
+  two-company tenant could open an entry — on the page where they void and
+  reverse it — and not be told whose books it belongs to. Noticed while voiding
+  the probe entry from the spin, which is the sort of thing only driving finds.
+- **The dialog title ran under the close button.** `DialogContent` puts an icon
+  button at `top-2 right-2` and `DialogTitle` had no right padding, so any title
+  long enough to wrap went beneath it — "Close Oak Row LLC's books through
+  2026-07-×31" on screen. Fixed in the PRIMITIVE rather than in the caller: the
+  component that positions the button is the one that should reserve its corner.
+  `leading-none` went with it, which is why the two lines looked jammed.
+- **What the spin PROVED, and it is the point of the slice:** Oak Row closed
+  through 2026-07-31 while Test stayed at 2026-06-30; the same journal entry,
+  same date, same accounts was REFUSED in Oak Row ("That date falls in a closed
+  period") and POSTED in Test. The checklist showed Test's 4 unreviewed
+  transactions, 2 draft invoices and 1 draft bill, and showed Oak Row none of
+  them — each with only its own register under "not reconciled". The probe entry
+  was voided afterwards; Oak Row is left closed through July on purpose, as the
+  standing demonstration that two companies sit at different months.
+
+### 2026-08-17 — Per-entity close (branch `claude/per-entity-close`)
+
+Slice 4 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md), and the
+last one it named. `period_closes` locked every company at once; ten LLCs close
+in different months. Migration `0152` (expand); **`0153` is the contract half** — `period_closes.entity_id` SET NOT NULL and the
+`accounting_settings.closed_through` DROP.
+
+- **THE LOCK MOVED ONTO THE COMPANY** — `entities.closed_through`, written only
+  by `completeClose`/`reopenClose`, which is exactly the rule the tenant-wide
+  scalar followed. Derived state with two writers is what keeps the lock and the
+  close history unable to disagree, and that survived the move unchanged.
+- **NOT derived from `max(period_end)`, and the data decided it.** Deriving the
+  lock from the close rows is tempting and would make drift impossible rather
+  than merely unrepresentable — but production holds exactly ONE close row, on
+  the two-company Test tenant, and its lock (2026-06-30) came from the scalar.
+  Pure derivation would either silently unlock Oak Row or need a fabricated
+  close row nobody performed. A backfilled column preserves every existing lock
+  and invents nothing. Checked before writing the migration, not after.
+- **`assertPeriodOpen` grew a required `entityId`** — the slice 1 and 3
+  instrument again. The failure it forecloses is worse in both directions than
+  the reporting one: a tenant-wide check REFUSES a write to a company whose
+  books are open, and ACCEPTS one into a company whose books are closed. Neither
+  is visible on a single-company tenant.
+- **THE CHECKLIST IS SCOPED TOO, and that is the half that took the work.**
+  Draft entries, invoices, bills and bills awaiting approval by the document's
+  company; unreviewed bank transactions and unreconciled accounts through the
+  REGISTER's company (a transaction has no company of its own, its account
+  does); ledger integrity narrowed to that company's entries. Telling somebody
+  closing Maple that Oak has three draft bills is noise on the one screen whose
+  whole job is "is this month finished".
+- **The receipts inbox stays UNSCOPED, and it is the honest option.** An uncoded
+  receipt has no company yet. Counting it for everybody is a real reason to
+  hesitate before closing anyone's month; hiding it would hide the item most
+  likely to be somebody's missing expense.
+- **"The latest close" is per company.** Reopening Maple's June has nothing to
+  say about Oak's July, and the tenant-wide latest check would have refused it.
+  Same for monotonicity: closing forward is enforced within a company, and the
+  same period end in another company is not a collision — the unique index is
+  `(tenant, entity, period_end)` now, because ten LLCs closing the same June is
+  the ordinary case.
+- **The close narrative finally scopes itself.** `narrative.ts` carried a
+  comment since slice 1 saying it used `combined` *because* a close was
+  tenant-wide, and named slice 4 as the thing that would change it. It reads the
+  close's own company now — anything else is a story about Maple's month told
+  over Oak's numbers.
+- **"Books closed through" needed a group answer**, and `groupClosedThrough` is
+  it: the EARLIEST of the companies, and null the moment one has never been
+  closed. That is the date before which nothing can be posted anywhere. The
+  latest, or the default company's, would read as a guarantee the books do not
+  give. The hub card and the trial-balance footer both go through it, and the
+  Close page shows every company's own state as a row of chips — an owner comes
+  to that page to find out Oak has not been closed since March.
+- **The close page picker has no "all companies", deliberately** — unlike every
+  report picker in the module. You cannot close everything at once any more, and
+  offering it would offer back the exact thing this slice removed. An unknown
+  `?entity=` 404s, which matters more here than on a report because this screen
+  WRITES.
+- **`0152` was hand-edited three ways and the header says so.** drizzle-kit
+  emitted the `accounting_settings.closed_through` DROP inline (removed — a DROP
+  goes out AFTER the deploy that stops selecting the column, the `0147` lesson),
+  emitted no backfills at all (both added — without them every existing lock
+  silently disappears), and put the foreign key before the backfill (reordered
+  so it validates real values). The one honest gap is stated in the file: in the
+  window between migration and deploy the old build writes closes with a NULL
+  entity, and NULLs are distinct in a unique index, so "one completed close per
+  period" is unenforced for those minutes. No path to it from the UI.
+- **The existing close row went to the DEFAULT company**, which is an
+  approximation and labelled as one: a close written before today locked
+  everything, so no company is its true owner. The LOCK is preserved for every
+  company by the other backfill, which is the part that matters. **The
+  consequence, stated rather than discovered later: a non-default company
+  carrying an inherited lock has no close row to reopen and can only be closed
+  forward.** On production that is Oak Row LLC.
+- Applied to dev AND production, both verified before the PR: two columns
+  nullable, both companies holding 2026-06-30, zero closes without a company,
+  the index swapped, `relforcerowsecurity` still true on `entities` and
+  `period_closes`.
+- `tests/entities-db.test.ts` grows to 38. The six new ones are the cases only a
+  two-company fixture can state: closing one company leaves the other's books
+  open (and the same date posts fine in it), the checklist counts one company's
+  drafts and not the other's, two companies close the same period, reopening
+  Oak's January is allowed while Maple sits at February, monotonicity binds
+  within a company only, and the group date is the earliest. Isolation gains
+  three: a close cannot name another tenant's company, one completed close per
+  period per company, and a second company may close the same period.
+
+### 2026-08-17 — Consolidation, and the third scope (branch `claude/consolidated-scope`)
+
+Slice 3 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md): the
+group's figures with intercompany eliminated. **No migration** — elimination is
+derived at read time from links that already exist, like invoice status,
+`closed_through` and retained earnings.
+
+- **ELIMINATION IS A LINE-LEVEL EXCLUSION, AND THE SCOPE HAD ALWAYS BEEN AN
+  ENTRY-LEVEL PREDICATE.** That mismatch is the whole risk in this slice: a
+  consolidated scope that reused `entityScopeCondition` would filter nothing,
+  eliminate nothing, and produce a statement that looks right, balances, and
+  double-counts every intercompany transaction. So the defence is the same one
+  slice 1 used — **make forgetting a compile error**. `entityScopeCondition` now
+  takes a `FilterScope` (`Exclude<EntityScope, {kind:"consolidated"}>`), which
+  broke all eight of its call sites and made each of them state what it does
+  about consolidation. Ledger reports go through `ledgerScopeConditions` in the
+  new `core/consolidation.ts`, which returns the entity filter AND the
+  elimination in one list to spread, so a report cannot take one and forget the
+  other.
+- **Eliminate by following the LINK, never by matching amounts** — drop exactly
+  the affiliate legs of entries carrying an `intercompany_id`, and nothing else
+  in those entries. `intercompany_id IS NOT NULL` is the whole test because
+  `0149` enforces exactly two entries in two companies, deferred: a committed
+  pair is a complete pair.
+- **Why it cannot unbalance a statement:** a pair's affiliate legs are always +X
+  and −X, so removing them removes zero. The consolidated trial balance still
+  ties with no plug and no invented figure. Checked on paper before any code was
+  written, against the two shapes the module can produce: a bill pair
+  consolidates to `Dr expense / Cr cash` — the group paid a vendor — and a
+  transfer pair to nothing at all, cash out of one register and into another.
+  Both are now tests.
+- **`combined` KEEPS ITS MEANING.** It sums and eliminates nothing, and
+  consolidated arrived BESIDE it as a third kind rather than redefining it — a
+  report that quietly started eliminating under the old name would change what
+  every saved report link and every archived export already says. A test asserts
+  combined still shows both affiliate legs, which is what makes that a promise
+  rather than an intention.
+- **Consolidated has no `entityId`, in the type.** Eliminating one side of a
+  pair while keeping the other leaves that company short by the amount, so a
+  consolidated single company is not a thing.
+- **Who takes it and who declines, each with its reason in the code.** Trial
+  balance, balance sheet and P&L take it. **The general ledger takes it too**,
+  because a consolidated trial balance nobody can drill into is a number an
+  accountant cannot check — a test pins the two tying out through `displayCents`.
+  **Cash Activity declines** (`FilterScope`), the same shape of reason it already
+  declines a basis: every register belongs to one company and none is inflated by
+  intercompany, so the difference the reader would go looking for cannot exist.
+  **A/R aging, A/P aging and the tax summary decline** because they read
+  documents, and an affiliate balance never becomes an invoice or a bill.
+- **THE P&L'S NUMBERS ARE IDENTICAL TO COMBINED TODAY, and it offers the scope
+  anyway.** No intercompany leg touches income or expense. It is offered for the
+  stamp — a reader who scoped the balance sheet to the group should not have to
+  switch back to see its profit — and because the day one company charges another
+  management fees, the obvious next step for a landlord with a management LLC,
+  the two stop being equal with nobody having to remember this page. A test pins
+  the equality so that day fails loudly.
+- **The manual-journal residual is SURFACED, not hidden**, and the argument is
+  stronger than consistency with the tax summary's gap: an unlinked affiliate
+  line has no counterparty leg to remove with it, so suppressing it would leave
+  assets short against liabilities-plus-equity and **hiding it would require
+  inventing an equity plug**. `consolidationResidual` counts what elimination
+  could not follow — defined as the exact complement of the elimination
+  predicate, so it is always precisely what survived on the face of the statement
+  — and `ConsolidationNote` says it on the page while `residualNote` puts the
+  same sentence in the CSV. It counts LINES as well as the net, because two
+  hand-written journals can offset to nothing and still mean something went in
+  unlinked.
+- **The stamp says which of the three it is** — page, CSV content and CSV
+  filename, the rule the basis stamp follows. `?entity=consolidated` on a
+  report that declines it **404s**, the same rule an unknown id follows: a scope
+  this report does not have is refused rather than quietly answered with the
+  combined figures under the name the reader chose for the difference. And on a
+  single-company tenant it resolves to that company, so the client who has one
+  never learns the word.
+- **The books export gains a consolidated set** of the three statements beside
+  the per-company and combined ones, once there is more than one company. That
+  zip is what goes to the accountant. At one company it is byte-identical.
+- **A BUG FOUND BY READING, not by driving, and it predates this slice:**
+  `entityParam` on the CSV export was `z.string().uuid().optional()`, but the
+  picker's own "All companies" option submits an EMPTY string. On a two-company
+  tenant, choosing combined and pressing Export CSV answered *"Invalid input"*
+  instead of downloading. It now accepts `""`, `combined` and `consolidated`
+  alongside a uuid; `resolveEntityScope` still decides what each one means.
+- **DRIVEN ON THE LIVE TEST TENANT after the deploy**, which is how every bug in
+  slices 1 and 2 was found. The trial balance drops both affiliate rows and
+  totals **10,127.09** against combined's 13,227.09; the balance sheet comes out
+  6,272.91 with **Total Liabilities 0.00** where combined shows 9,372.91 and
+  3,100 — exactly 3,100 apart on both sides, with equity identical in both,
+  which is what elimination not touching equity looks like. The general ledger
+  shows no affiliate sections and the bill pair reads as the paper test said it
+  would: `Dr Subcontractor Expense 600` in Oak Row, AP raised and settled to
+  zero, `Cr Test Operating 600`. Consolidated and combined P&L both come out
+  (5,356.78). `/reports/cash?entity=consolidated` 404s. Export CSV on combined
+  no longer answers "Invalid input".
+- **THE RESIDUAL NOTE HAS BEEN SEEN, and Test now carries a standing residual on
+  purpose.** A hand journal was posted on Test —
+  `Dr 1500 Due from Affiliates 4.00 / Cr 4000 Sales 4.00`, memo *"Oak Row owes us
+  for supplies - booked by hand, not as a transfer"* — and deliberately left
+  there, so the note is visible on the consolidated reports from now on rather
+  than being a code path nobody has ever rendered. It reads: *"Not eliminated: 1
+  journal line in the affiliate accounts with no linked transfer to follow (net
+  4.00 debit)."* The distinction it exists to make is visible in the number: 1500
+  shows **4.00**, not 3,104 — the linked pair is still eliminated and only the
+  unlinked journal survives. Both statements still balance **with it on them**
+  (6,276.91 either side), which is the argument for surfacing rather than hiding
+  in one figure. A future session should not read that 4.00 as stray data.
+- `tests/entities-db.test.ts` grows to 32. The new eight: the bill pair
+  consolidating to Dr expense / Cr cash, the transfer pair consolidating to
+  nothing at all (asserted as "the only accounts that moved are the two
+  registers"), consolidated differing from combined ONLY in the affiliate
+  accounts, the consolidated trial balance showing neither and still tying, the
+  general ledger dropping the same lines and reconciling to it, the P&L pin, the
+  picker's three answers (offered / refused / invisible), and the unlinked
+  journal surviving with the residual reporting it.
+
+### 2026-08-17 — The affiliate accounts were codable on a bill (branch `claude/affiliate-accounts-not-codable`)
+
+Found by driving the bill path: the line Account dropdown offered **1500 · Due
+from Affiliates** and **2450 · Due to Affiliates**.
+
+- **Not the same class as the three picker bugs before it**, and that is the
+  point. Those offered something `postEntry` refuses, so the books were never at
+  risk while the screens caught up. This one the engine has no reason to refuse:
+  a hand-coded line into an affiliate account posts happily and produces a
+  balance that "who owes whom" cannot attribute to anybody, because that table
+  walks the intercompany LINKS. The list is the only place it can be prevented.
+- **ONE PREDICATE WHERE THERE WERE FOUR COPIES.** `isCodableAccount` now lives
+  in `core/coa.ts`; the rule had been spelled out separately in the new-bill
+  page, the bill detail page, the recurring dialog and `ai/bill-code.ts`. Four
+  copies is why the affiliate accounts had to be remembered in four places and
+  were remembered in none — the next system account has one place to go.
+- **The AI bill-coder shared the copy too**, so it could have SUGGESTED an
+  affiliate account. It now filters through the same predicate as the form: the
+  model cannot propose a category a person is not offered.
+- **The JOURNAL still allows it, deliberately**, the way it already allows a
+  manual entry against AR or AP. That is what a journal is for. The cost is
+  stated rather than hidden: an entry into an affiliate account by hand is a
+  balance the who-owes-whom table will not explain.
+
+### 2026-08-16 — A retired register is still somebody's (branch `claude/transfer-account-list`)
+
+Found by driving the transfer dialog again after the previous fix. "What did
+they get?" offered Oak Row **1020 · Rules Test Checking** — Test's own register,
+deactivated months ago — and the server refused it with the cross-company
+message. A choice that can never succeed, for the third time in this feature.
+
+- **The exclusion filtered ACTIVE registers only.** The list of things the
+  receiving company might have got removes registers, because their own are
+  offered separately labelled *cash in* — but it was built from the same active
+  -only query that feeds those choices, so a deactivated register of any company
+  fell through. `postEntry`'s guard has no `is_active` condition, and rightly
+  not: **deactivating a register does not stop it being somebody's.**
+- Fixed by excluding every register, active or not, from the account list —
+  a second query whose only job is that exclusion.
+- The engine was right throughout and refused it every time. Three of the four
+  bugs in this slice have been the same shape: a picker offering something the
+  posting engine will not accept. The guard has been the thing holding the line
+  while the pickers caught up, which is the argument for having put it in the
+  engine rather than in each screen.
+
+### 2026-08-16 — There is no accounting for nothing (branch `claude/intercompany-transfer-fix`)
+
+Found by driving the transfer dialog on the live Test tenant, minutes after
+slice 2 deployed. Test pays Oak Row 2,500, "Into" left blank, Record transfer →
+**"A journal entry needs at least two lines."**
+
+- **A design error, not a typo.** The dialog offered *"it did not reach their
+  account"*, which made the receiving entry a single `Cr Due to Affiliates`
+  line. One line cannot balance, so it cannot post — and the server said so in
+  terms about journal lines rather than about companies, which is the tell that
+  the question was wrong rather than the answer.
+- **The model was wrong, and the fix is the sentence.** If a company is better
+  off by an amount, its books have to say WHAT IT GOT: its own register when the
+  cash arrived, or the expense or asset the payer settled on its behalf. There
+  is no third option, so "optional" was never a real choice.
+- The field is now **required** and asks "What did they get?", offering the
+  receiving company's registers (labelled *cash in*) and then the rest of the
+  chart. `postIntercompanyPair` refuses an empty side outright with a message
+  about companies, so the engine cannot be talked into a one-line entry by a
+  future caller either.
+- **The `payerLines` side had the same hole and was never exercised** — every
+  caller happened to pass one. Both are checked now.
+- Also on that page: the banner still said invoices, bills and bank
+  transactions all post to the default company, which stopped being true when
+  slice 1b landed. A banner that describes last week's behaviour is worse than
+  no banner.
+
+### 2026-08-16 — Intercompany pairs (branch `claude/intercompany-pairs`)
+
+Slice 2 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md). Slice 1b
+REFUSED paying one company's bill from another's account; this records it.
+Migrations `0148` (the link), `0149` (the trigger), `0150` (the enum value,
+alone), `0151` (the accounts for existing tenants).
+
+- **A pair, one entry per company, sharing an `intercompany_id`:**
+
+  ```
+  Oak Row     Dr Accounts Payable      500
+              Cr Due to Affiliates     500     <- Oak now owes Maple
+  Maple St    Dr Due from Affiliates   500     <- Maple is owed by Oak
+              Cr Checking              500
+  ```
+
+  **Each balances on its own**, so the invariant at the heart of this module is
+  untouched — the same reason `entity_id` went on the entry rather than the
+  line.
+- **THE REGISTER GUARD NEEDED NO EXCEPTION, and that is the strongest signal
+  the shape is right.** Oak's entry touches AP and Due-to, both shared chart
+  accounts; Maple's touches Due-from and its OWN register. Neither entry touches
+  a foreign register, so `assertNoForeignRegisters` is exactly as it was and
+  still refuses the unlinked single entry, which is still wrong.
+- **ONE PAIR OF ACCOUNTS, not one per counterparty.** Ten LLCs would otherwise
+  mean ninety accounts in a chart every company can see. Who owes whom is a
+  property of the TRANSACTION, so `affiliateBalances` walks the links at read
+  time — the same derived-never-stored habit as invoice status, `closed_through`
+  and retained earnings. Found by SUBTYPE (`due_from_affiliate` /
+  `due_to_affiliate`), never by code.
+- **`intercompany_id` is a GROUPING KEY, not a foreign key.** It points at no
+  row, because the thing it identifies is the pair. Consolidation (slice 3)
+  eliminates by following it rather than by matching amounts, which is what
+  makes elimination mechanical instead of a judgement call.
+- **The database enforces "exactly two entries, in two different companies"**
+  (`0149`), deferred, same shape as the balance trigger. A half-written pair
+  leaves one company owing an affiliate that nobody is owed by; every report
+  still balances and no screen surfaces it.
+- **NEITHER LEG MOVES ALONE.** `assertNotIntercompanyLeg` refuses voiding *or
+  reversing* a single side — stricter than the managed-source guard, which
+  still permits a reverse, because a one-sided reversal is exactly as wrong as
+  a one-sided void. `reverseIntercompanyPair` undoes both as a new pair.
+- **The bill's Paid-from picker offers other companies' registers again**,
+  reversing what slice 1b did there — deliberately. That filter existed because
+  the choice always failed; it now records a pair, so it is a real option, and
+  the dialog says what will happen before it happens. `bill_payments` still
+  points at the bill's own leg, so aging, status and unapply are untouched.
+- **"Where it landed" is optional on the transfer, and that optionality is the
+  feature.** Name a receiving account and both companies' cash moves; leave it
+  blank and one company simply settled something on the other's behalf, so only
+  the affiliate balance does.
+- **THE BUG THIS SLICE ALMOST SHIPPED.** `intercompanyId` was added to the
+  schema, to `NewEntryInput`, and to every caller — and `postEntry` never wrote
+  it. Both legs would have posted unlinked, the trigger's null-check would have
+  waved them through, and consolidation would simply never have found them.
+  Caught by the test asserting the id round-trips, which is the only assertion
+  that could have.
+- **NOT built: consolidation (slice 3).** The links exist and the accounts exist;
+  nothing yet sums across companies and eliminates them. Also not built:
+  receiving an invoice payment into another company's account, which is the
+  mirror of the bill case and still refused.
+
+### 2026-08-16 — `recurring_invoices` dropped, and the invoice total gets its CHECK (branch `claude/drop-recurring-invoices`)
+
+Two contract jobs owed since 2026-08-12 and 2026-08-13, done together because
+both must run AFTER this PR's deploy — for opposite reasons, which is the point
+worth keeping.
+
+- **The DROP inverts the usual order.** `recurring_invoices` and
+  `invoices.recurring_invoice_id` stopped being read when the fold landed
+  (`0121`/`0122`), but Drizzle builds its SELECT column list from `schema.ts`,
+  so a deployment still declaring the column selects it — dropping under a live
+  old build 500s every invoice page. Schema first, deploy, then migrate. That is
+  the `0075`/`0088` lesson.
+- **The CHECK could not ship earlier for the exact opposite reason.** Migrations
+  precede deploys, and the deployment running when `0123` landed wrote
+  `total_cents` without touching `subtotal_cents`, so the constraint would have
+  rejected every draft edit in that window. Every write path has written all
+  three together since.
+- **So one is safe only after a deploy and the other is safe either side.** They
+  go in one migration that runs after — one instruction rather than two with
+  opposite rules.
+- **`tsc` did not catch the dead write, and could not.**
+  `recurringInvoiceId: input.recurringInvoiceId ?? null` sat inside an object
+  returned from a helper, so excess-property checking never reached it — the
+  compiler is only strict about literals passed straight to a call. Found by
+  grep after removing the column. Same blindness the module has hit before with
+  `server-only`.
+- **The dev branch had two invoices violating the CHECK**, both on a `Merge
+  Test` tenant left behind by an interrupted run. The FIXTURES that made them
+  now state the arithmetic, and the stale rows were deleted by hand — **not**
+  repaired by the migration. An invoice whose total does not equal subtotal plus
+  tax is a real problem when the data is real, and a migration that quietly
+  rewrote one to satisfy a constraint would be the worst possible way to learn
+  that. Production had none.
+- `verify-rls` reports **115 tables** where it reported 116, which is the drop
+  showing up in the one place that counts them.
+
+### 2026-08-16 — Document `entity_id` becomes NOT NULL, and the refusal says which line (branch `claude/document-entity-not-null`)
+
+The contract half of slice 1b, plus the follow-up the founder asked for after
+watching a cross-company journal get refused with nothing but a toast.
+
+- **`0146`** closes `entity_id` on `invoices`, `bills` and `bank_accounts`,
+  after the deploy that writes them. Third time this repo has made that split —
+  `0123`/`0125`, `0142`/`0144`, now `0145`/`0146` — and the backfills re-run
+  first, because rows written in the window between migration and deploy carry
+  a NULL nobody would otherwise repair.
+- **The dev branch refused it, and that was worth more than a clean run.** A
+  `Merge Test` tenant had invoices and NO company at all — left by a fixture
+  written before slice 1 — and `SET NOT NULL` failed with nothing but *column
+  "entity_id" contains null values*. `0146` now re-runs `0142`'s guarded
+  "one default company per tenant" INSERT first. It is a REPAIR, not an
+  invention: `0142` established that invariant, so a tenant lacking a company is
+  a gap in it. Production matched nothing, as expected; a migration that only
+  works on the two databases you happened to check is not finished.
+- **The journal editor no longer offers another company's register**, and
+  changing the company CLEARS any line that had picked one — a selection left
+  behind would be a value the dropdown cannot render a label for. Same fix the
+  Deposit-to picker got, in the one place a cross-company register was still
+  selectable. Everything else in the chart stays: a journal has to be able to
+  name any account, and only a register is owned.
+- **The refusal now marks the line.** `CROSS_ENTITY_REGISTER` carries the
+  offending `accountId` in its meta, `fail()` passes it through as an optional
+  field on the error result, and the editor rings that row and prints the
+  message beneath it. The toast still fires — it is what tells you something
+  happened at all — but on a twelve-line journal it cannot tell you WHERE, and
+  the account list is long enough that hunting for it is real work.
+- `ActionResult`'s error arm gained an optional `accountId`, so `"error" in
+  result` and every existing call site are untouched.
+
+### 2026-08-16 — The deposit picker offered another company's account (branch `claude/register-pickers-by-company`)
+
+Found by driving the live Test tenant right after slice 1b deployed: Oak Row
+LLC's invoice offered **Test Operating** in "Deposit to". The server refuses it
+(`CROSS_ENTITY_REGISTER`, and the toast says why), so this was never a
+correctness hole — it is a control that offers a choice which always fails.
+
+- Same class as the recurring invoice that could be coded to Checking, and
+  found the same way. The picker listed every ACTIVE register of the tenant; it
+  now lists the ones belonging to the document's company.
+- **Both sides**: the invoice's Deposit-to and the bill's Paid-from.
+- **Undeposited Funds is still offered to everybody**, and that is right: it is
+  a chart account rather than a register, so two companies' unbanked cheques
+  both sit in 1250 separated by the entry's company — the same way their
+  receivables share 1200.
+- The engine guard is unchanged and is still the thing that makes this safe.
+  The picker mirrors it; it does not replace it.
+
+### 2026-08-16 — Invoices, bills and bank accounts carry a company (branch `claude/entities-on-documents`)
+
+Slice 1 put the company on the journal ENTRY, which made reports scopeable and
+left every document posting into the tenant's DEFAULT. This is the half that
+makes the ten-LLC landlord's books actually separable. Migration `0145`;
+**`0146` is owed after this deploy** and is the three `SET NOT NULL`s.
+
+- **THE DOCUMENT DECIDES, and every entry it posts follows it.** An invoice's
+  issuance and all its payments read `invoices.entity_id`; a bill's approval and
+  payments read `bills.entity_id`; a bank row, an opening balance and a register
+  quick-add read `bank_accounts.entity_id`. `entityForDocument` — the slice-1
+  rule that inherited a company from a document's FIRST entry — is now dead for
+  all three, because there is nothing left to infer.
+- **A LINE MAY NOT TOUCH ANOTHER COMPANY'S REGISTER**, enforced in `postEntry`
+  and in `editEntry`, not at the call sites. There is no useful list of call
+  sites: any journal can name any account. The case it refuses is the one the
+  ADR says this client does constantly — paying Oak Row's bill out of Maple
+  Street's checking. As a single entry that is `Dr AP (Oak) / Cr Checking
+  (Maple)` tagged to ONE company, so Oak's balance sheet shows cash leaving an
+  account it does not own and Maple's shows nothing, **and the ledger still
+  balances**. It is intercompany (slice 2), and until that exists it is refused
+  rather than mis-recorded. The error says so and says what to do instead.
+- **The chart of accounts is NOT constrained by that guard, deliberately.** AR,
+  AP and every expense account stay shared: two companies' receivables both sit
+  in 1200 and are separated by the entry's company. Only a REGISTER is owned,
+  because only a register is an account with a balance somebody reconciles.
+- **A/R and A/P aging, and the tax summary, now TAKE A SCOPE.** All three
+  declined one in slice 1 for the same stated reason — the documents they read
+  had no company — and that reason is gone. The tax summary is the one that
+  matters: it shows the gap between what the invoices say and what the ledger
+  says, so scoping one column and not the other made the difference
+  meaningless. A sales-tax return is filed per company.
+- **`entityScopeCondition` grew a column argument** rather than being copied
+  three times, so "combined means no predicate" is decided in one place. A
+  report that hand-rolled its own `eq(...)` would have to remember that alone.
+- **The company is fixed at creation on all three.** `updateInvoiceDraft` and
+  `updateBillDraft` do not write it (there is a comment where it would go), and
+  a register has no update path for it at all: every entry that has cleared
+  through an account belongs to whoever owned it then, so moving one would
+  strand them. The correction is a new register and a transfer.
+- **A TEMPLATE RESOLVES; A DOCUMENT FREEZES.** `recurring_entries.template`
+  gained an OPTIONAL `entityId` — optional for the reason `taxRateId` is, that a
+  template which stopped parsing would silently stop generating. Absent means
+  the tenant's default, resolved at generation. The invoice or bill it produces
+  then freezes what it was given, like any other document.
+- **A receipt takes the company of the account it was paid from**
+  (`entityForRegisterAccount`). A receipt is not a document with a company of
+  its own — it is evidence of money leaving an account, and the account has an
+  owner. It falls back to the default only when the paid-from account is not a
+  register at all.
+- **The list pages scope the WHOLE page, not just the header figure** — the
+  MoneyBar, the bucket tallies and the table read one `entity`. A list showing
+  one company's invoices under another company's "overdue" total is a screen
+  somebody makes a decision from. `CompanyPicker` navigates on change rather
+  than behind a Run button (a list is not a question you assemble), and it
+  PRESERVES the status filter and bucket in the query string — dropping them
+  would widen the list at the moment it narrowed it.
+- **The books export gains a `company` column** on `invoices.csv`, `bills.csv`
+  and `bank_accounts.csv`, APPENDED in each case so a process reading by
+  position is unaffected.
+- `tests/entities-db.test.ts` grows to 17: an invoice keeps its company through
+  issue and payment **with the default moved in between**, a payment into
+  another company's register is refused, a hand-written journal into one is
+  refused, and A/R aging comes out per company. Isolation gains three composite
+  FK cases — an invoice, a bill and a register each cannot name another
+  tenant's company.
+- **NOT built, and each is still its own slice:** intercompany pairs (2),
+  consolidation with eliminations (3), per-entity CLOSE (4) — `period_closes`
+  still locks every company at once. Fixed assets have no company either, so the
+  assets pack is `entityForDocument`'s last caller.
+
+### 2026-08-16 — The Journal header claimed one company's books (branch `claude/journal-company-copy`)
+
+Found by driving the live Test tenant straight after slice 1 deployed, which is
+the only way it could have been found: the string is correct at one company and
+every test fixture has one.
+
+- The page read **"Every entry in Test's books"** — the TENANT's name — directly
+  above a table whose new Company column showed two different companies. It
+  reads as a scoped list that is not scoped.
+- At two or more it now says **"Every entry across all N companies"**; at one it
+  is unchanged, so nobody who has never heard of the concept sees it.
+- **The list itself stays unscoped, deliberately.** The journal is where you see
+  everything; the reports are where you scope. Adding a third filter to this
+  page would duplicate the report control without the stamping that makes it
+  safe.
+
+### 2026-08-16 — `entity_id` becomes NOT NULL (branch `claude/entity-id-not-null`)
+
+The contract half of the entry below, and the reason it is a separate PR: it
+runs AFTER the deploy that writes the column. `0144`, applied to dev AND
+production, both verified before the PR opened.
+
+- **The backfill runs AGAIN, first.** Rows written between `0142` and the deploy
+  going live have a NULL `entity_id` — nothing was writing the column yet — and
+  until they are repaired they are invisible to every entity-scoped report. That
+  is the window this migration exists to close, not a belt-and-braces re-run.
+  Guarded, so it is a no-op when there is nothing to fix, which is what it was
+  on both databases.
+- Verified on production after: `entity_id` NOT NULL, 12 entries, zero nulls,
+  7 tenants with 7 entities and 7 defaults, zero rows whose entity belongs to
+  another tenant, and `verify-rls` clean across all 116 tables.
+- **The schema comment changed with it.** `ledger.ts` said the column was
+  declared NOT NULL "one release ahead of the database"; that stopped being true
+  the moment this landed, and a comment describing a state that has passed is
+  worse than none.
+
+### 2026-08-16 — A tenant can hold several companies (branch `claude/entities-slice-1`)
+
+Slice 1 of [ADR 0010](../decisions/0010-entities-inside-a-tenant.md), which the
+same day flipped from Proposed to Accepted. A tenant is the CLIENT; a legal
+entity inside it owns a set of books. Migrations `0142` (table, column,
+backfill, FK) and `0143` (RLS); **`0144` is owed after this deploy** and is the
+`SET NOT NULL`.
+
+- **`entity_id` is on the ENTRY, never the line**, so every entry still balances
+  on its own and the posting invariant this module is built around is untouched.
+  The alternative — an entry spanning entities with a per-entity balance check
+  inside it — rewrites that invariant to save writing two rows.
+- **THE WHOLE DEFENCE IS ONE REQUIRED PARAMETER.** `EntityScope` is
+  `{ kind: "one", entityId } | { kind: "combined" }`, and `getBalances`,
+  `getTrialBalance`, `getProfitAndLoss`, `getBalanceSheet`, `getCashActivity`,
+  `getGeneralLedger`, `ledgerIsBalanced` and `cashBasisAdjustment` all require
+  it. Not optional, and not `entityId?: string` where absent means everything —
+  `undefined` is exactly what a caller forgets, while `{ kind: "combined" }` is
+  something somebody had to type. This is `listStructures`' lesson applied to
+  the ledger, and it matters more here: ADR 0010 names the failure as a report
+  that is silently wrong across companies and **perfectly correct on the
+  single-company tenant you are testing on**, which is every other fixture in
+  the repo.
+- **`combined`, not `consolidated`.** It is a plain sum with no eliminations.
+  Today that is also the consolidated figure because intercompany does not
+  exist; when it does, "combined" is still an honest name for a number that has
+  eliminated nothing, so nothing has to be renamed or quietly redefined.
+- **`cashBasisAdjustment` is scoped in three places, not one.** The payments in
+  the window, EVERY prior payment of those documents (allocation is cumulative),
+  and the documents' accrual lines. Scoping only the first would have produced a
+  cash-basis report that still balanced and was wrong.
+- **The picker is a URL parameter per report, not an ambient selection.** An
+  ambient one is the failure mode with a nicer UI: a statement whose scope came
+  from a control three screens ago is one whose reader cannot tell whose books
+  it is. **An unknown entity id 404s rather than falling back** — the inverse of
+  the `basis` rule, and deliberately: an unreadable basis has a safe answer,
+  whereas substituting a different company's books for the one that was named is
+  wrong about which business it describes while looking entirely normal.
+- **The company is stamped wherever the basis is** — page footer, CSV content,
+  CSV filename — and **only when the tenant has more than one**. A
+  single-company tenant's exports are byte-identical to what they were, which is
+  the same promise the picker makes on screen.
+- **Two reports decline a scope, each for its own stated reason**, joining the
+  three that decline a basis. The **tax summary** reads two sources and shows
+  the gap between them — invoices for the per-rate figures, the ledger for what
+  is owed — and an invoice has no company yet, so scoping the ledger half alone
+  would make the difference between the columns meaningless. **Register
+  balances** on the banking pages are every entry that touched the account,
+  because a bank account belongs to an entity only from slice 4.
+- **A document's entries all land in the company its FIRST one did**
+  (`entityForDocument`). This is a live guard, not headroom: the default company
+  can be moved, so without it an invoice issued under one default and paid under
+  another would split its AR across two balance sheets. Same rule for bill
+  payments, re-categorized bank rows and an asset's whole depreciation schedule.
+- **A reversal takes the ORIGINAL's company**, never the default and never an
+  argument. Otherwise both companies go out of balance while the tenant as a
+  whole still nets to zero — the precise shape of wrongness the scope exists to
+  catch. Pinned by a test that moves the default first.
+- **A TEMPLATE resolves its company; a DOCUMENT freezes one.** Recurring
+  journals follow the default as it stands at generation — the same split
+  `recurring_entries` already makes for a sales-tax rate. Resolved once per
+  template rather than per catch-up month, so a twelve-month catch-up cannot
+  straddle two sets of books.
+- **The hub asks `ledgerIsBalancedPerEntity`, not `ledgerIsBalanced`.** Two
+  companies out by equal and opposite amounts sum to zero, so the combined check
+  would report a healthy ledger in exactly the case a mis-scoped write produces.
+- **`tests/entities-db.test.ts` is the only fixture in the repo with two
+  companies**, and that is why it exists. Eleven cases: each trial balance
+  balances on its own, the two add back up to the combined one account by
+  account, the P&L/BS/GL each honour their scope, cash equals accrual per
+  company, a reversal follows its original, an inactive company refuses a
+  posting, and an unknown id refuses rather than falling back.
+- **Isolation gains four**, including the one that matters: the composite FK
+  refuses an entry naming ANOTHER TENANT's company, so a cross-tenant set of
+  books is unrepresentable rather than merely unwritten. The file also says out
+  loud what these do *not* certify — two companies of one client are not
+  separated by RLS and are not meant to be.
+- **`0142` is hand-edited three ways** and the header says so: drizzle-kit
+  emitted `ADD COLUMN … NOT NULL` on a table with rows, no backfill at all, and
+  the composite FK before the unique index it targets. The column arrives
+  NULLABLE because migrations go out AHEAD of the deploy and the deploy running
+  while it lands does not write it — a NOT NULL there rejects every invoice
+  issued in that window. Same expand/contract split `0123` made for its
+  `total = subtotal + tax` CHECK. `src/db/schema/ledger.ts` declares it NOT NULL,
+  one release ahead of the database, on purpose.
+- **Companies live on their own page reached from ONE hub card**, not an
+  eleventh tab: `AccountingNav` was rebuilt because ten tabs already wrapped
+  onto two lines, and most tenants have one company for ever. The page still
+  exists at one, because adding the second is the only way to get to two.
+- **The books export produces a full set of statements PER COMPANY plus a
+  combined set**, once there is more than one. A return is filed per entity, so
+  an export that could only produce the combined statements would be incomplete
+  for exactly the client this was built for. At one company the loop runs once
+  and every filename is unchanged. `ledger/entities.csv` is new, and
+  `journal_entries.csv` gains `entity_id`/`entity` as APPENDED columns.
+- **NOT BUILT, and each is a later slice rather than an oversight:**
+  intercompany pairs (2), consolidation with eliminations (3), per-entity
+  banking and close (4). **And the honest limit of this one: only a hand-written
+  journal can name a company.** Invoices, bills, bank rows, receipts and
+  recurring journals all post to the default. The eleven explicit
+  `getDefaultEntityId` call sites are the grep that lists what the document
+  slice has to revisit — a silent default inside `postEntry` would be the same
+  behaviour with nothing to find.
+
+### 2026-08-13 — Sales tax (branch `claude/accounting-sales-tax`)
+
+The largest remaining gap from the 2026-08-10 QuickBooks review, and greenfield
+inside a mature module — `grep salesTax` returned nothing before this. Migrations
+`0123` (table + columns + backfill) and `0124` (RLS), both applied to dev AND
+production, and both verified with `verify-rls.ts` plus a column/constraint dump,
+before the PR opened.
+
+- **A FLAT tenant-owned rate list, `payment_terms`' fourth sibling.** No
+  jurisdictions and no nexus rules: resolving a rate from a delivery address is
+  an address-resolution product — a rate service, an agency registry, a filing
+  calendar, economic-nexus thresholds — and Simple Start, the benchmark, does not
+  give the founder's own file much of it. The upgrade path if it ever matters is
+  a `sales_tax_rate_components` child table plus per-component tax lines, both
+  additive to this shape.
+- **NOTHING IS SEEDED, unlike the other three lists.** "Net 30" is a sensible
+  default everywhere; there is no tax rate that is right anywhere, and a seeded
+  0% or 7% is a wrong number on somebody's invoice. `provisionCatalogue` does not
+  touch the table and the "Add the standard set" restore does not apply to it. A
+  tenant with no rates simply has no tax controls, which is the correct state for
+  most of them. The FIRST rate a tenant creates becomes the default, because a
+  list of one with nothing selected is a control that does nothing.
+- **`rate_ppm`, not basis points, and that is arithmetic rather than fussiness.**
+  8.875% (New York City) is 887.5 basis points, which is not an integer. Percent
+  × 10,000 carries four decimal places of percent and covers every real US rate.
+- **ONE RATE PER INVOICE, TAXABILITY PER LINE.** `invoice_lines.is_taxable` is
+  the split that lets a trade bill exempt labour and taxed materials on one
+  document — the common case wherever services are exempt and goods are not. A
+  boolean rather than a second rate on purpose: two rates on one invoice is a
+  different feature and this is not half of it.
+- **The tax block on the invoice is FROZEN at write.** `tax_rate_ppm` is a COPY
+  of the rate, not a reference, so editing a rate tomorrow cannot re-price a
+  document already sent and cannot make the invoice disagree with the entry
+  posted from it. Pinned by a DB test that moves a rate from 7.25% to 10% and
+  asserts the issued invoice, its stored tax and its ledger balance are all
+  unchanged. Derived-at-read was never a candidate for exactly this reason.
+- **`total_cents` becomes the GROSS, and that is the point.** It has always meant
+  "what the customer owes" — tax changes the value, not the meaning. That is what
+  makes ~45 call sites correct with no edit: the overpayment guard, aging, the
+  MoneyBar, reminders, the PDF balance, bank matching. Its `>= 0` CHECK is
+  untouched. A test pays the subtotal of a taxed invoice and confirms it does
+  *not* settle, and that paying the gross does.
+- **The `total = subtotal + tax` CHECK is DELIBERATELY NOT in `0123`.** Migrations
+  go out ahead of the deploy, and the running `updateInvoiceDraft` writes
+  `total_cents` without touching `subtotal_cents` — the constraint would reject
+  every draft edit in the window. It belongs with the follow-up migration
+  alongside the `recurring_invoices` DROP. Until then `tests/sales-tax-db.test.ts`
+  asserts the invariant over every stored invoice. `tax_cents >= 0` IS safe in
+  `0123`, because nothing before this deploy writes the column and its default
+  satisfies it.
+- **`subtotal_cents` is backfilled in `0123`, not left on its DEFAULT 0.** Every
+  invoice that exists charges no tax, so its subtotal is its total; a column that
+  reads as a real figure and is wrong is worse than one that is absent. Guarded
+  by `tax_cents = 0`, so a re-run is a no-op. Verified on production: 4 invoices,
+  4 with subtotal = total, zero rows where subtotal + tax ≠ total.
+- **Issuing adds ONE credit line, found by SUBTYPE `sales_tax`** — never by the
+  2200 the template happens to use, since a tenant may have renumbered. Looked up
+  only when tax ≠ 0, so a tenant who removed the account and never charges tax is
+  unaffected. The tax figure is RECOMPUTED at issue from the frozen lines and the
+  frozen rate rather than read off the column, so the entry and the document
+  cannot disagree, and the recomputed value is written back — issuance is
+  self-healing for any row a write path left stale.
+- **The tax line carries NO DIMENSION**, deliberately. A dimension answers "which
+  part of the business earned this", and this line is not earnings.
+- **Partial payment and void needed no code at all.** Accrual puts the whole
+  liability in 2200 at issue, so a payment stays Dr deposit / Cr AR; `voidInvoice`
+  already reverses the entire issuance entry. Both are pinned by tests rather
+  than assumed.
+- **Cash basis came free, and that is worth knowing before somebody "fixes" it.**
+  `cashBasisAdjustment` excludes only the AR/AP control leg and pro-rata-recognises
+  every *other* line of the document — the tax credit is one of those — so on a
+  cash-basis report the liability lands proportionally as payments arrive.
+  `cash-basis-allocate.ts` needed no change.
+- **ROUNDING HAPPENS ONCE, ON THE SUMMED TAXABLE BASE.** Per-line rounding
+  accumulates and produces a tax figure that does not equal rate × base, which is
+  both the number a customer checks with a calculator and the number a return
+  asks for. Three lines of $0.10 at 5% is 2 cents here and 3 cents per-line; a
+  test asserts the difference rather than describing it.
+- **BigInt intermediates, forced not stylistic.** `MAX_AMOUNT_CENTS` is 1e13 and
+  the scale is 1e6, so the product reaches 1e19, past `Number.MAX_SAFE_INTEGER`
+  — where the answer would be quietly wrong rather than loudly. Second place in
+  the module to need it after `cash-basis-allocate.ts`, and it hit the same trap:
+  BigInt LITERALS (`2n`) need an ES2020 target and this tsconfig is lower, so it
+  is `BigInt(2)`.
+- **`invoicing/tax.ts` is pure, no `server-only`**, for the reason `terms.ts` is:
+  the builder computes the tax in the browser as you type and the server
+  recomputes it on save, and two implementations of one rule is how those come to
+  disagree. 34 table tests, no database.
+- **`invoiceTotalCents` → `invoiceSubtotalCents`.** The name stopped being true
+  the moment an invoice could carry tax, and a helper called "total" returning the
+  pre-tax figure is what a later change reads wrong. Same move as
+  `perMemberCents` → `perColumnCents`.
+- **The P&L exclusion was already free — WHICH IS WHY IT IS NOW PINNED.**
+  `sales_tax` is absent from `PNL_SECTION_BY_SUBTYPE` and a liability matches
+  neither fallthrough branch, so `pnlSectionFor` returns null. Nothing would have
+  noticed somebody adding a line to that map. Three tests: the account maps to no
+  P&L section at any code or name, and end to end a 157,250 invoice shows 150,000
+  of income and a net profit of 150,000 with no tax row anywhere on the statement.
+- **The tax summary is the eighth report and the only one built from DOCUMENTS.**
+  The ledger knows what you owe and ties to the balance sheet; the invoices know
+  the taxable base a return asks for. Neither is honest alone, so it carries both
+  and **states the difference**. A non-zero difference is NORMAL — earlier
+  periods' unremitted tax sits in the balance — and the page says so, because the
+  alternative is a reader treating it as a fault. **Accrual only**, stamped on the
+  report: a cash-basis version means pro-rating each invoice's tax across its
+  payments per rate, which is a feature rather than a toggle, and a return
+  computed on the wrong basis is not slightly wrong. Third report to refuse a
+  basis control, third distinct reason.
+- **No division in the report (P5).** The first cut recovered the taxable base by
+  dividing tax by rate; it was approximate wherever the tax had been rounded,
+  which is the wrong trade when the exact figure is one `filter (where is_taxable)`
+  sum away. The tax is the authority, the base is summed from the frozen lines.
+- **`ReminderRenderContext.tax` is REQUIRED, not optional.** An optional field is
+  one a caller can forget, and the symptom would be a chasing letter whose
+  attached invoice omits the tax being chased for. `invoiceTaxFields` is the one
+  resolver the PDF route, the send path and both reminder paths call — the same
+  rule `reminder-render.ts` itself exists for.
+- **Subtotal and tax on the PDF are not decoration.** Most US states require sales
+  tax stated separately on the document, so an invoice folding it into one total
+  is the wrong document. They appear only when there IS tax; "Tax 0.00" implies a
+  taxed sale that came to nothing.
+- **Recurring invoice templates store the rate ID, not the ppm**, and that
+  inverts the invoice's freeze on purpose: a template is a standing instruction
+  ("bill this at the state rate"), so a rate correction *should* reach next
+  month's invoice — which then freezes it like any other. Optional in the schema,
+  so every template written before today still validates; one that stopped
+  parsing would silently stop generating.
+- **The books export gains `sales/sales_tax_rates.csv`**, four columns on
+  `invoices.csv` and `taxable` on `invoice_lines.csv`. The new invoice columns are
+  APPENDED, so a process reading that file by position is unaffected.
+- Isolation gains four cases: the unscoped select, an insert attributed to the
+  other tenant, an UPDATE of the other tenant's rate (the write half — one tenant
+  must not be able to change what another charges), and the composite FK refusing
+  an invoice that names the other tenant's rate.
+- **Not built, all deliberate:** tax on BILLS (tax paid a vendor is part of the
+  expense in the US; the regime where it matters is VAT/GST, which is a different
+  posting model and half of it would be worse than none — note
+  `ai/extract-validate.ts` has pulled `taxCents` off receipts since session 5 and
+  nothing has ever needed it); a customer-level default rate and a tax-exempt
+  flag; a one-click "record a tax payment" against 2200 (remit with a journal or
+  a bill, both of which already work, and the summary shows the balance); and
+  cash-basis tax.
+- **Turning tax ON ticks every line; turning it off leaves the flags alone.**
+  Found by reasoning through the empty-default case rather than by a test:
+  a tenant with rates but no *default* picks one and would have watched the tax
+  read 0.00 with every line unticked — the control appearing to do nothing.
+  Choosing a rate means "tax this invoice"; the per-line flag is for the
+  exceptions. The asymmetry on the way back is what makes switching to a rate
+  and back non-destructive.
+- **Nobody has clicked any of this.** Compiled, built, and proven against a real
+  database — 15 DB cases and 34 pure ones. The routes were driven far enough to
+  confirm they resolve (`/reports/sales-tax` answers 307 to `/sign-in`), which is
+  as far as an agent session gets: the page bodies execute only behind a Clerk
+  session. Compiled-and-tested, not seen, per the standing note in Open items.
 ### 2026-08-12 — A closed bank account was a state with no way out (branch `claude/accounting-inactive-bank-accounts`)
 
 Found while verifying the confirm dialogs: starting a reconciliation on a
@@ -50,6 +1526,7 @@ row. Pulling that thread found the bigger problem.
   that is the right word in their domain and the wrong one for a bank account.
 - **Not built:** closing a register with an unfinished reconciliation on it is
   neither blocked nor cancelled; it just cannot be completed until you reopen.
+
 
 ### 2026-08-12 — Every confirmation is a real dialog now (branch `claude/accounting-confirm-dialogs`)
 
@@ -772,19 +2249,22 @@ preview in either state. The change is argued to be inert, not observed to be.
 
 | Table | Since | Purpose |
 | --- | --- | --- |
-| `accounts` | S1 | Chart of accounts, hierarchical |
-| `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger |
+| `accounts` | S1 | Chart of accounts, hierarchical. **Tenant-wide, shared by every company** (ADR 0010) — that sharing is most of what "manage ten LLCs in one place" means |
+| `journal_entries.intercompany_id` | 2026-08-16 | The link between the two halves of an INTERCOMPANY transaction (`0148`). A grouping key, not a foreign key. Exactly two entries per id, in two different companies, by the deferred trigger in `0149` |
+| `entities` | 2026-08-16 | The legal entities inside one client; **the entity owns the books** ([ADR 0010](../decisions/0010-entities-inside-a-tenant.md)). At least one per tenant, exactly one `is_default` by partial unique index. Deactivate, never delete — it owns posted entries and the FK is NO ACTION. NOT a `dimension_members` type: the test is whether the trial balance has to balance within it |
+| `journal_entries` / `journal_lines` | S1 | The ledger; balanced-at-commit trigger. `journal_entries.entity_id` (`0142`) says whose books — **on the ENTRY, never the line**, so an entry still balances on its own. Composite FK `(tenant_id, entity_id)`. NOT NULL since `0144`, which ran after the deploy — `0142` had to add it nullable because migrations precede deploys |
 | `dimension_members` / `line_dimensions` | S1 | Dimension tagging (industry-pack seam); line_dimensions gained invoice_line_id (S4) and bill_line_id (S6) with exactly-one-parent CHECKs |
 | `accounting_settings` | S1 | Per-tenant config (fiscal year, etc.). Gained `reminders_enabled` (default **false**) and `reminder_offsets` jsonb (`0114`) |
-| `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens |
+| `bank_accounts`, `bank_transactions`, `reconciliations`, `reconciliation_lines`, `plaid_items` | S3 | Feeds, staging, reconciliation; encrypted Plaid tokens. `bank_accounts.entity_id` (`0145`) — **a register belongs to exactly one company**, chosen at creation and never moved, and `postEntry` refuses any line touching another company's register |
 | `bank_rules` | 2026-08-10 | Deterministic feed categorization. Priority-ordered, first match wins; `is_suggested` marks a machine-proposed rule; `auto_post` posts without review but never into a closed period. Gained `set_vendor_id` (`0113`) so a rule can name the payee too. `bank_transactions.rule_suggestion` is a **snapshot**, not an FK — it records what a rule said at match time, so editing the rule later cannot rewrite what the owner was shown |
 | `parties` | 2026-08-03 | **Shared, not this module's.** The identity spine behind `customers` and `vendors`; written through `src/lib/parties/`. See [crm.md](crm.md) |
-| `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and awaits its DROP |
+| `customers`, `invoices`, `invoice_lines`, `invoice_payments` | S4 | AR. `customers.party_id` (2026-08-03) makes the row a role on a party. Both `customers` and `invoices` gained `reminders_muted` (`0114`) — standing and one-off suppression of automatic chasing. `recurring_invoices` folded into `recurring_entries` (`0121`/`0122`) and was dropped in `0147` |
 | `documents`, `document_links` | S5 | Capture substrate; exactly-one-of link targets |
 | `vendors`, `bills`, `bill_lines`, `bill_payments` | S6 | AP. `vendors.party_id` (2026-08-03) makes the row a role on a party |
 | `period_closes`, `close_notes` | S7 | Month-end close |
 | `recurring_entries` | 2026-08-12 | **The** recurrence table: invoices, bills and journals. `kind` discriminates the jsonb `template`; two CHECKs pin the shape (`party_shape` — a bill has a vendor, an invoice a customer, a journal neither; and `auto_post_shape` — only a journal may post itself). `invoices.recurring_entry_id` records which template made a row |
 | `products`, `payment_terms`, `payment_methods` | 2026-08-12 | The catalogue: saved invoice lines, named terms (`due_in_days`, one default per tenant by partial unique index), and the tenant-owned payment-method list. `invoice_payments.method` stores a method's CODE with **no FK** — deactivating a method must never rewrite a posted payment. `customers.payment_terms_id` (nullable = use the default) |
+| `sales_tax_rates` | 2026-08-13 | The fourth reference list, and the only one **not seeded** — there is no rate that is right anywhere. `rate_ppm` is percent × 10,000 (8.875% = 88,750), because basis points cannot express a real US rate. One default per tenant by partial unique index. `invoices` gained `tax_rate_id` (composite FK, NO ACTION), `tax_rate_ppm` (**a frozen copy**, so a rate change never re-prices an issued invoice), `tax_cents` and `subtotal_cents`; `invoice_lines` gained `is_taxable`. `total_cents` is now the GROSS and still means what it always did — what the customer owes. The `total = subtotal + tax` CHECK landed in `0147` (`0123`'s header says why it had to wait) |
 
 All tables: `tenant_id`, FORCE RLS. Isolation coverage is split by area, one file
 per area under `tests/isolation/` — `accounting.test.ts` (core ledger),
@@ -799,6 +2279,15 @@ sentence rather than leaving it aspirational.
 - `src/modules/accounting/` — `core/` (posting engine, reports, reconciliation), `banking/`, `invoicing/`, `documents/`, `payables/`, `close/`, `export/`, `ai/` (shared engine pattern), `templates/` (COA)
 - `invoicing/reminder-render.ts` is the single place a reminder message is built — the sweep and the owner's test send both go through it, deliberately
 - `invoicing/reminder-schedule.ts` and `invoicing/reminder-email.ts` are **pure** for the same reason, and it matters most here: this is the one path that emails somebody nobody on our side chose, so proving its behaviour on a table of cases is the control. `reminder-run.ts` (the sweep) only finds rows and sends; it decides nothing
+- `invoicing/tax.ts` is **pure**, and everything that decides a tax figure is in
+  it — the rounding, the parse, the format, the taxable/exempt split. The invoice
+  builder calls it in the browser as you type and the server calls it again on
+  save, which is the same reason `terms.ts` is pure and the reason it matters
+  more here. `core/tax-summary.ts` is its report-side twin, and neither divides
+- `invoicing/invoices.ts` exports `invoiceTaxFields`, the ONE resolver for the
+  subtotal/tax/label a rendered invoice needs. The PDF route, the send path and
+  both reminder paths call it; `ReminderRenderContext.tax` is required rather
+  than optional so none of them can quietly omit the tax
 - `banking/rules-match.ts` and `banking/rules-learn.ts` are **pure** (no `server-only`) — all the deciding lives there and is table-tested without a database, exactly as `ai/*-validate.ts` is split from `ai/*-code.ts`. The rules form imports `ruleConditionsSchema` from the matcher so the client validates against the same schema the action re-validates against
 - Tenant UI under `src/app/dashboard/m/accounting/`
 - **Reports are all the same two pieces**: a pure builder in `core/report-builders.ts` (fixture-testable, no database, no division) and a thin fetch wrapper in `core/reports.ts`. `getBalances` is the one aggregate engine they share; the General Ledger is the only one that also runs its own line-level query, because it lists rather than sums
@@ -806,6 +2295,45 @@ sentence rather than leaving it aspirational.
 
 ## Decisions & gotchas
 
+- **MONEY BETWEEN TWO COMPANIES IS A PAIR OF ENTRIES**, never one. As a single
+  entry it leaves one balance sheet showing cash it does not own and the other
+  showing nothing, while the ledger still balances. Each leg touches only its
+  own company's accounts plus a shared affiliate account, which is why the
+  register guard needs no exception for it. Neither leg may be voided or
+  reversed alone. See [ADR 0010](../decisions/0010-entities-inside-a-tenant.md).
+- **One Due-from and one Due-to account, shared.** Who owes whom is derived from
+  the links (`affiliateBalances`), not from per-counterparty accounts — ten LLCs
+  would be ninety accounts otherwise.
+- **A REPORT MUST STATE ITS COMPANY, and cannot forget to.** `EntityScope` is a
+  required argument on every report engine — `{ kind: "one" }` or
+  `{ kind: "combined" }`, never an optional field where absent means everything.
+  A report that lost its scope would be silently wrong across companies and
+  perfectly correct on the single-company tenant it is tested against, which is
+  every fixture in the repo bar `tests/entities-db.test.ts`. If a new report
+  genuinely should not take one, say why in its own comment the way the tax
+  summary does — do not make the parameter optional. See
+  [ADR 0010](../decisions/0010-entities-inside-a-tenant.md).
+- **`combined` is not `consolidated`.** It sums across companies and eliminates
+  nothing. That is the same number today, because intercompany does not exist
+  yet; the name is chosen so it stays true when it does.
+- **RLS is not the wall between two companies of one client**, deliberately, and
+  it stays absolute between clients. There is no `app.current_entity` and there
+  is not going to be one in this design — separation between companies is
+  application code, which ADR 0010 names as its own strongest counter-argument.
+- **A DOCUMENT carries its own company; a TEMPLATE resolves the current
+  default.** `invoices`, `bills` and `bank_accounts` each have an `entity_id`
+  chosen at creation and never editable afterwards, and every entry they post
+  reads it — so moving the tenant's default cannot split a document's AR across
+  two balance sheets, and a reversal always takes its original's company. A
+  recurring template resolves the default at generation instead, the same split
+  the sales-tax rate already makes.
+- **A LINE MAY NOT TOUCH ANOTHER COMPANY'S REGISTER**, enforced in `postEntry`
+  and `editEntry`. Paying one company's bill from another's account is
+  INTERCOMPANY (slice 2) and is refused rather than mis-recorded — as one entry
+  it would leave both balance sheets wrong while the ledger still balanced. The
+  chart of accounts is deliberately NOT constrained: two companies' receivables
+  share account 1200, separated by the entry's company. Only a register is
+  owned.
 - **Three-tier mutability**: draft (free edit) → posted (edit-with-version/void/reverse) → reconciled (immutable; reverse only). The DB backs each tier with triggers/FKs, not just app code.
 - **Derived, never stored**: invoice/bill statuses derive from payments; `closed_through` derives from period_closes; Retained Earnings is computed — no closing entries exist.
 - **All money is integer cents.** No floats, and no division in report math — with exactly one quarantined exception, `core/cash-basis-allocate.ts`, where pro-rata recognition inherently divides. It uses BigInt intermediates and a largest-remainder rule so each split sums to the cent. Nowhere else in the report path may divide.
@@ -823,6 +2351,10 @@ sentence rather than leaving it aspirational.
 - **A recurring template may post; an AI suggestion never may.** Same line bank rules drew: a schedule the owner wrote down and can read back is a decision, replayed. It is off by default, journals only, and it still yields to the period lock — a closed month leaves a draft and says so.
 - **Lifecycle status is stored; obligation language is rendered.** `obligationFor` is never persisted and never checked by a guard — every rule in the module still reads `status`. A derived label that started being written back would be a second source of truth for whether an invoice is paid.
 - **Reference data deactivates, never deletes, and never rewrites history.** A saved item or term may be named on records that already exist. The payment-method list goes further: it has no foreign key from `invoice_payments`, so renaming a method changes the label and nothing else — the code a payment recorded is what it recorded.
+- **A DOCUMENT freezes its rate; a TEMPLATE resolves one.** `invoices.tax_rate_ppm` is a copy taken at write, so correcting a rate leaves every issued invoice and every entry posted from one exactly as they were. A recurring template stores the rate ID instead, and re-resolves it every month, because a template is a standing instruction rather than a record of what was charged. The two are opposite on purpose; do not "make them consistent".
+- **Tax collected is never income.** It lands in the `sales_tax` account — found by SUBTYPE, never by code — and a liability reaches no P&L section, so the exclusion is structural rather than a filter somebody has to remember. It is pinned by a test anyway, because the thing that would break it is a one-line addition to `PNL_SECTION_BY_SUBTYPE` that looks harmless.
+- **Tax rounds ONCE, on the summed taxable base**, never per line. Per-line rounding produces a total that does not equal rate × base, which is the arithmetic both the customer and the return do.
+- **The tax summary reads two sources and shows the gap.** Per-rate figures come from invoices (a return's boxes), the amount owed comes from the ledger (ties to the balance sheet), and the difference is stated rather than reconciled away — it is normally non-zero, because earlier periods' unremitted tax is still in the account. Any future report combining a document view with a ledger view owes the reader the same.
 - **An AI claim about a source is checked against the source.** The thread drafter verifies every quote appears in the message it cites; an unverifiable one is shown flagged and unticked, never dropped and never presented as fact. Any future "the assistant found this in X" owes the reader the same check — a citation nobody verifies is worse than no citation, because it is believed.
 - **Anything that previews an outbound message must share the renderer that sends it.** `reminder-render.ts` exists so the test button and the nightly sweep cannot drift; a preview built by its own code path is worse than none, because it is believed. Apply the same rule to any future preview (invoice, statement, digest).
 - **Reminders overtake, they do not queue.** Only the latest applicable offset can fire, so enabling the feature over an old book sends one email per invoice rather than one per missed offset. Nothing else in the module needs this rule; it exists because the alternative loses a client on the first morning.
@@ -849,6 +2381,12 @@ agent sessions cannot open. Treat every screen shipped this way as
 compiled-and-tested, not seen.
 
 
+- **Fixed assets carry a company** (2026-08-17, `0154`) — the last item on ADR 0010's list. `entityForDocument`/`entityOfDocument` are DELETED with it: nothing infers a company from where an entry happened to land any more. **Nothing is owed in the migration lane** — `assets.entity_id` stays NULLABLE, unlike every other one, because the assets pack `requires: []` and a tenant can register equipment with no books at all
+- **An invoice banked into another company's account is RECORDED** (2026-08-17), the mirror of the bill case and the last item ADR 0010 listed as refused. It also closed a live hole in the bill path: unapplying an intercompany payment voided ONE leg, because `assertNotIntercompanyLeg` lived only in the action layer. The guard is in `voidEntry`/`reverseEntry` now and `voidIntercompanyPair` is the undo that takes both
+- **Per-entity close is DONE** (2026-08-17, slice 4 of ADR 0010) — the lock is `entities.closed_through`, the checklist is scoped, and two companies can close different months. **The contract half is DONE too** (`0153`, applied and verified on both databases the same day): `period_closes.entity_id` is NOT NULL and `accounting_settings.closed_through` is dropped. **Nothing is owed in the migration lane.** Two things this slice leaves behind on purpose: a company carrying a lock INHERITED from the tenant-wide scalar has no close row to reopen and can only be closed forward (on production that is Oak Row LLC), and `assets` still has no company, so depreciation reads its lock through `entityForDocument`
+- **Consolidation is DONE** (2026-08-17, slice 3 of ADR 0010): a third scope beside "one company" and combined, on the trial balance, balance sheet, P&L and general ledger, plus a consolidated set in the books export. Eliminates by following the `intercompany_id`, never by matching amounts; the unlinked-journal residual is surfaced on the page and in the CSV rather than reconciled away. What is NOT built: **per-entity close** (4 — `period_closes` still locks every company at once), a company on **fixed assets** (the assets pack is `entityForDocument`'s last caller), and **receiving an invoice payment into another company's account**, the mirror of the bill case, still refused. And deliberately not built at all: full GAAP consolidation — no investment-in-subsidiary elimination, no minority interest, no purchase accounting, because these are commonly owned LLCs rather than a parent with subsidiaries
+- **Documents carry a company** (2026-08-16, slice 1b): `invoices`, `bills` and `bank_accounts` each have an `entity_id`, the posting engine refuses a line touching another company's register, and A/R aging, A/P aging and the tax summary all take a scope now. `drizzle/0146` closed the expand/contract — all three are NOT NULL on both databases. **Intercompany pairs are DONE** (slice 2, same day — `0148`–`0151`). What is NOT built: **consolidation with eliminations** (3), **per-entity close** (4 — `period_closes` still locks every company at once), and a company on **fixed assets**, which leaves the assets pack as `entityForDocument`'s last caller
+- **Companies (legal entities) are DONE** (2026-08-16, slice 1 of ADR 0010) — the table, `entity_id` on entries, the picker, and scoped trial balance, P&L, balance sheet, cash activity and general ledger. `drizzle/0144` closed the expand/contract the same day: `entity_id` is NOT NULL on both databases, with the window's backfill re-run first. Still queued in that lane: the `recurring_invoices` DROP and the `total = subtotal + tax` CHECK below. What is NOT built, each a later slice: **intercompany pairs** (2), **consolidation with eliminations** (3), **per-entity banking and close** (4) — `period_closes` still locks every company at once. And the limit worth stating to anybody selling this: **a multi-company tenant can only put entries in a second company by hand-journaling**, since invoices, bills and bank feeds all post to the default
 - Credit memos (designed-for headroom in S4, unbuilt)
 - Recurring-invoice cron (fast-follow; zero schema change needed)
 - Industry-pack dimension packs ("P&L by property" seam live but no pack registered yet — Real Estate pack is the planned next build)
@@ -860,6 +2398,9 @@ compiled-and-tested, not seen.
 - **The per-record History panel is DONE** (2026-08-12) on invoices and bills; journal entries, customers and vendors are a one-line addition each
 - **Products & Services, Terms and Payment Methods are DONE** (2026-08-12) — see the build log for the two deliberate gaps (customer-level default terms have a column and resolution but no control; saved items are invoice-only so far)
 - **Line account pickers are filtered in the UI ONLY.** `createInvoiceDraft`, `createBillDraft` and the recurring create action all accept whatever account id they are given, so nothing but the dropdown stops an invoice line posting revenue to Checking. Worth a server-side type check on all three paths, in one change rather than three
-- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **Still to do: `drizzle/0123` dropping `recurring_invoices` and `invoices.recurring_invoice_id`, which must land in a PR AFTER the fold has deployed.** What is not built for any kind: editing a template, and any cadence other than monthly
+- **Recurring entries GENERATE ON THEIR OWN** since 2026-08-13 (`/api/cron/recurring`, 6am in the tenant's zone). What is not built: any way to see the sweep's history in the UI — the counts come back to the cron caller and nowhere else
+- **Recurring journals and bills are DONE** (2026-08-12), and so is **folding `recurring_invoices` into them** (2026-08-12) — the module has ONE recurrence mechanism, one list and one engine. **DONE**: `drizzle/0147` dropped `recurring_invoices` and `invoices.recurring_invoice_id`. What is not built for any kind: editing a template, and any cadence other than monthly
 - **Obligation statuses and the MoneyBar are DONE** (2026-08-12) on the invoice and bill LISTS. What is not built: the same language on the detail pages, and a deposits screen for the two money buckets to link into. **That closes the 2026-08-10 QuickBooks review list.**
+- **Sales tax is DONE** (2026-08-13) — a tenant-owned rate list, per-line taxability, one frozen tax block on the invoice, one Cr to the `sales_tax` account at issue, and a per-rate summary that reconciles against the ledger. Deliberately NOT built, each for a reason in the build log: **tax on bills** (US purchase tax is part of the expense; the regime where it matters is VAT/GST, a different posting model), a **customer-level default rate and tax-exempt flag** (the invoice-level control is live; this is the `resolveTaxRate` signature's obvious next argument, ~30 lines), a **one-click remittance** debiting the tax account (a journal or a bill does it today, and the summary shows the balance to remit), **cash-basis tax**, and **splitting a combined rate into components** for a return that wants state and county separately
+- **`drizzle/0147` closed the last two owed contract migrations** (2026-08-16): the `recurring_invoices` DROP and the `total_cents = subtotal_cents + tax_cents` CHECK. They ran together because both must follow this deploy — the DROP because a live build still selecting a dropped column 500s, the CHECK because it could not precede the deploy that started writing `subtotal_cents`. Nothing is owed in that lane now
 - ~~The last item from that review~~: **obligation-language statuses** ("Overdue 60 days" rather than `issued`) and the **MoneyBar** bucket filters (Overdue / Not due yet / Not deposited / Deposited, each clickable with a total) on the invoice and bill lists. Everything else on that list is now built

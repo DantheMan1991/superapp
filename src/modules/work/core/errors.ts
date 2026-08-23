@@ -26,6 +26,8 @@ export function friendlyMessage(error: WorkErrorType): string {
       return "That person cannot be given work in this workspace.";
     case "WOULD_CYCLE":
       return "Work cannot be filed under itself.";
+    case "SELF_LINK":
+      return "Work cannot be about itself.";
     case "STALE":
       return "Somebody else changed this while you had it open. Reopen it and try again.";
     case "INVALID":

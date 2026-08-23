@@ -33,6 +33,12 @@ import {
   resolveTerm,
   type TermLike,
 } from "@/modules/accounting/invoicing/terms";
+import {
+  formatRatePpm,
+  invoiceTaxTotals,
+  resolveTaxRate,
+  type TaxRateLike,
+} from "@/modules/accounting/invoicing/tax";
 
 export interface BuilderCustomer {
   id: string;
@@ -61,38 +67,54 @@ interface LineRow {
   /** Raw money string; sign toggle below. */
   unitPrice: string;
   discount: boolean;
+  taxable: boolean;
   incomeAccountId: string;
 }
 
 export interface BuilderInvoice {
   id: string;
   version: number;
+  /** Read-only once the draft exists — the company is fixed at creation. */
+  entityId?: string;
   customerId: string;
   invoiceNumber: string;
   issueDate: string;
   dueDate: string | null;
   memo: string;
+  taxRateId: string | null;
   lines: Array<{
     description: string;
     quantity: string;
     unitPriceCents: number;
+    isTaxable: boolean;
     incomeAccountId: string;
   }>;
 }
 
-function emptyRow(defaultAccount: string): LineRow {
+/**
+ * A NEW line defaults to taxable when the invoice has a rate on it.
+ *
+ * The alternative — every line starting untaxed — means an owner who picked a
+ * rate then has to tick each line, and the failure mode of forgetting is an
+ * invoice that under-charges tax. Defaulting the other way makes the failure
+ * mode an over-charge somebody notices immediately on the total.
+ */
+function emptyRow(defaultAccount: string, taxable: boolean): LineRow {
   return {
     key: crypto.randomUUID(),
     description: "",
     quantity: "1",
     unitPrice: "",
     discount: false,
+    taxable,
     incomeAccountId: defaultAccount,
   };
 }
 
 export function InvoiceBuilder({
   customers,
+  entities = [],
+  defaultEntityId = null,
   incomeAccounts,
   suggestedNumber,
   today,
@@ -100,8 +122,20 @@ export function InvoiceBuilder({
   products = [],
   terms = [],
   defaultTermId = null,
+  taxRates = [],
+  defaultTaxRateId = null,
 }: {
   customers: BuilderCustomer[];
+  /**
+   * The tenant's companies (ADR 0010). Shown only at TWO or more — one company
+   * and the client never learns the concept.
+   *
+   * Chosen once, on the DRAFT, and never editable afterwards: the company is
+   * what issuance and every payment read, so changing it on a document that has
+   * already posted would move money between two balance sheets.
+   */
+  entities?: Array<{ id: string; name: string }>;
+  defaultEntityId?: string | null;
   incomeAccounts: BuilderAccount[];
   suggestedNumber: string;
   today: string;
@@ -111,11 +145,19 @@ export function InvoiceBuilder({
   terms?: TermLike[];
   /** The tenant's default term, applied to a NEW invoice only. */
   defaultTermId?: string | null;
+  /** ACTIVE rates only. Empty means this tenant charges no sales tax, and
+   * every tax control below disappears rather than sitting there empty. */
+  taxRates?: TaxRateLike[];
+  /** The tenant's default rate, applied to a NEW invoice only. */
+  defaultTaxRateId?: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const defaultAccount = incomeAccounts[0]?.id ?? "";
   const [customerId, setCustomerId] = useState(invoice?.customerId ?? "");
+  const [entityId, setEntityId] = useState(
+    invoice?.entityId ?? defaultEntityId ?? "",
+  );
   const [number, setNumber] = useState(invoice?.invoiceNumber ?? suggestedNumber);
   const [issueDate, setIssueDate] = useState(invoice?.issueDate ?? today);
   // An EXISTING draft keeps the date it was saved with — re-deriving it from
@@ -142,6 +184,14 @@ export function InvoiceBuilder({
     if (chosenTerm) setDueDate(dueDateFromTerms(next, chosenTerm.dueInDays));
   }
   const [memo, setMemo] = useState(invoice?.memo ?? "");
+  // Same rule as terms: an EXISTING draft keeps the rate it was saved with, a
+  // new one gets the tenant default.
+  const initialRate = invoice
+    ? (taxRates.find((r) => r.id === invoice.taxRateId) ?? null)
+    : resolveTaxRate(taxRates, defaultTaxRateId);
+  const [taxRateId, setTaxRateId] = useState(initialRate?.id ?? "");
+  const chosenRate = taxRates.find((r) => r.id === taxRateId) ?? null;
+
   const [rows, setRows] = useState<LineRow[]>(
     invoice
       ? invoice.lines.map((l) => ({
@@ -150,9 +200,10 @@ export function InvoiceBuilder({
           quantity: l.quantity,
           unitPrice: (Math.abs(l.unitPriceCents) / 100).toFixed(2),
           discount: l.unitPriceCents < 0,
+          taxable: l.isTaxable,
           incomeAccountId: l.incomeAccountId,
         }))
-      : [emptyRow(defaultAccount)],
+      : [emptyRow(defaultAccount, initialRate !== null)],
   );
 
   const parsed = rows.map((row) => {
@@ -173,7 +224,41 @@ export function InvoiceBuilder({
   // Not memoized: `filled` is rebuilt from `rows` on every render, so its
   // identity always changes and a useMemo keyed on it never once hit its cache
   // — it only stopped the compiler from memoizing this properly.
-  const totalCents = filled.reduce((s, p) => s + p.amountCents, 0);
+  //
+  // THE SAME FUNCTION THE SERVER RECOMPUTES ON SAVE (`invoicing/tax.ts`). Two
+  // implementations of this rule is how the number on screen and the number on
+  // the invoice come to disagree.
+  const totals = invoiceTaxTotals(
+    filled.map((p) => ({ amountCents: p.amountCents, isTaxable: p.row.taxable })),
+    chosenRate ? chosenRate.ratePpm : null,
+  );
+
+  // The per-line Tax column appears only once a rate is CHOSEN, not merely
+  // because the tenant has rates: ticking lines on an untaxed invoice does
+  // nothing, and a column that does nothing invites the belief that it did.
+  const showTax = chosenRate !== null;
+
+  /**
+   * Turning tax ON ticks every line; turning it off leaves the flags alone.
+   *
+   * Choosing a rate means "tax this invoice"; the per-line flag exists for the
+   * EXCEPTIONS. Without this, an owner whose tenant has rates but no default
+   * picks one and watches the tax read 0.00 with every line unticked — the
+   * control appearing to do nothing. Leaving the flags alone on the way back to
+   * "No tax" is what makes switching to a rate and back non-destructive.
+   */
+  function applyTaxRate(nextRateId: string) {
+    const wasOff = taxRateId === "";
+    setTaxRateId(nextRateId);
+    if (nextRateId !== "" && wasOff) {
+      setRows((rs) => rs.map((r) => ({ ...r, taxable: true })));
+    }
+  }
+  // Both class strings written out in full — Tailwind scans for literals, so a
+  // template-built grid template would simply not be generated.
+  const gridCols = showTax
+    ? "grid grid-cols-[1fr_90px_120px_60px_50px_1fr_100px_32px]"
+    : "grid grid-cols-[1fr_90px_120px_60px_1fr_100px_32px]";
 
   function setRow(key: string, patch: Partial<LineRow>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -186,16 +271,22 @@ export function InvoiceBuilder({
         description: p.row.description.trim(),
         quantity: p.row.quantity,
         unitPriceCents: p.row.discount ? -price : price,
+        // Sent even when the invoice has no rate: the flag describes the LINE,
+        // and keeping it means adding a rate later does not silently re-tick
+        // every row from scratch.
+        isTaxable: p.row.taxable,
         incomeAccountId: p.row.incomeAccountId,
       };
     });
     startTransition(async () => {
       const payload = {
+        entityId: entityId || undefined,
         customerId,
         invoiceNumber: number.trim() || undefined,
         issueDate,
         dueDate: dueDate || null,
         memo: memo.trim() || undefined,
+        taxRateId: taxRateId || null,
         lines,
       };
       const result = invoice
@@ -221,6 +312,24 @@ export function InvoiceBuilder({
   return (
     <Card>
       <CardContent className="space-y-4 pt-6">
+        {!invoice && entities.length > 1 && (
+          <div className="space-y-1.5 sm:max-w-xs">
+            <Label>Company</Label>
+            <Select value={entityId || undefined} onValueChange={setEntityId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Which company is invoicing?" />
+              </SelectTrigger>
+              <SelectContent>
+                {entities.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-4">
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Customer</Label>
@@ -292,7 +401,11 @@ export function InvoiceBuilder({
               </p>
             )}
           </div>
-          <div className="space-y-1.5 sm:col-span-2">
+          <div
+            className={
+              taxRates.length > 0 ? "space-y-1.5" : "space-y-1.5 sm:col-span-2"
+            }
+          >
             <Label htmlFor="inv-memo">Memo</Label>
             <Input
               id="inv-memo"
@@ -301,15 +414,39 @@ export function InvoiceBuilder({
               placeholder="Shown on the printed invoice"
             />
           </div>
+          {/* Absent entirely for a tenant with no rates — a tax control that
+              offers nothing is worse than no tax control. */}
+          {taxRates.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="inv-tax">Sales tax</Label>
+              <Select
+                value={taxRateId || "none"}
+                onValueChange={(v) => applyTaxRate(v === "none" ? "" : v)}
+              >
+                <SelectTrigger id="inv-tax">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No tax</SelectItem>
+                  {taxRates.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name} · {formatRatePpm(r.ratePpm)}%
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
 
         <div className="overflow-x-auto">
-          <div className="min-w-[640px] space-y-2">
-            <div className="grid grid-cols-[1fr_90px_120px_60px_1fr_100px_32px] items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div className={showTax ? "min-w-[700px] space-y-2" : "min-w-[640px] space-y-2"}>
+            <div className={`${gridCols} items-center gap-2 text-xs font-medium text-muted-foreground`}>
               <span>Description</span>
               <span className="text-right">Qty</span>
               <span className="text-right">Unit price</span>
               <span>Disc.</span>
+              {showTax && <span title="Charge sales tax on this line">Tax</span>}
               <span>Income account</span>
               <span className="text-right">Amount</span>
               <span />
@@ -319,7 +456,7 @@ export function InvoiceBuilder({
               return (
                 <div
                   key={row.key}
-                  className="grid grid-cols-[1fr_90px_120px_60px_1fr_100px_32px] items-center gap-2"
+                  className={`${gridCols} items-center gap-2`}
                 >
                   <Input
                     className="h-9"
@@ -349,6 +486,18 @@ export function InvoiceBuilder({
                       onChange={(e) => setRow(row.key, { discount: e.target.checked })}
                     />
                   </label>
+                  {showTax && (
+                    <label className="flex justify-center">
+                      <input
+                        type="checkbox"
+                        className="size-4"
+                        checked={row.taxable}
+                        aria-label={`Charge sales tax on ${row.description || "this line"}`}
+                        title="Charge sales tax on this line"
+                        onChange={(e) => setRow(row.key, { taxable: e.target.checked })}
+                      />
+                    </label>
+                  )}
                   <Select
                     value={row.incomeAccountId || undefined}
                     onValueChange={(v) => setRow(row.key, { incomeAccountId: v })}
@@ -390,7 +539,9 @@ export function InvoiceBuilder({
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setRows((rs) => [...rs, emptyRow(defaultAccount)])}
+            onClick={() =>
+              setRows((rs) => [...rs, emptyRow(defaultAccount, showTax)])
+            }
           >
             <Plus className="mr-1.5 size-4" /> Add line
           </Button>
@@ -411,6 +562,10 @@ export function InvoiceBuilder({
                     quantity: "1",
                     unitPrice: (Math.abs(product.unitPriceCents) / 100).toFixed(2),
                     discount: product.unitPriceCents < 0,
+                    // A saved item carries no taxability of its own — that is
+                    // a per-invoice question (who you sold to, where), not a
+                    // property of the thing. It follows the invoice's rate.
+                    taxable: showTax,
                     incomeAccountId: product.incomeAccountId ?? defaultAccount,
                   },
                 ]);
@@ -430,10 +585,29 @@ export function InvoiceBuilder({
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t pt-4">
-          <p className="font-mono text-lg font-semibold">
-            Total {formatCentsSigned(totalCents)}
-          </p>
+        <div className="flex flex-wrap items-end justify-between gap-4 border-t pt-4">
+          <div className="space-y-0.5">
+            {/* Subtotal and tax only appear once there is tax to show — on an
+                untaxed invoice they are two extra rows that say nothing. */}
+            {chosenRate && (
+              <>
+                <p className="flex justify-between gap-6 font-mono text-sm text-muted-foreground">
+                  <span>Subtotal</span>
+                  <span>{formatCentsSigned(totals.subtotalCents)}</span>
+                </p>
+                <p className="flex justify-between gap-6 font-mono text-sm text-muted-foreground">
+                  <span>
+                    {chosenRate.name} ({formatRatePpm(chosenRate.ratePpm)}%)
+                  </span>
+                  <span>{formatCentsSigned(totals.taxCents)}</span>
+                </p>
+              </>
+            )}
+            <p className="flex justify-between gap-6 font-mono text-lg font-semibold">
+              <span>Total</span>
+              <span>{formatCentsSigned(totals.totalCents)}</span>
+            </p>
+          </div>
           <Button
             onClick={submit}
             disabled={pending || !customerId || !allValid || !issueDate}

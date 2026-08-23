@@ -6,7 +6,11 @@ import type { TenantContext } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { StatCard } from "@/components/app/stat-card";
-import { getSettings, ledgerIsBalanced } from "./core";
+import {
+  groupClosedThrough,
+  ledgerIsBalancedPerEntity,
+  listEntities,
+} from "./core";
 import { formatCentsSigned, toSafeCents } from "./lib/money";
 import { AccountingNav } from "./components/accounting-nav";
 
@@ -31,8 +35,13 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
       .from(schema.journalEntries)
       .where(eq(schema.journalEntries.tenantId, tenantId))
       .groupBy(schema.journalEntries.status);
-    const balanced = await ledgerIsBalanced(tx, tenantId);
-    const settings = await getSettings(tx, tenantId);
+    // PER ENTITY, not combined. Two companies out by equal and opposite
+    // amounts sum to zero, so a combined check would report a healthy ledger
+    // in exactly the case a mis-scoped write produces.
+    const balanced = await ledgerIsBalancedPerEntity(tx, tenantId);
+    // Inactive included: a wound-up company still has books, and leaving it
+    // out would make the group look closed through a date it is not.
+    const entities = await listEntities(tx, tenantId, { includeInactive: true });
     const [unreviewed] = await tx
       .select({ n: sql<number>`count(*)::int` })
       .from(schema.bankTransactions)
@@ -127,9 +136,14 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
       toSafeCents(openBillsPaid[0]?.paid ?? 0);
     return {
       accountCount: accountCount.n,
+      entityCount: entities.filter((e) => e.isActive).length,
+      // The date EVERY company is locked through — null if any is still open.
+      // See groupClosedThrough: the latest, or the default company's, would
+      // read as a guarantee about the group that the books do not give.
+      closedThrough: groupClosedThrough(entities),
+      companiesClosed: entities.filter((e) => e.closedThrough).length,
       statusCounts,
       balanced,
-      settings,
       unreviewed: unreviewed.n,
       arOutstandingCents,
       receiptInbox: receiptInbox.n,
@@ -167,7 +181,29 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
           label="Ledger health"
           value={data.balanced ? "In balance" : "Out of balance"}
           tone={data.balanced ? "success" : "destructive"}
-          footnote="Debits equal credits across all posted entries."
+          footnote={
+            data.entityCount > 1
+              ? "Debits equal credits within every company."
+              : "Debits equal credits across all posted entries."
+          }
+        />
+        {/*
+          The COMPANIES card is the only entry point to the legal-entity screen,
+          and it is deliberately here rather than an eleventh tab in
+          `AccountingNav`: that strip was rebuilt because ten tabs already
+          wrapped onto two lines, and most tenants have exactly one company for
+          ever. It still has to exist at one, because adding the second is how a
+          tenant ever gets to two (ADR 0010).
+        */}
+        <StatCard
+          label="Companies"
+          value={data.entityCount}
+          href="/dashboard/m/accounting/companies"
+          footnote={
+            data.entityCount === 1
+              ? "One set of books. Add another for a second LLC."
+              : "Each keeps its own books — reports can scope to one"
+          }
         />
         <StatCard
           label="Active accounts"
@@ -223,9 +259,13 @@ export async function AccountingModule({ ctx }: { ctx: TenantContext }) {
         />
         <StatCard
           label="Books closed through"
-          value={data.settings.closedThrough ?? "—"}
+          value={data.closedThrough ?? "—"}
           href="/dashboard/m/accounting/close"
-          footnote="Month-end close, review and export"
+          footnote={
+            data.entityCount > 1
+              ? `${data.companiesClosed} of ${data.entityCount} companies closed · earliest shown`
+              : "Month-end close, review and export"
+          }
         />
       </div>
     </div>

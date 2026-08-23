@@ -2,13 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { withTenant } from "@/db";
+import { eq } from "drizzle-orm";
+import { withTenant, schema } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAuditInTx } from "@/lib/audit";
 import {
   LedgerError,
   assertEntryNotSourceManaged,
+  assertNotIntercompanyLeg,
   createAccount,
   deactivateAccount,
   deleteDraft,
@@ -16,10 +18,15 @@ import {
   friendlyMessage,
   getBalanceSheet,
   getCashActivity,
+  getDefaultEntityId,
   getGeneralLedger,
   getProfitAndLoss,
   postDraft,
   postEntry,
+  requireOwnerRole,
+  residualIfConsolidated,
+  residualNote,
+  resolveReportEntity,
   reverseEntry,
   updateAccount,
   voidEntry,
@@ -47,7 +54,13 @@ const BASE = "/dashboard/m/accounting";
 
 type ActionResult<T = undefined> =
   | { ok: true; data?: T }
-  | { error: string };
+  /**
+   * `accountId` rides along when the failure is about ONE account, so a form
+   * can put the message where the mistake is instead of only in a toast.
+   * Optional and absent for every other error, so `"error" in result` and every
+   * existing call site are unchanged.
+   */
+  | { error: string; accountId?: string };
 
 async function gate(opts?: { allowExpert?: boolean }): Promise<LedgerCtx> {
   const ctx = await requireTenant();
@@ -60,11 +73,59 @@ async function gate(opts?: { allowExpert?: boolean }): Promise<LedgerCtx> {
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
 }
 
-function fail(err: unknown): { error: string } {
+function fail(err: unknown): { error: string; accountId?: string } {
   if (!(err instanceof LedgerError)) {
     console.error("accounting action failed", err);
   }
-  return { error: friendlyMessage(err) };
+  const accountId = err instanceof LedgerError ? err.meta?.accountId : undefined;
+  return {
+    error: friendlyMessage(err),
+    ...(typeof accountId === "string" ? { accountId } : {}),
+  };
+}
+
+/**
+ * Set the basis every report opens on.
+ *
+ * **A PRESENTATION PREFERENCE, AND THE GUARDS HERE ARE ABOUT NOT LETTING IT
+ * BECOME ANYTHING MORE.** It never reaches `postEntry`, never changes what is
+ * stored and never decides what a pack posts — the ledger is accrual for every
+ * tenant whatever this says ([ADR 0007](../../docs/decisions/0007-cash-basis-reporting.md)).
+ *
+ * Owner-only all the same. It changes the number every other person in the
+ * business sees first, and the two bases give different and both-correct profit
+ * figures, so "which one loads by default" is a decision rather than a display
+ * tweak. Audited for the same reason.
+ */
+export async function setDefaultBasis(
+  input: unknown,
+): Promise<ActionResult<{ basis: "accrual" | "cash" }>> {
+  const parsed = z
+    .object({ basis: z.enum(["accrual", "cash"]) })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  try {
+    const ctx = await gate();
+    requireOwnerRole(ctx);
+    await withTenant(ctx.tenantId, async (tx) => {
+      await tx
+        .update(schema.accountingSettings)
+        .set({ defaultBasis: parsed.data.basis, updatedAt: new Date() })
+        .where(eq(schema.accountingSettings.tenantId, ctx.tenantId));
+      await logAuditInTx(tx, {
+        action: "ledger.default_basis_set",
+        tenantId: ctx.tenantId,
+        actorClerkUserId: ctx.userId,
+        targetType: "accounting_settings",
+        targetId: ctx.tenantId,
+        meta: { basis: parsed.data.basis },
+      });
+    });
+    revalidatePath("/dashboard/m/accounting", "layout");
+    return { ok: true, data: { basis: parsed.data.basis } };
+  } catch (err) {
+    return fail(err);
+  }
 }
 
 function revalidate(): void {
@@ -91,6 +152,13 @@ const lineSchema = z.object({
 });
 
 const entryInputSchema = z.object({
+  /**
+   * Which company's books (ADR 0010). Optional over the wire, because a
+   * single-entity tenant has no picker to send one from — absent means the
+   * tenant's default. It is NOT optional at the posting engine, where it is
+   * resolved explicitly below; the two are different questions.
+   */
+  entityId: z.string().uuid().optional(),
   entryDate: dateStr,
   memo: z.string().trim().max(1000).optional(),
   lines: z.array(lineSchema).min(1).max(100),
@@ -109,7 +177,13 @@ export async function createEntry(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     const result = await withTenant(ctx.tenantId, async (tx) => {
-      const r = await postEntry(tx, ctx, parsed.data);
+      const r = await postEntry(tx, ctx, {
+        ...parsed.data,
+        // The journal is the ONE write path in slice 1 that can name a company.
+        // `postEntry` re-checks that it belongs to this tenant and is active.
+        entityId:
+          parsed.data.entityId ?? (await getDefaultEntityId(tx, ctx.tenantId)),
+      });
       if (!r.deduped) {
         await logAuditInTx(tx, {
           action:
@@ -243,6 +317,10 @@ export async function voidPostedEntry(
       // P19 (session 6): document-owned entries are voided from their
       // document (voidInvoice/voidBill/unapply) — never from the journal.
       await assertEntryNotSourceManaged(tx, ctx.tenantId, parsed.data.entryId);
+      // Neither half of an intercompany pair moves alone: voiding one side
+      // leaves the other company still owing an affiliate that no longer owes
+      // it (ADR 0010 slice 2).
+      await assertNotIntercompanyLeg(tx, ctx.tenantId, parsed.data.entryId);
       const entry = await voidEntry(tx, ctx, parsed.data);
       // Tool coordination (actions layer — core stays tool-unaware): a
       // voided entry that satisfies a bank-feed row — whether born from
@@ -279,6 +357,10 @@ export async function reversePostedEntry(
   if (!parsed.success) return { error: "Invalid input" };
   try {
     const result = await withTenant(ctx.tenantId, async (tx) => {
+      // Stricter than the managed-source rule, which permits a reverse: a
+      // ONE-SIDED reversal of a transfer is exactly as wrong as a one-sided
+      // void, so the pair is reversed as a unit instead.
+      await assertNotIntercompanyLeg(tx, ctx.tenantId, parsed.data.entryId);
       const r = await reverseEntry(tx, ctx, parsed.data);
       if (!r.deduped) {
         await logAuditInTx(tx, {
@@ -429,9 +511,43 @@ export async function setCoaAccountActive(
 
 // --------------------------------------------------------------- reports
 
+/**
+ * A company name in a filename: lowercase, no spaces, nothing a shell or a
+ * Windows path minds. Bounded, because a name can be long and a filename
+ * cannot.
+ */
+function filenamePart(label: string): string {
+  return (
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "company"
+  );
+}
+
+/**
+ * `entity` is on every variant, and it is the same value the page was rendered
+ * with. An export that quietly re-ran the report combined while the screen
+ * showed one company would be the ADR 0010 failure with a download attached.
+ *
+ * IT IS NOT ONLY A UUID, and taking it for one was a bug this slice found by
+ * reading rather than by driving. The picker's own "All companies" option
+ * submits an EMPTY string, which `z.string().uuid()` rejects — so on a
+ * two-company tenant, choosing combined and pressing Export CSV answered
+ * "Invalid input" instead of downloading the file. `consolidated` is the third
+ * value the picker can now produce, and it is not a uuid either.
+ * `resolveEntityScope` is what decides what each one means; this only decides
+ * what may be asked.
+ */
+const entityParam = z
+  .union([z.string().uuid(), z.enum(["", "combined", "consolidated"])])
+  .optional();
+
 const exportCsvSchema = z.discriminatedUnion("report", [
   z.object({
     report: z.literal("pnl"),
+    entity: entityParam,
     from: dateStr,
     to: dateStr,
     compare: z.enum(["prev-period", "prev-year"]).optional(),
@@ -441,17 +557,20 @@ const exportCsvSchema = z.discriminatedUnion("report", [
   }),
   z.object({
     report: z.literal("balance-sheet"),
+    entity: entityParam,
     asOf: dateStr,
     compare: z.enum(["prev-year"]).optional(),
     basis: z.enum(["accrual", "cash"]).optional(),
   }),
   z.object({
     report: z.literal("cash"),
+    entity: entityParam,
     from: dateStr,
     to: dateStr,
   }),
   z.object({
     report: z.literal("general-ledger"),
+    entity: entityParam,
     from: dateStr,
     to: dateStr,
     // Bounded so a crafted request cannot turn the filter into an enormous
@@ -473,8 +592,52 @@ export async function exportReportCsv(
   const p = parsed.data;
   try {
     const data = await withTenant(ctx.tenantId, async (tx) => {
+      // Only when there is a choice, so a single-company tenant's filenames are
+      // unchanged and no process that reads them by name breaks. The label
+      // differs between combined and consolidated, so the two files cannot be
+      // mistaken for each other on disk either.
+      const suffixOf = (label: string | undefined) =>
+        label ? `_${filenamePart(label)}` : "";
+
+      // CASH ACTIVITY RESOLVES ITS OWN SCOPE, and separately on purpose: it
+      // DECLINES consolidation exactly as its page does, so `?entity=
+      // consolidated` refuses here too rather than downloading the combined
+      // figures under the consolidated name. Its own block is also what keeps
+      // the scope's TYPE narrow enough for `getCashActivity` to accept it —
+      // one shared resolve would widen it back to `EntityScope` and the
+      // compiler would stop being able to tell the two apart.
+      if (p.report === "cash") {
+        const { scope, stampLabel } = await resolveReportEntity(
+          tx,
+          ctx.tenantId,
+          p.entity,
+          "declined",
+        );
+        const report = await getCashActivity(tx, ctx.tenantId, {
+          scope,
+          from: p.from,
+          to: p.to,
+        });
+        return {
+          filename: `cash-activity_${p.from}_${p.to}${suffixOf(stampLabel)}.csv`,
+          csv: toCsv(cashActivityToCsvRows(report, stampLabel)),
+        };
+      }
+
+      const { scope, stampLabel } = await resolveReportEntity(
+        tx,
+        ctx.tenantId,
+        p.entity,
+        "offered",
+      );
+      const suffix = suffixOf(stampLabel);
       if (p.report === "pnl") {
+        const residual = await residualIfConsolidated(tx, ctx.tenantId, scope, {
+          from: p.from,
+          to: p.to,
+        });
         const report = await getProfitAndLoss(tx, ctx.tenantId, {
+          scope,
           from: p.from,
           to: p.to,
           compare: p.compare,
@@ -486,40 +649,65 @@ export async function exportReportCsv(
           // The basis is in the FILENAME as well as the content: these files
           // get emailed to accountants, and two profit figures for the same
           // period are only safe if you can tell them apart at a glance.
-          filename: `profit-and-loss${p.spread === "month" ? "-by-month" : ""}_${p.from}_${p.to}_${p.basis ?? "accrual"}.csv`,
-          csv: toCsv(pnlToCsvRows(report, p.basis ?? "accrual")),
+          filename: `profit-and-loss${p.spread === "month" ? "-by-month" : ""}_${p.from}_${p.to}_${p.basis ?? "accrual"}${suffix}.csv`,
+          csv: toCsv(
+            pnlToCsvRows(
+              report,
+              p.basis ?? "accrual",
+              stampLabel,
+              residual ? residualNote(residual) : undefined,
+            ),
+          ),
         };
       }
       if (p.report === "balance-sheet") {
+        const residual = await residualIfConsolidated(tx, ctx.tenantId, scope, {
+          asOf: p.asOf,
+        });
         const report = await getBalanceSheet(tx, ctx.tenantId, {
+          scope,
           asOf: p.asOf,
           compare: p.compare,
           basis: p.basis,
         });
         return {
-          filename: `balance-sheet_${p.asOf}_${p.basis ?? "accrual"}.csv`,
-          csv: toCsv(balanceSheetToCsvRows(report, p.basis ?? "accrual")),
+          filename: `balance-sheet_${p.asOf}_${p.basis ?? "accrual"}${suffix}.csv`,
+          csv: toCsv(
+            balanceSheetToCsvRows(
+              report,
+              p.basis ?? "accrual",
+              stampLabel,
+              residual ? residualNote(residual) : undefined,
+            ),
+          ),
         };
       }
       if (p.report === "general-ledger") {
+        const residual = await residualIfConsolidated(tx, ctx.tenantId, scope, {
+          from: p.from,
+          to: p.to,
+        });
         const report = await getGeneralLedger(tx, ctx.tenantId, {
+          scope,
           from: p.from,
           to: p.to,
           ...(p.accountIds?.length ? { accountIds: p.accountIds } : {}),
         });
         return {
-          filename: `general-ledger_${p.from}_${p.to}.csv`,
-          csv: toCsv(generalLedgerToCsvRows(report)),
+          filename: `general-ledger_${p.from}_${p.to}${suffix}.csv`,
+          csv: toCsv(
+            generalLedgerToCsvRows(
+              report,
+              stampLabel,
+              residual ? residualNote(residual) : undefined,
+            ),
+          ),
         };
       }
-      const report = await getCashActivity(tx, ctx.tenantId, {
-        from: p.from,
-        to: p.to,
-      });
-      return {
-        filename: `cash-activity_${p.from}_${p.to}.csv`,
-        csv: toCsv(cashActivityToCsvRows(report)),
-      };
+      // Unreachable: the discriminated union has four members and the other
+      // three returned above. Stated rather than left as a fallthrough, so
+      // adding a fifth report is a compile error here instead of a wrong file.
+      throw new Error(`unhandled report ${(p as { report: string }).report}`);
     });
     return { ok: true, data };
   } catch (err) {

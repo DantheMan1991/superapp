@@ -21,7 +21,10 @@ import {
   getGeneralLedger,
   getSettings,
   listAccounts,
+  residualIfConsolidated,
 } from "@/modules/accounting/core";
+import { ConsolidationNote } from "@/modules/accounting/components/consolidation-note";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { presetRange } from "@/modules/accounting/lib/dates";
 import {
   formatCentsSigned,
@@ -42,6 +45,8 @@ const SOURCE_LABEL: Record<string, string> = {
   opening_balance: "Opening",
   recurring: "Recurring",
   reversal: "Reversal",
+  intercompany: "Between companies",
+  depreciation: "Depreciation",
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,7 +54,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export default async function GeneralLedgerPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; account?: string }>;
+  searchParams: Promise<{
+    from?: string;
+    to?: string;
+    account?: string;
+    entity?: string;
+  }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -68,12 +78,37 @@ export default async function GeneralLedgerPage({
       sp.account && UUID.test(sp.account) && accounts.some((a) => a.id === sp.account)
         ? sp.account
         : "";
+    // OFFERED, and it is the reason to bother: a consolidated trial balance
+    // nobody can drill into is a number an accountant cannot check. The
+    // eliminated legs are simply absent here, exactly as they are absent from
+    // the totals, so the two still tie.
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      "offered",
+    );
     const report = await getGeneralLedger(tx, ctx.tenant.id, {
+      scope: entityView.scope,
       from,
       to,
       ...(account ? { accountIds: [account] } : {}),
     });
-    return { settings, today, from, to, account, accounts, report };
+    const residual = await residualIfConsolidated(tx, ctx.tenant.id, entityView.scope, {
+      from,
+      to,
+    });
+    return {
+      settings,
+      today,
+      from,
+      to,
+      account,
+      accounts,
+      report,
+      entityView,
+      residual,
+    };
   });
 
   const { report } = data;
@@ -85,7 +120,8 @@ export default async function GeneralLedgerPage({
         title="General Ledger"
         description={
           <>
-            {ctx.tenant.name} · {report.period.from} to {report.period.to}
+            {data.entityView.stampLabel ?? ctx.tenant.name} · {report.period.from}{" "}
+            to {report.period.to}
             {selected ? ` · ${selected.code} ${selected.name}` : ""} · accrual
             basis
           </>
@@ -97,6 +133,7 @@ export default async function GeneralLedgerPage({
               from: data.from,
               to: data.to,
               ...(data.account ? { accountIds: [data.account] } : {}),
+              entity: sp.entity,
             }}
           />
         }
@@ -118,7 +155,12 @@ export default async function GeneralLedgerPage({
           code: a.code,
           name: a.name,
         }))}
+        entity={sp.entity}
+        entities={data.entityView.entities}
+        offerConsolidated={data.entityView.offerConsolidated}
       />
+
+      <ConsolidationNote residual={data.residual} />
 
       {report.truncated && (
         // Never a silent cap. A ledger that quietly shows part of a period

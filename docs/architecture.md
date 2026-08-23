@@ -87,6 +87,39 @@ Roles within a tenant are `owner` | `staff` | `expert`:
 `owner` is the business owner. The distinction is enforced in RLS via
 `app.tenant_role`, not just in the UI.
 
+### A tenant is the client, not the legal entity
+
+One tenant currently means one set of books, and that stops being true the first
+time a client arrives with a property LLC per door. **The tenant is the client
+relationship; a legal entity lives inside it and owns the books** — see ADR
+[0010](decisions/0010-entities-inside-a-tenant.md), which also explains why
+entity is not a `dimension_members` type.
+
+**Built 2026-08-16 (slice 1).** `entities` is a tenant-scoped table with FORCE
+RLS; `journal_entries.entity_id` says which set of books an entry belongs to,
+composite-FK'd as `(tenant_id, entity_id)`. Every tenant has exactly one today
+and never sees the word — the picker appears at two.
+
+Three things follow for anything written from here on:
+
+- **Every report engine takes a required `EntityScope`** (`core/entities.ts`),
+  never an optional one. A report that forgot its scope would be silently wrong
+  across companies and perfectly correct on the single-company tenant you are
+  testing on, so forgetting is made a compile error. Declining a scope is
+  allowed where mixing sources would be dishonest — the tax summary does, and
+  says why in its own comment.
+- **RLS is NOT the wall between two companies of one client**, deliberately, and
+  that is the ADR's own stated cost. It remains absolute between CLIENTS. Do not
+  add an `app.current_entity`; the separation is application code.
+- **A table with a balance on it carries an entity.** `invoices`, `bills` and
+  `bank_accounts` do (`0145`), and every entry they post reads it from the
+  document. A new table with a balance is expected to do the same. `period_closes`
+  is the outstanding one — a close still locks every company at once.
+- **A journal line may not touch a register owned by another company**, enforced
+  in `postEntry`. Money moving between two of a client's companies is an
+  intercompany transaction needing a linked pair of entries, and until that
+  exists it is refused rather than recorded as one wrong entry.
+
 ---
 
 ## 5. Request lifecycle
@@ -137,6 +170,18 @@ Two functions, in [src/db/index.ts](../src/db/index.ts):
   so forgetting it denies a read and can never grant one.
 - **`withSystem(fn)`** — the god view. Only after `requireSuperAdmin()`, or in
   trusted sync code: webhooks, `tenant-sync.ts`, `logAudit`, seeds, migrations.
+
+**All four context settings are written in ONE statement**, and that is a
+performance decision worth not undoing. They used to be four separate
+`set_config` round trips, so establishing context cost four before the caller's
+own query ran — six with the `BEGIN` and `COMMIT`. Collapsing them to one
+measured **30% off the whole database suite** (145s → 102s over a fixed subset,
+three runs each, under 1% variance) and takes the same three round trips off
+every production request that touches a tenant table. The semantics are
+identical: `set_config`'s third argument is `is_local`, so each is still
+transaction-scoped. `tests/isolation/core.test.ts` asserts all four actually
+land, because a silent failure would hide owners-only rows and whole mailboxes
+without looking like an error.
 
 RLS is the backstop, not the primary control — but it is the one that catches
 the mistakes the primary controls miss. A query that forgets its `WHERE` clause
@@ -241,6 +286,18 @@ scripts/               migrate, seed, create-app-role, probes
 
 - **Audit** — `logAudit()` for general sensitive actions; `logAuditInTx()` for
   financial mutations, so the mutation and its audit row commit together.
+  **Reading it back: `src/lib/audit-detail.ts`** turns `meta` into readable
+  pairs for `/admin/audit`, and diffs a `{ was, now }` correction down to the
+  fields that MOVED — `meat withdrawal days: 21 → 28`. It is deliberately
+  generic and defensive, because `meta` is jsonb written by 200+ call sites and
+  a malformed blob must not take down the page a superadmin uses to find out
+  what happened.
+  **There is a SECOND describer and it is not a duplicate.**
+  `modules/accounting/history/format.ts` → `describeAuditMeta` is a curated
+  whitelist producing prose for the CLIENT-facing record-history panel on an
+  invoice or a bill ("INV-1042 · 3 lines · 5 days before due"). Different
+  audience, different job: completeness wins on the superadmin page, polish wins
+  on the client one. Do not unify them into a key-value dump.
 - **Encryption** — `encryptSecret()` / `decryptSecret()`, AES-256-GCM, one key.
 - **Billing** — Stripe webhook plus a server→Stripe reconcile on billing page
   load, which covers missed events and local development.

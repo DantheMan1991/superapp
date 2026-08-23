@@ -3,19 +3,36 @@ import { and, desc, eq, gt, isNull, lte, max, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { CloseNote, PeriodClose } from "@/db/schema";
 import { LedgerError } from "./errors";
-import { getSettings, requireOwnerRole, requireReviewRole, setClosedThrough } from "./guards";
+import {
+  getClosedThrough,
+  requireOwnerRole,
+  requireReviewRole,
+  setClosedThrough,
+} from "./guards";
 import { getLedgerIntegrity } from "./integrity";
 import type { LedgerCtx } from "./types";
 import { addDaysIso, fiscalYearStart } from "../lib/dates";
 
 /**
  * Month-end close (session 7). Each completed close snapshots its checklist
- * and establishes the period lock; accounting_settings.closed_through is
- * DERIVED state — written only here (completeClose/reopenClose), which is
- * what makes drift between the lock and the close history unrepresentable.
+ * and establishes the period lock; `entities.closed_through` is DERIVED state —
+ * written only here (completeClose/reopenClose), which is what makes drift
+ * between the lock and the close history unrepresentable.
+ *
+ * PER COMPANY SINCE ADR 0010 SLICE 4. A close is an act performed on ONE set of
+ * books: ten LLCs close in different months, and one of them waiting on a bank
+ * statement is not a reason the other nine cannot be locked. The lock moved from
+ * `accounting_settings` to `entities` without changing the rule above — it is
+ * still derived state with exactly two writers.
+ *
+ * THE CHECKLIST IS SCOPED TOO, and that is the half worth getting right: a
+ * checklist counting the whole tenant would tell somebody closing Maple that
+ * Oak has three draft bills. Every count below filters to the company being
+ * closed, except the receipts inbox, which is stated where it happens.
  */
 
 const BASE = "/dashboard/m/accounting";
+
 
 export interface CloseChecklistItem {
   key:
@@ -36,6 +53,8 @@ export interface CloseChecklistItem {
 }
 
 export interface CloseChecklist {
+  /** Whose books this checklist is about. Snapshotted with the close. */
+  entityId: string;
   periodEnd: string;
   computedAt: string;
   items: CloseChecklistItem[];
@@ -44,20 +63,38 @@ export interface CloseChecklist {
 }
 
 /**
- * Live pre-close review: what still needs attention on or before periodEnd.
- * Undated sources (the receipts inbox) are counted unscoped.
+ * Live pre-close review: what still needs attention on or before periodEnd,
+ * FOR ONE COMPANY.
+ *
+ * Undated sources (the receipts inbox) are counted unscoped — a receipt in the
+ * inbox has not been coded yet, so it has no company to belong to. Counting it
+ * for every company is the honest option of the two: it is a real reason to
+ * hesitate before closing anybody's month, and pretending otherwise would hide
+ * the one item most likely to be somebody's missing expense.
  */
 export async function getCloseChecklist(
   tx: Tx,
   tenantId: string,
+  entityId: string,
   periodEnd: string,
 ): Promise<CloseChecklist> {
+  // Registers belong to a company (slice 1b), and a bank transaction belongs to
+  // its register — so "unreviewed transactions" is answerable per company by
+  // going through the account rather than by anything on the row itself.
   const [unreviewed] = await tx
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.bankTransactions)
+    .innerJoin(
+      schema.bankAccounts,
+      and(
+        eq(schema.bankAccounts.tenantId, schema.bankTransactions.tenantId),
+        eq(schema.bankAccounts.id, schema.bankTransactions.bankAccountId),
+      ),
+    )
     .where(
       and(
         eq(schema.bankTransactions.tenantId, tenantId),
+        eq(schema.bankAccounts.entityId, entityId),
         eq(schema.bankTransactions.status, "unreviewed"),
         lte(schema.bankTransactions.txnDate, periodEnd),
       ),
@@ -68,6 +105,7 @@ export async function getCloseChecklist(
     .where(
       and(
         eq(schema.journalEntries.tenantId, tenantId),
+        eq(schema.journalEntries.entityId, entityId),
         eq(schema.journalEntries.status, "draft"),
         lte(schema.journalEntries.entryDate, periodEnd),
       ),
@@ -78,6 +116,7 @@ export async function getCloseChecklist(
     .where(
       and(
         eq(schema.invoices.tenantId, tenantId),
+        eq(schema.invoices.entityId, entityId),
         eq(schema.invoices.status, "draft"),
         lte(schema.invoices.issueDate, periodEnd),
       ),
@@ -88,6 +127,7 @@ export async function getCloseChecklist(
     .where(
       and(
         eq(schema.bills.tenantId, tenantId),
+        eq(schema.bills.entityId, entityId),
         eq(schema.bills.status, "draft"),
         lte(schema.bills.billDate, periodEnd),
       ),
@@ -98,6 +138,7 @@ export async function getCloseChecklist(
     .where(
       and(
         eq(schema.bills.tenantId, tenantId),
+        eq(schema.bills.entityId, entityId),
         eq(schema.bills.status, "awaiting_approval"),
         lte(schema.bills.billDate, periodEnd),
       ),
@@ -111,6 +152,9 @@ export async function getCloseChecklist(
         // `documents` is shared with the Documents module. Without this term
         // every unfiled DMS file would count as an unprocessed receipt and
         // become a permanent month-end close blocker.
+        //
+        // NOT scoped by company, and it cannot be: an uncoded receipt has no
+        // company yet. See the note on this function.
         eq(schema.documents.origin, "accounting"),
         eq(schema.documents.status, "inbox"),
       ),
@@ -135,6 +179,7 @@ export async function getCloseChecklist(
     .where(
       and(
         eq(schema.bankAccounts.tenantId, tenantId),
+        eq(schema.bankAccounts.entityId, entityId),
         eq(schema.bankAccounts.isActive, true),
       ),
     )
@@ -143,7 +188,10 @@ export async function getCloseChecklist(
     (r) => !r.lastCompleted || r.lastCompleted < periodEnd,
   );
 
-  const integrity = await getLedgerIntegrity(tx, tenantId);
+  // This company's own books. A tenant-wide check would refuse to let Maple
+  // close because Oak is out of balance — and, the other way round, two
+  // companies out by equal and opposite amounts sum to a clean zero.
+  const integrity = await getLedgerIntegrity(tx, tenantId, entityId);
 
   const items: CloseChecklistItem[] = [
     {
@@ -206,6 +254,7 @@ export async function getCloseChecklist(
   ];
 
   return {
+    entityId,
     periodEnd,
     computedAt: new Date().toISOString(),
     items,
@@ -214,43 +263,56 @@ export async function getCloseChecklist(
 }
 
 /**
- * Close the books through periodEnd. Monotonic: the new date must be after
- * the current closed-through. Outstanding checklist items warn but never
- * block; the checklist is recomputed here (never trusted from the client)
- * and snapshotted on the close row.
+ * Close ONE COMPANY's books through periodEnd. Monotonic within that company:
+ * the new date must be after ITS closed-through, and says nothing about any
+ * other company's. Outstanding checklist items warn but never block; the
+ * checklist is recomputed here (never trusted from the client) and snapshotted
+ * on the close row.
  */
 export async function completeClose(
   tx: Tx,
   ctx: LedgerCtx,
-  args: { periodEnd: string },
+  args: { entityId: string; periodEnd: string },
 ): Promise<{ close: PeriodClose; checklist: CloseChecklist }> {
   requireOwnerRole(ctx);
-  const settings = await getSettings(tx, ctx.tenantId);
-  if (settings.closedThrough && args.periodEnd <= settings.closedThrough) {
+  const closedThrough = await getClosedThrough(tx, ctx.tenantId, args.entityId);
+  if (closedThrough && args.periodEnd <= closedThrough) {
     throw new LedgerError("CLOSE_NOT_FORWARD", "period end not after closed_through", {
-      closedThrough: settings.closedThrough,
+      closedThrough,
       periodEnd: args.periodEnd,
     });
   }
-  const checklist = await getCloseChecklist(tx, ctx.tenantId, args.periodEnd);
+  const checklist = await getCloseChecklist(
+    tx,
+    ctx.tenantId,
+    args.entityId,
+    args.periodEnd,
+  );
   const [close] = await tx
     .insert(schema.periodCloses)
     .values({
       tenantId: ctx.tenantId,
+      entityId: args.entityId,
       periodEnd: args.periodEnd,
-      previousClosedThrough: settings.closedThrough,
+      previousClosedThrough: closedThrough,
       checklist,
       completedByClerkUserId: ctx.userId,
     })
     .returning();
-  await setClosedThrough(tx, ctx, { date: args.periodEnd });
+  await setClosedThrough(tx, ctx, {
+    entityId: args.entityId,
+    date: args.periodEnd,
+  });
   return { close, checklist };
 }
 
 /**
- * Reopen the LATEST completed close (reconciliation's latest-only reopen
- * precedent) and restore the closed-through date it replaced — which also
+ * Reopen the LATEST completed close OF ITS COMPANY (reconciliation's latest-only
+ * reopen precedent) and restore the closed-through date it replaced — which also
  * correctly unwinds scalar closes that predate the period_closes table.
+ *
+ * "Latest" is per company now. Maple's June being reopened has nothing to say
+ * about Oak's July, and a tenant-wide latest check would have refused it.
  */
 export async function reopenClose(
   tx: Tx,
@@ -268,6 +330,7 @@ export async function reopenClose(
     .where(
       and(
         eq(schema.periodCloses.tenantId, ctx.tenantId),
+        eq(schema.periodCloses.entityId, close.entityId),
         eq(schema.periodCloses.status, "completed"),
         gt(schema.periodCloses.periodEnd, close.periodEnd),
       ),
@@ -296,7 +359,10 @@ export async function reopenClose(
   if (!updated) {
     throw new LedgerError("STALE_VERSION", "close changed since loaded");
   }
-  await setClosedThrough(tx, ctx, { date: close.previousClosedThrough });
+  await setClosedThrough(tx, ctx, {
+    entityId: close.entityId,
+    date: close.previousClosedThrough,
+  });
   return updated;
 }
 
@@ -372,6 +438,12 @@ export async function loadClose(
   return close;
 }
 
+/**
+ * Every close, newest first. NOT scoped: the history page shows all companies
+ * with a Company column, the way the Journal does — scoping the list as well as
+ * the checklist would hide from an owner that Oak has not been closed since
+ * March, which is exactly what they came to this page to find out.
+ */
 export async function listCloses(
   tx: Tx,
   tenantId: string,

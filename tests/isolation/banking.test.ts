@@ -2,7 +2,7 @@ import "dotenv/config";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../../src/db";
-import { d } from "./_shared";
+import { d, seedEntity } from "./_shared";
 
 /**
  * Banking tables: RLS isolation plus the composite-tenant-FK guarantees.
@@ -17,6 +17,7 @@ import { d } from "./_shared";
 const STAMP_BANK = `iso-bank-${process.pid}`;
 
 interface BankFixture {
+  entityId: string;
   cashAccountId: string;
   expenseAccountId: string;
   bankAccountId: string;
@@ -36,6 +37,7 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
   async function seedBanking(tenantId: string, tag: string): Promise<BankFixture> {
     return withTenant(tenantId, async (tx) => {
       await tx.insert(schema.accountingSettings).values({ tenantId });
+      const entityId = await seedEntity(tx, tenantId, tag);
       const [cash] = await tx
         .insert(schema.accounts)
         .values({
@@ -60,6 +62,7 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.bankAccounts)
         .values({
           tenantId,
+          entityId,
           accountId: cash.id,
           name: `Register ${tag}`,
           kind: "checking",
@@ -104,6 +107,7 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
         .insert(schema.journalEntries)
         .values({
           tenantId,
+          entityId,
           entryDate: "2026-07-06",
           memo: `bank entry of ${tag}`,
           status: "posted",
@@ -147,6 +151,7 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
         .returning();
 
       return {
+        entityId,
         cashAccountId: cash.id,
         expenseAccountId: expense.id,
         bankAccountId: bank.id,
@@ -260,6 +265,22 @@ d("banking isolation (RLS + composite tenant FKs)", () => {
           tenantId: tenantB,
           plaidItemId: `${STAMP_BANK}-smuggled`,
           accessTokenEnc: "smuggled",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("composite FK: a register cannot name the OTHER tenant's company", async () => {
+    // A register belongs to exactly one company (ADR 0010 slice 1b), and the
+    // company it names has to be one of this tenant's own.
+    await expect(
+      withTenant(tenantA, (tx) =>
+        tx.insert(schema.bankAccounts).values({
+          tenantId: tenantA,
+          entityId: fx.b.entityId,
+          accountId: fx.a.cashAccountId,
+          name: "Smuggled register",
+          kind: "checking",
         }),
       ),
     ).rejects.toThrow();

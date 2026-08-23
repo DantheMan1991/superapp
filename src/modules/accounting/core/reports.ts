@@ -12,6 +12,12 @@ import {
 } from "../lib/dates";
 import { LedgerError } from "./errors";
 import { getBalances, type AccountingBasis } from "./balances";
+import { ledgerScopeConditions } from "./consolidation";
+import {
+  entityScopeCondition,
+  type EntityScope,
+  type FilterScope,
+} from "./entities";
 import { listAccounts } from "./coa";
 import { listDimensionMembers } from "./dimensions";
 import { getSettings } from "./guards";
@@ -20,16 +26,33 @@ import {
   buildCashActivity,
   buildGeneralLedger,
   buildProfitAndLoss,
+  displayCents,
   type BalanceSheetReport,
   type CashActivityReport,
   type GeneralLedgerInputLine,
   type GeneralLedgerReport,
   type ProfitAndLossReport,
 } from "./report-builders";
+import {
+  buildTaxSummary,
+  type TaxSummaryInvoice,
+  type TaxSummaryReport,
+} from "./tax-summary";
 
 /**
  * Thin fetch wrappers: listAccounts + 1–4 getBalances calls + a pure
  * builder. Read-only; compute-on-read per the balances.ts design note.
+ *
+ * EVERY ONE OF THEM STATES AN ENTITY SCOPE, and it is a required parameter
+ * rather than an optional one (ADR 0010). Two of the reports here decline to
+ * take one, each for its own stated reason — see `getTaxSummary` and the note
+ * on aging in docs/modules/accounting.md. Declining is a decision written down;
+ * an optional parameter is a decision nobody makes.
+ *
+ * SINCE SLICE 3 THE SAME IS TRUE OF CONSOLIDATION, in the type rather than in a
+ * comment. A report that takes `EntityScope` can be asked to eliminate and goes
+ * through `ledgerScopeConditions`; one that takes `FilterScope` cannot be asked
+ * at all, and the reason it declines is written above it.
  */
 
 /**
@@ -47,6 +70,7 @@ export async function getProfitAndLoss(
   tx: Tx,
   tenantId: string,
   opts: {
+    scope: EntityScope;
     from: string;
     to: string;
     compare?: "prev-period" | "prev-year";
@@ -66,6 +90,7 @@ export async function getProfitAndLoss(
   const dimensionType = opts.compare || spread ? undefined : opts.dimensionType;
   const basis = opts.basis ?? "accrual";
   const current = await getBalances(tx, tenantId, {
+    scope: opts.scope,
     from: opts.from,
     to: opts.to,
     basis,
@@ -84,10 +109,12 @@ export async function getProfitAndLoss(
       buckets.map(async (b) => ({
         key: b.key,
         label: b.label,
-        // Every column on the SAME basis as the report as a whole — a cash
-        // month next to an accrual one would be two different questions in
-        // one table, the same reasoning the comparison column follows.
+        // Every column on the SAME basis AND the same entity scope as the
+        // report as a whole — a cash month next to an accrual one, or one
+        // company's January beside every company's February, would be two
+        // different questions in one table.
         rows: await getBalances(tx, tenantId, {
+          scope: opts.scope,
           from: b.from,
           to: b.to,
           basis,
@@ -110,7 +137,7 @@ export async function getProfitAndLoss(
       ...range,
       // The comparison period is computed on the SAME basis — comparing cash
       // against accrual would be two different questions in one column pair.
-      rows: await getBalances(tx, tenantId, { ...range, basis }),
+      rows: await getBalances(tx, tenantId, { ...range, scope: opts.scope, basis }),
     };
   }
   let dimension;
@@ -134,6 +161,7 @@ export async function getBalanceSheet(
   tx: Tx,
   tenantId: string,
   opts: {
+    scope: EntityScope;
     asOf: string;
     compare?: "prev-year";
     showZero?: boolean;
@@ -145,8 +173,9 @@ export async function getBalanceSheet(
   const fyStart = fiscalYearStart(opts.asOf, settings.fiscalYearStartMonth);
   const basis = opts.basis ?? "accrual";
   const fetchPair = async (asOf: string, fy: string) => ({
-    cumulative: await getBalances(tx, tenantId, { asOf, basis }),
+    cumulative: await getBalances(tx, tenantId, { scope: opts.scope, asOf, basis }),
     priorFyBoundary: await getBalances(tx, tenantId, {
+      scope: opts.scope,
       asOf: addDaysIso(fy, -1),
       basis,
     }),
@@ -172,11 +201,18 @@ export async function getBalanceSheet(
  * register line exactly where it was. Cash Activity is the same report on
  * either basis, so offering a toggle would only invite the reader to look for
  * a difference that cannot exist.
+ *
+ * NO CONSOLIDATED SCOPE EITHER, for exactly that reason a second time
+ * (`FilterScope`, so it cannot be handed one). Every register belongs to one
+ * company and no register balance is inflated by intercompany: a transfer takes
+ * cash out of one and puts it into another, and both movements are real. The
+ * group's cash is the sum of the registers on either scope, so consolidating
+ * would change nothing and only invite the reader to hunt for the difference.
  */
 export async function getCashActivity(
   tx: Tx,
   tenantId: string,
-  opts: { from: string; to: string },
+  opts: { scope: FilterScope; from: string; to: string },
 ): Promise<CashActivityReport> {
   const accounts = await listAccounts(tx, tenantId);
   const cashIds = accounts
@@ -185,11 +221,17 @@ export async function getCashActivity(
   if (cashIds.length === 0) {
     return buildCashActivity(accounts, [], [], opts);
   }
+  // It DOES take an entity scope, unlike a basis: a bank account is shared
+  // between entities only until slice 4 gives it an owner, but the MOVEMENTS
+  // through it already belong to one company or another, and "what did Maple
+  // Street move through the account this month" is a real question today.
   const opening = await getBalances(tx, tenantId, {
+    scope: opts.scope,
     asOf: addDaysIso(opts.from, -1),
     accountIds: cashIds,
   });
   const activity = await getBalances(tx, tenantId, {
+    scope: opts.scope,
     from: opts.from,
     to: opts.to,
     accountIds: cashIds,
@@ -225,11 +267,19 @@ export const GENERAL_LEDGER_LINE_CAP = 5000;
  * earliest part of the period rather than an arbitrary sample. Note that a
  * truncated report no longer reconciles to the trial balance at `to` — its
  * closing balances are as at the last line shown.
+ *
+ * IT DOES TAKE A CONSOLIDATED SCOPE, and the reason is that reconciliation. A
+ * consolidated trial balance you cannot drill into is a number an accountant
+ * has no way to check; the eliminated legs are simply absent here, exactly as
+ * they are absent from the totals above. Both queries below share the one
+ * `where`, so the count, the lines and the opening balance cannot disagree
+ * about what was eliminated.
  */
 export async function getGeneralLedger(
   tx: Tx,
   tenantId: string,
   opts: {
+    scope: EntityScope;
     from: string;
     to: string;
     /** Narrow to specific accounts; empty/absent means every account. */
@@ -255,6 +305,10 @@ export async function getGeneralLedger(
     // Only posted entries count, exactly as getBalances does — a general
     // ledger that included drafts would disagree with every other report.
     eq(je.status, "posted" as const),
+    // ...and the same scope AND the same elimination, from the same helper the
+    // engine uses, or the report would stop tying back to the trial balance —
+    // which is the one thing an accountant does with it first.
+    ...(await ledgerScopeConditions(tx, tenantId, opts.scope)),
     gte(je.entryDate, opts.from),
     lte(je.entryDate, opts.to),
     ...(narrowed ? [inArray(jl.accountId, narrowed)] : []),
@@ -264,6 +318,7 @@ export async function getGeneralLedger(
     // The balance carried INTO the period — the same engine every other
     // report uses, so the opening column cannot drift from the balance sheet.
     getBalances(tx, tenantId, {
+      scope: opts.scope,
       asOf: addDaysIso(opts.from, -1),
       ...(narrowed ? { accountIds: narrowed } : {}),
     }),
@@ -307,5 +362,129 @@ export async function getGeneralLedger(
     from: opts.from,
     to: opts.to,
     matchedLineCount: toSafeCents(countRows[0]?.n ?? 0),
+  });
+}
+
+/**
+ * Sales tax collected, by rate, for a period — plus what the ledger says is
+ * owed. The reasoning for reading BOTH sources is in `tax-summary.ts`.
+ *
+ * NO `basis` PARAMETER, and it is the third report to refuse one for its own
+ * reason (Cash Activity: the adjustment cannot touch registers; the General
+ * Ledger: cash basis produces adjustments, not lines). Here it is that a
+ * cash-basis tax summary means pro-rating each invoice's tax across its
+ * payments PER RATE, which is a real feature rather than a toggle — and a tax
+ * return computed on the wrong basis is not slightly wrong.
+ *
+ * Invoices are selected by ISSUE DATE, which is when the liability arises.
+ *
+ * IT TAKES A SCOPE NOW, on BOTH halves. This report reads two sources and shows
+ * the gap between them — the per-rate figures come from INVOICES, the amount
+ * owed comes from the LEDGER — so it declined a scope for as long as invoices
+ * had no company: scoping one column and not the other makes the difference
+ * between them meaningless, and that difference is the whole report. Now that
+ * `invoices.entity_id` exists both halves are scoped by the same argument, and
+ * a return is filed per company, which is the point.
+ *
+ * IT DECLINES A CONSOLIDATED SCOPE (`FilterScope`), and joins the aging reports
+ * in that. Both halves read things intercompany cannot reach: an affiliate
+ * balance never becomes an invoice, and the sales-tax control is not an
+ * affiliate account. Consolidated would therefore be combined with a different
+ * name on it — and a tax return is filed by a legal entity anyway, so the group
+ * is not a filer this report has anything to say to.
+ */
+export async function getTaxSummary(
+  tx: Tx,
+  tenantId: string,
+  opts: { scope: FilterScope; from: string; to: string },
+): Promise<TaxSummaryReport> {
+  const inv = schema.invoices;
+  const il = schema.invoiceLines;
+
+  // The taxable base is SUMMED from the frozen lines rather than derived from
+  // the tax — exact, and no division (P5). Grouped in the database because an
+  // invoice can have a hundred lines and this report can span a year.
+  const lineTotals = await tx
+    .select({
+      invoiceId: il.invoiceId,
+      taxable: sql<string>`coalesce(sum(${il.amountCents}) filter (where ${il.isTaxable}), 0)`,
+      exempt: sql<string>`coalesce(sum(${il.amountCents}) filter (where not ${il.isTaxable}), 0)`,
+    })
+    .from(il)
+    .innerJoin(inv, and(eq(inv.tenantId, il.tenantId), eq(inv.id, il.invoiceId)))
+    .where(
+      and(
+        eq(il.tenantId, tenantId),
+        entityScopeCondition(opts.scope, inv.entityId),
+        gte(inv.issueDate, opts.from),
+        lte(inv.issueDate, opts.to),
+      ),
+    )
+    .groupBy(il.invoiceId);
+  const basesOf = new Map(lineTotals.map((r) => [r.invoiceId, r]));
+
+  const invoiceRows = await tx
+    .select({
+      id: inv.id,
+      taxRateId: inv.taxRateId,
+      taxRatePpm: inv.taxRatePpm,
+      taxCents: inv.taxCents,
+      status: inv.status,
+    })
+    .from(inv)
+    .where(
+      and(
+        eq(inv.tenantId, tenantId),
+        entityScopeCondition(opts.scope, inv.entityId),
+        gte(inv.issueDate, opts.from),
+        lte(inv.issueDate, opts.to),
+      ),
+    );
+
+  const invoices: TaxSummaryInvoice[] = invoiceRows.map((r) => {
+    const base = basesOf.get(r.id);
+    return {
+      taxRateId: r.taxRateId,
+      taxRatePpm: r.taxRatePpm,
+      taxableCents: toSafeCents(base?.taxable ?? 0),
+      exemptCents: toSafeCents(base?.exempt ?? 0),
+      taxCents: r.taxCents,
+      status: r.status,
+    };
+  });
+
+  const rateNames = await tx
+    .select({ id: schema.salesTaxRates.id, name: schema.salesTaxRates.name })
+    .from(schema.salesTaxRates)
+    .where(eq(schema.salesTaxRates.tenantId, tenantId));
+
+  // BY SUBTYPE, never by code — a tenant may have renumbered. Null when there
+  // is no such account, which the report renders as "no comparison available"
+  // rather than as a zero balance.
+  const accounts = await listAccounts(tx, tenantId);
+  const taxAccount = accounts.find((a) => a.subtype === "sales_tax");
+  let liabilityCents: number | null = null;
+  if (taxAccount) {
+    const balances = await getBalances(tx, tenantId, {
+      // The SAME scope as the invoice half above — that is what makes the
+      // difference between the two columns mean something.
+      scope: opts.scope,
+      asOf: opts.to,
+      accountIds: [taxAccount.id],
+    });
+    // Natural side (P6): `displayCents` already flips a credit-normal account,
+    // so tax collected and not yet remitted comes out POSITIVE. Do not negate
+    // it again — that reads correct on an empty account and inverts on a real
+    // one.
+    liabilityCents = displayCents(
+      taxAccount.accountType,
+      balances.find((b) => b.accountId === taxAccount.id)?.netCents ?? 0,
+    );
+  }
+
+  return buildTaxSummary(invoices, rateNames, {
+    from: opts.from,
+    to: opts.to,
+    liabilityCents,
   });
 }

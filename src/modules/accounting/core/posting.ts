@@ -1,11 +1,18 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { DimensionMember, JournalEntry, JournalLine } from "@/db/schema";
 import { MAX_AMOUNT_CENTS, isValidIsoDate, todayInTimezone } from "../lib/money";
 import { getTenantTimezone } from "@/lib/tenant-timezone";
 import { LedgerError } from "./errors";
-import { assertPeriodOpen, getSettings, requireOwnerRole } from "./guards";
+import {
+  assertNotIntercompanyLeg,
+  assertPeriodOpen,
+  getClosedThrough,
+  getSettings,
+  requireOwnerRole,
+  requirePostingRight,
+} from "./guards";
 import type { EntryLineInput, LedgerCtx, NewEntryInput, PostResult } from "./types";
 
 /**
@@ -68,6 +75,89 @@ async function loadActiveAccounts(
     const row = byId.get(id);
     if (!row) throw new LedgerError("ACCOUNT_NOT_FOUND", `account ${id} not found`);
     if (!row.isActive) throw new LedgerError("ACCOUNT_INACTIVE", `account ${id} inactive`);
+  }
+}
+
+/**
+ * The entry's entity must exist, belong to this tenant and be active. The
+ * composite FK already makes a cross-tenant entity unrepresentable; this gives
+ * a friendly error first, and it is the only place that checks `is_active` —
+ * the database has no opinion on that.
+ */
+async function assertEntityPostable(
+  tx: Tx,
+  tenantId: string,
+  entityId: string,
+): Promise<void> {
+  const row = await tx.query.entities.findFirst({
+    where: and(
+      eq(schema.entities.tenantId, tenantId),
+      eq(schema.entities.id, entityId),
+    ),
+    columns: { isActive: true },
+  });
+  if (!row) {
+    throw new LedgerError("ENTITY_NOT_FOUND", `entity ${entityId} not found`);
+  }
+  if (!row.isActive) {
+    throw new LedgerError("ENTITY_INACTIVE", `entity ${entityId} is inactive`);
+  }
+}
+
+/**
+ * A LINE MAY NOT TOUCH ANOTHER COMPANY'S REGISTER.
+ *
+ * This is the invariant that makes per-company bank accounts safe, and it lives
+ * here rather than at each call site because there is no useful list of call
+ * sites — any journal entry can name any account.
+ *
+ * The case it refuses is the one the ten-LLC landlord does constantly: paying
+ * Oak Row's bill out of Maple Street's checking account. As a single entry that
+ * would be `Dr AP (Oak) / Cr Checking (Maple)` tagged to ONE company, which
+ * makes Oak's balance sheet show cash leaving an account it does not own and
+ * Maple's show nothing at all. Both statements are then wrong, and the ledger
+ * still balances — the failure signature ADR 0010 is written against.
+ *
+ * It is an INTERCOMPANY transaction, and the honest form is a linked PAIR of
+ * entries with due-to/due-from legs (ADR 0010 slice 2). Until that exists this
+ * refuses rather than mis-records.
+ *
+ * The chart of accounts is NOT constrained: AR, AP and every expense account
+ * are shared, and two companies' receivables both sit in 1200, separated by the
+ * entry's company. Only a REGISTER — a row in `bank_accounts` — is owned.
+ */
+async function assertNoForeignRegisters(
+  tx: Tx,
+  tenantId: string,
+  entityId: string,
+  accountIds: string[],
+): Promise<void> {
+  const distinct = [...new Set(accountIds)];
+  if (distinct.length === 0) return;
+  const foreign = await tx
+    .select({
+      name: schema.bankAccounts.name,
+      accountId: schema.bankAccounts.accountId,
+    })
+    .from(schema.bankAccounts)
+    .where(
+      and(
+        eq(schema.bankAccounts.tenantId, tenantId),
+        inArray(schema.bankAccounts.accountId, distinct),
+        ne(schema.bankAccounts.entityId, entityId),
+      ),
+    )
+    .limit(1);
+  if (foreign.length > 0) {
+    // `accountId` is in the meta so the JOURNAL EDITOR can mark the line that
+    // caused it. A toast alone tells you the entry was refused; on a
+    // twelve-line journal it does not tell you which line to fix, and the
+    // account list is long enough that hunting for it is real work.
+    throw new LedgerError(
+      "CROSS_ENTITY_REGISTER",
+      `account ${foreign[0].accountId} is a register of another company`,
+      { registerName: foreign[0].name, accountId: foreign[0].accountId },
+    );
   }
 }
 
@@ -191,7 +281,12 @@ export async function postEntry(
     reversesEntryId?: string | null;
   },
 ): Promise<PostResult> {
-  if (input.status === "posted") requireOwnerRole(ctx);
+  // WHO MAY POST depends on WHAT produced the entry, not only on who is
+  // asking. A hand-written journal is an owner's decision; a journal line that
+  // exists because a staff member issued feed rides the authorisation of that
+  // act. See MACHINE_SOURCES and ADR 0011 — and note `source` defaults to
+  // "manual", so anything that does not name itself still needs an owner.
+  if (input.status === "posted") requirePostingRight(ctx, input.source);
   if (!isValidIsoDate(input.entryDate)) {
     throw new LedgerError("PERIOD_CLOSED", `invalid entry date ${input.entryDate}`);
   }
@@ -209,22 +304,35 @@ export async function postEntry(
   );
   if (existing) return { entry: existing, deduped: true };
 
+  await assertEntityPostable(tx, ctx.tenantId, input.entityId);
   await loadActiveAccounts(tx, ctx.tenantId, input.lines.map((l) => l.accountId));
+  await assertNoForeignRegisters(
+    tx,
+    ctx.tenantId,
+    input.entityId,
+    input.lines.map((l) => l.accountId),
+  );
   const members = await loadDimensionMembers(tx, ctx.tenantId, input.lines);
   if (input.status === "posted") {
-    await assertPeriodOpen(tx, ctx.tenantId, input.entryDate);
+    // The company being posted INTO decides whether the period is open. One
+    // company's June being closed says nothing about another's.
+    await assertPeriodOpen(tx, ctx.tenantId, input.entityId, input.entryDate);
   }
 
   const inserted = await tx
     .insert(schema.journalEntries)
     .values({
       tenantId: ctx.tenantId,
+      entityId: input.entityId,
       entryDate: input.entryDate,
       memo: input.memo ?? "",
       status: input.status,
       source: input.source ?? "manual",
       sourceId: input.sourceId ?? null,
       idempotencyKey: input.idempotencyKey ?? null,
+      // Both halves of an intercompany pair carry the same id (ADR 0010
+      // slice 2); null on every ordinary entry, which is nearly all of them.
+      intercompanyId: input.intercompanyId ?? null,
       reversesEntryId: input.reversesEntryId ?? null,
       postedAt: input.status === "posted" ? new Date() : null,
       createdByClerkUserId: ctx.userId,
@@ -369,7 +477,8 @@ async function assertPostedMutable(
   if (settings.entryEditPolicy === "strict_append_only") {
     throw new LedgerError("ENTRY_IMMUTABLE", "tenant is in strict append-only mode");
   }
-  if (settings.closedThrough && entry.entryDate <= settings.closedThrough) {
+  const closedThrough = await getClosedThrough(tx, ctx.tenantId, entry.entityId);
+  if (closedThrough && entry.entryDate <= closedThrough) {
     throw new LedgerError("ENTRY_IMMUTABLE", "entry is in a closed period");
   }
   if (await entryHasReconciledLines(tx, ctx.tenantId, entry.id)) {
@@ -385,6 +494,12 @@ export async function editEntry(
   args: {
     entryId: string;
     expectedVersion: number;
+    /**
+     * No `entityId`, and that is deliberate rather than an omission: moving a
+     * posted entry between entities moves money between two balance sheets,
+     * which is a transfer to be recorded, not a field to be corrected. Reverse
+     * it and post it in the right one.
+     */
     patch: { entryDate?: string; memo?: string; lines?: EntryLineInput[] };
   },
 ): Promise<{ before: EntrySnapshot; after: EntrySnapshot }> {
@@ -400,8 +515,10 @@ export async function editEntry(
 
   if (entry.status === "posted") {
     await assertPostedMutable(tx, ctx, entry);
-    // The new date must also land in the open period.
-    await assertPeriodOpen(tx, ctx.tenantId, newDate);
+    // The new date must also land in the open period — of the entry's OWN
+    // company, which is the only one it can be in (there is no entityId in the
+    // patch, deliberately, see above).
+    await assertPeriodOpen(tx, ctx.tenantId, entry.entityId, newDate);
   }
 
   if (args.patch.lines) {
@@ -410,6 +527,13 @@ export async function editEntry(
     await loadActiveAccounts(
       tx,
       ctx.tenantId,
+      args.patch.lines.map((l) => l.accountId),
+    );
+    // An EDIT can introduce a foreign register just as a create can.
+    await assertNoForeignRegisters(
+      tx,
+      ctx.tenantId,
+      entry.entityId,
       args.patch.lines.map((l) => l.accountId),
     );
     const members = await loadDimensionMembers(tx, ctx.tenantId, args.patch.lines);
@@ -452,7 +576,7 @@ export async function postDraft(
   validateLineAmounts(lines);
   assertBalanced(lines);
   await loadActiveAccounts(tx, ctx.tenantId, lines.map((l) => l.accountId));
-  await assertPeriodOpen(tx, ctx.tenantId, entry.entryDate);
+  await assertPeriodOpen(tx, ctx.tenantId, entry.entityId, entry.entryDate);
   return bumpVersion(tx, ctx.tenantId, entry.id, args.expectedVersion, {
     status: "posted",
     postedAt: new Date(),
@@ -494,6 +618,40 @@ export async function voidEntry(
   ctx: LedgerCtx,
   args: { entryId: string; expectedVersion: number },
 ): Promise<JournalEntry> {
+  /**
+   * NEITHER LEG OF AN INTERCOMPANY PAIR MOVES ALONE, and this guard is in the
+   * ENGINE rather than in the action layer because that is where it holds.
+   *
+   * It lived only in `actions.ts` until now, so the journal screens were
+   * covered and `unapplyBillPayment` was not: unapplying a bill one company had
+   * paid for another voided the bill's leg and left the paying company's
+   * posted, with cash gone and a "Due from Affiliates" balance no counterparty
+   * explains. Proved against the dev database before this was written — the two
+   * legs came back `['posted', 'void']`. Same lesson as
+   * `assertNoForeignRegisters`: a rule enforced per screen is a rule the next
+   * caller does not get.
+   *
+   * Undoing a pair is `voidIntercompanyPair`, which takes both.
+   */
+  await assertNotIntercompanyLeg(tx, ctx.tenantId, args.entryId);
+  return voidEntryUnchecked(tx, ctx, args);
+}
+
+/**
+ * The void itself, with no intercompany check.
+ *
+ * CORE-INTERNAL — deliberately not re-exported from `core/index.ts`, the way
+ * `asFilterScope` is not. Its only caller is `voidIntercompanyPair`, which has
+ * already established that it is voiding BOTH legs; every other route must go
+ * through `voidEntry` and be refused. The mutability tiers still apply to each
+ * leg, so a reconciled line or a closed period blocks one half and rolls the
+ * whole transaction back.
+ */
+export async function voidEntryUnchecked(
+  tx: Tx,
+  ctx: LedgerCtx,
+  args: { entryId: string; expectedVersion: number },
+): Promise<JournalEntry> {
   const entry = await loadEntry(tx, ctx.tenantId, args.entryId);
   if (entry.status !== "posted") {
     throw new LedgerError("ENTRY_NOT_POSTED", "only posted entries can be voided");
@@ -515,6 +673,9 @@ export async function reverseEntry(
   args: { entryId: string; entryDate?: string; memo?: string },
 ): Promise<PostResult> {
   requireOwnerRole(ctx);
+  // Same rule as the void above, and for the same reason: a one-sided reversal
+  // leaves the other company still owing. `reverseIntercompanyPair` posts both.
+  await assertNotIntercompanyLeg(tx, ctx.tenantId, args.entryId);
   const entry = await loadEntry(tx, ctx.tenantId, args.entryId);
   if (entry.status !== "posted") {
     throw new LedgerError("ENTRY_NOT_POSTED", "only posted entries can be reversed");
@@ -555,6 +716,11 @@ export async function reverseEntry(
 
   return postEntry(tx, ctx, {
     status: "posted",
+    // The ORIGINAL's entity, never the tenant default and never an argument. A
+    // reversal landing in another entity would leave both of them out of
+    // balance while the tenant as a whole still netted to zero — the exact
+    // class of wrongness entity-scoped reports exist to catch.
+    entityId: entry.entityId,
     entryDate: reversalDate,
     memo: args.memo ?? `Reversal of entry dated ${entry.entryDate}`,
     source: "reversal",

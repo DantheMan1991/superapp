@@ -3,6 +3,7 @@ import { neonConfig, Pool } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { sql } from "drizzle-orm";
 import ws from "ws";
+import { configureNeonForLocalProxy } from "./lib/neon-local";
 import * as schema from "../src/db/schema";
 
 /**
@@ -136,6 +137,108 @@ const MODULES: (typeof schema.modules.$inferInsert)[] = [
     status: "available",
     sortOrder: 70,
   },
+
+  // ---------------------------------------------------------------------
+  // Layer 2a — capability packs. Same table, `category = 'pack'`
+  // (ADR 0009), so enablement, nav, routing and the guard all work through
+  // machinery that already exists.
+  //
+  // NONE OF THESE ARE SOLD INDIVIDUALLY. The SKU is the profile — a tenant
+  // buys "Homestead Farm", not seven line items — so packs must never reach
+  // a client-facing catalogue. There is no such page today, and if one is
+  // ever built it filters on `category = 'core'`.
+  //
+  // All `coming_soon`: declared seams with a real dependency graph in
+  // `src/packs/index.ts` and no renderer yet, exactly how `scheduling` and
+  // `work` were carried before they shipped. Each flips to `available` when
+  // its pack is built.
+  //
+  // Descriptions describe the CAPABILITY, never an industry — a pack that
+  // names one has the boundary wrong. "Land", "Livestock" and "Crops" are
+  // narrow capabilities, not industries: a cattle ranch, a market garden and
+  // a vineyard compose different subsets of the same list.
+  // ---------------------------------------------------------------------
+  {
+    id: "land",
+    name: "Land",
+    description:
+      "Parcels and the zones inside them — what each area is for, what it costs, and what has been on it.",
+    category: "pack",
+    // `available` from slice 0 (2026-08-15): parcels, zones and dated zone use,
+    // both levels synced as cost objects. Occupancy and rest follow in slice 1,
+    // geometry in slice 2, and the description grows as they do.
+    status: "available",
+    sortOrder: 200,
+  },
+  {
+    id: "assets",
+    name: "Assets",
+    description:
+      "Anything owned with a cost, a working life, a place it lives and a service schedule.",
+    category: "pack",
+    // `available` from the first pack slice (2026-08-14): it renders, writes to
+    // a pack-owned table under RLS, and syncs a cost object. Depreciation and
+    // maintenance follow and get added to the description as they do.
+    status: "available",
+    sortOrder: 210,
+  },
+  {
+    id: "inventory",
+    name: "Inventory",
+    description:
+      "Quantities on hand, where they are, what they cost, and the lot each one came from.",
+    category: "pack",
+    // `available` from slice 0 (2026-08-15): items, the LOT SPINE and the
+    // movement ledger. Receipts and issues follow in slice 1, valuation in
+    // slice 3, and the description grows as they do.
+    status: "available",
+    sortOrder: 220,
+  },
+  {
+    id: "livestock",
+    name: "Livestock",
+    description:
+      "Animals tracked as lots — health, movement, breeding and what each one has cost.",
+    category: "pack",
+    // `available` from slice 0 (2026-08-15): lots, the head ledger and
+    // occupancy — all composed from `inventory` and `land` rather than
+    // rebuilt. Daily log, feed, health and breeding follow.
+    status: "available",
+    sortOrder: 230,
+  },
+  {
+    id: "crops",
+    name: "Crops",
+    description:
+      "Plantings in beds — what went in when, how it is doing, and what came off it.",
+    category: "pack",
+    status: "coming_soon",
+    sortOrder: 240,
+  },
+  {
+    id: "production",
+    name: "Production",
+    description:
+      "Turning inputs into outputs at a yield, with the cost carried through to what comes out.",
+    category: "pack",
+    // `available` from slice 0 (2026-08-20): the run model, and outputs landing
+    // in `inventory` carrying the input lot's cost. Cut sheets and the legal
+    // machinery follow in slice 1, recipes in slice 2.
+    status: "available",
+    sortOrder: 250,
+  },
+  {
+    id: "retail",
+    name: "Retail",
+    description:
+      "Selling what you have — channels, price lists, orders and what actually moved.",
+    category: "pack",
+    // `available` from slice 0 (2026-08-20): channels, per-item-per-channel
+    // price lists, and what a day of selling cost. The till, stockouts and
+    // payments follow in slices 1 and 2.
+    status: "available",
+    sortOrder: 260,
+  },
 ];
 
 /**
@@ -182,6 +285,10 @@ async function main() {
   if (!globalThis.WebSocket) {
     neonConfig.webSocketConstructor = ws;
   }
+  // A no-op unless NEON_LOCAL_PROXY is set, which only CI does. Every script
+  // that opens its OWN Neon pool needs this line — the first CI run failed
+  // because `migrate.ts` did not have it, and this is the same shape.
+  configureNeonForLocalProxy();
   const pool = new Pool({ connectionString: url });
   const db = drizzle(pool, { schema });
 

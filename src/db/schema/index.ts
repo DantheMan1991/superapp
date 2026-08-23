@@ -25,3 +25,11 @@ export * from "./interview";
 export * from "./crm";
 export * from "./scheduling";
 export * from "./work";
+// Layer 2a — pack-owned tables. Same rules as any domain above; the separation
+// that matters is in `src/packs/`, where the code lives.
+export * from "./assets";
+export * from "./land";
+export * from "./inventory";
+export * from "./livestock";
+export * from "./production";
+export * from "./retail";

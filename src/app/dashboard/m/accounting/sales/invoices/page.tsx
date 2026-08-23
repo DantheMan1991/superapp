@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/app/page-header";
 import { DataTable } from "@/components/app/data-table";
 import { EmptyState } from "@/components/app/empty-state";
 import { FilterPills } from "@/components/app/filter-pills";
+import { CompanyPicker } from "@/modules/accounting/components/company-picker";
 import { MoneyBar } from "@/modules/accounting/components/money-bar";
 import {
   AR_BUCKETS,
@@ -37,6 +38,8 @@ import {
   todayInTimezone,
   toSafeCents,
 } from "@/modules/accounting/lib/money";
+import { entityScopeCondition } from "@/modules/accounting/core";
+import { reportEntityOr404 } from "@/modules/accounting/lib/report-entity";
 import { SalesNav } from "../sales-nav";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +66,7 @@ const FILTERS = [
 export default async function InvoicesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ f?: string; bucket?: string }>;
+  searchParams: Promise<{ f?: string; bucket?: string; entity?: string }>;
 }) {
   const ctx = await requireTenant();
   await requireModuleEnabled(ctx.tenant.id, "accounting");
@@ -75,7 +78,21 @@ export default async function InvoicesPage({
 
   const data = await withTenant(ctx.tenant.id, async (tx) => {
     const today = todayInTimezone(ctx.tenant.timezone);
-    const aging = await getArAging(tx, ctx.tenant.id, today);
+    /**
+     * THE WHOLE PAGE TAKES THE SCOPE, not just the header figure. The MoneyBar,
+     * the bucket tallies and the table all read the same `entity`, because a
+     * list showing one company's invoices under another company's "overdue"
+     * total is the kind of screen somebody makes a decision from.
+     */
+    const entityView = await reportEntityOr404(
+      tx,
+      ctx.tenant.id,
+      sp.entity,
+      // A list of invoices, not a statement — nothing on it is intercompany.
+      "declined",
+    );
+    const inScope = entityScopeCondition(entityView.scope, schema.invoices.entityId);
+    const aging = await getArAging(tx, ctx.tenant.id, today, entityView.scope);
 
     /**
      * The bar's figures cover EVERY invoice, not the 200 the table shows.
@@ -98,7 +115,7 @@ export default async function InvoicesPage({
           eq(schema.invoicePayments.invoiceId, schema.invoices.id),
         ),
       )
-      .where(eq(schema.invoices.tenantId, ctx.tenant.id))
+      .where(and(eq(schema.invoices.tenantId, ctx.tenant.id), inScope))
       .groupBy(
         schema.invoices.id,
         schema.invoices.status,
@@ -193,6 +210,7 @@ export default async function InvoicesPage({
         dueDate: schema.invoices.dueDate,
         totalCents: schema.invoices.totalCents,
         customerName: schema.customers.name,
+        entityId: schema.invoices.entityId,
         paidCents: sql<string>`coalesce(sum(${schema.invoicePayments.amountCents}), 0)`,
       })
       .from(schema.invoices)
@@ -213,6 +231,7 @@ export default async function InvoicesPage({
       .where(
         and(
           eq(schema.invoices.tenantId, ctx.tenant.id),
+          inScope,
           ...(filter.statuses.length > 0
             ? [inArray(schema.invoices.status, [...filter.statuses])]
             : []),
@@ -236,11 +255,25 @@ export default async function InvoicesPage({
         schema.invoices.dueDate,
         schema.invoices.totalCents,
         schema.customers.name,
+        schema.invoices.entityId,
       )
       .orderBy(desc(schema.invoices.issueDate), desc(schema.invoices.createdAt))
       .limit(200);
-    return { invoices, aging, today, tally, inBucket };
+    return { invoices, aging, today, tally, inBucket, entityView };
   });
+
+  // The column appears only for a tenant with more than one company.
+  const companyName = new Map(data.entityView.entities.map((e) => [e.id, e.name]));
+  const showCompany = data.entityView.entities.length > 1;
+
+  // Every link out of this page keeps the company scope. A bucket or a status
+  // pill that dropped it would widen the list at the moment it narrowed it.
+  const q = (extra: Record<string, string> = {}) => {
+    const p = new URLSearchParams(extra);
+    if (sp.entity) p.set("entity", sp.entity);
+    const s = p.toString();
+    return `/dashboard/m/accounting/sales/invoices${s ? `?${s}` : ""}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -281,28 +314,36 @@ export default async function InvoicesPage({
       <MoneyBar
         noun="invoice"
         activeKey={bucket}
-        clearHref="/dashboard/m/accounting/sales/invoices"
+        clearHref={q()}
         buckets={AR_BUCKETS.map((key) => ({
           key,
           label: AR_BUCKET_LABEL[key],
           cents: data.tally[key][0],
           count: data.tally[key][1],
-          href: `/dashboard/m/accounting/sales/invoices?bucket=${key}`,
+          href: q({ bucket: key }),
           alarm: key === "overdue",
         }))}
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SalesNav />
+        <div className="flex flex-wrap items-center gap-3">
+        <CompanyPicker
+          entities={data.entityView.entities.map((e) => ({
+            id: e.id,
+            name: e.name,
+          }))}
+        />
         <FilterPills
           activeKey={filter.key}
           items={FILTERS.map((f) => ({
             key: f.key,
             label: f.label,
-            href: `/dashboard/m/accounting/sales/invoices?f=${f.key}`,
+            href: q({ f: f.key }),
           }))}
           className="print:hidden"
         />
+        </div>
       </div>
 
       <DataTable
@@ -337,6 +378,7 @@ export default async function InvoicesPage({
             <TableRow>
               <TableHead>Number</TableHead>
               <TableHead>Customer</TableHead>
+              {showCompany && <TableHead>Company</TableHead>}
               <TableHead>Issued</TableHead>
               <TableHead>Due</TableHead>
               <TableHead>Status</TableHead>
@@ -368,6 +410,11 @@ export default async function InvoicesPage({
                   <TableCell className="max-w-[200px] truncate text-sm">
                     {inv.customerName}
                   </TableCell>
+                  {showCompany && (
+                    <TableCell className="text-xs text-muted-foreground">
+                      {companyName.get(inv.entityId) ?? "—"}
+                    </TableCell>
+                  )}
                   <TableCell className="whitespace-nowrap font-mono text-xs">
                     {inv.issueDate}
                   </TableCell>

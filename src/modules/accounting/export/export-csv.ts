@@ -14,6 +14,7 @@ import type {
   DimensionMember,
   Document,
   DocumentLink,
+  Entity,
   Invoice,
   InvoiceLine,
   InvoicePayment,
@@ -25,9 +26,11 @@ import type {
   Reconciliation,
   ReconciliationLine,
   RecurringEntry,
+  SalesTaxRate,
   Vendor,
 } from "@/db/schema";
 import { preferredContactValue } from "@/lib/parties/contact-values";
+import { formatRatePpm } from "../invoicing/tax";
 
 /**
  * Full-books export: pure per-table CSV builders (the testable seam).
@@ -40,6 +43,8 @@ import { preferredContactValue } from "@/lib/parties/contact-values";
 
 export interface BooksData {
   accounts: Account[];
+  /** ADR 0010: the legal entities whose books these are. */
+  entities: Entity[];
   journalEntries: JournalEntry[];
   journalLines: JournalLine[];
   dimensionMembers: DimensionMember[];
@@ -70,6 +75,7 @@ export interface BooksData {
   invoices: Invoice[];
   invoiceLines: InvoiceLine[];
   invoicePayments: InvoicePayment[];
+  salesTaxRates: SalesTaxRate[];
   recurringEntries: RecurringEntry[];
   vendors: Vendor[];
   bills: Bill[];
@@ -156,14 +162,37 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     ),
   );
 
+  const entityName = (id: string): string =>
+    data.entities.find((x) => x.id === id)?.name ?? "";
+
+  files.push(
+    file(
+      "ledger/entities.csv",
+      "Legal entities — each one owns a set of books",
+      // `closed_through` is APPENDED, so a process reading this file by column
+      // position is unaffected. It moved here from settings.csv when the period
+      // lock became per company (ADR 0010 slice 4) — a set of books is what
+      // gets closed, and ten of them close in different months.
+      ["id", "name", "legal_name", "is_default", "is_active", "closed_through"],
+      data.entities.map((e) => [
+        e.id, e.name, e.legalName, String(e.isDefault), String(e.isActive),
+        e.closedThrough ?? "",
+      ]),
+    ),
+  );
+
   files.push(
     file(
       "ledger/journal_entries.csv",
       "Journal entry headers",
-      ["id", "date", "memo", "status", "source", "source_id", "reverses_entry_id", "posted_at", "created_by"],
+      // entity_id and entity are APPENDED, so a process reading this file by
+      // column position is unaffected — the same rule the sales-tax columns on
+      // invoices.csv followed.
+      ["id", "date", "memo", "status", "source", "source_id", "reverses_entry_id", "posted_at", "created_by", "entity_id", "entity"],
       data.journalEntries.map((e) => [
         e.id, e.entryDate, e.memo, e.status, e.source, e.sourceId ?? "",
         e.reversesEntryId ?? "", ts(e.postedAt), e.createdByClerkUserId ?? "",
+        e.entityId, entityName(e.entityId),
       ]),
     ),
   );
@@ -212,9 +241,12 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "ledger/settings.csv",
       "Accounting policy settings",
-      ["closed_through", "coa_template", "fiscal_year_start_month", "entry_edit_policy", "bookkeeping_timezone"],
+      // `closed_through` LEFT this file in slice 4 — it is per company now and
+      // lives on entities.csv. Removed rather than left empty: a column that is
+      // always blank reads as "never closed", which is a different and wrong
+      // claim about the books.
+      ["coa_template", "fiscal_year_start_month", "entry_edit_policy", "bookkeeping_timezone"],
       [[
-        data.settings.closedThrough ?? "",
         data.settings.coaTemplate,
         String(data.settings.fiscalYearStartMonth),
         data.settings.entryEditPolicy,
@@ -227,7 +259,10 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "ledger/period_closes.csv",
       "Month-end close history",
-      ["id", "period_end", "status", "completed_by", "completed_at", "signed_off_by", "signed_off_at", "reopened_by", "reopened_at", "open_items_at_close"],
+      // entity_id and entity APPENDED (slice 4): a close covers one company,
+      // and a history that does not say which is unreadable the moment a tenant
+      // has two.
+      ["id", "period_end", "status", "completed_by", "completed_at", "signed_off_by", "signed_off_at", "reopened_by", "reopened_at", "open_items_at_close", "entity_id", "entity"],
       data.periodCloses.map((c) => {
         const checklist = c.checklist as { blockerCount?: number } | null;
         return [
@@ -236,6 +271,7 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
           c.signedOffByClerkUserId ?? "", ts(c.signedOffAt),
           c.reopenedByClerkUserId ?? "", ts(c.reopenedAt),
           String(checklist?.blockerCount ?? ""),
+          c.entityId, entityName(c.entityId),
         ];
       }),
     ),
@@ -281,15 +317,28 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     ),
   );
 
+  const taxRateName = (id: string | null) =>
+    id ? (data.salesTaxRates.find((r) => r.id === id)?.name ?? id) : "";
+
   files.push(
     file(
       "sales/invoices.csv",
       "Invoices",
-      ["id", "invoice_number", "customer", "status", "issue_date", "due_date", "memo", "total", "journal_entry_id"],
+      // `total` stays where it was and still means what the customer owes;
+      // `subtotal` and `sales_tax` are appended, so a process that reads this
+      // file by position is unaffected. `tax_rate_percent` is the rate AS
+      // CHARGED, from the invoice rather than from the rate list, so an
+      // exported invoice states its own arithmetic.
+      // `company` is APPENDED like the tax columns before it, so a process
+      // reading this file by position is unaffected.
+      ["id", "invoice_number", "customer", "status", "issue_date", "due_date", "memo", "total", "journal_entry_id", "subtotal", "sales_tax", "tax_rate", "tax_rate_percent", "company"],
       data.invoices.map((i) => [
         i.id, i.invoiceNumber, custName(i.customerId), i.status,
         i.issueDate, i.dueDate ?? "", i.memo, money(i.totalCents),
         i.journalEntryId ?? "",
+        money(i.subtotalCents), money(i.taxCents),
+        taxRateName(i.taxRateId), i.taxRateId ? formatRatePpm(i.taxRatePpm) : "",
+        entityName(i.entityId),
       ]),
     ),
   );
@@ -298,11 +347,23 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "sales/invoice_lines.csv",
       "Invoice lines",
-      ["id", "invoice_number", "line_no", "description", "quantity", "unit_price", "amount", "income_account_code"],
+      ["id", "invoice_number", "line_no", "description", "quantity", "unit_price", "amount", "income_account_code", "taxable"],
       data.invoiceLines.map((l) => [
         l.id, invoiceById.get(l.invoiceId)?.invoiceNumber ?? l.invoiceId,
         String(l.lineNo), l.description, l.quantity, money(l.unitPriceCents),
-        money(l.amountCents), acctCode(l.incomeAccountId),
+        money(l.amountCents), acctCode(l.incomeAccountId), String(l.isTaxable),
+      ]),
+    ),
+  );
+
+  files.push(
+    file(
+      "sales/sales_tax_rates.csv",
+      "Sales tax rates",
+      ["id", "name", "rate_percent", "is_default", "active"],
+      data.salesTaxRates.map((r) => [
+        r.id, r.name, formatRatePpm(r.ratePpm), String(r.isDefault),
+        String(r.isActive),
       ]),
     ),
   );
@@ -357,10 +418,11 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "purchases/bills.csv",
       "Vendor bills",
-      ["id", "vendor", "vendor_invoice_number", "status", "bill_date", "due_date", "memo", "total", "journal_entry_id"],
+      ["id", "vendor", "vendor_invoice_number", "status", "bill_date", "due_date", "memo", "total", "journal_entry_id", "company"],
       data.bills.map((b) => [
         b.id, vendName(b.vendorId), b.billNumber, b.status, b.billDate,
         b.dueDate ?? "", b.memo, money(b.totalCents), b.journalEntryId ?? "",
+        entityName(b.entityId),
       ]),
     ),
   );
@@ -397,10 +459,10 @@ export function buildBooksCsvFiles(data: BooksData): BooksCsvFile[] {
     file(
       "banking/bank_accounts.csv",
       "Bank and card registers",
-      ["id", "name", "kind", "institution", "last4", "ledger_account_code", "active"],
+      ["id", "name", "kind", "institution", "last4", "ledger_account_code", "active", "company"],
       data.bankAccounts.map((b) => [
         b.id, b.name, b.kind, b.institution, b.last4,
-        acctCode(b.accountId), String(b.isActive),
+        acctCode(b.accountId), String(b.isActive), entityName(b.entityId),
       ]),
     ),
   );

@@ -35,15 +35,36 @@ export const GENERAL_COA: CoaTemplate = {
     { code: "1250", name: "Undeposited Funds", type: "asset", subtype: "undeposited_funds", isSystem: true },
     { code: "1300", name: "Inventory", type: "asset", subtype: "inventory" },
     { code: "1400", name: "Prepaid Expenses", type: "asset", subtype: "other_current_asset" },
+    /**
+     * The intercompany pair (ADR 0010 slice 2). ONE account each, not one per
+     * counterparty: ten LLCs would otherwise mean ninety accounts in a chart
+     * every company can see, and who owes whom is a property of the
+     * TRANSACTION rather than of the account — it comes from the linked pair at
+     * read time, the way invoice status comes from payments.
+     *
+     * `isSystem`, so they cannot be renumbered into something the resolver
+     * stops finding, and looked up BY SUBTYPE like every other system account.
+     *
+     * A single-company tenant has these and never posts to them, which is the
+     * same deal it gets on Undeposited Funds.
+     */
+    { code: "1500", name: "Due from Affiliates", type: "asset", subtype: "due_from_affiliate", isSystem: true },
     { code: "1600", name: "Equipment", type: "asset", subtype: "fixed_asset" },
     { code: "1650", name: "Vehicles", type: "asset", subtype: "fixed_asset" },
     { code: "1700", name: "Accumulated Depreciation", type: "asset", subtype: "accumulated_depreciation" },
     // Liabilities
     { code: "2000", name: "Accounts Payable", type: "liability", subtype: "accounts_payable", isSystem: true },
+    // **Goods received, not yet invoiced.** The account that joins what the
+    // business HAS to what it OWES: credited when stock arrives, debited when
+    // the bill for it is allocated. A standing credit balance is stock received
+    // with no invoice; a debit is an invoice for stock the books never received.
+    // Both are month-end questions worth being asked. See ADR 0012.
+    { code: "2050", name: "Goods Received Not Invoiced", type: "liability", subtype: "goods_received", isSystem: true },
     { code: "2100", name: "Credit Card", type: "liability", subtype: "credit_card" },
     { code: "2200", name: "Sales Tax Payable", type: "liability", subtype: "sales_tax", isSystem: true },
     { code: "2300", name: "Payroll Liabilities", type: "liability", subtype: "payroll_liability" },
     { code: "2400", name: "Unearned Revenue", type: "liability", subtype: "other_current_liability" },
+    { code: "2450", name: "Due to Affiliates", type: "liability", subtype: "due_to_affiliate", isSystem: true },
     { code: "2500", name: "Loans Payable", type: "liability", subtype: "long_term_liability" },
     // Equity
     { code: "3000", name: "Opening Balance Equity", type: "equity", subtype: "opening_balance", isSystem: true },
@@ -56,6 +77,12 @@ export const GENERAL_COA: CoaTemplate = {
     { code: "4020", name: "Product Sales", type: "income", subtype: "operating_revenue", parentCode: "4000" },
     { code: "4100", name: "Discounts Given", type: "income", subtype: "contra_revenue" },
     { code: "4900", name: "Other Income", type: "income", subtype: "other_income" },
+    // ONE account for both directions. A disposal either makes money or loses
+    // it, and the ledger's signed amounts carry that without a second account:
+    // a credit here is a gain, a debit is a loss. Splitting it into separate
+    // gain and loss accounts is the other common convention and buys nothing
+    // when the report can show a negative.
+    { code: "4950", name: "Gain (Loss) on Asset Disposal", type: "income", subtype: "other_income" },
     // Cost of goods sold
     { code: "5000", name: "Cost of Goods Sold", type: "expense", subtype: "cogs" },
     { code: "5100", name: "Subcontractor Expense", type: "expense", subtype: "cogs" },

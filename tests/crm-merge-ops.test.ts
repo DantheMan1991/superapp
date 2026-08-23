@@ -31,6 +31,8 @@ d("crm merge executor (database)", () => {
   let tenantId: string;
   const ctx = { role: "owner" as const, userId: "owner" };
 
+  let entityId: string;
+
   beforeAll(async () => {
     tenantId = await withSystem(async (tx) => {
       const [row] = await tx
@@ -38,6 +40,15 @@ d("crm merge executor (database)", () => {
         .values([{ clerkOrgId: STAMP, name: "Merge Test", slug: STAMP }])
         .returning();
       return row.id;
+    });
+    // Invoices belong to a company now (ADR 0010), and this fixture writes them
+    // raw rather than through the module.
+    entityId = await withTenant(tenantId, async (tx) => {
+      const [e] = await tx
+        .insert(schema.entities)
+        .values({ tenantId, name: "Merge Co", isDefault: true })
+        .returning();
+      return e.id;
     });
   });
 
@@ -160,21 +171,27 @@ d("crm merge executor (database)", () => {
         await tx.insert(schema.invoices).values([
           {
             tenantId,
+            entityId,
             customerId: lose.id,
             invoiceNumber: `${STAMP}-1`,
             status: "issued",
             issueDate: "2026-08-01",
             dueDate: "2026-08-31",
+            // `subtotal + tax = total` is a CHECK from `0147`, so a raw
+            // fixture has to state the arithmetic rather than only the answer.
+            subtotalCents: 12_500,
             totalCents: 12_500,
             createdByClerkUserId: "owner",
           },
           {
             tenantId,
+            entityId,
             customerId: lose.id,
             invoiceNumber: `${STAMP}-2`,
             status: "issued",
             issueDate: "2026-08-02",
             dueDate: "2026-09-01",
+            subtotalCents: 7_500,
             totalCents: 7_500,
             createdByClerkUserId: "owner",
           },

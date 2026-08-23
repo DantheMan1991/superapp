@@ -6,6 +6,7 @@ import { isModuleEnabled } from "@/lib/modules";
 import { preferredContactValue } from "@/lib/parties/contact-values";
 import { listContactPoints } from "@/lib/parties/contacts";
 import { renderInvoicePdf } from "@/modules/accounting/invoicing/invoice-pdf";
+import { invoiceTaxFields } from "@/modules/accounting/invoicing/invoices";
 
 export const runtime = "nodejs";
 
@@ -72,7 +73,8 @@ export async function GET(
       const contacts = customer
         ? await listContactPoints(tx, ctx.tenant.id, customer.partyId)
         : [];
-      return { invoice, customer, lines, payments, contacts };
+      const tax = await invoiceTaxFields(tx, ctx.tenant.id, invoice);
+      return { invoice, customer, lines, payments, contacts, tax };
     },
     { role: ctx.role },
   );
@@ -89,6 +91,7 @@ export async function GET(
     dueDate: data.invoice.dueDate,
     memo: data.invoice.memo,
     totalCents: data.invoice.totalCents,
+    ...data.tax,
     paidCents: data.payments.reduce((s, p) => s + p.amountCents, 0),
     customerName: data.customer?.name ?? "",
     customerAddress: data.customer?.address ?? "",

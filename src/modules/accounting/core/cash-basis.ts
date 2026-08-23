@@ -2,6 +2,8 @@ import "server-only";
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type { BalanceRow } from "./balances";
+import { asFilterScope } from "./consolidation";
+import { entityScopeCondition, type EntityScope } from "./entities";
 import {
   allocateDocument,
   type DocumentPayment,
@@ -35,6 +37,14 @@ import {
 const CONTROL_SUBTYPES = ["accounts_receivable", "accounts_payable"] as const;
 
 export interface CashBasisWindow {
+  /**
+   * REQUIRED, and it is applied in FOUR places below, not one: the payments
+   * that land in the window, every prior payment of those documents (allocation
+   * is cumulative — a payment made from another entity's books must not consume
+   * this entity's recognition), the documents' accrual lines, and the control
+   * leg. Scoping only the first would produce a report that still balances.
+   */
+  scope: EntityScope;
   asOf?: string;
   from?: string;
   to?: string;
@@ -81,8 +91,24 @@ export async function cashBasisAdjustment(
   opts: CashBasisWindow & {
     accountIds?: string[];
     groupByDimensionType?: string;
-  } = {},
+    /**
+     * `journalLineId` → the account this line should be recognised under
+     * instead, from `@/lib/basis-lens`. Empty for nearly every tenant.
+     *
+     * **APPLIED TO THE RECOGNITION, NOT TO THE CONTROL LEG.** The offset is
+     * sized by what was recognised and cancels the AR/AP the payment entry
+     * moved, so re-pointing a recognition line moves it sideways in the chart
+     * and leaves the entry balanced. Re-pointing the control leg would not.
+     */
+    substitutedLineAccounts?: Map<string, string>;
+  },
 ): Promise<BalanceRow[]> {
+  // CONSOLIDATED BEHAVES AS COMBINED HERE, and there is nothing to eliminate:
+  // this adjustment only ever moves recognition between the AR/AP controls and
+  // the P&L, so no line it produces or reads can be an affiliate leg. The
+  // accrual half it is merged into was eliminated by `getBalances`, which is
+  // where the group's intercompany actually lives.
+  const inScope = entityScopeCondition(asFilterScope(opts.scope));
   const controls = await tx.query.accounts.findMany({
     where: and(
       eq(schema.accounts.tenantId, tenantId),
@@ -123,6 +149,7 @@ export async function cashBasisAdjustment(
         and(
           eq(schema.invoicePayments.tenantId, tenantId),
           eq(je.status, "posted"),
+          inScope,
           ...extra,
         ),
       );
@@ -147,6 +174,7 @@ export async function cashBasisAdjustment(
         and(
           eq(schema.billPayments.tenantId, tenantId),
           eq(je.status, "posted"),
+          inScope,
           ...extra,
         ),
       );
@@ -189,6 +217,7 @@ export async function cashBasisAdjustment(
   const recognitionBase = tx
     .select({
       documentId: je.sourceId,
+      lineId: jl.id,
       accountId: jl.accountId,
       amountCents: jl.amountCents,
       memberId: opts.groupByDimensionType
@@ -216,19 +245,23 @@ export async function cashBasisAdjustment(
       and(
         eq(jl.tenantId, tenantId),
         eq(je.status, "posted"),
+        inScope,
         inArray(je.source, ["invoice", "bill"]),
         inArray(je.sourceId, documentIds),
       ),
     )
     .orderBy(jl.lineNo);
 
+  const substituted = opts.substitutedLineAccounts;
   const recognitionByDoc = new Map<string, RecognitionLine[]>();
   for (const row of recognitionRows) {
     if (!row.documentId) continue;
     if (controlIds.has(row.accountId)) continue; // the AR/AP leg
     const list = recognitionByDoc.get(row.documentId) ?? [];
     list.push({
-      accountId: row.accountId,
+      // The lens moves a line sideways in the chart. The AMOUNT is never
+      // touched, which is what keeps the offset below exact.
+      accountId: substituted?.get(row.lineId) ?? row.accountId,
       memberId: row.memberId ?? null,
       amountCents: row.amountCents,
     });

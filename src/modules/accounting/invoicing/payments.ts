@@ -5,8 +5,10 @@ import type { Invoice, InvoicePayment } from "@/db/schema";
 import {
   LedgerError,
   postEntry,
+  postIntercompanyPair,
   requireOwnerRole,
   voidEntry,
+  voidIntercompanyPair,
   type LedgerCtx,
 } from "../core";
 import { toSafeCents } from "../lib/money";
@@ -111,18 +113,79 @@ export async function recordPayment(
   // and the payment row is born with its real entry id — no placeholder,
   // no FK gymnastics. Both inserts share this transaction.
   const paymentId = crypto.randomUUID();
-  const { entry } = await postEntry(tx, ctx, {
-    status: "posted",
-    entryDate: args.paymentDate,
-    memo: `Payment — ${invoice.invoiceNumber}`,
-    source: "invoice_payment",
-    sourceId: paymentId,
-    idempotencyKey: `invpay:${paymentId}`,
-    lines: [
-      { accountId: args.depositAccountId, amountCents: args.amountCents },
-      { accountId: arAccountId, amountCents: -args.amountCents },
-    ],
+
+  /**
+   * WHOSE ACCOUNT THE MONEY LANDED IN, which decides whether this is one entry
+   * or two. THE MIRROR OF THE BILL CASE, and the last thing ADR 0010 listed as
+   * refused rather than recorded: a customer pays Oak Row's invoice and the
+   * cheque goes into Test's account, because that is the account on the
+   * remittance slip or the one the deposit book was open at.
+   *
+   * Undeposited Funds is NOT a register and has no company, so it falls through
+   * to the ordinary path — two companies' unbanked cheques share 1250 and are
+   * separated by the entry's company, exactly as their receivables share 1200.
+   */
+  const depositRegister = await tx.query.bankAccounts.findFirst({
+    where: and(
+      eq(schema.bankAccounts.tenantId, ctx.tenantId),
+      eq(schema.bankAccounts.accountId, args.depositAccountId),
+    ),
+    columns: { entityId: true },
   });
+  const receivingEntityId = depositRegister?.entityId ?? invoice.entityId;
+
+  let entry;
+  if (receivingEntityId === invoice.entityId) {
+    // The ordinary case, byte-identical to what it always was.
+    ({ entry } = await postEntry(tx, ctx, {
+      entityId: invoice.entityId,
+      status: "posted",
+      entryDate: args.paymentDate,
+      memo: `Payment — ${invoice.invoiceNumber}`,
+      source: "invoice_payment",
+      sourceId: paymentId,
+      idempotencyKey: `invpay:${paymentId}`,
+      lines: [
+        { accountId: args.depositAccountId, amountCents: args.amountCents },
+        { accountId: arAccountId, amountCents: -args.amountCents },
+      ],
+    }));
+  } else {
+    /**
+     * INTERCOMPANY, and note which way round it goes. The invoice's company
+     * clears its receivable and is now OWED by the company that took the money
+     * in; the receiving company holds cash that is not its own.
+     *
+     *   Oak Row   Dr Due from Affiliates  1,000   <- Oak is owed by Test
+     *             Cr Accounts Receivable  1,000      (the invoice is settled)
+     *   Test      Dr Checking             1,000      (Test's cash arrived)
+     *             Cr Due to Affiliates    1,000   <- Test now owes Oak
+     *
+     * So the INVOICE'S company is `from` — the side that ends up holding the
+     * asset — even though no money left it. `postIntercompanyPair` names that
+     * argument for the bill case, where the payer's cash really does move; what
+     * the two shapes actually share is which company is owed afterwards, and
+     * that is what the parameter decides.
+     *
+     * `invoice_payments.journalEntryId` points at the INVOICE'S leg, so status
+     * derivation, aging and unapply keep reading the payment row exactly as
+     * they did — the same choice `bill_payments` made.
+     */
+    const pair = await postIntercompanyPair(tx, ctx, {
+      fromEntityId: invoice.entityId,
+      toEntityId: receivingEntityId,
+      amountCents: args.amountCents,
+      entryDate: args.paymentDate,
+      memo: `Payment — ${invoice.invoiceNumber} (received by another company)`,
+      sourceId: paymentId,
+      idempotencyKey: `invpay:${paymentId}`,
+      payerLines: [{ accountId: arAccountId, amountCents: -args.amountCents }],
+      payeeLines: [
+        { accountId: args.depositAccountId, amountCents: args.amountCents },
+      ],
+    });
+    entry = pair.from;
+  }
   const [linkedPayment] = await tx
     .insert(schema.invoicePayments)
     .values({
@@ -187,7 +250,15 @@ export async function unapplyPayment(
     ),
   });
   if (entry && entry.status === "posted") {
-    await voidEntry(tx, ctx, { entryId: entry.id, expectedVersion: entry.version });
+    // BOTH LEGS, when the money came from (or went to) another company. The
+    // payment row points at this company's leg; voiding only that one leaves
+    // the affiliate holding a balance nothing explains — see
+    // `voidIntercompanyPair`.
+    if (entry.intercompanyId) {
+      await voidIntercompanyPair(tx, ctx, entry.intercompanyId);
+    } else {
+      await voidEntry(tx, ctx, { entryId: entry.id, expectedVersion: entry.version });
+    }
   }
   await tx
     .delete(schema.invoicePayments)

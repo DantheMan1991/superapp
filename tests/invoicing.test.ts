@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withTenant, withSystem, schema } from "../src/db";
 import {
+  getDefaultEntityId,
   startReconciliation,
   toggleReconciliationLine,
   setClosedThrough,
@@ -519,8 +520,8 @@ d("invoicing (DB)", () => {
 
   it("closed period blocks issuing (T-D7)", async () => {
     const sales = await accountId("4000");
-    await withTenant(tenantId, (tx) =>
-      setClosedThrough(tx, owner, { date: "2026-01-31" }),
+    await withTenant(tenantId, async (tx) =>
+      setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: "2026-01-31" }),
     );
     const invoice = await withTenant(tenantId, (tx) =>
       createInvoiceDraft(tx, owner, {
@@ -537,7 +538,7 @@ d("invoicing (DB)", () => {
         }),
       ),
     ).rejects.toMatchObject({ code: "PERIOD_CLOSED" });
-    await withTenant(tenantId, (tx) => setClosedThrough(tx, owner, { date: null }));
+    await withTenant(tenantId, async (tx) => setClosedThrough(tx, owner, { entityId: await getDefaultEntityId(tx, tenantId), date: null }));
     await withTenant(tenantId, (tx) =>
       deleteInvoiceDraft(tx, owner, {
         invoiceId: invoice.id,
@@ -574,6 +575,48 @@ d("invoicing (DB)", () => {
         issueInvoice(tx, staff, { invoiceId: draft.id, expectedVersion: draft.version }),
       ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("an UNATTENDED run credits the schedule's author, not the caller", async () => {
+    // The nightly sweep has nobody at the keyboard, and
+    // `created_by_clerk_user_id` is NOT NULL — so it needs a real id rather
+    // than a sentinel. Whoever wrote the schedule down is the truthful answer
+    // and the only person who ever decided any of this; it also means the
+    // History panel names somebody who can explain the row.
+    const sales = await accountId("4000");
+    const template = await withTenant(tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(schema.recurringEntries)
+        .values({
+          tenantId,
+          kind: "invoice",
+          name: "Attribution — Test",
+          customerId,
+          dayOfMonth: 2,
+          nextRunDate: "2026-07-02",
+          template: { kind: "invoice", lines: [line(9_900, sales)], dueInDays: 7 },
+          createdByClerkUserId: "user-who-wrote-the-schedule",
+        })
+        .returning();
+      return row;
+    });
+    await generateRecurringEntries(
+      // A caller id that must NOT end up on the records.
+      { ...owner, userId: "cron-has-no-user" },
+      { unattended: true },
+    );
+    const drafts = await withTenant(tenantId, (tx) =>
+      tx.query.invoices.findMany({
+        where: and(
+          eq(schema.invoices.tenantId, tenantId),
+          eq(schema.invoices.recurringEntryId, template.id),
+        ),
+      }),
+    );
+    expect(drafts.length).toBeGreaterThan(0);
+    expect(
+      drafts.every((i) => i.createdByClerkUserId === "user-who-wrote-the-schedule"),
+    ).toBe(true);
   });
 
   it("recurring invoice: catch-up drafts with period dates, cap, CAS (T-D10)", async () => {
@@ -893,12 +936,22 @@ d("invoicing (DB)", () => {
         .returning();
       return rows[0].id;
     });
+    // B needs a company of its own, so the insert below fails on the CUSTOMER
+    // foreign key rather than on a missing company — the assertion names which.
+    const otherEntity = await withTenant(otherTenant, async (tx) => {
+      const [e] = await tx
+        .insert(schema.entities)
+        .values({ tenantId: otherTenant, name: "Other Co", isDefault: true })
+        .returning();
+      return e.id;
+    });
     try {
       // Tenant B cannot reference tenant A's customer (composite FK pair absent).
       await expectDbReject(
         withTenant(otherTenant, (tx) =>
           tx.insert(schema.invoices).values({
             tenantId: otherTenant,
+            entityId: otherEntity,
             customerId,
             invoiceNumber: "INV-9999",
             issueDate: "2026-07-01",

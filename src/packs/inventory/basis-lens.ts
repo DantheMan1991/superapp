@@ -106,20 +106,54 @@ async function adjust(
     .from(schema.inventoryItems)
     .where(eq(schema.inventoryItems.tenantId, request.tenantId));
 
+  /**
+   * **THE ACCOUNT HAS TO STILL BE THERE, AND STILL BE ACTIVE.**
+   *
+   * `setTaxRule` refuses to record a substituting rule without one, so a null
+   * here is nearly unreachable through the app — which is exactly why the
+   * interesting case is the other one. **An account can be DEACTIVATED after
+   * the rule was recorded** (this chart never hard-deletes a referenced
+   * account, it deactivates), and a report that quietly recognised cost into a
+   * retired account would balance, look ordinary, and put money somewhere the
+   * business had deliberately stopped using.
+   *
+   * Found by a CI failure: the first version of this only checked for null, and
+   * the test proving it had to write a state the app could no longer produce.
+   * A guard whose test needs an impossible fixture is guarding the wrong thing.
+   */
+  const activeAccounts = new Set(
+    (
+      await tx
+        .select({ id: schema.accounts.id })
+        .from(schema.accounts)
+        .where(
+          and(
+            eq(schema.accounts.tenantId, request.tenantId),
+            eq(schema.accounts.isActive, true),
+          ),
+        )
+    ).map((a) => a.id),
+  );
+
   const expenseByItem = new Map<string, string>();
   for (const item of items) {
     const resolved = resolveTaxRule(item.itemKind, stored);
     if (!APPLIED_RULES.has(resolved.timingRule)) continue;
+    /**
+     * **REFUSES RATHER THAN PICKING ONE.** A substituting rule has to
+     * substitute TO something, and ADR 0013 §A.5 is explicit that "everything
+     * to cost of goods" produces a report that balances and is useless at
+     * return time. Falling back to any account would be exactly that, and it
+     * would be invisible.
+     */
     if (!resolved.expenseAccountId) {
-      /**
-       * **REFUSES RATHER THAN PICKING ONE.** A substituting rule has to
-       * substitute TO something, and ADR 0013 §A.5 is explicit that "everything
-       * to cost of goods" produces a report that balances and is useless at
-       * return time. Falling back to any account would be exactly that, and it
-       * would be invisible.
-       */
       throw new Error(
         `"${item.itemKind}" is set to be deducted when it is paid for, but no expense account has been recorded for it. A report cannot move that cost somewhere nobody has chosen.`,
+      );
+    }
+    if (!activeAccounts.has(resolved.expenseAccountId)) {
+      throw new Error(
+        `"${item.itemKind}" is set to be deducted when it is paid for, into an expense account that is no longer active. Pick one that is, on the "when it is deducted" screen.`,
       );
     }
     expenseByItem.set(item.id, resolved.expenseAccountId);

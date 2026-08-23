@@ -86,6 +86,21 @@ $0.00, both in balance.
 3. **The account field said it could stay undecided** while the server was about
    to refuse without it. The hint follows the rule now.
 
+**AND ONE THING CI FOUND THAT CLICKING DID NOT.** The save-time guard above
+broke the test for the REPORT-time guard — which had recorded a rule with no
+account, a state `setTaxRule` now refuses. It passed locally only because the
+guard was added after that suite last ran, and re-running the suite that tested
+the guard is not the same as re-running the suite the guard breaks.
+
+The fix was better than the test. With the save-time guard in place a null
+account is nearly unreachable, so the report check was defending a state the app
+cannot produce — while the state it CAN produce went unguarded: **this chart
+never hard-deletes a referenced account, it deactivates**, so a rule can end up
+pointed at a retired one. A report that quietly recognised cost into it would
+balance, look ordinary, and put money somewhere the business had stopped using.
+The lens checks the account is present AND active now. **A guard whose test needs
+an impossible fixture is guarding the wrong thing.**
+
 **`total_cents` on a bill is a stored column the posting-test fixture never
 set**, which nothing noticed until a test tried to PAY one and got
 `BILL_OVERPAYMENT` against a remaining balance of zero. Fixed in the fixture.

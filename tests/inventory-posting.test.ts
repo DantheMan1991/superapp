@@ -2289,15 +2289,18 @@ it("NOBODY INVOICES YOU FOR WHAT YOU MADE", async () => {
       expect(netOfIn(accrual, feedExpense)).toBe(0);
     });
 
-    it("REFUSES TO REPORT when a rule has nowhere to put the cost", async () => {
+    it("REFUSES TO REPORT into an account that has been retired", async () => {
       /**
-       * A substituting rule has to substitute TO something. "Everything to cost
-       * of goods" produces a report that balances and is useless at return
-       * time — ADR 0013 A.5 — so falling back to any account would be exactly
-       * the invisible wrongness this whole ADR exists to prevent.
+       * **THE STATE THAT CAN ACTUALLY ARISE**, and the first version of this
+       * test did not use it. It recorded a rule with no account at all — which
+       * `setTaxRule` refused as soon as the save-time guard landed, so the test
+       * broke on CI at its own setup. A guard whose test needs a fixture the app
+       * cannot produce is guarding the wrong thing.
        *
-       * It fails the REPORT rather than the setting, because the account can be
-       * removed after the rule was recorded.
+       * This chart never hard-deletes a referenced account; it deactivates. So
+       * the reachable failure is a rule pointed at a retired account, and a
+       * report that quietly recognised cost into one would balance, look
+       * ordinary, and put money somewhere the business had stopped using.
        */
       await asOwner((tx) =>
         createItem(tx, ownerCtx(), {
@@ -2306,16 +2309,40 @@ it("NOBODY INVOICES YOU FOR WHAT YOU MADE", async () => {
           itemKind: "no_home",
         }),
       );
+      const retired = await asOwner(async (tx) => {
+        const rows = await tx
+          .insert(schema.accounts)
+          .values({
+            tenantId,
+            code: "6199",
+            name: "Retired feed",
+            accountType: "expense",
+          })
+          .returning();
+        return rows[0].id;
+      });
       await asOwner((tx) =>
         setTaxRule(tx, ownerCtx(), {
           itemKind: "no_home",
           timingRule: "paid",
-          expenseAccountId: null,
+          expenseAccountId: retired,
         }),
       );
-      await expect(balanceOf("cash")).rejects.toThrow(
-        /no expense account has been recorded/i,
+      // Recorded against a live account, the report is fine.
+      await expect(balanceOf("cash")).resolves.toBeDefined();
+
+      await asOwner((tx) =>
+        tx
+          .update(schema.accounts)
+          .set({ isActive: false })
+          .where(
+            and(
+              eq(schema.accounts.tenantId, tenantId),
+              eq(schema.accounts.id, retired),
+            ),
+          ),
       );
+      await expect(balanceOf("cash")).rejects.toThrow(/no longer active/i);
       // And it says which lens failed rather than surfacing a raw query error.
       await expect(balanceOf("cash")).rejects.toThrow(/inventory/i);
       await asOwner((tx) => clearTaxRule(tx, ownerCtx(), "no_home"));

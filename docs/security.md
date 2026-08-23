@@ -356,7 +356,7 @@ After migrating, prove the database actually has what the migration claimed —
 against **both** databases, `--dev` and without:
 
 ```bash
-npx tsx scripts/verify-rls.ts --dev
+npm run db:verify-rls -- --dev
 ```
 
 Every table must report ENABLED, FORCED and at least one policy; the script
@@ -364,7 +364,8 @@ exits non-zero if any does not. "Migrations complete" is not evidence. A
 partial migration once left a table on production with RLS switched off, and
 nothing surfaced it, because RLS failing open is indistinguishable from RLS
 working right up until two tenants share a query. Pass a table name
-(`… verify-rls.ts memberships`) to dump its policies and read them back.
+(`npm run db:verify-rls -- memberships`) to dump its policies and read them
+back.
 
 Then confirm by hand for any PR touching data access:
 

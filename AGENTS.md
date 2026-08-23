@@ -95,12 +95,13 @@ tree — a new file appears on the page with no code change):
 
 ## Commands
 
-- `npm run db:migrate` / `db:seed` / `db:generate` — run as the owner URL
-  (`DATABASE_URL_OWNER`).
+- `npm run db:migrate` / `db:seed` / `db:generate` / `db:verify-rls` — run as
+  the owner URL (`DATABASE_URL_OWNER`).
 - **NOTHING IN THE DEPLOY APPLIES MIGRATIONS, and `main` auto-deploys.** A merged
   PR is live within minutes; its migration is not. Apply it yourself, in this
   order, **before** merging: `npm run db:migrate -- --dev`, then
-  `npm run db:migrate`, then verify in `pg_class`/`pg_policies` that the table is
+  `npm run db:migrate`, then `npm run db:verify-rls -- --dev` and
+  `npm run db:verify-rls` to prove in `pg_class`/`pg_policies` that the table is
   there with RLS enabled AND forced and its policies present. CI cannot check
   this — it builds its own database from zero, so every migration always applies
   there — and the `migrations` job only refuses a migration PR that is missing

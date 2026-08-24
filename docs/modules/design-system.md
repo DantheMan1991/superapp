@@ -23,6 +23,32 @@ tokens and gets its own pass later.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-23 — A tick box, and the variant `switch.tsx` gets wrong (`claude/the-app-does-the-lookup`)
+
+**THE KIT HAD NO CHECKBOX, SO ROW SELECTION WAS BEING DONE WITH `Switch`.** The
+production pack's price list put one on every row of a 108-row rate sheet and on
+every group heading, and the founder read the result out loud: beside a heading
+saying *Cattle 2*, a switch says **switch cattle on**. A switch turns a thing on;
+a tick box picks a row to act on. `src/components/ui/checkbox.tsx` is stock
+shadcn over `radix-ui`'s Checkbox, on registered tokens — `--primary` fill,
+`--primary-foreground` tick, `--input` resting edge.
+
+**`Switch` KEEPS THE JOBS IT IS RIGHT FOR**, and the distinction is worth stating
+because both controls now exist: *Replace the N already on file* on the price-list
+read dialog is still a switch, because it turns a behaviour on. The row ticks
+beside it are not.
+
+**AND `switch.tsx` HAS A VARIANT THAT MATCHES NOTHING.** It styles its checked
+state with `data-checked:bg-primary` / `data-unchecked:bg-input`. Radix emits
+**`data-state="checked" | "unchecked"`** — confirmed in
+`@radix-ui/react-switch/dist/index.mjs`, whose only data attributes are
+`data-state` and `data-disabled` — and Tailwind v4's `data-checked:` shorthand
+compiles to `[data-checked]`, an attribute nothing sets. So the checked fill has
+never applied. The new Checkbox uses `data-[state=checked]:` and says why in its
+header. **The fix to `switch.tsx` is deliberately NOT in that PR**: it changes the
+appearance of every switch in the app and belongs in a change whose subject is
+the switch. Recorded here so it is not re-derived.
+
 ### 2026-08-22 — The Clerk mismatch, closed (`claude/laughing-herschel-e284b2`)
 
 The open item this dossier had carried since the foundation PR — *"the dashboard
@@ -162,6 +188,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `Panel` | no | `<Card><CardContent className="p-0">` around a list |
 | `SectionRow` | no | — (new: titled band on a hub page) |
 | `CommandPalette` | **yes** | — (new: ⌘K, in the rail) |
+| `ui/checkbox` | **yes** | `Switch` used for row selection (2026-08-23) |
 | `icon-registry.ts` | no | The shell's private `ICONS` map |
 
 ### `DataTable` is a container, not a table
@@ -254,6 +281,12 @@ What remains is the three centred states above and `(marketing)`.
 
 ## Open items
 
+- **`switch.tsx`'s checked fill has never applied.** `data-checked:` is a
+  Tailwind v4 shorthand for `[data-checked]`; Radix emits `data-state="checked"`.
+  Every `Switch` in the app therefore renders in its unchecked colours. The fix is
+  one line per variant (`data-[state=checked]:`), and it is a visual change to
+  every switch, so it wants its own change rather than riding along with a pack
+  slice. Found 2026-08-23 while adding the Checkbox.
 - **The sweep.** ~70 surfaces still hand-roll their header, empty state and table
   panel. Planned as one PR per module: accounting → documents + mail → CRM + work
   + scheduling → admin/auth/onboarding.

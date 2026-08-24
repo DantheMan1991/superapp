@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { addRunCarcassAction } from "../actions";
 import {
@@ -273,9 +274,9 @@ export function ReadKillSheetDialog({
                     key={i}
                     className="flex flex-wrap items-end gap-2 rounded-md border p-2"
                   >
-                    <Switch
+                    <Checkbox
                       checked={row.keep}
-                      onCheckedChange={(v: boolean) => set(i, { keep: v })}
+                      onCheckedChange={(v) => set(i, { keep: v === true })}
                       aria-label="Record this line"
                     />
                     <div className="w-20 space-y-1">
@@ -351,6 +352,9 @@ interface ItemRow {
   kind: string;
   category: string;
   label: string;
+  variant: string;
+  headMin: string;
+  headMax: string;
   price: string;
   unit: string;
   minimum: string;
@@ -443,6 +447,9 @@ export function ReadPriceListDialog({
           kind: row.kind,
           category: row.category,
           label: row.label,
+          variant: row.variant,
+          headMin: row.headMin === null ? "" : String(row.headMin),
+          headMax: row.headMax === null ? "" : String(row.headMax),
           price: row.price === null ? "" : row.price.toFixed(2),
           unit: row.unit,
           minimum: row.minimum === null ? "" : row.minimum.toFixed(2),
@@ -485,9 +492,20 @@ export function ReadPriceListDialog({
     }
     return clashes;
   };
+  /**
+   * The unique index's key. **THE VARIANT AND THE BAND'S FLOOR ARE IN IT since
+   * 2f**, because they are in the index — without them a plant's 24 chicken
+   * slaughter rows all read as one key and the dialog would refuse the whole
+   * page as a wall of clashes that are not clashes.
+   */
   const itemKey = (row: ItemRow) =>
     row.keep && row.label.trim() !== ""
-      ? [row.kind, row.label.trim().toLowerCase()].join(" ")
+      ? [
+          row.kind,
+          row.label.trim().toLowerCase(),
+          row.variant.trim().toLowerCase(),
+          row.headMin.trim() === "" ? "0" : row.headMin.trim(),
+        ].join(" ")
       : null;
   const itemClashes = clashesIn((items ?? []).map(itemKey));
   const animalClashes = clashesIn(
@@ -558,6 +576,11 @@ export function ReadPriceListDialog({
           kind: row.kind,
           category: row.category,
           label: row.label,
+          variant: row.variant,
+          // Empty is nought — from the first head — which is true of every
+          // unbanded row. Empty at the top is null, which is no ceiling.
+          headMin: row.headMin === "" ? 0 : Number(row.headMin),
+          headMax: row.headMax === "" ? null : Number(row.headMax),
           price: row.price === "" ? null : Number(row.price),
           unit: row.unit,
           minimum: row.minimum === "" ? null : Number(row.minimum),
@@ -651,6 +674,13 @@ export function ReadPriceListDialog({
 
           {existingCount > 0 && (
             <div className="flex items-start gap-3 rounded-md border p-3">
+              {/*
+                **STILL A SWITCH, AND EVERY TICK ABOVE IT IS NOT.** This one
+                turns a behaviour on — replace rather than add — which is what a
+                switch means. The row ticks pick rows to act on, which is what a
+                tick box means, and reading "Cattle 2" beside a switch said
+                *switch cattle on*.
+              */}
               <Switch
                 checked={replace}
                 onCheckedChange={(v: boolean) => setReplace(v)}
@@ -684,9 +714,9 @@ export function ReadPriceListDialog({
                     key={i}
                     className="flex flex-wrap items-end gap-2 rounded-md border p-2"
                   >
-                    <Switch
+                    <Checkbox
                       checked={row.keep}
-                      onCheckedChange={(v: boolean) => setItem(i, { keep: v })}
+                      onCheckedChange={(v) => setItem(i, { keep: v === true })}
                       aria-label="Record this price"
                     />
                     <div className="min-w-44 flex-1 space-y-1">
@@ -706,6 +736,37 @@ export function ReadPriceListDialog({
                     <div className="w-32 space-y-1">
                       <Label className="text-xs">For</Label>
                       {kindSelect(row.kind, (kind) => setItem(i, { kind }))}
+                    </div>
+                    {/*
+                      **WHAT TELLS ONE CELL OF A MATRIX FROM ANOTHER**, asked of
+                      the model as fields rather than parsed back out of a label
+                      afterwards. Every one of them is editable here for the same
+                      reason every other field is: a band read wrong resolves the
+                      wrong price for a whole season.
+                    */}
+                    <div className="w-32 space-y-1">
+                      <Label className="text-xs">Which one</Label>
+                      <Input
+                        value={row.variant}
+                        placeholder="Any"
+                        onChange={(e) => setItem(i, { variant: e.target.value })}
+                      />
+                    </div>
+                    <div className="w-20 space-y-1">
+                      <Label className="text-xs">From head</Label>
+                      <Input
+                        value={row.headMin}
+                        placeholder="Any"
+                        onChange={(e) => setItem(i, { headMin: e.target.value })}
+                      />
+                    </div>
+                    <div className="w-20 space-y-1">
+                      <Label className="text-xs">To head</Label>
+                      <Input
+                        value={row.headMax}
+                        placeholder="No top"
+                        onChange={(e) => setItem(i, { headMax: e.target.value })}
+                      />
                     </div>
                     <div className="w-32 space-y-1">
                       <Label className="text-xs">Group</Label>
@@ -789,9 +850,9 @@ export function ReadPriceListDialog({
                   key={i}
                   className="flex flex-wrap items-end gap-2 rounded-md border p-2"
                 >
-                  <Switch
+                  <Checkbox
                     checked={row.keep}
-                    onCheckedChange={(v: boolean) => setAnimal(i, { keep: v })}
+                    onCheckedChange={(v) => setAnimal(i, { keep: v === true })}
                     aria-label="Record this animal"
                   />
                   <div className="w-36 space-y-1">

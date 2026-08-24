@@ -23,6 +23,38 @@ tokens and gets its own pass later.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-23 — A tick box, and the variant `switch.tsx` gets wrong (`claude/the-app-does-the-lookup`)
+
+**THE KIT HAD NO CHECKBOX, SO ROW SELECTION WAS BEING DONE WITH `Switch`.** The
+production pack's price list put one on every row of a 108-row rate sheet and on
+every group heading, and the founder read the result out loud: beside a heading
+saying *Cattle 2*, a switch says **switch cattle on**. A switch turns a thing on;
+a tick box picks a row to act on. `src/components/ui/checkbox.tsx` is stock
+shadcn over `radix-ui`'s Checkbox, on registered tokens — `--primary` fill,
+`--primary-foreground` tick, `--input` resting edge.
+
+**`Switch` KEEPS THE JOBS IT IS RIGHT FOR**, and the distinction is worth stating
+because both controls now exist: *Replace the N already on file* on the price-list
+read dialog is still a switch, because it turns a behaviour on. The row ticks
+beside it are not.
+
+**AND `data-checked:` IS NOT THE TRAP IT LOOKS LIKE — RECORDED BECAUSE IT WAS
+NEARLY WRITTEN DOWN AS ONE.** `switch.tsx` styles its checked state with
+`data-checked:bg-primary`, and Radix emits `data-state="checked"`, not a bare
+`data-checked` — which reads exactly like a variant matching nothing. It is not.
+Tailwind v4 compiles the shorthand to BOTH forms:
+
+```css
+.data-checked\:bg-primary:where([data-state="checked"]),
+.data-checked\:bg-primary:where([data-checked]:not([data-checked="false"]))
+```
+
+so it matches Radix's attribute and a bare boolean one. **Read it out of
+`document.styleSheets` before believing either story** — grepping the Radix dist
+for `data-checked` proves only which attribute Radix sets, which is half the
+question. The new Checkbox uses the same shorthand for consistency;
+`data-[state=checked]:` also works.
+
 ### 2026-08-22 — The Clerk mismatch, closed (`claude/laughing-herschel-e284b2`)
 
 The open item this dossier had carried since the foundation PR — *"the dashboard
@@ -162,6 +194,7 @@ directory is stock shadcn and stays upgradeable. These compose it.
 | `Panel` | no | `<Card><CardContent className="p-0">` around a list |
 | `SectionRow` | no | — (new: titled band on a hub page) |
 | `CommandPalette` | **yes** | — (new: ⌘K, in the rail) |
+| `ui/checkbox` | **yes** | `Switch` used for row selection (2026-08-23) |
 | `icon-registry.ts` | no | The shell's private `ICONS` map |
 
 ### `DataTable` is a container, not a table

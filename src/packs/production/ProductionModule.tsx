@@ -121,6 +121,23 @@ export async function ProductionModule({
             <Button asChild variant="outline">
               <Link href={`${BASE}/bookings`}>Booked dates</Link>
             </Button>
+            {/*
+              **BESIDE BOOKED DATES, NOT A CARD ON THIS PAGE.** The founder could
+              not find a cut sheet: the only ways in were a booking row and a
+              card inside an open run. This page's job is the run list and the
+              yield column on it, and a sheet is not a run — it exists before one
+              and often without one.
+
+              NEVER PLURALISED. `cutSheet` is a word the tenant owns and the
+              homestead profile renames it; "Every cut sheet" reads as a list
+              without a `+ "s"` that would produce "Cut sheets" on a word
+              somebody else has renamed to something that does not take one.
+            */}
+            <Button asChild variant="outline">
+              <Link href={`${BASE}/orders`}>
+                Every {labelFor(pack.labels, "cutSheet", "Order").toLowerCase()}
+              </Link>
+            </Button>
             <Button asChild variant="outline">
               <Link href={`${BASE}/processors`}>
                 {labelFor(pack.labels, "processor", "Processor")} directory

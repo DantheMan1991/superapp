@@ -27,7 +27,7 @@ this dossier is the build record.
 | **2b** | **The cut sheet as an order** — pick the items for a batch, print it for the plant | **shipped 2026-08-23** |
 | **2c** | **The processing fee reaches inventory cost**, per plant — flat per animal plus per pound, accrued at completion | **shipped 2026-08-23** |
 | **2e** | **One row per bird** — the animal in the column not the label, grouped, filtered, and editable in bulk | **shipped 2026-08-23** |
-| 2f | **The whole-bird remainder** — 10 of 100 go back whole, the rest get cut up, and the sheet reconciles | |
+| **2f** | **The front door, the whole-bird remainder, and the app doing its own lookup** | **shipped 2026-08-23** |
 | 2d | The plant's BILL, matched to the run: clear the accrual and make the variance a number | |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
@@ -83,6 +83,212 @@ file had reached 1,658 lines and the log was 60% of it. Nothing was superseded
 by the move: the two live weights, the condemnation adjustment, the withdrawal
 guard, the booking model and the migration that never ran are all argued there,
 and that is the file to read before changing any of them.
+
+### 2026-08-23 — Slice 2f: the app does the lookup (`claude/the-app-does-the-lookup`)
+
+**FOUR THINGS, AND THE FOURTH IS THE ONE THAT CHANGES THE MODEL.**
+
+**THE CUT SHEET HAD NO FRONT DOOR, AND THAT WAS THE BUG.** The founder could not
+find one. Two slices built it, printed it and priced it, and the only ways in
+were a row on `Booked dates` and a card inside an open run — so a sheet was
+reachable only by somebody who already knew which date or which run it hung off,
+which is the opposite of how anybody looks for a piece of paper. It has its own
+page now, beside `Booked dates`: every sheet, with its plant, its animal, the day
+it is for and whether it has been printed. **Not a card on the Production landing
+page**, which is the run list and its yield column; a sheet is not a run — it
+exists before one and frequently without one.
+
+**STARTING ONE ASKS WHICH DAY, RATHER THAN MAKING YOU NAVIGATE TO IT.** The plant
+is NOT a field on that form: it comes with whatever the sheet is attached to,
+because a sheet quotes the rates of the place it is going to, and offering the
+two independently would let somebody pair a date at Miller's with Valley
+Poultry's prices — which `addOrderLine` refuses later, at the point where it is a
+confusing error rather than an impossible choice.
+
+**`listOrders` AND `getOrder` NOW CARRY THE DAY**, which is why the list could
+not have been written before: every screen wanting to list sheets had to join for
+the booking's date or the run's, and 2c's printed header was doing exactly that
+join by hand.
+
+── THE WHOLE-BIRD REMAINDER ─────────────────────────────────────────────────
+
+**TEN OF THE HUNDRED GO BACK WHOLE AND NOTHING RECONCILED THAT.** Ask for 90
+quartered out of 100 and no screen mentioned the other 10; ask for 130 and
+nothing objected. `core/portions.ts` derives it, refuses in three named ways, and
+reads like `tallyCarcasses` because it is the same shape one table along.
+
+**IT PRINTS, AND IT IS THE ONLY THING BESIDES THE LINES THAT DOES.** *"90
+Quartered · 10 back whole"* is what the plant needs; the money on the same page
+stays screen-only for 2b's reason. **Over-accounting is flagged the way
+`SHEET_OVER_ACCOUNTED` is; under-accounting is not a refusal at all** — head no
+cutting line claims ARE the whole birds, and a sheet with no cutting on it is a
+hundred whole birds, which is a real arrangement.
+
+**A BLANK QUANTITY MEANS ALL OF THEM, DELIBERATELY.** `core/fee.ts` →
+`lineQuantity` already measures the whole run for a head-priced line with nothing
+typed, and that is the figure that reached the meat on the $235.00 receipt.
+Reading the same blank as *nobody has said* would put two answers to one question
+on one screen. Its consequence is visible rather than hidden: two blank cutting
+lines each claim every bird, which over-accounts, which is flagged. `fee.ts` was
+left alone — this was a decision about how the remainder READS a blank, not a
+change to what the plant is charged.
+
+**ONLY `cutting` COUNTS, AND ONLY PER HEAD.** Slaughter is per head too and every
+animal gets it, so counting it would read 100 slaughtered plus 90 quartered as a
+sheet for 190 birds. The sheet's own grouping is the only thing that says which
+lines divide the animals up, and guessing that from the label is how this pack
+would start knowing what a chicken is.
+
+── THE PRICE LIST, FOUR SPECIFIC THINGS ─────────────────────────────────────
+
+- **`1001 to 1500, 101 to 250, 251 to 500, 50 to 100`** was on the screen.
+  Alphabetically correct and, to anybody holding the sheet, nonsense.
+  `compareLabels` compares digit runs as numbers — a general comparison, not a
+  band-shaped one, because `Box of 6` before `Box of 12` has the same problem.
+- **`Slaughter, Cornish x, 50 to 100 · Slaughter`.** The suppression fired only
+  on an EXACT match, which was enough while a label was one word.
+  `categoryRepeatsLabel` fires when the label BEGINS with the category, with a
+  boundary check so `Slaughterhouse levy` is not a repeat.
+- **45 rows in one animal is a wall.** The sheet's own `category` is the second
+  axis, in the order the paper uses it — the same rank the picker already
+  grouped by.
+- **A `Checkbox`, because `Switch` was saying the wrong thing.** Beside a
+  heading reading *Cattle 2* a switch reads as *switch cattle on*. The kit had no
+  tick box; there is one now, in `src/components/ui/checkbox.tsx`, on registered
+  tokens. `Switch` stays where it genuinely toggles a behaviour — *Replace the N
+  already on file* is still one, and the split is written down at both sites.
+
+── AND THE ONE WITH THE MIGRATION ───────────────────────────────────────────
+
+**24 OF CHICKEN'S 45 ROWS WERE ONE DECISION.** Pleasant Valley's sheet prices
+slaughter as a **4-breed × 6-band grid** — Cornish x, Non-Cornish, Heritage,
+Tough Roosters against 50–100, 101–250, 251–500, 501–1000, 1001–1500, over 1500.
+For a given batch exactly one cell is the price, and the app made you find it
+among 24 siblings.
+
+**THE DIAGNOSIS: 2a MODELLED A LOOKUP AS A MENU.** *A menu is not a rate* was
+right for cutting options — quartered against eight-piece is a choice somebody
+makes — and wrong for a breed × batch-size grid, which is a table. So `variant`
+and `[head_min, head_max]` came out of the label and became fields, and
+`core/band.ts` reads them. A sheet for 800 Cornish Cross resolves **$2.75** and
+says which band it used.
+
+**A BATCH NO BAND COVERS IS REPORTED, NEVER ROUNDED**, and it is printed on the
+sheet: *"if you show up with less than 50 chickens, we do not offer cutting,
+whole birds only."* The nearest band would quote a price the plant has said it
+will not offer, at the moment somebody is deciding whether to load a trailer.
+**Overlapping bands are a different failure** — the sheet being ambiguous, or a
+row typed wrong — and it says so rather than picking, because a confident figure
+would hide the transcription error.
+
+**THE BAND IS RESOLVED WHEN THE LINE IS WRITTEN, NOT WHEN THE FEE IS COMPUTED.**
+`core/fee.ts` never sees any of this. The order line already snapshots
+`unit_price_cents`; the band only decides WHICH price gets snapshotted. Putting
+the lookup in the fee would make a rate change move last October's sheet, which
+is the one thing the snapshot exists to prevent.
+
+**AND THE SNAPSHOT'S LABEL IS COMPOSED, WHICH IS THE OPPOSITE RULE FROM THE
+CATALOGUE'S.** `Slaughter` on its own no longer says which of 24 prices was
+quoted, and the line has to go on saying so after the rate sheet is replaced. So
+`snapshotLabel` writes `Slaughter · Cornish Cross · 501 to 1000 head` onto the
+line. On the CATALOGUE those facts belong in fields so the app can read them; on
+a LINE they are a decision already made, and a decision is prose.
+
+**RULE 5 IN THE EXTRACTOR PROMPT WAS HALF WRONG AND IS AMENDED.** It said a
+matrix of prices is a matrix of items — still true — and that *the label must say
+what tells them apart* — which is what made the app unable to read its own data.
+The three fields are in the TOOL SCHEMA rather than regex-parsed out of labels
+afterwards, because a regex over a plant's own prose is a second reader with none
+of the first one's judgement.
+
+**THE UNIQUE INDEX HAD TO CHANGE, AND NULLS WOULD HAVE MADE IT A NO-OP.** Parse
+the band out and all 24 rows become label `Slaughter` and collide on
+`(tenant, processor, kind, label)`. The key gains the variant and the band's
+FLOOR, and **both are `NOT NULL`** — `variant` defaults to `''` the way `kind`
+already does, `head_min` to `0`, which means *from the first head* and is true of
+every unbanded row. Postgres treats two nulls as distinct, so a nullable column
+in that index would have constrained nothing; this repo has now been bitten by
+that three times (`inventory_count_lines`, `inventory_tax_treatments`, and the
+note in `inventory.md`). Only the CEILING stays nullable, meaning no ceiling.
+
+**THE OLD INDEX IS DROPPED IN THE SAME MIGRATION, WHICH IS NOT THIS REPO'S USUAL
+DISCIPLINE, AND THE ALTERNATIVE WAS TRIED AND RUN.** Keeping it — renamed out of
+the way, since ON CONFLICT infers a target from an index's columns and not its
+name — was written, applied to `dev`, and the suite failed: it refuses the second
+of any plant's 24 slaughter rows, because that is exactly what it says. An
+expand-only release would therefore have shipped a feature that cannot be used
+and tests that cannot pass. **What is accepted instead, stated plainly:** between
+the migration being applied and the merge deploying, the running code's
+`setPriceItem` infers its ON CONFLICT target from the four old columns and fails
+with *"no unique or exclusion constraint matching the ON CONFLICT
+specification"*. A few minutes, writes to a price list only, nothing lost and
+nothing corrupted — and it is the reason ADR 0014 has the apply happen at a
+moment somebody is watching.
+
+**`production_orders.printed_at` IS THE NEAREST HONEST THING TO "HANDED OVER"**,
+and it is the shape this dossier asked for before it existed: *a date rather than
+a status*, because a status somebody has to advance is a status nobody advances.
+The print button writes it and nothing else does, so null means *nobody pressed
+Print here* and never *the plant never got one* — which is what the list says.
+
+── DRIVEN, ON THE REAL SHEET ────────────────────────────────────────────────
+
+**PLEASANT VALLEY'S TWO-PAGE PDF, READ THROUGH THE AMENDED EXTRACTOR, ON THE DEV
+BRANCH'S `Hilltop Farm`: 115 rows recorded in one pass** — 108 prices and 7
+animals. The 24-cell grid came back as FIELDS, `Slaughter Fee` × {Cornish x,
+Non-Cornish, Heritage, Tough Roosters} × six bands, and the app then did the
+lookup twice on two sheets against one rate card:
+
+| Sheet | Head | What it resolved | Snapshotted as |
+| --- | --- | --- | --- |
+| Autumn broilers | 100 | **$3.75** | `Slaughter Fee · Cornish x · 50 to 100 head` |
+| Big batch | 800 | **$2.75** | `Slaughter Fee · Cornish x · 501 to 1000 head` |
+
+Same plant, same breed, same label, two prices — and the line says which. **The
+picker showed 4 options where the list holds 24**, one per breed, each already
+resolved. The 40-bird sheet withdrew twelve of them and gave the plant's own
+reason. 90 quartered out of 100 printed **"Of 100 head — 90 Quartered, 10 back
+whole"**; adding a 50-bird Split on top flagged **140 against 100**. `printed_at`
+stamped and showed on the list.
+
+**AND THE VARIANT GENERALISED WITHOUT BEING ASKED TO**, which is the argument for
+it being free text: the reader used it for turkey weight classes (*up to 29.99
+lbs.*, *30 lbs. and up*), container sizes (*16 oz.*, *5 Gal. Bucket*) and bone
+broth batch sizes (*120lb. Batches*). This pack does not know what a breed is and
+did not need to.
+
+**SIX DEFECTS, AND EVERY ONE WAS IN A STRING OR A RENDER.** Seventh slice
+running:
+
+- **"What each plant was asked to do"** — a hardcoded word for a renameable one,
+  directly above a column headed *Butcher*, on the first screen this slice
+  opened.
+- **Every price row repeated its own sub-group heading.** This slice's own
+  defect: 2e suppressed the category when it exactly repeated the label, 2f put a
+  *Cutting 10* heading above the rows, and all ten then said "Cutting" under it.
+  The heading is the category; the row says nothing.
+- **The extractor's note repeated the band** — `Over 1500` sitting under a row
+  already reading *1501 head and over*, on eight rows, and *50 bird minimum*
+  under *50 head and over* on six more. Rule 5 now says the note is for what the
+  fields cannot hold.
+- **`90 Quartered · 50 head and over · 10 back whole`** — the reconciliation
+  joined with the same `·` the snapshot label composes with, so the band read as
+  a third portion. `shortLabel` takes the head of the label and the sentence
+  joins with commas.
+- **Twelve identical sixty-word refusals**, one per blocked option, on the
+  40-bird sheet. The reason is the same reason for all of them: it is printed
+  once with the names under it. Same complaint as *45 rows in one run*, one
+  screen along.
+- **An empty sheet claimed "800 back whole"** beside *Nothing on it yet*. It
+  reconciles perfectly and says nothing anybody decided.
+
+**ONE CLAIM WAS WRONG AND IS CORRECTED IN `design-system.md`:** `switch.tsx`'s
+`data-checked:` looked like a variant matching nothing, because Radix emits
+`data-state="checked"`. Tailwind v4 compiles the shorthand to BOTH forms. Reading
+the compiled rule out of `document.styleSheets` settled it; grepping the Radix
+dist proves only half the question.
+
+Migration `0203`. 24 new tests.
 
 ### 2026-08-23 — Slice 2e: one row per bird, and a list you can find things in (`claude/one-row-per-bird`)
 
@@ -687,10 +893,10 @@ AI feature. Recorded as an open item.
 
 | `production_processors` | **Who does the work you do not** — a role on a party, not a new contact model | `tenant_id`, FORCE RLS. Composite FK to `parties` (CASCADE); UNIQUE per party, because two rows would be two opinions about one plant with nothing to say which is current. **No `name` column** — it is the party's, so this table cannot disagree with the rest of the app. `inspection` in `usda\|state\|custom_exempt\|uninspected\|unknown`: five, and `unknown` is a real answer rather than a missing one. `rating` 1–5 or null, and it is an OPINION — the measured half is folded, never stored |
 | `production_processor_handles` | **What one processor will take** | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind)`. `kind` is an open taxonomy from the profile's `processorHandles`, a **separate list** from `livestock.species` because what a plant takes is not what this farm raises. **The three fee columns are superseded** — copied out by `0196`, read and written by nothing, awaiting their DROP in a follow-up PR. What is left is `capacity_per_day` and the prose that is not a price |
-| `production_processor_price_items` | **One priced thing off a rate sheet** — the menu, as data | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind, label)` — two rows for one named option would be two prices with nothing to say which is current, and it is what makes next year's sheet re-readable over this year's as a correction. **`unit` is CLOSED** (`head`, `live_lb`, `hanging_lb`, `finished_lb`, `package`, `box`, `flat`, `hour`) and is the whole point: $1.05 is five different amounts of money across them. `category` and `label` are OPEN, the same call `..._cuts` made about cut names. `price_cents` NULL is "call them", never zero; `minimum_cents` is a floor, not a price. Still a QUOTE — what was paid is a bill in `payables` against the same party
+| `production_processor_price_items` | **One priced thing off a rate sheet** — the menu, as data, and since 2f a TABLE the app reads rather than a list a person searches | Composite FK to the processor (CASCADE). UNIQUE per `(processor, kind, variant, head_min, label)` — two rows for one named option would be two prices with nothing to say which is current, and it is what makes next year's sheet re-readable over this year's as a correction. **`variant`** is the breed or qualifier in the plant's own words and **`[head_min, head_max]`** is the batch band; they are in the key because one plant's 24 chicken slaughter rows all carry the label `Slaughter`, and **both key columns are `NOT NULL`** (`''` and `0`) because Postgres treats two nulls as distinct and a nullable column in a unique index constrains nothing. Only `head_max` is nullable, meaning no ceiling. **`unit` is CLOSED** (`head`, `live_lb`, `hanging_lb`, `finished_lb`, `package`, `box`, `flat`, `hour`) and is the whole point: $1.05 is five different amounts of money across them. `category` and `label` are OPEN, the same call `..._cuts` made about cut names. `price_cents` NULL is "call them", never zero; `minimum_cents` is a floor, not a price. Still a QUOTE — what was paid is a bill in `payables` against the same party
 | `production_processor_cuts` | What a processor will produce | Composite FK to the processor (CASCADE). Free text by design — cut names are a trade's prose and every plant's list differs. `kind` empty means "anything they take". This is CAPABILITY; the per-animal cut sheet is a later slice |
 
-| `production_orders` | **The cut sheet** — what this farm asked one plant to do with one lot of animals | `tenant_id`, FORCE RLS. Composite FKs to the processor, the booking and the run, **all CASCADE**; `booking_id` is where it began and `run_id` is what it became, and the CHECK asks for at least one — a sheet attached to nothing is a sheet for a day that does not exist. **No unique index**: the design's *one animal, two cut sheets* is the ordinary case, and `title` tells them apart until `retail`'s commitments can name the customer |
+| `production_orders` | **The cut sheet** — what this farm asked one plant to do with one lot of animals | `tenant_id`, FORCE RLS. Composite FKs to the processor, the booking and the run, **all CASCADE**; `booking_id` is where it began and `run_id` is what it became, and the CHECK asks for at least one — a sheet attached to nothing is a sheet for a day that does not exist. **No unique index**: the design's *one animal, two cut sheets* is the ordinary case, and `title` tells them apart until `retail`'s commitments can name the customer. **`printed_at`** is the nearest honest thing to a handed-over state — a DATE rather than a status, written by the print button and by nothing else, so null is *nobody pressed Print here* rather than *they never got one* |
 | `production_order_lines` | **One line of a sheet — an option chosen, or an instruction given** | Composite FK to the order (CASCADE) and to the price item (**`SET NULL (price_item_id)`**, PG 15's column-list form — a line is a SNAPSHOT and must survive the rate sheet being tidied). `unit_price_cents`, `unit` and `minimum_cents` are **stamped and never re-read**. A line with no `price_item_id` is an INSTRUCTION and carries no money. CHECK: a price must say what it is per; a unit with no price is allowed. `quantity` NULL means *work it out* on a computable unit and *nobody has counted* on the rest |
 | `production_bookings` | **A date held with a processor — the scarce resource** | `tenant_id`, FORCE RLS. Composite FKs to the processor and to the run, **both CASCADE**; `run_id` is what the booking BECAME and is null until the day happens. `status` in `held\|confirmed\|cancelled` — three, and there is deliberately **no "it happened"**, because `run_id` answers that and a status somebody must advance would disagree with it. CHECK: a cancelled date cannot claim a run. Deposit in cents, and null is not zero — a date held on a phone call is ordinary |
 
@@ -724,6 +930,21 @@ run model, separate templates), and the processing path and eligibility flag
 - `src/packs/production/core/roll.ts` — pure. The pro-rata off a lot, the basis
   rule, and the largest-remainder split. **Read this before changing anything
   about what an output cost**
+- `src/packs/production/core/band.ts` — pure. **The lookup the app should have
+  been doing**, and the two ways it refuses rather than guessing. Read this
+  before being tempted to fall back to the nearest band. It also holds
+  `snapshotLabel`, and the argument for why a LINE composes the variant and the
+  band into its label while the CATALOGUE keeps them in fields
+- `src/packs/production/core/portions.ts` — pure. **The whole-bird remainder,
+  derived and never stored.** Read the header before changing what a blank
+  quantity means: it agrees with `core/fee.ts` on purpose, and the two
+  disagreeing would put two answers to one question on one sheet
+- `src/app/dashboard/m/production/orders/page.tsx` — **the front door.** Every
+  sheet, with the day it is for. The founder could not find a cut sheet before
+  this existed
+- `src/components/ui/checkbox.tsx` — the tick box the kit did not have. **Note
+  the variant it uses**: Radix emits `data-state`, and `switch.tsx`'s
+  `data-checked:` matches nothing — see `design-system.md`
 - `src/packs/production/core/fee.ts` — pure. **What the plant charged, and the
   four measures it is allowed to work out for itself.** Read this before adding
   a ninth price unit: `MEASURED_BY` is exhaustive over `PRICE_UNITS` by
@@ -796,7 +1017,8 @@ run model, separate templates), and the processing path and eligibility flag
 - `src/packs/production/components/carcass-controls.tsx` — the sheet's one
   dialog, used for both adding and correcting. **The form changes shape when a
   carcass is condemned** rather than taking a number it will throw away
-- `src/db/schema/production.ts` · `drizzle/0197_amazing_mentallo.sql` ·
+- `src/db/schema/production.ts` · `drizzle/0203_amused_devos.sql` ·
+  `drizzle/0197_amazing_mentallo.sql` ·
   `drizzle/0198_processing_accrual_source.sql` ·
   `drizzle/0199_production_orders_rls.sql` ·
   `drizzle/0200_order_line_price_item_set_null.sql` ·
@@ -1024,6 +1246,29 @@ run model, separate templates), and the processing path and eligibility flag
 
 ## Open items
 
+- **"plant" IS HARDCODED IN ABOUT FIFTEEN STRINGS ACROSS THIS PACK**, where the
+  word is the tenant's — the homestead profile calls it *Butcher*. Driving 2f
+  fixed the one it introduced and left the rest: `cut-sheet.tsx`'s "the plant
+  reads this rather than guessing", `carcass-controls.tsx`'s "Live weight at the
+  plant", and the refusal sentences in `core/carcass.ts` and `core/band.ts`.
+  Sweeping them is a copy change with no behaviour in it and wants its own PR;
+  the pure files also have no `labelFor` to reach for, so their sentences need a
+  word passed in the way `inspectionNote` takes one.
+- **THE LIVE 108 ROWS ON `Test` STILL CARRY THEIR BANDS IN THE LABEL TEXT.**
+  The columns exist and the extractor asks for them, but the rows already on file
+  were read under the old rule — `Slaughter, Cornish x, 50 to 100` as a label,
+  with `variant` empty and `head_min` 0. Nothing resolves for them, and the fix
+  is one re-read of Pleasant Valley's sheet with **Replace** on, which
+  `clearPriceItems` makes safe. It has to happen against the deployed code, so it
+  is the first thing to do after this merge.
+- **NOTHING WARNS THAT A PLANT'S BANDS HAVE A HOLE IN THEM.** `resolveBands`
+  reports that no band covers a particular batch, which is the right answer at
+  the moment somebody is writing a sheet. What nothing does is look at a rate
+  sheet as a whole and say *there is no price between 1500 and 1501* or *these
+  two overlap* — that is a check on the LIST rather than on one lookup, it wants
+  a screen on the processor page, and it wants a second plant's sheet on file
+  before it can say anything useful.
+
 - ~~**NEITHER READER HAS BEEN GIVEN A REAL PHOTOGRAPH.**~~ **The price-list
   reader has** — a real two-page USDA poultry rate sheet, 2026-08-23, and it
   refused correctly in both places a naive reader gets wrong. See the build log.
@@ -1079,15 +1324,21 @@ run model, separate templates), and the processing path and eligibility flag
 - **A LONG SHEET'S PAGE BREAKS ARE UNTESTED.** Every sheet driven so far fits
   on one page. A twelve-option chicken sheet will not, and nothing says a line
   may not break across pages or that the header repeats.
-- **A SHEET STILL HAS NO "HANDED OVER" STATE** — see below; driving did not
-  change that, but printing one made it more obviously missing, because the
-  moment you print is the moment you would want it recorded.
+- ~~**A SHEET STILL HAS NO "HANDED OVER" STATE.**~~ **Half closed 2026-08-23** —
+  `production_orders.printed_at`, stamped by the print button, and shown on the
+  new list. What it does NOT record is whether the plant received it: a sheet can
+  be read off a screen at the counter or photographed, so null means "nobody
+  pressed Print here" and the copy says exactly that. A real handed-over state
+  wants somebody to have missed one first.
 - **A SHEET CANNOT BE REORDERED.** Lines sort by the sheet's own grouping and
   then alphabetically, which is right for reading against a rate sheet and
   arbitrary for a plant working down a list. Nobody has asked yet.
-- **A SHEET HAS NO "HANDED OVER" STATE.** Whether the plant actually got it is
-  not recorded, so a run can complete against a sheet nobody sent. It wants a
-  date rather than a status, and it wants somebody to have missed one first.
+- **NOTHING KNOWS THE BREED, so the variant is chosen on the line.** The order
+  carries `kind` (chicken) and nothing carries "Cornish Cross" — the picker
+  offers the variants a plant prices and somebody picks one. Reaching into
+  `livestock` for a lot's breed would make this pack depend on that one, which is
+  a P5 question and not this slice's; it also would not be enough, since a batch
+  can be mixed and the plant prices the batch.
 - **AN ORDER LINE CANNOT BE MOVED BETWEEN SHEETS.** On a half-beef sale where
   the customer changes their mind about which half something is on, the answer
   today is remove and re-add — which loses the quote it was written at.

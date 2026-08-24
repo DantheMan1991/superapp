@@ -28,6 +28,7 @@ import {
 import {
   addOrderLineAction,
   createOrderAction,
+  markOrderPrintedAction,
   removeOrderAction,
   removeOrderLineAction,
   updateOrderLineAction,
@@ -35,10 +36,18 @@ import {
 import {
   PRICE_CATEGORY_LABELS,
   PRICE_UNIT_LABELS,
+  compareLabels,
   priceCategoryRank,
   priceWithUnit,
   slugLabel,
 } from "../vocabulary";
+import {
+  BAND_REFUSALS,
+  describeBand,
+  isBanded,
+  resolveBands,
+  type BandRefusal,
+} from "../core/band";
 
 /**
  * The cut sheet's controls.
@@ -67,8 +76,212 @@ export interface PriceItemOption {
   kind: string;
   category: string;
   label: string;
+  variant: string;
+  headMin: number;
+  headMax: number | null;
   priceCents: number | null;
   unit: string;
+  minimumCents: number | null;
+}
+
+/**
+ * Somewhere a sheet can hang off: a date that is still coming, or a run that is
+ * still open. **The CHECK insists on one of the two**, because a sheet attached
+ * to nothing is a sheet for a day that does not exist.
+ */
+export interface SheetTarget {
+  id: string;
+  what: "booking" | "run";
+  processorId: string;
+  processorName: string;
+  /** How it reads in the picker — a date and a plant, or a run's own code. */
+  label: string;
+}
+
+/**
+ * Start a sheet from the list of them.
+ *
+ * **THE FOUNDER COULD NOT FIND THE CUT SHEET, WHICH IS THE BUG THIS CLOSES.**
+ * Until now the only two ways to reach one were a row on Booked dates and a card
+ * inside an open run, so writing a sheet meant already knowing which date or
+ * which run it belonged to and navigating there first. Here the question is
+ * asked the other way round: start one, then say what it is for.
+ *
+ * **THE PLANT IS NOT A FIELD.** It comes with whatever the sheet is attached to,
+ * because a sheet quotes the rates of the place it is going to and a picker
+ * offering the two independently would let somebody pair a date at Miller's with
+ * Valley Poultry's prices — which `addOrderLine` refuses later, at the point
+ * where it is a confusing error rather than an impossible choice.
+ */
+export function StartSheetDialog({
+  targets,
+  kindOptions,
+  sheetWord,
+  runWord,
+}: {
+  targets: SheetTarget[];
+  kindOptions: string[];
+  sheetWord: string;
+  runWord: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [targetId, setTargetId] = useState(targets[0]?.id ?? "");
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState("");
+  const [headCount, setHeadCount] = useState("");
+  const [notes, setNotes] = useState("");
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  const chosen = targets.find((t) => t.id === targetId);
+  const bookings = targets.filter((t) => t.what === "booking");
+  const runs = targets.filter((t) => t.what === "run");
+
+  const submit = () => {
+    if (!chosen) {
+      toast.error("Say which day it is for.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await createOrderAction({
+        processorId: chosen.processorId,
+        bookingId: chosen.what === "booking" ? chosen.id : null,
+        runId: chosen.what === "run" ? chosen.id : null,
+        title: title.trim(),
+        kind,
+        headCount: numOrNull(headCount),
+        notes: notes.trim(),
+      });
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Started");
+      setTitle("");
+      setNotes("");
+      setHeadCount("");
+      setOpen(false);
+      router.refresh();
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button disabled={targets.length === 0}>
+          Start a {sheetWord.toLowerCase()}
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Start a {sheetWord.toLowerCase()}</DialogTitle>
+          <DialogDescription>
+            What you are asking them to do, and which day it goes with. One
+            animal can carry two — a half sold to a customer is cut to their
+            instructions, and the retained half to yours.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="sheet-target">Which day</Label>
+            <Select value={targetId} onValueChange={setTargetId}>
+              <SelectTrigger id="sheet-target">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {bookings.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel>Booked dates</SelectLabel>
+                    {bookings.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
+                {runs.length > 0 && (
+                  <SelectGroup>
+                    <SelectLabel>{runWord}</SelectLabel>
+                    {runs.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                )}
+              </SelectContent>
+            </Select>
+            {chosen && (
+              <p className="text-xs text-muted-foreground">
+                Going to {chosen.processorName}, so it quotes their prices.
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sheet-title">Whose</Label>
+            <Input
+              id="sheet-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Retained half"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="sheet-kind">What</Label>
+              <Select
+                value={kind === "" ? "none" : kind}
+                onValueChange={(v) => setKind(v === "none" ? "" : v)}
+              >
+                <SelectTrigger id="sheet-kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not said</SelectItem>
+                  {kindOptions.map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {slugLabel(k)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sheet-head">How many head</Label>
+              <Input
+                id="sheet-head"
+                type="number"
+                min={1}
+                value={headCount}
+                onChange={(e) => setHeadCount(e.target.value)}
+              />
+              {/* The count the whole-bird remainder is a share of, so it is
+                  worth saying here rather than leaving somebody to find out on
+                  the sheet that it could not reconcile. */}
+              <p className="text-xs text-muted-foreground">
+                What the cutting is a share of — say it and the ones going back
+                whole work themselves out.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sheet-notes">Anything else they should know</Label>
+            <Textarea
+              id="sheet-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={submit} disabled={pending || !chosen}>
+            Start
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function AddOrderDialog({
@@ -207,44 +420,141 @@ export function AddOrderDialog({
 export function AddOrderLineDialog({
   orderId,
   options,
+  used,
+  headCount,
   sheetWord,
 }: {
   orderId: string;
+  /** Every price this plant quotes for this sheet's animal. NOT yet de-duplicated. */
   options: PriceItemOption[];
+  /** Price items already on the sheet. Applied AFTER the bands resolve — see below. */
+  used: string[];
+  /** How many head the sheet covers. Null is what makes a band unresolvable. */
+  headCount: number | null;
   sheetWord: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [priceItemId, setPriceItemId] = useState(options[0]?.id ?? "");
   const [quantity, setQuantity] = useState("");
   const [notes, setNotes] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
-  const chosen = options.find((o) => o.id === priceItemId);
+  /**
+   * **THE APP DOES THE LOOKUP.** One real chicken sheet prices slaughter as a
+   * 4-breed × 6-band grid, so picking a price meant finding one row among 24
+   * siblings that all read "Slaughter". The breed and the band are fields now,
+   * and for a sheet that says how many head it covers there is exactly one right
+   * row — so the picker offers one entry per thing and says which band it used.
+   *
+   * **THE ALREADY-ADDED FILTER RUNS AFTER THE RESOLUTION, NOT BEFORE.** Taking
+   * the covering band out of the input first would leave the group with only the
+   * bands that do NOT cover this batch, and it would then report that no band
+   * covers it — which is a different and untrue statement from "you already
+   * added it".
+   */
+  const onSheet = new Set(used);
+  const groups = resolveBands(options, headCount)
+    .filter((g) => !(g.chosen !== null && onSheet.has(g.chosen.id)))
+    .sort(
+      (a, b) =>
+        priceCategoryRank(a.category) - priceCategoryRank(b.category) ||
+        a.category.localeCompare(b.category) ||
+        compareLabels(a.label, b.label) ||
+        a.variant.localeCompare(b.variant),
+    );
+
+  /**
+   * What can actually be picked. A resolved group offers its one right row; a
+   * group nothing could resolve because the sheet has no head count offers its
+   * bands individually, since choosing one by hand is then the honest way to
+   * write the line and `addOrderLine` has nothing to check it against.
+   */
+  const offered: Array<{ option: PriceItemOption; text: string; category: string }> =
+    [];
+  const blocked: Array<{ text: string; reason: BandRefusal }> = [];
+  for (const group of groups) {
+    const name = [group.label, group.variant].filter((p) => p !== "").join(" · ");
+    if (group.chosen) {
+      const band = describeBand(group.chosen);
+      offered.push({
+        option: group.chosen,
+        category: group.category,
+        text: `${name} — ${
+          priceWithUnit(group.chosen.priceCents, group.chosen.unit) ?? "not quoted"
+        }${band === "" ? "" : ` · ${band}`}`,
+      });
+      continue;
+    }
+    if (group.refusedBecause === "NO_HEAD_COUNT") {
+      for (const band of group.bands) {
+        if (onSheet.has(band.id)) continue;
+        offered.push({
+          option: band,
+          category: group.category,
+          text: `${name} · ${describeBand(band)} — ${
+            priceWithUnit(band.priceCents, band.unit) ?? "not quoted"
+          }`,
+        });
+      }
+      continue;
+    }
+    // Reported, never rounded to the nearest band they did quote.
+    blocked.push({
+      text: name,
+      reason: group.refusedBecause ?? "NO_BAND_COVERS",
+    });
+  }
+
+  /**
+   * **THE REASON ONCE, WITH THE NAMES UNDER IT.** Found by driving a 40-bird
+   * sheet at a plant with a fifty-bird floor: twelve options were blocked and
+   * the picker printed the same sixty-word sentence twelve times. It is the
+   * founder's "45 rows in one run is a wall" complaint one screen along — the
+   * useful half is WHICH options are unavailable, and the reason is the same
+   * reason for all of them.
+   */
+  const blockedByReason = [...new Set(blocked.map((b) => b.reason))].map(
+    (reason) => ({
+      reason,
+      names: blocked.filter((b) => b.reason === reason).map((b) => b.text),
+    }),
+  );
+
+  const [priceItemId, setPriceItemId] = useState("");
+  /**
+   * **FALLS BACK TO THE FIRST OFFER RATHER THAN GOING BLANK.** What is offered
+   * changes under this component — adding a line takes it out of the list, and
+   * the state would otherwise go on naming a row the picker no longer shows,
+   * which submits an id the server then refuses for a reason nothing on screen
+   * explains.
+   */
+  const selected =
+    offered.find((o) => o.option.id === priceItemId) ?? offered[0];
+  const chosen = selected?.option;
 
   /** The base first, then the layers, then anything nobody anticipated. */
   const grouped = (() => {
-    const by = new Map<string, PriceItemOption[]>();
-    for (const option of options) {
-      const list = by.get(option.category);
-      if (list) list.push(option);
-      else by.set(option.category, [option]);
+    const by = new Map<string, typeof offered>();
+    for (const entry of offered) {
+      const list = by.get(entry.category);
+      if (list) list.push(entry);
+      else by.set(entry.category, [entry]);
     }
-    for (const list of by.values()) list.sort((a, b) => a.label.localeCompare(b.label));
     return [...by.entries()].sort(
       ([a], [b]) => priceCategoryRank(a) - priceCategoryRank(b) || a.localeCompare(b),
     );
   })();
 
   const submit = () => {
-    if (!priceItemId) {
+    if (!chosen) {
       toast.error("Pick what you want.");
       return;
     }
+    const picked = chosen.id;
     startTransition(async () => {
       const result = await addOrderLineAction({
         orderId,
-        priceItemId,
+        priceItemId: picked,
         quantity: numOrNull(quantity),
         notes: notes.trim(),
       });
@@ -263,7 +573,11 @@ export function AddOrderLineDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" disabled={options.length === 0}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={offered.length === 0 && blocked.length === 0}
+        >
           Add an option
         </Button>
       </DialogTrigger>
@@ -290,7 +604,7 @@ export function AddOrderLineDialog({
               already scoped to this sheet's animal, so printing it forty times
               is the noise this grouping exists to remove.
             */}
-            <Select value={priceItemId} onValueChange={setPriceItemId}>
+            <Select value={chosen?.id ?? ""} onValueChange={setPriceItemId}>
               <SelectTrigger id="line-item">
                 <SelectValue />
               </SelectTrigger>
@@ -300,17 +614,39 @@ export function AddOrderLineDialog({
                     <SelectLabel>
                       {PRICE_CATEGORY_LABELS[category] ?? slugLabel(category)}
                     </SelectLabel>
-                    {rows.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        {option.label} —{" "}
-                        {priceWithUnit(option.priceCents, option.unit) ??
-                          "not quoted"}
+                    {rows.map((entry) => (
+                      <SelectItem key={entry.option.id} value={entry.option.id}>
+                        {entry.text}
                       </SelectItem>
                     ))}
                   </SelectGroup>
                 ))}
               </SelectContent>
             </Select>
+            {/*
+              **WHICH BAND IT USED, SAID OUT LOUD.** A resolved price is the app
+              having made a decision on somebody's behalf, and a decision nobody
+              can see is one nobody can check against the paper.
+            */}
+            {chosen && isBanded(chosen) && headCount !== null && (
+              <p className="text-xs text-muted-foreground">
+                {headCount} head falls in their {describeBand(chosen)} band.
+              </p>
+            )}
+            {/*
+              **REPORTED, NOT ROUNDED.** A batch no band covers is usually the
+              plant saying it will not take one, which is a thing to know before
+              loading a trailer.
+            */}
+            {blockedByReason.map(({ reason, names }) => (
+              <p key={reason} className="text-xs text-muted-foreground">
+                <span className="font-medium">
+                  {names.slice(0, 3).join(", ")}
+                  {names.length > 3 ? ` and ${names.length - 3} more` : ""}
+                </span>{" "}
+                — {BAND_REFUSALS[reason]}
+              </p>
+            ))}
           </div>
           <div className="space-y-2">
             <Label htmlFor="line-quantity">How many</Label>
@@ -557,17 +893,43 @@ export function RemoveOrderButton({
 }
 
 /**
- * Print it.
+ * Print it, and record that it was printed.
  *
  * **THE SHEET IS THE PAGE, NOT A SEPARATE ROUTE.** Same arrangement an invoice
  * uses: `print:` variants hide everything that is not the sheet and reveal a
  * header that only exists on paper. A second route would be a second copy of
  * the same content to keep in step, and the thing being handed over has to say
  * exactly what the screen says.
+ *
+ * **THE STAMP IS FIRED AND NOT WAITED ON.** `window.print()` blocks the tab
+ * until the dialog is dismissed, so awaiting the action first would put a pause
+ * between the press and the dialog for no benefit — and a sheet that printed but
+ * whose stamp failed is a worse outcome than the other way round. A failure is
+ * reported and the printing still happens.
  */
-export function PrintOrderButton({ sheetWord }: { sheetWord: string }) {
+export function PrintOrderButton({
+  id,
+  sheetWord,
+}: {
+  id: string;
+  sheetWord: string;
+}) {
+  const router = useRouter();
   return (
-    <Button size="sm" variant="outline" onClick={() => window.print()}>
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() => {
+        void markOrderPrintedAction({ id }).then((result) => {
+          if ("error" in result && result.error) {
+            toast.error(result.error);
+            return;
+          }
+          router.refresh();
+        });
+        window.print();
+      }}
+    >
       Print the {sheetWord.toLowerCase()}
     </Button>
   );

@@ -228,6 +228,15 @@ export async function setPriceItemAction(input: unknown) {
       kind: z.string().trim().max(63).optional(),
       category: z.string().trim().max(63).optional(),
       label: z.string().trim().min(1).max(200),
+      /** The plant's own words for a breed or qualifier — free text, not a slug. */
+      variant: z.string().trim().max(100).optional(),
+      /**
+       * The band. `headMin` is nought by default — "from the first head" — and
+       * `headMax` null is "no ceiling"; both are argued in the schema, and the
+       * short version is that neither may be nullable in a unique index.
+       */
+      headMin: z.number().int().min(0).max(1_000_000).nullable().optional(),
+      headMax: z.number().int().min(0).max(1_000_000).nullable().optional(),
       price: dollars,
       unit: z.enum(PRICE_UNITS),
       minimum: dollars,
@@ -266,6 +275,12 @@ export async function setPriceItemAction(input: unknown) {
         kind: row.kind,
         category: row.category,
         label: row.label,
+        // Beside the price for the same reason the unit is: `275` under the
+        // label `Slaughter` is now one of 24 figures, and the variant and the
+        // band are what say which.
+        variant: row.variant,
+        headMin: row.headMin,
+        headMax: row.headMax,
         priceCents: row.priceCents,
         unit: row.unit,
         minimumCents: row.minimumCents,

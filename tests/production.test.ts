@@ -23,6 +23,22 @@ import {
   rollRun,
 } from "../src/packs/production/core/roll";
 import {
+  BAND_REFUSALS,
+  bandCovers,
+  describeBand,
+  isBanded,
+  resolveBands,
+  snapshotLabel,
+  type BandedItem,
+} from "../src/packs/production/core/band";
+import {
+  PORTION_REFUSALS,
+  portionRefusal,
+  portionSentence,
+  tallyPortions,
+  type PortionLine,
+} from "../src/packs/production/core/portions";
+import {
   COST_BASES,
   RUN_STATUSES,
   SLUG_FORMAT,
@@ -45,7 +61,9 @@ import {
   PATH_LABELS,
   daysBetween,
   describeBookingDate,
+  categoryRepeatsLabel,
   centsToDisplay,
+  compareLabels,
   COMPUTABLE_PRICE_UNITS,
   isComputablePriceUnit,
   isPriceUnit,
@@ -998,5 +1016,327 @@ describe("exemptionStanding", () => {
     }
     expect(exemptionNote("over", 1200, 1000, "Butcher")).toContain("200 more");
     expect(exemptionNote("close", 850, 1000, "Butcher")).toContain("150 left");
+  });
+});
+
+// ------------------------------------------- the whole-bird remainder (2f) ---
+
+function cut(
+  key: string,
+  patch: Partial<PortionLine> = {},
+): PortionLine {
+  return {
+    key,
+    label: key,
+    category: "cutting",
+    unit: "head",
+    quantity: null,
+    ...patch,
+  };
+}
+
+describe("tallyPortions", () => {
+  it("derives the ten that go back whole out of a hundred", () => {
+    // The founder's sentence, as arithmetic: "10 of the 100 birds might need to
+    // be whole birds and then some will get cut up."
+    const tally = tallyPortions(
+      [
+        cut("slaughter", { category: "slaughter", label: "Slaughter" }),
+        cut("quartered", { label: "Quartered", quantity: 90 }),
+      ],
+      100,
+    );
+
+    expect(tally.headPortioned).toBe(90);
+    expect(tally.headWhole).toBe(10);
+    expect(tally.headOver).toBeNull();
+    expect(portionRefusal(tally)).toBeNull();
+    expect(portionSentence(tally)).toBe("90 Quartered · 10 back whole");
+  });
+
+  it("does not count slaughter, which every animal gets", () => {
+    // Counting it would read a hundred slaughtered plus ninety quartered as a
+    // sheet for a hundred and ninety birds.
+    const tally = tallyPortions(
+      [
+        cut("s", { category: "slaughter", label: "Slaughter", quantity: 100 }),
+        cut("p", { category: "packaging", label: "Vacuum bag", quantity: 100 }),
+        cut("q", { label: "Quartered", quantity: 90 }),
+      ],
+      100,
+    );
+    expect(tally.shares.map((s) => s.key)).toEqual(["q"]);
+    expect(tally.headWhole).toBe(10);
+  });
+
+  it("flags a sheet asking for more head than it covers", () => {
+    // "Ask for 130 and nothing objects" — the SHEET_OVER_ACCOUNTED shape,
+    // arriving on the cut sheet.
+    const tally = tallyPortions(
+      [
+        cut("q", { label: "Quartered", quantity: 90 }),
+        cut("e", { label: "Eight piece", quantity: 40 }),
+      ],
+      100,
+    );
+    expect(tally.headPortioned).toBe(130);
+    expect(tally.headWhole).toBeNull();
+    expect(tally.headOver).toBe(30);
+    expect(portionRefusal(tally)).toBe("SHEET_OVER_PORTIONED");
+    // Nothing to hand over: a printed "minus thirty back whole" would be worse
+    // than the silence.
+    expect(portionSentence(tally)).toBe("");
+  });
+
+  it("reads a blank quantity as all of them, the way the fee already does", () => {
+    // `lineQuantity` measures the whole run for a head-priced line with nothing
+    // typed, and that figure is what reached the meat. Two answers to one
+    // question is the thing this agreement exists to prevent.
+    const one = tallyPortions([cut("q", { label: "Quartered" })], 100);
+    expect(one.shares[0]?.source).toBe("all");
+    expect(one.headPortioned).toBe(100);
+    expect(one.headWhole).toBe(0);
+    expect(portionSentence(one)).toBe("100 Quartered");
+
+    // Two blanks each claim every bird, which over-accounts — and being told so
+    // is the useful half.
+    const two = tallyPortions(
+      [cut("q", { label: "Quartered" }), cut("e", { label: "Eight piece" })],
+      100,
+    );
+    expect(portionRefusal(two)).toBe("SHEET_OVER_PORTIONED");
+  });
+
+  it("says a sheet with no cutting at all is all whole birds", () => {
+    // Not a refusal: a hundred birds and a slaughter line is a hundred whole
+    // birds, which is exactly what a plant that will not cut under fifty offers.
+    const tally = tallyPortions(
+      [cut("s", { category: "slaughter", label: "Slaughter" })],
+      100,
+    );
+    expect(portionRefusal(tally)).toBeNull();
+    expect(tally.headWhole).toBe(100);
+    expect(portionSentence(tally)).toBe("100 back whole");
+  });
+
+  it("refuses when cutting is charged by weight, and when nobody said how many head", () => {
+    const byWeight = tallyPortions(
+      [cut("c", { label: "Cut and wrap", unit: "hanging_lb" })],
+      1,
+    );
+    expect(byWeight.cutByWeight).toBe(true);
+    expect(portionRefusal(byWeight)).toBe("CUT_NOT_BY_HEAD");
+
+    const noHead = tallyPortions([cut("q", { label: "Quartered" })], null);
+    expect(portionRefusal(noHead)).toBe("NO_HEAD_COUNT");
+    expect(noHead.headWhole).toBeNull();
+    expect(portionSentence(noHead)).toBe("");
+  });
+
+  it("ignores an instruction line, which asks for no animals at all", () => {
+    const tally = tallyPortions(
+      [
+        cut("i", { category: "cutting", label: "Grind the chuck", unit: null }),
+        cut("q", { label: "Quartered", quantity: 90 }),
+      ],
+      100,
+    );
+    expect(tally.shares).toHaveLength(1);
+    expect(tally.headWhole).toBe(10);
+  });
+
+  it("gives every refusal a sentence", () => {
+    for (const reason of [
+      "NO_HEAD_COUNT",
+      "CUT_NOT_BY_HEAD",
+      "SHEET_OVER_PORTIONED",
+    ] as const) {
+      expect(PORTION_REFUSALS[reason].length).toBeGreaterThan(20);
+    }
+  });
+});
+
+describe("compareLabels", () => {
+  it("puts a rate sheet's bands in the order the paper has them", () => {
+    // What `localeCompare` produced on a live screen: 1001 to 1500, 101 to 250,
+    // 251 to 500, 50 to 100.
+    const bands = ["1001 to 1500", "101 to 250", "251 to 500", "50 to 100"];
+    expect([...bands].sort(compareLabels)).toEqual([
+      "50 to 100",
+      "101 to 250",
+      "251 to 500",
+      "1001 to 1500",
+    ]);
+  });
+
+  it("sorts by the words first and only then by the figures", () => {
+    const rows = [
+      "Slaughter, Cornish x, 501 to 1000",
+      "Cutting, 50 to 100",
+      "Slaughter, Cornish x, 50 to 100",
+    ];
+    expect([...rows].sort(compareLabels)).toEqual([
+      "Cutting, 50 to 100",
+      "Slaughter, Cornish x, 50 to 100",
+      "Slaughter, Cornish x, 501 to 1000",
+    ]);
+  });
+
+  it("is a general comparison, not a band-shaped one", () => {
+    expect([" Box of 12", " Box of 6"].sort(compareLabels)).toEqual([
+      " Box of 6",
+      " Box of 12",
+    ]);
+    expect(compareLabels("Quartered", "Quartered")).toBe(0);
+  });
+});
+
+describe("categoryRepeatsLabel", () => {
+  it("suppresses a category the label already begins with", () => {
+    // `Slaughter, Cornish x, 50 to 100 · Slaughter` was on a live screen: the
+    // old check fired only on an exact match.
+    expect(categoryRepeatsLabel("Slaughter", "Slaughter")).toBe(true);
+    expect(categoryRepeatsLabel("Slaughter", "Slaughter, Cornish x, 50 to 100")).toBe(
+      true,
+    );
+    expect(categoryRepeatsLabel("Slaughter", " slaughter ")).toBe(true);
+  });
+
+  it("keeps it when the label only starts with the same letters", () => {
+    // The boundary is load-bearing: a levy is not a repeat.
+    expect(categoryRepeatsLabel("Slaughter", "Slaughterhouse levy")).toBe(false);
+    expect(categoryRepeatsLabel("Cutting", "Quartered")).toBe(false);
+    expect(categoryRepeatsLabel("", "Quartered")).toBe(false);
+  });
+});
+
+// ------------------------------------------------ the app does the lookup ---
+
+function priced(patch: Partial<BandedItem> = {}): BandedItem {
+  return {
+    id: patch.id ?? "x",
+    kind: "chicken",
+    category: "slaughter",
+    label: "Slaughter",
+    variant: "",
+    headMin: 0,
+    headMax: null,
+    priceCents: 350,
+    unit: "head",
+    minimumCents: null,
+    ...patch,
+  };
+}
+
+/** The shape off the real sheet: one breed, six bands. */
+const CORNISH = [
+  priced({ id: "a", variant: "Cornish Cross", headMin: 50, headMax: 100, priceCents: 350 }),
+  priced({ id: "b", variant: "Cornish Cross", headMin: 101, headMax: 250, priceCents: 325 }),
+  priced({ id: "c", variant: "Cornish Cross", headMin: 251, headMax: 500, priceCents: 300 }),
+  priced({ id: "d", variant: "Cornish Cross", headMin: 501, headMax: 1000, priceCents: 275 }),
+  priced({ id: "e", variant: "Cornish Cross", headMin: 1001, headMax: 1500, priceCents: 260 }),
+  priced({ id: "f", variant: "Cornish Cross", headMin: 1501, headMax: null, priceCents: 250 }),
+];
+
+describe("resolveBands", () => {
+  it("resolves 800 Cornish Cross to $2.75, and says which band", () => {
+    const [group] = resolveBands(CORNISH, 800);
+    expect(group.chosen?.id).toBe("d");
+    expect(group.chosen?.priceCents).toBe(275);
+    expect(group.refusedBecause).toBeNull();
+    expect(describeBand(group.chosen!)).toBe("501 to 1000 head");
+  });
+
+  it("keeps the breeds apart, and offers one entry each", () => {
+    const ranger = CORNISH.map((b) =>
+      priced({ ...b, id: `r-${b.id}`, variant: "Freedom Ranger", priceCents: (b.priceCents ?? 0) + 25 }),
+    );
+    const groups = resolveBands([...CORNISH, ...ranger], 800);
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => g.chosen?.priceCents).sort()).toEqual([275, 300]);
+  });
+
+  it("reports a batch no band covers rather than quoting the nearest", () => {
+    // Printed on the sheet this was modelled from: "if you show up with less
+    // than 50 chickens, we do not offer cutting, whole birds only."
+    const [group] = resolveBands(CORNISH, 30);
+    expect(group.chosen).toBeNull();
+    expect(group.refusedBecause).toBe("NO_BAND_COVERS");
+    // Emphatically NOT the 50-to-100 row, which is the nearest one.
+    expect(BAND_REFUSALS.NO_BAND_COVERS).toContain("rather than rounded");
+  });
+
+  it("says the sheet is ambiguous rather than picking, when two bands overlap", () => {
+    const overlapping = [
+      priced({ id: "a", headMin: 50, headMax: 200, priceCents: 350 }),
+      priced({ id: "b", headMin: 101, headMax: 250, priceCents: 325 }),
+    ];
+    const [group] = resolveBands(overlapping, 150);
+    expect(group.chosen).toBeNull();
+    expect(group.refusedBecause).toBe("BANDS_OVERLAP");
+    // And a head count only one of them covers still resolves.
+    expect(resolveBands(overlapping, 60)[0].chosen?.id).toBe("a");
+  });
+
+  it("resolves an unbanded row whatever the head count, including none", () => {
+    // Most of a rate sheet is this: a delivery charge, a bag, a giblet fee.
+    const delivery = [priced({ id: "d", category: "extra", label: "Delivery", unit: "flat" })];
+    expect(resolveBands(delivery, null)[0].chosen?.id).toBe("d");
+    expect(resolveBands(delivery, 800)[0].chosen?.id).toBe("d");
+  });
+
+  it("refuses to pick a band when the sheet does not say how many head", () => {
+    const [group] = resolveBands(CORNISH, null);
+    expect(group.chosen).toBeNull();
+    expect(group.refusedBecause).toBe("NO_HEAD_COUNT");
+    // The bands still come back, lowest floor first, so a person can pick one.
+    expect(group.bands.map((b) => b.id)).toEqual(["a", "b", "c", "d", "e", "f"]);
+  });
+
+  it("describes a band the way the sheet reads it", () => {
+    expect(describeBand(priced({ headMin: 50, headMax: 100 }))).toBe("50 to 100 head");
+    expect(describeBand(priced({ headMin: 1501, headMax: null }))).toBe("1501 head and over");
+    expect(describeBand(priced({ headMin: 0, headMax: 49 }))).toBe("up to 49 head");
+    // Not banded at all — nothing to say, and the caller drops the span.
+    expect(describeBand(priced({}))).toBe("");
+    expect(isBanded(priced({}))).toBe(false);
+    expect(isBanded(priced({ headMin: 50 }))).toBe(true);
+    expect(isBanded(priced({ headMax: 49 }))).toBe(true);
+  });
+
+  it("covers a band inclusively at both ends", () => {
+    const band = priced({ headMin: 101, headMax: 250 });
+    expect(bandCovers(band, 100)).toBe(false);
+    expect(bandCovers(band, 101)).toBe(true);
+    expect(bandCovers(band, 250)).toBe(true);
+    expect(bandCovers(band, 251)).toBe(false);
+    // No ceiling means no ceiling.
+    expect(bandCovers(priced({ headMin: 1501 }), 40_000)).toBe(true);
+  });
+});
+
+describe("snapshotLabel", () => {
+  it("says which of 24 prices was quoted, after the rate sheet is gone", () => {
+    // The line is a SNAPSHOT and `SET NULL (price_item_id)` guarantees the row
+    // survives its price item; nothing guarantees the meaning of "Slaughter" on
+    // its own once the breed and the band are columns somewhere else.
+    expect(snapshotLabel(CORNISH[3])).toBe(
+      "Slaughter · Cornish Cross · 501 to 1000 head",
+    );
+  });
+
+  it("leaves an ordinary row alone", () => {
+    expect(snapshotLabel(priced({ label: "Quartered", category: "cutting" }))).toBe(
+      "Quartered",
+    );
+    expect(snapshotLabel(priced({ label: "Quartered", variant: "Boneless" }))).toBe(
+      "Quartered · Boneless",
+    );
+  });
+
+  it("is suppressed as a repeated category the way any label is", () => {
+    // The composed label begins with its category, so the screen does not print
+    // "Slaughter · Cornish Cross · 501 to 1000 head · Slaughter".
+    expect(categoryRepeatsLabel("Slaughter", snapshotLabel(CORNISH[3]))).toBe(true);
   });
 });

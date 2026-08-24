@@ -30,8 +30,11 @@ import {
   addOrderLine,
   createOrder,
   getOrder,
+  listOrders,
+  markOrderPrinted,
   updateOrderLine,
 } from "../src/packs/production/order-ops";
+import { resolveBands } from "../src/packs/production/core/band";
 import {
   createBooking,
   startRunFromBooking,
@@ -2060,6 +2063,353 @@ d("production ops", () => {
           createOrder(tx, ownerCtx(), { processorId: processor.id }),
         ),
       ).rejects.toThrow(/which date or which run/);
+    });
+
+    /**
+     * SLICE 2f. The lookup the app should have been doing, against the real
+     * index — the pure resolution is pinned in `production.test.ts`, and what is
+     * here is everything that needs the unique key to be a unique key.
+     */
+    describe("the app does the lookup", () => {
+      /** One breed's ladder off the real sheet: six bands, one label. */
+      const bandedPlant = async (name: string) => {
+        const processor = await asOwner((tx) =>
+          createProcessor(tx, ownerCtx(), { name }),
+        );
+        const bands: Array<[number, number | null, number]> = [
+          [50, 100, 350],
+          [101, 250, 325],
+          [251, 500, 300],
+          [501, 1000, 275],
+          [1001, 1500, 260],
+          [1501, null, 250],
+        ];
+        for (const [headMin, headMax, priceCents] of bands) {
+          await asOwner((tx) =>
+            setPriceItem(tx, ownerCtx(), processor.id, {
+              kind: "chicken",
+              category: "slaughter",
+              label: "Slaughter",
+              variant: "Cornish Cross",
+              headMin,
+              headMax,
+              priceCents,
+              unit: "head",
+            }),
+          );
+        }
+        return processor;
+      };
+
+      it("HOLDS 24 ROWS THAT ALL CARRY ONE LABEL", async () => {
+        // The reason the unique index had to change. Take the band out of the
+        // label and all 24 cells of a 4-breed by 6-band grid collide on
+        // (tenant, processor, kind, label) — so the variant and the band's floor
+        // are in the key, and both are NOT NULL because Postgres treats two
+        // nulls as distinct and a nullable column in a unique index constrains
+        // nothing at all.
+        const processor = await bandedPlant("Matrix Poultry");
+        for (const variant of ["Freedom Ranger", "Heritage", "Broad Breasted"]) {
+          for (const [headMin, headMax] of [
+            [50, 100],
+            [101, 250],
+            [251, 500],
+            [501, 1000],
+            [1001, 1500],
+            [1501, null],
+          ] as Array<[number, number | null]>) {
+            await asOwner((tx) =>
+              setPriceItem(tx, ownerCtx(), processor.id, {
+                kind: "chicken",
+                category: "slaughter",
+                label: "Slaughter",
+                variant,
+                headMin,
+                headMax,
+                priceCents: 400,
+                unit: "head",
+              }),
+            );
+          }
+        }
+        const detail = await asOwner((tx) =>
+          getProcessor(tx, tenantId, processor.id),
+        );
+        const slaughter = (detail?.priceItems ?? []).filter(
+          (i) => i.label === "Slaughter",
+        );
+        expect(slaughter).toHaveLength(24);
+        // And they read in the order the paper does: breed, then the ladder.
+        expect(
+          slaughter
+            .filter((i) => i.variant === "Cornish Cross")
+            .map((i) => i.headMin),
+        ).toEqual([50, 101, 251, 501, 1001, 1501]);
+      });
+
+      it("still corrects rather than duplicates, band by band", async () => {
+        // The upsert has to go on working with the wider key, or a re-read of
+        // next year's sheet doubles the whole grid instead of restating it.
+        const processor = await bandedPlant("Reread Poultry");
+        await asOwner((tx) =>
+          setPriceItem(tx, ownerCtx(), processor.id, {
+            kind: "chicken",
+            category: "slaughter",
+            label: "Slaughter",
+            variant: "Cornish Cross",
+            headMin: 501,
+            headMax: 1000,
+            priceCents: 289,
+            unit: "head",
+          }),
+        );
+        const detail = await asOwner((tx) =>
+          getProcessor(tx, tenantId, processor.id),
+        );
+        expect(detail?.priceItems).toHaveLength(6);
+        expect(
+          detail?.priceItems.find((i) => i.headMin === 501)?.priceCents,
+        ).toBe(289);
+      });
+
+      it("refuses a band that ends before it starts", async () => {
+        const processor = await bandedPlant("Backwards Poultry");
+        await expect(
+          asOwner((tx) =>
+            setPriceItem(tx, ownerCtx(), processor.id, {
+              kind: "chicken",
+              category: "slaughter",
+              label: "Slaughter",
+              variant: "Muddle",
+              headMin: 250,
+              headMax: 100,
+              priceCents: 300,
+              unit: "head",
+            }),
+          ),
+        ).rejects.toThrow(/cannot end before it starts/);
+      });
+
+      it("SNAPSHOTS 800 BIRDS AT $2.75 AND SAYS WHICH BAND IT USED", async () => {
+        // The claim the whole slice rests on. The band decides WHICH price gets
+        // snapshotted; the snapshot itself is unchanged, and `core/fee.ts` never
+        // sees any of this — putting the lookup in the fee would make a rate
+        // change move last October's sheet.
+        const processor = await bandedPlant("Eight Hundred Poultry");
+        const run = await asOwner((tx) =>
+          startRun(tx, ownerCtx(), {
+            code: "BAND-800",
+            startedOn: TODAY,
+            processorId: processor.id,
+          }),
+        );
+        const order = await asOwner((tx) =>
+          createOrder(tx, ownerCtx(), {
+            processorId: processor.id,
+            runId: run.id,
+            kind: "chicken",
+            headCount: 800,
+          }),
+        );
+        const detail = await asOwner((tx) =>
+          getProcessor(tx, tenantId, processor.id),
+        );
+        const resolved = resolveBands(
+          (detail?.priceItems ?? []).map((i) => ({
+            id: i.id,
+            kind: i.kind,
+            category: i.category,
+            label: i.label,
+            variant: i.variant,
+            headMin: i.headMin,
+            headMax: i.headMax,
+            priceCents: i.priceCents,
+            unit: i.unit,
+            minimumCents: i.minimumCents,
+          })),
+          800,
+        );
+        expect(resolved).toHaveLength(1);
+        expect(resolved[0].chosen?.priceCents).toBe(275);
+
+        const line = await asOwner((tx) =>
+          addOrderLine(tx, ownerCtx(), order.id, {
+            priceItemId: resolved[0].chosen?.id,
+          }),
+        );
+        expect(line.unitPriceCents).toBe(275);
+        // The label is what survives the rate sheet being replaced, so it has to
+        // carry what told this row apart from its 23 siblings.
+        expect(line.label).toBe("Slaughter · Cornish Cross · 501 to 1000 head");
+      });
+
+      it("REFUSES A BAND THAT DOES NOT COVER THE SHEET'S OWN HEAD COUNT", async () => {
+        // "If you show up with less than 50 chickens, we do not offer cutting,
+        // whole birds only." Reported, never rounded to the nearest band.
+        const processor = await bandedPlant("Forty Bird Poultry");
+        const run = await asOwner((tx) =>
+          startRun(tx, ownerCtx(), {
+            code: "BAND-40",
+            startedOn: TODAY,
+            processorId: processor.id,
+          }),
+        );
+        const order = await asOwner((tx) =>
+          createOrder(tx, ownerCtx(), {
+            processorId: processor.id,
+            runId: run.id,
+            kind: "chicken",
+            headCount: 40,
+          }),
+        );
+        const detail = await asOwner((tx) =>
+          getProcessor(tx, tenantId, processor.id),
+        );
+        const smallest = (detail?.priceItems ?? []).find((i) => i.headMin === 50);
+        await expect(
+          asOwner((tx) =>
+            addOrderLine(tx, ownerCtx(), order.id, {
+              priceItemId: smallest?.id,
+            }),
+          ),
+        ).rejects.toThrow(/does not cover 40 head/);
+      });
+
+      it("lets a sheet with no head count quote a band by hand", async () => {
+        // A sheet written before anybody has counted has nothing to check
+        // against, so choosing the band deliberately is the honest way to write
+        // the line and nothing refuses it.
+        const processor = await bandedPlant("Uncounted Poultry");
+        const run = await asOwner((tx) =>
+          startRun(tx, ownerCtx(), {
+            code: "BAND-NONE",
+            startedOn: TODAY,
+            processorId: processor.id,
+          }),
+        );
+        const order = await asOwner((tx) =>
+          createOrder(tx, ownerCtx(), {
+            processorId: processor.id,
+            runId: run.id,
+            kind: "chicken",
+          }),
+        );
+        const detail = await asOwner((tx) =>
+          getProcessor(tx, tenantId, processor.id),
+        );
+        const band = (detail?.priceItems ?? []).find((i) => i.headMin === 1501);
+        const line = await asOwner((tx) =>
+          addOrderLine(tx, ownerCtx(), order.id, { priceItemId: band?.id }),
+        );
+        expect(line.unitPriceCents).toBe(250);
+        expect(line.label).toBe(
+          "Slaughter · Cornish Cross · 1501 head and over",
+        );
+      });
+
+      it("moves a whole grid onto one animal without reporting false clashes", async () => {
+        // `keyOf` had to grow the variant and the floor with the index. Without
+        // them all six bands read as one key and the bulk move would report five
+        // collisions where nothing collides.
+        const processor = await asOwner((tx) =>
+          createProcessor(tx, ownerCtx(), { name: "Unsorted Poultry" }),
+        );
+        for (const [headMin, headMax] of [
+          [50, 100],
+          [101, 250],
+          [251, 500],
+        ] as Array<[number, number | null]>) {
+          await asOwner((tx) =>
+            setPriceItem(tx, ownerCtx(), processor.id, {
+              category: "slaughter",
+              label: "Slaughter",
+              variant: "Cornish Cross",
+              headMin,
+              headMax,
+              priceCents: 300,
+              unit: "head",
+            }),
+          );
+        }
+        const before = await asOwner((tx) =>
+          getProcessor(tx, tenantId, processor.id),
+        );
+        const result = await asOwner((tx) =>
+          setPriceItemKind(
+            tx,
+            ownerCtx(),
+            (before?.priceItems ?? []).map((i) => i.id),
+            "chicken",
+          ),
+        );
+        expect(result).toEqual({ moved: 3, clashed: [] });
+      });
+
+      it("stamps a sheet as printed, and says nothing until it is", async () => {
+        // A DATE rather than a status, because a status somebody has to advance
+        // is a status nobody advances. Printing is the moment you would want it
+        // recorded, so the print button is the only thing that writes it.
+        const { processor } = await plantWithRates("Printed Packing");
+        const run = await asOwner((tx) =>
+          startRun(tx, ownerCtx(), {
+            code: "PRINTED",
+            startedOn: TODAY,
+            processorId: processor.id,
+          }),
+        );
+        const order = await asOwner((tx) =>
+          createOrder(tx, ownerCtx(), {
+            processorId: processor.id,
+            runId: run.id,
+          }),
+        );
+        expect(order.printedAt).toBeNull();
+
+        // MEMBER, like every other write on this table: printing a sheet and
+        // walking it out to the trailer is the yard's job.
+        const at = new Date("2026-08-23T15:04:05.000Z");
+        const stamped = await asStaff((tx) =>
+          markOrderPrinted(tx, staffCtx(), order.id, at),
+        );
+        expect(stamped.printedAt?.toISOString()).toBe(at.toISOString());
+
+        // Reprinting after a line changed overwrites: the version that went over
+        // is the last one, and the first printing is not a fact anybody needs
+        // back.
+        const again = new Date("2026-08-24T09:00:00.000Z");
+        const restamped = await asStaff((tx) =>
+          markOrderPrinted(tx, staffCtx(), order.id, again),
+        );
+        expect(restamped.printedAt?.toISOString()).toBe(again.toISOString());
+      });
+
+      it("carries the day a sheet is for, so a list of them can be written", async () => {
+        // The read the front door needed and did not have: every screen listing
+        // sheets had to join for the day itself, so the list that would have
+        // made them findable could not be written without one.
+        const { processor } = await plantWithRates("Findable Packing");
+        const booking = await asOwner((tx) =>
+          createBooking(tx, ownerCtx(), {
+            processorId: processor.id,
+            bookedFor: "2026-09-15",
+          }),
+        );
+        const order = await asOwner((tx) =>
+          createOrder(tx, ownerCtx(), {
+            processorId: processor.id,
+            bookingId: booking.id,
+            title: "Findable",
+          }),
+        );
+        const detail = await asOwner((tx) => getOrder(tx, tenantId, order.id));
+        expect(detail?.bookedFor).toBe("2026-09-15");
+        expect(detail?.run).toBeNull();
+
+        const listed = await asOwner((tx) => listOrders(tx, tenantId));
+        expect(
+          listed.find((e) => e.order.id === order.id)?.bookedFor,
+        ).toBe("2026-09-15");
+      });
     });
   });
 });

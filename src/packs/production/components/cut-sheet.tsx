@@ -3,8 +3,16 @@ import { formatMoney } from "@/lib/money";
 import type { ProductionOrderLine } from "@/db/schema";
 import type { FeeLineTotal } from "../core/fee";
 import {
+  PORTION_REFUSALS,
+  portionRefusal,
+  portionSentence,
+  tallyPortions,
+} from "../core/portions";
+import {
   PRICE_CATEGORY_LABELS,
+  categoryRepeatsLabel,
   isComputablePriceUnit,
+  isPriceUnit,
   priceWithUnit,
   slugLabel,
 } from "../vocabulary";
@@ -61,6 +69,25 @@ export function CutSheet({
   currencySymbol: string | null;
   sheetWord: string;
 }) {
+  /**
+   * Folded here rather than passed in, because this component is the only place
+   * that holds both halves of the question — the sheet's head count and the
+   * lines that divide it up — and a second caller working it out separately is
+   * how the screen and the printout come to disagree.
+   */
+  const portions = tallyPortions(
+    lines.map((line) => ({
+      key: line.id,
+      label: line.label,
+      category: line.category,
+      unit: line.unit !== null && isPriceUnit(line.unit) ? line.unit : null,
+      quantity: line.quantity,
+    })),
+    order.headCount,
+  );
+  const portionsRefusedBecause = portionRefusal(portions);
+  const portionLine = portionSentence(portions);
+
   return (
     <div className="space-y-2">
       {/*
@@ -98,16 +125,22 @@ export function CutSheet({
               which animal offers everything, because there is nothing to
               filter on and hiding rows would be worse than a long list.
 
-              Already-added options come out too: the write refuses a second
-              line for one option, and this is what stops anybody meeting that.
+              **ALREADY-ADDED OPTIONS COME OUT INSIDE THE DIALOG, NOT HERE**,
+              and the order matters: the bands have to resolve against the whole
+              of a plant's list first, or a group whose covering band is already
+              on the sheet reports that no band covers this batch — which is
+              untrue and alarming. See `AddOrderLineDialog`.
             */}
             <AddOrderLineDialog
               orderId={order.id}
               options={priceOptions.filter(
                 (o) =>
-                  !lines.some((l) => l.priceItemId === o.id) &&
-                  (order.kind === "" || o.kind === "" || o.kind === order.kind),
+                  order.kind === "" || o.kind === "" || o.kind === order.kind,
               )}
+              used={lines
+                .map((l) => l.priceItemId)
+                .filter((id): id is string => id !== null)}
+              headCount={order.headCount}
               sheetWord={sheetWord}
             />
             <AddInstructionDialog orderId={order.id} />
@@ -134,15 +167,20 @@ export function CutSheet({
               >
                 <span className="font-medium">{line.label}</span>
                 {/*
-                  **THE GROUPING IS SCREEN-ONLY, AND IT DISAPPEARS WHEN IT ONLY
-                  REPEATS THE LABEL.** Both found by reading a real one:
-                  "Slaughter · Slaughter" on five rows of Valley Poultry's
+                  **THE GROUPING IS SCREEN-ONLY, AND IT DISAPPEARS WHEN THE
+                  LABEL ALREADY BEGINS WITH IT.** Both found by reading a real
+                  one: "Slaughter · Slaughter" on five rows of Valley Poultry's
                   sheet, and on the printed page a butcher being told that
                   "Keep the heart and liver" is filed under "Extras" — which is
-                  this farm's filing, not an instruction to them.
+                  this farm's filing, not an instruction to them. The check
+                  fired only on an EXACT match until 2f, so a label carrying its
+                  own qualifiers still doubled: `Slaughter, Cornish x, 50 to 100
+                  · Slaughter`.
                 */}
-                {categoryLabel(line.category).toLowerCase() !==
-                  line.label.trim().toLowerCase() && (
+                {!categoryRepeatsLabel(
+                  categoryLabel(line.category),
+                  line.label,
+                ) && (
                   <span className="text-muted-foreground print:hidden">
                     {categoryLabel(line.category)}
                   </span>
@@ -205,6 +243,47 @@ export function CutSheet({
           })}
         </ul>
       )}
+
+      {/*
+        **THE WHOLE-BIRD REMAINDER, AND IT PRINTS.** *"10 of the 100 birds might
+        need to be whole birds and then some will get cut up."* Ninety quartered
+        out of a hundred left ten animals nothing on this page mentioned, and the
+        plant is the party that needs to know: the sentence it reads is "90
+        Quartered · 10 back whole", so it is the one thing here besides the lines
+        themselves that survives `print:`.
+
+        Derived, never stored — `core/portions.ts` holds the argument, including
+        why a blank quantity means all of them and why only `cutting` counts.
+      */}
+      {portionLine !== "" && (
+        <p className="border-t pt-2 text-sm">
+          <span className="text-muted-foreground">Of {portions.headCount} head — </span>
+          <span className="font-medium">{portionLine}</span>
+        </p>
+      )}
+      {portionsRefusedBecause === "SHEET_OVER_PORTIONED" && (
+        <p className="border-t pt-2 text-sm text-destructive print:hidden">
+          {PORTION_REFUSALS.SHEET_OVER_PORTIONED} The cutting adds up to{" "}
+          {portions.headPortioned} against {portions.headCount} on the sheet.
+        </p>
+      )}
+      {portionsRefusedBecause === "NO_HEAD_COUNT" && portions.shares.length > 0 && (
+        <p className="border-t pt-2 text-xs text-muted-foreground print:hidden">
+          {PORTION_REFUSALS.NO_HEAD_COUNT}
+        </p>
+      )}
+      {/*
+        Only worth saying on a sheet covering several animals. On a beef, where
+        cutting is quoted per pound of hanging weight and the sheet is for one
+        animal, it is a sentence about nothing.
+      */}
+      {portionsRefusedBecause === "CUT_NOT_BY_HEAD" &&
+        order.headCount !== null &&
+        order.headCount > 1 && (
+          <p className="border-t pt-2 text-xs text-muted-foreground print:hidden">
+            {PORTION_REFUSALS.CUT_NOT_BY_HEAD}
+          </p>
+        )}
     </div>
   );
 }

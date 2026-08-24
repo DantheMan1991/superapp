@@ -520,6 +520,71 @@ export function priceCategoryRank(category: string): number {
 }
 
 /**
+ * Compare two labels the way a person reads them, with numbers as numbers.
+ *
+ * **`localeCompare` PUT A RATE SHEET IN THIS ORDER: `1001 to 1500`, `101 to
+ * 250`, `251 to 500`, `50 to 100`.** Alphabetically that is correct and to
+ * anybody holding the sheet it is nonsense — the bands are a ladder and they
+ * came out shuffled. Any label carrying a figure has the same problem, which is
+ * why this is a general comparison rather than a band-shaped one: `2 lb bag`
+ * before `10 lb bag`, `Box of 6` before `Box of 12`.
+ *
+ * Digit runs compare as numbers and everything else compares as text, so
+ * `Slaughter, Cornish x, 50 to 100` still sorts under `Slaughter` and only then
+ * by its figures. Leading zeroes and decimal points are not special-cased:
+ * `007` is seven, and `1.5` is a one followed by a five, which orders correctly
+ * against `1.25` for the only reason that matters here — nobody bands a rate
+ * sheet in fractions of an animal.
+ */
+export function compareLabels(a: string, b: string): number {
+  const left = chunks(a);
+  const right = chunks(b);
+  for (let i = 0; i < Math.min(left.length, right.length); i += 1) {
+    const x = left[i];
+    const y = right[i];
+    const bothNumbers = typeof x === "number" && typeof y === "number";
+    if (bothNumbers) {
+      if (x !== y) return (x as number) - (y as number);
+      continue;
+    }
+    const compared = String(x).localeCompare(String(y));
+    if (compared !== 0) return compared;
+  }
+  return left.length - right.length;
+}
+
+/** `Slaughter, 50 to 100` → `["slaughter, ", 50, " to ", 100]`. */
+function chunks(value: string): Array<string | number> {
+  const parts = value.trim().toLowerCase().match(/\d+|\D+/g) ?? [];
+  return parts.map((part) => (/^\d+$/.test(part) ? Number(part) : part));
+}
+
+/**
+ * Does printing the category beside this label only say the label again?
+ *
+ * **THE SUPPRESSION USED TO FIRE ONLY ON AN EXACT MATCH**, which was enough
+ * while a label was one word and stopped being enough the moment a real sheet's
+ * labels carried their qualifiers: `Slaughter, Cornish x, 50 to 100 ·
+ * Slaughter` was on a screen. A label that BEGINS with its own category is
+ * repeating it, and the category adds nothing.
+ *
+ * **THE BOUNDARY IS LOAD-BEARING.** `Slaughterhouse levy` begins with the
+ * letters of `slaughter` and is not repeating it, so the character after the
+ * match has to be punctuation or a space — anything but another letter or
+ * digit.
+ */
+export function categoryRepeatsLabel(
+  categoryLabel: string,
+  label: string,
+): boolean {
+  const category = categoryLabel.trim().toLowerCase();
+  const text = label.trim().toLowerCase();
+  if (category === "" || !text.startsWith(category)) return false;
+  const next = text.charAt(category.length);
+  return next === "" || !/[a-z0-9]/.test(next);
+}
+
+/**
  * A price with its unit, for a line of a screen — `$1.05 per lb hanging`.
  *
  * Null in means null out, the same refusal `centsToDisplay` makes and for the

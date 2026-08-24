@@ -11,6 +11,7 @@ import type { ProductionCtx } from "./ops";
 import {
   addOrderLine,
   createOrder,
+  markOrderPrinted,
   removeOrder,
   removeOrderLine,
   updateOrder,
@@ -123,6 +124,46 @@ export async function updateOrderAction(input: unknown) {
       targetType: "production_order",
       targetId: row.id,
       meta: { kind: row.kind, headCount: row.headCount },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Stamp a sheet as printed.
+ *
+ * **THE TIME IS TAKEN HERE AND NOT IN THE OPS LAYER**, the same arrangement
+ * every dated write in this pack uses: an op that reads the clock cannot be
+ * tested against a fixed one.
+ *
+ * **AUDITED, because this is the record of a document leaving the building.**
+ * It is the only entry in this pack that says a piece of paper went to a third
+ * party, and it is the row somebody looks at when a plant says it never got a
+ * sheet.
+ */
+export async function markOrderPrintedAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const at = new Date();
+    const row = await withTenant(
+      ctx.tenant.id,
+      (tx) => markOrderPrinted(tx, ctxOf(ctx), parsed.data.id, at),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "production.order.printed",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "production_order",
+      targetId: row.id,
+      meta: { processorId: row.processorId, printedAt: at.toISOString() },
     });
     revalidatePath(BASE, "layout");
     return { ok: true };

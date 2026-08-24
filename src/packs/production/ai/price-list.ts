@@ -35,6 +35,20 @@ import { isPriceUnit, isValidSlug } from "../vocabulary";
  * underneath it: **a range is still not a price**, and $0.65–$0.90 a pound
  * comes back null with the range in the note, because averaging it would invent
  * a figure the plant never quoted.
+ *
+ * ── AND RULE 5 WENT HALF WRONG, WHICH IS WORTH KNOWING ──────────────────────
+ *
+ * It said a matrix of prices is a matrix of items and *the label must say what
+ * tells them apart*: `Slaughter, Cornish Cross, 25-49 birds`. The first half
+ * still holds — it is still one item per cell. The second half made the app
+ * unable to read its own data: a batch of 800 birds cannot be compared against
+ * words, so the farm was handed 24 siblings and told to find the right one.
+ *
+ * **WHAT TELLS THEM APART IS NOW FIELDS: `variant`, `headMin`, `headMax`** —
+ * asked for in the tool schema rather than parsed back out of a label
+ * afterwards, because a regex over a plant's own prose is a second reader with
+ * none of the first one's judgement. The label is what is being charged for and
+ * is the same across the whole matrix.
  */
 
 /**
@@ -85,9 +99,13 @@ RULES, IN ORDER OF IMPORTANCE.
 
 4. A MENU IS A LIST OF ITEMS, NOT ONE PRICE. Quartered $1.05, eight-piece $1.25, deboned $1.30 is three items, each with its own label and price. Never pick one of them, never average them, and never fold them into a single cutting fee.
 
-5. IF THE SHEET PRICES THE SAME THING SEVERAL WAYS — by breed, by batch size, by weight band — each priced cell is its own item, and the label must say what tells it apart from the others: "Slaughter, Cornish Cross, 25-49 birds". A matrix of prices is a matrix of items. Only do this where the sheet gives a definite price per cell; a range is still rule 2.
+5. IF THE SHEET PRICES THE SAME THING SEVERAL WAYS — by breed, by batch size, by weight band — each priced cell is STILL its own item, and what tells the cells apart goes in the FIELDS, not in the label. A matrix of prices is a matrix of items.
+   - variant is the qualifier: the breed, the grade, whatever the column of the table is headed with. "Cornish Cross", "Freedom Ranger", "Heritage", "Boneless". The plant's own words. Empty when the sheet does not distinguish.
+   - headMin and headMax are the batch size the price applies to, in head. "25-49 birds" is headMin 25 and headMax 49. "1-24" is headMin 1 and headMax 24. "Over 1500" is headMin 1501 and headMax null. A price that applies whatever the batch size has headMin null and headMax null.
+   - The label stays the same across the whole matrix, because it is the same thing being charged for: all 24 cells of a 4-breed by 6-batch-size slaughter grid have the label "Slaughter".
+   DO NOT put the breed or the batch size in the label as well. It is being read by an app that looks the price up: a batch of 800 Cornish Cross has to find exactly one row, and words in a label cannot be compared against a number of birds. Only do this where the sheet gives a definite price per cell; a range is still rule 2.
 
-6. THE LABEL IS THE PLANT'S OWN WORDS for what is being charged for, short enough to read in a list. Do not translate it, do not tidy it, do not invent a category name for it. LEAVE THE ANIMAL OUT OF IT — "Duck & Geese: Quartered" is a label of "Quartered" on a duck item and a goose item. The one exception is rule 5, where the label is the only thing telling two priced cells apart.
+6. THE LABEL IS THE PLANT'S OWN WORDS for what is being charged for, short enough to read in a list. Do not translate it, do not tidy it, do not invent a category name for it. LEAVE THE ANIMAL OUT OF IT — "Duck & Geese: Quartered" is a label of "Quartered" on a duck item and a goose item. Leave the breed and the batch size out of it too — those are rule 5's fields.
 
 7. CATEGORY GROUPS THE SHEET the way the paper does: slaughter, cutting, packaging, giblets, extra. Use one of those five where it fits and "extra" where nothing does.
 
@@ -126,7 +144,22 @@ const TOOL = {
             label: {
               type: "string",
               description:
-                "What is being charged for, in the plant's own words, and specific enough to tell it apart from the other options.",
+                "What is being charged for, in the plant's own words. NOT the breed and NOT the batch size — those are variant, headMin and headMax. Every cell of one matrix shares one label.",
+            },
+            variant: {
+              type: "string",
+              description:
+                "The qualifier that tells this priced cell apart from its siblings — the breed, the grade, whatever heads the column. The plant's own words. Empty when the sheet does not price the same thing several ways.",
+            },
+            headMin: {
+              type: ["integer", "null"],
+              description:
+                "The smallest batch, in head, this price applies to. 25 for \"25-49 birds\", 1501 for \"over 1500\". Null when the price does not depend on batch size.",
+            },
+            headMax: {
+              type: ["integer", "null"],
+              description:
+                "The largest batch, in head, this price applies to, inclusive. 49 for \"25-49 birds\". Null for the top band and for a price that does not depend on batch size.",
             },
             price: {
               type: ["number", "null"],
@@ -163,6 +196,9 @@ const TOOL = {
             "kind",
             "category",
             "label",
+            "variant",
+            "headMin",
+            "headMax",
             "price",
             "unit",
             "minimum",
@@ -212,6 +248,12 @@ export interface ProposedPriceItem {
   kind: string;
   category: string;
   label: string;
+  /** The breed or qualifier, in the plant's own words. Empty when unbanded. */
+  variant: string;
+  /** The band's floor, in head. Null is "from the first". */
+  headMin: number | null;
+  /** The band's ceiling, in head, inclusive. Null is "no ceiling". */
+  headMax: number | null;
   price: number | null;
   unit: string;
   minimum: number | null;
@@ -268,10 +310,37 @@ export function validatePriceList(raw: unknown): PriceListProposal {
     const categoryRaw = readText(row.category, 63)
       .toLowerCase()
       .replace(/\s+/g, "_");
+    /**
+     * **A BAND THAT ENDS BEFORE IT BEGINS IS DROPPED BACK TO NO BAND**, rather
+     * than the row being lost. `25-19` is a misread of `25-49` and the price on
+     * it is still worth putting in front of somebody; a row nothing can ever
+     * resolve to would sit on the list looking like a price and behaving like a
+     * hole in the ladder. The form makes them supply it.
+     */
+    const headMin = readNumber(row.headMin, {
+      min: 0,
+      max: 1_000_000,
+      integer: true,
+    });
+    const headMaxRaw = readNumber(row.headMax, {
+      min: 0,
+      max: 1_000_000,
+      integer: true,
+    });
+    const headMax =
+      headMaxRaw !== null && headMin !== null && headMaxRaw < headMin
+        ? null
+        : headMaxRaw;
     items.push({
       kind: isValidSlug(kindRaw) ? kindRaw : "",
       category: isValidSlug(categoryRaw) ? categoryRaw : "extra",
       label,
+      // Free text and the plant's own words, so nothing is validated beyond a
+      // length — a variant is not a slug and this pack does not know what a
+      // breed is.
+      variant: readText(row.variant, 100),
+      headMin,
+      headMax,
       // Money, in dollars, and never negative. A plant does not pay you.
       price: readNumber(row.price, { min: 0, max: 1_000_000 }),
       unit,

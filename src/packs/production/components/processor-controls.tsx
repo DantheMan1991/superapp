@@ -508,6 +508,9 @@ export function PriceItemDialog({
     kind: string;
     category: string;
     label: string;
+    variant: string;
+    headMin: number;
+    headMax: number | null;
     priceCents: number | null;
     unit: string;
     minimumCents: number | null;
@@ -518,6 +521,13 @@ export function PriceItemDialog({
   const [kind, setKind] = useState(existing?.kind ?? "");
   const [category, setCategory] = useState(existing?.category ?? "cutting");
   const [label, setLabel] = useState(existing?.label ?? "");
+  const [variant, setVariant] = useState(existing?.variant ?? "");
+  const [headMin, setHeadMin] = useState(
+    existing && existing.headMin > 0 ? String(existing.headMin) : "",
+  );
+  const [headMax, setHeadMax] = useState(
+    existing?.headMax != null ? String(existing.headMax) : "",
+  );
   const [price, setPrice] = useState(
     existing?.priceCents != null ? (existing.priceCents / 100).toFixed(2) : "",
   );
@@ -542,6 +552,11 @@ export function PriceItemDialog({
         kind,
         category,
         label: label.trim(),
+        variant: variant.trim(),
+        // Empty means from the first head, which the column's default says too.
+        // Null is NOT nought here: the top band genuinely has no ceiling.
+        headMin: numOrNull(headMin) ?? 0,
+        headMax: numOrNull(headMax),
         price: numOrNull(price),
         unit,
         minimum: numOrNull(minimum),
@@ -627,6 +642,53 @@ export function PriceItemDialog({
               </Select>
             </div>
           </div>
+          {/*
+            **THE BREED AND THE BATCH SIZE ARE FIELDS, NOT WORDS IN THE LABEL.**
+            One real chicken sheet prices slaughter as a 4-breed x 6-band grid,
+            and 2a put what told the 24 cells apart in the label — which read
+            correctly and made the app unable to do the lookup. With these three
+            filled in, a sheet for 800 Cornish Cross resolves its own price.
+          */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="price-variant">Which one</Label>
+              <Input
+                id="price-variant"
+                value={variant}
+                onChange={(e) => setVariant(e.target.value)}
+                placeholder="Cornish Cross"
+                disabled={Boolean(existing)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="price-head-min">From this many head</Label>
+              <Input
+                id="price-head-min"
+                type="number"
+                min={0}
+                value={headMin}
+                onChange={(e) => setHeadMin(e.target.value)}
+                placeholder="Any"
+                disabled={Boolean(existing)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="price-head-max">Up to</Label>
+              <Input
+                id="price-head-max"
+                type="number"
+                min={0}
+                value={headMax}
+                onChange={(e) => setHeadMax(e.target.value)}
+                placeholder="No ceiling"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Leave all three empty unless their sheet prices the same thing
+            several ways. Empty at the top is the last band — &ldquo;over
+            1500&rdquo; is a row starting at 1501 with nothing above it.
+          </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="price-amount">Price</Label>

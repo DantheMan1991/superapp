@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge";
 import { slugLabel } from "@/packs/production/vocabulary";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOrder } from "@/packs/production/order-ops";
-import { getBooking } from "@/packs/production/booking-ops";
 import { getProcessor } from "@/packs/production/processor-ops";
 import { runDetail } from "@/packs/production/ops";
 import { CutSheet } from "@/packs/production/components/cut-sheet";
@@ -69,14 +68,11 @@ export default async function CutSheetPage({
         ? await runDetail(tx, ctx.tenant.id, detail.order.runId, today)
         : null;
       /**
-       * The day the sheet was written against. Read separately rather than
-       * joined onto the order, because a sheet started off a RUN has no booking
-       * at all and the printed header has to say so rather than print nothing.
+       * The day the sheet was written against comes with the order now —
+       * `getOrder` resolves it, because every screen listing sheets needed the
+       * same join and the printed header was doing it by hand.
        */
-      const booking = detail.order.bookingId
-        ? await getBooking(tx, ctx.tenant.id, detail.order.bookingId)
-        : null;
-      return { detail, processor, pack, run, bookedFor: booking?.bookedFor ?? null };
+      return { detail, processor, pack, run, bookedFor: detail.bookedFor };
     },
     { role: ctx.role },
   );
@@ -144,12 +140,17 @@ export default async function CutSheetPage({
       </div>
 
       <div className="print:hidden">
+        {/*
+          BACK TO THE LIST THIS PAGE BELONGS TO, which until 2f did not exist —
+          a sheet with no run sent you to Booked dates, which is where it was
+          written rather than where it lives.
+        */}
         <Link
-          href={order.runId ? `${BASE}/${order.runId}` : `${BASE}/bookings`}
+          href={order.runId ? `${BASE}/${order.runId}` : `${BASE}/orders`}
           className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
         >
           <ChevronLeft className="mr-1 h-4 w-4" />
-          {order.runId ? runWord : "Booked dates"}
+          {order.runId ? runWord : `Every ${sheetWord.toLowerCase()}`}
         </Link>
       </div>
 
@@ -165,7 +166,7 @@ export default async function CutSheetPage({
         }`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <PrintOrderButton sheetWord={sheetWord} />
+            <PrintOrderButton id={order.id} sheetWord={sheetWord} />
             {isOpen && <RemoveOrderButton id={order.id} sheetWord={sheetWord} />}
           </div>
         }
@@ -186,8 +187,12 @@ export default async function CutSheetPage({
               kind: item.kind,
               category: item.category,
               label: item.label,
+              variant: item.variant,
+              headMin: item.headMin,
+              headMax: item.headMax,
               priceCents: item.priceCents,
               unit: item.unit,
+              minimumCents: item.minimumCents,
             }))}
             currencySymbol={currencySymbol}
             sheetWord={sheetWord}

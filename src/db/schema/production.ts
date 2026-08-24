@@ -973,6 +973,44 @@ export const productionProcessorPriceItems = pgTable(
     category: text("category").notNull().default("extra"),
     /** What it is, in the plant's own words. */
     label: text("label").notNull(),
+    /**
+     * **WHICH ONE OF IT** — the breed, or whatever else the sheet prices
+     * separately. `Cornish Cross`, `Freedom Ranger`, `Heritage`.
+     *
+     * **THE PLANT'S OWN WORDS, NOT A SLUG AND NOT A TAXONOMY.** This pack does
+     * not know what a breed is and must not start: `livestock` owns that, the
+     * profile owns the species list, and what a rate sheet distinguishes is
+     * frequently not a breed at all — "boneless", "organic", "two day". Free
+     * text is the same call `production_processor_cuts.name` made, for the same
+     * reason.
+     *
+     * `NOT NULL DEFAULT ''` and empty means "however they come", exactly as
+     * `kind` does. **It is in the unique index and a nullable column in a unique
+     * index constrains nothing**, because Postgres treats two nulls as distinct
+     * — the trap `inventory_count_lines` and `inventory_tax_treatments` both hit
+     * before this.
+     */
+    variant: text("variant").notNull().default(""),
+    /**
+     * **THE BATCH SIZE THIS PRICE STARTS AT.** A poultry plant charges $3.50 a
+     * bird for fifty and $2.75 for eight hundred, and until 2f the only place
+     * that could be said was the label — which made the app's own lookup
+     * impossible and put 24 siblings in front of somebody who needed one of them.
+     *
+     * `NOT NULL DEFAULT 0`, and nought means *from the first head*, which is
+     * true of every unbanded item on every sheet. Same argument as `variant`:
+     * it is in the unique index, so it cannot be nullable.
+     */
+    headMin: integer("head_min").notNull().default(0),
+    /**
+     * The last head this price covers, INCLUSIVE. **The one bound that is
+     * nullable, and null means no ceiling** — the "Over 1500" line at the bottom
+     * of every band table. It is deliberately NOT in the unique index: two rows
+     * starting at the same head are two prices for one batch size whichever way
+     * they end, and putting a nullable column in the index would let them both
+     * exist.
+     */
+    headMax: integer("head_max"),
     /** What they charge, in cents, for one `unit`. Null when unquoted. */
     priceCents: integer("price_cents"),
     /** CLOSED. See `PRICE_UNITS` — the whole point of this table. */
@@ -996,16 +1034,32 @@ export const productionProcessorPriceItems = pgTable(
       t.id,
     ),
     /**
-     * One price per named thing per animal. A second row saying "Quartered ·
-     * chicken" would be two prices for one option with nothing to say which is
-     * current — the same rule the handle table's unique index states, and what
-     * lets this year's rate sheet be re-read over last year's as a correction
-     * rather than a duplicate.
+     * One price per named thing per animal per variant per band. A second row
+     * saying "Quartered · chicken" would be two prices for one option with
+     * nothing to say which is current — the same rule the handle table's unique
+     * index states, and what lets this year's rate sheet be re-read over last
+     * year's as a correction rather than a duplicate.
+     *
+     * **THE VARIANT AND THE LOWER BOUND JOINED IT IN 2f, AND THEY HAD TO.**
+     * Taking the breed and the batch size out of the label is what makes the
+     * app able to do the lookup — and it also makes all 24 of one plant's
+     * chicken slaughter rows carry the label `Slaughter`. Without these two
+     * columns in the key they are 24 rows fighting over one.
+     *
+     * **BOTH ARE `NOT NULL`, WHICH IS THE WHOLE POINT.** Postgres treats two
+     * nulls as distinct, so a nullable column in a unique index constrains
+     * nothing at all — the trap this repo has now hit three times
+     * (`inventory_count_lines`, `inventory_tax_treatments`, and the note in
+     * `inventory.md`). `head_max` stays out of the key rather than being made
+     * `NOT NULL` with a sentinel: "no ceiling" is a real answer and 2147483647
+     * is not one.
      */
     uniqueIndex("production_processor_price_items_unique_idx").on(
       t.tenantId,
       t.processorId,
       t.kind,
+      t.variant,
+      t.headMin,
       t.label,
     ),
     index("production_processor_price_items_processor_idx").on(
@@ -1040,6 +1094,16 @@ export const productionProcessorPriceItems = pgTable(
     check(
       "production_processor_price_items_minimum_nonneg",
       sql`${t.minimumCents} is null or ${t.minimumCents} >= 0`,
+    ),
+    /**
+     * A band that starts before the first animal is not a band, and one that
+     * ends before it starts covers nothing at all — a row nothing can ever
+     * resolve to, which would look like a price on the screen and behave like a
+     * gap in the ladder.
+     */
+    check(
+      "production_processor_price_items_band_ordered",
+      sql`${t.headMin} >= 0 and (${t.headMax} is null or ${t.headMax} >= ${t.headMin})`,
     ),
   ],
 );
@@ -1248,6 +1312,21 @@ export const productionOrders = pgTable(
     kind: text("kind").notNull().default(""),
     /** How many head this sheet covers. Null when it covers whatever went. */
     headCount: integer("head_count"),
+    /**
+     * **WHEN IT WAS LAST PRINTED, WHICH IS THE NEAREST THING TO "HANDED OVER".**
+     *
+     * A DATE RATHER THAN A STATUS, and the dossier called that months before
+     * this column existed: a status somebody has to advance is a status nobody
+     * advances, and the moment a sheet is printed is the moment somebody would
+     * want it recorded. It is stamped by the print button and by nothing else,
+     * so it says exactly what it claims to say — this page was sent to a
+     * printer — rather than pretending to know that a plant received it.
+     *
+     * **NULL IS NOT "NEVER SENT".** A sheet can be read off a screen at the
+     * counter or photographed, and null only means nobody pressed Print here.
+     * The list says "Not printed" rather than anything stronger.
+     */
+    printedAt: timestamp("printed_at", { withTimezone: true }),
     notes: text("notes").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

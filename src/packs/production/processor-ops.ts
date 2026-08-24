@@ -13,6 +13,7 @@ import { ProductionError, type ProductionCtx, requireWrite } from "./ops";
 import {
   INSPECTIONS,
   LABELLING_OPTIONS,
+  compareLabels,
   isPriceUnit,
   isValidSlug,
   priceCategoryRank,
@@ -78,6 +79,12 @@ export interface PriceItemInput {
   kind?: string;
   category?: string;
   label: string;
+  /** The plant's own qualifier — a breed, usually. Empty is "however they come". */
+  variant?: string;
+  /** The first head this price covers. Nought is "from the first". */
+  headMin?: number | null;
+  /** The last, inclusive. Null is no ceiling — the "Over 1500" row. */
+  headMax?: number | null;
   priceCents?: number | null;
   unit: string;
   minimumCents?: number | null;
@@ -255,7 +262,13 @@ function sheetOrder(
       a.kind.localeCompare(b.kind) ||
       priceCategoryRank(a.category) - priceCategoryRank(b.category) ||
       a.category.localeCompare(b.category) ||
-      a.label.localeCompare(b.label),
+      // Numbers as numbers: `50 to 100` before `101 to 250`, rather than after
+      // `1001 to 1500`, which is what a plain string sort put on the screen.
+      compareLabels(a.label, b.label) ||
+      a.variant.localeCompare(b.variant) ||
+      // The ladder, in the order it is climbed. A band table read out of order
+      // is the same defect as the label sort, one column along.
+      a.headMin - b.headMin,
   );
 }
 
@@ -467,12 +480,17 @@ export async function removeHandle(
 /**
  * Record one priced line off a rate sheet, or correct one already recorded.
  *
- * **AN UPSERT ON `(processor, kind, label)`, for the reason `setHandle` is one
- * on `(processor, kind)`:** a second row saying "Quartered · chicken" would be
- * two prices for one option with nothing to say which is current. It is also
- * what makes next year's rate sheet re-readable over this year's — the same
- * twelve labels come back with new figures and correct the ones on file rather
- * than doubling them.
+ * **AN UPSERT ON `(processor, kind, variant, head_min, label)`, for the reason
+ * `setHandle` is one on `(processor, kind)`:** a second row saying "Quartered ·
+ * chicken" would be two prices for one option with nothing to say which is
+ * current. It is also what makes next year's rate sheet re-readable over this
+ * year's — the same twelve labels come back with new figures and correct the
+ * ones on file rather than doubling them.
+ *
+ * **THE VARIANT AND THE BAND'S FLOOR JOINED THE KEY IN 2f**, because taking them
+ * out of the label is what makes 24 chicken slaughter rows all say `Slaughter`.
+ * Both are `NOT NULL` for the reason the schema header gives at length: a
+ * nullable column in a unique index constrains nothing.
  *
  * **THE UNIT IS CHECKED HERE AS WELL AS BY THE CONSTRAINT**, and the sentence
  * matters more than usual: a unit is the difference between $1.05 a bird and
@@ -521,8 +539,28 @@ export async function setPriceItem(
       );
     }
   }
+  /**
+   * **A BAND THAT ENDS BEFORE IT BEGINS COVERS NOTHING**, so it is refused here
+   * as well as by the CHECK — a row nothing can ever resolve to would look like
+   * a price on the screen and behave like a hole in the ladder.
+   */
+  const headMin = input.headMin ?? 0;
+  const headMax = input.headMax ?? null;
+  if (!Number.isInteger(headMin) || headMin < 0) {
+    throw new ProductionError(
+      "PROCESSOR_INVALID",
+      "a batch size starts at nought or more head",
+    );
+  }
+  if (headMax !== null && (!Number.isInteger(headMax) || headMax < headMin)) {
+    throw new ProductionError(
+      "PROCESSOR_INVALID",
+      "a batch size cannot end before it starts — leave the top empty for no ceiling",
+    );
+  }
   await requireProcessor(tx, ctx.tenantId, processorId);
 
+  const variant = (input.variant ?? "").trim();
   const priceCents = input.priceCents ?? null;
   const minimumCents = input.minimumCents ?? null;
   const notes = (input.notes ?? "").trim();
@@ -535,6 +573,9 @@ export async function setPriceItem(
       kind,
       category,
       label,
+      variant,
+      headMin,
+      headMax,
       priceCents,
       unit: input.unit,
       minimumCents,
@@ -545,10 +586,16 @@ export async function setPriceItem(
         schema.productionProcessorPriceItems.tenantId,
         schema.productionProcessorPriceItems.processorId,
         schema.productionProcessorPriceItems.kind,
+        schema.productionProcessorPriceItems.variant,
+        schema.productionProcessorPriceItems.headMin,
         schema.productionProcessorPriceItems.label,
       ],
       set: {
         category,
+        // The ceiling is not in the key, so a re-read may legitimately move it:
+        // last year's "50 to 100" becoming "50 to 120" is a correction to one
+        // row rather than a new row beside it.
+        headMax,
         priceCents,
         unit: input.unit,
         minimumCents,
@@ -619,9 +666,22 @@ export async function clearPriceItems(
  * only in case are the same option to a person and two rows to Postgres — the
  * index cannot say so, so the bulk move refuses the collision rather than
  * letting the database refuse it with an index name.
+ *
+ * **THE VARIANT AND THE BAND'S FLOOR ARE IN IT because they are in the index.**
+ * Without them, moving a plant's 24 chicken slaughter rows onto `chicken` would
+ * report 23 clashes on a key that is now the same for all of them — a bulk move
+ * that reads as a wall of collisions where nothing actually collides.
  */
-function keyOf(processorId: string, label: string): string {
-  return `${processorId}::${label.trim().toLowerCase()}`;
+function keyOf(
+  processorId: string,
+  row: { label: string; variant: string; headMin: number },
+): string {
+  return [
+    processorId,
+    row.label.trim().toLowerCase(),
+    row.variant.trim().toLowerCase(),
+    row.headMin,
+  ].join("::");
 }
 
 export async function setPriceItemKind(
@@ -660,15 +720,13 @@ export async function setPriceItemKind(
       eq(schema.productionProcessorPriceItems.kind, next),
     ),
   });
-  const taken = new Set(
-    existing.map((r) => keyOf(r.processorId, r.label)),
-  );
+  const taken = new Set(existing.map((r) => keyOf(r.processorId, r)));
 
   const clashed: string[] = [];
   let moved = 0;
   for (const row of rows) {
     if (row.kind === next) continue;
-    const key = keyOf(row.processorId, row.label);
+    const key = keyOf(row.processorId, row);
     if (taken.has(key)) {
       clashed.push(row.label);
       continue;

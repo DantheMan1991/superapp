@@ -9,6 +9,14 @@ import type {
 import { loadParty } from "@/lib/parties";
 import { ProductionError, type ProductionCtx, requireWrite } from "./ops";
 import {
+  BAND_REFUSALS,
+  bandCovers,
+  describeBand,
+  isBanded,
+  snapshotLabel,
+} from "./core/band";
+import {
+  compareLabels,
   isPriceUnit,
   isValidSlug,
   priceCategoryRank,
@@ -77,6 +85,21 @@ export interface OrderDetail {
   /** The plant's name, from the party. Never copied onto this table. */
   processorName: string;
   lines: ProductionOrderLine[];
+  /**
+   * The day it was written against, off the booking. Null on a sheet started
+   * from a run, which has a day of its own.
+   */
+  bookedFor: string | null;
+  /**
+   * The run it became. Null until the day happens — a sheet exists months
+   * before there is anything to attach it to.
+   *
+   * **BOTH OF THESE ARE HERE BECAUSE A SHEET COULD NOT SAY WHEN IT WAS FOR.**
+   * Every screen listing sheets had to join for the day itself, so the list that
+   * would have made them findable could not be written without one; the printed
+   * header solved the same problem separately in 2c and by hand.
+   */
+  run: { id: string; code: string; startedOn: string } | null;
 }
 
 /**
@@ -91,7 +114,7 @@ function lineOrder(rows: ProductionOrderLine[]): ProductionOrderLine[] {
     (a, b) =>
       priceCategoryRank(a.category) - priceCategoryRank(b.category) ||
       a.category.localeCompare(b.category) ||
-      a.label.localeCompare(b.label),
+      compareLabels(a.label, b.label),
   );
 }
 
@@ -112,13 +135,19 @@ export async function listOrders(
   });
   if (orders.length === 0) return [];
 
-  // Two reads, not one per order — the same rule `listProcessors` follows.
-  const [lines, processors] = await Promise.all([
+  // Four reads, not one per order — the same rule `listProcessors` follows.
+  const [lines, processors, bookings, runs] = await Promise.all([
     tx.query.productionOrderLines.findMany({
       where: eq(schema.productionOrderLines.tenantId, tenantId),
     }),
     tx.query.productionProcessors.findMany({
       where: eq(schema.productionProcessors.tenantId, tenantId),
+    }),
+    tx.query.productionBookings.findMany({
+      where: eq(schema.productionBookings.tenantId, tenantId),
+    }),
+    tx.query.productionRuns.findMany({
+      where: eq(schema.productionRuns.tenantId, tenantId),
     }),
   ]);
   const parties = await tx.query.parties.findMany({
@@ -128,11 +157,22 @@ export async function listOrders(
   const nameByProcessor = new Map(
     processors.map((p) => [p.id, nameByParty.get(p.partyId) ?? ""]),
   );
+  const dayByBooking = new Map(bookings.map((b) => [b.id, b.bookedFor]));
+  const runById = new Map(
+    runs.map((r) => [
+      r.id,
+      { id: r.id, code: r.code, startedOn: r.startedOn },
+    ]),
+  );
 
   return orders.map((order) => ({
     order,
     processorName: nameByProcessor.get(order.processorId) ?? "",
     lines: lineOrder(lines.filter((l) => l.orderId === order.id)),
+    bookedFor: order.bookingId
+      ? (dayByBooking.get(order.bookingId) ?? null)
+      : null,
+    run: order.runId ? (runById.get(order.runId) ?? null) : null,
   }));
 }
 
@@ -162,13 +202,31 @@ export async function getOrder(
       ),
     }),
   ]);
-  const party = processor
-    ? await loadParty(tx, tenantId, processor.partyId)
-    : null;
+  const [party, booking, run] = await Promise.all([
+    processor ? loadParty(tx, tenantId, processor.partyId) : null,
+    order.bookingId
+      ? tx.query.productionBookings.findFirst({
+          where: and(
+            eq(schema.productionBookings.tenantId, tenantId),
+            eq(schema.productionBookings.id, order.bookingId),
+          ),
+        })
+      : null,
+    order.runId
+      ? tx.query.productionRuns.findFirst({
+          where: and(
+            eq(schema.productionRuns.tenantId, tenantId),
+            eq(schema.productionRuns.id, order.runId),
+          ),
+        })
+      : null,
+  ]);
   return {
     order,
     processorName: party?.displayName ?? "",
     lines: lineOrder(lines),
+    bookedFor: booking?.bookedFor ?? null,
+    run: run ? { id: run.id, code: run.code, startedOn: run.startedOn } : null,
   };
 }
 
@@ -249,6 +307,41 @@ export async function updateOrder(
       ...(patch.notes !== undefined ? { notes: patch.notes.trim() } : {}),
       updatedAt: new Date(),
     })
+    .where(
+      and(
+        eq(schema.productionOrders.tenantId, ctx.tenantId),
+        eq(schema.productionOrders.id, id),
+      ),
+    )
+    .returning();
+  if (!row) throw new ProductionError("NOT_FOUND", "that sheet is gone");
+  return row;
+}
+
+/**
+ * Stamp a sheet as printed.
+ *
+ * **THE NEAREST HONEST THING TO "HANDED OVER".** The dossier has wanted this
+ * since 2b and said what shape it should be: *a date rather than a status*,
+ * because a status somebody must advance is a status nobody advances. This is
+ * written by the print button and by nothing else, so it claims only what it
+ * knows — this page went to a printer.
+ *
+ * **IT OVERWRITES RATHER THAN REFUSING A SECOND PRINT**, because a sheet
+ * reprinted after a line changed is the version that went over, and the first
+ * printing is not a fact anybody needs back. MEMBER, like every other write on
+ * this table: printing a sheet is the yard's job.
+ */
+export async function markOrderPrinted(
+  tx: Tx,
+  ctx: ProductionCtx,
+  id: string,
+  at: Date,
+): Promise<ProductionOrder> {
+  requireWrite(ctx, "member");
+  const [row] = await tx
+    .update(schema.productionOrders)
+    .set({ printedAt: at, updatedAt: at })
     .where(
       and(
         eq(schema.productionOrders.tenantId, ctx.tenantId),
@@ -354,10 +447,35 @@ export async function addOrderLine(
         `${row.label} is already on this sheet — change how many rather than adding it twice`,
       );
     }
+    /**
+     * **THE BAND IS CHECKED AGAINST THE SHEET'S OWN HEAD COUNT**, and refused
+     * rather than rounded. A plant's smallest band has a floor under it for a
+     * reason — *"if you show up with less than 50 chickens, we do not offer
+     * cutting, whole birds only"* is printed on the sheet this was modelled
+     * from — so quoting the nearest band would quote a price they have said
+     * they will not offer.
+     *
+     * Only when the sheet says how many. A sheet with no count has nothing to
+     * check against, and picking a band by hand is then the honest way to write
+     * one — which is what the picker offers.
+     */
+    if (order.headCount !== null && isBanded(row) && !bandCovers(row, order.headCount)) {
+      throw new ProductionError(
+        "ORDER_INVALID",
+        `${row.label} at ${describeBand(row)} does not cover ${order.headCount} head — ${BAND_REFUSALS.NO_BAND_COVERS}`,
+      );
+    }
     quoted = row;
   }
 
-  const label = (input.label ?? quoted?.label ?? "").trim();
+  /**
+   * **THE LABEL IS COMPOSED FROM THE FIELDS, NOT COPIED FROM ONE.** `Slaughter`
+   * on its own no longer says which of a plant's 24 chicken prices was quoted,
+   * now that the breed and the batch band are columns — and this line has to go
+   * on saying so after the rate sheet is replaced, which is the whole reason it
+   * is a snapshot. See `core/band.ts` → `snapshotLabel`.
+   */
+  const label = (input.label ?? (quoted ? snapshotLabel(quoted) : "")).trim();
   if (!label) {
     throw new ProductionError("ORDER_INVALID", "say what you are asking for");
   }

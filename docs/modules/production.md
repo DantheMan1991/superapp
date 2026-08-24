@@ -288,6 +288,19 @@ running:
 the compiled rule out of `document.styleSheets` settled it; grepping the Radix
 dist proves only half the question.
 
+**AND IT WAS RE-READ ON PRODUCTION AFTER THE DEPLOY**, which is what makes the
+slice mean anything to the one tenant holding a real rate sheet: `Test`'s plant
+went from 108 rows with their bands buried in label text to 108 rows where **69
+carry a variant or a band**, the chicken grid among them. See Open items.
+
+**TWO THINGS THAT ONLY APPEAR ON PRODUCTION, worth knowing before driving there
+again:** the extractor took **~4 minutes** on the two-page PDF against Vercel
+(85 seconds locally), and a stray second `change` event started a second
+concurrent read that ran six minutes more — holding `pending` true, which
+disables **Record**. The dialog sat with its answer on screen and would not
+accept it. That is the missing cooldown showing up as something other than a
+double charge.
+
 Migration `0203`. 24 new tests.
 
 ### 2026-08-23 — Slice 2e: one row per bird, and a list you can find things in (`claude/one-row-per-bird`)
@@ -1254,13 +1267,14 @@ run model, separate templates), and the processing path and eligibility flag
   Sweeping them is a copy change with no behaviour in it and wants its own PR;
   the pure files also have no `labelFor` to reach for, so their sentences need a
   word passed in the way `inspectionNote` takes one.
-- **THE LIVE 108 ROWS ON `Test` STILL CARRY THEIR BANDS IN THE LABEL TEXT.**
-  The columns exist and the extractor asks for them, but the rows already on file
-  were read under the old rule — `Slaughter, Cornish x, 50 to 100` as a label,
-  with `variant` empty and `head_min` 0. Nothing resolves for them, and the fix
-  is one re-read of Pleasant Valley's sheet with **Replace** on, which
-  `clearPriceItems` makes safe. It has to happen against the deployed code, so it
-  is the first thing to do after this merge.
+- ~~**THE LIVE 108 ROWS ON `Test` STILL CARRY THEIR BANDS IN THE LABEL TEXT.**~~
+  **Re-read 2026-08-24, on production, against the deployed code.** 115 recorded
+  with Replace on; the plant's list is 108 rows again and **69 of them now carry
+  a variant or a band**, including the 24-cell chicken slaughter grid as FIELDS
+  — `Cornish x · 501 to 1000 head · 275c`. The screen reads *Slaughter 24 ·
+  Cutting 10 · Packaging 3 · Giblets and offal 5 · Extras 3*, bands in numeric
+  order, no repeated category and no "Over 1500" note under a row that already
+  says *1501 head and over*.
 - **NOTHING WARNS THAT A PLANT'S BANDS HAVE A HOLE IN THEM.** `resolveBands`
   reports that no band covers a particular batch, which is the right answer at
   the moment somebody is writing a sheet. What nothing does is look at a rate
@@ -1274,9 +1288,15 @@ run model, separate templates), and the processing path and eligibility flag
   refused correctly in both places a naive reader gets wrong. See the build log.
   **The KILL-SHEET reader still has not**, and it is the harder of the two:
   handwriting on a clipboard rather than a typeset PDF.
-- **NOTHING RATE-LIMITS IT, and it spends money per press.** Accounting's
-  extractor claims a 15-second per-tenant cooldown slot inside its gating
-  transaction; this has none, so a double-click is two calls.
+- **NOTHING RATE-LIMITS IT, and it spends money per press — CONFIRMED THE
+  EXPENSIVE WAY ON PRODUCTION, 2026-08-24.** Accounting's extractor claims a
+  15-second per-tenant cooldown slot inside its gating transaction; this has
+  none. Two `change` events on the file input started two concurrent reads of the
+  same two-page PDF: the first returned 115 rows and the second went on running
+  for **another six minutes**, holding `pending` true, which disables Record. So
+  the visible symptom of the missing cooldown is not a double charge — it is a
+  dialog that has its answer on screen and will not let you accept it. A cooldown
+  would fix both halves.
 - ~~**THE SCHEMA CANNOT HOLD POULTRY CUTTING.**~~ ~~**What is still not
   representable is a cutting MENU.**~~ **Both closed 2026-08-23** —
   `production_processor_price_items`, one row per priced thing with its own

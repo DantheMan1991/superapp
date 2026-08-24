@@ -28,6 +28,7 @@ import {
   describeBand,
   isBanded,
   resolveBands,
+  shortLabel,
   snapshotLabel,
   type BandedItem,
 } from "../src/packs/production/core/band";
@@ -1051,7 +1052,7 @@ describe("tallyPortions", () => {
     expect(tally.headWhole).toBe(10);
     expect(tally.headOver).toBeNull();
     expect(portionRefusal(tally)).toBeNull();
-    expect(portionSentence(tally)).toBe("90 Quartered · 10 back whole");
+    expect(portionSentence(tally)).toBe("90 Quartered, 10 back whole");
   });
 
   it("does not count slaughter, which every animal gets", () => {
@@ -1332,6 +1333,23 @@ describe("snapshotLabel", () => {
     expect(snapshotLabel(priced({ label: "Quartered", variant: "Boneless" }))).toBe(
       "Quartered · Boneless",
     );
+  });
+
+  it("shortens back to what is being asked for, for the printed sentence", () => {
+    // FOUND BY READING A LIVE SHEET OUT LOUD. The reconciliation joins with the
+    // same `·` this composes with, so a sheet for ninety quartered birds printed
+    // "90 Quartered · 50 head and over · 10 back whole" — the band reading as a
+    // third portion.
+    expect(shortLabel(snapshotLabel(CORNISH[3]))).toBe("Slaughter");
+    expect(shortLabel("Quartered · 50 head and over")).toBe("Quartered");
+    expect(shortLabel("Quartered")).toBe("Quartered");
+    const tally = tallyPortions(
+      [
+        cut("q", { label: shortLabel("Quartered · 50 head and over"), quantity: 90 }),
+      ],
+      100,
+    );
+    expect(portionSentence(tally)).toBe("90 Quartered, 10 back whole");
   });
 
   it("is suppressed as a repeated category the way any label is", () => {

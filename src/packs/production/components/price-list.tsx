@@ -20,7 +20,6 @@ import {
 import { describeBand, isBanded } from "../core/band";
 import {
   PRICE_CATEGORY_LABELS,
-  categoryRepeatsLabel,
   centsToDisplay,
   compareLabels,
   priceCategoryRank,
@@ -372,18 +371,17 @@ export function PriceList({
                                 </span>
                               )}
                               {/*
-                                **THE HEADING ALREADY SAYS THE CATEGORY**, so
-                                the row only says it when it differs from what
-                                the label starts with — `Slaughter, Cornish x,
-                                50 to 100 · Slaughter` was on a live screen,
-                                because the old check fired only on an exact
-                                match.
+                                **NO CATEGORY ON THE ROW AT ALL, AND THAT IS
+                                THIS SLICE'S OWN DEFECT CAUGHT BY DRIVING.**
+                                2e suppressed it when it exactly repeated the
+                                label; 2f went further and put a *Cutting 10*
+                                heading above the rows — at which point every
+                                one of the ten saying "Cutting" is the same
+                                doubling one level up. The heading is the
+                                category now. `categoryRepeatsLabel` still earns
+                                its place on the cut sheet, which has no
+                                headings to group under.
                               */}
-                              {!categoryRepeatsLabel(label, item.label) && (
-                                <span className="text-muted-foreground">
-                                  {label}
-                                </span>
-                              )}
                               <span
                                 className={
                                   money

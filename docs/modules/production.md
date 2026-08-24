@@ -231,7 +231,64 @@ a status*, because a status somebody has to advance is a status nobody advances.
 The print button writes it and nothing else does, so null means *nobody pressed
 Print here* and never *the plant never got one* — which is what the list says.
 
-Migration `0203`. 23 new tests.
+── DRIVEN, ON THE REAL SHEET ────────────────────────────────────────────────
+
+**PLEASANT VALLEY'S TWO-PAGE PDF, READ THROUGH THE AMENDED EXTRACTOR, ON THE DEV
+BRANCH'S `Hilltop Farm`: 115 rows recorded in one pass** — 108 prices and 7
+animals. The 24-cell grid came back as FIELDS, `Slaughter Fee` × {Cornish x,
+Non-Cornish, Heritage, Tough Roosters} × six bands, and the app then did the
+lookup twice on two sheets against one rate card:
+
+| Sheet | Head | What it resolved | Snapshotted as |
+| --- | --- | --- | --- |
+| Autumn broilers | 100 | **$3.75** | `Slaughter Fee · Cornish x · 50 to 100 head` |
+| Big batch | 800 | **$2.75** | `Slaughter Fee · Cornish x · 501 to 1000 head` |
+
+Same plant, same breed, same label, two prices — and the line says which. **The
+picker showed 4 options where the list holds 24**, one per breed, each already
+resolved. The 40-bird sheet withdrew twelve of them and gave the plant's own
+reason. 90 quartered out of 100 printed **"Of 100 head — 90 Quartered, 10 back
+whole"**; adding a 50-bird Split on top flagged **140 against 100**. `printed_at`
+stamped and showed on the list.
+
+**AND THE VARIANT GENERALISED WITHOUT BEING ASKED TO**, which is the argument for
+it being free text: the reader used it for turkey weight classes (*up to 29.99
+lbs.*, *30 lbs. and up*), container sizes (*16 oz.*, *5 Gal. Bucket*) and bone
+broth batch sizes (*120lb. Batches*). This pack does not know what a breed is and
+did not need to.
+
+**SIX DEFECTS, AND EVERY ONE WAS IN A STRING OR A RENDER.** Seventh slice
+running:
+
+- **"What each plant was asked to do"** — a hardcoded word for a renameable one,
+  directly above a column headed *Butcher*, on the first screen this slice
+  opened.
+- **Every price row repeated its own sub-group heading.** This slice's own
+  defect: 2e suppressed the category when it exactly repeated the label, 2f put a
+  *Cutting 10* heading above the rows, and all ten then said "Cutting" under it.
+  The heading is the category; the row says nothing.
+- **The extractor's note repeated the band** — `Over 1500` sitting under a row
+  already reading *1501 head and over*, on eight rows, and *50 bird minimum*
+  under *50 head and over* on six more. Rule 5 now says the note is for what the
+  fields cannot hold.
+- **`90 Quartered · 50 head and over · 10 back whole`** — the reconciliation
+  joined with the same `·` the snapshot label composes with, so the band read as
+  a third portion. `shortLabel` takes the head of the label and the sentence
+  joins with commas.
+- **Twelve identical sixty-word refusals**, one per blocked option, on the
+  40-bird sheet. The reason is the same reason for all of them: it is printed
+  once with the names under it. Same complaint as *45 rows in one run*, one
+  screen along.
+- **An empty sheet claimed "800 back whole"** beside *Nothing on it yet*. It
+  reconciles perfectly and says nothing anybody decided.
+
+**ONE CLAIM WAS WRONG AND IS CORRECTED IN `design-system.md`:** `switch.tsx`'s
+`data-checked:` looked like a variant matching nothing, because Radix emits
+`data-state="checked"`. Tailwind v4 compiles the shorthand to BOTH forms. Reading
+the compiled rule out of `document.styleSheets` settled it; grepping the Radix
+dist proves only half the question.
+
+Migration `0203`. 24 new tests.
 
 ### 2026-08-23 — Slice 2e: one row per bird, and a list you can find things in (`claude/one-row-per-bird`)
 
@@ -1189,6 +1246,14 @@ run model, separate templates), and the processing path and eligibility flag
 
 ## Open items
 
+- **"plant" IS HARDCODED IN ABOUT FIFTEEN STRINGS ACROSS THIS PACK**, where the
+  word is the tenant's — the homestead profile calls it *Butcher*. Driving 2f
+  fixed the one it introduced and left the rest: `cut-sheet.tsx`'s "the plant
+  reads this rather than guessing", `carcass-controls.tsx`'s "Live weight at the
+  plant", and the refusal sentences in `core/carcass.ts` and `core/band.ts`.
+  Sweeping them is a copy change with no behaviour in it and wants its own PR;
+  the pure files also have no `labelFor` to reach for, so their sentences need a
+  word passed in the way `inspectionNote` takes one.
 - **THE LIVE 108 ROWS ON `Test` STILL CARRY THEIR BANDS IN THE LABEL TEXT.**
   The columns exist and the extractor asks for them, but the rows already on file
   were read under the old rule — `Slaughter, Cornish x, 50 to 100` as a label,

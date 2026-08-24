@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatMoney } from "@/lib/money";
 import type { ProductionOrderLine } from "@/db/schema";
 import type { FeeLineTotal } from "../core/fee";
+import { shortLabel } from "../core/band";
 import {
   PORTION_REFUSALS,
   portionRefusal,
@@ -78,7 +79,10 @@ export function CutSheet({
   const portions = tallyPortions(
     lines.map((line) => ({
       key: line.id,
-      label: line.label,
+      // The head of the label, not the whole of it: the line's own label is
+      // `·`-joined and so is the sentence, and a live sheet printed "90
+      // Quartered · 50 head and over · 10 back whole".
+      label: shortLabel(line.label),
       category: line.category,
       unit: line.unit !== null && isPriceUnit(line.unit) ? line.unit : null,
       quantity: line.quantity,
@@ -255,7 +259,14 @@ export function CutSheet({
         Derived, never stored — `core/portions.ts` holds the argument, including
         why a blank quantity means all of them and why only `cutting` counts.
       */}
-      {portionLine !== "" && (
+      {/*
+        **NOTHING UNTIL THE SHEET HAS SOMETHING ON IT.** An empty sheet
+        reconciles perfectly — nought cutting lines out of 800 head is 800 whole
+        birds — and printing that beside "Nothing on it yet" claims a decision
+        nobody has made. Found by driving an 800-bird sheet before adding a
+        single line.
+      */}
+      {lines.length > 0 && portionLine !== "" && (
         <p className="border-t pt-2 text-sm">
           <span className="text-muted-foreground">Of {portions.headCount} head — </span>
           <span className="font-medium">{portionLine}</span>

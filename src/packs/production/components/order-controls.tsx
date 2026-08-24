@@ -46,6 +46,7 @@ import {
   describeBand,
   isBanded,
   resolveBands,
+  type BandRefusal,
 } from "../core/band";
 
 /**
@@ -470,7 +471,7 @@ export function AddOrderLineDialog({
    */
   const offered: Array<{ option: PriceItemOption; text: string; category: string }> =
     [];
-  const blocked: Array<{ text: string; why: string }> = [];
+  const blocked: Array<{ text: string; reason: BandRefusal }> = [];
   for (const group of groups) {
     const name = [group.label, group.variant].filter((p) => p !== "").join(" · ");
     if (group.chosen) {
@@ -500,9 +501,24 @@ export function AddOrderLineDialog({
     // Reported, never rounded to the nearest band they did quote.
     blocked.push({
       text: name,
-      why: BAND_REFUSALS[group.refusedBecause ?? "NO_BAND_COVERS"],
+      reason: group.refusedBecause ?? "NO_BAND_COVERS",
     });
   }
+
+  /**
+   * **THE REASON ONCE, WITH THE NAMES UNDER IT.** Found by driving a 40-bird
+   * sheet at a plant with a fifty-bird floor: twelve options were blocked and
+   * the picker printed the same sixty-word sentence twelve times. It is the
+   * founder's "45 rows in one run is a wall" complaint one screen along — the
+   * useful half is WHICH options are unavailable, and the reason is the same
+   * reason for all of them.
+   */
+  const blockedByReason = [...new Set(blocked.map((b) => b.reason))].map(
+    (reason) => ({
+      reason,
+      names: blocked.filter((b) => b.reason === reason).map((b) => b.text),
+    }),
+  );
 
   const [priceItemId, setPriceItemId] = useState("");
   /**
@@ -622,9 +638,13 @@ export function AddOrderLineDialog({
               plant saying it will not take one, which is a thing to know before
               loading a trailer.
             */}
-            {blocked.map((b) => (
-              <p key={b.text} className="text-xs text-muted-foreground">
-                <span className="font-medium">{b.text}</span> — {b.why}
+            {blockedByReason.map(({ reason, names }) => (
+              <p key={reason} className="text-xs text-muted-foreground">
+                <span className="font-medium">
+                  {names.slice(0, 3).join(", ")}
+                  {names.length > 3 ? ` and ${names.length - 3} more` : ""}
+                </span>{" "}
+                — {BAND_REFUSALS[reason]}
               </p>
             ))}
           </div>

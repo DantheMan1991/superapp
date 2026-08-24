@@ -14,11 +14,11 @@ import { cn } from "@/lib/utils"
  * switching cattle on rather than as picking that row to act on. The price list
  * had one on every row of a 108-row sheet.
  *
- * **NOTE THE VARIANT: `data-[state=checked]`, NOT `data-checked`.** Radix emits
- * `data-state="checked" | "unchecked"`, and Tailwind v4's `data-checked:`
- * shorthand compiles to `[data-checked]` — an attribute nothing here sets. See
- * the design-system dossier: `switch.tsx` has that mistake in it and its checked
- * fill has never applied.
+ * **`data-checked:`, THE SAME SHORTHAND `switch.tsx` USES.** Radix emits
+ * `data-state="checked"`, and Tailwind v4 compiles this variant to match BOTH
+ * that and a bare `[data-checked]` — verified in the browser against the
+ * compiled stylesheet, because the shorthand reads as though it could only mean
+ * the second. `data-[state=checked]:` works too; matching the kit is the point.
  *
  * Tokens only — `--primary` for the fill, `--primary-foreground` for the tick,
  * `--input` for the resting edge, matching every other control in the kit.
@@ -33,7 +33,7 @@ function Checkbox({
       className={cn(
         "peer size-4 shrink-0 rounded-sm border border-input bg-background shadow-none transition-colors outline-none",
         "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-        "data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
+        "data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground",
         "aria-invalid:border-destructive aria-invalid:ring-[3px] aria-invalid:ring-destructive/20",
         "disabled:cursor-not-allowed disabled:opacity-50",
         className

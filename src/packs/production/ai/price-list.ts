@@ -103,7 +103,7 @@ RULES, IN ORDER OF IMPORTANCE.
    - variant is the qualifier: the breed, the grade, whatever the column of the table is headed with. "Cornish Cross", "Freedom Ranger", "Heritage", "Boneless". The plant's own words. Empty when the sheet does not distinguish.
    - headMin and headMax are the batch size the price applies to, in head. "25-49 birds" is headMin 25 and headMax 49. "1-24" is headMin 1 and headMax 24. "Over 1500" is headMin 1501 and headMax null. A price that applies whatever the batch size has headMin null and headMax null.
    - The label stays the same across the whole matrix, because it is the same thing being charged for: all 24 cells of a 4-breed by 6-batch-size slaughter grid have the label "Slaughter".
-   DO NOT put the breed or the batch size in the label as well. It is being read by an app that looks the price up: a batch of 800 Cornish Cross has to find exactly one row, and words in a label cannot be compared against a number of birds. Only do this where the sheet gives a definite price per cell; a range is still rule 2.
+   DO NOT put the breed or the batch size in the label as well, and DO NOT REPEAT THEM IN THE NOTE. It is being read by an app that looks the price up and then prints the band itself: a batch of 800 Cornish Cross has to find exactly one row, words in a label cannot be compared against a number of birds, and a note saying "over 1500" under a row already reading "1501 head and over" is the same thing said twice. A note is for what the fields cannot hold — a season, a condition, a qualification. Only do this where the sheet gives a definite price per cell; a range is still rule 2.
 
 6. THE LABEL IS THE PLANT'S OWN WORDS for what is being charged for, short enough to read in a list. Do not translate it, do not tidy it, do not invent a category name for it. LEAVE THE ANIMAL OUT OF IT — "Duck & Geese: Quartered" is a label of "Quartered" on a duck item and a goose item. Leave the breed and the batch size out of it too — those are rule 5's fields.
 
@@ -189,7 +189,7 @@ const TOOL = {
             notes: {
               type: "string",
               description:
-                "Conditions on this one price, in the sheet's own words — a range, a season, a qualification.",
+                "Conditions on this one price that the other fields cannot hold — a range, a season, a qualification. NOT the batch size and NOT the variant, which have fields of their own and are printed from them.",
             },
           },
           required: [

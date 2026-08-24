@@ -159,7 +159,7 @@ export function portionRefusal(tally: PortionTally): PortionRefusal | null {
 }
 
 /**
- * "90 Quartered · 10 back whole" — the line the PLANT reads.
+ * "90 Quartered, 10 back whole" — the line the PLANT reads.
  *
  * **THIS PRINTS**, unlike the money beside it. What is going to be done to a
  * bird is the plant's business and is the whole purpose of handing a sheet over;
@@ -175,7 +175,15 @@ export function portionSentence(tally: PortionTally): string {
   if (tally.headWhole !== null && tally.headWhole > 0) {
     parts.push(`${formatHead(tally.headWhole)} back whole`);
   }
-  return parts.join(" · ");
+  /**
+   * **COMMAS, NOT `·`, AND THAT WAS A DEFECT.** The order line's own label is
+   * `·`-joined — `Quartered · 50 head and over` — so a middot here put two
+   * separators of one kind at two levels, and a live sheet printed *"90
+   * Quartered · 50 head and over · 10 back whole"*, in which the band reads as a
+   * third portion. The caller passes a shortened label; this keeps the levels
+   * apart.
+   */
+  return parts.join(", ");
 }
 
 /** Birds are counted, so a trailing `.00` reads as false precision. */

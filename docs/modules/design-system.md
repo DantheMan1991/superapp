@@ -38,16 +38,22 @@ because both controls now exist: *Replace the N already on file* on the price-li
 read dialog is still a switch, because it turns a behaviour on. The row ticks
 beside it are not.
 
-**AND `switch.tsx` HAS A VARIANT THAT MATCHES NOTHING.** It styles its checked
-state with `data-checked:bg-primary` / `data-unchecked:bg-input`. Radix emits
-**`data-state="checked" | "unchecked"`** — confirmed in
-`@radix-ui/react-switch/dist/index.mjs`, whose only data attributes are
-`data-state` and `data-disabled` — and Tailwind v4's `data-checked:` shorthand
-compiles to `[data-checked]`, an attribute nothing sets. So the checked fill has
-never applied. The new Checkbox uses `data-[state=checked]:` and says why in its
-header. **The fix to `switch.tsx` is deliberately NOT in that PR**: it changes the
-appearance of every switch in the app and belongs in a change whose subject is
-the switch. Recorded here so it is not re-derived.
+**AND `data-checked:` IS NOT THE TRAP IT LOOKS LIKE — RECORDED BECAUSE IT WAS
+NEARLY WRITTEN DOWN AS ONE.** `switch.tsx` styles its checked state with
+`data-checked:bg-primary`, and Radix emits `data-state="checked"`, not a bare
+`data-checked` — which reads exactly like a variant matching nothing. It is not.
+Tailwind v4 compiles the shorthand to BOTH forms:
+
+```css
+.data-checked\:bg-primary:where([data-state="checked"]),
+.data-checked\:bg-primary:where([data-checked]:not([data-checked="false"]))
+```
+
+so it matches Radix's attribute and a bare boolean one. **Read it out of
+`document.styleSheets` before believing either story** — grepping the Radix dist
+for `data-checked` proves only which attribute Radix sets, which is half the
+question. The new Checkbox uses the same shorthand for consistency;
+`data-[state=checked]:` also works.
 
 ### 2026-08-22 — The Clerk mismatch, closed (`claude/laughing-herschel-e284b2`)
 
@@ -281,12 +287,6 @@ What remains is the three centred states above and `(marketing)`.
 
 ## Open items
 
-- **`switch.tsx`'s checked fill has never applied.** `data-checked:` is a
-  Tailwind v4 shorthand for `[data-checked]`; Radix emits `data-state="checked"`.
-  Every `Switch` in the app therefore renders in its unchecked colours. The fix is
-  one line per variant (`data-[state=checked]:`), and it is a visual change to
-  every switch, so it wants its own change rather than riding along with a pack
-  slice. Found 2026-08-23 while adding the Checkbox.
 - **The sweep.** ~70 surfaces still hand-roll their header, empty state and table
   panel. Planned as one PR per module: accounting → documents + mail → CRM + work
   + scheduling → admin/auth/onboarding.

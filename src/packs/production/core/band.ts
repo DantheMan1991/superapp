@@ -118,6 +118,26 @@ export function snapshotLabel(item: BandedItem): string {
   return parts.join(" · ");
 }
 
+/**
+ * The head of a composed label — what is being asked for, without the pricing
+ * qualifiers.
+ *
+ * **FOUND BY READING THE PRINTED SENTENCE OUT LOUD.** The whole-bird
+ * reconciliation joins its parts with the same `·` this function's inverse uses,
+ * so a sheet asking for ninety quartered birds printed *"90 Quartered · 50 head
+ * and over · 10 back whole"* — where the band reads as a third portion. On the
+ * LINE the band earns its place; in a sentence about how many animals get what,
+ * it is noise.
+ *
+ * Safe because `snapshotLabel` owns that separator. A plant's own label
+ * containing one would be shortened to its first phrase, which is still the
+ * right half of it.
+ */
+export function shortLabel(label: string): string {
+  const at = label.indexOf(" · ");
+  return at === -1 ? label : label.slice(0, at);
+}
+
 /** Everything a plant charges for one named thing, at one variant. */
 export interface BandGroup {
   /** `kind\ncategory\nlabel\nvariant`. Stable, and never shown to anybody. */

@@ -153,7 +153,13 @@ export default async function CutSheetsPage() {
 
       <PageHeader
         title={`Every ${sheetWord.toLowerCase()}`}
-        description={`What each plant was asked to do with one lot of animals. The sheet goes over with the animals at drop-off, so it exists before the ${runWord.toLowerCase()} does — and this is where to find one again.`}
+        /*
+          **THE WORD IS THE TENANT'S, AND THIS SENTENCE HAD "plant" IN IT** —
+          directly above a column headed *Butcher*, on the first screen driving
+          this slice opened. Seventh slice running where the defect was in a
+          string and nothing but reading it out loud would have found it.
+        */
+        description={`What each ${processorWord.toLowerCase()} was asked to do with one lot of animals. The sheet goes over with the animals at drop-off, so it exists before the ${runWord.toLowerCase()} does — and this is where to find one again.`}
         actions={
           isOwner ? (
             <StartSheetDialog

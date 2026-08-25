@@ -160,6 +160,31 @@ The signature-verified webhook, or a server→Stripe reconcile
 (`src/lib/billing-sync.ts`). Never from client input. Card data never touches
 this server.
 
+**This now covers TWO opposite directions, and conflating them is its own bug
+class.** `subscriptions` is the PLATFORM charging the TENANT.
+`payment_accounts` is the TENANT charging THEIR customer — Stripe Connect, one
+connected account per legal entity ([ADR 0015](decisions/0015-a-connected-account-belongs-to-a-company.md)).
+Same SDK, same platform secret key, separate routes, separate signing secrets.
+
+On `payment_accounts` the rule is enforced by POLICY rather than by care:
+**members hold a SELECT policy and nothing else**, so no tenant transaction can
+write the table. The `card_payments` capability status is the outcome of a KYC
+review this platform does not perform, and the app asserting it is the whole
+class of bug — a farm told it can take a card, and a customer's card declined at
+a stall. Note the denial is SILENT: with no member UPDATE policy an UPDATE
+matches zero rows rather than raising. Only the INSERT is loud.
+
+That side also runs on Stripe's **Accounts v2** API, whose events are THIN —
+they carry a reference, not an object — so the webhook must fetch the account
+before it can write anything. S7 therefore holds by construction there rather
+than by discipline: there is no payload to be tempted to trust.
+
+**A tenant's own Stripe secret key is never stored, never asked for, never
+seen.** The connected account id (`acct_…`) is an identifier; the authority to
+act on it comes from the platform key plus `stripeAccount`. A per-client secret
+key would be a C5 secret granting unlimited authority over that client's money,
+and it is the shortcut ADR 0015 exists to refuse.
+
 **S8 — Secrets at rest are encrypted with `encryptSecret()`.**
 AES-256-GCM, random IV, auth tag stored alongside — tampering fails loudly.
 One key, `APP_ENCRYPTION_KEY`. Plaid access tokens and mailbox OAuth tokens use
@@ -264,7 +289,8 @@ Paste these into the PR. They are the actual gate.
 | `DATABASE_URL` | Runtime, `app_user` | `npm run db:create-role` |
 | `DATABASE_URL_OWNER` | Migrations only | Neon console |
 | `CLERK_SECRET_KEY`, webhook secret | Identity | Clerk dashboard |
-| `STRIPE_SECRET_KEY`, webhook secret | Billing | Stripe dashboard |
+| `STRIPE_SECRET_KEY`, webhook secret | Billing — the platform charging the tenant | Stripe dashboard |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | Connect events — the tenant's own connected accounts. A SEPARATE endpoint with a separate secret, because Stripe only delivers `account.updated` to a Connect-enabled one | Stripe dashboard |
 | `ANTHROPIC_API_KEY` | Copilot, extraction | Anthropic console |
 | `PLAID_*` | Bank feed | Plaid dashboard |
 | Stalwart / JMAP creds | Mailbox access | Per-deployment |
@@ -299,7 +325,8 @@ Every path into the system, and what makes it trustworthy.
 | Server actions | Clerk session → `require*()` | Re-checked per action (S4) |
 | `src/app/api/**` | `resolveTenantContext()` | JSON 401/404, no redirects |
 | Clerk webhook | Svix signature | Trusted sync → `withSystem()` legal. Deliveries are **not ordered**: when an event's prerequisite hasn't arrived, answer 5xx so svix retries. A 200 that wrote nothing loses the row for good |
-| Stripe webhook | Stripe signature | Only trusted source of billing state (S7) |
+| Stripe webhook | Stripe signature | Only trusted source of billing state (S7). The PLATFORM charging the TENANT |
+| Stripe **Connect** webhook | Stripe signature, own secret | `/api/webhooks/stripe/connect`. The TENANT charging THEIR customer, over Accounts v2. A v2 notification carries only a REFERENCE, so the handler re-reads the account from the API — the event is a nudge and the data is always a server→Stripe read. The tenant is resolved from our own row by account id, never from the event or from Stripe metadata |
 | Resend inbound mail | Signature + address token | Token is the tenant claim; validate before use |
 | `/s/[token]` share links | Unguessable token + expiry + limits | **Unauthenticated by design.** Scope tightly, log access |
 | `/health-check` | Public | Prospect funnel. No tenant data. Treat all input as hostile |

@@ -37,7 +37,8 @@ be broken, for a scale problem we do not have.
 | Framework | Next.js App Router (see `node_modules/next/dist/docs/` — this version has breaking changes from what you likely know) |
 | Database | Neon Postgres, Drizzle ORM, RLS FORCE |
 | Identity | Clerk. Organizations are tenants |
-| Billing | Stripe. Webhook + server-side reconcile |
+| Billing | Stripe. Webhook + server-side reconcile. **The PLATFORM charging the TENANT** |
+| Taking payments | Stripe Connect, one connected account per legal entity. **The TENANT charging THEIR customer** — opposite direction, same SDK ([ADR 0015](decisions/0015-a-connected-account-belongs-to-a-company.md)) |
 | Files | Vercel Blob |
 | Mail | Self-hosted Stalwart over JMAP |
 | AI | Claude via `getClaude()` (`src/lib/claude.ts`) |
@@ -300,7 +301,15 @@ scripts/               migrate, seed, create-app-role, probes
   on the client one. Do not unify them into a key-value dump.
 - **Encryption** — `encryptSecret()` / `decryptSecret()`, AES-256-GCM, one key.
 - **Billing** — Stripe webhook plus a server→Stripe reconcile on billing page
-  load, which covers missed events and local development.
+  load, which covers missed events and local development. This is the platform
+  charging the tenant.
+- **Taking payments** — the OTHER direction, and the two must not get tangled.
+  Stripe Connect, a connected account per legal entity, hosted KYC, payouts to
+  the client's own bank. Same shape as billing on purpose — a Connect webhook
+  plus a server→Stripe reconcile on page load — but its own route, its own
+  signing secret and its own table, because `subscriptions` and
+  `payment_accounts` point in opposite directions. Platform-level machinery
+  with its own dossier.
 - **AI** — all Claude calls through `getClaude()`. Lazy client, adaptive
   thinking, streamed. Model output is untrusted input: validate it.
 - **Retainer hours** — platform-level machinery with its own dossier.

@@ -316,52 +316,73 @@ export function describeRequirements(
 }
 
 /**
- * A person-scoped requirement can carry the person's Stripe id in the key:
- * `person_1PabcXYZ.given_name`. Strip it — the id is meaningless to a farmer,
- * and leaving it in means every such key falls through to the raw fallback.
+ * **STRIPE MOVES A REQUIREMENT BETWEEN PREFIXES AS AN ACCOUNT PROGRESSES, and
+ * enumerating them all is a losing game.** One real account returned
+ * `representative.given_name` on the day it was created and
+ * `identity.individual.given_name` a few hours later, once Stripe had decided
+ * the entity type. A third form, `person_1Pabc.given_name`, names somebody
+ * other than the account's own owner. Three prefixes, one question: *whose
+ * name?*
+ *
+ * So the key is NORMALISED to a canonical form before lookup, and the table
+ * below is keyed on the leaf. That turned three tables into one and fixed a
+ * family nobody had seen — which is exactly how it was found, by looking at a
+ * real screen rather than at the types.
+ *
+ * `namedPerson` survives the normalisation because it changes the wording: the
+ * account's own owner is "the owner", a beneficial owner Stripe has asked about
+ * separately is "that person".
  */
-function stripPersonPrefix(key: string): string {
-  return key
-    .replace(/^(?:persons|owners|directors|executives)\./, "")
-    .replace(/^person_[A-Za-z0-9]+\./, "");
+function canonicalise(rawKey: string): { key: string; namedPerson: boolean } {
+  let key = rawKey.trim();
+  // `identity.` wraps most of the KYC tree and says nothing on its own.
+  key = key.replace(/^identity\./, "");
+  const named = /^(?:persons|owners|directors|executives)\./.test(key) ||
+    /^person_[A-Za-z0-9]+\./.test(key);
+  key = key.replace(/^(?:persons|owners|directors|executives)\./, "");
+  key = key.replace(/^person_[A-Za-z0-9]+\./, "person.");
+  // `individual` (sole trader) and `representative` (before Stripe has decided)
+  // are the same human as far as anybody reading this screen is concerned.
+  key = key.replace(/^(?:individual|representative)\./, "person.");
+  if (named && !key.startsWith("person.")) key = `person.${key}`;
+  return { key, namedPerson: named };
 }
 
 /**
  * **EVERY KEY HERE WAS READ OFF A REAL v2 ACCOUNT**, not translated from v1.
- * `scripts/stripe-connect-probe.ts create` prints the current list; if Stripe
- * changes the vocabulary, that is how you find out rather than by guessing.
+ * `scripts/stripe-connect-probe.ts show <acct_>` prints the current list; if
+ * Stripe changes the vocabulary, that is how you find out rather than by
+ * guessing.
  */
 const LABELS: Record<string, string> = {
   // The two that actually stop a market day.
   external_account: "A bank account for Stripe to pay into",
-  "identity.attestations.terms_of_service.account.date":
+  "attestations.terms_of_service.account.date":
     "Accepting Stripe's terms of service",
-  "identity.attestations.terms_of_service.account.ip":
+  "attestations.terms_of_service.account.ip":
     "Accepting Stripe's terms of service",
+  "attestations.ownership_declaration": "Confirming who owns the business",
+  "attestations.persons_provided": "Confirming who is involved in the business",
 
   // The business.
-  "identity.entity_type":
-    "Whether this is a sole trader, an LLC or a corporation",
-  "identity.country": "Which country the business is registered in",
-  "identity.business_details.registered_name": "The registered business name",
-  "identity.business_details.doing_business_as": "The trading name",
-  "identity.business_details.id_numbers": "The business tax ID (EIN)",
-  "identity.business_details.phone": "A phone number for the business",
-  "identity.business_details.address": "The business address",
-  "identity.business_details.registration_date":
-    "When the business was registered",
-  "identity.business_details.structure": "How the business is structured",
-  "identity.business_details.documents.company_license":
-    "A copy of the business licence",
-  "identity.business_details.documents.company_registration_verification":
+  entity_type: "Whether this is a sole trader, an LLC or a corporation",
+  country: "Which country the business is registered in",
+  "business_details.registered_name": "The registered business name",
+  "business_details.doing_business_as": "The trading name",
+  "business_details.id_numbers": "The business tax ID (EIN)",
+  "business_details.phone": "A phone number for the business",
+  "business_details.address": "The business address",
+  "business_details.registration_date": "When the business was registered",
+  "business_details.structure": "How the business is structured",
+  "business_details.documents.company_license": "A copy of the business licence",
+  "business_details.documents.company_registration_verification":
     "A document proving the business is registered",
-  "identity.attestations.ownership_declaration": "Confirming who owns the business",
-  "identity.attestations.persons_provided": "Confirming who is involved in the business",
   "configuration.merchant.mcc": "What kind of business this is",
   "configuration.merchant.statement_descriptor.descriptor":
     "What shows on a customer's card statement",
   "configuration.merchant.support.phone": "A phone number customers can call",
-  "configuration.merchant.support.email": "An email address customers can write to",
+  "configuration.merchant.support.email":
+    "An email address customers can write to",
   "configuration.merchant.support.address": "An address customers can write to",
   "configuration.merchant.support.url": "A support page customers can visit",
   "defaults.profile.business_url": "A website for the business",
@@ -369,43 +390,32 @@ const LABELS: Record<string, string> = {
   "defaults.profile.mcc": "What kind of business this is",
   "defaults.currency": "Which currency you take payment in",
 
-  // The person Stripe holds responsible. v2 calls them the representative.
-  "representative.given_name": "The owner's name",
-  "representative.surname": "The owner's name",
-  "representative.email": "The owner's email address",
-  "representative.phone": "The owner's phone number",
-  "representative.date_of_birth.day": "The owner's date of birth",
-  "representative.date_of_birth.month": "The owner's date of birth",
-  "representative.date_of_birth.year": "The owner's date of birth",
-  "representative.id_numbers": "The owner's Social Security number",
-  "representative.address": "The owner's home address",
-  "representative.relationship.title": "The owner's job title",
-  "representative.relationship.executive": "Whether the owner runs the business",
-  "representative.relationship.owner": "Whether this person owns the business",
-  "representative.relationship.percent_ownership":
+  // The person Stripe holds responsible — whatever prefix it arrived under.
+  "person.given_name": "The owner's name",
+  "person.surname": "The owner's name",
+  "person.email": "The owner's email address",
+  "person.phone": "The owner's phone number",
+  "person.date_of_birth.day": "The owner's date of birth",
+  "person.date_of_birth.month": "The owner's date of birth",
+  "person.date_of_birth.year": "The owner's date of birth",
+  "person.id_numbers": "The owner's Social Security number",
+  "person.id_numbers.us_ssn_last_4":
+    "The last four digits of the owner's Social Security number",
+  "person.address": "The owner's home address",
+  "person.address.line1": "The owner's home address",
+  "person.address.city": "The owner's home address",
+  "person.address.state": "The owner's home address",
+  "person.address.postal_code": "The owner's home address",
+  "person.relationship.title": "The owner's job title",
+  "person.relationship.executive": "Whether the owner runs the business",
+  "person.relationship.owner": "Whether this person owns the business",
+  "person.relationship.percent_ownership":
     "How much of the business this person owns",
-  "representative.documents.primary_verification":
+  "person.documents.primary_verification":
     "A photo of the owner's ID — a licence or passport",
-  "representative.documents.secondary_verification":
+  "person.documents.secondary_verification":
     "A second document showing the owner's address — a bill or a statement",
-  "representative.political_exposure": "Whether the owner holds a public office",
-
-  // Same fields when Stripe scopes them to a named person rather than to the
-  // account's representative. Reached after stripPersonPrefix.
-  given_name: "That person's name",
-  surname: "That person's name",
-  email: "That person's email address",
-  phone: "That person's phone number",
-  "date_of_birth.day": "That person's date of birth",
-  "date_of_birth.month": "That person's date of birth",
-  "date_of_birth.year": "That person's date of birth",
-  id_numbers: "That person's Social Security number",
-  address: "That person's home address",
-  "relationship.title": "That person's job title",
-  "documents.primary_verification":
-    "A photo of that person's ID — a licence or passport",
-  "documents.secondary_verification":
-    "A second document showing that person's address",
+  "person.political_exposure": "Whether the owner holds a public office",
 };
 
 /**
@@ -418,17 +428,22 @@ const LABELS: Record<string, string> = {
  * hand-written label and infinitely better than nothing.
  */
 export function requirementLabel(rawKey: string): string {
-  const key = rawKey.trim();
-  if (!key) return "";
-  const mapped = LABELS[key] ?? LABELS[stripPersonPrefix(key)];
-  if (mapped) return mapped;
-  return prettifyKey(stripPersonPrefix(key));
+  if (!rawKey.trim()) return "";
+  const { key, namedPerson } = canonicalise(rawKey);
+  const label = LABELS[key] ?? prettifyKey(key);
+  if (!label) return "";
+  // The account's own owner is "the owner"; anybody Stripe asked about
+  // separately is "that person".
+  return namedPerson
+    ? label
+        .replace(/\bThe owner's\b/, "That person's")
+        .replace(/\bthe owner's\b/, "that person's")
+    : label;
 }
 
 function prettifyKey(key: string): string {
   const words = key
-    .replace(/^(?:identity|configuration\.merchant|defaults|representative)\./, "")
-    .replace(/^(?:business_details|profile|attestations|documents)\./, "")
+    .replace(/^(?:person|configuration\.merchant|defaults|business_details|attestations|documents|profile)\./, "")
     .replace(/[._]+/g, " ")
     .trim();
   if (!words) return "";

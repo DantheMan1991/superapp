@@ -26,7 +26,7 @@ Rows are listed in build order; the numbers are left alone because the build log
 | **0** | **Channels + per-item-per-channel price lists + the market day record** | **shipped 2026-08-20** |
 | **1** | **The till: sales, the truck, sold-out capture, day-end reconciliation** | **shipped 2026-08-21** |
 | **1p** | **Stripe Connect: the farm's own connected account, per company** | **shipped 2026-08-25** — Layer 0, [ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md), dossier in [payments.md](payments.md) |
-| 5 | **Payment adapter — write: register a reader, PaymentIntent on the connected account, push it to the terminal** | next |
+| 5 | **Payment adapter — write: the till takes a card** | next — the reader and the charge are BUILT ([payments.md](payments.md) slice 1); what is left is wiring `collectPayment` into `recordSale` so the till's own `client_ref` becomes the idempotency key |
 | 2 | Payment adapter — read (settlements, fees → books) | after 5 — needs a payment to have happened |
 | 1b | Offline: service worker, durable queue, flush on reconnect | deferred — robustness, not a blocker. See Open items |
 | 3 | Commitments: reservations, deposits, hanging-weight final invoice, fulfilment point — needs `production` | |
@@ -346,15 +346,17 @@ guard with nothing to read.
 
 ## Open items
 
-- **THE TILL CANNOT TAKE A CARD YET, and that is the live gap.** The farm's own
-  Stripe connected account exists as of 2026-08-25 ([ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md),
-  [payments.md](payments.md)) — one per company, hosted KYC, payouts to their own
-  bank. What is still missing is everything that turns it into money at a stall:
-  a registered Terminal reader, a PaymentIntent created on the connected account
-  and pushed to it, and then the settlement and its fee reaching the books.
-  `retail_sales.payment_method` has recorded the method since slice 1 precisely
-  so the matching slice has something to match against, and it still has no
-  reader.
+- **THE TILL CANNOT TAKE A CARD YET, and the gap is now one wire.** The farm's
+  own Stripe account and a registered card reader both exist as of 2026-08-25
+  ([ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md),
+  [payments.md](payments.md)), and a real card-present charge has settled on a
+  connected account. What is missing is that **the till does not call it**:
+  `collectPayment` takes a reader, an amount and a `clientRef` and its only
+  caller is a panel on the settings page. Wiring it into `recordSale` should
+  pass the till's OWN `client_ref` as the idempotency key rather than minting a
+  second one — that is what makes a retry at a stall with no signal safe on both
+  sides at once. `retail_sales.payment_method` has recorded the method since
+  slice 1 precisely so the settlement slice has something to match against.
 - **THE TILL IS NOT OFFLINE YET, and this is no longer the next thing to
   build.** The founder has signal almost all of the time (2026-08-25), so this
   is robustness rather than a blocker and the payment slices went first. What

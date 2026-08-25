@@ -128,9 +128,103 @@ async function link(id: string) {
   console.log("\nonboarding url (expires " + l.expires_at + "):\n" + l.url);
 }
 
+/**
+ * **THE QUESTION THAT DECIDES THE SHAPE OF THE READER SLICE:** can a Terminal
+ * location and reader be registered on a connected account that has NOT passed
+ * KYC? If yes, the hardware half is buildable and provable before anybody fills
+ * a form in; if no, the whole slice waits on a human.
+ *
+ * Terminal is a v1 API even though the account is v2, and everything here acts
+ * AS the connected account via `stripeAccount` — that is what makes the reader
+ * theirs rather than ours.
+ */
+async function terminal(id: string) {
+  const s = stripe();
+  const as = { stripeAccount: id };
+
+  const location = await s.terminal.locations.create(
+    {
+      display_name: "Probe market stall",
+      address: {
+        line1: "1 Elm Street",
+        city: "Denver",
+        state: "CO",
+        postal_code: "80202",
+        country: "US",
+      },
+    },
+    as,
+  );
+  console.log("location:", location.id, location.display_name);
+
+  // Stripe's published registration code for a simulated reader. No hardware,
+  // and it behaves like the real thing.
+  const code = process.env.PROBE_REG_CODE ?? "simulated-wpe";
+  const reader = await s.terminal.readers.create(
+    { registration_code: code, location: location.id, label: "Probe reader" },
+    as,
+  );
+  console.log(
+    "reader:",
+    JSON.stringify(
+      {
+        id: reader.id,
+        label: reader.label,
+        status: reader.status,
+        device_type: reader.device_type,
+        action: reader.action,
+      },
+      null,
+      1,
+    ),
+  );
+
+  /**
+   * **HOW FAR DOES A RESTRICTED ACCOUNT ACTUALLY GET?** The assumption was that
+   * nothing here would work without KYC. Creating a PaymentIntent turns out to
+   * be fine, so the real question is where the wall is — and the answer decides
+   * how much of this slice can be proven before anybody fills a form in.
+   */
+  try {
+    const pi = await s.paymentIntents.create(
+      {
+        amount: 1234,
+        currency: "usd",
+        payment_method_types: ["card_present"],
+        capture_method: "automatic",
+      },
+      as,
+    );
+    console.log("payment intent:", pi.id, pi.status);
+
+    const pushed = await s.terminal.readers.processPaymentIntent(
+      reader.id,
+      { payment_intent: pi.id },
+      as,
+    );
+    console.log("pushed to reader:", JSON.stringify(pushed.action, null, 1));
+
+    // Simulate the customer tapping a card.
+    const tapped = await s.testHelpers.terminal.readers.presentPaymentMethod(
+      reader.id,
+      {},
+      as,
+    );
+    console.log("after tap:", JSON.stringify(tapped.action, null, 1));
+
+    const after = await s.paymentIntents.retrieve(pi.id, {}, as);
+    console.log("payment intent now:", after.id, after.status);
+  } catch (e) {
+    console.log("STOPPED HERE:", (e as Error).message);
+  }
+}
+
 async function main() {
   const [cmd, arg] = process.argv.slice(2);
   switch (cmd) {
+    case "terminal":
+      if (!arg) throw new Error("usage: terminal <acct_...>");
+      return terminal(arg);
     case "create":
       return create(arg ?? "Yosher probe farm");
     case "show":

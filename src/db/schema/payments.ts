@@ -222,5 +222,99 @@ export const paymentAccounts = pgTable(
   ],
 );
 
+/**
+ * **A CARD READER AT A STALL.** A Stripe Terminal reader registered on ONE
+ * connected account, which is what makes it the farm's device rather than ours.
+ *
+ * **THIS ROW IS A MIRROR OF STRIPE, NOT A RECORD OF OUR OWN**, and it takes the
+ * same policy as `payment_accounts` for the same reason: members hold SELECT
+ * only. A row here that Stripe has never heard of is not a harmless stray — it
+ * is a device the till would try to push a payment to, at a stall, with a queue
+ * behind it. Every write happens after the Stripe call has already succeeded.
+ *
+ * **NO LOCATION TABLE, DELIBERATELY.** A Terminal location is an address that
+ * groups readers, and Stripe already stores it. Keeping a copy would mean a
+ * second thing to keep in step for no reader of it; the id is denormalised here
+ * so that a farm with two market addresses is already representable without a
+ * migration, and slice 1 simply always uses the account's first one.
+ *
+ * Deliberately NOT here yet: the charge. A PaymentIntent pushed to this reader
+ * has no table until `retail` slice 5 links one to a sale, at which point the
+ * shape is known rather than guessed.
+ */
+export const paymentReaders = pgTable(
+  "payment_readers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * Which connected account the reader belongs to — and therefore which
+     * COMPANY takes the money it collects. The composite target index on
+     * `payment_accounts` exists for exactly this.
+     */
+    paymentAccountId: uuid("payment_account_id").notNull(),
+    /** `tmr_…`. Stripe's id for the device. */
+    stripeReaderId: text("stripe_reader_id").notNull(),
+    /** `tml_…`. The address it is registered at. */
+    stripeLocationId: text("stripe_location_id").notNull(),
+    /** What a person calls it: "Front table", "Elm Street". Theirs to set. */
+    label: text("label").notNull(),
+    /** Stripe's own model string, e.g. `simulated_wisepos_e`, `stripe_s700`. */
+    deviceType: text("device_type"),
+    /**
+     * `online` \| `offline`, **Stripe's to say**. A reader that has been
+     * unplugged is offline whatever this app believes, so this is refreshed
+     * from the API rather than assumed.
+     */
+    status: text("status"),
+    /**
+     * Retired rather than deleted: a reader that took money last season is
+     * still the answer to "what device was that payment collected on".
+     */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("payment_readers_tenant_id_id_idx").on(t.tenantId, t.id),
+    /** One row per physical device. Re-registering the same reader is an update. */
+    uniqueIndex("payment_readers_tenant_reader_idx").on(
+      t.tenantId,
+      t.stripeReaderId,
+    ),
+    index("payment_readers_tenant_account_idx").on(
+      t.tenantId,
+      t.paymentAccountId,
+    ),
+    /**
+     * Composite, so a reader can never name another tenant's connected account
+     * — which would push a payment into another business's bank. CASCADE:
+     * a connected account's readers are meaningless without it.
+     */
+    foreignKey({
+      name: "payment_readers_account_fk",
+      columns: [t.tenantId, t.paymentAccountId],
+      foreignColumns: [paymentAccounts.tenantId, paymentAccounts.id],
+    }).onDelete("cascade"),
+    check(
+      "payment_readers_stripe_reader_id_shape",
+      sql`${t.stripeReaderId} ~ '^tmr_[A-Za-z0-9]+$'`,
+    ),
+    check(
+      "payment_readers_stripe_location_id_shape",
+      sql`${t.stripeLocationId} ~ '^tml_[A-Za-z0-9]+$'`,
+    ),
+  ],
+);
+
 export type PaymentAccount = typeof paymentAccounts.$inferSelect;
 export type NewPaymentAccount = typeof paymentAccounts.$inferInsert;
+export type PaymentReader = typeof paymentReaders.$inferSelect;
+export type NewPaymentReader = typeof paymentReaders.$inferInsert;

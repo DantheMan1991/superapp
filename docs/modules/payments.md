@@ -34,12 +34,74 @@ Read it before changing where the account hangs, or which API this talks to.
 | # | Slice | State |
 | --- | --- | --- |
 | **0** | **Connect: the connected account per company, hosted onboarding, the settings screen** | **shipped 2026-08-25** — onboarding form not yet completed by a human, see Open items |
-| 1 | Terminal: register a location and a reader, PaymentIntent on the connected account, push it to the reader | next — `retail` slice 5 |
-| 2 | Settlements and fees reaching the books | after 1 — `retail` slice 2 |
+| **1** | **Terminal: register a location and a reader, PaymentIntent on the connected account, push it to the reader** | **shipped 2026-08-25** — driven end to end, a real card-present charge settled on the connected account |
+| 1b | The TILL takes a card: wire `collectPayment` into `recordSale` with the `client_ref` story | next — `retail` slice 5's other half |
+| 2 | Settlements and fees reaching the books | after 1b — `retail` slice 2 |
 | 3 | Refunds from the till | |
 | 4 | Online / card-not-present, for `retail` slice 6's orders | |
 
 ## Build log
+
+### 2026-08-25 — Slice 1: the reader at the stall (`claude/the-reader-at-the-stall`)
+
+**A REAL CARD-PRESENT CHARGE SETTLED ON THE CONNECTED ACCOUNT**: $12.50, visa
+`4242`, captured, on `acct_1U8Bof…` and **not visible on the platform account**.
+That last clause is ADR 0015's whole claim and this is the first time anything
+has proved it with money rather than with an argument.
+
+**THE BLOCKER SLICE 0 RECORDED TURNED OUT NOT TO EXIST.** Slice 0's open items
+said the reader work needed a connected account at `Ready`, and therefore needed
+a human to finish Stripe's KYC form. It does not: **Stripe test mode does not
+gate card-present charges on the capability status**, so the whole flow —
+location, reader, PaymentIntent, tap, `succeeded` — runs on a `restricted`
+account. Live mode does gate it, which is why the guard below still exists.
+
+- **`ensureLocation` asks Stripe rather than keeping a column.** A Terminal
+  location is an address that groups readers and Stripe already stores it; a
+  copy here would be a second thing to keep in step for no reader of it. The
+  location id is denormalised onto the reader, so a farm with two market
+  addresses is already representable without a migration.
+- **The address comes from a form on the FIRST reader**, because Stripe requires
+  one and this app holds an address nowhere. Not stored afterwards.
+- **`payment_readers` takes the same SELECT-only policy as `payment_accounts`**,
+  and the reason is adjacent rather than identical: a row here that Stripe has
+  never heard of is a device the till would offer, at a stall, and pushing a
+  payment to it fails with a customer holding a card. Every write happens after
+  Stripe has already accepted the device.
+- **THE IDEMPOTENCY KEY IS THE WHOLE SAFETY STORY, and it is `retail`'s lesson
+  reused.** A till with bad signal retries; a retry whose request arrived and
+  whose reply did not would charge the customer twice. The caller's `clientRef`
+  — minted before it touches the network, exactly as `retail_sales.client_ref`
+  is — becomes the Stripe idempotency key, so the second attempt returns the
+  FIRST PaymentIntent.
+- **`collectPayment` pushes and returns; it does not wait.** A customer takes as
+  long as a customer takes. Blocking would tie up a handler for a minute and
+  give the stall a spinner it cannot cancel.
+- **Taking a payment is MEMBER, registering a reader is OWNER** — the same split
+  `retail` draws between recording what the pitch cost and setting a price. A
+  till only the owner could operate is a till nobody uses.
+- 27 pure tests, 22 isolation tests. Migration `0210`, `0211` is RLS. **No
+  hand-reordering** — the composite FK targets `payment_accounts`, which already
+  existed.
+
+**DRIVEN THROUGH THE REAL UI**, not the probe: the address form, the pairing
+code, the reader appearing `online`, the guard refusing, then the charge, the
+tap and `Paid`. Two defects, both found by doing it rather than by reading it:
+
+1. **`readers.del(id, options)` PUT THE ACCOUNT IN THE QUERY STRING.** The
+   signature is `del(id, params, options)`, so passing `{ stripeAccount }`
+   second sends it as a parameter and Stripe rejects the call — and
+   `archiveReader` catches and logs delete failures, so **the reader would have
+   stayed registered while the app said it was retired**, silently, forever.
+   `tsc` did not catch it; a cleanup script that actually ran did.
+2. **A THIRD REQUIREMENT-KEY FAMILY, and the table could not keep up.** The same
+   account returned `representative.given_name` when it was created and
+   `identity.individual.given_name` a few hours later, once Stripe had decided
+   its entity type — so eleven readable lines became "Individual given name",
+   "Individual date of birth day", "Individual date of birth month"… undeduped.
+   Enumerating prefixes was the wrong shape. Keys are now **normalised** to a
+   canonical form before lookup, which collapsed three tables into one and
+   handles a family nobody had seen.
 
 ### 2026-08-25 — Slice 0: the account that belongs to the farm (`claude/the-account-that-belongs-to-the-farm`)
 
@@ -166,8 +228,14 @@ The columns worth knowing, all of them v2's vocabulary:
   cannot be inferred from the date, and the date cannot be inferred from the
   status.
 
+| `payment_readers` | **A card reader at a stall.** One row per physical (or simulated) device, registered on ONE connected account | `tenant_id`, FORCE RLS, **members hold SELECT ONLY** for the same reason the account does. Composite FK to `(tenant_id, payment_account_id)` — CASCADE, because a reader is meaningless without the account it pays into — which makes "a device pointed at another business's bank" unrepresentable. UNIQUE per `(tenant_id, stripe_reader_id)`: re-registering a known device is an update. CHECKs that the ids look like `tmr_…` and `tml_…`, because swapping them would register a payment against an address instead of a device. Archived, never deleted |
+
 **Never a column here:** the tenant's Stripe secret key, any bank detail, any
 card number, any KYC document.
+
+**No `payment_locations` table, and no charge table yet.** A Terminal location
+lives in Stripe; a PaymentIntent gets a row when `retail` slice 5 links one to a
+sale and the shape is known rather than guessed.
 
 ## Key files & seams
 
@@ -179,7 +247,11 @@ card number, any KYC document.
   opposite direction does not also mean an opposite design
 - `src/app/api/webhooks/stripe/connect/route.ts` — the Connect endpoint, its own
   signing secret, v2 thin events
-- `src/app/dashboard/settings/payments/` — the screen, its action, its buttons
+- `src/lib/payments/terminal.ts` — server. Locations, readers, and the charge.
+  **Acts AS the connected account via `{ stripeAccount }`**, which is the whole
+  difference between this and `billing-sync.ts`
+- `src/app/dashboard/settings/payments/` — the screen, its actions, its buttons.
+  `reader-controls.tsx` holds the only place a payment can be driven today
 - `scripts/stripe-connect-probe.ts` — Stripe with nothing else in the way.
   `create` prints the requirement keys a real account returns
 - `src/db/schema/payments.ts` · `drizzle/0206` (table) · `0207` (RLS) ·
@@ -231,6 +303,28 @@ card number, any KYC document.
 - **AN UNKNOWN REQUIREMENT IS SHOWN, NOT DROPPED.** Stripe adds keys without
   telling us, and a screen that silently hid one would leave somebody stuck on a
   step the page swore was finished. The fallback prettifies the key.
+- **TERMINAL IS A v1 API EVEN THOUGH THE ACCOUNT IS v2.** `stripe.terminal.*`
+  beside `stripe.v2.core.*` in one file is correct, not a leftover.
+- **`{ stripeAccount }` GOES IN THE OPTIONS ARGUMENT, WHICH IS NOT ALWAYS THE
+  SECOND ONE.** `list(params, options)` but `del(id, params, options)` and
+  `retrieve(id, params, options)`. Passing it one slot early sends it as a query
+  parameter; Stripe rejects the call, `tsc` does not, and if the caller
+  swallows errors the failure is silent. That shipped once here — see build log
+  defect 1.
+- **`retrieve` RETURNS `Reader | DeletedReader`.** A device removed on Stripe's
+  side has no `status`; narrow before reading one.
+- **A REQUIREMENT KEY IS NORMALISED, NEVER MATCHED WHOLE.** Stripe moves the
+  same question between `representative.`, `identity.individual.` and
+  `person_xxx.` as an account progresses. Add leaves to `LABELS`, not prefixes.
+- **THE IDEMPOTENCY KEY IS NOT OPTIONAL FOR A TILL.** `collectPayment` takes the
+  caller's `clientRef` and hands it to Stripe. Without it a retry charges twice
+  — the same rule, and the same reason, as `retail_sales.client_ref`.
+- **`collectPayment` DOES NOT WAIT FOR THE CUSTOMER**, and nothing that calls it
+  should either. Push, then poll `readPaymentStatus`.
+- **THE CAPABILITY GUARD CANNOT BE VERIFIED BY TEST MODE.** Test mode happily
+  takes a card on a `restricted` account, so the guard in `collectPayment` is
+  the only thing standing between a live farm and a decline at the stall. Do not
+  conclude from a green test run that it is unnecessary.
 - **CONNECT IS A ONE-TIME PLATFORM SIGNUP.** Not per client, not an env var.
   Without it every client's first click fails identically, which is why that one
   error has its own message saying it is ours to fix. SETUP.md §4.5.
@@ -257,7 +351,7 @@ card number, any KYC document.
 ## Open items
 
 - **NOBODY HAS COMPLETED THE HOSTED ONBOARDING, so nothing has ever reached
-  `Ready`.** What IS proven end to end: the screen renders one card per company
+  `Ready` — but slice 1 proved this blocks less than it looked like it would.** What IS proven end to end: the screen renders one card per company
   on a two-company tenant; the non-default company's button creates a real v2
   connected account against the non-default company's id; the row is written
   with the right status, requirements, country and currency; Stripe's hosted
@@ -290,6 +384,27 @@ card number, any KYC document.
   falls through to the fallback, either.
 - **The country is hard-coded to `US`.** The first non-US client needs a real
   field on `tenants`, not a constant in `connect.ts`.
+- **THE TILL DOES NOT CALL ANY OF THIS YET.** `collectPayment` works and its
+  only caller is a panel on the settings page. Wiring it into `recordSale` is
+  `retail` slice 5's other half, and it is where the `client_ref` already minted
+  by the till should become the idempotency key rather than a second uuid.
+- **NOTHING RECORDS THAT A CHARGE HAPPENED.** There is no charge table: the
+  PaymentIntent id is returned to the browser and forgotten. That is deliberate
+  until a sale needs to reference one, and it means today a payment taken
+  through the panel is reconcilable only in Stripe.
+- **A `succeeded` PaymentIntent IS READ BY POLLING, NOT BY EVENT.** Fine for a
+  person watching a screen; wrong for a till that may lose signal mid-tap. The
+  Connect endpoint could carry `payment_intent.succeeded` and does not.
+- **A READER'S `status` IS ONLY AS GOOD AS ITS LAST SYNC**, refreshed on page
+  load. A reader that goes offline while somebody is looking at the page still
+  reads `online`.
+- **The address for a Terminal location is asked for once and never editable.**
+  Changing it means deleting the location in Stripe, which the app does not
+  offer.
+- **`simulateTap` ships in production code.** It refuses anything that is not a
+  `simulated_*` device, so it cannot be pointed at a real reader — but it is a
+  test helper living on a live surface, and a `NODE_ENV` guard would be belt and
+  braces.
 - **A flapping account writes one audit row per flap.** Only `active` and
   `restricted` transitions are audited, which is the right filter at this
   volume; worth a thought if it ever gets noisy.

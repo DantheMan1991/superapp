@@ -51,6 +51,8 @@ export type PaymentCompany = {
   name: string;
   view: PaymentAccountView;
   stripeAccountId: string | null;
+  /** Our own row id — what a reader hangs off. Null when nothing is connected. */
+  paymentAccountId: string | null;
   /** Stripe stops accepting charges after this if the requirements are unmet. */
   requirementsDueBy: Date | null;
   syncedAt: Date | null;
@@ -176,6 +178,7 @@ function toCompany(
     entityId,
     name,
     stripeAccountId: row?.stripeAccountId ?? null,
+    paymentAccountId: row?.id ?? null,
     requirementsDueBy: row?.requirementsDueBy ?? null,
     syncedAt: row?.syncedAt ?? null,
     view: describePaymentAccount(

@@ -25,7 +25,7 @@ import { formatQuantity } from "@/packs/inventory/core/units";
 import { dayTill, priceListFor, truckStock } from "@/packs/retail/ops";
 import { Till, StockoutButton } from "@/packs/retail/components/till";
 import {
-  CashCountForm,
+  CloseDayForm,
   TruckMoveForm,
 } from "@/packs/retail/components/truck-controls";
 import { VoidSaleButton } from "@/packs/retail/components/retail-controls";
@@ -189,10 +189,16 @@ export default async function SellingDayPage({
                 />
               </>
             )}
-            <CashCountForm
+            <CloseDayForm
               marketDayId={till.day.id}
               openingFloatCents={till.day.openingFloatCents}
               cashCountedCents={till.day.cashCountedCents}
+              stallFeeCents={till.day.stallFeeCents}
+              travelCents={till.day.travelCents}
+              crewSize={till.day.crewSize}
+              hours={till.day.hours}
+              weather={till.day.weather ?? ""}
+              notes={till.day.notes ?? ""}
               currencySymbol={currencySymbol}
             />
           </div>

@@ -842,4 +842,92 @@ d("retail ops", () => {
       ),
     ).rejects.toThrow(RetailError);
   });
+  /**
+   * **A MARKET DAY IS OPENED, THEN CLOSED.** Slice 0 built the row as a
+   * retrospective cost record; slice 1 hung the till off it, which made it the
+   * thing you create BEFORE you can sell. The dialog never caught up: it asked
+   * how long you stood there and what the weather did before either had
+   * happened, and collected the float — the one fact you know at seven in the
+   * morning — at the end, inside "Count the tin".
+   *
+   * The forms are two moments now. The risk that creates is this test: the
+   * closing form submits EVERY field, so a mis-read prefill would silently
+   * blank whatever the opening form set.
+   */
+  it("opens with what you know, closes with what you learned, and blanks nothing", async () => {
+    const channel = await asOwner((tx) =>
+      createChannel(tx, ownerCtx(), { name: `${STAMP} two moments` }),
+    );
+
+    // Morning: where, when, the float in the tin, the fee if paid upfront.
+    const opened = await asOwner((tx) =>
+      recordMarketDay(tx, ownerCtx(), {
+        channelId: channel.id,
+        heldOn: TODAY,
+        openingFloatCents: 5_000,
+        stallFeeCents: 3_500,
+      }),
+    );
+    expect(opened.openingFloatCents).toBe(5_000);
+    expect(opened.stallFeeCents).toBe(3_500);
+    // Nothing retrospective has been invented on the way in.
+    expect(opened.cashCountedCents).toBeNull();
+    expect(opened.hours).toBeNull();
+    expect(opened.travelCents).toBeNull();
+    expect(opened.crewSize).toBeNull();
+
+    // Evening: everything only knowable once the stall is packed away. The
+    // form resubmits the opening fields too, so they must survive unchanged.
+    const closed = await asOwner((tx) =>
+      updateMarketDay(tx, ownerCtx(), opened.id, {
+        openingFloatCents: 5_000,
+        stallFeeCents: 3_500,
+        cashCountedCents: 13_750,
+        travelCents: 1_800,
+        crewSize: 2,
+        hours: 5,
+        weather: "rained until eleven",
+      }),
+    );
+    expect(closed.openingFloatCents).toBe(5_000);
+    expect(closed.stallFeeCents).toBe(3_500);
+    expect(closed.cashCountedCents).toBe(13_750);
+    expect(closed.travelCents).toBe(1_800);
+    expect(closed.crewSize).toBe(2);
+    expect(Number(closed.hours)).toBe(5);
+    expect(closed.weather).toBe("rained until eleven");
+  });
+
+  it("A BLANK COUNT IS STILL NOT A ZERO COUNT after the forms were merged", async () => {
+    /**
+     * The rule the cash panel has always turned on: not counted and
+     * counted-and-right are different facts, and a screen that read one as the
+     * other would report every uncounted day as balanced. Merging the tin into
+     * the close form is exactly where that could have been lost.
+     */
+    const channel = await asOwner((tx) =>
+      createChannel(tx, ownerCtx(), { name: `${STAMP} blank count` }),
+    );
+    const day = await asOwner((tx) =>
+      recordMarketDay(tx, ownerCtx(), {
+        channelId: channel.id,
+        heldOn: TODAY,
+        openingFloatCents: 5_000,
+      }),
+    );
+    const closedWithoutCounting = await asOwner((tx) =>
+      updateMarketDay(tx, ownerCtx(), day.id, {
+        cashCountedCents: null,
+        hours: 4,
+      }),
+    );
+    expect(closedWithoutCounting.cashCountedCents).toBeNull();
+    expect(Number(closedWithoutCounting.hours)).toBe(4);
+
+    // And zero is a real answer, distinct from never having counted.
+    const countedEmpty = await asOwner((tx) =>
+      updateMarketDay(tx, ownerCtx(), day.id, { cashCountedCents: 0 }),
+    );
+    expect(countedEmpty.cashCountedCents).toBe(0);
+  });
 });

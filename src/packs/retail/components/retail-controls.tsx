@@ -51,12 +51,6 @@ function toCents(value: FormDataEntryValue | null): number | null {
   return Math.round(parsed * 100);
 }
 
-function numberOrNull(value: FormDataEntryValue | null): number | null {
-  const text = String(value ?? "").trim();
-  if (!text) return null;
-  const parsed = Number(text);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
 
 /** Add somewhere the business sells. Owner-only: it is a decision, not a chore. */
 export function ChannelForm({
@@ -399,20 +393,22 @@ export function MarketDayForm({
       const result = await recordMarketDayAction({
         channelId,
         heldOn: String(formData.get("heldOn") ?? today),
+        // Only what somebody knows before they have stood there. Everything
+        // retrospective belongs to `CloseDayForm` on the day's own page.
         stallFeeCents: toCents(formData.get("stallFee")),
-        travelCents: toCents(formData.get("travel")),
-        crewSize: numberOrNull(formData.get("crewSize")),
-        hours: numberOrNull(formData.get("hours")),
-        weather: String(formData.get("weather") ?? ""),
-        notes: String(formData.get("notes") ?? ""),
+        openingFloatCents: toCents(formData.get("float")),
       });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success(`${dayWord} recorded`);
       setOpen(false);
-      router.refresh();
+      /**
+       * **GO TO THE DAY.** The till, the truck and the tin all live there and
+       * nowhere else, so leaving somebody on the page they started from is what
+       * made the whole thing unfindable.
+       */
+      router.push(`/dashboard/m/retail/days/${result.id}`);
     });
   }
 
@@ -420,16 +416,25 @@ export function MarketDayForm({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" disabled={channels.length === 0}>
-          Record a {dayWord.toLowerCase()}
+          Start a {dayWord.toLowerCase()}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <form action={submit}>
           <DialogHeader>
-            <DialogTitle>Record a {dayWord.toLowerCase()}</DialogTitle>
+            <DialogTitle>Start a {dayWord.toLowerCase()}</DialogTitle>
             <DialogDescription>
-              What it cost to stand there. Two seasons of this is what settles
-              which market is worth going to and which one is habit.
+              {/**
+               * **THIS FORM USED TO BE WRITTEN IN THE PAST TENSE**, because
+               * slice 0 built the row as a record of what a day COST and slice 1
+               * then hung the till off it. It asked how long you stood there and
+               * what the weather did, before either had happened — and the one
+               * genuinely start-of-day field, the float in the tin, was collected
+               * at the END inside "Count the tin". Opening and closing are two
+               * moments now.
+               */}
+              Opens the stall so you can sell. What it cost and how it went are
+              filled in at the end, when you know them.
             </DialogDescription>
           </DialogHeader>
 
@@ -475,71 +480,36 @@ export function MarketDayForm({
                   step="0.01"
                   placeholder="35.00"
                 />
+                <p className="text-xs text-muted-foreground">
+                  If you paid it upfront. Otherwise leave it and add it at the
+                  end.
+                </p>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="travel">
-                  Getting there {currencySymbol ? `(${currencySymbol})` : ""}
+                <Label htmlFor="float">
+                  Float in the tin {currencySymbol ? `(${currencySymbol})` : ""}
                 </Label>
                 <Input
-                  id="travel"
-                  name="travel"
+                  id="float"
+                  name="float"
                   type="number"
                   min="0"
                   step="0.01"
-                  placeholder="18.00"
+                  placeholder="50.00"
                 />
+                <p className="text-xs text-muted-foreground">
+                  {/* The one field that is genuinely knowable at seven in the
+                      morning, and it used to be collected at the end. */}
+                  The change you are taking with you. What the tin should hold
+                  at the end is this plus the cash you take.
+                </p>
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="crewSize">Crew</Label>
-                <Input
-                  id="crewSize"
-                  name="crewSize"
-                  type="number"
-                  min="1"
-                  step="1"
-                  inputMode="numeric"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="hours">Hours stood there</Label>
-                <Input
-                  id="hours"
-                  name="hours"
-                  type="number"
-                  min="0"
-                  step="0.25"
-                  inputMode="decimal"
-                />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {/* The whole argument for the table: own hours at zero make every
-                  market look profitable and the dud invisible. */}
-              Hours are recorded beside the money, never inside it. If your own
-              time counts as nothing, every market looks worth going to.
-            </p>
-
-            <div className="grid gap-2">
-              <Label htmlFor="weather">Weather</Label>
-              <Input
-                id="weather"
-                name="weather"
-                maxLength={300}
-                placeholder="e.g. rained until eleven"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="day-notes">Notes</Label>
-              <Textarea id="day-notes" name="notes" rows={2} maxLength={5000} />
             </div>
           </div>
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Record"}
+              {pending ? "Starting…" : "Start selling"}
             </Button>
           </DialogFooter>
         </form>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { Check, ChevronLeft, Circle } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled, isModuleEnabled } from "@/lib/modules";
@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getUnit } from "@/packs/inventory/core/units";
+import { listLocations } from "@/packs/inventory/ops";
 import {
   getChannel,
   listChannels,
@@ -67,25 +68,34 @@ export default async function RetailChannelPage({
   const currencySymbol = ctx.tenant.currencySymbol;
   // Only signpost a module this tenant actually has.
   const inventoryEnabled = await isModuleEnabled(ctx.tenant.id, "inventory");
+  // The truck is an ASSETS concept, so the checklist can only offer the link
+  // when that module is switched on.
+  const assetsEnabled = await isModuleEnabled(ctx.tenant.id, "assets");
 
   const data = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const channel = await getChannel(tx, ctx.tenant.id, id);
       if (!channel) return null;
-      const [prices, days, channels, pack] = await Promise.all([
+      const [prices, days, channels, pack, locations] = await Promise.all([
         priceListFor(tx, ctx.tenant.id, id, today),
         marketDays(tx, ctx.tenant.id, { channelId: id }),
         listChannels(tx, ctx.tenant.id, { status: "active" }),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "retail"),
+        /**
+         * Somewhere to sell OUT of. Read here rather than on the day page,
+         * because the day page can only tell you it is missing once you have
+         * already gone to the trouble of starting a day.
+         */
+        listLocations(tx, ctx.tenant.id),
       ]);
-      return { channel, prices, days, channels, pack };
+      return { channel, prices, days, channels, pack, locations };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { channel, prices, days, channels, pack } = data;
+  const { channel, prices, days, channels, pack, locations } = data;
   const isOwner = ctx.role === "owner";
   const channelWord = labelFor(pack.labels, "channel", "Channel");
   const dayWord = labelFor(pack.labels, "marketDay", "Market day");
@@ -130,6 +140,15 @@ export default async function RetailChannelPage({
             )}
           </div>
         }
+      />
+
+      <SellingChecklist
+        priced={pricedCount}
+        hasLocation={locations.length > 0}
+        hasDay={days.length > 0}
+        assetsEnabled={assetsEnabled}
+        channelWord={channelWord}
+        dayWord={dayWord}
       />
 
       <Card>
@@ -368,5 +387,113 @@ export default async function RetailChannelPage({
         </Card>
       )}
     </div>
+  );
+}
+
+/**
+ * **WHAT YOU STILL NEED BEFORE YOU CAN SELL HERE.**
+ *
+ * The till renders only when four things already exist — a price, somewhere to
+ * sell out of, a market day, and stock loaded onto it — and until this panel
+ * existed **nothing anywhere said so**. The channel page showed an empty "market
+ * days here" and the day page said "No truck to sell from", each one visible
+ * only after you had already guessed the step before it. That is the reason
+ * this pack's own dossier said for weeks that the market truck had never left a
+ * yard: reach, not reluctance.
+ *
+ * **IT DISAPPEARS ONCE IT IS SATISFIED.** A checklist that keeps congratulating
+ * an established stall is noise, and noise is what teaches people to skip the
+ * one panel that had something to say.
+ *
+ * Loading the truck is deliberately NOT a step here: it happens on the day's own
+ * page, next to the button that does it, and a checklist item you cannot act on
+ * from the page you are reading is worse than no item.
+ */
+function SellingChecklist({
+  priced,
+  hasLocation,
+  hasDay,
+  assetsEnabled,
+  channelWord,
+  dayWord,
+}: {
+  priced: number;
+  hasLocation: boolean;
+  hasDay: boolean;
+  assetsEnabled: boolean;
+  channelWord: string;
+  dayWord: string;
+}) {
+  const steps = [
+    {
+      done: priced > 0,
+      title: `Price what you sell at this ${channelWord.toLowerCase()}`,
+      todo: "Set a price on the list below. A price belongs to this place, not to the thing — the same pound is one price here and another at the gate.",
+    },
+    {
+      done: hasLocation,
+      title: "Somewhere to sell out of",
+      todo: assetsEnabled
+        ? "A market truck is an asset with “Things are kept here” ticked. Add one under Assets and it becomes somewhere the till can draw stock from."
+        : "The till sells out of a storage location — a truck, a stall, a van. That lives in the Assets module, which is not switched on for you yet.",
+      href: assetsEnabled ? "/dashboard/m/assets" : undefined,
+      linkLabel: "Go to Assets",
+    },
+    {
+      done: hasDay,
+      title: `Start a ${dayWord.toLowerCase()}`,
+      todo: `Use the button at the top of this page. The till, the truck and the cash tin all live on the ${dayWord.toLowerCase()}’s own page — this is the step that opens it.`,
+    },
+  ];
+
+  if (steps.every((step) => step.done)) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Before you can sell here</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ol className="space-y-3">
+          {steps.map((step) => (
+            <li key={step.title} className="flex gap-3">
+              {step.done ? (
+                <Check
+                  className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                  aria-label="Done"
+                />
+              ) : (
+                <Circle
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                  aria-label="Still to do"
+                />
+              )}
+              <div className="space-y-1">
+                <p
+                  className={
+                    step.done
+                      ? "text-sm text-muted-foreground line-through"
+                      : "text-sm font-medium"
+                  }
+                >
+                  {step.title}
+                </p>
+                {!step.done && (
+                  <p className="text-sm text-muted-foreground">{step.todo}</p>
+                )}
+                {!step.done && step.href && (
+                  <Link
+                    href={step.href}
+                    className="inline-block text-sm underline underline-offset-4 hover:text-foreground"
+                  >
+                    {step.linkLabel}
+                  </Link>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </CardContent>
+    </Card>
   );
 }

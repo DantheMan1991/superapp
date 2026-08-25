@@ -36,6 +36,35 @@ Rows are listed in build order; the numbers are left alone because the build log
 
 ## Build log
 
+### 2026-08-25 — What you still need before you can sell (`claude/what-you-still-need-to-sell`)
+
+**THE TILL NEEDS FOUR THINGS AND NOTHING ANYWHERE SAID SO.** A price, somewhere
+to sell out of, a market day, and stock loaded onto it. Miss any and the failure
+is silent in a particular way: the channel page shows an empty *"market days
+here"*, the day page says *"No truck to sell from"* — and each message is only
+visible **after** you have already guessed the step before it.
+
+That is the whole reason this dossier said for weeks that *"the market truck has
+not left a yard"*. The founder went looking for the point of sale on a live
+channel and could not find one. **Reach, not reluctance.**
+
+So the channel page opens with **Before you can sell here** — three steps, each
+either ticked or carrying the sentence that says what to do about it.
+
+- **It disappears once it is satisfied.** A checklist that keeps congratulating
+  an established stall is noise, and noise is what teaches somebody to skip the
+  one panel that had something to say.
+- **The truck step links to Assets**, because that is where it lives, and it is
+  the step nothing in Retail has ever mentioned. The link only appears when that
+  module is switched on; otherwise the copy says plainly that it is not.
+- **Loading the truck is deliberately NOT a step here.** It happens on the
+  day's own page, next to the button that does it — and a checklist item you
+  cannot act on from the page you are reading is worse than no item.
+
+Driven both ways on the dev branch: an empty channel shows the panel with the
+truck step already ticked and the other two open, and the established channel
+renders without it.
+
 ### 2026-08-25 — A market day is opened, then closed (`claude/open-the-stall-then-close-it`)
 
 **THE OBJECT CHANGED JOBS BETWEEN TWO SLICES AND THE WORDS NEVER CAUGHT UP.**
@@ -352,6 +381,10 @@ guard with nothing to read.
   covers the ones that exist.
 - **STARTING A DAY NAVIGATES TO IT.** `recordMarketDayAction` returns the id for
   that reason; do not "simplify" it back to `{ ok: true }`.
+- **THE CHECKLIST HIDES ITSELF WHEN SATISFIED, AND THAT IS THE FEATURE.** If a
+  future step is added to selling, add it to `SellingChecklist` — a prerequisite
+  that only announces itself once you have already failed at it is what the
+  panel exists to end.
 - **`client_ref` IS LOAD-BEARING AND MUST NEVER BECOME OPTIONAL FOR A TILL.**
   Posting is retried by design; without the ref a retry takes the money twice.
   Any future till — farm store, online — mints one before it touches the network.
@@ -417,16 +450,15 @@ guard with nothing to read.
 
 ## Open items
 
-- **NOTHING TELLS YOU WHAT YOU STILL NEED BEFORE YOU CAN SELL.** The till wants a
-  channel, a market day, a storage-location asset and priced stock on it. Miss
-  any and the day page says "No truck to sell from" or shows an empty list; the
-  channel page says nothing at all. The fix is a checklist on the channel, and
-  it is the single cheapest thing left in this pack.
-- **THE TRUCK IS AN ASSETS CONCEPT WITH NO MENTION IN RETAIL.** A market truck is
-  an asset with "Things are kept here" ticked, which is the right model and
-  completely undiscoverable from here.
-- **The truck is still whichever storage location sorts first**, changeable only
-  by hand-editing a `?truck=` query parameter. A farm with a van and a chest
+- **The checklist does not cover stock on the truck**, because loading happens on
+  the day page. So a farm can tick all three, open a day and still find an empty
+  till. The day page says so, which is the right place — but it is the one step
+  in the chain with no signpost ahead of it.
+- **THE TRUCK IS AN ASSETS CONCEPT WITH NO MENTION IN RETAIL** beyond the
+  checklist's link. A market truck is an asset with "Things are kept here"
+  ticked, which is the right model and still not something anybody would guess.
+- **The truck is whichever storage location sorts first**, changeable only by
+  hand-editing a `?truck=` query parameter. A farm with a van and a chest
   freezer gets whichever the alphabet picks.
 - **THE TILL CANNOT TAKE A CARD YET, and the gap is now one wire.** The farm's
   own Stripe account and a registered card reader both exist as of 2026-08-25

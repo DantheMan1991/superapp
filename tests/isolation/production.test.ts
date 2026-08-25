@@ -58,6 +58,9 @@ d("production tables (RLS)", () => {
   let orderLineA: string;
   let bookingA: string;
   let bookingB: string;
+  let billLineA: string;
+  let billLineB: string;
+  let allocationA: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -380,6 +383,94 @@ d("production tables (RLS)", () => {
         ])
         .returning();
       orderLineA = orderLines[0].id;
+
+      /**
+       * SLICE 2d. A bill from each tenant, and one allocation tying tenant A's
+       * bill line to tenant A's run.
+       *
+       * These fixtures are bare tenants — no accounting is provisioned — so the
+       * company a bill belongs to is made by hand. Nothing here reads the books;
+       * the entity exists only so a bill row is legal. Copied from
+       * `inventory.test.ts`, which needed the same three rows for the same
+       * reason one account along.
+       */
+      const billEntities = await tx
+        .insert(schema.entities)
+        .values([
+          { tenantId: tenantA, name: "Farm A", isDefault: true },
+          { tenantId: tenantB, name: "Farm B", isDefault: true },
+        ])
+        .returning();
+      const entityOf = (t: string) =>
+        billEntities.find((e) => e.tenantId === t)!.id;
+      const billVendors = await tx
+        .insert(schema.vendors)
+        .values([
+          { tenantId: tenantA, partyId: partyA, name: "Miller's" },
+          { tenantId: tenantB, partyId: partyB, name: "Their plant" },
+        ])
+        .returning();
+      const bills = await tx
+        .insert(schema.bills)
+        .values([
+          {
+            tenantId: tenantA,
+            entityId: entityOf(tenantA),
+            vendorId: billVendors[0].id,
+            billDate: "2026-08-24",
+            createdByClerkUserId: OWNER,
+          },
+          {
+            tenantId: tenantB,
+            entityId: entityOf(tenantB),
+            vendorId: billVendors[1].id,
+            billDate: "2026-08-24",
+            createdByClerkUserId: OTHER,
+          },
+        ])
+        .returning();
+      const theBillLines = await tx
+        .insert(schema.billLines)
+        .values([
+          {
+            tenantId: tenantA,
+            billId: bills[0].id,
+            lineNo: 1,
+            description: "Killing and cutting",
+            amountCents: 23_500,
+          },
+          {
+            tenantId: tenantB,
+            billId: bills[1].id,
+            lineNo: 1,
+            description: "Killing and cutting",
+            amountCents: 9_900,
+          },
+        ])
+        .returning();
+      billLineA = theBillLines[0].id;
+      billLineB = theBillLines[1].id;
+
+      const allocations = await tx
+        .insert(schema.productionRunBillAllocations)
+        .values([
+          {
+            tenantId: tenantA,
+            billLineId: billLineA,
+            runId: runA,
+            accruedCents: 22_370,
+            billedCents: 23_500,
+          },
+          {
+            tenantId: tenantB,
+            billLineId: billLineB,
+            runId: runB,
+            accruedCents: 9_900,
+            billedCents: 9_900,
+          },
+        ])
+        .returning();
+      allocationA = allocations[0].id;
     });
   });
 
@@ -925,6 +1016,103 @@ d("production tables (RLS)", () => {
           .where(eq(schema.productionOrderLines.id, orderLineA)),
       ),
     ).rejects.toThrow();
+  });
+
+  it("cannot see which of another tenant's bills settled which of its kill days", async () => {
+    /**
+     * SLICE 2d. **A NARROWER LEAK THAN THE RATE SHEET'S AND A DIFFERENT SHAPE.**
+     * This row is the only thing standing between an accrual and the invoice
+     * that clears it, so a leaked one does not merely disclose what a farm paid
+     * — it would let a reconciliation net across two businesses' books.
+     */
+    const mine = await asStaff((tx) =>
+      tx.select().from(schema.productionRunBillAllocations),
+    );
+    expect(mine.map((a) => a.accruedCents)).toEqual([22_370]);
+    expect(mine.map((a) => a.billedCents)).toEqual([23_500]);
+
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.productionRunBillAllocations),
+    );
+    expect(theirs.map((a) => a.accruedCents)).toEqual([9_900]);
+  });
+
+  it("cannot settle another tenant's run, or with another tenant's bill line", async () => {
+    // Both composite FKs are tenant-scoped, so the pairing the policy refuses to
+    // READ is one the database refuses to WRITE as well.
+    for (const values of [
+      { billLineId: billLineA, runId: runB },
+      { billLineId: billLineB, runId: runA },
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.productionRunBillAllocations).values({
+            tenantId: tenantA,
+            ...values,
+            accruedCents: 1_000,
+            billedCents: 1_000,
+          }),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("SETTLES A RUN ONCE PER BILL LINE, and the index is what makes that true", async () => {
+    // A double-submitted match would otherwise clear the accrual twice and leave
+    // 2060 in debit with nothing to explain it. The ops layer refuses in words;
+    // this is what makes it true of every path to the table.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.productionRunBillAllocations).values({
+          tenantId: tenantA,
+          billLineId: billLineA,
+          runId: runA,
+          accruedCents: 22_370,
+          billedCents: 23_500,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an allocation of nothing", async () => {
+    // A row saying a bill settled a run for no money is what an absent row
+    // already says, and says better.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.productionRunBillAllocations)
+          .set({ accruedCents: 0 })
+          .where(eq(schema.productionRunBillAllocations.id, allocationA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("lets go of the allocation when a draft's line is rewritten", async () => {
+    /**
+     * **THE CASCADE IS LOAD-BEARING, NOT TIDINESS.** `updateBillDraft` DELETES
+     * AND RE-INSERTS every line of a draft, so a bill line's id does not survive
+     * an edit — without the cascade this table would fill with rows pointing at
+     * lines that no longer exist, and the reconciliation would report accruals
+     * as settled by bills nobody could open.
+     */
+    const before = await withSystem((tx) =>
+      tx
+        .select()
+        .from(schema.productionRunBillAllocations)
+        .where(eq(schema.productionRunBillAllocations.billLineId, billLineB)),
+    );
+    expect(before).toHaveLength(1);
+
+    await withSystem((tx) =>
+      tx.delete(schema.billLines).where(eq(schema.billLines.id, billLineB)),
+    );
+    const after = await withSystem((tx) =>
+      tx
+        .select()
+        .from(schema.productionRunBillAllocations)
+        .where(eq(schema.productionRunBillAllocations.billLineId, billLineB)),
+    );
+    expect(after).toHaveLength(0);
   });
 
   it("refuses a negative processing fee — a plant does not pay you to cut", async () => {

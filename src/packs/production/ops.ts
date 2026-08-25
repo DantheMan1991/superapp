@@ -77,7 +77,9 @@ export class ProductionError extends Error {
       | "PROCESSOR_INVALID"
       | "BOOKING_INVALID"
       | "ORDER_INVALID"
-      | "PAPERWORK_INVALID",
+      | "PAPERWORK_INVALID"
+      | "BILL_INVALID"
+      | "BILL_POSTED",
     message: string,
   ) {
     super(message);

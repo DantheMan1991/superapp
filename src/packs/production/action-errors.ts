@@ -37,8 +37,23 @@ export function toResult(err: unknown): { error: string } {
       case "BOOKING_INVALID":
       case "ORDER_INVALID":
       case "PAPERWORK_INVALID":
+      case "BILL_INVALID":
+      case "BILL_POSTED":
         return { error: err.message };
     }
+    /**
+     * **A CODE NOBODY LISTED IS NOW A TYPE ERROR, NOT A SHRUG.** Slice 2d added
+     * two codes and did not add them here, so "nothing came out of this one that
+     * is on a shelf, so there is no batch to move a cost onto" — a sentence
+     * written for the person reading it — reached the screen as *Something went
+     * wrong saving that*. Found by pressing the button.
+     *
+     * The switch is exhaustive by construction now: an unhandled code makes this
+     * assignment fail to compile, which is the same trick `MEASURED_BY` uses in
+     * `core/fee.ts` to stop a new price unit quietly shrinking a fee.
+     */
+    const unhandled: never = err.code;
+    return { error: String(unhandled) };
   }
   if (err instanceof Error && err.name === "InventoryError") {
     return { error: err.message };

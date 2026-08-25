@@ -28,7 +28,7 @@ this dossier is the build record.
 | **2c** | **The processing fee reaches inventory cost**, per plant — flat per animal plus per pound, accrued at completion | **shipped 2026-08-23** |
 | **2e** | **One row per bird** — the animal in the column not the label, grouped, filtered, and editable in bulk | **shipped 2026-08-23** |
 | **2f** | **The front door, the whole-bird remainder, and the app doing its own lookup** | **shipped 2026-08-23** |
-| 2d | The plant's BILL, matched to the run: clear the accrual and make the variance a number | |
+| **2d** | **The plant's BILL, matched to the run** — the accrual clears and the variance becomes a number | **shipped 2026-08-24** |
 | 2 | Recipes + bake batches + results feedback | |
 | 3 | Cost roll refinements: byproducts at NRV, costed internal transfers, labour | |
 | 4 | Label generation, including a processor's own-label capability | |
@@ -83,6 +83,124 @@ file had reached 1,658 lines and the log was 60% of it. Nothing was superseded
 by the move: the two live weights, the condemnation adjustment, the withdrawal
 guard, the booking model and the migration that never ran are all argued there,
 and that is the file to read before changing any of them.
+
+### 2026-08-24 — Slice 2d: the bill that clears the accrual (`claude/the-bill-that-clears-the-accrual`)
+
+**`2060` ONLY EVER GREW.** 2c posted `Dr consumption / Cr 2060 Services Received
+Not Invoiced` at completion and said plainly that nothing would ever take it off
+again — calling the balance a feature in the meantime, because a non-zero 2060
+per plant IS the list of processing nobody has invoiced you for. It stops being a
+feature the moment a bill arrives. This is the third line of that entry:
+
+```
+accrual        Dr 5000 22370   Cr 2060 22370
+outputs land   Dr 1300 22370   Cr 5000 22370
+bill matched   Dr 2060 22370   Dr 5000 1130   Cr AP 23500   ← built
+               ─────────────────────────────────────────────
+               1300 = 22370 · 2060 = 0 · 5000 = 1130 · AP = 23500
+```
+
+**IT IS `bill_line_stock_allocations` ONE ACCOUNT ALONG**, and the shape is
+copied from `inventory/ledger-ops.ts` rather than reinvented: upsert the
+allocations, **rebuild the line from ALL of them** rather than from this call,
+split the invoice so the liability clears EXACTLY, and put the rest on a sibling
+line. Every one of those was learned there by a bug, and the comments in that
+file say which.
+
+**WHAT IS OPEN IS READ FROM THE LEDGER, NOT FROM `processing_fee_cents`.** The
+fee column is what somebody typed; the accrual entry is what actually posted, and
+they differ for two ordinary reasons — a tenant with stock posting off accrues
+nothing, and a waived fee accrues nothing. Building the list off the column would
+offer runs with nothing to settle and then fail at match time.
+
+**THE AMOUNT IS NOT A FIELD.** A processing day is invoiced as a whole; there is
+no natural unit to settle part of one with, the way a delivery has a quantity. So
+ticking a run settles its whole outstanding accrual, and whatever the invoice
+charges beyond that is the variance.
+
+── WHERE THE DIFFERENCE GOES, WHICH WAS THE DECISION ────────────────────────
+
+**THE FOUNDER CHOSE: P&L NOW, THE MEAT SEPARATELY** (2026-08-24). Matching books
+the difference to the profit and loss and the batch keeps what it landed with.
+Moving the batch's cost to what was actually billed is a **second, deliberate
+act** — `correctRunCost` — because by the time a plant invoices the meat is
+frequently sold, and restating a batch's value every time a bill is $11 out, with
+nobody asked, is not a decision software should make.
+
+**IT IS `inventory`'s OWN SPLIT, ARRIVING HERE.** ADR 0012 §A.5 corrects the
+books when an invoice disagrees with a ticket; §A.4 corrects the stock record
+when there is no invoice to disagree with. A delivery that gets both ends up with
+the right value, the right liability and no net variance — and so does a kill day.
+
+**THE CORRECTION IS IDEMPOTENT THROUGH `corrected_cents`**, apportioned across
+the output batches by what each landed carrying, and `adjustLotCost` does the
+hard part: the on-hand share raises the batch's carrying value and the
+already-sold share is expensed, because capitalising it would put an asset back
+on the balance sheet for meat that has been eaten.
+
+**AND UNPICKING REFUSES ONCE THE COST HAS MOVED.** It would leave the accrual
+unsettled while the meat carries a figure that came from the very match being
+undone — two records disagreeing about one bill. The way back is another
+correction, which is an event rather than an erasure.
+
+**THE SIBLING LINE IS LEFT UNCODED ON PURPOSE.** A processing overcharge may be a
+rate rise, a service nobody asked for, or a mistake to query, and this pack must
+not decide which. `approveBill` refusing an uncoded line is what forces somebody
+to say — which is the ordinary path for any bill line.
+
+**A BILL CANNOT SETTLE ANOTHER COMPANY'S PROCESSING**, and the picker does not
+offer it rather than offering and then refusing. The accrual posts in the books
+the run's stock belonged to; a bill clears in its own; if they differ neither
+2060 ever nets. `Test` keeps two companies, which is where that class of defect
+keeps being found.
+
+── THE SCREEN ───────────────────────────────────────────────────────────────
+
+`/dashboard/m/production/billing`, **both halves on one page** for the reason the
+GRNI screen gives: *processing with no invoice* and *a plant's bill with no
+processing* are the same question from opposite ends, and a reconciliation split
+across two screens is one nobody finishes. **Not on the inventory matching page**
+— 2c kept this out of 2050 so the stock reconciliation stays explainable by its
+own workings, and one screen would re-mix what that decision separated.
+
+The third section is an **offer, not an obligation**: it appears only when a bill
+disagreed with an accrual, and a farm that never presses it is not wrong.
+
+── DRIVEN, AND WHAT IT FOUND ────────────────────────────────────────────────
+
+**THE WHOLE LOOP RUN ON THE DEV BRANCH'S `Hilltop Farm`:** matched a $235.00 bill
+to a run that had put aside $223.70, moved the meat's cost by the $11.30, and
+approved the bill — **2060 went from −83,110 to −60,740, exactly the 22,370 that
+was accrued.** The cost adjustment is on the output batch as `processing_bill`
+and `corrected_cents` records it, so a second press moves nothing.
+
+Four defects, and the first is the one that matters:
+
+- **`toResult` SWALLOWED A PERFECTLY GOOD SENTENCE.** Slice 2d added two error
+  codes to `ProductionError` and did not add them to the switch in
+  `action-errors.ts`, so *"nothing came out of this one that is on a shelf, so
+  there is no batch to move a cost onto"* reached the screen as **"Something went
+  wrong saving that."** The switch is now **exhaustive by construction** — an
+  unhandled code fails to compile, the same trick `MEASURED_BY` uses in
+  `core/fee.ts` — so this cannot recur.
+- **"anything the plant charged"** on a screen that says *butcher* everywhere
+  else. Eighth slice running.
+- **"Difference $235.00" in red before anything was ticked**, which reads as the
+  plant overcharging by the whole invoice. There is no comparison to make until
+  something is selected.
+- **A matched row read `$223.70` on a `$235.00` invoice** and looked like the
+  bill had shrunk. Matching rewrites the line down to what was accrued and puts
+  the rest on its own line, so the row now says so.
+- **AND ONE COPY DEFECT THE LEDGER ITSELF EXPOSED**: the page said the account
+  clears "when their bill is matched". It does not — matching points the line,
+  **approving posts it**. Reading the balance after matching two bills is what
+  caught it, and saying only the first half would have been this screen making
+  the same mistake the GRNI card made: reporting the working and calling it the
+  answer.
+
+Migrations `0204` + `0205` (RLS). 17 new tests — 7 ledger claims in
+`inventory-posting.test.ts` where a tenant keeps books, 5 correction claims in
+`production-ops.test.ts`, 5 in the isolation suite.
 
 ### 2026-08-23 — Slice 2f: the app does the lookup (`claude/the-app-does-the-lookup`)
 
@@ -911,6 +1029,7 @@ AI feature. Recorded as an open item.
 
 | `production_orders` | **The cut sheet** — what this farm asked one plant to do with one lot of animals | `tenant_id`, FORCE RLS. Composite FKs to the processor, the booking and the run, **all CASCADE**; `booking_id` is where it began and `run_id` is what it became, and the CHECK asks for at least one — a sheet attached to nothing is a sheet for a day that does not exist. **No unique index**: the design's *one animal, two cut sheets* is the ordinary case, and `title` tells them apart until `retail`'s commitments can name the customer. **`printed_at`** is the nearest honest thing to a handed-over state — a DATE rather than a status, written by the print button and by nothing else, so null is *nobody pressed Print here* rather than *they never got one* |
 | `production_order_lines` | **One line of a sheet — an option chosen, or an instruction given** | Composite FK to the order (CASCADE) and to the price item (**`SET NULL (price_item_id)`**, PG 15's column-list form — a line is a SNAPSHOT and must survive the rate sheet being tidied). `unit_price_cents`, `unit` and `minimum_cents` are **stamped and never re-read**. A line with no `price_item_id` is an INSTRUCTION and carries no money. CHECK: a price must say what it is per; a unit with no price is allowed. `quantity` NULL means *work it out* on a computable unit and *nobody has counted* on the rest |
+| `production_run_bill_allocations` | **The plant's bill, matched to the processing day it pays for** — slice 2d | `tenant_id`, FORCE RLS. Composite FKs to `bill_lines` (**CASCADE**, load-bearing: `updateBillDraft` deletes and re-inserts every line of a draft, so a line's id does not survive an edit) and to the run (**no cascade** — erasing the record that a bill settled one would hide the money). UNIQUE per `(bill line, run)`: a second match is a CORRECTION, not a second settlement. **`accrued_cents` is STAMPED at match time and never re-read** — it is what the ledger credited, and a later cost correction must not restate a variance that has posted. **`corrected_cents`** is how much of the difference has been pushed onto the meat, and is what makes that second act idempotent |
 | `production_bookings` | **A date held with a processor — the scarce resource** | `tenant_id`, FORCE RLS. Composite FKs to the processor and to the run, **both CASCADE**; `run_id` is what the booking BECAME and is null until the day happens. `status` in `held\|confirmed\|cancelled` — three, and there is deliberately **no "it happened"**, because `run_id` answers that and a status somebody must advance would disagree with it. CHECK: a cancelled date cannot claim a run. Deposit in cents, and null is not zero — a date held on a phone call is ordinary |
 
 **Everything else lives in `inventory`:**
@@ -978,6 +1097,14 @@ run model, separate templates), and the processing path and eligibility flag
 - `src/packs/inventory/ledger-ops.ts` → `postServiceAccrual`,
   `resolveServicesAccruedAccount`. **The entry that makes the output receipt
   honest**, and the argument for `2060` over `2050`
+- `src/packs/production/billing-ops.ts` — **this pack's only file that touches
+  core's tables**, the same boundary `inventory` drew with `ledger-ops.ts`. It
+  reads `journal_entries` to find what was accrued and rewrites `bill_lines` to
+  point at the liability; it posts no entry itself — `approveBill` does, from the
+  lines. Read the header before changing what a match clears
+- `src/app/dashboard/m/production/billing/page.tsx` — the reconciliation, both
+  halves on one page. **Matching points the line; approving posts it**, and the
+  copy has to keep saying both
 - `src/packs/production/core/handler.ts` — **the P5 slot.** Types only, so a
   pack filling it never drags this pack's ops into its bundle
 - `src/packs/livestock/run-handler.ts` — livestock filling it: the withdrawal
@@ -1030,7 +1157,9 @@ run model, separate templates), and the processing path and eligibility flag
 - `src/packs/production/components/carcass-controls.tsx` — the sheet's one
   dialog, used for both adding and correcting. **The form changes shape when a
   carcass is condemned** rather than taking a number it will throw away
-- `src/db/schema/production.ts` · `drizzle/0203_amused_devos.sql` ·
+- `src/db/schema/production.ts` · `drizzle/0204_aberrant_star_brand.sql` ·
+  `drizzle/0205_production_run_bill_allocations_rls.sql` ·
+  `drizzle/0203_amused_devos.sql` ·
   `drizzle/0197_amazing_mentallo.sql` ·
   `drizzle/0198_processing_accrual_source.sql` ·
   `drizzle/0199_production_orders_rls.sql` ·
@@ -1308,33 +1437,45 @@ run model, separate templates), and the processing path and eligibility flag
   keep emitting them and the isolation suite still asserts their CHECKs.
 - ~~**NOTHING SELECTS A PRICE ITEM YET.**~~ **Closed 2026-08-23** — the cut
   sheet quotes from it and the fee reaches the meat.
-- **A FEE NOT KNOWN AT COMPLETION CAN NEVER BE RECORDED**, and that is the
-  normal case rather than an edge one: a plant routinely invoices days after the
-  boxes go in the freezer. `completeRun` takes the figure and nothing else ever
-  sets it, so a run finished before the bill arrived carries `null` for good.
-  Slice 2d's matching is the answer — the cost correction it posts is what moves
-  a landed cost — but until it exists the honest advice is to wait for the bill
-  before finishing a run, which is the opposite of what the pack tells you to do
-  everywhere else.
+- **A FEE NOT KNOWN AT COMPLETION CAN STILL NEVER BE RECORDED**, and 2d did NOT
+  close this. `completeRun` takes the figure and nothing else ever sets it, so a
+  run finished before the bill arrived carries `null` — and with `null` there is
+  no accrual, so there is nothing for the bill to match against either. 2d
+  answers *the accrual was wrong*; it does not answer *there was no accrual*.
+  The honest advice is still to wait for the bill before finishing a run, and the
+  fix is an edit path for `processing_fee_cents` on a finished run that posts the
+  accrual late — which wants the run edit path below to exist first.
 - **A RUN'S PLACE CANNOT BE CHANGED AFTER IT STARTS.** There is no edit at all
   for a run — not the location, not the crew, not the notes. It went unnoticed
   until the accrual needed a location and a run started from a booking had none;
   the fallback fixed that case, and a run with no outputs carrying a location
   still has nowhere to get one from.
-- **THE PLANT'S BILL IS NOT MATCHED TO THE RUN, so `2060` never clears** — and
-  there is now a real balance in it to prove it: `Batch 2026-08-23` on `Test`
-  put $235.00 there on 2026-08-23 and nothing will ever take it out. The
-  third row of the worked entry in the build log is not built: the accrual goes
-  on and nothing takes it off, so the balance grows by every run that names a
-  fee. That is *deliberately* a useful state in the meantime — a non-zero
-  balance per plant is the list of processing nobody has invoiced you for, the
-  same self-surfacing shape `missedBookings` has — and it is still an open
-  liability that wants a screen. Slice 2d, and it is what turns "they charged
-  more than they quoted" from two numbers a person compares into one number the
-  app reports.
-- **NOTHING WARNS THAT AN ACCRUAL HAS BEEN OPEN FOR MONTHS.** Same reason: until
-  the bill can be matched there is nothing to close it against, so a digest line
-  would be an obligation nobody can discharge.
+- ~~**THE PLANT'S BILL IS NOT MATCHED TO THE RUN, so `2060` never clears.**~~
+  **Shipped 2026-08-24** — matching, the variance as a number, and the cost
+  correction as a separate act. Driven on the dev branch: 2060 fell by exactly
+  what was accrued when the matched bill was approved. **What is still true on
+  the LIVE `Test` tenant is that its $235.00 is not cleared yet**, and it cannot
+  be until Valley Poultry exists as a VENDOR — a bill has to name one, and a
+  processor is a role on a party rather than a vendor. See below.
+- **NOTHING WARNS THAT AN ACCRUAL HAS BEEN OPEN FOR MONTHS.** The reason has
+  changed rather than gone: there is something to close it against now, so a
+  digest line WOULD be dischargeable — it just has no horizon yet. A plant that
+  has not invoiced in sixty days is worth a nudge; one that invoices quarterly is
+  not, and nothing here knows which. It wants a plant's own billing habit before
+  it can say anything true, which is the same shape `lead_time_days` is in.
+- **A PLANT MUST BE A VENDOR BEFORE ITS BILL CAN BE MATCHED**, and nothing offers
+  to make it one. `production_processors` is a role on a `parties` row and a bill
+  names a `vendors` row, so a plant that has only ever been a processor does not
+  appear on the reconciliation at all — which is honest (it has sent no bills)
+  and is a dead end the first time somebody hits it. The live `Test` tenant is in
+  exactly that state. `src/lib/parties/role-sync.ts` already mints a role on an
+  existing party, so the fix is small and is a decision about which screen offers
+  it.
+- **NOTHING SPLITS A BILL LINE ACROSS PART OF A RUN.** Ticking a run settles its
+  whole accrual, because a processing day has no natural unit to divide — but a
+  plant that invoices a deposit and a balance against one kill day cannot be
+  represented. A deposit is a booking concept and this may be the wrong place to
+  fix it.
 - ~~**NOTHING HAS BEEN PRINTED.**~~ **Printed and read 2026-08-23**, by
   injecting the compiled `@media print` rules as screen styles rather than
   opening a print dialog — which is a technique worth keeping, because it makes

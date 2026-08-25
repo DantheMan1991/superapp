@@ -36,6 +36,10 @@ import {
 } from "../src/packs/production/order-ops";
 import { resolveBands } from "../src/packs/production/core/band";
 import {
+  correctRunCost,
+  unmatchBillLineFromRuns,
+} from "../src/packs/production/billing-ops";
+import {
   createBooking,
   startRunFromBooking,
 } from "../src/packs/production/booking-ops";
@@ -2054,6 +2058,233 @@ d("production ops", () => {
           }),
         ),
       ).resolves.toBeDefined();
+    });
+
+    /**
+     * SLICE 2d, the half that does NOT need books. What matching does to the
+     * ledger is pinned in `inventory-posting.test.ts`, where a tenant keeps a
+     * set; what is here is the correction's own arithmetic — how a difference is
+     * apportioned across the batches that came out, and why pressing twice moves
+     * nothing the second time.
+     */
+    describe("moving the meat's cost to what the plant billed", () => {
+      /** A finished run with one priced input and one output that landed. */
+      const costedRun = async (code: string, potCents: number) => {
+        const grain = await asOwner((tx) =>
+          createItem(tx, ownerCtx(), {
+            name: `Grain ${code}`,
+            stockingUnit: "lb",
+            itemKind: "feed",
+          }),
+        );
+        const meat = await asOwner((tx) =>
+          createItem(tx, ownerCtx(), {
+            name: `Meat ${code}`,
+            stockingUnit: "lb",
+            itemKind: "meat",
+          }),
+        );
+        await asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: grain.id,
+            newLotCode: `LOT-${code}`,
+            quantity: 100,
+            costCents: potCents,
+            occurredOn: TODAY,
+          }),
+        );
+        const lot = await asOwner((tx) =>
+          tx.query.inventoryLots.findFirst({
+            where: and(
+              eq(schema.inventoryLots.tenantId, tenantId),
+              eq(schema.inventoryLots.code, `LOT-${code}`),
+            ),
+          }),
+        );
+        const run = await asOwner((tx) =>
+          startRun(tx, ownerCtx(), { code, startedOn: TODAY }),
+        );
+        await asOwner((tx) =>
+          addRunInput(
+            tx,
+            ownerCtx(),
+            {
+              runId: run.id,
+              itemId: grain.id,
+              lotId: lot!.id,
+              quantity: 100,
+              occurredOn: TODAY,
+            },
+            TODAY,
+          ),
+        );
+        await asOwner((tx) =>
+          addRunOutput(tx, ownerCtx(), {
+            runId: run.id,
+            itemId: meat.id,
+            quantity: 50,
+          }),
+        );
+        await asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY));
+        const outputs = await asOwner((tx) =>
+          listRunOutputs(tx, tenantId, run.id),
+        );
+        return { run, lotId: outputs[0].lotId as string };
+      };
+
+      /** A draft bill line, and an allocation tying it to the run. */
+      const allocate = async (
+        runId: string,
+        accruedCents: number,
+        billedCents: number,
+      ) =>
+        asOwner(async (tx) => {
+          const party = await tx
+            .insert(schema.parties)
+            .values({
+              tenantId,
+              kind: "organization",
+              displayName: `Plant ${accruedCents}-${billedCents}`,
+            })
+            .returning();
+          const vendor = await tx
+            .insert(schema.vendors)
+            .values({
+              tenantId,
+              partyId: party[0].id,
+              name: `Plant ${accruedCents}-${billedCents}`,
+            })
+            .returning();
+          const entity = await tx
+            .insert(schema.entities)
+            .values({ tenantId, name: `Books ${accruedCents}-${billedCents}` })
+            .returning();
+          const bill = await tx
+            .insert(schema.bills)
+            .values({
+              tenantId,
+              entityId: entity[0].id,
+              vendorId: vendor[0].id,
+              billDate: TODAY,
+              createdByClerkUserId: OWNER,
+              totalCents: billedCents,
+            })
+            .returning();
+          const line = await tx
+            .insert(schema.billLines)
+            .values({
+              tenantId,
+              billId: bill[0].id,
+              lineNo: 1,
+              description: "Killing and cutting",
+              amountCents: billedCents,
+            })
+            .returning();
+          await tx.insert(schema.productionRunBillAllocations).values({
+            tenantId,
+            billLineId: line[0].id,
+            runId,
+            accruedCents,
+            billedCents,
+          });
+          return line[0].id;
+        });
+
+      it("MOVES THE BATCH'S COST BY WHAT THE PLANT BILLED OVER THE ACCRUAL", async () => {
+        // The live `Test` shape: accrued $223.70, billed $235.00, so the meat
+        // should carry $11.30 more than it landed with.
+        const { run, lotId } = await costedRun("BILL-UP", 22_370);
+        await allocate(run.id, 22_370, 23_500);
+
+        const before = await asOwner((tx) =>
+          carriedCostByLot(tx, tenantId, [lotId], TODAY),
+        );
+        const result = await asOwner((tx) =>
+          correctRunCost(tx, ownerCtx(), { runId: run.id, occurredOn: TODAY }),
+        );
+        expect(result.movedCents).toBe(1_130);
+        expect(result.lots).toBe(1);
+
+        const after = await asOwner((tx) =>
+          carriedCostByLot(tx, tenantId, [lotId], TODAY),
+        );
+        expect(carriedValue(after.get(lotId)!)).toBe(
+          carriedValue(before.get(lotId)!)! + 1_130,
+        );
+      });
+
+      it("MOVES NOTHING THE SECOND TIME, which is what `corrected_cents` is for", async () => {
+        // Without it a second press would move the cost twice and no screen
+        // could say whether it had been done at all.
+        const { run } = await costedRun("BILL-TWICE", 10_000);
+        await allocate(run.id, 10_000, 11_000);
+        const first = await asOwner((tx) =>
+          correctRunCost(tx, ownerCtx(), { runId: run.id, occurredOn: TODAY }),
+        );
+        expect(first.movedCents).toBe(1_000);
+        await expect(
+          asOwner((tx) =>
+            correctRunCost(tx, ownerCtx(), { runId: run.id, occurredOn: TODAY }),
+          ),
+        ).rejects.toThrow(/already carries what the plant billed/);
+      });
+
+      it("moves the cost DOWN when the plant billed less than was accrued", async () => {
+        const { run, lotId } = await costedRun("BILL-DOWN", 20_000);
+        await allocate(run.id, 20_000, 18_000);
+        const before = await asOwner((tx) =>
+          carriedCostByLot(tx, tenantId, [lotId], TODAY),
+        );
+        const result = await asOwner((tx) =>
+          correctRunCost(tx, ownerCtx(), { runId: run.id, occurredOn: TODAY }),
+        );
+        expect(result.movedCents).toBe(-2_000);
+        const after = await asOwner((tx) =>
+          carriedCostByLot(tx, tenantId, [lotId], TODAY),
+        );
+        expect(carriedValue(after.get(lotId)!)).toBe(
+          carriedValue(before.get(lotId)!)! - 2_000,
+        );
+      });
+
+      it("refuses when no bill has been matched, and when the bill agreed", async () => {
+        const unmatched = await costedRun("BILL-NONE", 5_000);
+        await expect(
+          asOwner((tx) =>
+            correctRunCost(tx, ownerCtx(), {
+              runId: unmatched.run.id,
+              occurredOn: TODAY,
+            }),
+          ),
+        ).rejects.toThrow(/no bill has been matched/);
+
+        const agreed = await costedRun("BILL-EXACT", 5_000);
+        await allocate(agreed.run.id, 5_000, 5_000);
+        await expect(
+          asOwner((tx) =>
+            correctRunCost(tx, ownerCtx(), {
+              runId: agreed.run.id,
+              occurredOn: TODAY,
+            }),
+          ),
+        ).rejects.toThrow(/already carries what the plant billed/);
+      });
+
+      it("REFUSES TO UNPICK A MATCH WHOSE COST HAS ALREADY MOVED", async () => {
+        // Unpicking would put the accrual back as unsettled while the meat keeps
+        // a cost that came from this very match — two records disagreeing about
+        // one bill. The way back is another correction, not an erasure.
+        const { run } = await costedRun("BILL-STUCK", 9_000);
+        const billLineId = await allocate(run.id, 9_000, 9_500);
+        await asOwner((tx) =>
+          correctRunCost(tx, ownerCtx(), { runId: run.id, occurredOn: TODAY }),
+        );
+        await expect(
+          asOwner((tx) =>
+            unmatchBillLineFromRuns(tx, ownerCtx(), { billLineId }),
+          ),
+        ).rejects.toThrow(/already been moved/);
+      });
     });
 
     it("refuses a sheet attached to neither a date nor a run", async () => {

@@ -138,6 +138,15 @@ export async function ProductionModule({
                 Every {labelFor(pack.labels, "cutSheet", "Order").toLowerCase()}
               </Link>
             </Button>
+            {/*
+              **ONLY WHEN THERE IS SOMETHING TO RECONCILE.** A farm that keeps no
+              books never puts anything aside for a plant, and a permanently
+              empty reconciliation is a link people learn to ignore. The page
+              itself says the same thing if somebody arrives at it directly.
+            */}
+            <Button asChild variant="outline">
+              <Link href={`${BASE}/billing`}>Processing not invoiced</Link>
+            </Button>
             <Button asChild variant="outline">
               <Link href={`${BASE}/processors`}>
                 {labelFor(pack.labels, "processor", "Processor")} directory

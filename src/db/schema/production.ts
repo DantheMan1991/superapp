@@ -61,6 +61,7 @@ import { tenants } from "./platform";
 import { assets } from "./assets";
 import { parties } from "./parties";
 import { inventoryItems, inventoryLots, inventoryMovements } from "./inventory";
+import { billLines } from "./payables";
 
 /**
  * ONE PASS OF TURNING THINGS INTO OTHER THINGS: a processing day, a bake, a
@@ -1552,5 +1553,120 @@ export type ProductionBooking = typeof productionBookings.$inferSelect;
 export type NewProductionBooking = typeof productionBookings.$inferInsert;
 export type ProductionOrder = typeof productionOrders.$inferSelect;
 export type NewProductionOrder = typeof productionOrders.$inferInsert;
+/**
+ * **THE PLANT'S BILL, MATCHED TO THE PROCESSING DAY IT PAYS FOR.** Slice 2d.
+ *
+ * `completeRun` accrues what the plant charged — `Dr consumption / Cr 2060
+ * Services Received Not Invoiced` — because the fee went into the meat's cost
+ * and nobody had invoiced it. Until this table nothing ever took it off again,
+ * so `2060` only ever grew. That was deliberately useful in the meantime: a
+ * non-zero balance per plant IS the list of processing nobody has billed you
+ * for. It stops being useful the moment a bill arrives.
+ *
+ * **THIS IS `bill_line_stock_allocations` ONE ACCOUNT ALONG**, and the shape is
+ * copied on purpose rather than reinvented: one row per (bill line, run), the
+ * accrued figure STAMPED at match time, and the invoice's own share beside it so
+ * the difference between them can be read rather than recomputed.
+ *
+ * **WHY THE ACCRUED FIGURE IS STORED AND NOT RE-READ.** It is what the ledger
+ * credited when the run finished, and matching clears exactly that — the same
+ * rule stock matching follows against a receipt's stamped cost. A later cost
+ * correction changes what the meat is worth and must NOT restate a variance
+ * that has already posted.
+ */
+export const productionRunBillAllocations = pgTable(
+  "production_run_bill_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * CASCADE, and load-bearing rather than tidy: `updateBillDraft` DELETES AND
+     * RE-INSERTS every line of a draft, so a bill line's id does not survive an
+     * edit. `bill_line_stock_allocations` carries the same cascade for the same
+     * reason.
+     */
+    billLineId: uuid("bill_line_id").notNull(),
+    /** The processing day being settled. */
+    runId: uuid("run_id").notNull(),
+    /**
+     * What the run's accrual credited to `2060`, in cents, as at match time.
+     * This is what the bill line clears — never the run's current fee, which a
+     * cost correction may since have moved.
+     */
+    accruedCents: integer("accrued_cents").notNull(),
+    /** This run's share of what the invoice charges. The gap is the variance. */
+    billedCents: integer("billed_cents").notNull(),
+    /**
+     * How much of this allocation's variance has been pushed onto the meat.
+     *
+     * **THE COST CORRECTION IS A SECOND, DELIBERATE ACT AND THIS IS WHAT MAKES
+     * IT IDEMPOTENT.** Matching books the difference to the P&L and leaves the
+     * meat carrying what it landed with; moving the batch's cost to what was
+     * actually billed is a decision somebody takes afterwards, because by then
+     * the meat is often sold and restating a batch for $11 is not automatic.
+     * Without this column a second press would move the cost twice, and there
+     * would be nothing on any screen to say whether it had been done at all.
+     *
+     * That is the same split `inventory` drew between ADR 0012 §A.5 (an invoice
+     * disagreeing with a ticket) and §A.4 (correcting the stock record).
+     */
+    correctedCents: integer("corrected_cents").notNull().default(0),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("production_run_bill_allocations_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    /**
+     * One bill line settles a given run once. A second match against the same
+     * pair is a CORRECTION to the first rather than a second settlement —
+     * without this, a double-submitted match would clear the accrual twice and
+     * leave `2060` in debit with nothing to explain it.
+     */
+    uniqueIndex("production_run_bill_allocations_pair_idx").on(
+      t.tenantId,
+      t.billLineId,
+      t.runId,
+    ),
+    // "What is still unbilled on this run" — the reconciliation's own question.
+    index("production_run_bill_allocations_run_idx").on(t.tenantId, t.runId),
+    foreignKey({
+      name: "production_run_bill_allocations_line_fk",
+      columns: [t.tenantId, t.billLineId],
+      foreignColumns: [billLines.tenantId, billLines.id],
+    }).onDelete("cascade"),
+    /**
+     * NO cascade to the run. A run is never deleted in this pack, and if one
+     * ever were, erasing the record that a bill had settled it would hide the
+     * money rather than surface it — the same call the stock table makes about
+     * a movement.
+     */
+    foreignKey({
+      name: "production_run_bill_allocations_run_fk",
+      columns: [t.tenantId, t.runId],
+      foreignColumns: [productionRuns.tenantId, productionRuns.id],
+    }),
+    /**
+     * An allocation of nothing is not an allocation. Zero would be a row saying
+     * a bill settled a run for no money, which is what an absent row already
+     * says and says better.
+     */
+    check(
+      "production_run_bill_allocations_accrued_positive",
+      sql`${t.accruedCents} > 0`,
+    ),
+  ],
+);
+
+export type ProductionRunBillAllocation =
+  typeof productionRunBillAllocations.$inferSelect;
+export type NewProductionRunBillAllocation =
+  typeof productionRunBillAllocations.$inferInsert;
 export type ProductionOrderLine = typeof productionOrderLines.$inferSelect;
 export type NewProductionOrderLine = typeof productionOrderLines.$inferInsert;

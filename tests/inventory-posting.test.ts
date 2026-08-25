@@ -37,6 +37,12 @@ import {
   unmatchBillLine,
 } from "../src/packs/inventory/ledger-ops";
 import { carriedValue } from "../src/packs/inventory/core/valuation";
+import { startRun, type ProductionCtx } from "../src/packs/production/ops";
+import {
+  matchBillLineToRuns,
+  openProcessingAccruals,
+  unmatchBillLineFromRuns,
+} from "../src/packs/production/billing-ops";
 
 const RUN = !!process.env.DATABASE_URL;
 const d = RUN ? describe : describe.skip;
@@ -92,6 +98,8 @@ d("inventory posting", () => {
   };
 
   const ledgerOwner = () => ({ tenantId, userId: OWNER, role: "owner" as const });
+  /** The same person, in the shape `production` asks for. */
+  const prodOwner = (): ProductionCtx => ({ tenantId, userId: OWNER, role: "owner" });
 
   /** A one-line draft bill from a throwaway vendor, ready to be matched. */
   const makeBill = async (amountCents: number) => {
@@ -2529,6 +2537,267 @@ it("NOBODY INVOICES YOU FOR WHAT YOU MADE", async () => {
         carriedCostByLot(tx, tenantId, [lot.id], "2027-02-28"),
       );
       expect(carriedValue(inFebruary.get(lot.id)!)).toBe(1_300);
+    });
+  });
+
+  /**
+   * SLICE 2d. **THE THIRD LINE OF THE ENTRY 2c LEFT UNBUILT.**
+   *
+   * These live here rather than in `production-ops.test.ts` for the reason the
+   * accrual's own tests do: that pack's test tenant keeps no books, and the
+   * whole point of matching is what it does to a set that does. The accrual and
+   * the thing that clears it now sit in one file, which is where they belong.
+   */
+  describe("the plant's bill, matched to the run", () => {
+    beforeAll(() => setTreatment("capitalise"));
+
+    /** A run with a fee accrued against it, and nothing yet clearing it. */
+    const accruedRun = async (amountCents: number, code: string) => {
+      const run = await asOwner((tx) =>
+        startRun(tx, prodOwner(), {
+          code: `${code}-${Date.now()}`,
+          startedOn: "2026-09-01",
+        }),
+      );
+      await asOwner((tx) =>
+        postServiceAccrual(tx, ownerCtx(), {
+          sourceId: run.id,
+          amountCents,
+          occurredOn: "2026-09-01",
+          locationAssetId: freezerId,
+          memo: `Processing accrued — ${run.code}`,
+        }),
+      );
+      return run;
+    };
+
+    it("CLEARS 2060 TO ZERO when the bill is matched and approved", async () => {
+      /**
+       * **THE CLAIM THE WHOLE SLICE RESTS ON.** Completing the run credited
+       * 2060; matching points the bill line at it; approving debits it back. A
+       * non-zero balance afterwards is processing nobody has been invoiced for
+       * — which is what the account is for, and is not this case.
+       */
+      const accrued = await asOwner((tx) =>
+        resolveServicesAccruedAccount(tx, tenantId),
+      );
+      const before = await netOf(accrued);
+      const run = await accruedRun(22_370, "CLEAR");
+      // The accrual has credited it, and nothing has cleared that yet.
+      expect((await netOf(accrued)) - before).toBe(-22_370);
+
+      const open = await asOwner((tx) =>
+        openProcessingAccruals(tx, tenantId, { runIds: [run.id] }),
+      );
+      expect(open).toHaveLength(1);
+      expect(open[0].openCents).toBe(22_370);
+
+      const { billId, billLineId } = await makeBill(22_370);
+      const result = await asOwner((tx) =>
+        matchBillLineToRuns(tx, prodOwner(), { billLineId, runIds: [run.id] }),
+      );
+      expect(result.accruedCents).toBe(22_370);
+      expect(result.varianceCents).toBe(0);
+
+      await asOwner(async (tx) => {
+        const bill = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: bill!.version,
+        });
+      });
+
+      // The run credited 22,370; the bill debited it back.
+      expect((await netOf(accrued)) - before).toBe(0);
+      // And the run stops being offered, because it has nothing left to settle.
+      const after = await asOwner((tx) =>
+        openProcessingAccruals(tx, tenantId, { runIds: [run.id] }),
+      );
+      expect(after).toHaveLength(0);
+    });
+
+    it("PUTS THE DIFFERENCE ON A SIBLING LINE so 2060 still clears exactly", async () => {
+      /**
+       * **$223.70 QUOTED, $235.00 BILLED — the live `Test` case.** A single line
+       * for the invoice total would debit 2060 by more than the run ever
+       * credited and leave $11.30 sitting there meaning nothing. The matched
+       * line carries exactly what was accrued, a sibling carries the rest, and
+       * AP is unaffected because the two still sum to the invoice.
+       */
+      const accrued = await asOwner((tx) =>
+        resolveServicesAccruedAccount(tx, tenantId),
+      );
+      const before = await netOf(accrued);
+      const run = await accruedRun(22_370, "VARIANCE");
+
+      const { billId, billLineId } = await makeBill(23_500);
+      const result = await asOwner((tx) =>
+        matchBillLineToRuns(tx, prodOwner(), { billLineId, runIds: [run.id] }),
+      );
+      expect(result.accruedCents).toBe(22_370);
+      expect(result.varianceCents).toBe(1_130);
+
+      const lines = await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.billLines)
+          .where(eq(schema.billLines.billId, billId)),
+      );
+      expect(lines).toHaveLength(2);
+      // The two still sum to what the plant charged.
+      expect(lines.reduce((sum, l) => sum + l.amountCents, 0)).toBe(23_500);
+      const matched = lines.find((l) => l.id === billLineId)!;
+      expect(matched.amountCents).toBe(22_370);
+      expect(matched.accountId).toBe(accrued);
+      const sibling = lines.find((l) => l.id !== billLineId)!;
+      expect(sibling.amountCents).toBe(1_130);
+      /**
+       * **UNCODED ON PURPOSE.** A processing overcharge may be a rate rise, a
+       * service nobody asked for, or a mistake to query, and this pack must not
+       * decide which. Coding it is the ordinary path for any bill line — and
+       * `approveBill` refusing an uncoded one is what forces somebody to.
+       */
+      expect(sibling.accountId).toBeNull();
+
+      await asOwner(async (tx) => {
+        await tx
+          .update(schema.billLines)
+          .set({ accountId: cogsAccountId })
+          .where(eq(schema.billLines.id, sibling.id));
+        const bill = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: bill!.version,
+        });
+      });
+
+      // 2060 clears EXACTLY, and the $11.30 went to the P&L rather than sitting
+      // in a liability nothing could ever explain.
+      expect((await netOf(accrued)) - before).toBe(0);
+    });
+
+    it("splits one bill line across two kill days by what each accrued", async () => {
+      const a = await accruedRun(10_000, "SPLIT-A");
+      const b = await accruedRun(30_000, "SPLIT-B");
+      const { billLineId } = await makeBill(44_000);
+      const result = await asOwner((tx) =>
+        matchBillLineToRuns(tx, prodOwner(), {
+          billLineId,
+          runIds: [a.id, b.id],
+        }),
+      );
+      expect(result.accruedCents).toBe(40_000);
+      expect(result.varianceCents).toBe(4_000);
+
+      const allocations = await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.productionRunBillAllocations)
+          .where(eq(schema.productionRunBillAllocations.billLineId, billLineId)),
+      );
+      expect(allocations).toHaveLength(2);
+      // Split in the ratio the runs accrued in — 1:3 — and the parts sum to the
+      // whole, which is what `rollCents` is for.
+      const billed = new Map(allocations.map((x) => [x.runId, x.billedCents]));
+      expect(billed.get(a.id)).toBe(11_000);
+      expect(billed.get(b.id)).toBe(33_000);
+      expect([...billed.values()].reduce((s, v) => s + v, 0)).toBe(44_000);
+    });
+
+    it("REFUSES A RUN A BILL ALREADY COVERS, so an accrual cannot clear twice", async () => {
+      const run = await accruedRun(5_000, "TWICE");
+      const first = await makeBill(5_000);
+      await asOwner((tx) =>
+        matchBillLineToRuns(tx, prodOwner(), {
+          billLineId: first.billLineId,
+          runIds: [run.id],
+        }),
+      );
+      const second = await makeBill(5_000);
+      await expect(
+        asOwner((tx) =>
+          matchBillLineToRuns(tx, prodOwner(), {
+            billLineId: second.billLineId,
+            runIds: [run.id],
+          }),
+        ),
+      ).rejects.toThrow(/nothing left to settle/);
+    });
+
+    it("refuses to match an already-approved bill", async () => {
+      // Matching rewrites the line and `approveBill` builds its entry FROM the
+      // lines, so matching afterwards changes what the bill says without
+      // changing what posted.
+      const run = await accruedRun(4_000, "APPROVED");
+      const { billId, billLineId } = await makeBill(4_000);
+      await asOwner(async (tx) => {
+        const bill = await tx.query.bills.findFirst({
+          where: eq(schema.bills.id, billId),
+          columns: { version: true },
+        });
+        return approveBill(tx, ledgerOwner(), {
+          billId,
+          expectedVersion: bill!.version,
+        });
+      });
+      await expect(
+        asOwner((tx) =>
+          matchBillLineToRuns(tx, prodOwner(), { billLineId, runIds: [run.id] }),
+        ),
+      ).rejects.toThrow(/already approved/);
+    });
+
+    it("unpicks a match, and the sibling's money comes home", async () => {
+      // Somebody will match the wrong kill day. Unpicking undoes all three
+      // things matching did, or the bill is left in a state no screen explains.
+      const run = await accruedRun(8_000, "UNPICK");
+      const { billId, billLineId } = await makeBill(9_000);
+      await asOwner((tx) =>
+        matchBillLineToRuns(tx, prodOwner(), { billLineId, runIds: [run.id] }),
+      );
+      const released = await asOwner((tx) =>
+        unmatchBillLineFromRuns(tx, prodOwner(), { billLineId }),
+      );
+      expect(released.released).toBe(1);
+
+      const lines = await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.billLines)
+          .where(eq(schema.billLines.billId, billId)),
+      );
+      expect(lines).toHaveLength(1);
+      expect(lines[0].amountCents).toBe(9_000);
+      expect(lines[0].accountId).toBeNull();
+      // And the run is offered again.
+      const open = await asOwner((tx) =>
+        openProcessingAccruals(tx, tenantId, { runIds: [run.id] }),
+      );
+      expect(open[0]?.openCents).toBe(8_000);
+    });
+
+    it("reads what is open from the LEDGER, not from the run's fee column", async () => {
+      /**
+       * A run whose fee was typed but never accrued — a tenant with posting off,
+       * or a plant that waived it — has nothing to settle. Building the list off
+       * `processing_fee_cents` would offer it and then fail at match time.
+       */
+      const run = await asOwner((tx) =>
+        startRun(tx, prodOwner(), {
+          code: `NOACCRUAL-${Date.now()}`,
+          startedOn: "2026-09-02",
+        }),
+      );
+      const open = await asOwner((tx) =>
+        openProcessingAccruals(tx, tenantId, { runIds: [run.id] }),
+      );
+      expect(open).toEqual([]);
     });
   });
 });

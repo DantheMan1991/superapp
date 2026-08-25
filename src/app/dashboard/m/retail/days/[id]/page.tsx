@@ -181,6 +181,14 @@ export default async function SellingDayPage({
                      lot does not end the day stranded on a vehicle. */
                   items={onTruckItems}
                   lots={onTruckLots}
+                  /* Bringing back starts FULL: a row per batch still on the
+                     truck at its remaining quantity, because at the end of a
+                     market you take home whatever did not sell. */
+                  onTruck={onTruck.map((l) => ({
+                    itemId: l.itemId,
+                    lotId: l.lotId,
+                    onHand: l.onHand,
+                  }))}
                   locations={locations
                     .filter((l) => l.id !== truckAssetId)
                     .map((l) => ({ id: l.id, name: l.name }))}

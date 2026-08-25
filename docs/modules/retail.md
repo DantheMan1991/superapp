@@ -36,6 +36,50 @@ Rows are listed in build order; the numbers are left alone because the build log
 
 ## Build log
 
+### 2026-08-25 — Load the whole truck, not one thing at a time (`claude/load-the-whole-truck`)
+
+**A TRUCK IS LOADED WITH MANY THINGS AT ONCE.** Five cuts of beef, four of
+chicken and a crate of produce is one trip — and both truck forms asked for
+them one at a time, so putting a real load on meant opening the same dialog ten
+times. That is a form nobody finishes, which is another way of saying the truck
+stayed empty and the till had nothing to sell.
+
+Both directions take a line per thing now: item, batch, quantity, add another,
+remove.
+
+- **ONE TRANSACTION FOR THE WHOLE LOAD, and it is the point of the shape.** Nine
+  lines where the fifth fails must not leave four on the truck: the farmer
+  drives off believing they have stock the ledger says is still in the yard, and
+  **the till then counts down locally from a number that was never true**, so
+  nothing catches it until the day-end variance. All or nothing.
+- **BRINGING BACK STARTS FULL.** At the end of a market you take home whatever
+  did not sell, so the unload dialog opens with a row per batch still on the
+  truck at its remaining quantity, each showing "N on the truck". The common
+  case is one click; adjusting is for the pound somebody gave away.
+- **The unit is per row.** A load of pounds and head reads right line by line —
+  "How much (lb)" above one and "(head)" above the next — because a mixed truck
+  is the normal truck.
+- **The day and the other end stay per MOVE, not per line.** You load the whole
+  truck on one morning out of one place; asking twice per row would be a worse
+  form for no more truth.
+- **Changing a row's item clears its batch.** A lot belongs to the thing it was
+  made of, and carrying it across would move stock out of a batch that is not
+  this item's.
+- **A blank row is skipped, an entirely blank form is refused.** Somebody adding
+  a row and thinking better of it should not have to find the remove button.
+
+Two ops tests cover the guarantee: a load that throws partway leaves **nothing**
+on the truck, and a load of three different things puts all three on.
+
+**Driven on the dev branch.** Three rows, three items, three units — and the
+server received one call carrying three lines. The bring-back opened prefilled
+with the truck's own stock. **The write was not observable through the browser**
+for the same reason as the last change: the local Clerk session keeps reverting
+its active organisation between the page load and the server action, so the
+action executes against a tenant with no `retail`. The action was confirmed
+running with the right payload; the ops tests cover what it writes.
+
+
 ### 2026-08-25 — What you still need before you can sell (`claude/what-you-still-need-to-sell`)
 
 **THE TILL NEEDS FOUR THINGS AND NOTHING ANYWHERE SAID SO.** A price, somewhere
@@ -385,6 +429,13 @@ guard with nothing to read.
   future step is added to selling, add it to `SellingChecklist` — a prerequisite
   that only announces itself once you have already failed at it is what the
   panel exists to end.
+- **A TRUCK MOVE IS ATOMIC ACROSS ITS LINES.** `loadTruckAction` and
+  `unloadTruckAction` run every line inside ONE `withTenant`. Do not "simplify"
+  them into a call per line: a half-loaded truck is stock the till believes in
+  and the ledger does not, and the till counts locally so nothing would notice.
+- **BRINGING BACK PREFILLS FROM THE TRUCK, REBUILT ON EVERY OPEN.** The truck's
+  stock changes as things sell, so a prefill captured at mount would offer this
+  morning's load at four in the afternoon.
 - **`client_ref` IS LOAD-BEARING AND MUST NEVER BECOME OPTIONAL FOR A TILL.**
   Posting is retried by design; without the ref a retry takes the money twice.
   Any future till — farm store, online — mints one before it touches the network.

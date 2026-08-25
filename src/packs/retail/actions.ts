@@ -293,12 +293,26 @@ export async function removeMarketDayAction(input: unknown) {
 }
 // ------------------------------------------------------------- the truck ---
 
-const truckMove = {
+/**
+ * **A TRUCK IS LOADED WITH MANY THINGS AT ONCE.** Five cuts of beef, four of
+ * chicken and a crate of produce is one trip, not ten, and the first version of
+ * this form asked for them one at a time — which is a form nobody finishes.
+ *
+ * The DAY and the OTHER END are per move rather than per line, because that is
+ * what actually happens: you load the whole truck on one morning out of one
+ * place.
+ */
+const truckMoveLine = z.object({
   itemId: z.string().uuid(),
   lotId: z.string().uuid().nullable().optional(),
   quantity: z.number().positive().max(100_000_000).multipleOf(0.0001),
+});
+
+const truckMove = {
+  truckAssetId: z.string().uuid(),
   occurredOn: requiredDate,
   notes: z.string().max(2000).optional(),
+  lines: z.array(truckMoveLine).min(1).max(200),
 };
 
 export async function loadTruckAction(input: unknown) {
@@ -307,22 +321,33 @@ export async function loadTruckAction(input: unknown) {
   const parsed = z
     .object({
       ...truckMove,
-      truckAssetId: z.string().uuid(),
       fromLocationAssetId: z.string().uuid().nullable().optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
+  const { lines, ...move } = parsed.data;
 
   try {
+    /**
+     * **ONE TRANSACTION FOR THE WHOLE LOAD, and it is the point of the shape.**
+     * Nine lines where the fifth fails must not leave four on the truck: the
+     * farmer drives off believing they have stock the ledger says is still in
+     * the yard, and the till then counts down from a number that was never
+     * true. All or nothing.
+     */
     await withTenant(
       ctx.tenant.id,
-      (tx) => moveStockToTruck(tx, ctxOf(ctx), parsed.data),
+      async (tx) => {
+        for (const line of lines) {
+          await moveStockToTruck(tx, ctxOf(ctx), { ...move, ...line });
+        }
+      },
       { role: ctx.role },
     );
     revalidatePath(BASE, "layout");
     // Stock left a shelf; the item page has to agree.
     revalidatePath("/dashboard/m/inventory", "layout");
-    return { ok: true };
+    return { ok: true, moved: lines.length };
   } catch (err) {
     return toResult(err);
   }
@@ -334,21 +359,27 @@ export async function unloadTruckAction(input: unknown) {
   const parsed = z
     .object({
       ...truckMove,
-      truckAssetId: z.string().uuid(),
       toLocationAssetId: z.string().uuid().nullable().optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };
+  const { lines, ...move } = parsed.data;
 
   try {
+    // Same all-or-nothing bargain as loading, and it matters more here: a
+    // half-finished bring-back leaves stock stranded on a vehicle overnight.
     await withTenant(
       ctx.tenant.id,
-      (tx) => returnStockFromTruck(tx, ctxOf(ctx), parsed.data),
+      async (tx) => {
+        for (const line of lines) {
+          await returnStockFromTruck(tx, ctxOf(ctx), { ...move, ...line });
+        }
+      },
       { role: ctx.role },
     );
     revalidatePath(BASE, "layout");
     revalidatePath("/dashboard/m/inventory", "layout");
-    return { ok: true };
+    return { ok: true, moved: lines.length };
   } catch (err) {
     return toResult(err);
   }

@@ -55,6 +55,8 @@ export function MatchBillLineDialog({
   entityId,
   options,
   currencySymbol,
+  processorWord,
+  runWord,
 }: {
   billLineId: string;
   description: string;
@@ -64,6 +66,9 @@ export function MatchBillLineDialog({
   entityId: string;
   options: (AccrualOption & { entityId: string })[];
   currencySymbol: string | null;
+  /** The tenant's own words. Found by driving: this copy said "plant". */
+  processorWord: string;
+  runWord: string;
 }) {
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -131,8 +136,8 @@ export function MatchBillLineDialog({
             {vendorName} · {description} ·{" "}
             {formatMoney(amountCents, currencySymbol)}. Tick the processing it
             pays for. Each one settles what was put aside for it when it
-            finished; anything the plant charged beyond that goes on the bill as
-            its own line for somebody to code.
+            finished; anything the {processorWord.toLowerCase()} charged beyond
+            that goes on the bill as its own line for somebody to code.
           </DialogDescription>
         </DialogHeader>
 
@@ -178,16 +183,31 @@ export function MatchBillLineDialog({
               {formatMoney(amountCents, currencySymbol)}
             </span>
           </div>
-          <div className="flex justify-between gap-4 font-medium">
-            <span>{variance === 0 ? "They agree" : "Difference"}</span>
-            <span
-              className={
-                variance === 0 ? "tabular-nums" : "tabular-nums text-destructive"
-              }
-            >
-              {formatMoney(variance, currencySymbol)}
-            </span>
-          </div>
+          {/*
+            **NOT A DIFFERENCE UNTIL THERE IS SOMETHING TO DIFFER FROM.** Found
+            by opening it: with nothing ticked the panel read "Difference
+            $235.00" in red, which says the plant overcharged by the whole
+            invoice. Before a selection there is no comparison to make.
+          */}
+          {chosen.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Tick a {runWord.toLowerCase()} above and the two figures can be
+              compared.
+            </p>
+          ) : (
+            <div className="flex justify-between gap-4 font-medium">
+              <span>{variance === 0 ? "They agree" : "Difference"}</span>
+              <span
+                className={
+                  variance === 0
+                    ? "tabular-nums"
+                    : "tabular-nums text-destructive"
+                }
+              >
+                {formatMoney(variance, currencySymbol)}
+              </span>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

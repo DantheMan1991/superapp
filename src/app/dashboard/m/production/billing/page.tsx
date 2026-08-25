@@ -139,10 +139,19 @@ export default async function ProcessingBillsPage() {
                 {formatMoney(openTotal, currencySymbol)}
               </span>
             </div>
+            {/*
+              **MATCHING POINTS THE LINE; APPROVING POSTS IT**, and saying only
+              the first would be this screen making the same mistake the GRNI
+              card made — reporting the WORKING and calling it the answer. The
+              figure above is what has no bill against it, which is not the same
+              as what the account is holding the moment a matched bill is still a
+              draft. Found by reading the balance after matching two of them.
+            */}
             <p className="text-sm text-muted-foreground">
               Money already in the cost of the meat, owed to a{" "}
-              {processorWord.toLowerCase()} who has not sent a bill. It clears
-              when their bill is matched to the day it paid for.
+              {processorWord.toLowerCase()} who has not sent a bill. Matching
+              their bill to the day it paid for points it at this; the account
+              itself clears when that bill is approved.
             </p>
             {open.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -236,6 +245,18 @@ export default async function ProcessingBillsPage() {
                       <TableCell>{l.description || "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         {formatMoney(l.amountCents, currencySymbol)}
+                        {/*
+                          **THE REST OF THE INVOICE, SAID OUT LOUD.** Matching
+                          rewrites this line down to what was accrued and puts
+                          the difference on its own line, so without this a
+                          $235.00 bill reads as $223.70 and looks like it shrank.
+                        */}
+                        {l.varianceCents !== 0 && (
+                          <span className="block text-xs font-normal text-muted-foreground">
+                            {formatMoney(l.varianceCents, currencySymbol)} more
+                            on its own line
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {l.matchedRunCodes.length === 0 ? (
@@ -256,6 +277,8 @@ export default async function ProcessingBillsPage() {
                                 entityId={l.entityId}
                                 options={options}
                                 currencySymbol={currencySymbol}
+                                processorWord={processorWord}
+                                runWord={runWord}
                               />
                             ) : (
                               <UnmatchBillLineButton

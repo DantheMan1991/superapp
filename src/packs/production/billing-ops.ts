@@ -240,6 +240,15 @@ export interface MatchableBillLine {
   amountCents: number;
   /** Runs already settled by this line. Empty on an unmatched one. */
   matchedRunCodes: string[];
+  /**
+   * What went onto the SIBLING line when this one was matched, or 0.
+   *
+   * **WITHOUT IT THE ROW LOOKS LIKE THE BILL SHRANK.** Matching rewrites this
+   * line down to exactly what was accrued and puts the rest on a line of its
+   * own, so a $235.00 invoice reads as $223.70 here — accurate, and the first
+   * thing somebody queries. Found by driving.
+   */
+  varianceCents: number;
 }
 
 /**
@@ -313,6 +322,8 @@ export async function matchableProcessorBillLines(
     .select({
       billLineId: schema.productionRunBillAllocations.billLineId,
       runId: schema.productionRunBillAllocations.runId,
+      accruedCents: schema.productionRunBillAllocations.accruedCents,
+      billedCents: schema.productionRunBillAllocations.billedCents,
     })
     .from(schema.productionRunBillAllocations)
     .where(
@@ -337,10 +348,15 @@ export async function matchableProcessorBillLines(
         });
   const codeByRun = new Map(runs.map((r) => [r.id, r.code]));
   const codesByLine = new Map<string, string[]>();
+  const varianceByLine = new Map<string, number>();
   for (const a of allocations) {
     const list = codesByLine.get(a.billLineId) ?? [];
     list.push(codeByRun.get(a.runId) ?? "");
     codesByLine.set(a.billLineId, list);
+    varianceByLine.set(
+      a.billLineId,
+      (varianceByLine.get(a.billLineId) ?? 0) + a.billedCents - a.accruedCents,
+    );
   }
 
   /**
@@ -366,6 +382,7 @@ export async function matchableProcessorBillLines(
         description: l.description,
         amountCents: l.amountCents,
         matchedRunCodes: (codesByLine.get(l.id) ?? []).filter(Boolean).sort(),
+        varianceCents: varianceByLine.get(l.id) ?? 0,
       };
     })
     .sort(

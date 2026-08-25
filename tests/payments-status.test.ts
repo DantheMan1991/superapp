@@ -291,6 +291,17 @@ describe("describeRequirements", () => {
     ).toEqual(["The owner's home address — We could not verify it."]);
   });
 
+  it("an address spread over four keys is one line, whatever the prefix", () => {
+    expect(
+      describeRequirements([
+        need("identity.individual.address.line1"),
+        need("identity.individual.address.city"),
+        need("identity.individual.address.state"),
+        need("identity.individual.address.postal_code"),
+      ]),
+    ).toEqual(["The owner's home address"]);
+  });
+
   it("no requirements is a meaningful answer, not an empty screen", () => {
     expect(describeRequirements()).toEqual([]);
     expect(describeRequirements([])).toEqual([]);
@@ -299,7 +310,8 @@ describe("describeRequirements", () => {
 
 describe("requirementLabel", () => {
   it("translates the v2 keys a real account actually returned", () => {
-    // Every one of these came off `stripe-connect-probe.ts create`.
+    // Every one of these came off `stripe-connect-probe.ts` against a live
+    // test-mode account.
     expect(requirementLabel("external_account")).toBe(
       "A bank account for Stripe to pay into",
     );
@@ -312,29 +324,58 @@ describe("requirementLabel", () => {
     expect(requirementLabel("defaults.profile.product_description")).toBe(
       "A description of what you sell",
     );
+    expect(requirementLabel("defaults.profile.business_url")).toBe(
+      "A website for the business",
+    );
     expect(
       requirementLabel("identity.attestations.terms_of_service.account.date"),
     ).toBe("Accepting Stripe's terms of service");
     expect(requirementLabel("identity.entity_type")).toBe(
       "Whether this is a sole trader, an LLC or a corporation",
     );
-    expect(requirementLabel("representative.given_name")).toBe("The owner's name");
-    expect(requirementLabel("representative.surname")).toBe("The owner's name");
   });
 
-  it("does NOT answer v1's keys, because v1 is not what this talks to", () => {
-    // `individual.id_number` was v1. If it ever appears the fallback renders it
-    // rather than silently mapping it to something v2 never sends.
-    expect(requirementLabel("individual.id_number")).toBe("Individual id number");
+  it("THE SAME QUESTION UNDER THREE PREFIXES IS ONE ANSWER", () => {
+    /**
+     * The defect that only a real screen found. One account returned
+     * `representative.given_name` when it was created and
+     * `identity.individual.given_name` a few hours later, once Stripe had
+     * decided its entity type — so a table keyed on the full path answered the
+     * first and rendered "Individual given name" for the second.
+     */
+    for (const key of [
+      "representative.given_name",
+      "identity.individual.given_name",
+      "individual.given_name",
+    ]) {
+      expect(requirementLabel(key)).toBe("The owner's name");
+    }
+    expect(requirementLabel("identity.individual.id_numbers.us_ssn_last_4")).toBe(
+      "The last four digits of the owner's Social Security number",
+    );
+    expect(requirementLabel("identity.individual.address.postal_code")).toBe(
+      "The owner's home address",
+    );
+    expect(requirementLabel("identity.individual.date_of_birth.day")).toBe(
+      "The owner's date of birth",
+    );
   });
 
-  it("strips the person id out of a person-scoped requirement", () => {
+  it("a NAMED person is not 'the owner'", () => {
+    /**
+     * `person_1Pabc.given_name` is somebody Stripe asked about separately — a
+     * beneficial owner or a director — and calling them "the owner" on a screen
+     * listing several of them would be wrong.
+     */
     expect(requirementLabel("person_1PabcXYZ.given_name")).toBe(
       "That person's name",
     );
     expect(requirementLabel("persons.person_1PabcXYZ.date_of_birth.year")).toBe(
       "That person's date of birth",
     );
+    expect(
+      requirementLabel("owners.person_1PabcXYZ.documents.primary_verification"),
+    ).toBe("A photo of that person's ID — a licence or passport");
   });
 
   it("KEEPS AN UNKNOWN REQUIREMENT VISIBLE RATHER THAN DROPPING IT", () => {
@@ -344,6 +385,9 @@ describe("requirementLabel", () => {
      * page swore was finished — so the fallback prettifies the key instead.
      */
     expect(requirementLabel("configuration.merchant.brand_new_thing")).toBe(
+      "Brand new thing",
+    );
+    expect(requirementLabel("identity.individual.brand_new_thing")).toBe(
       "Brand new thing",
     );
     expect(requirementLabel("some_brand_new_field")).toBe("Some brand new field");

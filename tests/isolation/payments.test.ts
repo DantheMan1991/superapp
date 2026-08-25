@@ -38,6 +38,8 @@ d("payment_accounts (RLS)", () => {
   let entityB: string;
   let accountA: string;
   let accountB: string;
+  let readerA: string;
+  let readerB: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
     withTenant(tenantA, fn, { role: "staff", userId: MATE });
@@ -95,6 +97,30 @@ d("payment_accounts (RLS)", () => {
         .returning();
       accountA = accounts[0].id;
       accountB = accounts[1].id;
+
+      const readers = await tx
+        .insert(schema.paymentReaders)
+        .values([
+          {
+            tenantId: tenantA,
+            paymentAccountId: accountA,
+            stripeReaderId: `tmr_${STAMP.replace(/-/g, "")}A`,
+            stripeLocationId: `tml_${STAMP.replace(/-/g, "")}A`,
+            label: "Front table",
+            deviceType: "simulated_wisepos_e",
+            status: "online",
+          },
+          {
+            tenantId: tenantB,
+            paymentAccountId: accountB,
+            stripeReaderId: `tmr_${STAMP.replace(/-/g, "")}B`,
+            stripeLocationId: `tml_${STAMP.replace(/-/g, "")}B`,
+            label: "B reader",
+          },
+        ])
+        .returning();
+      readerA = readers[0].id;
+      readerB = readers[1].id;
     });
   });
 
@@ -399,5 +425,155 @@ d("payment_accounts (RLS)", () => {
         tx.delete(schema.entities).where(eq(schema.entities.id, entityA1)),
       ),
     ).rejects.toThrow();
+  });
+
+  // ---- readers -----------------------------------------------------------
+
+  it("a tenant sees only its own readers, and STAFF can see them", async () => {
+    // The till is worked by whoever is standing at the stall. A reader only the
+    // owner could see is a reader nobody can take money on.
+    expect(
+      (await asStaff((tx) => tx.select().from(schema.paymentReaders))).map(
+        (r) => r.label,
+      ),
+    ).toEqual(["Front table"]);
+    expect(
+      (await asOtherTenant((tx) => tx.select().from(schema.paymentReaders))).map(
+        (r) => r.label,
+      ),
+    ).toEqual(["B reader"]);
+  });
+
+  it("cannot read another tenant's reader", async () => {
+    expect(
+      await asOwner((tx) =>
+        tx
+          .select()
+          .from(schema.paymentReaders)
+          .where(eq(schema.paymentReaders.id, readerB)),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("AN OWNER CANNOT WRITE A READER ROW EITHER — it mirrors Stripe", async () => {
+    /**
+     * Same posture as `payment_accounts`, and for a related reason: a row here
+     * that Stripe has never heard of is a device the till would offer, at a
+     * stall, and pushing a payment to it fails with a customer holding a card.
+     * Silent again — only the INSERT raises.
+     */
+    expect(
+      await asOwner((tx) =>
+        tx
+          .update(schema.paymentReaders)
+          .set({ status: "online", label: "Stolen" })
+          .where(eq(schema.paymentReaders.id, readerA))
+          .returning(),
+      ),
+    ).toHaveLength(0);
+
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.paymentReaders).values({
+          tenantId: tenantA,
+          paymentAccountId: accountA,
+          stripeReaderId: `tmr_${STAMP.replace(/-/g, "")}SELF`,
+          stripeLocationId: `tml_${STAMP.replace(/-/g, "")}SELF`,
+          label: "Invented",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("A READER CANNOT POINT AT ANOTHER TENANT'S ACCOUNT, even under withSystem", async () => {
+    /**
+     * The composite FK, and the reason it is composite. The connected account
+     * decides whose bank a device's takings land in — a reader pointed at
+     * somebody else's account would pay one farm's market into another's.
+     */
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.paymentReaders).values({
+          tenantId: tenantA,
+          paymentAccountId: accountB,
+          stripeReaderId: `tmr_${STAMP.replace(/-/g, "")}X`,
+          stripeLocationId: `tml_${STAMP.replace(/-/g, "")}X`,
+          label: "Wrong bank",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("one row per physical device", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.paymentReaders).values({
+          tenantId: tenantA,
+          paymentAccountId: accountA,
+          stripeReaderId: `tmr_${STAMP.replace(/-/g, "")}A`,
+          stripeLocationId: `tml_${STAMP.replace(/-/g, "")}A`,
+          label: "Duplicate",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses anything that is not a reader or location id", async () => {
+    // `tmr_` and `tml_` are different things and swapping them would register a
+    // payment against an address instead of a device.
+    for (const [reader, location] of [
+      ["tml_abc123", "tml_abc123"],
+      ["tmr_abc123", "tmr_abc123"],
+      ["acct_abc123", "tml_abc123"],
+      ["", "tml_abc123"],
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.paymentReaders).values({
+            tenantId: tenantA,
+            paymentAccountId: accountA,
+            stripeReaderId: reader,
+            stripeLocationId: location,
+            label: "Bad ids",
+          }),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
+  it("closing a connected account takes its readers with it", async () => {
+    // CASCADE here, unlike the entity FK: a reader is meaningless without the
+    // account it pays into, and there is no separate history to preserve.
+    const account = await withSystem((tx) =>
+      tx
+        .insert(schema.paymentAccounts)
+        .values({
+          tenantId: tenantB,
+          stripeAccountId: `acct_${STAMP.replace(/-/g, "")}C`,
+        })
+        .returning(),
+    );
+    await withSystem((tx) =>
+      tx.insert(schema.paymentReaders).values({
+        tenantId: tenantB,
+        paymentAccountId: account[0].id,
+        stripeReaderId: `tmr_${STAMP.replace(/-/g, "")}C`,
+        stripeLocationId: `tml_${STAMP.replace(/-/g, "")}C`,
+        label: "Doomed",
+      }),
+    );
+    await withSystem((tx) =>
+      tx
+        .delete(schema.paymentAccounts)
+        .where(eq(schema.paymentAccounts.id, account[0].id)),
+    );
+    expect(
+      await withSystem((tx) =>
+        tx
+          .select()
+          .from(schema.paymentReaders)
+          .where(eq(schema.paymentReaders.stripeReaderId, `tmr_${STAMP.replace(/-/g, "")}C`)),
+      ),
+    ).toHaveLength(0);
   });
 });

@@ -7,6 +7,7 @@ import {
   reconcileConnectedAccounts,
   type PaymentCompany,
 } from "@/lib/payments/connect";
+import { listReaders, refreshReaders, type ReaderView } from "@/lib/payments/terminal";
 import { dateInTimezone } from "@/lib/timezone";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ConnectButton, RefreshStatusButton } from "./payment-controls";
+import { ReaderSection } from "./reader-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +67,24 @@ export default async function PaymentsSettingsPage({
     ctx.tenant.name,
     ctx.role,
   );
+
+  /**
+   * A reader that has been unplugged is offline whatever this app believes, so
+   * the status is refreshed from Stripe on load — the same bargain the account
+   * reconcile makes, and best effort for the same reason.
+   */
+  const readers = new Map<string, ReaderView[]>();
+  for (const company of companies) {
+    if (!company.paymentAccountId) continue;
+    await refreshReaders(ctx.tenant.id, company.paymentAccountId);
+    readers.set(
+      company.paymentAccountId,
+      await listReaders(ctx.tenant.id, company.paymentAccountId, ctx.role),
+    );
+  }
+  // Gates the simulated-tap button and nothing else. A real charge is a real
+  // charge in either mode.
+  const testMode = !!process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_");
   // ADR 0010's rule: the picker — here, the per-company heading — appears at
   // two. A one-company client never learns the word.
   const namesCompanies = companies.length > 1;
@@ -116,6 +136,12 @@ export default async function PaymentsSettingsPage({
             company={company}
             showName={namesCompanies}
             timezone={ctx.tenant.timezone}
+            readers={
+              company.paymentAccountId
+                ? (readers.get(company.paymentAccountId) ?? [])
+                : []
+            }
+            testMode={testMode}
           />
         ))}
 
@@ -142,10 +168,14 @@ function CompanyCard({
   company,
   showName,
   timezone,
+  readers,
+  testMode,
 }: {
   company: PaymentCompany;
   showName: boolean;
   timezone: string;
+  readers: ReaderView[];
+  testMode: boolean;
 }) {
   const { view } = company;
 
@@ -188,6 +218,15 @@ function CompanyCard({
               </p>
             )}
           </div>
+        )}
+
+        {company.paymentAccountId && view.state !== "closed" && (
+          <ReaderSection
+            entityId={company.entityId}
+            readers={readers}
+            canRegister
+            testMode={testMode}
+          />
         )}
 
         {company.stripeAccountId && (

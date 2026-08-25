@@ -1463,14 +1463,28 @@ run model, separate templates), and the processing path and eligibility flag
   has not invoiced in sixty days is worth a nudge; one that invoices quarterly is
   not, and nothing here knows which. It wants a plant's own billing habit before
   it can say anything true, which is the same shape `lead_time_days` is in.
-- **A PLANT MUST BE A VENDOR BEFORE ITS BILL CAN BE MATCHED**, and nothing offers
-  to make it one. `production_processors` is a role on a `parties` row and a bill
-  names a `vendors` row, so a plant that has only ever been a processor does not
-  appear on the reconciliation at all — which is honest (it has sent no bills)
-  and is a dead end the first time somebody hits it. The live `Test` tenant is in
-  exactly that state. `src/lib/parties/role-sync.ts` already mints a role on an
-  existing party, so the fix is small and is a decision about which screen offers
-  it.
+- **A PLANT MUST BE A VENDOR BEFORE ITS BILL CAN BE MATCHED, AND CREATING ONE THE
+  ORDINARY WAY MAKES IT WORSE.** `production_processors` is a role on a `parties`
+  row and a bill names a `vendors` row; `matchableProcessorBillLines` joins the
+  two **through the party**, which is the whole reason the processor table carries
+  no name of its own. **`createVendor` calls `createPartyForRole` and therefore
+  mints a NEW party every time** — so adding "Valley Poultry Processing" as a
+  vendor from the accounting screen produces a SECOND party with the same name,
+  and the reconciliation still cannot see the bill. Two rows, same name, no link,
+  and nothing on any screen says why.
+
+  It is not a bug in either half: `processor-ops.ts` argues at length that
+  matching parties by NAME is the thing to refuse (*"a customer called Miller's
+  becoming the plant called Miller's"*), and it is right — so the fix is not to
+  loosen the join. The fix is an act that mints a VENDOR ROLE on the party that
+  already exists, which `src/lib/parties/role-sync.ts` can already do; what is
+  missing is a screen offering it, and a decision about whether it lives on the
+  processor page ("they also send bills") or on the vendor picker ("this is
+  somebody you already know").
+
+  **THE LIVE `Test` TENANT IS IN EXACTLY THIS STATE**, which is why its real
+  $235.00 in `2060` is still uncleared after 2d shipped. Nothing is wrong with
+  the books; there is simply no bill it can be matched to yet.
 - **NOTHING SPLITS A BILL LINE ACROSS PART OF A RUN.** Ticking a run settles its
   whole accrual, because a processing day has no natural unit to divide — but a
   plant that invoices a deposit and a balance against one kill day cannot be

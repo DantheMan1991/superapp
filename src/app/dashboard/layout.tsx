@@ -92,10 +92,21 @@ export default async function DashboardLayout({
         // outbound mail claims to come from, that one is the inbox.
         { href: "/dashboard/email", label: "Email setup", icon: "settings" },
         { href: "/dashboard/billing", label: "Billing", icon: "billing" },
+        // The OTHER Stripe, and the neighbouring row is exactly why the label
+        // spells it out: "Billing" is what this business pays us, "Taking
+        // payments" is what its own customers pay it. ADR 0015.
+        {
+          href: "/dashboard/settings/payments",
+          label: "Taking payments",
+          icon: "payments",
+        },
         {
           href: "/dashboard/settings",
           label: "Business settings",
           icon: "wrench",
+          // Exact, because "Taking payments" lives at /dashboard/settings/
+          // payments and the default prefix match would light both rows up.
+          exact: true,
         },
       ],
     });

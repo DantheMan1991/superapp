@@ -13,19 +13,46 @@ this dossier is the build record.
 
 ## Slice order
 
+**REORDERED 2026-08-25, and the numbers are identities rather than positions —
+read the State column, not the order of the digits.** This table used to say
+offline (1b) was next. The founder corrected that: *he has signal almost all of
+the time, and what he actually cannot do is take a credit card.* So the payment
+slices move to the front and **1b becomes robustness rather than a blocker.**
+Rows are listed in build order; the numbers are left alone because the build log,
+`src/db/schema/retail.ts` and ADR 0015 all cite them by name.
+
 | # | Slice | State |
 | --- | --- | --- |
 | **0** | **Channels + per-item-per-channel price lists + the market day record** | **shipped 2026-08-20** |
 | **1** | **The till: sales, the truck, sold-out capture, day-end reconciliation** | **shipped 2026-08-21** |
-| 1b | **Offline: service worker, durable queue, flush on reconnect** | next — see Open items |
-| 2 | Payment adapter — read (settlements, fees → books) | |
+| **1p** | **Stripe Connect: the farm's own connected account, per company** | **shipped 2026-08-25** — Layer 0, [ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md), dossier in [payments.md](payments.md) |
+| 5 | **Payment adapter — write: register a reader, PaymentIntent on the connected account, push it to the terminal** | next |
+| 2 | Payment adapter — read (settlements, fees → books) | after 5 — needs a payment to have happened |
+| 1b | Offline: service worker, durable queue, flush on reconnect | deferred — robustness, not a blocker. See Open items |
 | 3 | Commitments: reservations, deposits, hanging-weight final invoice, fulfilment point — needs `production` | |
 | 4 | Farm store, attended and count-derived | |
-| 5 | Payment adapter — write (drive the terminal) | |
 | 6 | Online orders + pickup windows | |
 | 7 | Shipping (costed), then wholesale (eligibility becomes load-bearing) | |
 
 ## Build log
+
+### 2026-08-25 — The order changed: cards before offline (`claude/the-account-that-belongs-to-the-farm`)
+
+No retail code moved. What moved is the roadmap, and a roadmap that contradicts
+the order things are being built in is worse than no roadmap.
+
+This dossier said offline (1b) was next. The founder corrected it: **he has
+signal almost all of the time, and what he cannot do is take a credit card.** So
+the payment slices went to the front, 1b became robustness, and the Layer 0 half
+of payments — the farm's own Stripe connected account, one per company — shipped
+the same day. That work has its own dossier ([payments.md](payments.md)) and its
+own decision ([ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md)),
+because a connected account is platform machinery that any pack could sell
+through rather than something retail owns.
+
+The two things this pack still needs, in order: a registered Terminal reader with
+a PaymentIntent pushed to it (slice 5), then the settlement and its fee reaching
+the books (slice 2).
 
 ### 2026-08-21 — Slice 1: the till, and the column that makes a retry safe (`claude/the-till-that-cannot-double-post`)
 
@@ -319,7 +346,18 @@ guard with nothing to read.
 
 ## Open items
 
-- **THE TILL IS NOT OFFLINE YET, and this is the next thing to build.** What
+- **THE TILL CANNOT TAKE A CARD YET, and that is the live gap.** The farm's own
+  Stripe connected account exists as of 2026-08-25 ([ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md),
+  [payments.md](payments.md)) — one per company, hosted KYC, payouts to their own
+  bank. What is still missing is everything that turns it into money at a stall:
+  a registered Terminal reader, a PaymentIntent created on the connected account
+  and pushed to it, and then the settlement and its fee reaching the books.
+  `retail_sales.payment_method` has recorded the method since slice 1 precisely
+  so the matching slice has something to match against, and it still has no
+  reader.
+- **THE TILL IS NOT OFFLINE YET, and this is no longer the next thing to
+  build.** The founder has signal almost all of the time (2026-08-25), so this
+  is robustness rather than a blocker and the payment slices went first. What
   exists is the half that could not be added later: a client-minted `client_ref`
   and idempotent posting. What is missing is the half that can — and all three
   parts are needed for a stall with no signal:
@@ -336,6 +374,8 @@ guard with nothing to read.
 - **Cards genuinely cannot work offline**, and the till should say so rather than
   appear to accept one. Authorisation has to reach the network — an OS-level
   fact, not a provider limitation. Today the payment method is simply recorded.
+  This is also why the two open items above do not compete: offline is for the
+  cash and the stock, and a card was never going to be in it.
 - **The till has been driven; the market truck has not left a yard.** Six
   defects came out of one browser session (above) and every one had a passing
   test over it. What no amount of clicking here can test is a phone, one hand,

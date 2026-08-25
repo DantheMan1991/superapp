@@ -1,4 +1,5 @@
 import {
+  Banknote,
   BookOpen,
   Boxes,
   Calculator,
@@ -47,6 +48,10 @@ import {
 export const ICONS: Record<string, LucideIcon> = {
   audit: ScrollText,
   billing: CreditCard,
+  // Deliberately NOT CreditCard: `billing` is the platform charging this
+  // tenant, `payments` is the tenant taking money from its customer, and the
+  // two sit next to each other in the same rail (ADR 0015).
+  payments: Banknote,
   book: BookOpen,
   boxes: Boxes,
   calculator: Calculator,

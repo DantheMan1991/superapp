@@ -340,6 +340,84 @@ If you skip 4.4, checkouts still succeed in Stripe; the status shown inside
 the app just won't update until webhooks exist (which you'll get for free
 once deployed).
 
+### 4.5 Stripe Connect: letting CLIENTS take card payments (one-time)
+
+**Everything above is the platform charging the client. This is the opposite
+direction — a client taking a card from its own customer at a market stall**,
+into its own bank account, under its own name. Same Stripe account, opposite
+direction; see
+[ADR 0015](docs/decisions/0015-a-connected-account-belongs-to-a-company.md).
+
+It has to be switched on once, by hand, for the platform's Stripe account.
+Until it is, a client's first click on **/dashboard/settings/payments** fails
+with *"Card payments are not switched on for Yosher yet"* — deliberately
+worded that way, because it is ours to fix and there is nothing the client can
+do about it.
+
+1. Stripe dashboard → **https://dashboard.stripe.com/connect** → sign up for
+   Connect. Still in **test mode**; no real business verification is needed to
+   try it.
+2. Two questions matter, and the answers that match what the app builds are
+   **"Onboarding hosted by Stripe"** and **"Stripe Dashboard"**. Together those
+   mean: Stripe collects the KYC on its own pages, and the client keeps a real
+   Stripe dashboard, pays Stripe's fees, carries the liability for disputes and
+   gets its own tax form. The app states the responsibilities explicitly when it
+   creates an account (`RESPONSIBILITIES` in `src/lib/payments/connect.ts`)
+   rather than relying on defaults.
+   Do **not** pick Express Dashboard: the app links clients to
+   `dashboard.stripe.com` directly, which Express accounts cannot use.
+3. Set a **platform name and support details** if Stripe asks — a client sees
+   them on the hosted onboarding pages.
+4. No new key is needed. `STRIPE_SECRET_KEY` is what acts on a connected
+   account, plus the account id the app stores.
+5. Leave the **"Complete setup in live mode"** and **"Activate your Stripe
+   account"** steps alone until you actually want to take real money. Test mode
+   works without them.
+
+**This app uses Stripe's Accounts v2 API** (`/v2/core/accounts`), because Stripe
+stopped accepting v1 account creation for new Connect integrations. If you ever
+see an error pointing at
+`dashboard.stripe.com/settings/features/feat_accounts_v1_support`, **do not
+enable that toggle** — it is a compatibility shim for old integrations and this
+one is not old. See [ADR 0015](docs/decisions/0015-a-connected-account-belongs-to-a-company.md).
+
+**Connect events need their own webhook endpoint**, because Stripe only
+delivers `account.updated` to a Connect-enabled one. Locally:
+
+```
+stripe listen --forward-connect-to localhost:3000/api/webhooks/stripe/connect
+```
+
+Put the `whsec_...` it prints into `.env` as `STRIPE_CONNECT_WEBHOOK_SECRET`
+(not `STRIPE_WEBHOOK_SECRET` — they are two different endpoints with two
+different secrets). Deployed: Stripe dashboard → **Developers → Webhooks →
+Add endpoint**, URL `/api/webhooks/stripe/connect`, and tick **Listen to
+events on connected accounts**. Subscribe to the v2 account events — anything
+under `v2.core.account`, including the capability-status and requirements
+updates.
+
+**The exact list matters less than it looks.** The handler keys off the event's
+related OBJECT rather than its name, so any event about a `v2.core.account`
+makes it re-read that account. Subscribing to one too many is harmless;
+subscribing to none means the page is only fresh when somebody opens it.
+
+Skipping the webhook is survivable and not free: the payments page reconciles
+from the Stripe API every time it loads, so the state is right whenever
+somebody looks at it and stale when nobody does.
+
+### 4.6 Try a connected account in test mode
+
+1. **/dashboard/settings/payments** → **Set up card payments**.
+2. Stripe's hosted onboarding opens — a real KYC form that Stripe says must be
+   completed by the business owner. In test mode there is a **Use test data**
+   link on most steps; the test bank account is routing **110000000**, account
+   **000123456789**, and the test SSN is **000-00-0000**.
+3. Coming back does **not** mean it worked — Stripe sends you back whether you
+   finished or not, which is why the page asks Stripe again on load. Expect to
+   land on **Needs information** or **Stripe is reviewing** rather than
+   **Ready**; that is the honest state and the one most real clients sit in for
+   a day or two.
+
 ---
 
 ## Part 4.5 — Anthropic: the Discovery copilot (5 min)

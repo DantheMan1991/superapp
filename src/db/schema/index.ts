@@ -25,6 +25,10 @@ export * from "./interview";
 export * from "./crm";
 export * from "./scheduling";
 export * from "./work";
+// The TENANT charging THEIR customer. The other direction — the platform
+// charging the tenant — is `subscriptions` in platform.ts, and the two must
+// never get tangled. See ADR 0015.
+export * from "./payments";
 // Layer 2a — pack-owned tables. Same rules as any domain above; the separation
 // that matters is in `src/packs/`, where the code lives.
 export * from "./assets";

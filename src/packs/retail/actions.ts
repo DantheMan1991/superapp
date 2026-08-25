@@ -231,13 +231,20 @@ export async function recordMarketDayAction(input: unknown) {
   if (!parsed.success) return { error: "Check the details and try again." };
 
   try {
-    await withTenant(
+    const day = await withTenant(
       ctx.tenant.id,
       (tx) => recordMarketDay(tx, ctxOf(ctx), parsed.data),
       { role: ctx.role },
     );
     revalidatePath(BASE, "layout");
-    return { ok: true };
+    /**
+     * **THE ID IS RETURNED SO THE CALLER CAN GO THERE.** Starting a day and
+     * being left on the page you started it from is what made the till
+     * unfindable: everything else about a market day — loading the truck,
+     * selling, counting the tin — lives on the day's own page, and the only
+     * other way in is clicking a date in a list that was empty a second ago.
+     */
+    return { ok: true as const, id: day.id };
   } catch (err) {
     return toResult(err);
   }

@@ -36,6 +36,66 @@ Rows are listed in build order; the numbers are left alone because the build log
 
 ## Build log
 
+### 2026-08-25 — A market day is opened, then closed (`claude/open-the-stall-then-close-it`)
+
+**THE OBJECT CHANGED JOBS BETWEEN TWO SLICES AND THE WORDS NEVER CAUGHT UP.**
+Slice 0 built `retail_market_days` as a retrospective cost record — *what did it
+cost to stand there*, so two seasons settle which market is habit. Slice 1 then
+hung the TILL off that same row, which made it the thing you must create
+**before** you can sell anything. One object, two opposite tenses, and the
+dialog only ever spoke the first.
+
+The founder found it by looking at it: *"Record a market day makes it seem like
+this is recording something that has already happened."* It is worse than the
+label, and the evidence was in the fields:
+
+- **"Hours stood there"** — unknowable at seven in the morning.
+- **"Weather · e.g. rained until eleven"** — past tense by construction.
+- **The one genuinely start-of-day field was missing from the start-of-day
+  form.** `opening_float_cents` — the change you take to the stall — was
+  collected at the END, inside "Count the tin". So the form named for the past
+  asked about the future, and the form named for the end asked about the
+  beginning.
+
+**Opening and closing are two moments now.**
+
+- **"Start a market day"** asks only what somebody knows before they have stood
+  there: where, when, the float in the tin, and the stall fee *if* it was paid
+  upfront. Submit reads **"Start selling"**.
+- **"Close the day"** on the day's own page absorbs the old cash panel and
+  everything retrospective: the count, the fee, getting there, crew, hours,
+  weather, notes. It reads "Edit the day" once those facts exist.
+- **STARTING A DAY NOW TAKES YOU TO IT.** `recordMarketDayAction` returns the
+  id and the form pushes to `/days/<id>`. Leaving somebody on the page they
+  started from is most of why the till was unfindable: the truck, the tin and
+  the till live only there, and the other way in is clicking a date in a list
+  that was empty a second earlier.
+
+**No `closed_at` column.** Nothing reads a closed state, and a column with no
+reader is what this repo refuses; the button leans on whether the end-of-day
+facts exist yet.
+
+**The risk in merging the tin into the close form is that it resubmits EVERY
+field**, so a mis-read prefill would silently blank whatever the opening form
+set. Two ops tests cover exactly that, including that **a blank count is still
+not a zero count** — the rule the cash panel has always turned on.
+
+**`scripts/retail-fixture.ts` is how any of this got looked at.** The till only
+renders when four things already exist — a channel, a market day, a
+storage-location asset, and priced stock on it — which is why this dossier has
+said since slice 1 that *"the market truck has not left a yard"*. The reason
+was reach, not reluctance. The script builds the chain in one command, writes
+through the real ops, and refuses any database that is not the dev branch.
+
+**What could NOT be driven, and why it is honest to say so.** The two dialogs
+were verified on screen — copy, fields, prefilled values, and the button
+switching between "Close the day" and "Edit the day". The SAVE round trip was
+not: the local Clerk session kept reverting its active organisation to `Test`
+between the page load and the server action, so every action executed against a
+tenant with no `retail`. The action itself was confirmed to run with the right
+payload in the server log; what it wrote could not be observed through the UI.
+The ops tests cover the write.
+
 ### 2026-08-25 — The order changed: cards before offline (`claude/the-account-that-belongs-to-the-farm`)
 
 No retail code moved. What moved is the roadmap, and a roadmap that contradicts
@@ -281,6 +341,17 @@ guard with nothing to read.
 
 ## Decisions & gotchas
 
+- **A MARKET DAY IS OPENED AND THEN CLOSED, AND THE TWO FORMS MUST NOT MERGE
+  BACK.** "Start a market day" collects only what is knowable at the start; the
+  retrospective half belongs to "Close the day" on the day's own page. The row
+  is both a container the till hangs off and a record of what the day cost —
+  that dual job is what made the original dialog ask about the weather before it
+  had happened.
+- **THE CLOSE FORM RESUBMITS EVERY FIELD.** Anything added to the market day
+  must be prefilled there, or closing the day will blank it. `tests/retail-ops`
+  covers the ones that exist.
+- **STARTING A DAY NAVIGATES TO IT.** `recordMarketDayAction` returns the id for
+  that reason; do not "simplify" it back to `{ ok: true }`.
 - **`client_ref` IS LOAD-BEARING AND MUST NEVER BECOME OPTIONAL FOR A TILL.**
   Posting is retried by design; without the ref a retry takes the money twice.
   Any future till — farm store, online — mints one before it touches the network.
@@ -346,6 +417,17 @@ guard with nothing to read.
 
 ## Open items
 
+- **NOTHING TELLS YOU WHAT YOU STILL NEED BEFORE YOU CAN SELL.** The till wants a
+  channel, a market day, a storage-location asset and priced stock on it. Miss
+  any and the day page says "No truck to sell from" or shows an empty list; the
+  channel page says nothing at all. The fix is a checklist on the channel, and
+  it is the single cheapest thing left in this pack.
+- **THE TRUCK IS AN ASSETS CONCEPT WITH NO MENTION IN RETAIL.** A market truck is
+  an asset with "Things are kept here" ticked, which is the right model and
+  completely undiscoverable from here.
+- **The truck is still whichever storage location sorts first**, changeable only
+  by hand-editing a `?truck=` query parameter. A farm with a van and a chest
+  freezer gets whichever the alphabet picks.
 - **THE TILL CANNOT TAKE A CARD YET, and the gap is now one wire.** The farm's
   own Stripe account and a registered card reader both exist as of 2026-08-25
   ([ADR 0015](../decisions/0015-a-connected-account-belongs-to-a-company.md),
@@ -382,14 +464,13 @@ guard with nothing to read.
   defects came out of one browser session (above) and every one had a passing
   test over it. What no amount of clicking here can test is a phone, one hand,
   a queue of people and no signal.
-- **A market day cannot be edited from the UI.** `updateMarketDay` exists, is
-  tested, and has no caller — only remove-and-re-enter. The same shape
-  `inventory`'s four callerless actions had.
+- ~~**A market day cannot be edited from the UI.**~~ **Closed 2026-08-25** —
+  "Close the day" is a full editor for everything except where and when.
+  Changing the channel or the date is still remove-and-re-enter.
 - **A channel cannot be renamed or re-kinded from the UI** either;
   `updateChannel` is only reached by the close/reopen button.
-- **There is no per-day page.** A market day is a row in two tables and nothing
-  more, so the home page's date column is plain text. That changes the moment
-  sales hang off a day.
+- ~~**There is no per-day page.**~~ **Closed** — slice 1 built one and starting a
+  day now lands on it.
 - **A channel is not a cost object.** Lots sync into `dimension_members`;
   channels do not, so "profit per channel" is a page rather than a P&L
   dimension. Same open item `production` has for runs, and the same accounting

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -54,6 +55,14 @@ function toCents(value: FormDataEntryValue | null): number | null {
   const parsed = Number(text);
   if (!Number.isFinite(parsed) || parsed < 0) return null;
   return Math.round(parsed * 100);
+}
+
+/** Blank stays blank: "not recorded" and "recorded as none" are different. */
+function numberOrNull(value: FormDataEntryValue | null): number | null {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 /**
@@ -280,98 +289,233 @@ export function TruckMoveForm({
  * the panel says "not counted" rather than reporting the whole day's takings as
  * a shortfall.
  */
-export function CashCountForm({
+export function CloseDayForm({
   marketDayId,
   openingFloatCents,
   cashCountedCents,
+  stallFeeCents,
+  travelCents,
+  crewSize,
+  hours,
+  weather,
+  notes,
   currencySymbol,
 }: {
   marketDayId: string;
   openingFloatCents: number | null;
   cashCountedCents: number | null;
+  stallFeeCents: number | null;
+  travelCents: number | null;
+  crewSize: number | null;
+  hours: number | null;
+  weather: string;
+  notes: string;
   currencySymbol: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
+  /**
+   * **THE END OF THE DAY, AND EVERYTHING ONLY KNOWABLE THEN.**
+   *
+   * This used to be "Count the tin" and collected two numbers. The rest — how
+   * long you stood there, what the weather did, what getting there cost — lived
+   * in the dialog that CREATED the day, which you open before any of it has
+   * happened. Meanwhile the float, the one thing you know at seven in the
+   * morning, was collected here. Both halves were in the wrong place; opening
+   * and closing are two moments now.
+   */
   function submit(formData: FormData) {
     startTransition(async () => {
       const result = await updateMarketDayAction({
         id: marketDayId,
+        stallFeeCents: toCents(formData.get("stallFee")),
+        travelCents: toCents(formData.get("travel")),
+        crewSize: numberOrNull(formData.get("crewSize")),
+        hours: numberOrNull(formData.get("hours")),
         openingFloatCents: toCents(formData.get("float")),
         cashCountedCents: toCents(formData.get("counted")),
+        weather: String(formData.get("weather") ?? ""),
+        notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success("Counted");
+      toast.success("Day closed");
       setOpen(false);
       router.refresh();
     });
   }
 
+  /**
+   * No `closed_at` column, deliberately — nothing reads a closed state, and a
+   * column with no reader is exactly what this repo refuses. The label leans on
+   * whether the end-of-day facts exist yet.
+   */
+  const closed = cashCountedCents !== null || hours !== null;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
-          {cashCountedCents === null ? "Count the tin" : "Recount"}
+          {closed ? "Edit the day" : "Close the day"}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <form action={submit}>
           <DialogHeader>
-            <DialogTitle>The cash tin</DialogTitle>
+            <DialogTitle>Close the day</DialogTitle>
             <DialogDescription>
-              What went out as change and what came back. Only cash sales are
-              checked against it — counting card takings as a shortfall is the
-              fastest way to teach somebody to ignore the number.
+              What it cost to stand there and how it went. Two seasons of this
+              is what settles which market is worth going to and which one is
+              habit.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-4 py-4">
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="float">
+                  Float out {currencySymbol ? `(${currencySymbol})` : ""}
+                </Label>
+                <Input
+                  id="float"
+                  name="float"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={
+                    openingFloatCents === null
+                      ? ""
+                      : (openingFloatCents / 100).toFixed(2)
+                  }
+                  placeholder="50.00"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="counted">
+                  Counted in {currencySymbol ? `(${currencySymbol})` : ""}
+                </Label>
+                <Input
+                  id="counted"
+                  name="counted"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={
+                    cashCountedCents === null
+                      ? ""
+                      : (cashCountedCents / 100).toFixed(2)
+                  }
+                  autoFocus
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {/* Leaving the count blank must stay meaningful: not counted and
+                  counted-and-right are different facts. */}
+              Only cash sales are checked against the tin — counting card
+              takings as a shortfall is the fastest way to teach somebody to
+              ignore the number. Leave it blank if nobody counted.
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="stallFee">
+                  Stall fee {currencySymbol ? `(${currencySymbol})` : ""}
+                </Label>
+                <Input
+                  id="stallFee"
+                  name="stallFee"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={
+                    stallFeeCents === null
+                      ? ""
+                      : (stallFeeCents / 100).toFixed(2)
+                  }
+                  placeholder="35.00"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="travel">
+                  Getting there {currencySymbol ? `(${currencySymbol})` : ""}
+                </Label>
+                <Input
+                  id="travel"
+                  name="travel"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={
+                    travelCents === null ? "" : (travelCents / 100).toFixed(2)
+                  }
+                  placeholder="18.00"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="crewSize">Crew</Label>
+                <Input
+                  id="crewSize"
+                  name="crewSize"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  defaultValue={crewSize ?? ""}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="hours">Hours stood there</Label>
+                <Input
+                  id="hours"
+                  name="hours"
+                  type="number"
+                  min="0"
+                  step="0.25"
+                  inputMode="decimal"
+                  defaultValue={hours ?? ""}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {/* The whole argument for the table: own hours at zero make every
+                  market look profitable and the dud invisible. */}
+              Hours are recorded beside the money, never inside it. If your own
+              time counts as nothing, every market looks worth going to.
+            </p>
+
             <div className="grid gap-2">
-              <Label htmlFor="float">
-                Float out {currencySymbol ? `(${currencySymbol})` : ""}
-              </Label>
+              <Label htmlFor="weather">Weather</Label>
               <Input
-                id="float"
-                name="float"
-                type="number"
-                min="0"
-                step="0.01"
-                defaultValue={
-                  openingFloatCents === null
-                    ? ""
-                    : (openingFloatCents / 100).toFixed(2)
-                }
-                placeholder="50.00"
+                id="weather"
+                name="weather"
+                maxLength={300}
+                defaultValue={weather}
+                placeholder="e.g. rained until eleven"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="counted">
-                Counted in {currencySymbol ? `(${currencySymbol})` : ""}
-              </Label>
-              <Input
-                id="counted"
-                name="counted"
-                type="number"
-                min="0"
-                step="0.01"
-                defaultValue={
-                  cashCountedCents === null
-                    ? ""
-                    : (cashCountedCents / 100).toFixed(2)
-                }
-                autoFocus
+              <Label htmlFor="day-notes">Notes</Label>
+              <Textarea
+                id="day-notes"
+                name="notes"
+                rows={2}
+                maxLength={5000}
+                defaultValue={notes}
               />
             </div>
           </div>
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Save"}
+              {pending ? "Saving…" : closed ? "Save" : "Close the day"}
             </Button>
           </DialogFooter>
         </form>

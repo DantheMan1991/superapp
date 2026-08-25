@@ -930,4 +930,130 @@ d("retail ops", () => {
     );
     expect(countedEmpty.cashCountedCents).toBe(0);
   });
+  /**
+   * **A TRUCK IS LOADED WITH MANY THINGS AT ONCE, AND ALL OF THEM OR NONE.**
+   *
+   * The form takes a line per thing and the action runs the lot inside ONE
+   * `withTenant` transaction. This is the reason it has to: nine lines where
+   * the fifth fails must not leave four on the truck. The farmer drives off
+   * believing they have stock the ledger says is still in the yard, and the
+   * till then counts down from a number that was never true — and because the
+   * till counts locally, nothing would catch it until the day-end variance.
+   *
+   * The transaction is the action's, so this reproduces the action's shape
+   * rather than calling it: several `moveStockToTruck` calls in one `tx`, one
+   * of which throws.
+   */
+  it("a load that fails partway leaves NOTHING on the truck", async () => {
+    const truck = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.assets)
+        .values({
+          tenantId,
+          kind: "vehicle",
+          name: `${STAMP} atomic truck`,
+          isStorageLocation: true,
+        })
+        .returning();
+      return rows[0];
+    });
+
+    const beef = await asOwner((tx) =>
+      createItem(tx, inv(), {
+        name: `${STAMP} atomic beef`,
+        stockingUnit: "lb",
+      }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, inv(), {
+        itemId: beef.id,
+        newLotCode: `${STAMP}-atomic`,
+        quantity: 30,
+        occurredOn: TODAY,
+      }),
+    );
+
+    // Two good lines and one impossible one. `transferStock` refuses a move
+    // that starts and ends in the same place, which is the cheapest way to make
+    // exactly one line throw.
+    await expect(
+      asOwner(async (tx) => {
+        await moveStockToTruck(tx, ownerCtx(), {
+          itemId: beef.id,
+          quantity: 10,
+          truckAssetId: truck.id,
+          occurredOn: TODAY,
+        });
+        await moveStockToTruck(tx, ownerCtx(), {
+          itemId: beef.id,
+          quantity: 5,
+          truckAssetId: truck.id,
+          occurredOn: TODAY,
+        });
+        await moveStockToTruck(tx, ownerCtx(), {
+          itemId: beef.id,
+          quantity: 5,
+          // Same place at both ends: not a move.
+          fromLocationAssetId: truck.id,
+          truckAssetId: truck.id,
+          occurredOn: TODAY,
+        });
+      }),
+    ).rejects.toThrow();
+
+    // The two that "succeeded" went back with the one that did not.
+    const onTruck = await asOwner((tx) =>
+      truckStock(tx, tenantId, truck.id),
+    );
+    expect(onTruck).toEqual([]);
+  });
+
+  it("a load of several different things puts all of them on", async () => {
+    const truck = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.assets)
+        .values({
+          tenantId,
+          kind: "vehicle",
+          name: `${STAMP} full truck`,
+          isStorageLocation: true,
+        })
+        .returning();
+      return rows[0];
+    });
+
+    const made: { id: string }[] = [];
+    for (const name of ["cuts", "birds", "produce"]) {
+      const item = await asOwner((tx) =>
+        createItem(tx, inv(), {
+          name: `${STAMP} ${name}`,
+          stockingUnit: "lb",
+        }),
+      );
+      await asOwner((tx) =>
+        receiveStock(tx, inv(), {
+          itemId: item.id,
+          newLotCode: `${STAMP}-${name}`,
+          quantity: 20,
+          occurredOn: TODAY,
+        }),
+      );
+      made.push(item);
+    }
+
+    await asOwner(async (tx) => {
+      for (const item of made) {
+        await moveStockToTruck(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 7,
+          truckAssetId: truck.id,
+          occurredOn: TODAY,
+        });
+      }
+    });
+
+    const onTruck = await asOwner((tx) => truckStock(tx, tenantId, truck.id));
+    expect(onTruck).toHaveLength(3);
+    expect(onTruck.every((line) => line.onHand === 7)).toBe(true);
+  });
 });

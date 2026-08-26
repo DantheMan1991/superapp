@@ -58,6 +58,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
+import { enterprises } from "./enterprises";
 import { assets } from "./assets";
 import { parties } from "./parties";
 import { inventoryItems, inventoryLots, inventoryMovements } from "./inventory";
@@ -201,8 +202,26 @@ export const productionRuns = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /**
+     * **WHICH LINE OF BUSINESS THIS RUN BELONGS TO.** A kill day is one part of
+     * the business's; a bake is another's.
+     *
+     * Falls back to the run's INPUT lots when unset, which is usually the truer
+     * answer — the pen that went in already knows what it was. Set it here when
+     * a run mixes inputs from more than one, which is the case nothing else can
+     * work out.
+     *
+     * Composite FK, no `onDelete`. See `inventory_items.enterprise_id`.
+     */
+    enterpriseId: uuid("enterprise_id"),
   },
   (t) => [
+    foreignKey({
+      name: "production_runs_enterprise_fk",
+      columns: [t.tenantId, t.enterpriseId],
+      foreignColumns: [enterprises.tenantId, enterprises.id],
+    }),
+    index("production_runs_tenant_enterprise_idx").on(t.tenantId, t.enterpriseId),
     uniqueIndex("production_runs_tenant_id_id_idx").on(t.tenantId, t.id),
     index("production_runs_tenant_status_idx").on(t.tenantId, t.status),
     index("production_runs_tenant_started_idx").on(t.tenantId, t.startedOn),

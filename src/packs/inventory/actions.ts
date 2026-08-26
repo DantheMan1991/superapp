@@ -136,6 +136,7 @@ function ctxOf(ctx: Awaited<ReturnType<typeof requireTenant>>): InventoryCtx {
 const itemSchema = z.object({
   name: z.string().min(1).max(200),
   itemKind: z.string().min(1).max(63).optional(),
+  enterpriseId: z.string().uuid().nullable().optional(),
   stockingUnit: z.string().min(1).max(32),
   purchaseUnit: z.string().max(32).nullable().optional(),
   purchaseUnitQty: quantity.positive().nullable().optional(),
@@ -261,6 +262,7 @@ const lotSchema = z.object({
   openedOn: optionalDate.nullable(),
   expiresOn: optionalDate.nullable(),
   notes: z.string().max(5000).optional(),
+  enterpriseId: z.string().uuid().nullable().optional(),
 });
 
 export async function createLotAction(input: unknown) {

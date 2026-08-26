@@ -5,12 +5,22 @@ import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FilterPills } from "@/components/app/filter-pills";
 import { slugLabel } from "../vocabulary";
 
 export interface KindInUse {
   kind: string;
   count: number;
 }
+
+export interface EnterpriseInUse {
+  id: string;
+  name: string;
+  count: number;
+}
+
+/** The pill key for "belongs to no line of business". */
+const UNTAGGED = "none";
 
 /**
  * Narrow the list: by kind, by name, and whether retired things show.
@@ -36,6 +46,10 @@ export function ItemFilters({
   base,
   kinds,
   activeKind,
+  enterprises,
+  untaggedCount,
+  activeEnterprise,
+  enterpriseWord,
   search,
   showArchived,
   shown,
@@ -46,6 +60,13 @@ export function ItemFilters({
   /** Kinds this tenant actually holds, with counts. Never a global taxonomy. */
   kinds: KindInUse[];
   activeKind?: string;
+  /** Active lines of business with their item counts. Empty hides the row. */
+  enterprises: EnterpriseInUse[];
+  /** How many items belong to none — the "what have I not done yet" pill. */
+  untaggedCount: number;
+  activeEnterprise?: string;
+  /** What the installed profile calls one. Never hard-coded here. */
+  enterpriseWord: string;
   search: string;
   showArchived: boolean;
   /** How many rows the current filter produced, for the summary line. */
@@ -58,15 +79,19 @@ export function ItemFilters({
   /** Every link on this bar keeps the other two choices. */
   function urlWith(change: {
     kind?: string | null;
+    enterprise?: string | null;
     q?: string | null;
     archived?: boolean;
   }): string {
     const params = new URLSearchParams();
     const kind = change.kind === undefined ? activeKind : change.kind;
+    const ent =
+      change.enterprise === undefined ? activeEnterprise : change.enterprise;
     const q = change.q === undefined ? search : change.q;
     const archived =
       change.archived === undefined ? showArchived : change.archived;
     if (kind) params.set("kind", kind);
+    if (ent) params.set("enterprise", ent);
     if (q) params.set("q", q);
     if (archived) params.set("archived", "1");
     const query = params.toString();
@@ -79,31 +104,82 @@ export function ItemFilters({
     router.push(urlWith({ q: typed || null }));
   }
 
-  const filtering = Boolean(activeKind) || Boolean(search) || showArchived;
+  const filtering =
+    Boolean(activeKind) ||
+    Boolean(activeEnterprise) ||
+    Boolean(search) ||
+    showArchived;
+  /**
+   * **HIDDEN UNTIL THERE IS SOMETHING TO PICK.** A business with no list, or one
+   * that has built a list and tagged nothing, gets no row — a pill group where
+   * every count is zero is furniture that teaches people to ignore the bar.
+   */
+  const showEnterprises =
+    enterprises.length > 0 && enterprises.some((e) => e.count > 0);
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {/* ALL IS A CHIP, not the absence of one. A bar whose unfiltered state
-            has nothing selected gives somebody no way to see that they ARE
-            filtered except by noticing what is missing. */}
-        <FilterChip href={urlWith({ kind: null })} active={!activeKind}>
-          All
-        </FilterChip>
-        {kinds.map((k) => (
-          <FilterChip
-            key={k.kind}
-            href={urlWith({ kind: k.kind })}
-            active={activeKind === k.kind}
-          >
-            {slugLabel(k.kind)}
-            {/* The count is free — `listKindsInUse` already groups — and it
-                turns "is there anything under Medicine" into a question the
-                bar has already answered. */}
-            <span className="ml-1.5 tabular-nums opacity-60">{k.count}</span>
-          </FilterChip>
-        ))}
-      </div>
+      {/**
+        * **`FilterPills` RATHER THAN A HAND-ROLLED CHIP, and the first version
+        * of this file should have used it.** It already existed, already
+        * rendered links with counts and an active key, and already carried the
+        * house decision that a filter is a fill and navigation is an underline.
+        * A second implementation beside it was two components drifting apart
+        * for no reason.
+        */}
+      <FilterPills
+        activeKey={activeKind ?? ""}
+        items={[
+          // ALL IS A PILL, not the absence of one. A bar whose unfiltered state
+          // has nothing selected gives somebody no way to see that they ARE
+          // filtered except by noticing what is missing.
+          { key: "", label: "All", href: urlWith({ kind: null }) },
+          ...kinds.map((k) => ({
+            key: k.kind,
+            label: slugLabel(k.kind),
+            href: urlWith({ kind: k.kind }),
+            // Free — `listKindsInUse` already groups — and it turns "is there
+            // anything under Medicine" into a question the bar has answered.
+            count: k.count,
+          })),
+        ]}
+      />
+
+      {showEnterprises && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {enterpriseWord}
+          </span>
+          <FilterPills
+            activeKey={activeEnterprise ?? ""}
+            items={[
+              { key: "", label: "All", href: urlWith({ enterprise: null }) },
+              ...enterprises.map((e) => ({
+                key: e.id,
+                label: e.name,
+                href: urlWith({ enterprise: e.id }),
+                count: e.count,
+              })),
+              /**
+               * **"NOT SET" IS A FILTER SOMEBODY NEEDS, not a gap in the list.**
+               * The question after tagging anything is *what have I not tagged
+               * yet*, and it is unaskable without this pill. Hidden when there
+               * is nothing untagged, because then it answers nothing.
+               */
+              ...(untaggedCount > 0
+                ? [
+                    {
+                      key: UNTAGGED,
+                      label: "Not set",
+                      href: urlWith({ enterprise: UNTAGGED }),
+                      count: untaggedCount,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {/**
@@ -181,31 +257,5 @@ export function ItemFilters({
         )}
       </div>
     </div>
-  );
-}
-
-function FilterChip({
-  href,
-  active,
-  children,
-}: {
-  href: string;
-  active: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      // `aria-pressed` rather than colour alone: which chip is on is the one
-      // thing on this bar a screen reader has to be able to answer.
-      aria-pressed={active}
-      className={`inline-flex items-center rounded-full border px-3 py-1 text-sm transition-colors ${
-        active
-          ? "border-transparent bg-primary text-primary-foreground"
-          : "hover:bg-accent"
-      }`}
-    >
-      {children}
-    </Link>
   );
 }

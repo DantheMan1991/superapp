@@ -108,6 +108,13 @@ export interface ChannelInput {
   name: string;
   channelKind?: string;
   location?: string;
+  /**
+   * Which line of business this channel's OWN costs belong to — right for a
+   * single-purpose round, left blank for a mixed stall. See the column, and
+   * note it does NOT decide what a sale here earns: that is per line, from the
+   * item sold.
+   */
+  enterpriseId?: string | null;
   notes?: string;
 }
 
@@ -128,6 +135,7 @@ export async function createChannel(
       name: input.name.trim(),
       channelKind,
       location: input.location?.trim() ?? "",
+      enterpriseId: input.enterpriseId ?? null,
       notes: input.notes?.trim() ?? "",
     })
     .returning();
@@ -142,6 +150,7 @@ export async function updateChannel(
     name?: string;
     channelKind?: string;
     location?: string;
+    enterpriseId?: string | null;
     status?: string;
     notes?: string;
   },
@@ -164,6 +173,10 @@ export async function updateChannel(
       name: patch.name?.trim() || existing.name,
       channelKind: channelKind || existing.channelKind,
       location: patch.location === undefined ? existing.location : patch.location.trim(),
+      enterpriseId:
+        patch.enterpriseId === undefined
+          ? existing.enterpriseId
+          : patch.enterpriseId,
       status: patch.status ?? existing.status,
       notes: patch.notes === undefined ? existing.notes : patch.notes.trim(),
       updatedAt: new Date(),

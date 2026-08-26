@@ -134,6 +134,12 @@ export interface RunInput {
    */
   processorId?: string | null;
   locationAssetId?: string | null;
+  /**
+   * Which line of business this run belongs to. Set it when a run mixes inputs
+   * from more than one, which is the case nothing else can work out; otherwise
+   * the input lots already know and this stays null.
+   */
+  enterpriseId?: string | null;
   performedBy?: string;
   crewSize?: number | null;
   labourHours?: number | null;
@@ -159,6 +165,7 @@ export async function startRun(
       startedOn: input.startedOn,
       processorId: input.processorId ?? null,
       locationAssetId: input.locationAssetId ?? null,
+      enterpriseId: input.enterpriseId ?? null,
       performedBy: input.performedBy?.trim() ?? "",
       crewSize: input.crewSize ?? null,
       labourHours: input.labourHours ?? null,

@@ -49,6 +49,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
+import { enterprises } from "./enterprises";
 import { assets } from "./assets";
 import { inventoryItems, inventoryLots, inventoryMovements } from "./inventory";
 
@@ -86,6 +87,21 @@ export const retailChannels = pgTable(
      */
     location: text("location").notNull().default(""),
     /** `active` | `closed`. A closed channel keeps its prices and its history. */
+    /**
+     * **WHICH LINE OF BUSINESS THIS CHANNEL'S OWN COSTS BELONG TO, and only its
+     * own costs.**
+     *
+     * Right for a single-purpose round — an egg run is entirely the egg
+     * business — and deliberately left BLANK for a mixed stall. A stall selling
+     * beef and chicken cannot attribute its stall fee to one of them, and doing
+     * it anyway would be a confident wrong number. What each SALE earns is
+     * attributed per line from the item sold; a mixed day's overheads stay
+     * Unassigned until somebody decides how to split them, which is an
+     * allocation and wants its own decision.
+     *
+     * Composite FK, no `onDelete`. See `inventory_items.enterprise_id`.
+     */
+    enterpriseId: uuid("enterprise_id"),
     status: text("status").notNull().default("active"),
     notes: text("notes").notNull().default(""),
     /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
@@ -106,6 +122,12 @@ export const retailChannels = pgTable(
       "retail_channels_kind_format",
       sql`${t.channelKind} ~ '^[a-z][a-z0-9_]{0,62}$'`,
     ),
+    foreignKey({
+      name: "retail_channels_enterprise_fk",
+      columns: [t.tenantId, t.enterpriseId],
+      foreignColumns: [enterprises.tenantId, enterprises.id],
+    }),
+    index("retail_channels_tenant_enterprise_idx").on(t.tenantId, t.enterpriseId),
     check(
       "retail_channels_status_valid",
       sql`${t.status} in ('active', 'closed')`,

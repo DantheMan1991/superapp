@@ -28,6 +28,12 @@ import {
 } from "@/components/ui/select";
 import { useConfirm } from "@/components/app/use-confirm";
 import {
+  EnterprisePicker,
+  enterpriseSelection,
+  enterpriseValue,
+  type EnterpriseOption,
+} from "@/components/app/enterprise-picker";
+import {
   archiveItemAction,
   createItemAction,
   restoreItemAction,
@@ -54,9 +60,15 @@ const NOT_CHOSEN = "";
  */
 export function ItemForm({
   kindsInUse,
+  enterprises,
+  enterpriseWord,
   livestockEnabled = false,
 }: {
   kindsInUse: string[];
+  /** Active lines of business. Empty hides the field entirely. */
+  enterprises: EnterpriseOption[];
+  /** What the installed profile calls one — never hard-coded here. */
+  enterpriseWord: string;
   /** Only redirect somewhere this tenant actually has. */
   livestockEnabled?: boolean;
 }) {
@@ -74,6 +86,7 @@ export function ItemForm({
   const [kindChoice, setKindChoice] = useState<string>(NOT_CHOSEN);
   const [customKind, setCustomKind] = useState("");
   const [unit, setUnit] = useState<string>(NOT_CHOSEN);
+  const [enterprise, setEnterprise] = useState(enterpriseSelection(null));
 
   const kind = kindChoice === CUSTOM_KIND ? customKind.trim() : kindChoice;
   /**
@@ -101,6 +114,7 @@ export function ItemForm({
       const result = await createItemAction({
         name: String(formData.get("name") ?? ""),
         itemKind: kind.toLowerCase().replace(/\s+/g, "_"),
+        enterpriseId: enterpriseValue(enterprise),
         stockingUnit: unit,
         purchaseUnit: purchaseUnit || null,
         purchaseUnitQty: rawQty ? Number(rawQty) : null,
@@ -215,6 +229,15 @@ export function ItemForm({
               </div>
             </div>
 
+            <EnterprisePicker
+              id="enterprise"
+              word={enterpriseWord}
+              options={enterprises}
+              value={enterprise}
+              onValue={setEnterprise}
+              hint={`Batches of this inherit it, so a delivery does not have to be told twice.`}
+            />
+
             <div className="grid gap-2">
               <Label htmlFor="storageRequirement">Needs to be kept</Label>
               <Select name="storageRequirement" defaultValue={NO_STORAGE}>
@@ -284,6 +307,7 @@ export interface EditableItem {
   id: string;
   name: string;
   itemKind: string;
+  enterpriseId: string | null;
   stockingUnit: string;
   purchaseUnit: string | null;
   purchaseUnitQty: number | null;
@@ -315,11 +339,15 @@ export interface EditableItem {
 export function ItemControls({
   item,
   kindsInUse,
+  enterprises,
+  enterpriseWord,
   unitLocked,
   onHandLabel,
 }: {
   item: EditableItem;
   kindsInUse: string[];
+  enterprises: EnterpriseOption[];
+  enterpriseWord: string;
   /** True once ANY movement exists. The unit is then frozen — see above. */
   unitLocked: boolean;
   /**
@@ -346,6 +374,9 @@ export function ItemControls({
   const [customKind, setCustomKind] = useState("");
   const [unit, setUnit] = useState(item.stockingUnit);
   const [storage, setStorage] = useState(item.storageRequirement ?? NO_STORAGE);
+  const [enterprise, setEnterprise] = useState(
+    enterpriseSelection(item.enterpriseId),
+  );
 
   const kind = kindChoice === CUSTOM_KIND ? customKind.trim() : kindChoice;
   const archived = item.status === "archived";
@@ -360,6 +391,7 @@ export function ItemControls({
         id: item.id,
         name: String(formData.get("name") ?? ""),
         itemKind: kind.toLowerCase().replace(/\s+/g, "_"),
+        enterpriseId: enterpriseValue(enterprise),
         stockingUnit: unit,
         purchaseUnit: purchaseUnit || null,
         purchaseUnitQty: rawQty ? Number(rawQty) : null,
@@ -520,6 +552,18 @@ export function ItemControls({
                   />
                 </div>
               </div>
+
+              <EnterprisePicker
+                id={`edit-enterprise-${item.id}`}
+                word={enterpriseWord}
+                options={enterprises}
+                value={enterprise}
+                onValue={setEnterprise}
+                /* NEW batches only. Re-tagging every batch ever made would
+                   restate what past reports said, which is the one thing this
+                   pack never does. */
+                hint={`New batches inherit this. Batches already made keep what they have.`}
+              />
 
               <div className="grid gap-2">
                 <Label htmlFor="edit-storage">Needs to be kept</Label>

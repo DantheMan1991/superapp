@@ -26,6 +26,7 @@ import {
   clearTaxRule,
   listTaxRules,
 } from "../src/packs/inventory/ops";
+import { createEnterprise } from "../src/lib/enterprises";
 import { resolveTaxRule } from "../src/packs/inventory/core/tax-rules";
 import { balanceOfLot, balanceByItem } from "../src/packs/inventory/core/balances";
 import {
@@ -1390,6 +1391,138 @@ d("inventory ops", () => {
         weightRatesForItems(tx, tenantId, [item.id]),
       );
       expect(byLot.get(received.lotId!)).toBeCloseTo(1.25, 10);
+    });
+  });
+
+  describe("which line of business it belongs to", () => {
+    /**
+     * Slice 2 of profit-per-enterprise. **Two rules, and the second is the one
+     * that does the work later:** an item can name a line of business, and a
+     * batch INHERITS it unless told otherwise.
+     */
+    async function anEnterprise(name: string) {
+      return asOwner((tx) =>
+        createEnterprise(tx, ownerCtx(), { name: `${name}-${process.pid}` }),
+      );
+    }
+
+    it("tags an item, and the filter finds it", async () => {
+      const ent = await anEnterprise("Broilers");
+      const item = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: `Tagged feed ${process.pid}`,
+          stockingUnit: "lb",
+          enterpriseId: ent.id,
+        }),
+      );
+      const found = await asOwner((tx) =>
+        listItems(tx, tenantId, { enterprise: ent.id }),
+      );
+      expect(found.map((i) => i.id)).toEqual([item.id]);
+    });
+
+    it("A BATCH INHERITS ITS ITEM'S, which is what makes feed cost land right", async () => {
+      /**
+       * The rule slice 3 rests on. A farm that has tagged "Broiler chicks" as
+       * Broilers must not have to say so again on every hatch — and the batch
+       * is where the costing reads it from.
+       */
+      const ent = await anEnterprise("Inherit");
+      const item = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: `Inheriting item ${process.pid}`,
+          stockingUnit: "head",
+          enterpriseId: ent.id,
+        }),
+      );
+      const lot = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), { itemId: item.id, code: `INH-${process.pid}` }),
+      );
+      expect(lot.enterpriseId).toBe(ent.id);
+    });
+
+    it("lets a batch OVERRIDE it, including back to none", async () => {
+      // `undefined` means "not said" and `null` means "said none" — the
+      // distinction the whole pack keeps, and the reason the column is on both.
+      const ent = await anEnterprise("Override");
+      const other = await anEnterprise("Elsewhere");
+      const item = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: `Override item ${process.pid}`,
+          stockingUnit: "head",
+          enterpriseId: ent.id,
+        }),
+      );
+      const moved = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `OVR-${process.pid}`,
+          enterpriseId: other.id,
+        }),
+      );
+      expect(moved.enterpriseId).toBe(other.id);
+
+      const none = await asOwner((tx) =>
+        createLot(tx, ownerCtx(), {
+          itemId: item.id,
+          code: `NONE-${process.pid}`,
+          enterpriseId: null,
+        }),
+      );
+      expect(none.enterpriseId).toBeNull();
+    });
+
+    it("FINDS WHAT IS NOT TAGGED, which is the question after tagging anything", async () => {
+      const untagged = await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: `Untagged ${process.pid}`,
+          stockingUnit: "lb",
+        }),
+      );
+      const found = await asOwner((tx) =>
+        listItems(tx, tenantId, { enterprise: "none" }),
+      );
+      expect(found.map((i) => i.id)).toContain(untagged.id);
+      expect(found.every((i) => i.enterpriseId === null)).toBe(true);
+    });
+
+    it("REFUSES ANOTHER TENANT'S, and the composite FK is what refuses it", async () => {
+      // Unrepresentable rather than merely refused by application code: this
+      // fails at the constraint, so it would fail under `withSystem` too.
+      let otherTenant = "";
+      await withSystem(async (tx) => {
+        const rows = await tx
+          .insert(schema.tenants)
+          .values({
+            clerkOrgId: `${STAMP}-ent-other`,
+            name: "Ent Other",
+            slug: `${STAMP}-ent-other`,
+          })
+          .returning();
+        otherTenant = rows[0].id;
+      });
+      const theirs = await withTenant(
+        otherTenant,
+        (tx) =>
+          createEnterprise(
+            tx,
+            { tenantId: otherTenant, userId: OWNER, role: "owner" },
+            { name: "Theirs" },
+          ),
+        { role: "owner", userId: OWNER },
+      );
+      await expect(
+        asOwner((tx) =>
+          createItem(tx, ownerCtx(), {
+            name: `Cross tenant ${process.pid}`,
+            stockingUnit: "lb",
+            enterpriseId: theirs.id,
+          }),
+        ),
+      ).rejects.toThrow();
+      await withSystem((tx) =>
+        tx.delete(schema.tenants).where(eq(schema.tenants.id, otherTenant)),
+      );
     });
   });
 

@@ -10,6 +10,7 @@ import {
   createItem,
   createLot,
   getItem,
+  listItems,
   listLots,
   mergeLot,
   movementRowsForItem,
@@ -1389,6 +1390,99 @@ d("inventory ops", () => {
         weightRatesForItems(tx, tenantId, [item.id]),
       );
       expect(byLot.get(received.lotId!)).toBeCloseTo(1.25, 10);
+    });
+  });
+
+  describe("narrowing the list", () => {
+    /**
+     * **THE FILTER BAR'S READ LAYER, which shipped in slice 0 and had no
+     * control until 2026-08-25.** The kind filter answers "just feed" and "just
+     * animals"; the search answers the question that cuts ACROSS kinds, because
+     * chicken feed, live broilers and packaged chicken are three kinds and one
+     * enterprise.
+     */
+    // A FRESH PREFIX PER CALL. These items are never deleted between tests, so
+    // a shared stamp makes the second test see the first one's three rows.
+    let batch = 0;
+    async function namedItems() {
+      batch += 1;
+      const stamp = `search-${process.pid}-${batch}`;
+      await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: `${stamp} Broiler chicks`,
+          stockingUnit: "head",
+          itemKind: "livestock",
+        }),
+      );
+      await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: `${stamp} Whole broilers`,
+          stockingUnit: "pkg",
+          itemKind: "meat",
+        }),
+      );
+      await asOwner((tx) =>
+        createItem(tx, ownerCtx(), {
+          name: `${stamp} Grower crumble`,
+          stockingUnit: "lb",
+          itemKind: "feed",
+        }),
+      );
+      return stamp;
+    }
+
+    it("finds by name ACROSS kinds, which is what a kind filter cannot do", async () => {
+      const stamp = await namedItems();
+      const found = await asOwner((tx) =>
+        listItems(tx, tenantId, { search: "broiler" }),
+      );
+      const mine = found.filter((i) => i.name.startsWith(stamp));
+      // A bird on the hoof and a bird in a bag: two kinds, one enterprise.
+      expect(mine.map((i) => i.itemKind).sort()).toEqual(["livestock", "meat"]);
+    });
+
+    it("is case-insensitive and matches the middle of a name", async () => {
+      const stamp = await namedItems();
+      const found = await asOwner((tx) =>
+        listItems(tx, tenantId, { search: "CRUMB" }),
+      );
+      expect(found.filter((i) => i.name.startsWith(stamp))).toHaveLength(1);
+    });
+
+    it("combines with the kind filter rather than replacing it", async () => {
+      const stamp = await namedItems();
+      const found = await asOwner((tx) =>
+        listItems(tx, tenantId, { search: "broiler", kind: "meat" }),
+      );
+      const mine = found.filter((i) => i.name.startsWith(stamp));
+      expect(mine).toHaveLength(1);
+      expect(mine[0].name).toContain("Whole broilers");
+    });
+
+    it("TREATS % AND _ AS CHARACTERS, not as wildcards", async () => {
+      /**
+       * Unescaped, a search box is a way to match every row by typing one key.
+       * `_` is the worse of the two: it matches any single character, so
+       * "cr_mble" would quietly return the crumble and nothing about the result
+       * would look wrong.
+       */
+      const stamp = await namedItems();
+      const pct = await asOwner((tx) => listItems(tx, tenantId, { search: "%" }));
+      expect(pct.filter((i) => i.name.startsWith(stamp))).toHaveLength(0);
+      const underscore = await asOwner((tx) =>
+        listItems(tx, tenantId, { search: "Gr_wer" }),
+      );
+      expect(underscore.filter((i) => i.name.startsWith(stamp))).toHaveLength(0);
+    });
+
+    it("ignores a blank or whitespace-only term rather than matching nothing", async () => {
+      // An empty box is not a filter. Pushing `''` through `ilike '%%'` happens
+      // to work, but a term of spaces would search for spaces.
+      const stamp = await namedItems();
+      const blank = await asOwner((tx) => listItems(tx, tenantId, { search: "   " }));
+      expect(
+        blank.filter((i) => i.name.startsWith(stamp)).length,
+      ).toBeGreaterThanOrEqual(3);
     });
   });
 

@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { Boxes, ClipboardList, Coins, FileCheck, Scale } from "lucide-react";
+import {
+  Boxes,
+  ClipboardList,
+  Coins,
+  FileCheck,
+  Scale,
+  SearchX,
+} from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { PageHeader } from "@/components/app/page-header";
@@ -29,6 +36,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { todayInTimezone } from "@/lib/timezone";
 import { ItemForm } from "./components/item-form";
+import { ItemFilters } from "./components/item-filters";
+
+const BASE = "/dashboard/m/inventory";
 
 /**
  * The `inventory` pack's home.
@@ -48,7 +58,10 @@ export async function InventoryModule({
 }) {
   const kindParam = searchParams.kind;
   const kind = typeof kindParam === "string" ? kindParam : undefined;
+  const qParam = searchParams.q;
+  const search = typeof qParam === "string" ? qParam.trim() : "";
   const showArchived = searchParams.archived === "1";
+  const filtering = Boolean(kind) || Boolean(search) || showArchived;
 
   /**
    * Only signpost a module this tenant actually has. Pointing somebody at a
@@ -73,6 +86,7 @@ export async function InventoryModule({
       const [items, onHand, kinds, locations, pack, expiring] = await Promise.all([
         listItems(tx, ctx.tenant.id, {
           kind,
+          search,
           status: showArchived ? undefined : "active",
         }),
         onHandByItem(tx, ctx.tenant.id),
@@ -206,17 +220,59 @@ export async function InventoryModule({
         </Card>
       )}
 
-      {items.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<Boxes className="h-5 w-5" />}
-          title="Nothing tracked yet"
-          description={
-            isOwner
-              ? `Add the first ${itemWord.toLowerCase()} you hold — feed, cartons, meat in a freezer. What it is measured in decides how every number about it reads, so it is worth a moment.`
-              : "An owner adds what the business holds. Once they do, it shows up here."
-          }
+      {/**
+       * **THE BAR IS HIDDEN ON A FARM THAT HOLDS NOTHING, and shown the moment
+       * one thing exists.** A filter over an empty list is furniture, and the
+       * first screen somebody sees should be the one sentence telling them what
+       * to add. `kinds` is empty in exactly that case, so it is the test.
+       */}
+      {kinds.length > 0 && (
+        <ItemFilters
+          base={BASE}
+          kinds={kinds}
+          activeKind={kind}
+          search={search}
+          showArchived={showArchived}
+          shown={items.length}
+          itemWord={itemWord}
         />
+      )}
+
+      {items.length === 0 ? (
+        /**
+         * **"NOTHING MATCHES" AND "NOTHING TRACKED YET" ARE DIFFERENT FACTS,
+         * and showing the second for the first is how a filter convinces
+         * somebody their data is gone.** The old copy told an owner with forty
+         * items and a stale search box to go and add their first one.
+         */
+        filtering ? (
+          <EmptyState
+            panel
+            icon={<SearchX className="h-5 w-5" />}
+            title="Nothing matches"
+            description={
+              search
+                ? `No ${itemWord.toLowerCase()} here has "${search}" in its name. Names are all this searches — a bag of feed for the beef herd is not called beef.`
+                : "Nothing under this filter. Retired things are hidden unless you ask for them."
+            }
+            action={
+              <Button asChild variant="outline">
+                <Link href={BASE}>Clear filters</Link>
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            panel
+            icon={<Boxes className="h-5 w-5" />}
+            title="Nothing tracked yet"
+            description={
+              isOwner
+                ? `Add the first ${itemWord.toLowerCase()} you hold — feed, cartons, meat in a freezer. What it is measured in decides how every number about it reads, so it is worth a moment.`
+                : "An owner adds what the business holds. Once they do, it shows up here."
+            }
+          />
+        )
       ) : (
         <Table>
           <TableHeader>

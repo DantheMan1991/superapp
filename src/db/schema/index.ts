@@ -13,6 +13,7 @@
 
 export * from "./platform";
 export * from "./parties";
+export * from "./enterprises";
 export * from "./ledger";
 export * from "./invoicing";
 export * from "./banking";

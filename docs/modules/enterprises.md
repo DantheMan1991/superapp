@@ -15,7 +15,7 @@ substring"* — and this is the spine that answers it.
 | # | Slice | State |
 | --- | --- | --- |
 | **1** | **The register** — the table, the writer, the `dimension_members` mirror, the screen | **shipped 2026-08-26** |
-| 2 | **What belongs to what** — `enterprise_id` on items, lots, channels and runs; the inventory filter bar gains a row | |
+| **2** | **What belongs to what** — `enterprise_id` on items, lots, channels and runs; the inventory filter bar gains a row | **shipped 2026-08-26** |
 | 3 | The cost side — `postMovement` and the production accrual pass the member | |
 | 4 | The revenue side — `retail` posts a sale, tagged per line | |
 
@@ -27,6 +27,59 @@ own stated blocker — `retail` slice 5, the till taking a card, which its dossi
 says is one wire. See the plan for the full argument.
 
 ## Build log
+
+### 2026-08-26 — What belongs to what (`claude/what-belongs-to-what`)
+
+Slice 2, and the one the founder actually asked for back at the start: *"a
+filter tool to filter just chicken inventory or just animals or just feed."* The
+kind chips answered two thirds of that the day before. **This answers the third,
+and it is one click now instead of a substring that happens to work.**
+
+**FOUR COLUMNS, ONE MIGRATION, ALL NULLABLE.** `enterprise_id` on
+`inventory_items`, `inventory_lots`, `retail_channels` and `production_runs`.
+Every one a composite FK to `(tenant_id, id)`, so naming another tenant's line of
+business is UNREPRESENTABLE rather than merely refused by application code — it
+fails under `withSystem` too, and there is a test that proves it. No `onDelete`:
+an enterprise is archived and never deleted, so a delete reaching one of these is
+a mistake worth stopping.
+
+**A BATCH INHERITS ITS ITEM'S, AND THAT IS THE RULE SLICE 3 RESTS ON.** A farm
+that has tagged "Broiler chicks" must not have to say so again on every hatch —
+and the batch is where the costing will read it from, because *"Grower crumble"
+belongs to no one part of a business while the pen it was fed to belongs to
+exactly one*. `undefined` means "not said" and inherits; `null` means "said
+none" and does not. Same distinction the pack keeps everywhere.
+
+**"NOT SET" IS A PILL, AND IT IS THE ONE SOMEBODY WILL USE MOST.** The question
+after tagging anything is *what have I not tagged yet*, and it is unaskable if an
+absent filter and an explicit untagged filter mean the same thing. It hides
+itself when nothing is untagged, because then it answers nothing.
+
+**THE ENTERPRISE ROW HIDES UNTIL SOMETHING CARRIES A TAG.** A business with no
+list, or a list nobody has used, gets no row. A pill group where every count is
+zero is furniture, and furniture is what teaches people to ignore a filter bar.
+
+**THE COUNTS ARE OVER THE UNFILTERED LIST, and getting that wrong would have
+been invisible.** Counting the filtered rows makes every pill read the number
+currently showing — so picking Broilers would leave every other pill at zero and
+the bar would look like the data had gone.
+
+**`FilterPills` EXISTED AND THE FILTER BAR SHOULD HAVE USED IT.** Yesterday's
+slice hand-rolled a `FilterChip` beside a component that already rendered links
+with counts and an active key, and already carried the house decision that a
+filter is a fill and navigation is an underline. Both rows go through
+`FilterPills` now and the duplicate is gone.
+
+**One picker for four packs**, at `src/components/app/`, for the reason the table
+is at Layer 0. It takes the word as a prop — a core control that said
+"Enterprise" would be the mistake the settings screen shipped and had to fix a
+day earlier — and renders nothing at all when there is nothing to pick.
+
+Driven on the dev branch's Hilltop Farm: *Whole broilers* (Meat) and *Broiler
+chicks* (Livestock) both tagged Broilers, and the Broilers pill returns **both**
+— two kinds, one line of business, which is exactly what a kind filter
+structurally cannot do. *Not set* returns the other six.
+
 
 ### 2026-08-26 — A core tool speaks no industry (`claude/a-core-tool-speaks-no-industry`)
 

@@ -50,6 +50,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
+import { enterprises } from "./enterprises";
 import { assets } from "./assets";
 import { billLines } from "./payables";
 import { accounts } from "./ledger";
@@ -106,6 +107,18 @@ export const inventoryItems = pgTable(
      * whatever they have.
      */
     storageRequirement: text("storage_requirement"),
+    /**
+     * **WHICH LINE OF BUSINESS THIS BELONGS TO.** Null is ordinary and is the
+     * default: plenty of what a business holds belongs to no one part of it.
+     *
+     * Composite FK to `(tenant_id, id)`, so naming another tenant's line of
+     * business is UNREPRESENTABLE rather than merely refused by application
+     * code — it fails even under `withSystem`, where RLS is not watching. No
+     * `onDelete`, i.e. RESTRICT: an enterprise is archived and never deleted
+     * (`src/lib/enterprises/`), so a delete reaching this FK is a mistake worth
+     * stopping rather than cascading.
+     */
+    enterpriseId: uuid("enterprise_id"),
     status: text("status").notNull().default("active"),
     notes: text("notes").notNull().default(""),
     /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
@@ -121,6 +134,12 @@ export const inventoryItems = pgTable(
     uniqueIndex("inventory_items_tenant_id_id_idx").on(t.tenantId, t.id),
     index("inventory_items_tenant_kind_idx").on(t.tenantId, t.itemKind),
     index("inventory_items_tenant_status_idx").on(t.tenantId, t.status),
+    foreignKey({
+      name: "inventory_items_enterprise_fk",
+      columns: [t.tenantId, t.enterpriseId],
+      foreignColumns: [enterprises.tenantId, enterprises.id],
+    }),
+    index("inventory_items_tenant_enterprise_idx").on(t.tenantId, t.enterpriseId),
     check("inventory_items_name_present", sql`length(btrim(${t.name})) > 0`),
     check(
       "inventory_items_kind_format",
@@ -210,6 +229,19 @@ export const inventoryLots = pgTable(
      * open and this cannot.
      */
     expiresOn: date("expires_on"),
+    /**
+     * **WHICH LINE OF BUSINESS THIS BATCH BELONGS TO**, and it BEATS the item's
+     * when both are set.
+     *
+     * That precedence is the whole reason the column is here as well as on the
+     * item: "Grower crumble" belongs to no one part of a business — it is fed to
+     * the broilers AND to the layers — while the pen it was fed to belongs to
+     * exactly one. The batch is where the fact is true and the item is an
+     * average over batches, which is the same rule the package weight follows.
+     *
+     * Composite FK, no `onDelete`. See `inventory_items.enterprise_id`.
+     */
+    enterpriseId: uuid("enterprise_id"),
     notes: text("notes").notNull().default(""),
     metadata: jsonb("metadata").notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -236,6 +268,12 @@ export const inventoryLots = pgTable(
       columns: [t.tenantId, t.parentLotId],
       foreignColumns: [t.tenantId, t.id],
     }),
+    foreignKey({
+      name: "inventory_lots_enterprise_fk",
+      columns: [t.tenantId, t.enterpriseId],
+      foreignColumns: [enterprises.tenantId, enterprises.id],
+    }),
+    index("inventory_lots_tenant_enterprise_idx").on(t.tenantId, t.enterpriseId),
     check("inventory_lots_code_present", sql`length(btrim(${t.code})) > 0`),
     check(
       "inventory_lots_source_valid",

@@ -56,6 +56,13 @@ import {
   SplitLotForm,
 } from "@/packs/inventory/components/stock-controls";
 import { ItemControls } from "@/packs/inventory/components/item-form";
+import { listEnterprises } from "@/lib/enterprises";
+import {
+  ENTERPRISE_FALLBACK,
+  ENTERPRISE_LABEL_KEY,
+} from "@/lib/enterprises/vocabulary";
+import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -87,8 +94,18 @@ export default async function InventoryItemPage({
     async (tx) => {
       const item = await getItem(tx, ctx.tenant.id, id);
       if (!item) return null;
-      const [lots, rows, movements, locations, allLots, allItems, costRate, weights] =
-        await Promise.all([
+      const [
+        lots,
+        rows,
+        movements,
+        locations,
+        allLots,
+        allItems,
+        costRate,
+        enterprises,
+        pack,
+        weights,
+      ] = await Promise.all([
           listLots(tx, ctx.tenant.id, { itemId: id }),
           movementRowsForItem(tx, ctx.tenant.id, id),
           listMovements(tx, ctx.tenant.id, { itemId: id, limit: 25 }),
@@ -98,6 +115,8 @@ export default async function InventoryItemPage({
           listLots(tx, ctx.tenant.id),
           listItems(tx, ctx.tenant.id, { status: "active" }),
           itemCostRate(tx, ctx.tenant.id, id),
+          listEnterprises(tx, ctx.tenant.id, { status: "active" }),
+          packContext(tx, ctx.tenant.id, ctx.tenant.industry, "inventory"),
           // Both halves — the item's rate for the card, every batch's for the
           // table — come back from ONE query. See `weightRatesForItems`.
           weightRatesForItems(tx, ctx.tenant.id, [id]),
@@ -119,6 +138,8 @@ export default async function InventoryItemPage({
         lots,
         rows,
         movements,
+        enterprises,
+        labels: pack.labels,
         weights,
         locations,
         allLots,
@@ -137,6 +158,8 @@ export default async function InventoryItemPage({
     lots,
     rows,
     movements,
+    enterprises,
+    labels,
     weights,
     locations,
     allLots,
@@ -152,6 +175,11 @@ export default async function InventoryItemPage({
    * See src/lib/packs/authorize.ts.
    */
   const isOwner = ctx.role === "owner";
+  const enterpriseWord = labelFor(
+    labels,
+    ENTERPRISE_LABEL_KEY,
+    ENTERPRISE_FALLBACK,
+  );
   const unit = item.stockingUnit;
   const unitLabel = getUnit(unit)?.plural ?? unit;
   const unitSingular = getUnit(unit)?.singular ?? unit;
@@ -251,6 +279,7 @@ export default async function InventoryItemPage({
                   id: item.id,
                   name: item.name,
                   itemKind: item.itemKind,
+                  enterpriseId: item.enterpriseId,
                   stockingUnit: item.stockingUnit,
                   purchaseUnit: item.purchaseUnit,
                   purchaseUnitQty: item.purchaseUnitQty,
@@ -259,6 +288,8 @@ export default async function InventoryItemPage({
                   status: item.status,
                 }}
                 kindsInUse={[...new Set(allItems.map((i) => i.itemKind))]}
+                enterprises={enterprises.map((e) => ({ id: e.id, name: e.name }))}
+                enterpriseWord={enterpriseWord}
                 /* ONE MOVEMENT IS ENOUGH TO FREEZE THE UNIT, and `rows` is
                    every movement this item has. Not the balance: an item that
                    received ten and issued ten is back at zero and its ledger

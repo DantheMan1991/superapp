@@ -156,10 +156,27 @@ function escapeLike(term: string): string {
 export async function listItems(
   tx: Tx,
   tenantId: string,
-  filter: { kind?: string; status?: string; search?: string } = {},
+  filter: {
+    kind?: string;
+    status?: string;
+    search?: string;
+    /** An enterprise id, or `"none"` for the things belonging to none. */
+    enterprise?: string;
+  } = {},
 ): Promise<InventoryItem[]> {
   const where = [eq(schema.inventoryItems.tenantId, tenantId)];
   if (filter.kind) where.push(eq(schema.inventoryItems.itemKind, filter.kind));
+  /**
+   * **"NONE" IS A FILTER, NOT THE ABSENCE OF ONE.** Once things can be tagged,
+   * *"what have I not tagged yet"* is the question somebody actually needs
+   * answering — and it is unaskable if an empty parameter and an explicit
+   * "untagged" mean the same thing.
+   */
+  if (filter.enterprise === "none") {
+    where.push(isNull(schema.inventoryItems.enterpriseId));
+  } else if (filter.enterprise) {
+    where.push(eq(schema.inventoryItems.enterpriseId, filter.enterprise));
+  }
   if (filter.status) where.push(eq(schema.inventoryItems.status, filter.status));
   /**
    * **BY NAME, AND ONLY BY NAME.** The kind filter answers "just feed" and
@@ -196,6 +213,15 @@ export async function getItem(
 export interface ItemInput {
   name: string;
   itemKind?: string;
+  /**
+   * Which line of business this belongs to, or null for none.
+   *
+   * **NOT VALIDATED HERE, AND THAT IS THE COMPOSITE FK'S JOB.** Naming another
+   * tenant's is unrepresentable at the database; naming one that does not exist
+   * fails the constraint. What this pack must not do is reach into
+   * `src/lib/enterprises/` to re-check a thing the schema already guarantees.
+   */
+  enterpriseId?: string | null;
   stockingUnit: string;
   purchaseUnit?: string | null;
   purchaseUnitQty?: number | null;
@@ -226,6 +252,7 @@ export async function createItem(
       tenantId: ctx.tenantId,
       name: input.name.trim(),
       itemKind,
+      enterpriseId: input.enterpriseId ?? null,
       stockingUnit,
       purchaseUnit: input.purchaseUnit?.trim() || null,
       purchaseUnitQty: input.purchaseUnitQty ?? null,
@@ -280,6 +307,9 @@ export async function updateItem(
       }
       patch.stockingUnit = unit;
     }
+  }
+  if (input.enterpriseId !== undefined) {
+    patch.enterpriseId = input.enterpriseId;
   }
   if (input.purchaseUnit !== undefined) {
     patch.purchaseUnit = input.purchaseUnit?.trim() || null;
@@ -395,6 +425,12 @@ export interface LotInput {
   openedOn?: string | null;
   /** When this batch stops being good. A batch fact, never an item one. */
   expiresOn?: string | null;
+  /**
+   * Which line of business this batch belongs to. **Defaults to the ITEM's**,
+   * which is the answer nine times in ten and saves asking on every delivery.
+   * Pass `null` explicitly to leave a batch untagged under a tagged item.
+   */
+  enterpriseId?: string | null;
   notes?: string;
 }
 
@@ -424,6 +460,18 @@ export async function createLot(
       parentLotId: input.parentLotId ?? null,
       openedOn: input.openedOn ?? null,
       expiresOn: input.expiresOn ?? null,
+      /**
+       * **INHERITED FROM THE ITEM WHEN NOT SAID, and that is a default rather
+       * than a rule.** A farm that has tagged "Broiler chicks" as Broilers
+       * should not have to say so again on every hatch; a batch that genuinely
+       * belongs elsewhere overrides it here, which is why the column exists on
+       * both. `undefined` means "not said" and `null` means "said none" — the
+       * distinction the whole pack keeps.
+       */
+      enterpriseId:
+        input.enterpriseId === undefined
+          ? item.enterpriseId
+          : input.enterpriseId,
       notes: input.notes?.trim() ?? "",
     })
     .returning();

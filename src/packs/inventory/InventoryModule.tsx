@@ -37,6 +37,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { todayInTimezone } from "@/lib/timezone";
 import { ItemForm } from "./components/item-form";
 import { ItemFilters } from "./components/item-filters";
+import { listEnterprises } from "@/lib/enterprises";
+import {
+  ENTERPRISE_FALLBACK,
+  ENTERPRISE_LABEL_KEY,
+} from "@/lib/enterprises/vocabulary";
 
 const BASE = "/dashboard/m/inventory";
 
@@ -60,8 +65,11 @@ export async function InventoryModule({
   const kind = typeof kindParam === "string" ? kindParam : undefined;
   const qParam = searchParams.q;
   const search = typeof qParam === "string" ? qParam.trim() : "";
+  const entParam = searchParams.enterprise;
+  const enterprise = typeof entParam === "string" ? entParam : undefined;
   const showArchived = searchParams.archived === "1";
-  const filtering = Boolean(kind) || Boolean(search) || showArchived;
+  const filtering =
+    Boolean(kind) || Boolean(search) || Boolean(enterprise) || showArchived;
 
   /**
    * Only signpost a module this tenant actually has. Pointing somebody at a
@@ -80,13 +88,24 @@ export async function InventoryModule({
     .toISOString()
     .slice(0, 10);
 
-  const { items, onHand, kinds, locations, labels, expiring } = await withTenant(
+  const {
+    items,
+    onHand,
+    kinds,
+    locations,
+    labels,
+    expiring,
+    enterprises,
+    allItems,
+  } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [items, onHand, kinds, locations, pack, expiring] = await Promise.all([
+      const [items, onHand, kinds, locations, pack, expiring, enterprises, allItems] =
+        await Promise.all([
         listItems(tx, ctx.tenant.id, {
           kind,
           search,
+          enterprise,
           status: showArchived ? undefined : "active",
         }),
         onHandByItem(tx, ctx.tenant.id),
@@ -96,14 +115,53 @@ export async function InventoryModule({
         // FIRST EXPIRED, FIRST OUT. A suggestion and never an enforcement:
         // the person holding the scoop can see which bag is already open.
         expiringLots(tx, ctx.tenant.id, { onOrBefore: horizon, limit: 12 }),
+        listEnterprises(tx, ctx.tenant.id, { status: "active" }),
+        /**
+         * **UNFILTERED, FOR THE COUNTS ON THE PILLS.** Counting the FILTERED
+         * list would make every pill read the number of rows currently showing,
+         * so picking "Broilers" would leave every other pill at zero and the
+         * bar would look like the data had gone.
+         */
+        listItems(tx, ctx.tenant.id, {
+          status: showArchived ? undefined : "active",
+        }),
       ]);
-      return { items, onHand, kinds, locations, labels: pack.labels, expiring };
+      return {
+        items,
+        onHand,
+        kinds,
+        locations,
+        labels: pack.labels,
+        expiring,
+        enterprises,
+        allItems,
+      };
     },
     { role: ctx.role },
   );
 
   const isOwner = ctx.role === "owner";
   const itemWord = labelFor(labels, "item", "Item");
+  const enterpriseWord = labelFor(
+    labels,
+    ENTERPRISE_LABEL_KEY,
+    ENTERPRISE_FALLBACK,
+  );
+  const enterpriseOptions = enterprises.map((e) => ({ id: e.id, name: e.name }));
+  /**
+   * Counted over the UNFILTERED list, and "none" is a pill of its own — see
+   * `listItems`, where "what have I not tagged yet" is the question that makes
+   * an explicit untagged filter worth having.
+   */
+  const byEnterprise = new Map<string, number>();
+  let untagged = 0;
+  for (const i of allItems) {
+    if (i.enterpriseId) {
+      byEnterprise.set(i.enterpriseId, (byEnterprise.get(i.enterpriseId) ?? 0) + 1);
+    } else {
+      untagged += 1;
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -157,6 +215,8 @@ export async function InventoryModule({
             {isOwner && (
               <ItemForm
                 kindsInUse={kinds.map((k) => k.kind)}
+                enterprises={enterpriseOptions}
+                enterpriseWord={enterpriseWord}
                 livestockEnabled={livestockEnabled}
               />
             )}
@@ -231,6 +291,19 @@ export async function InventoryModule({
           base={BASE}
           kinds={kinds}
           activeKind={kind}
+          /**
+           * **THE ROW THAT ANSWERS "JUST CHICKEN".** A kind filter cannot: feed,
+           * live birds and packaged meat are three kinds and one line of
+           * business. Only rendered once a list exists and something carries a
+           * tag — a row of pills over nothing is furniture.
+           */
+          enterprises={enterpriseOptions.map((e) => ({
+            ...e,
+            count: byEnterprise.get(e.id) ?? 0,
+          }))}
+          untaggedCount={untagged}
+          activeEnterprise={enterprise}
+          enterpriseWord={enterpriseWord}
           search={search}
           showArchived={showArchived}
           shown={items.length}

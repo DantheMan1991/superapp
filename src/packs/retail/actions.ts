@@ -6,6 +6,7 @@ import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
+import { PRICE_BASES } from "./vocabulary";
 import {
   RetailError,
   createChannel,
@@ -141,6 +142,9 @@ export async function setPriceAction(input: unknown) {
       channelId: z.string().uuid(),
       itemId: z.string().uuid(),
       priceCents: cents,
+      // Closed at the boundary as well as in the table: a basis nothing
+      // implements must not reach the money.
+      priceBasis: z.enum(PRICE_BASES).optional(),
       effectiveFrom: requiredDate,
       notes: z.string().max(2000).optional(),
     })
@@ -159,10 +163,12 @@ export async function setPriceAction(input: unknown) {
       actorClerkUserId: ctx.userId,
       targetType: "retail_channel",
       targetId: parsed.data.channelId,
-      // Identifiers and the figure, never the notes.
+      // Identifiers and the figure, never the notes. The basis is part of the
+      // figure: $8.00 means two different amounts of money without it.
       meta: {
         itemId: price.itemId,
         priceCents: price.priceCents,
+        priceBasis: price.priceBasis,
         effectiveFrom: price.effectiveFrom,
       },
     });
@@ -419,6 +425,17 @@ export async function recordSaleAction(input: unknown) {
             lotId: z.string().uuid().nullable().optional(),
             quantity: z.number().positive().max(1_000_000).multipleOf(0.0001),
             unitPriceCents: cents,
+            // The pair. `recordSale` refuses one without the other in either
+            // direction — see the comment there for why the second direction
+            // is the one that matters.
+            weightLb: z
+              .number()
+              .positive()
+              .max(1_000_000)
+              .multipleOf(0.0001)
+              .nullable()
+              .optional(),
+            lineTotalCents: cents.nullable().optional(),
           }),
         )
         .min(1)

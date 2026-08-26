@@ -31,6 +31,7 @@ import {
 import { costPerPersonHour } from "@/packs/retail/core/pricing";
 import {
   CHANNEL_STATUS_LABELS,
+  priceBasisLabel,
   slugLabel,
   type ChannelStatus,
 } from "@/packs/retail/vocabulary";
@@ -193,7 +194,17 @@ export default async function RetailChannelPage({
                           <span className="font-medium">{row.item.name}</span>
                         )}
                         <div className="text-xs text-muted-foreground">
-                          per {singular}
+                          {/* **WHAT THE PRICE IS PER, FROM THE PRICE AND NOT
+                              FROM THE ITEM.** This line used to read the item's
+                              unit unconditionally, which stops being true the
+                              moment a package is priced per pound. An unpriced
+                              row has no basis to show, so it falls back to the
+                              unit — which is what it will be if somebody sets
+                              one without changing the picker. */}
+                          {priceBasisLabel(
+                            row.current?.priceBasis ?? "unit",
+                            singular,
+                          )}
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -229,8 +240,15 @@ export default async function RetailChannelPage({
                             itemId={row.item.id}
                             itemName={row.item.name}
                             unitSingular={singular}
+                            /* Per-pound is offered only where it means
+                               something different from per-unit. `setPrice`
+                               refuses it for a mass-stocked item. */
+                            weighable={
+                              getUnit(row.item.stockingUnit)?.dimension !== "mass"
+                            }
                             currencySymbol={currencySymbol}
                             currentCents={row.current?.priceCents ?? null}
+                            currentBasis={row.current?.priceBasis}
                             today={today}
                           />
                         )}

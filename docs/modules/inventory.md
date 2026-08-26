@@ -29,7 +29,7 @@ this dossier is the build record.
 | 5 | Reorder points, capacity warnings — needs history | |
 | **6a** | **A package is a unit** — the `pkg` stocking unit, and an item you can edit | **shipped 2026-08-25** |
 | **6b** | **What a batch weighs** — `inventory_movements.weight_lb`, a per-lot average, production passes the weight it already has | **shipped 2026-08-25** |
-| 6c | Selling by the pound — `retail`'s half, see [retail.md](retail.md) | |
+| **6c** | **Selling by the pound** — `retail`'s half, see [retail.md](retail.md) slice 8 | **shipped 2026-08-25** |
 
 ## Build log
 

@@ -145,6 +145,31 @@ export const retailPrices = pgTable(
     itemId: uuid("item_id").notNull(),
     /** Per one stocking unit, in integer cents. The house convention. */
     priceCents: bigint("price_cents", { mode: "number" }).notNull(),
+    /**
+     * **WHAT `price_cents` IS PER: `'unit'` or `'lb'`.**
+     *
+     * The comment above says the price is per the item's stocking unit and that
+     * there is deliberately no unit column, *"because a price denominated
+     * differently from the balance would put the 'is it bags or pounds' bug back
+     * into the one place it costs real money."* **That rule was right about the
+     * danger and it was about INFERENCE.** A catch-weight item genuinely has two
+     * measures — a package is what leaves the truck and a pound is what the
+     * customer pays for — and the ambiguity only bites when nothing says which.
+     * This column says which, the sale line stamps both numbers explicitly, and
+     * nothing anywhere is inferred. See
+     * [ADR 0016](../../../docs/decisions/0016-a-catch-weight-item-is-stocked-in-packages.md).
+     *
+     * **A CLOSED SET, and defaulting to `'unit'` so every row written before
+     * this column keeps its meaning byte for byte.** Closed for `PRICE_UNITS`'s
+     * reason: a basis nothing implements has to be refused on the way in rather
+     * than fall through to whichever branch happens to be last.
+     *
+     * **`'lb'` IS REFUSED FOR AN ITEM STOCKED BY MASS** (`setPrice`), where the
+     * quantity already IS the weight and the two bases mean the same thing. It
+     * is offered for anything counted — packages, head, dozens — which is where
+     * they differ.
+     */
+    priceBasis: text("price_basis").notNull().default("unit"),
     /** The first day this price applies. */
     effectiveFrom: date("effective_from").notNull(),
     notes: text("notes").notNull().default(""),
@@ -182,6 +207,10 @@ export const retailPrices = pgTable(
     // Free is a real price — a sample, a giveaway, a loss leader. Negative is
     // not a price at all, it is a refund, and that is a sale's business.
     check("retail_prices_not_negative", sql`${t.priceCents} >= 0`),
+    check(
+      "retail_prices_basis_valid",
+      sql`${t.priceBasis} in ('unit', 'lb')`,
+    ),
   ],
 );
 
@@ -442,8 +471,55 @@ export const retailSaleLines = pgTable(
       scale: 4,
       mode: "number",
     }).notNull(),
-    /** What was actually charged per stocking unit, in cents. Never re-derived. */
+    /**
+     * What was actually charged, in cents, **per stocking unit — or per POUND
+     * when `weight_lb` is set.**
+     *
+     * The denominator is named by a sibling column rather than inferred from
+     * anything, which is the distinction `retail_prices.price_basis` explains at
+     * length: the "bags or pounds" rule guards against a number whose unit
+     * nobody stated, not against an item having two measures.
+     */
     unitPriceCents: bigint("unit_price_cents", { mode: "number" }).notNull(),
+    /**
+     * **WHAT WAS ON THE SCALE, when this line was sold by weight.**
+     *
+     * Null is ordinary and is the common case: a line sold by the package has
+     * no weighing in it at all. Its presence is what switches the meaning of
+     * `unit_price_cents` above and what makes `line_total_cents` required.
+     *
+     * **`quantity` STILL MEANS PACKAGES, and that is load-bearing.** It is the
+     * number that issues the movement and the number the till counts the truck
+     * down by. Three packages weighed together are one line: quantity 3,
+     * weight 3.7, and one package off the truck for each of the three.
+     *
+     * **THIS IS THE ONLY PLACE THE REAL WEIGHT OF WHAT LEFT IS RECORDED.** It
+     * deliberately does NOT feed back into `inventory`, whose pounds are a
+     * batch average and are approximate by design — one figure is a shelf
+     * estimate and the other is a transaction record, and they never reconcile.
+     * See [ADR 0016](../../../docs/decisions/0016-a-catch-weight-item-is-stocked-in-packages.md).
+     */
+    weightLb: numeric("weight_lb", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }),
+    /**
+     * **THE MONEY, when it cannot be derived from quantity × price.**
+     *
+     * Null whenever it CAN be — which is every line sold by the package, and
+     * every line written before this column existed. Not a stored duplicate of
+     * an arithmetic result: *"a second column saying so is a second number that
+     * has to agree with the first forever"*, which is the same reasoning that
+     * keeps `retail_prices` from having an `effective_to`.
+     *
+     * It exists because 3 packages at 3.7 lb and $8.00 a pound is $29.60, and
+     * $29.60 divided by three packages and rounded back up is $29.61. **A till
+     * that is a cent wrong in front of the customer holding the note is the one
+     * failure `core/till.ts` exists to prevent**, so the money for a weighed
+     * line is recorded rather than reconstructed.
+     */
+    lineTotalCents: bigint("line_total_cents", { mode: "number" }),
     /** The issue that took it off the truck. */
     inventoryMovementId: uuid("inventory_movement_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -486,6 +562,28 @@ export const retailSaleLines = pgTable(
     check(
       "retail_sale_lines_price_not_negative",
       sql`${t.unitPriceCents} >= 0`,
+    ),
+    // A weighing of nothing is not a weighing. Null is how to say it was sold
+    // by the package.
+    check(
+      "retail_sale_lines_weight_positive",
+      sql`${t.weightLb} is null or ${t.weightLb} > 0`,
+    ),
+    check(
+      "retail_sale_lines_total_not_negative",
+      sql`${t.lineTotalCents} is null or ${t.lineTotalCents} >= 0`,
+    ),
+    /**
+     * **A WEIGHED LINE MUST CARRY ITS OWN MONEY.** Without the total, the only
+     * way back to what was charged is weight × rate re-rounded, which is the
+     * cent that makes the receipt disagree with the till. Enforced here because
+     * `lineTotalCents` in `core/till.ts` falls back to quantity × price when
+     * the total is null, and a weighed line falling into that branch would be
+     * silently priced per PACKAGE at a per-POUND rate.
+     */
+    check(
+      "retail_sale_lines_weighed_has_total",
+      sql`${t.weightLb} is null or ${t.lineTotalCents} is not null`,
     ),
   ],
 );

@@ -142,8 +142,20 @@ export default async function SellingDayPage({
       weightRate: weights.byLot.get(l.lotId!) ?? null,
     }));
   const dayWord = labelFor(pack.labels, "marketDay", "Market day");
+  /**
+   * **THE BASIS TRAVELS WITH THE FIGURE.** $8.00 is two different amounts of
+   * money for a package of beef depending on whether it is per package or per
+   * pound, so the till is handed both or neither — never a price whose
+   * denominator it has to guess.
+   */
   const priceByItem = new Map(
-    prices.map((p) => [p.item.id, p.current?.priceCents ?? null]),
+    prices.map((p) => [
+      p.item.id,
+      {
+        cents: p.current?.priceCents ?? null,
+        basis: p.current?.priceBasis ?? "unit",
+      },
+    ]),
   );
   const stockoutItems = new Set(till.stockouts.map((s) => s.itemId));
 
@@ -154,7 +166,8 @@ export default async function SellingDayPage({
     lotId: line.lotId,
     lotCode: line.lotCode,
     onHand: line.onHand,
-    priceCents: priceByItem.get(line.itemId) ?? null,
+    priceCents: priceByItem.get(line.itemId)?.cents ?? null,
+    priceBasis: priceByItem.get(line.itemId)?.basis ?? "unit",
   }));
 
   const unpriced = tillLines.filter((l) => l.priceCents === null);
@@ -472,9 +485,15 @@ export default async function SellingDayPage({
                       {row.lines.map((l) => (
                         <div key={l.id} className="text-sm">
                           {formatQuantity(l.quantity, l.unit)} {l.itemName}
+                          {/* **A WEIGHED LINE HAS TO SAY THE WEIGHT**, or the
+                              row reads "1 package at $8.00" beside a sale that
+                              took $9.60 and looks like a mistake. The pounds
+                              are the only thing that explains the money, and
+                              this line is the receipt somebody checks. */}
                           <span className="text-muted-foreground">
-                            {" "}
-                            at {formatMoney(l.unitPriceCents, currencySymbol)}
+                            {l.weightLb === null
+                              ? ` at ${formatMoney(l.unitPriceCents, currencySymbol)}`
+                              : ` · ${l.weightLb} lb at ${formatMoney(l.unitPriceCents, currencySymbol)}/lb`}
                           </span>
                         </div>
                       ))}

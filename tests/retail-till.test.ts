@@ -4,6 +4,7 @@ import {
   dayResult,
   lineTotalCents,
   remainingOnTruck,
+  weighedLineCents,
   saleTotalCents,
   soldByItem,
   takings,
@@ -31,6 +32,49 @@ describe("lineTotalCents", () => {
   it("treats free as a line, because a sample is one", () => {
     expect(lineTotalCents({ quantity: 3, unitPriceCents: 0 })).toBe(0);
   });
+
+  it("takes the STAMPED total when there is one, and reads it back exactly", () => {
+    // 3 packages, 3.7 lb, $8.00 a pound is $29.60 — and there is no per-package
+    // price that reproduces it. $29.60 over three is $9.8667, which rounds to
+    // $9.87 and multiplies back to $29.61. THE CENT IS THE WHOLE REASON the
+    // money is recorded rather than reconstructed.
+    expect(weighedLineCents(3.7, 800)).toBe(2960);
+    expect(
+      lineTotalCents({ quantity: 3, unitPriceCents: 800, totalCents: 2960 }),
+    ).toBe(2960);
+    // What the derived path would have charged, for contrast: 3 × $8.00 per
+    // PACKAGE at a per-POUND rate. Nearly three times the money.
+    expect(lineTotalCents({ quantity: 3, unitPriceCents: 800 })).toBe(2400);
+  });
+
+  it("is unchanged by a null or absent total, which is every old line", () => {
+    // Every row written before catch weight existed has a null here, and the
+    // day-end report reads them through the same function forever.
+    expect(lineTotalCents({ quantity: 2.35, unitPriceCents: 550 })).toBe(1293);
+    expect(
+      lineTotalCents({ quantity: 2.35, unitPriceCents: 550, totalCents: null }),
+    ).toBe(1293);
+  });
+
+  it("lets a stamped ZERO stand, because free weighed goods are still free", () => {
+    // `??` would fold 0 back to the derived branch and charge for a giveaway.
+    expect(
+      lineTotalCents({ quantity: 2, unitPriceCents: 800, totalCents: 0 }),
+    ).toBe(0);
+  });
+});
+
+describe("weighedLineCents", () => {
+  it("rounds the half cent up, exactly as the unit path does", () => {
+    // The two paths must agree at the boundary or a receipt changes by a penny
+    // depending on how the same goods were priced.
+    expect(weighedLineCents(2.35, 550)).toBe(1293);
+    expect(weighedLineCents(1.125, 800)).toBe(900);
+  });
+
+  it("costs nothing for a free weighed line", () => {
+    expect(weighedLineCents(3.7, 0)).toBe(0);
+  });
 });
 
 describe("saleTotalCents", () => {
@@ -52,6 +96,17 @@ describe("saleTotalCents", () => {
 
   it("is nothing for an empty basket", () => {
     expect(saleTotalCents([])).toBe(0);
+  });
+
+  it("adds a weighed line and a unit line without either changing the other", () => {
+    // The mixed basket is the ordinary basket at a meat stall: a whole chicken
+    // at $22 and some ground beef on the scale.
+    expect(
+      saleTotalCents([
+        { quantity: 1, unitPriceCents: 2200 },
+        { quantity: 3, unitPriceCents: 800, totalCents: 2960 },
+      ]),
+    ).toBe(5160);
   });
 });
 

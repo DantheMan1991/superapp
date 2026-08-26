@@ -11,6 +11,7 @@ import {
   moveStockToTruck,
   priceListFor,
   pricedCountByChannel,
+  pricesForChannel,
   recordMarketDay,
   recordSale,
   recordStockout,
@@ -567,6 +568,235 @@ d("retail ops", () => {
     const onTruck = await asOwner((tx) => truckStock(tx, tenantId, truckId));
     expect(onTruck.find((l) => l.itemId === item.id)?.onHand).toBe(37.65);
     expect((await asOwner((tx) => onHandByItem(tx, tenantId))).get(item.id)).toBe(97.65);
+  });
+
+  describe("selling by the pound", () => {
+    /**
+     * Slice 8 / ADR 0016. **The invariant every test here is really about: the
+     * MONEY comes from the scale and the STOCK comes from the package count,
+     * and neither is derived from the other.**
+     */
+    async function packStall(name: string) {
+      const channel = await asOwner((tx) =>
+        createChannel(tx, ownerCtx(), { name, channelKind: "farmers_market" }),
+      );
+      const item = await newItem(`${name} packs`, "pkg");
+      await asOwner((tx) =>
+        receiveStock(tx, inv(), {
+          itemId: item.id,
+          quantity: 40,
+          weightLb: 50,
+          costCents: 20_000,
+          occurredOn: "2026-08-01",
+          locationAssetId: barnId,
+        }),
+      );
+      await asOwner((tx) =>
+        setPrice(tx, ownerCtx(), {
+          channelId: channel.id,
+          itemId: item.id,
+          priceCents: 800,
+          priceBasis: "lb",
+          effectiveFrom: "2026-01-01",
+        }),
+      );
+      const day = await asOwner((tx) =>
+        recordMarketDay(tx, ownerCtx(), { channelId: channel.id, heldOn: TODAY }),
+      );
+      await asOwner((tx) =>
+        moveStockToTruck(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 20,
+          fromLocationAssetId: barnId,
+          truckAssetId: truckId,
+          occurredOn: TODAY,
+        }),
+      );
+      return { channel, item, day };
+    }
+
+    it("takes the money from the SCALE and the stock from the COUNT", async () => {
+      const { channel, item, day } = await packStall("Weighed");
+      const result = await asOwner((tx) =>
+        recordSale(tx, ownerCtx(), {
+          clientRef: "weighed-1",
+          channelId: channel.id,
+          marketDayId: day.id,
+          soldAt: new Date(`${TODAY}T10:30:00Z`),
+          locationAssetId: truckId,
+          // Three packages, weighed together at 3.7 lb, $8.00 a pound.
+          lines: [
+            {
+              itemId: item.id,
+              quantity: 3,
+              unitPriceCents: 800,
+              weightLb: 3.7,
+              lineTotalCents: 2_960,
+            },
+          ],
+        }),
+      );
+      // $29.60 — NOT 3 × $8.00, which is what the derived path would charge.
+      expect(result.totalCents).toBe(2_960);
+      expect(result.lines[0].weightLb).toBe(3.7);
+      expect(result.lines[0].lineTotalCents).toBe(2_960);
+      // THREE PACKAGES off the truck, not 3.7 of anything.
+      const onTruck = await asOwner((tx) => truckStock(tx, tenantId, truckId));
+      expect(onTruck.find((l) => l.itemId === item.id)?.onHand).toBe(17);
+    });
+
+    it("re-totals a replayed weighed sale to the same cent", async () => {
+      // The idempotent path folds STORED lines rather than the input, so it is
+      // the one that would quietly lose the stamped total and price the line
+      // per package at a per-pound rate. The day's own fold is a third path
+      // over the same rows.
+      const { channel, item, day } = await packStall("Replayed");
+      const send = () =>
+        asOwner((tx) =>
+          recordSale(tx, ownerCtx(), {
+            clientRef: "weighed-replay",
+            channelId: channel.id,
+            marketDayId: day.id,
+            soldAt: new Date(`${TODAY}T11:00:00Z`),
+            locationAssetId: truckId,
+            lines: [
+              {
+                itemId: item.id,
+                quantity: 3,
+                unitPriceCents: 800,
+                weightLb: 3.7,
+                lineTotalCents: 2_960,
+              },
+            ],
+          }),
+        );
+      const first = await send();
+      const again = await send();
+      expect(again.alreadyPosted).toBe(true);
+      expect(again.totalCents).toBe(first.totalCents);
+      expect(again.totalCents).toBe(2_960);
+      const folded = await asOwner((tx) => dayTill(tx, tenantId, day.id));
+      expect(folded?.takings.totalCents).toBe(2_960);
+    });
+
+    it("REFUSES a weight with no total, because the money cannot be worked back out", async () => {
+      // The dangerous direction: without the total the line falls into the
+      // derived branch and is priced per PACKAGE at a per-POUND rate — silently,
+      // and low.
+      const { channel, item, day } = await packStall("No total");
+      await expect(
+        asOwner((tx) =>
+          recordSale(tx, ownerCtx(), {
+            channelId: channel.id,
+            marketDayId: day.id,
+            soldAt: new Date(`${TODAY}T11:00:00Z`),
+            locationAssetId: truckId,
+            lines: [
+              { itemId: item.id, quantity: 3, unitPriceCents: 800, weightLb: 3.7 },
+            ],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "SALE_INVALID" });
+    });
+
+    it("REFUSES a total with no weight, because that is arithmetic stored twice", async () => {
+      const { channel, item, day } = await packStall("No weight");
+      await expect(
+        asOwner((tx) =>
+          recordSale(tx, ownerCtx(), {
+            channelId: channel.id,
+            marketDayId: day.id,
+            soldAt: new Date(`${TODAY}T11:00:00Z`),
+            locationAssetId: truckId,
+            lines: [
+              {
+                itemId: item.id,
+                quantity: 3,
+                unitPriceCents: 800,
+                lineTotalCents: 2_400,
+              },
+            ],
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "SALE_INVALID" });
+    });
+
+    it("leaves an ordinary sale exactly as it was", async () => {
+      // The regression that matters most: every line ever written has a null
+      // weight and a null total, and must total the way it always did.
+      const { channel, item, day } = await stall("Unchanged market");
+      await asOwner((tx) =>
+        moveStockToTruck(tx, ownerCtx(), {
+          itemId: item.id,
+          quantity: 40,
+          fromLocationAssetId: barnId,
+          truckAssetId: truckId,
+          occurredOn: TODAY,
+        }),
+      );
+      const result = await asOwner((tx) =>
+        recordSale(tx, ownerCtx(), {
+          clientRef: "unchanged-1",
+          channelId: channel.id,
+          marketDayId: day.id,
+          soldAt: new Date(`${TODAY}T10:30:00Z`),
+          locationAssetId: truckId,
+          lines: [{ itemId: item.id, quantity: 2.35, unitPriceCents: 500 }],
+        }),
+      );
+      expect(result.totalCents).toBe(1_175);
+      expect(result.lines[0].weightLb).toBeNull();
+      expect(result.lines[0].lineTotalCents).toBeNull();
+    });
+
+    it("REFUSES per-pound pricing for something already counted in pounds", async () => {
+      // The two bases would mean the same thing, and the till would ask
+      // somebody to weigh a number they had just typed.
+      const channel = await asOwner((tx) =>
+        createChannel(tx, ownerCtx(), {
+          name: "Mass priced",
+          channelKind: "farmers_market",
+        }),
+      );
+      const byWeight = await newItem("Bulk beef", "lb");
+      await expect(
+        asOwner((tx) =>
+          setPrice(tx, ownerCtx(), {
+            channelId: channel.id,
+            itemId: byWeight.id,
+            priceCents: 800,
+            priceBasis: "lb",
+            effectiveFrom: "2026-01-01",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_PRICE" });
+    });
+
+    it("keeps a basis change as a NEW ROW, like any other price change", async () => {
+      // "We used to sell it by the package at $9, now by the pound at $8" is a
+      // fact a margin report reads back, so it cannot overwrite.
+      const { channel, item } = await packStall("Changed basis");
+      await asOwner((tx) =>
+        setPrice(tx, ownerCtx(), {
+          channelId: channel.id,
+          itemId: item.id,
+          priceCents: 900,
+          priceBasis: "unit",
+          effectiveFrom: "2026-06-01",
+        }),
+      );
+      const rows = await asOwner((tx) =>
+        pricesForChannel(tx, tenantId, channel.id),
+      );
+      const mine = rows.filter((r) => r.itemId === item.id);
+      expect(mine).toHaveLength(2);
+      expect(
+        mine.find((r) => r.effectiveFrom === "2026-01-01")?.priceBasis,
+      ).toBe("lb");
+      expect(
+        mine.find((r) => r.effectiveFrom === "2026-06-01")?.priceBasis,
+      ).toBe("unit");
+    });
   });
 
   it("POSTING THE SAME SALE TWICE TAKES THE MONEY ONCE", async () => {

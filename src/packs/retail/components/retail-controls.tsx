@@ -226,8 +226,10 @@ export function SetPriceForm({
   itemId,
   itemName,
   unitSingular,
+  weighable,
   currencySymbol,
   currentCents,
+  currentBasis,
   today,
 }: {
   channelId: string;
@@ -235,13 +237,22 @@ export function SetPriceForm({
   itemName: string;
   /** "pound", not "pounds" — a price is per one of them. */
   unitSingular: string;
+  /**
+   * True when this item COULD be priced per pound — i.e. it is counted in
+   * something that is not already a weight. `setPrice` refuses per-pound for a
+   * mass-stocked item, where the two bases mean the same thing; the picker is
+   * hidden here rather than offered and then refused.
+   */
+  weighable?: boolean;
   currencySymbol: string | null;
   currentCents: number | null;
+  currentBasis?: string;
   today: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [basis, setBasis] = useState(currentBasis ?? "unit");
 
   function submit(formData: FormData) {
     const priceCents = toCents(formData.get("price"));
@@ -254,6 +265,7 @@ export function SetPriceForm({
         channelId,
         itemId,
         priceCents,
+        priceBasis: weighable ? basis : "unit",
         effectiveFrom: String(formData.get("effectiveFrom") ?? today),
         notes: String(formData.get("notes") ?? ""),
       });
@@ -279,9 +291,9 @@ export function SetPriceForm({
           <DialogHeader>
             <DialogTitle>{itemName}</DialogTitle>
             <DialogDescription>
-              Per {unitSingular}, here. A change is a new price from a day —
-              nothing overwrites what you charged before, because that is what a
-              margin report has to read.
+              {weighable
+                ? "What you charge here, and what you charge it by. A change is a new price from a day — nothing overwrites what you charged before, because that is what a margin report has to read."
+                : `Per ${unitSingular}, here. A change is a new price from a day — nothing overwrites what you charged before, because that is what a margin report has to read.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -313,6 +325,39 @@ export function SetPriceForm({
                 />
               </div>
             </div>
+            {/**
+              * **THE BASIS IS PART OF THE PRICE, so it is beside it and not
+              * behind a disclosure.** "$8.00" means two entirely different
+              * amounts of money for a package of beef depending on this, which
+              * is the whole reason the column exists.
+              *
+              * A basis change is a NEW ROW like any other price change, and it
+              * has to be: *"we used to sell it by the package at $9, now by the
+              * pound at $8"* is a fact a margin report reads back.
+              */}
+            {weighable && (
+              <div className="grid gap-2">
+                <Label htmlFor="priceBasis">Charged</Label>
+                <Select value={basis} onValueChange={setBasis}>
+                  <SelectTrigger id="priceBasis">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unit">
+                      Per {unitSingular} — one price whatever it weighs
+                    </SelectItem>
+                    <SelectItem value="lb">
+                      Per pound — weighed at the till
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Per pound means the till asks for a weight and works the money
+                  out. One {unitSingular} still leaves the truck for each one
+                  sold.
+                </p>
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
               A date in the future sets the price ahead without changing what you
               are charging today.

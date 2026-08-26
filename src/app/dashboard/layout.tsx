@@ -100,6 +100,15 @@ export default async function DashboardLayout({
           label: "Taking payments",
           icon: "payments",
         },
+        // The lines of business the money is reported against — Broilers,
+        // Beef, Eggs. Under Settings rather than in a module because four
+        // packs name an enterprise and none of them owns it; see
+        // src/db/schema/enterprises.ts.
+        {
+          href: "/dashboard/settings/enterprises",
+          label: "Enterprises",
+          icon: "wrench",
+        },
         {
           href: "/dashboard/settings",
           label: "Business settings",

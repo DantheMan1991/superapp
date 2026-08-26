@@ -147,11 +147,15 @@ async function assertNameFree(
   exceptId?: string,
 ): Promise<void> {
   const existing = await listEnterprises(tx, tenantId);
-  const taken = existing.some(
+  const clash = existing.find(
     (e) => e.id !== exceptId && e.name.toLowerCase() === name.toLowerCase(),
   );
-  if (taken) {
-    throw new EnterpriseError("NAME_TAKEN", `there is already a ${name}`);
+  if (clash) {
+    // **THE EXISTING NAME, NOT THE TYPED ONE.** Somebody typing "broilers"
+    // against a list holding "Broilers" is told "there is already a Broilers",
+    // which points at the row they meant; echoing their own lowercase back
+    // reads as the app quibbling about capitals.
+    throw new EnterpriseError("NAME_TAKEN", `there is already a ${clash.name}`);
   }
 }
 

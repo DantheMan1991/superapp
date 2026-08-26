@@ -91,8 +91,23 @@ screen shipped and had to fix an hour later.
 open on another branch and had already taken it. Two migrations with one number
 is a merge nobody enjoys; the journal entry was renumbered with it.
 
-Driven on the dev branch: five enterprises created, renamed, retired and put
-back, with the mirror checked at each step.
+**DRIVEN ON THE DEV BRANCH'S HILLTOP FARM, and the whole loop closed.** The
+founder's five went in — Broilers, Beef, Pigs, Eggs, Produce, the last as a
+crop. *Eggs* was renamed to *Eggs and layers*, and the database confirms the
+design: `name` moved, `dimension_members.display_name` moved with it, and
+`slug` stayed `eggs`. A second "broilers" was refused case-insensitively.
+*Produce* retired to the bottom with a badge and came back.
+
+Then the payoff, with no report code written for it: **the profit and loss
+report's "Split by" picker now offers Enterprise**, and running it renders an
+Unassigned column holding the whole $811.17 — which is exactly what the
+settings page promises until slice 2 lands.
+
+**One thing clicking found, and it was not in this slice's code.** The picker
+rendered its options as raw slugs — "enterprise", "lot", "asset" — because
+`report-controls.tsx` de-underscored them and never capitalised. Pre-existing,
+and newly prominent because `enterprise` is the one a farmer will reach for. One
+line, fixed here rather than left as a paper cut on the feature that exposed it.
 
 ## Data model
 

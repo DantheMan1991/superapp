@@ -6,6 +6,7 @@ import {
   eq,
   gte,
   inArray,
+  ilike,
   isNotNull,
   isNull,
   lte,
@@ -143,14 +144,35 @@ function requireWrite(ctx: InventoryCtx, level: WriteLevel): void {
 
 // ------------------------------------------------------------------ items ---
 
+/**
+ * **`%` AND `_` ARE WILDCARDS, AND A PERSON TYPING ONE MEANS THE CHARACTER.**
+ * Unescaped, a search box is a way to match every row by typing one key — and
+ * `_` is worse than `%` because nothing about the result looks wrong.
+ */
+function escapeLike(term: string): string {
+  return term.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
 export async function listItems(
   tx: Tx,
   tenantId: string,
-  filter: { kind?: string; status?: string } = {},
+  filter: { kind?: string; status?: string; search?: string } = {},
 ): Promise<InventoryItem[]> {
   const where = [eq(schema.inventoryItems.tenantId, tenantId)];
   if (filter.kind) where.push(eq(schema.inventoryItems.itemKind, filter.kind));
   if (filter.status) where.push(eq(schema.inventoryItems.status, filter.status));
+  /**
+   * **BY NAME, AND ONLY BY NAME.** The kind filter answers "just feed" and
+   * "just animals"; this answers the question that cuts ACROSS kinds — chicken
+   * feed, live broilers and packaged chicken are three kinds and one enterprise.
+   * Matching notes as well would make a search for "beef" return the bag of feed
+   * whose note says it is for the beef herd, which is a different question
+   * wearing the same word.
+   */
+  const term = filter.search?.trim();
+  if (term) {
+    where.push(ilike(schema.inventoryItems.name, `%${escapeLike(term)}%`));
+  }
   return tx.query.inventoryItems.findMany({
     where: and(...where),
     orderBy: (i, { asc: byAsc }) => [byAsc(i.itemKind), byAsc(i.name)],

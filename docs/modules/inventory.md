@@ -33,6 +33,67 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-25 — A filter bar that was half built (`claude/a-filter-bar-that-was-half-built`)
+
+The founder's ask, alongside the packages one: *"there should also me a filter
+tool to filter just chicken inventory or just animals or just feed etc."*
+
+**MOST OF IT SHIPPED IN SLICE 0 AND THE CONTROL NEVER DID.** `listItems` has
+taken a `kind` filter since the first commit, `InventoryModule` has read
+`?kind=` and `?archived=1` since the first commit, and `listKindsInUse` — which
+runs on every page load — carries the doc comment *"for the filter bar"*. Its
+result went to the add-item form as autocomplete suggestions and nowhere else.
+The read layer was designed, built and tested; nothing rendered a control.
+
+**"JUST FEED" AND "JUST ANIMALS" ARE A KIND. "JUST CHICKEN" IS NOT**, and that
+is what decided the shape. Chicken feed, live broilers and packaged chicken are
+three kinds and one enterprise, so a kind filter structurally cannot answer the
+founder's first example. A name search can, and does on the real data: "broiler"
+returns Broiler chicks (livestock), Broilers (meat) and Whole broilers (meat).
+
+- **Chips for the kinds, a form for the search** — the split between a closed
+  choice and an open one. A tap is one round trip; typing is not, so the box
+  submits on Enter or the button rather than on every keystroke. A farm holds
+  forty items and this does not need to be clever.
+- **Counts on the chips are free**, because `listKindsInUse` already groups, and
+  they turn "is there anything under Medicine" into a question the bar has
+  already answered.
+- **`%` AND `_` ARE ESCAPED.** Unescaped, a search box is a way to match every
+  row by typing one key — and `_` is the worse of the two, because it matches any
+  single character and nothing about the result looks wrong. There is a test.
+- **NAME ONLY, deliberately.** Matching notes too would make a search for "beef"
+  return the bag of feed whose note says it is for the beef herd: a different
+  question wearing the same word.
+- **THE FILTER LIVES IN THE URL.** The list is server-rendered from it, so a
+  filtered view is a link somebody can bookmark or send, and there is no
+  client-side second filter to disagree with the server's.
+- **"All" is a chip, not the absence of one.** A bar whose unfiltered state has
+  nothing selected gives somebody no way to see that they ARE filtered except by
+  noticing what is missing.
+
+**"NOTHING MATCHES" AND "NOTHING TRACKED YET" ARE DIFFERENT FACTS, and showing
+the second for the first is how a filter convinces somebody their data is gone.**
+The empty state told an owner with forty items and a stale search box to go and
+add their first one. It now says which filter emptied the list and offers to
+clear it — and the bar itself is hidden entirely on a farm that holds nothing,
+because a filter over an empty list is furniture.
+
+**Two defects came out of clicking it, and neither had a failing test over it:**
+
+1. **Enter did not submit.** The form is correctly structured — one text input,
+   one `type="submit"` button — and implicit submission is a browser default this
+   was relying on. Enter is handled explicitly now, through the same function as
+   the button so the two cannot diverge. A search box that silently ignores the
+   key somebody just pressed reads as a broken app.
+2. **"Find a item by name".** `itemWord` comes from the installed profile, so any
+   copy with an article in front of it is a grammar bug waiting for a profile
+   whose word begins with a vowel. The label has no article now.
+
+Driven on the dev branch's Hilltop Farm: the Livestock chip narrowing 8 rows to
+2, "broiler" returning 3 across two kinds, kind and search composing to 1, a
+no-match landing on the right empty state, and Show/Hide retired keeping the
+search. No migration, no schema change.
+
 ### 2026-08-25 — What a batch weighs (`claude/what-a-batch-weighs`)
 
 Slice 6b, and [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md).
@@ -1092,6 +1153,21 @@ commitment against a live animal to delivered without sitting on a shelf.
   under `withSystem` on purpose, so a pack needs BOTH files.
 
 ## Open items
+
+- **THERE IS NO ENTERPRISE DIMENSION, and the search box is standing in for one.**
+  "Just chicken" is answered today by typing a word that happens to appear in the
+  names — which works on this farm because its items are called *Broiler chicks*,
+  *Broilers* and *Whole broilers*, and stops working the day somebody names one
+  *Cornish Cross*. Kind is what a thing IS (feed, meat, livestock); enterprise is
+  which animal or crop it belongs to, and they are orthogonal. It is also the
+  dimension the pack's own thesis needs — *profit per enterprise* cannot be a
+  report while the only way to group is a substring. `livestock` already has
+  species and `production` already has run kinds, so the vocabulary exists; what
+  is missing is a column on the item and a decision about who owns it.
+- **The filter does not reach the other inventory screens.** Counting, valuation
+  and matching all list items and none of them can be narrowed. The valuation one
+  is the likeliest to be asked for first: *"what is the meat worth"* is a
+  question somebody will have the moment they see the total.
 
 - ~~Nobody has driven slice 0 yet~~ — **closed 2026-08-19.** Driven on
   production; the fold, the split, the location split and the return to zero all

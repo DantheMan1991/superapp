@@ -23,6 +23,62 @@ tokens and gets its own pass later.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-26 — Seven packs wore one green, and five wore the same box (`claude/seven-packs-wore-one-green`)
+
+**THE PACKS WERE NEVER IN THE SWEEP, BECAUSE THE SWEEP WAS PLANNED BEFORE ANY
+PACK EXISTED.** The plan in Open items below reads *accounting → documents +
+mail → CRM + work + scheduling → admin*; every pack shipped after it was
+written, and not one of the seven imports a single primitive from
+`src/components/app/`. This PR is the first of five and does only the two things
+that need no pack edits at all.
+
+**FIVE OF THE SEVEN PACK ICONS WERE THE GENERIC FALLBACK — the exact failure
+this file already predicted would recur, and it did.** `src/packs/index.ts`
+names `map`, `beef`, `sprout`, `factory` and `store`; `icon-registry.ts` had
+none of them, so Land, Livestock, Crops, Production and Retail all rendered
+`Boxes` in the rail *and* in the ⌘K palette, from the day each pack shipped.
+The 2026-08-10 entry below records the identical bug hitting CRM, Scheduling and
+Work, and the registry's own comment says why it keeps happening: `getIcon`
+falls back rather than throwing, so nothing is louder than a slightly wrong
+glyph nobody is looking at. **There is still no test for it.** Verified in a
+signed-in session by reading `svg.classList` off every rail row — `lucide-map`,
+`lucide-beef`, `lucide-factory`, `lucide-store` where all four used to say
+`lucide-boxes`.
+
+**AND EVERY PACK WAS THE SAME EMERALD, for the reason the rule below already
+names.** `m/layout.tsx` resolves `var(--accent-<slug>, var(--accent-brand))`.
+No pack slug had a token in any of the three blocks, so all seven fell through
+to brand — in the rail, in `PageHeader`'s chip, in `EmptyState`'s circle and in
+`CategoryStrip`'s active underline. Added `--accent-land`, `-crops`, `-assets`,
+`-inventory`, `-livestock`, `-production` and `-retail` to `:root`, `.dark` and
+`[data-sidebar-surface]`. Confirmed at runtime rather than by grep: all seven
+resolve to a real `lab()` in both the `.dark` scope and the rail scope, none
+`MISSING`.
+
+**MEASURING CHANGED ONE OF THE SEVEN, WHICH IS THE ARGUMENT FOR MEASURING.**
+`crops` was pitched at hue 105 to sit between `documents` and `land`, and
+measured **4.40:1** on `--background` — below AA, on a token used for glyphs.
+Yellow-green has so little sRGB gamut that every AA-passing value at that hue is
+a muddy khaki; 118 is greener, in gamut, and 5.15:1. All 84 pairs (14 accents ×
+6 surfaces — page and card in both themes, plus both rail navies) now clear
+4.5:1, minimum **4.74:1**, and that minimum is pre-existing `documents`, not one
+of the new seven.
+
+**Hue spacing is now the constraint, and it is worth knowing before an eighth
+pack.** Sorted, the fourteen read 15 · 35 · 55 · 75 · 118 · 140 · 170 · 200 ·
+222 · 245 · 268 · 295 · 320 · 350. The tightest gaps are 20° — the same minimum
+the core seven already had — and all three of them fall in the orange region
+(`retail` 15, `work` 35, `production` 55, `documents` 75) where hue is least
+discriminable. Those four are never adjacent in the rail, since `work` and
+`documents` sit in the core group; if it ever reads badly, drop `retail`'s
+chroma rather than moving its hue. **A fifteenth module has no comfortable gap
+left** — at that point vary chroma, or accept that two distant modules share a
+hue.
+
+`Map` is imported as `MapIcon`. A bare `Map` import shadows the global `Map`
+constructor for the whole module, which is a trap in a file whose entire job is
+a lookup table.
+
 ### 2026-08-23 — A tick box, and the variant `switch.tsx` gets wrong (`claude/the-app-does-the-lookup`)
 
 **THE KIT HAD NO CHECKBOX, SO ROW SELECTION WAS BEING DONE WITH `Switch`.** The
@@ -173,7 +229,16 @@ also a Tailwind utility.
   `[data-sidebar-surface]` — and adding a module means adding it to **all three**.
   A missing entry does not error; it inherits a value tuned for the wrong
   background. That is exactly how the dark-mode accents measured 3.43:1 before
-  they were caught.
+  they were caught — and how all seven packs shipped sharing accounting's
+  emerald, for months, until 2026-08-26. **The list covers packs as well as core
+  modules**: anything with a `/dashboard/m/<slug>` route needs a token, because
+  that layout is what resolves the variable. A `coming_soon` module does not —
+  it never reaches the rail.
+- **Adding a module means adding its icon to `icon-registry.ts` too**, and this
+  is the single most-forgotten line in the codebase: it has now been missed for
+  three core modules (2026-08-10) and five packs (2026-08-26). `getIcon` falls
+  back to `Boxes` instead of throwing, so the only symptom is a slightly wrong
+  glyph in the rail and the ⌘K palette. Nothing tests it.
 - **Every token pair here clears WCAG AA 4.5:1**, measured in both themes
   (42 pairs, minimum 4.54:1, on 2026-08-10). If you add or darken a token, re-run
   the check rather than assuming.
@@ -290,6 +355,24 @@ What remains is the three centred states above and `(marketing)`.
 - **The sweep.** ~70 surfaces still hand-roll their header, empty state and table
   panel. Planned as one PR per module: accounting → documents + mail → CRM + work
   + scheduling → admin/auth/onboarding.
+- **THE PACKS ARE THE LARGER HALF OF THE SWEEP, and were not in that plan** —
+  it was written on 2026-08-10, before a single pack existed. Measured
+  2026-08-26: **zero of the seven** import `DataTable`, `Panel`, `StatCard`,
+  `CategoryStrip`, `FilterPills` or `SectionRow`; seven bare `<Table>`s sit
+  directly on the page background, and 45 raw `<Card>` wrappers are still doing
+  `Panel`'s job. They do use `EmptyState` (19 files), so this is a partial
+  adoption rather than none. Remaining order, after the tokens landed:
+  **inventory** (the pattern the rest copy) → **production + livestock** (the
+  most pages and the most hand-rolled cards) → **land + retail + assets**.
+- **A pack hub puts its sections in the header's actions row**, as identical
+  outline buttons — five on inventory, four on production, three on livestock —
+  so nothing distinguishes a place from a verb, and the one real action sits
+  last. This is what `CategoryStrip` exists for. Sub-pages are worse than
+  untidy: `/inventory/counts` has no way back to the module at all, and
+  `/inventory/value` hand-rolls its own back-link inside `actions`.
+- **No pack passes `icon=` to `PageHeader`**, so no pack hub shows the accent
+  chip that all 42 core screens carry. Cheap, and it is half of why the pack
+  headers read flat next to a core tool's.
 - **`CommandPalette` indexes navigation only.** Searching records needs a server
   action per keystroke and per-module scoping. The placeholder deliberately says
   "Jump to a page" so it does not promise records.

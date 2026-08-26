@@ -207,6 +207,29 @@
   --accent-work: oklch(0.53 0.16 35);
   --accent-hello: oklch(0.52 0.15 320);
 
+  /**
+   * The packs. Added 2026-08-26; until then not one of the seven had a token,
+   * so `m/layout.tsx`'s `var(--accent-<slug>, var(--accent-brand))` fell
+   * through and every pack was the same emerald as accounting — in the rail,
+   * in the page-header chip and in the active strip underline.
+   *
+   * Hues sit in the gaps the core seven leave. Sorted, all fourteen now read
+   * 15 · 35 · 55 · 75 · 118 · 140 · 170 · 200 · 222 · 245 · 268 · 295 · 320 ·
+   * 350, whose tightest gap is 20° — the same minimum the core set already had.
+   *
+   * `crops` is the one that is not where you would guess. It was pitched at 105
+   * to sit between documents and land, and measured 4.40:1 on `--background`:
+   * yellow-green has so little sRGB gamut that every AA-passing value there is
+   * a muddy khaki. 118 is greener, in gamut, and 5.15:1.
+   */
+  --accent-land: oklch(0.52 0.12 140);
+  --accent-crops: oklch(0.52 0.11 118);
+  --accent-assets: oklch(0.52 0.13 268);
+  --accent-inventory: oklch(0.52 0.1 222);
+  --accent-livestock: oklch(0.52 0.14 350);
+  --accent-production: oklch(0.55 0.12 55);
+  --accent-retail: oklch(0.54 0.13 15);
+
   --sidebar: oklch(0.25 0.06 265);
   --sidebar-foreground: oklch(0.93 0.008 265);
   --sidebar-primary: oklch(0.67 0.12 170);
@@ -276,6 +299,14 @@
   --accent-scheduling: oklch(0.72 0.1 200);
   --accent-work: oklch(0.72 0.15 35);
   --accent-hello: oklch(0.72 0.13 320);
+  /* The packs, lifted the same way. Same hues as `:root`, higher L. */
+  --accent-land: oklch(0.76 0.14 140);
+  --accent-crops: oklch(0.78 0.13 118);
+  --accent-assets: oklch(0.72 0.13 268);
+  --accent-inventory: oklch(0.74 0.11 222);
+  --accent-livestock: oklch(0.74 0.14 350);
+  --accent-production: oklch(0.78 0.12 55);
+  --accent-retail: oklch(0.74 0.13 15);
   --chart-1: oklch(0.6 0.1 265);
   --chart-2: oklch(0.67 0.12 170);
   --chart-3: oklch(0.68 0.14 150);
@@ -306,6 +337,16 @@
   --accent-scheduling: oklch(0.72 0.1 200);
   --accent-work: oklch(0.72 0.15 35);
   --accent-hello: oklch(0.72 0.13 320);
+  /* The packs. This block is the one that gets forgotten — the rail is dark in
+     BOTH themes, so a pack missing here inherits its `:root` value and goes
+     muddy on the navy rather than failing loudly. */
+  --accent-land: oklch(0.76 0.14 140);
+  --accent-crops: oklch(0.78 0.13 118);
+  --accent-assets: oklch(0.72 0.13 268);
+  --accent-inventory: oklch(0.74 0.11 222);
+  --accent-livestock: oklch(0.74 0.14 350);
+  --accent-production: oklch(0.78 0.12 55);
+  --accent-retail: oklch(0.74 0.13 15);
 }
 
 @layer base {

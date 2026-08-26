@@ -3,6 +3,15 @@ import { ChevronLeft, Sprout } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
 import { listEnterprises } from "@/lib/enterprises";
+import {
+  ENTERPRISE_FALLBACK,
+  ENTERPRISE_FALLBACK_PLURAL,
+  ENTERPRISE_LABEL_KEY,
+  enterpriseKindsFrom,
+  slugLabel,
+} from "@/lib/enterprises/vocabulary";
+import { packContext } from "@/lib/packs/tenant-context";
+import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -22,20 +31,20 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const KIND_LABELS: Record<string, string> = {
-  livestock: "Livestock",
-  crop: "Crop",
-  other: "Other",
-};
-
 /**
- * **THE ENTERPRISE LIST — the lines of business this farm wants the money for
- * separately.**
+ * **THE LIST OF LINES OF BUSINESS a tenant wants the money for separately.**
  *
- * In Settings rather than in a module, because four packs name an enterprise
- * and none of them owns it (see `src/db/schema/enterprises.ts`). Putting it
- * under Inventory would hide it from a farm running only Livestock, and would
- * make it look like an inventory idea rather than the reporting dimension it is.
+ * In Settings rather than in a module, because four packs name one and none of
+ * them owns it (see `src/db/schema/enterprises.ts`). Putting it under Inventory
+ * would hide it from a business running only Livestock, and would make it look
+ * like an inventory idea rather than the reporting dimension it is.
+ *
+ * **EVERY NOUN ON THIS PAGE COMES FROM THE PROFILE.** The first version said
+ * "Enterprises", offered "Livestock" and "Crop", and told the reader that *"most
+ * farms have between three and six"* — a Layer 0 screen telling a law firm what
+ * its lines of business are made of. The word and the kinds are resolved now;
+ * the farm profile supplies "Enterprise", "livestock" and "crop", and a profile
+ * that supplies nothing gets the neutral word and a free-text field.
  *
  * **NOTHING IS TAGGED WITH ONE YET, AND THE PAGE SAYS SO.** This is the first
  * of four slices; the tagging is the next. A screen that let somebody build a
@@ -48,11 +57,26 @@ export default async function EnterprisesPage() {
 
   // Archived ones are shown too, at the bottom: the list is short, and the only
   // way to put one back is to be able to see it.
-  const enterprises = await withTenant(
+  const { enterprises, pack } = await withTenant(
     ctx.tenant.id,
-    (tx) => listEnterprises(tx, ctx.tenant.id),
+    async (tx) => ({
+      enterprises: await listEnterprises(tx, ctx.tenant.id),
+      // `enterprises` is not a pack; the key is a namespace for the profile's
+      // defaults. See the profile's own comment on it.
+      pack: await packContext(
+        tx,
+        ctx.tenant.id,
+        ctx.tenant.industry,
+        "enterprises",
+      ),
+    }),
     { role: ctx.role },
   );
+
+  const word = labelFor(pack.labels, ENTERPRISE_LABEL_KEY, ENTERPRISE_FALLBACK);
+  const plural =
+    word === ENTERPRISE_FALLBACK ? ENTERPRISE_FALLBACK_PLURAL : `${word}s`;
+  const kinds = enterpriseKindsFrom(pack.config);
 
   const active = enterprises.filter((e) => e.status === "active");
   const retired = enterprises.filter((e) => e.status !== "active");
@@ -68,24 +92,27 @@ export default async function EnterprisesPage() {
       </Link>
 
       <PageHeader
-        title="Enterprises"
-        description="The lines of business you want to see the money for on their own."
-        actions={<EnterpriseForm />}
+        title={plural}
+        description={`The parts of the business you want to see the money for on their own.`}
+        actions={<EnterpriseForm word={word} kinds={kinds} />}
       />
 
       {enterprises.length === 0 ? (
         <EmptyState
           panel
           icon={<Sprout className="h-5 w-5" />}
-          title="No enterprises yet"
-          description="Broilers, Beef, Pigs, Eggs — whatever you would want a separate profit figure for. Most farms have between three and six, and you can change the list whenever you like."
-          action={<EnterpriseForm />}
+          title={`No ${plural.toLowerCase()} yet`}
+          /* NO EXAMPLES, because an example is an industry. "Whatever you would
+             want a separate profit figure for" is the definition and works for a
+             farm, a law firm and a bakery alike. */
+          description={`Whatever you would want a separate profit figure for. Most businesses have between three and six, and you can change the list whenever you like.`}
+          action={<EnterpriseForm word={word} kinds={kinds} />}
         />
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Enterprise</TableHead>
+              <TableHead>{word}</TableHead>
               <TableHead>Kind</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead className="w-40" />
@@ -103,7 +130,10 @@ export default async function EnterprisesPage() {
                   </div>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
-                  {KIND_LABELS[e.kind] ?? e.kind}
+                  {/* The stored slug, prettied. No lookup table, because a
+                      lookup table is a list of kinds and this file must not
+                      hold one. */}
+                  {slugLabel(e.kind)}
                 </TableCell>
                 <TableCell className="max-w-sm truncate text-muted-foreground">
                   {e.notes || "—"}
@@ -118,6 +148,8 @@ export default async function EnterprisesPage() {
                       status: e.status,
                       notes: e.notes,
                     }}
+                    word={word}
+                    kinds={kinds}
                   />
                 </TableCell>
               </TableRow>
@@ -140,22 +172,22 @@ export default async function EnterprisesPage() {
             What this list does today
           </p>
           <p>
-            Every enterprise here is registered as a reporting dimension, so
-            &ldquo;Enterprise&rdquo; now appears in the grouping picker on the
-            profit and loss report.
+            Everything here is registered as a reporting dimension, so
+            &ldquo;{word}&rdquo; now appears in the grouping picker on the profit
+            and loss report.
           </p>
           <p>
             <span className="font-medium text-foreground">
               Nothing is tagged with one yet.
             </span>{" "}
-            Until items, batches, market channels and processing runs can name an
-            enterprise, that report will show every figure under Unassigned. That
-            is the next piece of work, not a fault.
+            Until items, batches, sales channels and production runs can name
+            one, that report will show every figure under Unassigned. That is the
+            next piece of work, not a fault.
           </p>
           <p>
-            Retiring an enterprise stops it being offered on new records and
-            leaves everything already recorded against it reporting exactly as
-            before — last year&rsquo;s figures never move.
+            Retiring one stops it being offered on new records and leaves
+            everything already recorded against it reporting exactly as before —
+            last year&rsquo;s figures never move.
           </p>
         </CardContent>
       </Card>

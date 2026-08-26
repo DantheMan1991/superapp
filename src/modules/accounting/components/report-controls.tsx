@@ -283,7 +283,16 @@ export function ReportControls({
             <option value="">No split</option>
             {dimensionTypes.map((t) => (
               <option key={t} value={t}>
-                {t.replaceAll("_", " ")}
+                {/* Capitalised, not just de-underscored. These are slugs from
+                    `dimension_members` and they read as raw data otherwise —
+                    "enterprise" beside "Accrual" and "One total" looks like a
+                    value that escaped rather than a choice somebody is making.
+                    Noticed when `enterprise` joined the list and became the one
+                    a person actually reaches for. */}
+                {(() => {
+                  const words = t.replaceAll("_", " ");
+                  return words.charAt(0).toUpperCase() + words.slice(1);
+                })()}
               </option>
             ))}
           </select>

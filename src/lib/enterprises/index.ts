@@ -10,6 +10,7 @@ import {
 import type { LedgerCtx } from "@/modules/accounting/core";
 import { EnterpriseError } from "./errors";
 import { slugify, uniqueSlug } from "./slug";
+import { KIND_FORMAT } from "./vocabulary";
 
 /**
  * THE ENTERPRISE SUBSYSTEM — the single door onto `enterprises`.
@@ -55,10 +56,12 @@ export { SLUG_FORMAT, slugify, uniqueSlug } from "./slug";
 /** The dimension type every enterprise mirrors under. */
 export const ENTERPRISE_DIMENSION = "enterprise";
 
-/** Suggestions, not a taxonomy. The column takes any slug. */
-export const SUGGESTED_ENTERPRISE_KINDS = ["livestock", "crop", "other"] as const;
-
-const KIND_FORMAT = /^[a-z][a-z0-9_]{0,62}$/;
+/**
+ * **NO SUGGESTED KINDS LIVE HERE ANY MORE.** This exported
+ * `["livestock", "crop", "other"]` and it was a Layer 0 file naming an
+ * industry. The profile supplies them now — `enterpriseKindsFrom` in
+ * `./vocabulary.ts`, the shape `speciesFrom` and `runKindsFrom` already use.
+ */
 
 export interface EnterpriseInput {
   name: string;
@@ -147,11 +150,15 @@ async function assertNameFree(
   exceptId?: string,
 ): Promise<void> {
   const existing = await listEnterprises(tx, tenantId);
-  const taken = existing.some(
+  const clash = existing.find(
     (e) => e.id !== exceptId && e.name.toLowerCase() === name.toLowerCase(),
   );
-  if (taken) {
-    throw new EnterpriseError("NAME_TAKEN", `there is already a ${name}`);
+  if (clash) {
+    // **THE EXISTING NAME, NOT THE TYPED ONE.** Somebody typing "broilers"
+    // against a list holding "Broilers" is told "there is already a Broilers",
+    // which points at the row they meant; echoing their own lowercase back
+    // reads as the app quibbling about capitals.
+    throw new EnterpriseError("NAME_TAKEN", `there is already a ${clash.name}`);
   }
 }
 

@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useConfirm } from "@/components/app/use-confirm";
+import { slugLabel } from "@/lib/enterprises/vocabulary";
 import {
   archiveEnterpriseAction,
   createEnterpriseAction,
@@ -32,11 +33,16 @@ import {
   updateEnterpriseAction,
 } from "./actions";
 
-const KINDS = [
-  { value: "livestock", label: "Livestock — animals you raise" },
-  { value: "crop", label: "Crop — something you grow" },
-  { value: "other", label: "Something else" },
-];
+/**
+ * **NO LIST OF KINDS LIVES HERE.** The first version held
+ * `["livestock", "crop", "other"]` with copy reading *"Livestock — animals you
+ * raise"*, which is a Layer 0 form telling a law firm what its lines of
+ * business are made of. The installed profile supplies them; a business whose
+ * profile supplies none gets a free-text box, which is `runKinds`' arrangement
+ * exactly.
+ */
+const CUSTOM_KIND = "__custom__";
+const NO_KIND = "other";
 
 export interface EnterpriseRow {
   id: string;
@@ -55,17 +61,26 @@ export interface EnterpriseRow {
  * fixed forever so a rename costs nothing. Asking somebody to choose one would
  * be asking them to make a decision they cannot evaluate and can never revise.
  */
-export function EnterpriseForm() {
+export function EnterpriseForm({
+  word,
+  kinds,
+}: {
+  /** What the installed profile calls one. Never hard-coded here. */
+  word: string;
+  /** Kind suggestions from the profile. Empty means a free-text box. */
+  kinds: string[];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState("livestock");
+  const [kind, setKind] = useState(kinds[0] ?? NO_KIND);
+  const [customKind, setCustomKind] = useState("");
   const [pending, startTransition] = useTransition();
 
   function submit(formData: FormData) {
     startTransition(async () => {
       const result = await createEnterpriseAction({
         name: String(formData.get("name") ?? ""),
-        kind,
+        kind: kind === CUSTOM_KIND ? customKind.trim() || NO_KIND : kind,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -83,16 +98,18 @@ export function EnterpriseForm() {
       <DialogTrigger asChild>
         <Button>
           <Plus className="mr-2 h-4 w-4" />
-          Add an enterprise
+          Add {article(word)} {word.toLowerCase()}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <form action={submit}>
           <DialogHeader>
-            <DialogTitle>Add an enterprise</DialogTitle>
+            <DialogTitle>
+              Add {article(word)} {word.toLowerCase()}
+            </DialogTitle>
             <DialogDescription>
-              A line of business you want to see the money for on its own —
-              Broilers, Beef, Pigs, Eggs.
+              {/* The definition, not an example. An example is an industry. */}
+              A part of the business you want to see the money for on its own.
             </DialogDescription>
           </DialogHeader>
 
@@ -105,24 +122,16 @@ export function EnterpriseForm() {
                 required
                 maxLength={120}
                 autoFocus
-                placeholder="Broilers"
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="kind">What kind</Label>
-              <Select value={kind} onValueChange={setKind}>
-                <SelectTrigger id="kind">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {KINDS.map((k) => (
-                    <SelectItem key={k.value} value={k.value}>
-                      {k.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <KindField
+              id="kind"
+              kinds={kinds}
+              value={kind}
+              onValue={setKind}
+              custom={customKind}
+              onCustom={setCustomKind}
+            />
             <div className="grid gap-2">
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" name="notes" rows={2} maxLength={5000} />
@@ -148,11 +157,20 @@ export function EnterpriseForm() {
  * dialog is two Radix modals deep, and `useConfirm` has to be awaited before
  * any transition starts.
  */
-export function EnterpriseControls({ enterprise }: { enterprise: EnterpriseRow }) {
+export function EnterpriseControls({
+  enterprise,
+  word,
+  kinds,
+}: {
+  enterprise: EnterpriseRow;
+  word: string;
+  kinds: string[];
+}) {
   const router = useRouter();
   const { confirm, confirmDialog } = useConfirm();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState(enterprise.kind);
+  const [customKind, setCustomKind] = useState("");
   const [pending, startTransition] = useTransition();
   const archived = enterprise.status === "archived";
 
@@ -161,7 +179,7 @@ export function EnterpriseControls({ enterprise }: { enterprise: EnterpriseRow }
       const result = await updateEnterpriseAction({
         id: enterprise.id,
         name: String(formData.get("name") ?? ""),
-        kind,
+        kind: kind === CUSTOM_KIND ? customKind.trim() || NO_KIND : kind,
         notes: String(formData.get("notes") ?? ""),
       });
       if ("error" in result) {
@@ -224,8 +242,9 @@ export function EnterpriseControls({ enterprise }: { enterprise: EnterpriseRow }
                 <DialogDescription>
                   {/* The one thing somebody will worry about, answered before
                       they have to ask it. */}
-                  Renaming is safe — every record already tagged with this
-                  enterprise follows the new name, including in reports.
+                  Renaming is safe — every record already tagged with this{" "}
+                  {word.toLowerCase()} follows the new name, including in
+                  reports.
                 </DialogDescription>
               </DialogHeader>
 
@@ -240,29 +259,18 @@ export function EnterpriseControls({ enterprise }: { enterprise: EnterpriseRow }
                     defaultValue={enterprise.name}
                   />
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor={`kind-${enterprise.id}`}>What kind</Label>
-                  <Select value={kind} onValueChange={setKind}>
-                    <SelectTrigger id={`kind-${enterprise.id}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {KINDS.map((k) => (
-                        <SelectItem key={k.value} value={k.value}>
-                          {k.label}
-                        </SelectItem>
-                      ))}
-                      {/* A kind that came from a seed or an import and is not
-                          one of the three stays selectable rather than being
-                          silently changed to "other" on the next save. */}
-                      {!KINDS.some((k) => k.value === enterprise.kind) && (
-                        <SelectItem value={enterprise.kind}>
-                          {enterprise.kind}
-                        </SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <KindField
+                  id={`kind-${enterprise.id}`}
+                  kinds={kinds}
+                  value={kind}
+                  onValue={setKind}
+                  custom={customKind}
+                  onCustom={setCustomKind}
+                  /* A kind that came from a seed or an import and is not one
+                     the profile lists stays selectable, rather than being
+                     silently changed on the next save. */
+                  extra={enterprise.kind}
+                />
                 <div className="grid gap-2">
                   <Label htmlFor={`notes-${enterprise.id}`}>Notes</Label>
                   <Textarea
@@ -295,5 +303,92 @@ export function EnterpriseControls({ enterprise }: { enterprise: EnterpriseRow }
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * "a" or "an", for a word the PROFILE supplies.
+ *
+ * **NOT COSMETIC HERE.** The word is renameable, so hard-coding an article is a
+ * grammar bug waiting for a profile whose word starts with a vowel — the exact
+ * mistake the inventory filter bar shipped as "Find a item by name" the day
+ * before this. There is no way to avoid the article on a button reading "Add an
+ * enterprise", so the article has to be computed.
+ */
+function article(word: string): string {
+  return /^[aeiou]/i.test(word.trim()) ? "an" : "a";
+}
+
+/**
+ * Pick a kind, or type one.
+ *
+ * **THE SUGGESTIONS ARE THE PROFILE'S AND THE FIELD ACCEPTS ANYTHING.** With no
+ * profile there is no list, and the control is a text box — which is the honest
+ * state for a business whose industry nobody has described, and is what
+ * `runKinds` does on the production form.
+ */
+function KindField({
+  id,
+  kinds,
+  value,
+  onValue,
+  custom,
+  onCustom,
+  extra,
+}: {
+  id: string;
+  kinds: string[];
+  value: string;
+  onValue: (v: string) => void;
+  custom: string;
+  onCustom: (v: string) => void;
+  /** A stored kind the profile does not list, kept selectable. */
+  extra?: string;
+}) {
+  const options = [...new Set([...kinds, ...(extra ? [extra] : [])])];
+
+  if (options.length === 0) {
+    return (
+      <div className="grid gap-2">
+        <Label htmlFor={id}>What kind</Label>
+        <Input
+          id={id}
+          value={value === NO_KIND ? "" : value}
+          onChange={(e) => onValue(e.target.value.trim() || NO_KIND)}
+          maxLength={63}
+        />
+        <p className="text-xs text-muted-foreground">
+          Optional. A word for grouping the list — nothing depends on it.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>What kind</Label>
+      <Select value={value} onValueChange={onValue}>
+        <SelectTrigger id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((k) => (
+            <SelectItem key={k} value={k}>
+              {slugLabel(k)}
+            </SelectItem>
+          ))}
+          <SelectItem value={NO_KIND}>Something else</SelectItem>
+          <SelectItem value={CUSTOM_KIND}>Name a new kind…</SelectItem>
+        </SelectContent>
+      </Select>
+      {value === CUSTOM_KIND && (
+        <Input
+          aria-label="New kind"
+          value={custom}
+          onChange={(e) => onCustom(e.target.value)}
+          maxLength={63}
+        />
+      )}
+    </div>
   );
 }

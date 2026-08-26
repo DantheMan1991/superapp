@@ -32,6 +32,14 @@ export const homesteadFarm: IndustryProfile = {
    * the core word is genuinely wrong, not to rename things for flavour.
    */
   labels: {
+    /**
+     * **THE FARM WORD FOR A LINE OF BUSINESS.** Core calls it that because a
+     * core tool speaks no industry; on a farm it is an ENTERPRISE, which is
+     * the standard farm-management term — the beef enterprise and the dairy
+     * enterprise are the two halves of a herd. Outside agriculture the word
+     * reads as "a company", which is why it cannot be the neutral default.
+     */
+    enterprise: "Enterprise",
     zone: "Paddock",
     lot: "Lot",
     productionRun: "Batch",
@@ -71,6 +79,19 @@ export const homesteadFarm: IndustryProfile = {
      * Each pack reads its own key. Values are defaults for a new tenant, not
      * constraints — Layer 3 tailoring lives in `tenant_modules.config`.
      */
+    /**
+     * **`enterprises` IS LAYER 0 AND NOT A PACK**, and it reads this key anyway
+     * — the namespace is where a profile's defaults live, not an assertion that
+     * a pack exists. Doing it any other way would mean a second resolver for
+     * one list.
+     *
+     * What a farm's lines of business are made of. The subsystem has no list of
+     * its own, for the reason `runKinds` below has none: one that knew what
+     * "livestock" was would know what industry it was in.
+     */
+    enterprises: {
+      kinds: ["livestock", "crop"],
+    },
     livestock: {
       species: ["cattle", "swine", "poultry"],
       /**

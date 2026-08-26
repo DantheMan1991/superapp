@@ -28,6 +28,59 @@ says is one wire. See the plan for the full argument.
 
 ## Build log
 
+### 2026-08-26 — A core tool speaks no industry (`claude/a-core-tool-speaks-no-industry`)
+
+**The founder caught this the day it shipped:** *"is this enterprise considered a
+core tool? the reason i ask is all of the prompts are faming related. if it is a
+core tool, it should be industry nutral and then switched to farming related when
+the indutry is chosen."* He is right, and it is his own standing rule — no
+trade-specific nouns in core copy; that is the add-on layers' job.
+
+**WHAT WAS WRONG.** A Layer 0 table shipped with `["livestock", "crop", "other"]`
+hard-coded, a form reading *"Livestock — animals you raise"*, an empty state
+saying *"most farms have between three and six"*, and the word "Enterprises" on
+the page, the rail and the report picker. That is core telling a law firm what
+its lines of business are made of.
+
+**THE RULE IT BROKE IS ALREADY WRITTEN DOWN**, in `production`'s comment about
+its own missing list: *"the pack has no list of its own on purpose — one that
+knew what 'butchering' was would know what industry it was in, which is the
+boundary ADR 0004 draws."* `speciesFrom`, `runKindsFrom` and `channelKindsFrom`
+are three instances of the same shape. `enterpriseKindsFrom` is the fourth, and
+it should have been written that way first.
+
+**THE NEUTRAL WORD IS "LINE OF BUSINESS", AND "ENTERPRISE" IS THE FARM WORD.**
+Enterprise is farm-management vocabulary — the beef enterprise and the dairy
+enterprise are the two halves of a herd — and to anybody outside agriculture it
+reads as "a company". So it moves to the profile beside `zone: "Paddock"` and
+`productionRun: "Batch"`, and core falls back to plain English that needs no
+glossary.
+
+- **The table keeps its name.** Renaming a shipped table earns nothing; every
+  word a person SEES is resolved.
+- **The article is computed.** "Add **an** enterprise" and "Add **a** line of
+  business" come from the same code, because a renameable noun with a hard-coded
+  article is a grammar bug waiting for a profile whose word starts with a vowel
+  — the exact mistake the inventory filter bar shipped as *"Find a item by
+  name"* the day before.
+- **No profile means a free-text kind box**, not a list. That is the honest state
+  for a business nobody has described, and is what the production form does.
+- **The examples are gone entirely.** "Whatever you would want a separate profit
+  figure for" is the definition and works for a farm, a law firm and a bakery
+  alike; an example is an industry.
+
+**Driven on both tenants, which is the only way to prove a seam like this.**
+Hilltop Farm reads *Enterprises* / *Add an enterprise* / kinds *Livestock, Crop*.
+The Test tenant, with no profile, reads *Lines of business* / *Add a line of
+business* / a free-text kind box — and the rail says *Lines of business* too.
+Same code, two vocabularies.
+
+**Two fixes from #283 that missed the merge window are folded in here**, having
+been pushed after that PR was already merged: the duplicate-name message now
+names the EXISTING row rather than echoing what was typed, and the report's
+"Split by" picker capitalises its options instead of rendering raw slugs.
+
+
 ### 2026-08-26 — An enterprise is a dimension (`claude/an-enterprise-is-a-dimension`)
 
 Slice 1. The founder's ask was a filter — *"just chicken inventory or just
@@ -159,10 +212,13 @@ the same transaction as every write.
 - **No back-fill, and there cannot be one.** Entries posted before slice 3 carry
   no enterprise and cannot get one without rewriting history. A report over last
   year will read Unassigned and the screen has to keep saying why.
-- **The word "Enterprise" is not label-resolved.** Every pack renders its nouns
-  through `labelFor(pack.labels, …)` so a profile can rename them; this screen
-  hard-codes the farm word. Right for now — it is the standard farm-management
-  term — and wrong the first time a non-farm profile installs.
+- ~~**The word "Enterprise" is not label-resolved.**~~ **Closed 2026-08-26**,
+  the day after it was written and by the founder noticing rather than by this
+  list being read. Both the word and the kind suggestions come from the profile
+  now. **The remaining gap: the word is not OFFERED on the superadmin rename
+  screen**, because `collectLabelDefinitions` assembles its registry from
+  enabled features and this is not one. A stored tenant override is honoured; it
+  just cannot be set from the UI.
 - **An enterprise cannot be deleted, only retired.** Correct while anything
   might reference it, and there is no "nothing has ever used this one, remove
   it" path for a row created by mistake.

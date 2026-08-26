@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +26,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createItemAction } from "../actions";
+import { useConfirm } from "@/components/app/use-confirm";
+import {
+  archiveItemAction,
+  createItemAction,
+  restoreItemAction,
+  updateItemAction,
+} from "../actions";
 import { SUGGESTED_ITEM_KINDS, STORAGE_REQUIREMENTS, slugLabel } from "../vocabulary";
 import { UNITS } from "../core/units";
 
@@ -176,10 +183,13 @@ export function ItemForm({
 
             <p className="-mt-2 text-xs text-muted-foreground">
               {/* The one rule the whole pack rests on, in the place somebody
-                  is about to commit to it. */}
-              Every balance for this item is kept in that unit. Buy feed in
-              bags, count it in pounds — it cannot be changed once anything has
-              moved.
+                  is about to commit to it. The meat sentence is here rather
+                  than in a hint that appears AFTER picking, because it is
+                  meant to decide the choice and not to explain it. */}
+              Every balance for this item is kept in that unit, and it cannot be
+              changed once anything has moved. Buy feed in bags, count it in
+              pounds. Count meat in packages — a package is what gets loaded
+              onto a truck and handed over.
             </p>
 
             <div className="grid grid-cols-2 gap-4">
@@ -265,5 +275,299 @@ export function ItemForm({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ------------------------------------------------------------ editing one ---
+
+export interface EditableItem {
+  id: string;
+  name: string;
+  itemKind: string;
+  stockingUnit: string;
+  purchaseUnit: string | null;
+  purchaseUnitQty: number | null;
+  storageRequirement: string | null;
+  notes: string;
+  status: string;
+}
+
+/**
+ * Edit an item, and retire or restore it.
+ *
+ * **`updateItem` AND `archiveItem` SHIPPED IN SLICE 0 WITH NO CALLER AT ALL,
+ * and the dossier has carried that as an open item ever since** — so an item
+ * could not be renamed, re-kinded or retired from any screen in the app. This
+ * is the dialog.
+ *
+ * **THE UNIT IS THE FIELD THIS EXISTS FOR.** `ops.updateItem` refuses to change
+ * it once anything has moved, correctly: every movement was recorded in the old
+ * unit, so converting the column alone would silently restate the whole ledger.
+ * What that refusal implies is that the unit CAN be fixed before then — and
+ * until now nothing could. Somebody adding "Ground beef" in pounds when they
+ * meant packages had to live with it.
+ *
+ * **RETIRING IS OUTSIDE THE DIALOG, NOT IN ITS FOOTER**, because a confirm
+ * opened from inside an open dialog is two Radix modals deep, and the guard has
+ * to be awaited before any transition starts (see `useConfirm`). Side by side,
+ * both are one modal, and Save is nowhere near the destructive control.
+ */
+export function ItemControls({
+  item,
+  kindsInUse,
+  unitLocked,
+  onHandLabel,
+}: {
+  item: EditableItem;
+  kindsInUse: string[];
+  /** True once ANY movement exists. The unit is then frozen — see above. */
+  unitLocked: boolean;
+  /**
+   * What is on hand, already formatted, or null when nothing has been
+   * recorded. Archiving does NOT touch the ledger, so stock behind a retired
+   * item stays in every balance and every valuation — the confirm has to say
+   * so rather than let somebody find it in a report later.
+   */
+  onHandLabel: string | null;
+}) {
+  const router = useRouter();
+  const { confirm, confirmDialog } = useConfirm();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  const kindOptions = [
+    ...SUGGESTED_ITEM_KINDS,
+    ...[...new Set([...kindsInUse, item.itemKind])]
+      .filter((k) => !SUGGESTED_ITEM_KINDS.includes(k as never))
+      .sort(),
+  ];
+
+  const [kindChoice, setKindChoice] = useState(item.itemKind);
+  const [customKind, setCustomKind] = useState("");
+  const [unit, setUnit] = useState(item.stockingUnit);
+  const [storage, setStorage] = useState(item.storageRequirement ?? NO_STORAGE);
+
+  const kind = kindChoice === CUSTOM_KIND ? customKind.trim() : kindChoice;
+  const archived = item.status === "archived";
+
+  function submit(formData: FormData) {
+    if (!kind || !unit) return;
+    const rawQty = String(formData.get("purchaseUnitQty") ?? "").trim();
+    const purchaseUnit = String(formData.get("purchaseUnit") ?? "").trim();
+
+    startTransition(async () => {
+      const result = await updateItemAction({
+        id: item.id,
+        name: String(formData.get("name") ?? ""),
+        itemKind: kind.toLowerCase().replace(/\s+/g, "_"),
+        stockingUnit: unit,
+        purchaseUnit: purchaseUnit || null,
+        purchaseUnitQty: rawQty ? Number(rawQty) : null,
+        storageRequirement: storage === NO_STORAGE ? null : storage,
+        notes: String(formData.get("notes") ?? ""),
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Saved");
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  async function retire() {
+    // ASKED BEFORE THE TRANSITION STARTS. Awaiting the dialog inside one
+    // deadlocks it — see the note in `useConfirm`.
+    const asked = await confirm({
+      title: `Retire ${item.name}?`,
+      description: onHandLabel
+        ? `It stops appearing in lists, and nothing else changes: ${onHandLabel} stays on hand, in every balance and every valuation. You can put it back.`
+        : "It stops appearing in lists. Nothing in the ledger changes, and you can put it back.",
+      confirmLabel: "Retire it",
+    });
+    if (!asked) return;
+    startTransition(async () => {
+      const result = await archiveItemAction({ id: item.id });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Retired");
+      router.refresh();
+    });
+  }
+
+  function restore() {
+    startTransition(async () => {
+      const result = await restoreItemAction({ id: item.id });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Back in the list");
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      {confirmDialog}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button variant="outline">
+            <Pencil className="mr-2 h-4 w-4" />
+            Edit
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-lg">
+          <form action={submit}>
+            <DialogHeader>
+              <DialogTitle>Edit {item.name}</DialogTitle>
+              <DialogDescription>
+                What this item is and how it is bought. What it is COUNTED in is
+                a different matter — see below.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-name">Name</Label>
+                <Input
+                  id="edit-name"
+                  name="name"
+                  required
+                  maxLength={200}
+                  defaultValue={item.name}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-kind">Kind</Label>
+                  <Select value={kindChoice} onValueChange={setKindChoice}>
+                    <SelectTrigger id="edit-kind">
+                      <SelectValue placeholder="Pick a kind" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {kindOptions.map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {slugLabel(k)}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={CUSTOM_KIND}>Something else…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {kindChoice === CUSTOM_KIND && (
+                    <Input
+                      aria-label="New kind"
+                      placeholder="e.g. bedding"
+                      value={customKind}
+                      onChange={(e) => setCustomKind(e.target.value)}
+                      maxLength={63}
+                    />
+                  )}
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-unit">Counted in</Label>
+                  <Select
+                    value={unit}
+                    onValueChange={setUnit}
+                    disabled={unitLocked}
+                  >
+                    <SelectTrigger id="edit-unit">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UNITS.map((u) => (
+                        <SelectItem key={u.code} value={u.code}>
+                          {u.plural}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <p className="-mt-2 text-xs text-muted-foreground">
+                {unitLocked
+                  ? "Locked. Stock has already moved in this unit, and changing the column alone would restate every entry ever recorded against it. Start a new item instead."
+                  : "Nothing has moved yet, so this can still be fixed. Count meat in packages — a package is what gets loaded onto a truck and handed over. After the first entry it is fixed for good."}
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-purchaseUnit">Bought in</Label>
+                  <Input
+                    id="edit-purchaseUnit"
+                    name="purchaseUnit"
+                    maxLength={32}
+                    placeholder="e.g. bag"
+                    defaultValue={item.purchaseUnit ?? ""}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-purchaseUnitQty">How many, each</Label>
+                  <Input
+                    id="edit-purchaseUnitQty"
+                    name="purchaseUnitQty"
+                    type="number"
+                    min="0"
+                    step="0.0001"
+                    placeholder="e.g. 50"
+                    defaultValue={item.purchaseUnitQty ?? ""}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-storage">Needs to be kept</Label>
+                <Select value={storage} onValueChange={setStorage}>
+                  <SelectTrigger id="edit-storage">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_STORAGE}>Doesn&apos;t matter</SelectItem>
+                    {STORAGE_REQUIREMENTS.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {slugLabel(s)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="edit-notes">Notes</Label>
+                <Textarea
+                  id="edit-notes"
+                  name="notes"
+                  rows={2}
+                  maxLength={5000}
+                  defaultValue={item.notes}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="submit" disabled={pending || !kind || !unit}>
+                {pending ? "Saving…" : "Save"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {archived ? (
+        <Button variant="outline" onClick={restore} disabled={pending}>
+          Put back
+        </Button>
+      ) : (
+        <Button variant="ghost" onClick={retire} disabled={pending}>
+          Retire
+        </Button>
+      )}
+    </>
   );
 }

@@ -86,6 +86,25 @@ describe("units", () => {
     expect(convert(70, "head", "head")).toBe(70);
   });
 
+  it("counts packages, and reads them as packages", () => {
+    // A package is the atom for anything that leaves a freezer wrapped: it is
+    // what gets loaded onto a truck, counted in a chest freezer and handed
+    // over. "Load 43.2 lb" is not an instruction anybody can follow.
+    expect(getUnit("pkg")?.dimension).toBe("count");
+    expect(formatQuantity(1, "pkg")).toBe("1 package");
+    expect(formatQuantity(38, "pkg")).toBe("38 packages");
+  });
+
+  it("will convert between the three count units, and the answer is nonsense", () => {
+    // NOT a wish — a standing trap, asserted so it is discovered here rather
+    // than in a balance. `each`, `head` and `pkg` all sit at perBase 1, so
+    // this returns 70 and means nothing: 70 head is not 70 packages. It stays
+    // harmless only because a conversion is offered between ONE item's own
+    // purchase and stocking units, which a person chose as a pair.
+    expect(convert(70, "head", "pkg")).toBe(70);
+    expect(convert(1, "pkg", "each")).toBe(1);
+  });
+
   it("offers only units it can actually convert to", () => {
     const massCodes = unitsInDimensionOf("lb").map((u) => u.code);
     expect(massCodes).toContain("ton");

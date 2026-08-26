@@ -65,6 +65,20 @@ export const UNITS: readonly UnitDefinition[] = [
   { code: "each", dimension: "count", perBase: 1, singular: "each", plural: "each" },
   { code: "dozen", dimension: "count", perBase: 12, singular: "dozen", plural: "dozen" },
   /**
+   * A PACKAGE IS THE ATOM FOR ANYTHING THAT LEAVES A FREEZER WRAPPED, and it is
+   * a UNIT rather than a second balance bolted onto a pound-stocked item.
+   *
+   * A pack of ground beef is what gets loaded onto a truck, counted in a chest
+   * freezer and handed to a customer: a whole number somebody can check by
+   * looking. Stocking meat in pounds instead makes every one of those acts a
+   * multiplication — *"load 43.2 lb"* is not an instruction anybody can follow.
+   *
+   * **Its WEIGHT is a measurement OF the package, not a conversion TO it.** See
+   * the third kind of conversion in this file's header, which this does not
+   * become. Nothing in this pack records one yet.
+   */
+  { code: "pkg", dimension: "count", perBase: 1, singular: "package", plural: "packages" },
+  /**
    * HEAD IS A UNIT OF MEASURE, and that is the decision that let the lot spine
    * be one mechanism. "70 head" is a quantity exactly as "500 lb" is — so the
    * head ledger and the inventory ledger were always the same ledger, and
@@ -106,6 +120,12 @@ export class UnitError extends Error {
  * between pounds and gallons — it depends entirely on what is in the container —
  * and an app that quietly invented one would produce balances nobody could
  * explain.
+ *
+ * **THREE COUNT UNITS SHARE `perBase: 1` — `each`, `head` and `pkg` — so this
+ * converts freely between them and the answer means nothing.** 70 head is not
+ * 70 packages. It is harmless today because a conversion is only ever offered
+ * between ONE item's own purchase and stocking units, which a person chose as a
+ * pair; it is a trap for whoever adds a caller that picks two units itself.
  */
 export function convert(value: number, from: string, to: string): number {
   const a = getUnit(from);

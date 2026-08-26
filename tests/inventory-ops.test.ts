@@ -15,6 +15,7 @@ import {
   movementRowsForItem,
   onHandByItem,
   recordMovement,
+  restoreItem,
   splitLot,
   updateItem,
   lotAncestry,
@@ -1269,6 +1270,29 @@ d("inventory ops", () => {
     const rows = await asOwner((tx) => movementRowsForItem(tx, tenantId, item.id));
     expect(rows).toHaveLength(1);
     expect((await asOwner((tx) => listLots(tx, tenantId, { itemId: item.id })))).toHaveLength(1);
+  });
+
+  it("puts an archived item back, because retiring one is a judgement", async () => {
+    // Archiving with no way back is a trap, and it was one for as long as
+    // `archiveItem` had no caller: the item strands where only a query
+    // parameter can see it. The round trip has to land on 'active'.
+    const item = await newItem("Second thoughts");
+    await asOwner((tx) => archiveItem(tx, ownerCtx(), item.id));
+    expect((await asOwner((tx) => getItem(tx, tenantId, item.id)))?.status).toBe(
+      "archived",
+    );
+    await asOwner((tx) => restoreItem(tx, ownerCtx(), item.id));
+    expect((await asOwner((tx) => getItem(tx, tenantId, item.id)))?.status).toBe(
+      "active",
+    );
+  });
+
+  it("keeps restoring an item with the OWNER, like retiring one", async () => {
+    const item = await newItem("Staff restore");
+    await asOwner((tx) => archiveItem(tx, ownerCtx(), item.id));
+    await expect(
+      asOwner((tx) => restoreItem(tx, staffCtx(), item.id)),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
   it("lets STAFF record a movement, because feeding out is a chore", async () => {

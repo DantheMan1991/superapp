@@ -27,8 +27,77 @@ this dossier is the build record.
 | 3d iv | `billed`, `sold` and the two `later_of` rules | each needs different machinery — see `packs/inventory/basis-lens.ts` |
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
+| **6a** | **A package is a unit** — the `pkg` stocking unit, and an item you can edit | **shipped 2026-08-25** |
+| 6b | **What a batch weighs** — `inventory_movements.weight_lb`, a per-lot average, production passes the weight it already has | |
+| 6c | Selling by the pound — `retail`'s half, see [retail.md](retail.md) | |
 
 ## Build log
+
+### 2026-08-25 — A package is a unit, and an item you can edit (`claude/a-package-is-a-unit`)
+
+Slice 6a, and the first of three. The founder's ask: *"meat will be a package.
+that package is sometimes just sold by the package or by the weight. when
+loading the truck, for retail we will always be loading packages. not 10 lbs of
+beef."*
+
+**NEITHER EXISTING UNIT COULD SAY THAT, AND BOTH WERE DEFENSIBLE.** Stock ground
+beef in `lb` and the on-hand figure and the price per pound are right, while
+loading the truck is *"43.2 lb"* — not an instruction anybody can follow — and
+counting the freezer is counting packages and multiplying. Stock it in `each` and
+the truck, the count and the price per package are all right, and it can never be
+sold by weight or answer how many pounds are in the freezer. **The item genuinely
+has two measures**, which is the case `units.ts` already names as the third kind
+of conversion and refuses.
+
+**THE REFUSAL STAYS. A PACKAGE WEIGHT IS NOT A CONVERSION, IT IS A
+MEASUREMENT** — so it gets recorded rather than computed, and that is slice 6b.
+This slice only settles which of the two measures the BALANCE is kept in, and the
+answer is the package: it is what gets loaded, counted, handed over and put back,
+and it is a whole number somebody can check by looking. Pounds are a property of
+it.
+
+- **`pkg` is one entry in `UNITS` and no other code at all.** `moveStockToTruck`
+  already moves "quantity in the item's stocking unit", so **the truck loads
+  packages the day an item is stocked in packages** with nothing changed in
+  `retail`. Physical counts stop asking anybody to weigh a freezer, by the same
+  mechanism. That is the evidence the shape is right rather than bolted on.
+- **THREE COUNT UNITS NOW SHARE `perBase: 1`** — `each`, `head` and `pkg` — so
+  `convert(70, "head", "pkg")` returns 70 and means nothing. Already true of
+  `each`/`head`; a third makes it worth asserting, so there is a test that pins
+  the nonsense down rather than a comment hoping nobody hits it. It stays
+  harmless only because a conversion is offered between ONE item's own purchase
+  and stocking units, which a person chose as a pair.
+- **The meat sentence is in the copy BEFORE the picker, not in a hint after
+  it.** It is meant to decide the choice, not to explain one already made.
+
+**`updateItem` AND `archiveItem` FINALLY HAVE A CALLER**, which is not a
+side-quest: the unit locks on the first movement, and until now nothing in the
+app could fix it before then. Somebody adding "Ground beef" in pounds when they
+meant packages had to live with it forever. Now `Edit` opens on the item page,
+with the unit picker disabled once `rows` is non-empty and saying which of the
+two sentences applies.
+
+- **Locked on ANY movement, not on the balance.** An item that received ten and
+  issued ten is back at zero and its ledger is still denominated in the old unit.
+- **`restoreItem` is new, and archiving without it would have been a trap.**
+  Retiring an item is a judgement and judgements are wrong sometimes; a one-way
+  control on a list somebody is tidying strands the item where only
+  `?archived=1` can see it. Its own act rather than a field on `updateItem`, so
+  it gets its own audit entry — retiring a thing the business holds is not the
+  same kind of event as correcting its spelling.
+- **The retire confirm names what stays on hand.** Archiving does not touch the
+  ledger, so stock behind a retired item is still in every balance and every
+  valuation. Better said in the dialog than found in a report.
+- **Retire sits OUTSIDE the edit dialog rather than in its footer.** A confirm
+  opened from inside an open dialog is two Radix modals deep, and `useConfirm`
+  must be awaited before any transition starts. Side by side, both are one
+  modal, and Save is nowhere near the destructive control.
+- **The item page's header actions are no longer gated on `active`.** A retired
+  item is precisely the one somebody needs to reach, to put it back. Starting a
+  batch and moving stock still are.
+
+No migration, no schema change, no new RLS. The plan for 6b and 6c, with the
+alternatives each rejected and why, is the one this slice was cut from.
 
 ### 2026-08-22 — The hydration error that was not inventory's (`claude/laughing-herschel-e284b2`)
 
@@ -790,6 +859,17 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Decisions & gotchas
 
+- **`each`, `head` AND `pkg` ALL SIT AT `perBase: 1` IN THE `count` DIMENSION**,
+  so `convert` will happily turn 70 head into 70 packages. There is a test
+  asserting the nonsense so it is found here rather than in somebody's balance.
+  It is harmless only because a conversion is offered between ONE item's own
+  purchase and stocking units, chosen by a person as a pair — **a caller that
+  picks two count units itself would be silently wrong.**
+- **THE STOCKING UNIT IS THE PACKAGE FOR ANYTHING THAT LEAVES A FREEZER
+  WRAPPED, and its weight is a measurement rather than a conversion.** Modelling
+  a package's weight as a factor is exactly the third kind of conversion
+  `core/units.ts` refuses, and refusing it is why meat is not stocked in pounds
+  with a packages-per-pound fudge. Slice 6b records the measurement instead.
 - **UNVALUED IS NOT ZERO.** A lot nobody costed and a lot whose cost has all
   been released both fold to `remainingCents: 0`, and only the second is worth
   nothing. `carriedValue` is the discriminator and `valueLine` must never be
@@ -994,11 +1074,13 @@ commitment against a live animal to delivered without sitting on a shelf.
 - **Nothing warns that a batch has gone past its date and is still on hand.**
   The item page colours it and the home page lists it; neither is a rule anybody
   is asked about, which is the deviation-surfacing the design keeps wanting.
-- **Four of the eight actions have no UI caller**: `updateItem`, `archiveItem`,
-  `closeLot` and `mergeLot`. So an item cannot be renamed or retired and a batch
-  cannot be closed. `updateItem` is the one that stings: the stocking unit is
-  documented as locking after the first movement, which implies it can be fixed
-  before then, and no screen can fix it at all.
+- ~~**Four of the eight actions have no UI caller**~~ — **two of the four closed
+  2026-08-25.** `updateItem` and `archiveItem` are reached by `ItemControls` on
+  the item page, along with a new `restoreItem`, so an item can be renamed,
+  re-kinded, re-housed, retired and put back. The unit picker is disabled once
+  anything has moved and enabled before then, which is the case that stung.
+  **`closeLot` and `mergeLot` still have none**, so a batch cannot be closed or
+  merged from any screen — splits are what `livestock` needed first.
 - ~~`listLocations` returns every active asset~~ — **fixed the same day** with
   `assets.is_storage_location`, a flag on the asset rather than a kind rule,
   because a freezer and a tractor are both `equipment`. See [assets.md](assets.md).

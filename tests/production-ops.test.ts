@@ -50,6 +50,7 @@ import {
   issueStock,
   movementKindsForLots,
   receiveStock,
+  weightRatesForItems,
   type InventoryCtx,
 } from "../src/packs/inventory/ops";
 import { carriedValue } from "../src/packs/inventory/core/valuation";
@@ -780,6 +781,44 @@ d("production ops", () => {
     await expect(
       asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY)),
     ).rejects.toThrow(ProductionError);
+  });
+
+  it("LANDS THE OUTPUT'S WEIGHT ON THE SHELF, not just its count", async () => {
+    /**
+     * **THE SEAM THIS PACK ALREADY HAD AND INVENTORY COULD NOT RECEIVE.**
+     * `production_run_outputs` has recorded the pair — "38 packages, 47.5 lb" —
+     * since it was written, and `completeRun` passed the count and dropped the
+     * weight because there was nowhere for it to land. So the boxes now know
+     * what they weigh with nobody typing a number twice.
+     */
+    const flour = await meatItem("Flour weighed", "lb");
+    const packs = await meatItem("Packs weighed", "pkg");
+    await asOwner((tx) =>
+      receiveStock(tx, inv(), {
+        itemId: flour.id,
+        newLotCode: "FLOUR-WEIGHED",
+        quantity: 10,
+        costCents: 1000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const run = await asOwner((tx) =>
+      startRun(tx, ownerCtx(), { code: "BAKE-WEIGHED", startedOn: TODAY }),
+    );
+    await asOwner((tx) =>
+      addRunOutput(tx, ownerCtx(), {
+        runId: run.id,
+        itemId: packs.id,
+        quantity: 38,
+        weightLb: 47.5,
+      }),
+    );
+    await asOwner((tx) => completeRun(tx, ownerCtx(), run.id, TODAY));
+
+    const { byItem } = await asOwner((tx) =>
+      weightRatesForItems(tx, tenantId, [packs.id]),
+    );
+    expect(byItem.get(packs.id)).toBeCloseTo(1.25, 10);
   });
 
   it("refuses to add to a run that has already landed", async () => {

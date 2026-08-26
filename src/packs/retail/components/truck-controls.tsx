@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatWeight, weightOf } from "@/packs/inventory/core/weight";
 import {
   loadTruckAction,
   unloadTruckAction,
@@ -37,12 +38,22 @@ export interface LoadableLot {
   id: string;
   itemId: string;
   code: string;
+  /**
+   * Pounds per stocking unit for THIS batch, or null when nobody weighed one.
+   *
+   * Per batch rather than per item because that is where the figure is true: a
+   * run packed in 1 lb bags and a run packed in 2 lb bags are different lots.
+   * See `weightRatesForItems` in the inventory pack.
+   */
+  weightRate?: number | null;
 }
 
 export interface LoadableItem {
   id: string;
   name: string;
   unit: string;
+  /** The item's average, used only for a line with no batch chosen. */
+  weightRate?: number | null;
 }
 
 export interface PlaceOption {
@@ -260,6 +271,25 @@ export function TruckMoveForm({
                 const item = items.find((i) => i.id === row.itemId);
                 const rowLots = lots.filter((l) => l.itemId === row.itemId);
                 const onHand = onHandByKey.get(`${row.itemId}:${row.lotId}`);
+                /**
+                 * **WHAT THIS LINE WEIGHS, WHILE SOMEBODY TYPES IT.** A truck
+                 * is loaded in packages — that is the whole point of the unit —
+                 * and the one thing a count of packages cannot answer is
+                 * whether the van will take it. The batch's own rate wins over
+                 * the item's, and an item nobody has weighed says nothing at
+                 * all rather than "0 lb".
+                 */
+                const rowRate =
+                  rowLots.find((l) => l.id === row.lotId)?.weightRate ??
+                  item?.weightRate ??
+                  null;
+                const typed = Number(row.quantity);
+                const reading =
+                  item && Number.isFinite(typed) && typed > 0
+                    ? weightOf({ unit: item.unit, quantity: typed, rate: rowRate })
+                    : null;
+                const rowWeight =
+                  reading && reading.approximate ? formatWeight(reading) : null;
                 return (
                   <div key={row.key} className="flex flex-wrap items-end gap-2">
                     <div className="grid min-w-40 flex-1 gap-1">
@@ -330,6 +360,11 @@ export function TruckMoveForm({
                       {!loading && onHand !== undefined && (
                         <p className="text-xs text-muted-foreground">
                           {onHand} on the truck
+                        </p>
+                      )}
+                      {rowWeight && (
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          {rowWeight}
                         </p>
                       )}
                     </div>

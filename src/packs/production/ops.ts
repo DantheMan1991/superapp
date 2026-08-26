@@ -1071,6 +1071,19 @@ export async function completeRun(
       newLotCode: output.lotCode,
       quantity: output.quantity,
       costCents: roll.byOutput.get(output.id) ?? null,
+      /**
+       * **THE PLANT'S OTHER FIGURE, WHICH USED TO STOP HERE.** This table has
+       * recorded the pair — "38 packages, 47.5 lb" — since it was written, and
+       * `receiveStock` took the count and dropped the weight because inventory
+       * had nowhere to put it. It does now, so the boxes land knowing what
+       * they weigh and nobody types a number twice.
+       *
+       * `output.weightLb` and NOT `outputWeightLb(output, item)`: the derived
+       * form falls back to converting the quantity for a mass-stocked item,
+       * which is a weight inventory can work out for itself and would only be
+       * a redundant second copy of the quantity in the ledger.
+       */
+      weightLb: output.weightLb,
       occurredOn: completedOn,
       locationAssetId: output.locationAssetId,
       source: "produced",

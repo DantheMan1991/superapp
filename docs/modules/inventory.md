@@ -28,10 +28,99 @@ this dossier is the build record.
 | 4 | Commitments (pre-sold halves) — needs `production` and `retail` | |
 | 5 | Reorder points, capacity warnings — needs history | |
 | **6a** | **A package is a unit** — the `pkg` stocking unit, and an item you can edit | **shipped 2026-08-25** |
-| 6b | **What a batch weighs** — `inventory_movements.weight_lb`, a per-lot average, production passes the weight it already has | |
+| **6b** | **What a batch weighs** — `inventory_movements.weight_lb`, a per-lot average, production passes the weight it already has | **shipped 2026-08-25** |
 | 6c | Selling by the pound — `retail`'s half, see [retail.md](retail.md) | |
 
 ## Build log
+
+### 2026-08-25 — What a batch weighs (`claude/what-a-batch-weighs`)
+
+Slice 6b, and [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md).
+6a settled that meat is stocked in packages; this records what those packages
+weigh, so the app can say roughly what a freezer holds in pounds and `retail`
+can eventually price by the pound.
+
+**THE ANSWER IS `cost_cents`'s ANSWER, AND THAT IS THE WHOLE DESIGN.**
+`inventory_movements.weight_lb` is a TOTAL on the event — 47.5 lb for a receipt
+of 38 packages, exactly as $340 for 12 bags — and the rate is a fold at read
+time. `core/weight.ts` is `averageCostRate` with a different numerator, down to
+skipping what arrived without a figure, and the two should stay recognisable as
+one idea.
+
+**PER LOT, NOT PER ITEM, AND THIS IS A DELIBERATE DIVERGENCE FROM COST.**
+`averageCostRate` folds at the ITEM level and this dossier's open items already
+record what that costs: *"lot A at $1.00 and lot B at $2.00 both issue at $1.50,
+so A goes negative and B stays high."* A run packed in 1 lb bags and a run packed
+in 2 lb bags are different batches and one figure across the item is true of
+neither. The receipt movement carries `lot_id` already, so per-lot cost nothing
+extra — there was no reason to repeat the mistake.
+
+**TWO DESIGNS WERE WRITTEN AND THROWN AWAY FIRST, and both failed the same
+test** — *does any figure here have to agree with another figure forever?*
+
+1. **`inventory_lots.weight_lb`.** A batch can be received into more than once,
+   so a stored batch total is a maintained number, which is the shape ADR 0007
+   and this pack's own *"valuation is not a column and never will be"* exist to
+   refuse.
+2. **A signed pound ledger** — weight on every movement, pounds on hand as the
+   fold. Tidier, and it breaks on the first transfer: a transfer carries no
+   weight, so the freezer would still read 47.5 lb and the truck 0.0 lb after
+   loading half of it. Fixing that means every transfer, adjustment and count
+   line derives a weight, which is the invented factor `core/units.ts` refuses,
+   spread across five writers instead of none.
+
+**ONLY AN INBOUND MOVEMENT MAY CARRY ONE, and it is a CHECK rather than a
+convention.** `core/weight.ts` folds only inbound rows, so a weight on an
+outbound one would be read by nothing while looking exactly like a number that
+meant something. `inventory_movements_weight_inbound` enforces it in the table
+every pack writes to; `recordMovement` refuses it too, so the failure is a
+sentence rather than a constraint violation somebody gets as a 500.
+
+**THE SEAM WAS ALREADY THERE AND HAD BEEN THROWING THE DATA AWAY.**
+`production_run_outputs` has recorded `quantity` AND `weight_lb` since it was
+written — *"38 packages, 47.5 lb"* is what a plant reports — and `completeRun`
+passed the count to `receiveStock` and dropped the weight, because inventory had
+nowhere to put it. **One argument on one call and the whole thing wires itself
+up**, with no new data entry anywhere. There is a test that drives the loop end
+to end: a run output with a weight lands as stock whose average package weight
+reads 1.25 lb.
+
+`output.weightLb` and NOT the derived `outputWeightLb(output, item)`: the derived
+form falls back to converting the quantity for a mass-stocked item, which
+inventory can work out for itself and which would only put a redundant second
+copy of the quantity in the ledger.
+
+**UNWEIGHED IS NOT ZERO**, the same rule as UNVALUED and with the same
+discriminator shape (`hasRecordedWeight`, beside `hasRecordedCost`). A batch
+nobody weighed is ABSENT from `weightRatesForItems`'s maps rather than present at
+zero, and every screen shows nothing rather than "0 lb".
+
+**THE FIGURE SAYS "ABOUT", AND THE FLAG THAT MAKES IT SAY SO IS IN THE RETURN
+TYPE.** `WeightReading.approximate` is true whenever the number came from an
+average, so a caller cannot drop the caveat by forgetting it. **Pounds on hand
+will never equal the pounds actually sold and never need to** — one is a shelf
+estimate, the other a transaction record. Written down here because it is
+exactly the kind of gap somebody arrives to "fix" in six months.
+
+Three screens read it, and the same rule decides all three: **show it only when
+it says something the quantity does not.** For an item stocked by mass
+`weightOf` returns the quantity converted — exact, and "840 lb" under "840
+pounds" is one number twice — so `approximate` doubles as the display guard.
+
+- The item's **On hand** card, under the balance.
+- Each **batch** row, which is where the per-lot rate earns itself.
+- The **truck load** dialog, per line, live as somebody types a count. A truck
+  is loaded in packages and the one thing a count of packages cannot answer is
+  whether the van will take it.
+
+**Somebody has to be able to enter one by hand, or the whole feature is
+reachable only through a production run.** The receipt form has a weight box —
+hidden for a mass-stocked item, because the quantity is already the weight and
+asking twice invites two numbers that disagree.
+
+Migration `0212`, two CHECKs, no new table and therefore no RLS migration and no
+new isolation coverage. Applied to dev and to production before the merge, per
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
 
 ### 2026-08-25 — A package is a unit, and an item you can edit (`claude/a-package-is-a-unit`)
 
@@ -809,6 +898,15 @@ and most head events `livestock` writes carry no money at all.
 movement that empties it, which is the same discipline `issueStock` follows.
 `averageCostRate` is unaffected: it counts only what came in with a price.
 
+**`weight_lb` on the movement arrived in slice 6b, and it is `cost_cents`'s
+shape** — a TOTAL on the event, never a rate, with the average folded at read
+time by `core/weight.ts`. **Only an inbound movement may carry one**
+(`inventory_movements_weight_inbound`), which is the deliberate difference from
+cost: an issue DOES stamp a cost because cost is released from a batch, whereas
+weight is a standing property of what is in it. Null is ordinary — feed, cartons
+and live animals have no package to weigh, and an item stocked by mass has its
+weight in `quantity` already.
+
 `expires_on` on the lot and `reason` on the movement arrived in slice 2. Both are
 nullable and null is ordinary: a batch with no date is one nobody has dated (and
 the pack does not try to tell that apart from "does not expire"), and a movement
@@ -844,6 +942,11 @@ commitment against a live animal to delivered without sitting on a shelf.
   anybody said what this cost" is answered
 - `src/packs/inventory/core/tax-rules.ts` — pure. The timing rules, what is
   implemented, and the resolution order. **Read the header before adding a rule**
+- `src/packs/inventory/core/weight.ts` — pure. **What a package weighs, and what
+  this file exists to NOT be** — a conversion. `averagePackageWeight` is
+  `averageCostRate` with a different numerator; `weightOf` is the one place the
+  mass/counted split is decided; `WeightReading.approximate` is why no screen can
+  present an estimate as a measurement
 - `src/packs/inventory/core/costing.ts` — pure. `lotCarried` folds movements AND
   cost corrections; `splitCostAdjustment` is the on-hand/issued arithmetic and is
   called by the server and by the dialog's preview, so the two cannot disagree
@@ -870,6 +973,17 @@ commitment against a live animal to delivered without sitting on a shelf.
   a package's weight as a factor is exactly the third kind of conversion
   `core/units.ts` refuses, and refusing it is why meat is not stocked in pounds
   with a packages-per-pound fudge. Slice 6b records the measurement instead.
+- **UNWEIGHED IS NOT ZERO**, and it is UNVALUED's rule with a different noun. A
+  batch nobody weighed is absent from `weightRatesForItems`'s maps rather than
+  present at zero, `hasRecordedWeight` is the discriminator, and every screen
+  shows nothing rather than "0 lb" over stock nobody has measured.
+- **POUNDS ON HAND ARE APPROXIMATE AND WILL NEVER RECONCILE WITH POUNDS SOLD.**
+  38 packages at an average of 1.25 lb is 47.5 lb and the actual 38 are each a
+  little more or less. **That is what catch weight IS.** One figure is a shelf
+  estimate and the other is a transaction record; nothing should ever try to make
+  them agree. `WeightReading.approximate` carries the caveat into the return type
+  so a caller cannot drop it by forgetting, and it doubles as the guard that
+  keeps a mass-stocked item from printing its own quantity twice.
 - **UNVALUED IS NOT ZERO.** A lot nobody costed and a lot whose cost has all
   been released both fold to `remainingCents: 0`, and only the second is worth
   nothing. `carriedValue` is the discriminator and `valueLine` must never be

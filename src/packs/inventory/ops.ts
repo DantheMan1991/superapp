@@ -44,6 +44,10 @@ import {
   type LotCarriedCost,
 } from "./core/costing";
 import {
+  averagePackageWeight,
+  type WeighedMovement,
+} from "./core/weight";
+import {
   carriedValue,
   valuationTotal,
   valueLine,
@@ -91,6 +95,7 @@ export class InventoryError extends Error {
       | "LOT_CYCLE"
       | "ZERO_QUANTITY"
       | "INVALID_COST"
+      | "INVALID_WEIGHT"
       | "INVALID_REASON"
       | "COUNT_CLOSED"
       | "COUNT_INVALID"
@@ -502,6 +507,13 @@ export interface MovementInput {
   occurredOn: string;
   /** Total money for this movement, in cents. Never a rate. */
   costCents?: number | null;
+  /**
+   * Total POUNDS for this movement, never a rate, and only on the way IN.
+   *
+   * "38 packages, 47.5 lb" — the fact a plant reports. `core/weight.ts` derives
+   * the average from it; nothing derives a weight it was not given.
+   */
+  weightLb?: number | null;
   /** Which lot consumed it — a pen of broilers eating a delivery of feed. */
   issuedToLotId?: string | null;
   /** Why, when the kind does not already say. Open taxonomy; see the column. */
@@ -566,6 +578,24 @@ export async function recordMovement(
   if (input.costCents !== undefined && input.costCents !== null && input.costCents < 0) {
     throw new InventoryError("INVALID_COST", "a cost cannot be negative");
   }
+  const weightLb = input.weightLb ?? null;
+  if (weightLb !== null) {
+    // Both of these are CHECK constraints too. Refusing here as well turns a
+    // constraint violation — which surfaces as a 500 nobody can act on — into
+    // the pack's own error with a sentence in it.
+    if (weightLb <= 0) {
+      throw new InventoryError("INVALID_WEIGHT", "a weight has to be more than nothing");
+    }
+    if (quantity <= 0) {
+      // `core/weight.ts` folds only inbound movements, so a weight recorded
+      // here would be read by nothing while looking like a number that meant
+      // something.
+      throw new InventoryError(
+        "INVALID_WEIGHT",
+        "only stock arriving carries a weight — what leaves is weighed by whoever weighs it",
+      );
+    }
+  }
   const reason = input.reason?.trim().toLowerCase() || null;
   if (reason !== null && !isValidSlug(reason)) {
     throw new InventoryError("INVALID_REASON", `invalid reason: ${input.reason}`);
@@ -582,6 +612,7 @@ export async function recordMovement(
       movementKind: kind,
       occurredOn: input.occurredOn,
       costCents: input.costCents ?? null,
+      weightLb: weightLb === null ? null : roundQuantity(weightLb),
       issuedToLotId: input.issuedToLotId ?? null,
       reason,
       extensionSlug: input.extensionSlug?.trim() || "inventory",
@@ -1097,6 +1128,17 @@ export async function receiveStock(
     quantity: number;
     /** Total, in cents. Null when the price is not known yet. */
     costCents?: number | null;
+    /**
+     * Total POUNDS for the delivery, when the thing arriving is counted rather
+     * than weighed. "38 packages, 47.5 lb".
+     *
+     * **A RECEIPT IS THE ONLY MOVEMENT THAT MEASURES ANYTHING**, which is why
+     * this parameter is here and not on `issueStock` or `transferStock`: a
+     * transfer moves a box without re-weighing it, and what leaves is weighed
+     * by whoever weighs it, on their own record. Null for an item stocked by
+     * mass — the quantity already is the weight.
+     */
+    weightLb?: number | null;
     occurredOn: string;
     locationAssetId?: string | null;
     /**
@@ -1147,6 +1189,7 @@ export async function receiveStock(
     movementKind: "receipt",
     occurredOn: input.occurredOn,
     costCents: input.costCents ?? null,
+    weightLb: input.weightLb ?? null,
     extensionSlug: input.extensionSlug,
     notes: input.notes,
   });
@@ -2986,6 +3029,73 @@ export async function averageRatesForItems(
     if (rate !== null) out.set(itemId, rate);
   }
   return out;
+}
+
+/**
+ * **POUNDS PER STOCKING UNIT for a set of items AND for each of their lots, in
+ * one query.**
+ *
+ * Both halves come out of the same rows, which is the whole reason they are one
+ * function: the item page wants the item's figure on its "on hand" card and
+ * every batch's figure in the table below it, and the truck wants a figure per
+ * line where a line IS an (item, lot) pair.
+ *
+ * **PER LOT IS THE ANSWER THAT MATTERS, and per item is only the fallback.**
+ * A run packed in 1 lb bags and a run packed in 2 lb bags are different batches
+ * and averaging them across the item produces a number true of neither — which
+ * is exactly the item-level drift `averageCostRate` is stuck with and the
+ * dossier's open items already complain about. Weight does not have to repeat
+ * that mistake, because the receipt movement carries `lot_id` already.
+ *
+ * A lot nobody weighed is ABSENT from the map rather than present at zero. See
+ * "UNWEIGHED IS NOT ZERO" in `core/weight.ts`.
+ */
+export async function weightRatesForItems(
+  tx: Tx,
+  tenantId: string,
+  itemIds: string[],
+): Promise<{ byItem: Map<string, number>; byLot: Map<string, number> }> {
+  const byItem = new Map<string, number>();
+  const byLot = new Map<string, number>();
+  if (itemIds.length === 0) return { byItem, byLot };
+  const rows = await tx
+    .select({
+      itemId: schema.inventoryMovements.itemId,
+      lotId: schema.inventoryMovements.lotId,
+      quantity: schema.inventoryMovements.quantity,
+      weightLb: schema.inventoryMovements.weightLb,
+    })
+    .from(schema.inventoryMovements)
+    .where(
+      and(
+        eq(schema.inventoryMovements.tenantId, tenantId),
+        inArray(schema.inventoryMovements.itemId, itemIds),
+        // Only weighed rows can contribute, and on a farm holding feed and
+        // animals that is a small minority of the ledger.
+        isNotNull(schema.inventoryMovements.weightLb),
+      ),
+    );
+  const perItem = new Map<string, WeighedMovement[]>();
+  const perLot = new Map<string, WeighedMovement[]>();
+  for (const row of rows) {
+    const list = perItem.get(row.itemId);
+    if (list) list.push(row);
+    else perItem.set(row.itemId, [row]);
+    if (row.lotId) {
+      const lotList = perLot.get(row.lotId);
+      if (lotList) lotList.push(row);
+      else perLot.set(row.lotId, [row]);
+    }
+  }
+  for (const [itemId, movements] of perItem) {
+    const rate = averagePackageWeight(movements);
+    if (rate !== null) byItem.set(itemId, rate);
+  }
+  for (const [lotId, movements] of perLot) {
+    const rate = averagePackageWeight(movements);
+    if (rate !== null) byLot.set(lotId, rate);
+  }
+  return { byItem, byLot };
 }
 
 /** Everything issued into one lot, newest first — the "what has this pen eaten" list. */

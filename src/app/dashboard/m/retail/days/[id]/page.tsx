@@ -20,7 +20,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listLocations, listLots } from "@/packs/inventory/ops";
+import {
+  listLocations,
+  listLots,
+  weightRatesForItems,
+} from "@/packs/inventory/ops";
 import { formatQuantity } from "@/packs/inventory/core/units";
 import { dayTill, priceListFor, truckStock } from "@/packs/retail/ops";
 import { Till, StockoutButton } from "@/packs/retail/components/till";
@@ -86,19 +90,31 @@ export default async function SellingDayPage({
         priceListFor(tx, ctx.tenant.id, till.day.channelId, today),
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "retail"),
       ]);
+      /**
+       * **A TRUCK IS LOADED IN PACKAGES, AND THE ONE THING A COUNT OF PACKAGES
+       * CANNOT ANSWER IS WHETHER THE VAN WILL TAKE IT.** One query for every
+       * item on the price list, keyed both ways, so the load form can put a
+       * weight under a line as somebody types the count.
+       */
+      const weights = await weightRatesForItems(
+        tx,
+        ctx.tenant.id,
+        prices.map((p) => p.item.id),
+      );
       // The truck is whichever storage location the page is pointed at. No new
       // concept: a truck is an asset flagged as somewhere stock is kept.
       const truckAssetId = truckParam ?? locations[0]?.id ?? null;
       const onTruck = truckAssetId
         ? await truckStock(tx, ctx.tenant.id, truckAssetId)
         : [];
-      return { till, locations, lots, prices, pack, truckAssetId, onTruck };
+      return { till, locations, lots, prices, pack, truckAssetId, onTruck, weights };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { till, locations, lots, prices, pack, truckAssetId, onTruck } = data;
+  const { till, locations, lots, prices, pack, truckAssetId, onTruck, weights } =
+    data;
 
   /**
    * What "bring it back" may offer: the truck's own stock, by item and batch.
@@ -108,13 +124,23 @@ export default async function SellingDayPage({
     ...new Map(
       onTruck.map((l) => [
         l.itemId,
-        { id: l.itemId, name: l.itemName, unit: l.unit },
+        {
+          id: l.itemId,
+          name: l.itemName,
+          unit: l.unit,
+          weightRate: weights.byItem.get(l.itemId) ?? null,
+        },
       ]),
     ).values(),
   ];
   const onTruckLots = onTruck
     .filter((l) => l.lotId !== null)
-    .map((l) => ({ id: l.lotId!, itemId: l.itemId, code: l.lotCode ?? "" }));
+    .map((l) => ({
+      id: l.lotId!,
+      itemId: l.itemId,
+      code: l.lotCode ?? "",
+      weightRate: weights.byLot.get(l.lotId!) ?? null,
+    }));
   const dayWord = labelFor(pack.labels, "marketDay", "Market day");
   const priceByItem = new Map(
     prices.map((p) => [p.item.id, p.current?.priceCents ?? null]),
@@ -160,11 +186,13 @@ export default async function SellingDayPage({
                     id: p.item.id,
                     name: p.item.name,
                     unit: p.item.stockingUnit,
+                    weightRate: weights.byItem.get(p.item.id) ?? null,
                   }))}
                   lots={lots.map((l) => ({
                     id: l.id,
                     itemId: l.itemId,
                     code: l.code,
+                    weightRate: weights.byLot.get(l.id) ?? null,
                   }))}
                   locations={locations
                     .filter((l) => l.id !== truckAssetId)

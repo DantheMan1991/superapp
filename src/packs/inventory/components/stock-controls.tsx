@@ -196,6 +196,7 @@ export function MovementForm({
   locations,
   consumers,
   unitSingular,
+  stockedByMass,
   currencySymbol,
   today,
 }: {
@@ -203,6 +204,12 @@ export function MovementForm({
   unitLabel: string;
   /** "pound", not "pounds" — a price is per one of them. */
   unitSingular: string;
+  /**
+   * True when the stocking unit measures mass. The weight box is then hidden,
+   * because the quantity already IS the weight and asking twice invites two
+   * numbers that disagree.
+   */
+  stockedByMass?: boolean;
   /** The tenant's symbol, or null for the house style of none. */
   currencySymbol: string | null;
   lots: LotOption[];
@@ -248,6 +255,7 @@ export function MovementForm({
        * price, Out carries who ate it.
        */
       const money = String(formData.get("cost") ?? "").trim();
+      const weighed = String(formData.get("weightLb") ?? "").trim();
       const consumedBy = String(formData.get("issuedToLotId") ?? NO_CONSUMER);
       const chosenReason =
         reason === CUSTOM_REASON
@@ -280,6 +288,9 @@ export function MovementForm({
               // Dollars in, cents stored. Rounding here rather than in the
               // action keeps the boundary integer-only.
               costCents: money ? Math.round(Number(money) * 100) : null,
+              // Blank stays blank. "Nobody weighed it" and "it weighed
+              // nothing" are different facts and the ledger keeps them apart.
+              weightLb: weighed ? Number(weighed) : null,
               occurredOn: String(formData.get("occurredOn") ?? today),
               locationAssetId: locationId === NO_LOCATION ? null : locationId,
               notes: String(formData.get("notes") ?? ""),
@@ -453,23 +464,55 @@ export function MovementForm({
             )}
 
             {direction === "in" ? (
-              <div className="grid gap-2">
-                <Label htmlFor="cost">What it cost</Label>
-                <Input
-                  id="cost"
-                  name="cost"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="340.00"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {/* The total on the ticket, not a rate. The per-unit figure
-                      is derived from it and never stored. */}
-                  The whole delivery, not the price per {unitSingular}. Leave it
-                  empty if the invoice has not arrived — the stock still counts.
-                </p>
-              </div>
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="cost">What it cost</Label>
+                  <Input
+                    id="cost"
+                    name="cost"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="340.00"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {/* The total on the ticket, not a rate. The per-unit figure
+                        is derived from it and never stored. */}
+                    The whole delivery, not the price per {unitSingular}. Leave
+                    it empty if the invoice has not arrived — the stock still
+                    counts.
+                  </p>
+                </div>
+                {/**
+                 * **ONLY FOR SOMETHING COUNTED, and only on the way in.**
+                 *
+                 * An item stocked by mass has its weight in the quantity box
+                 * already — asking for it twice invites two numbers that
+                 * disagree. And a weight belongs to stock ARRIVING: what leaves
+                 * is weighed by whoever weighs it, on their own record, which
+                 * is why there is no box on the issue side and a CHECK
+                 * constraint behind that.
+                 */}
+                {!stockedByMass && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="weightLb">What it weighed (lb)</Label>
+                    <Input
+                      id="weightLb"
+                      name="weightLb"
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      placeholder="47.5"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      The whole delivery again, not one {unitSingular}. This is
+                      what lets the app say roughly what a freezer holds in
+                      pounds. Leave it empty if nobody weighed it — an unweighed
+                      batch says nothing rather than nothing-at-all-pounds.
+                    </p>
+                  </div>
+                )}
+              </>
             ) : direction === "out" ? (
               consumers.length > 0 && (
                 <div className="grid gap-2">

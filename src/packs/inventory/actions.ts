@@ -24,6 +24,7 @@ import {
   issueStock,
   receiveStock,
   recordMovement,
+  restoreItem,
   splitLot,
   updateItem,
   type InventoryCtx,
@@ -208,6 +209,32 @@ export async function archiveItemAction(input: unknown) {
     );
     await logAudit({
       action: "inventory.item.archived",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "inventory_item",
+      targetId: parsed.data.id,
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function restoreItemAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => restoreItem(tx, ctxOf(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "inventory.item.restored",
       tenantId: ctx.tenant.id,
       actorClerkUserId: ctx.userId,
       targetType: "inventory_item",

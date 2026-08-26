@@ -53,6 +53,7 @@ import {
   MovementForm,
   SplitLotForm,
 } from "@/packs/inventory/components/stock-controls";
+import { ItemControls } from "@/packs/inventory/components/item-form";
 
 export const dynamic = "force-dynamic";
 
@@ -198,18 +199,47 @@ export default async function InventoryItemPage({
           </span>
         }
         actions={
-          isOwner && item.status === "active" ? (
-            <div className="flex items-center gap-2">
-              <LotForm itemId={item.id} today={today} />
-              <MovementForm
-                itemId={item.id}
-                unitLabel={unitLabel}
-                lots={lotOptions}
-                locations={locationOptions}
-                consumers={consumerOptions}
-                unitSingular={unitSingular}
-                currencySymbol={currencySymbol}
-                today={today}
+          isOwner ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Starting a batch and moving stock are acts on a LIVE item.
+                  Editing is not: a retired item is exactly the one somebody
+                  needs to reach, to put it back. */}
+              {item.status === "active" && (
+                <>
+                  <LotForm itemId={item.id} today={today} />
+                  <MovementForm
+                    itemId={item.id}
+                    unitLabel={unitLabel}
+                    lots={lotOptions}
+                    locations={locationOptions}
+                    consumers={consumerOptions}
+                    unitSingular={unitSingular}
+                    currencySymbol={currencySymbol}
+                    today={today}
+                  />
+                </>
+              )}
+              <ItemControls
+                item={{
+                  id: item.id,
+                  name: item.name,
+                  itemKind: item.itemKind,
+                  stockingUnit: item.stockingUnit,
+                  purchaseUnit: item.purchaseUnit,
+                  purchaseUnitQty: item.purchaseUnitQty,
+                  storageRequirement: item.storageRequirement,
+                  notes: item.notes,
+                  status: item.status,
+                }}
+                kindsInUse={[...new Set(allItems.map((i) => i.itemKind))]}
+                /* ONE MOVEMENT IS ENOUGH TO FREEZE THE UNIT, and `rows` is
+                   every movement this item has. Not the balance: an item that
+                   received ten and issued ten is back at zero and its ledger
+                   is still denominated in the old unit. */
+                unitLocked={rows.length > 0}
+                onHandLabel={
+                  rows.length === 0 ? null : formatQuantity(total, unit)
+                }
               />
             </div>
           ) : null

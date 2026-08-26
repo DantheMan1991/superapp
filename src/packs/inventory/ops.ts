@@ -284,12 +284,42 @@ export async function archiveItem(
   ctx: InventoryCtx,
   id: string,
 ): Promise<InventoryItem> {
+  return setItemStatus(tx, ctx, id, "archived");
+}
+
+/**
+ * Put an archived item back.
+ *
+ * **ARCHIVING WITHOUT THIS IS A TRAP, and it was one for as long as
+ * `archiveItem` had no caller.** Retiring an item is a judgement — the freezer
+ * is empty, the line is discontinued — and judgements are wrong sometimes. A
+ * one-way control on a list somebody is tidying would strand the item where
+ * only a `?archived=1` query parameter can see it.
+ *
+ * Its own act rather than a field on `updateItem`, so it gets its own audit
+ * entry: retiring a thing the business holds is not the same kind of event as
+ * correcting its spelling.
+ */
+export async function restoreItem(
+  tx: Tx,
+  ctx: InventoryCtx,
+  id: string,
+): Promise<InventoryItem> {
+  return setItemStatus(tx, ctx, id, "active");
+}
+
+async function setItemStatus(
+  tx: Tx,
+  ctx: InventoryCtx,
+  id: string,
+  status: "active" | "archived",
+): Promise<InventoryItem> {
   requireWrite(ctx, "owner");
   const existing = await getItem(tx, ctx.tenantId, id);
   if (!existing) throw new InventoryError("NOT_FOUND", `item ${id} not found`);
   const rows = await tx
     .update(schema.inventoryItems)
-    .set({ status: "archived", updatedAt: new Date() })
+    .set({ status, updatedAt: new Date() })
     .where(
       and(
         eq(schema.inventoryItems.tenantId, ctx.tenantId),

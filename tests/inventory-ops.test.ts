@@ -44,6 +44,7 @@ import {
   startCount,
   valueStock,
   averageRatesForItems,
+  weightRatesForItems,
 } from "../src/packs/inventory/ops";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -1270,6 +1271,125 @@ d("inventory ops", () => {
     const rows = await asOwner((tx) => movementRowsForItem(tx, tenantId, item.id));
     expect(rows).toHaveLength(1);
     expect((await asOwner((tx) => listLots(tx, tenantId, { itemId: item.id })))).toHaveLength(1);
+  });
+
+  describe("what a batch weighs", () => {
+    it("records the weight on the receipt and reads it back per LOT", async () => {
+      // The whole slice in one test: two runs of the same item packed
+      // differently, and the rate that comes back is each batch's own. One
+      // figure across the item would be true of neither, which is exactly the
+      // item-level drift `averageCostRate` is stuck with.
+      const item = await newItem("Ground beef", "pkg");
+      const light = await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          newLotCode: "PACKED-1LB",
+          quantity: 38,
+          weightLb: 47.5,
+          occurredOn: "2026-08-20",
+        }),
+      );
+      const heavy = await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          newLotCode: "PACKED-2LB",
+          quantity: 10,
+          weightLb: 25,
+          occurredOn: "2026-08-21",
+        }),
+      );
+      const { byItem, byLot } = await asOwner((tx) =>
+        weightRatesForItems(tx, tenantId, [item.id]),
+      );
+      expect(byLot.get(light.lotId!)).toBeCloseTo(1.25, 10);
+      expect(byLot.get(heavy.lotId!)).toBeCloseTo(2.5, 10);
+      // The item's own figure is the quantity-weighted blend, and is the
+      // fallback for a line with no batch — 72.5 lb over 48 packages.
+      expect(byItem.get(item.id)).toBeCloseTo(72.5 / 48, 10);
+    });
+
+    it("leaves a batch nobody weighed OUT of the map, rather than at zero", async () => {
+      // UNWEIGHED IS NOT ZERO, at the read boundary and not only in the fold.
+      const item = await newItem("Unweighed packs", "pkg");
+      await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          newLotCode: "NO-SCALE",
+          quantity: 12,
+          occurredOn: "2026-08-20",
+        }),
+      );
+      const { byItem, byLot } = await asOwner((tx) =>
+        weightRatesForItems(tx, tenantId, [item.id]),
+      );
+      expect(byItem.has(item.id)).toBe(false);
+      expect(byLot.size).toBe(0);
+    });
+
+    it("REFUSES a weight on something going out", async () => {
+      // A weight belongs to stock arriving. `core/weight.ts` folds only
+      // inbound movements, so one recorded here would be read by nothing while
+      // looking exactly like a number that meant something.
+      const item = await newItem("Outbound weight", "pkg");
+      await expect(
+        asOwner((tx) =>
+          recordMovement(tx, ownerCtx(), {
+            itemId: item.id,
+            quantity: -5,
+            weightLb: 6.25,
+            movementKind: "issue",
+            occurredOn: "2026-08-20",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_WEIGHT" });
+    });
+
+    it("refuses a weight of nothing, because that is not a measurement", async () => {
+      const item = await newItem("Zero weight", "pkg");
+      await expect(
+        asOwner((tx) =>
+          receiveStock(tx, ownerCtx(), {
+            itemId: item.id,
+            newLotCode: "ZERO",
+            quantity: 5,
+            weightLb: 0,
+            occurredOn: "2026-08-20",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_WEIGHT" });
+    });
+
+    it("carries no weight through a transfer, and that is the design", async () => {
+      // A transfer moves a box without re-weighing it. The pounds at a
+      // location are the batch's rate applied to what is there — which is why
+      // there is no weight parameter on `transferStock` to forget to pass.
+      const item = await newItem("Moved packs", "pkg");
+      const received = await asOwner((tx) =>
+        receiveStock(tx, ownerCtx(), {
+          itemId: item.id,
+          newLotCode: "MOVED",
+          quantity: 20,
+          weightLb: 25,
+          occurredOn: "2026-08-20",
+          locationAssetId: freezerId,
+        }),
+      );
+      await asOwner((tx) =>
+        transferStock(tx, ownerCtx(), {
+          itemId: item.id,
+          lotId: received.lotId,
+          quantity: 8,
+          fromLocationAssetId: freezerId,
+          toLocationAssetId: null,
+          occurredOn: "2026-08-21",
+        }),
+      );
+      // Both transfer legs carried nothing, so the rate is still the receipt's.
+      const { byLot } = await asOwner((tx) =>
+        weightRatesForItems(tx, tenantId, [item.id]),
+      );
+      expect(byLot.get(received.lotId!)).toBeCloseTo(1.25, 10);
+    });
   });
 
   it("puts an archived item back, because retiring one is a judgement", async () => {

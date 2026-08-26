@@ -1,0 +1,3 @@
+ALTER TABLE "inventory_movements" ADD COLUMN "weight_lb" numeric(18, 4);--> statement-breakpoint
+ALTER TABLE "inventory_movements" ADD CONSTRAINT "inventory_movements_weight_positive" CHECK ("inventory_movements"."weight_lb" is null or "inventory_movements"."weight_lb" > 0);--> statement-breakpoint
+ALTER TABLE "inventory_movements" ADD CONSTRAINT "inventory_movements_weight_inbound" CHECK ("inventory_movements"."weight_lb" is null or "inventory_movements"."quantity" > 0);

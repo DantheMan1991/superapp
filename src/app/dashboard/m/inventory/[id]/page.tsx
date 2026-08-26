@@ -32,6 +32,7 @@ import {
   listLots,
   listMovements,
   movementRowsForItem,
+  weightRatesForItems,
 } from "@/packs/inventory/ops";
 import {
   balanceByLocation,
@@ -39,6 +40,7 @@ import {
 } from "@/packs/inventory/core/balances";
 import { carriedValue } from "@/packs/inventory/core/valuation";
 import { formatQuantity, getUnit } from "@/packs/inventory/core/units";
+import { formatWeight, weightOf } from "@/packs/inventory/core/weight";
 import {
   LOT_SOURCE_LABELS,
   isLotSource,
@@ -85,7 +87,7 @@ export default async function InventoryItemPage({
     async (tx) => {
       const item = await getItem(tx, ctx.tenant.id, id);
       if (!item) return null;
-      const [lots, rows, movements, locations, allLots, allItems, costRate] =
+      const [lots, rows, movements, locations, allLots, allItems, costRate, weights] =
         await Promise.all([
           listLots(tx, ctx.tenant.id, { itemId: id }),
           movementRowsForItem(tx, ctx.tenant.id, id),
@@ -96,6 +98,9 @@ export default async function InventoryItemPage({
           listLots(tx, ctx.tenant.id),
           listItems(tx, ctx.tenant.id, { status: "active" }),
           itemCostRate(tx, ctx.tenant.id, id),
+          // Both halves — the item's rate for the card, every batch's for the
+          // table — come back from ONE query. See `weightRatesForItems`.
+          weightRatesForItems(tx, ctx.tenant.id, [id]),
         ]);
       /**
        * **THE SECOND ROUND TRIP IS THE LOT LIST'S FAULT, not an oversight.**
@@ -114,6 +119,7 @@ export default async function InventoryItemPage({
         lots,
         rows,
         movements,
+        weights,
         locations,
         allLots,
         allItems,
@@ -131,6 +137,7 @@ export default async function InventoryItemPage({
     lots,
     rows,
     movements,
+    weights,
     locations,
     allLots,
     allItems,
@@ -153,6 +160,25 @@ export default async function InventoryItemPage({
 
   const total = rows.reduce((sum, r) => sum + r.quantity, 0);
   const byLocation = balanceByLocation(rows);
+  /**
+   * **"258 packages · about 291 lb", and the "about" is the point.** A batch's
+   * average is the only thing there is — the actual packages are each a little
+   * more or less — so the figure is an estimate and has to read as one. Null
+   * for anything nobody has weighed: UNWEIGHED IS NOT ZERO.
+   */
+  const totalReading = weightOf({
+    unit,
+    quantity: total,
+    rate: weights.byItem.get(item.id) ?? null,
+  });
+  /**
+   * **ONLY WHEN IT SAYS SOMETHING THE QUANTITY DOES NOT.** For an item stocked
+   * by mass, `weightOf` returns the quantity converted — exact, and "840 lb"
+   * printed under "840 pounds" is a second copy of one number. `approximate` is
+   * true exactly when the figure came from a measured average instead, which is
+   * the case where it adds something.
+   */
+  const totalWeight = totalReading.approximate ? formatWeight(totalReading) : null;
 
   const lotOptions = lots
     .filter((l) => l.status === "open")
@@ -214,6 +240,7 @@ export default async function InventoryItemPage({
                     locations={locationOptions}
                     consumers={consumerOptions}
                     unitSingular={unitSingular}
+                    stockedByMass={getUnit(unit)?.dimension === "mass"}
                     currencySymbol={currencySymbol}
                     today={today}
                   />
@@ -255,6 +282,14 @@ export default async function InventoryItemPage({
             <p className="text-2xl font-medium tabular-nums">
               {rows.length === 0 ? "—" : formatQuantity(total, unit)}
             </p>
+            {rows.length > 0 && totalWeight && (
+              <p className="mt-1 text-sm text-muted-foreground tabular-nums">
+                {/* Only shown when somebody weighed a delivery of it. An item
+                    nobody has weighed says nothing here rather than "0 lb",
+                    which would be a fact that is not true. */}
+                {totalWeight}
+              </p>
+            )}
             <p className="mt-1 text-sm text-muted-foreground">
               {rows.length === 0
                 ? "Nothing recorded yet. Every number here is the sum of what you enter."
@@ -359,6 +394,16 @@ export default async function InventoryItemPage({
                  */
                 const cost = carried.get(lot.id);
                 const carriedCents = cost ? carriedValue(cost) : null;
+                // Same rule as the card above: shown only when it says
+                // something the quantity does not.
+                const reading = weightOf({
+                  unit,
+                  quantity: balance,
+                  rate: weights.byLot.get(lot.id) ?? null,
+                });
+                const weightLabel = reading.approximate
+                  ? formatWeight(reading)
+                  : null;
                 const received = rows
                   .filter((r) => r.lotId === lot.id && r.quantity > 0)
                   .reduce((sum, r) => sum + r.quantity, 0);
@@ -397,6 +442,15 @@ export default async function InventoryItemPage({
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatQuantity(balance, unit)}
+                      {/* **PER BATCH, AND THAT IS THE WHOLE REASON THE RATE IS
+                          KEPT PER LOT.** A run packed in 1 lb bags and a run
+                          packed in 2 lb bags are different batches; one figure
+                          across the item would be true of neither. */}
+                      {weightLabel && (
+                        <span className="block text-xs text-muted-foreground">
+                          {weightLabel}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {carriedCents === null ? (

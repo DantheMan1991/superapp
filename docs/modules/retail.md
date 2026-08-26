@@ -30,11 +30,37 @@ Rows are listed in build order; the numbers are left alone because the build log
 | 2 | Payment adapter — read (settlements, fees → books) | after 5 — needs a payment to have happened |
 | 1b | Offline: service worker, durable queue, flush on reconnect | deferred — robustness, not a blocker. See Open items |
 | 3 | Commitments: reservations, deposits, hanging-weight final invoice, fulfilment point — needs `production` | |
+| 8 | **Selling by the pound** — `retail_prices.price_basis`, `weight_lb` and `line_total_cents` on the sale line, a weigh box on the till. [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md); `inventory` slices 6a and 6b are both shipped | |
 | 4 | Farm store, attended and count-derived | |
 | 6 | Online orders + pickup windows | |
 | 7 | Shipping (costed), then wholesale (eligibility becomes load-bearing) | |
 
 ## Build log
+
+### 2026-08-25 — What is on the truck, in pounds (`claude/what-a-batch-weighs`)
+
+Retail's share of `inventory` slice 6b, and it is small on purpose. **A truck is
+loaded in packages — that is the whole point of the `pkg` unit — and the one
+thing a count of packages cannot answer is whether the van will take it.** So
+the load and bring-back rows now show what the line weighs, live, as somebody
+types the count.
+
+- **The batch's rate beats the item's**, because that is where the figure is
+  true: a run packed in 1 lb bags and a run packed in 2 lb bags are different
+  lots. `LoadableLot.weightRate` carries it; `LoadableItem.weightRate` is only
+  the fallback for a line with no batch chosen.
+- **One query for the whole price list**, not one per row. `weightRatesForItems`
+  returns both maps at once for exactly this reason.
+- **An item nobody has weighed says nothing**, and a mass-stocked one says
+  nothing either — "43.2 lb" under a box already reading 43.2 is one number
+  twice. `WeightReading.approximate` is the guard for both cases.
+
+**NOTHING ABOUT SELLING CHANGED.** The price is still per stocking unit and the
+till still cannot take a weight; that is slice 8, and it needs
+`retail_prices.price_basis` and a weight on the sale line. See
+[ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md) for
+the shape it will take and for why `retail_sale_lines.quantity` must keep
+meaning packages.
 
 ### 2026-08-25 — Load the whole truck, not one thing at a time (`claude/load-the-whole-truck`)
 

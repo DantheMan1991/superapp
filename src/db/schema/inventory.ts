@@ -327,6 +327,33 @@ export const inventoryMovements = pgTable(
      */
     costCents: bigint("cost_cents", { mode: "number" }),
     /**
+     * **WHAT ARRIVED WEIGHED, AS A TOTAL — never a rate, exactly like
+     * `cost_cents` above.**
+     *
+     * "38 packages, 47.5 lb" is the fact a plant reports and the fact somebody
+     * can check on a scale. The average package weight is DERIVED from it by
+     * `core/weight.ts`, the same way an average cost is derived from
+     * `cost_cents` — storing the rate instead would bake a division and its
+     * rounding into the record rather than into the report.
+     *
+     * **ONLY A RECEIPT EVER CARRIES ONE, and the CHECK below enforces it.** A
+     * receipt is the only movement that measures anything; a transfer moves a
+     * box without re-weighing it, and an issue's pounds are the rate applied to
+     * a quantity. This is the deliberate difference from `cost_cents`, which an
+     * issue DOES stamp: cost is released from a batch and has to be, whereas
+     * weight is a standing property of what is in it.
+     *
+     * **Nullable, and null is ordinary — most items never carry one.** An item
+     * stocked by mass has its weight in `quantity` already, and feed, cartons
+     * and live animals have no package to weigh. Nothing derives a weight it
+     * was not given: see "UNWEIGHED IS NOT ZERO" in the dossier.
+     */
+    weightLb: numeric("weight_lb", {
+      precision: 18,
+      scale: 4,
+      mode: "number",
+    }),
+    /**
      * **WHICH LOT ATE IT.** The join that closes the livestock costing loop.
      *
      * `lot_id` above says where the quantity came FROM — a delivery of feed.
@@ -415,6 +442,23 @@ export const inventoryMovements = pgTable(
     check(
       "inventory_movements_cost_not_negative",
       sql`${t.costCents} is null or ${t.costCents} >= 0`,
+    ),
+    // A weight of nothing is not a measurement, and a negative one is not a
+    // weight. Null is the way to say nobody weighed it.
+    check(
+      "inventory_movements_weight_positive",
+      sql`${t.weightLb} is null or ${t.weightLb} > 0`,
+    ),
+    /**
+     * **A WEIGHT BELONGS TO SOMETHING ARRIVING.** `core/weight.ts` folds only
+     * inbound movements, so a weight on an outbound one would be read by
+     * nothing while looking exactly like a number that meant something — the
+     * failure mode this pack keeps designing against. Enforced here rather than
+     * hoped for in ops, because the ledger is the thing every pack writes to.
+     */
+    check(
+      "inventory_movements_weight_inbound",
+      sql`${t.weightLb} is null or ${t.quantity} > 0`,
     ),
     check(
       "inventory_movements_kind_format",

@@ -75,6 +75,11 @@ function toResult(err: unknown): { error: string } {
         return { error: err.message };
       case "INVALID_COST":
         return { error: "A cost cannot be negative." };
+      // Both weight refusals carry the reason in their own sentence — one is
+      // "not more than nothing" and the other is "only stock arriving is
+      // weighed here", and flattening the two would hide which rule was hit.
+      case "INVALID_WEIGHT":
+        return { error: err.message };
       case "ZERO_QUANTITY":
         return { error: "Enter a quantity other than zero." };
       // Thrown by resolveInventoryAccounts / resolveGrniAccount when the chart
@@ -441,6 +446,9 @@ export async function receiveStockAction(input: unknown) {
       // Cents, and an integer: money that arrives as 12.5 cents is money that
       // has already been divided somewhere it should not have been.
       costCents: z.number().int().min(0).max(1_000_000_000_000).nullable().optional(),
+      // Pounds for the whole delivery, not per package. Fractional on purpose
+      // — a scale reads 47.5 — and `quantity` is what it is divided by.
+      weightLb: quantity.positive().nullable().optional(),
       occurredOn: requiredDate,
       locationAssetId: z.string().uuid().nullable().optional(),
       notes: z.string().max(5000).optional(),
@@ -463,6 +471,7 @@ export async function receiveStockAction(input: unknown) {
       meta: {
         quantity: parsed.data.quantity,
         costCents: parsed.data.costCents ?? null,
+        weightLb: parsed.data.weightLb ?? null,
         lotId: result.lotId,
       },
     });

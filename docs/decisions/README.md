@@ -50,3 +50,4 @@ Keep them short — one page. An ADR nobody reads has failed at its only job.
 | [0013](0013-inventory-tax-treatment.md) | Inventory treatment is a policy, not a property of "cash basis" | 2026-08-21 | Proposed |
 | [0014](0014-migrations-are-applied-before-the-merge.md) | Migrations are applied by hand, before the merge | 2026-08-23 | Accepted |
 | [0015](0015-a-connected-account-belongs-to-a-company.md) | A connected account belongs to a company, not to the client | 2026-08-25 | Accepted |
+| [0016](0016-a-catch-weight-item-is-stocked-in-packages.md) | A catch-weight item is stocked in packages and weighed on arrival | 2026-08-25 | Accepted |

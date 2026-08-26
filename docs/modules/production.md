@@ -77,6 +77,36 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-08-25 — The weight finally reaches the shelf (`claude/what-a-batch-weighs`)
+
+One argument, and the reason it is worth a build-log entry is what it says about
+this pack rather than what it changes in it.
+
+**`production_run_outputs` HAS RECORDED THE PAIR SINCE IT WAS WRITTEN** —
+`quantity` and `weight_lb`, *"38 packages, 47.5 lb"*, with the column's own
+comment explaining that the weight is *"required in practice for anything
+counted, because without it there is no yield to state."* `completeRun` then
+called `receiveStock` with the count and **dropped the weight on the floor**,
+because `inventory` had nowhere to put it. It does now
+([ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md)),
+so the boxes land knowing what they weigh and nobody types a number twice.
+
+**`output.weightLb`, NOT `outputWeightLb(output, item)`.** The derived form falls
+back to converting the quantity for a mass-stocked item — a weight `inventory`
+works out for itself — and passing it would put a redundant second copy of the
+quantity in the ledger. The raw column is the measurement; the derived one is for
+this pack's own yield arithmetic.
+
+A test drives the loop end to end: a run output with a weight completes, and the
+resulting stock's average package weight reads 1.25 lb.
+
+**STILL UNBUILT AND NOW CHEAP:** `RunMeasures` has four fields and
+`MEASURED_BY.package` is null, with the note *"However many packages came back —
+somebody has to count them."* Once outputs are stocked in `pkg` nobody has to —
+the count IS `output.quantity` — so a plant's per-package cutting line could
+total itself instead of being reported as unpriced. Deliberately not in this
+change: it is a fee-engine decision and belongs with the fee engine.
+
 **Slices 0 to 1d are in [production-build-log.md](production-build-log.md)**,
 swept there on 2026-08-23 under the dossier-length rule in `AGENTS.md` — this
 file had reached 1,658 lines and the log was 60% of it. Nothing was superseded

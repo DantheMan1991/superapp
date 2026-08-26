@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SLUG_FORMAT, slugify, uniqueSlug } from "../src/lib/enterprises/slug";
+import {
+  ENTERPRISE_FALLBACK,
+  KIND_FORMAT,
+  enterpriseKindsFrom,
+} from "../src/lib/enterprises/vocabulary";
+import { homesteadFarm } from "../src/industries/homestead-farm";
 
 /**
  * Turning a name into a handle. PURE — no database, so this lives on the `pure`
@@ -92,5 +98,51 @@ describe("uniqueSlug", () => {
     expect(slug.length).toBeLessThanOrEqual(63);
     expect(slug.endsWith("_2")).toBe(true);
     expect(SLUG_FORMAT.test(slug)).toBe(true);
+  });
+});
+
+describe("enterpriseKindsFrom", () => {
+  /**
+   * **A CORE TOOL SPEAKS NO INDUSTRY.** The first version of this subsystem
+   * shipped `["livestock", "crop", "other"]` hard-coded and a form reading
+   * *"Livestock — animals you raise"* — a Layer 0 table telling a law firm what
+   * its lines of business are made of. These tests are the fence.
+   */
+  it("IS EMPTY WITH NO PROFILE, rather than defaulting to an industry", () => {
+    expect(enterpriseKindsFrom(undefined)).toEqual([]);
+    expect(enterpriseKindsFrom({})).toEqual([]);
+    expect(enterpriseKindsFrom(null)).toEqual([]);
+  });
+
+  it("is total against anything the jsonb column can hold", () => {
+    // `tenant_modules.config` has no shape constraint, so every one of these is
+    // reachable and none of them may throw on a page load.
+    expect(enterpriseKindsFrom("nonsense")).toEqual([]);
+    expect(enterpriseKindsFrom(42)).toEqual([]);
+    expect(enterpriseKindsFrom([])).toEqual([]);
+    expect(enterpriseKindsFrom({ kinds: "livestock" })).toEqual([]);
+    expect(enterpriseKindsFrom({ kinds: [1, null, {}] })).toEqual([]);
+  });
+
+  it("drops anything the CHECK would refuse rather than passing it on", () => {
+    // A picker offering a value the database rejects is a form that fails on
+    // submit for a reason nobody can see.
+    expect(enterpriseKindsFrom({ kinds: ["livestock", "Not A Slug", "2crop"] })).toEqual([
+      "livestock",
+    ]);
+  });
+
+  it("reads the farm profile's own list, which is where the farm words live", () => {
+    const kinds = enterpriseKindsFrom(
+      (homesteadFarm.packConfig as Record<string, unknown>).enterprises,
+    );
+    expect(kinds).toEqual(["livestock", "crop"]);
+    for (const k of kinds) expect(KIND_FORMAT.test(k)).toBe(true);
+  });
+
+  it("keeps the farm word OUT of core and IN the profile", () => {
+    // The two halves of the rule, asserted together so neither can drift.
+    expect(ENTERPRISE_FALLBACK).not.toMatch(/enterprise/i);
+    expect(homesteadFarm.labels?.enterprise).toBe("Enterprise");
   });
 });

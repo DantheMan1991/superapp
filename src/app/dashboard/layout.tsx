@@ -10,6 +10,12 @@ import { getActiveModules } from "@/lib/modules";
 import { getMailBadge } from "@/lib/email/badge";
 import { getRenderableFeature } from "@/lib/features";
 import { getIndustryProfile } from "@/industries";
+import { labelFor, resolveLabels } from "@/lib/packs/resolve";
+import {
+  ENTERPRISE_FALLBACK,
+  ENTERPRISE_FALLBACK_PLURAL,
+  ENTERPRISE_LABEL_KEY,
+} from "@/lib/enterprises/vocabulary";
 import { AfterHydration } from "@/components/app/after-hydration";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +26,22 @@ export default async function DashboardLayout({
   children: ReactNode;
 }) {
   const ctx = await requireTenant();
+  /**
+   * Resolved HERE rather than fetched: `ctx.tenant` already carries the
+   * industry and the tenant's own overrides, so the rail's word costs no query.
+   */
+  const enterpriseWord = labelFor(
+    resolveLabels(
+      getIndustryProfile(ctx.tenant.industry)?.labels,
+      ctx.tenant.labels,
+    ),
+    ENTERPRISE_LABEL_KEY,
+    ENTERPRISE_FALLBACK,
+  );
+  const enterprisePlural =
+    enterpriseWord === ENTERPRISE_FALLBACK
+      ? ENTERPRISE_FALLBACK_PLURAL
+      : `${enterpriseWord}s`;
   const [active, admin, mail] = await Promise.all([
     getActiveModules(ctx.tenant.id),
     isSuperAdmin(),
@@ -100,13 +122,16 @@ export default async function DashboardLayout({
           label: "Taking payments",
           icon: "payments",
         },
-        // The lines of business the money is reported against — Broilers,
-        // Beef, Eggs. Under Settings rather than in a module because four
-        // packs name an enterprise and none of them owns it; see
-        // src/db/schema/enterprises.ts.
+        // The parts of the business the money is reported against. Under
+        // Settings rather than in a module because four packs name one and none
+        // of them owns it; see src/db/schema/enterprises.ts.
+        //
+        // **THE WORD COMES FROM THE PROFILE**, like every other renameable noun
+        // in the rail — a core tool speaks no industry, and this one read
+        // "Enterprises" at every tenant until it was fixed.
         {
           href: "/dashboard/settings/enterprises",
-          label: "Enterprises",
+          label: enterprisePlural,
           icon: "wrench",
         },
         {

@@ -1,6 +1,14 @@
 /**
- * **THE ENTERPRISE SPINE.** One row per line of business a tenant runs:
- * Broilers, Beef, Pigs, Eggs, Produce.
+ * **THE LINE-OF-BUSINESS SPINE.** One row per part of a business a tenant wants
+ * the money reported for separately.
+ *
+ * **THE TABLE IS NAMED FOR THE FARM WORD AND THE PRODUCT IS NOT.** `enterprise`
+ * is farm-management vocabulary — the beef enterprise and the dairy enterprise
+ * are the two halves of a herd — and it reads as "a company" to anybody outside
+ * agriculture. The column names stay as they are because renaming a shipped
+ * table earns nothing; **every word a person SEES is resolved from the installed
+ * profile**, with a neutral fallback in `src/lib/enterprises/vocabulary.ts`. A
+ * core tool speaks no industry.
  *
  * **AN ENTERPRISE IS A DIMENSION, NOT AN ENTITY, and that question is already
  * settled elsewhere.** `accounting/core/balances.ts` states the test:
@@ -28,13 +36,13 @@
  *
  * ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────────
  *
- * **No parent, so no hierarchy.** "Poultry → Broilers → Spring flock" is a tree,
- * a tree needs a rolled-up report, and the founder's own list folds layers INTO
- * eggs rather than nesting them (2026-08-26). A flat list is what was asked for
- * and `kind` carries the only grouping anybody wanted.
+ * **No parent, so no hierarchy.** A tree needs a rolled-up report, and the
+ * founder's own list flattened two levels into one rather than nesting them
+ * (2026-08-26). A flat list is what was asked for and `kind` carries the only
+ * grouping anybody wanted.
  *
- * **No budget, no target, no share-of-overhead.** Splitting a mixed market
- * stall's fee across the enterprises that sold there is a real and defensible
+ * **No budget, no target, no share-of-overhead.** Splitting a shared cost
+ * across the lines of business that incurred it is a real and defensible
  * allocation — and allocations are their own topic with their own decision to
  * make. Unassigned is the honest answer until then, and the P&L already renders
  * a column for it.
@@ -72,9 +80,13 @@ export const enterprises = pgTable(
      */
     slug: text("slug").notNull(),
     /**
-     * Open taxonomy (P1): 'livestock', 'crop', 'other'. FORMAT constrained,
-     * values never — the arrangement `inventory_items.kind` and `assets.kind`
-     * both use, so a farm with a woodlot or a guest cottage needs no migration.
+     * Open taxonomy (P1). FORMAT constrained, values never — the arrangement
+     * `inventory_items.kind` and `assets.kind` both use.
+     *
+     * **THE SUGGESTIONS COME FROM THE INSTALLED PROFILE AND NEVER FROM HERE.**
+     * A default of `['livestock', 'crop']` in core would be a Layer 0 table
+     * asserting what industry its tenant is in, which is the boundary ADR 0004
+     * draws. See `enterpriseKindsFrom`.
      *
      * It is the ONLY grouping this table carries, and it is deliberately weak:
      * see the header on why there is no parent.

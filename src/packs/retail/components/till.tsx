@@ -87,6 +87,11 @@ function totalledLine(b: Basket) {
   };
 }
 
+/** Priced by the pound, with nothing on the scale yet. Cannot be sold or totalled. */
+function isUnweighed(b: Basket): boolean {
+  return b.priceBasis === "lb" && b.weightLb === null;
+}
+
 /** The stamped total for a weighed line, or null when the line is not one. */
 function weighedTotal(b: Basket): number | null {
   if (b.priceBasis !== "lb") return null;
@@ -177,14 +182,24 @@ export function Till({
   );
 
 
-  const totalCents = saleTotalCents(basket.map(totalledLine));
   /**
-   * **A WEIGHED LINE NOBODY HAS WEIGHED CANNOT BE SOLD**, and the button says so
-   * rather than posting a line the server would refuse. The basket keeps the
-   * line — somebody is standing at the scale with it.
+   * **A WEIGHED LINE NOBODY HAS WEIGHED CANNOT BE SOLD**, and it must not be
+   * TOTALLED either. The basket keeps the line — somebody is standing at the
+   * scale with it.
    */
-  const unweighed = basket.filter(
-    (b) => b.priceBasis === "lb" && b.weightLb === null,
+  const unweighed = basket.filter(isUnweighed);
+  /**
+   * **THE UNWEIGHED LINE IS LEFT OUT OF THE TOTAL, AND LEAVING IT IN WAS A REAL
+   * BUG.** `lineTotalCents` falls back to quantity × price when no total is
+   * stamped — correct for a unit line, and for a `'lb'` line it is one package
+   * at a per-POUND rate. A basket holding one unweighed package of $8.00/lb
+   * beef read **$8.00**, which is a plausible-looking number, is not what the
+   * customer will pay, and is precisely the per-package-at-a-per-pound-rate
+   * mistake this whole slice is built to prevent. Found by standing at the
+   * screen; every test passed over it.
+   */
+  const totalCents = saleTotalCents(
+    basket.filter((b) => !isUnweighed(b)).map(totalledLine),
   );
 
   function add(line: TillLine) {
@@ -391,7 +406,7 @@ export function Till({
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium">{b.itemName}</span>
                     <span className="text-sm tabular-nums">
-                      {b.priceBasis === "lb" && b.weightLb === null ? (
+                      {isUnweighed(b) ? (
                         <span className="text-muted-foreground">weigh it</span>
                       ) : (
                         formatMoney(lineTotalCents(totalledLine(b)), currencySymbol)
@@ -507,6 +522,14 @@ export function Till({
               {formatMoney(totalCents, currencySymbol)}
             </span>
           </div>
+          {unweighed.length > 0 && (
+            // The total is not wrong, it is INCOMPLETE, and the difference has
+            // to be on the screen rather than only in a toast after a tap.
+            <p className="-mt-2 text-xs text-muted-foreground">
+              Not counting {unweighed.map((b) => b.itemName).join(", ")} — still
+              on the scale.
+            </p>
+          )}
 
           <div className="grid gap-2">
             <Label htmlFor="payment">Paid by</Label>
@@ -527,7 +550,11 @@ export function Till({
           <Button
             className="w-full"
             onClick={take}
-            disabled={pending || basket.length === 0}
+            // Disabled rather than erroring on tap: the reason is already on
+            // the screen above, and a dead button beside it reads as the same
+            // sentence. `take` keeps its own guard for anything that reaches it
+            // another way.
+            disabled={pending || basket.length === 0 || unweighed.length > 0}
           >
             {pending ? "Taking…" : "Take payment"}
           </Button>

@@ -105,9 +105,37 @@ Three things the screens had to say that they did not:
 3. **The sales list prints the pounds.** Otherwise the row reads "1 package at
    $8.00" beside a sale that took $9.60 and looks like a mistake.
 
-**A weighed line with no weight cannot be sold**, and the button says which item
-to weigh rather than posting something the server would refuse. The basket keeps
-the line — somebody is standing at the scale with it.
+**A weighed line with no weight cannot be sold, AND MUST NOT BE TOTALLED — and
+the second half was a real bug that only clicking found.** `lineTotalCents`
+falls back to quantity × price when no total is stamped, which is correct for a
+unit line and, for a `'lb'` line, is one package at a per-POUND rate. A basket
+holding one unweighed package of $8.00/lb beef read **$8.00** — plausible, not
+what the customer will pay, and **precisely the per-package-at-a-per-pound-rate
+mistake this whole slice exists to prevent**, sitting in the one place nothing
+guarded. Every test passed over it, because every test handed the fold a line
+that was already weighed.
+
+Unweighed lines are now left out of the total, the panel says which ones
+(*"Not counting Ground beef 1 lb packs — still on the scale"*), and the button
+is disabled rather than erroring on tap: the reason is already on screen, and a
+dead button beside it reads as the same sentence. `take` keeps its own guard for
+anything that reaches it another way.
+
+**Driven at the screen, on the dev branch's Hilltop Farm**, which is what found
+the above. $8.00 per pound set on Ground beef 1 lb packs; 12 packages loaded
+(the load dialog reading "about 18.125 lb"); the truck tile reading `$8.00/lb`
+beside Whole broilers' plain `$5.50`; then 3 packages at 3.7 lb ringing up at
+**$29.60** — the ADR's worked example, to the cent. The truck went from 12 to
+**9 packages**, takings to $29.60, margin from −$53.00 to −$23.40, the tin to
+$129.60 expected. The stored row is `quantity 3.0000 · unit_price_cents 800 ·
+weight_lb 3.7000 · line_total_cents 2960`, and the sales list prints *"3 packages
+Ground beef 1 lb packs · 3.7 lb at $8.00/lb"*.
+
+**A NOTE FOR WHOEVER DRIVES THIS NEXT:** the local Clerk session reverts its
+active organisation between a page load and a server action, so a write executes
+against the wrong tenant and the page 404s. Calling `Clerk.setActive` immediately
+before the click — in the same script, with a short wait — is what makes it land.
+This has now cost time in three separate sessions.
 
 Migration `0213`: one column on `retail_prices`, two on `retail_sale_lines`, four
 CHECKs. No new table, no RLS migration. Applied to dev and to production before

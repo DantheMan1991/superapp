@@ -30,12 +30,116 @@ Rows are listed in build order; the numbers are left alone because the build log
 | 2 | Payment adapter — read (settlements, fees → books) | after 5 — needs a payment to have happened |
 | 1b | Offline: service worker, durable queue, flush on reconnect | deferred — robustness, not a blocker. See Open items |
 | 3 | Commitments: reservations, deposits, hanging-weight final invoice, fulfilment point — needs `production` | |
-| 8 | **Selling by the pound** — `retail_prices.price_basis`, `weight_lb` and `line_total_cents` on the sale line, a weigh box on the till. [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md); `inventory` slices 6a and 6b are both shipped | |
+| **8** | **Selling by the pound** — `retail_prices.price_basis`, `weight_lb` and `line_total_cents` on the sale line, a weigh box on the till. [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md) | **shipped 2026-08-25** |
 | 4 | Farm store, attended and count-derived | |
 | 6 | Online orders + pickup windows | |
 | 7 | Shipping (costed), then wholesale (eligibility becomes load-bearing) | |
 
 ## Build log
+
+### 2026-08-25 — The till weighs a package (`claude/the-till-weighs-a-package`)
+
+Slice 8, and the last of the three [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md)
+cut into. `inventory` made meat a package with a weight; this is where a
+customer pays for the pounds.
+
+**THE INVARIANT THE WHOLE SLICE IS ABOUT: the MONEY comes from the scale and
+the STOCK comes from the package count, and neither is derived from the other.**
+Three packages weighed together at 3.7 lb is one line — quantity 3, weight 3.7,
+$29.60 — and it takes **three packages** off the truck.
+
+**`retail_sale_lines.quantity` STILL MEANS PACKAGES, and that was the constraint
+every other decision had to fit around.** It is the number that issues the
+movement and the number `soldByItem`/`remainingOnTruck` count the truck down by.
+Putting the weight in `quantity` and letting the existing arithmetic multiply is
+very tempting — 3.7 × 800 is exactly 2960, no branch, no new column — and it
+makes the till count 3.7 packages off a truck holding 12.
+
+**THE MONEY IS RECORDED RATHER THAN RECONSTRUCTED, and one worked example is the
+entire argument.** 3 packages, 3.7 lb, $8.00 a pound is $29.60. There is no
+per-package price that reproduces it: $29.60 over three is $9.8667, which rounds
+to $9.87 and multiplies back to $29.61. **A till that is a cent wrong in front of
+the customer holding the note is the failure `core/till.ts` exists to prevent**,
+so `line_total_cents` is stamped and read straight back.
+
+**IT IS ONE BRANCH IN `lineTotalCents`, IN THE FILE EVERY CUSTOMER-FACING NUMBER
+COMES FROM.** A stamped total wins; everything else takes the path it always
+took and produces the number it always produced. One branch rather than a second
+function, so the receipt and the day-end report cannot drift by taking different
+ones — and `!== null` rather than `??`, because a stamped **zero** is a free
+weighed line and `??` would fold it back to the derived branch and charge for a
+giveaway. There is a test on exactly that.
+
+**THREE PLACES TOTAL A SALE AND THEY NOW SHARE ONE ADAPTER.** The idempotent
+replay, the fresh post and the day's list each built their own object literal for
+the fold; three literals is how one of them quietly forgets the stamped total and
+starts pricing weighed lines per package at a per-pound rate. `asTotalled` is the
+only one, and the replay path has its own test because it folds STORED rows
+rather than the input.
+
+**THE PAIR IS REFUSED IN BOTH DIRECTIONS, and the second direction is the one
+that matters.** A weight with no total falls into the derived branch and prices
+the line per PACKAGE at a per-POUND rate — silently, and low. The table CHECKs
+that one (`retail_sale_lines_weighed_has_total`). A total with no weight is
+arithmetic stored twice, which only `recordSale` can refuse, and it does.
+
+**PER-POUND IS REFUSED FOR AN ITEM STOCKED BY MASS.** The quantity already IS the
+weight there, so the two bases mean the same thing and the till would ask
+somebody to weigh a number they had just typed. The picker is hidden on the price
+form rather than offered and then refused.
+
+**A BASIS CHANGE IS A NEW ROW, like any other price change** — *"we used to sell
+it by the package at $9, now by the pound at $8"* is a fact a margin report reads
+back, so `price_basis` sits on the effective-dated row and not on the item.
+
+Three things the screens had to say that they did not:
+
+1. **The truck tile shows `/lb`.** Without it a tile reads "$8.00" for a package
+   that rings up at $9.60 — the one place somebody at a stall notices too late.
+2. **The basket has two shapes**, because they are two different sales. A unit
+   line is quantity × price and reads exactly as it always has. A weighed line is
+   a count, a scale reading, and money worked out from the two — and the money is
+   the editable box there, because *two for twenty* on a weighed line is a total
+   and not a rate. Changing the weight clears a typed total, since a haggled
+   figure belongs to what was on the scale at the time.
+3. **The sales list prints the pounds.** Otherwise the row reads "1 package at
+   $8.00" beside a sale that took $9.60 and looks like a mistake.
+
+**A weighed line with no weight cannot be sold, AND MUST NOT BE TOTALLED — and
+the second half was a real bug that only clicking found.** `lineTotalCents`
+falls back to quantity × price when no total is stamped, which is correct for a
+unit line and, for a `'lb'` line, is one package at a per-POUND rate. A basket
+holding one unweighed package of $8.00/lb beef read **$8.00** — plausible, not
+what the customer will pay, and **precisely the per-package-at-a-per-pound-rate
+mistake this whole slice exists to prevent**, sitting in the one place nothing
+guarded. Every test passed over it, because every test handed the fold a line
+that was already weighed.
+
+Unweighed lines are now left out of the total, the panel says which ones
+(*"Not counting Ground beef 1 lb packs — still on the scale"*), and the button
+is disabled rather than erroring on tap: the reason is already on screen, and a
+dead button beside it reads as the same sentence. `take` keeps its own guard for
+anything that reaches it another way.
+
+**Driven at the screen, on the dev branch's Hilltop Farm**, which is what found
+the above. $8.00 per pound set on Ground beef 1 lb packs; 12 packages loaded
+(the load dialog reading "about 18.125 lb"); the truck tile reading `$8.00/lb`
+beside Whole broilers' plain `$5.50`; then 3 packages at 3.7 lb ringing up at
+**$29.60** — the ADR's worked example, to the cent. The truck went from 12 to
+**9 packages**, takings to $29.60, margin from −$53.00 to −$23.40, the tin to
+$129.60 expected. The stored row is `quantity 3.0000 · unit_price_cents 800 ·
+weight_lb 3.7000 · line_total_cents 2960`, and the sales list prints *"3 packages
+Ground beef 1 lb packs · 3.7 lb at $8.00/lb"*.
+
+**A NOTE FOR WHOEVER DRIVES THIS NEXT:** the local Clerk session reverts its
+active organisation between a page load and a server action, so a write executes
+against the wrong tenant and the page 404s. Calling `Clerk.setActive` immediately
+before the click — in the same script, with a short wait — is what makes it land.
+This has now cost time in three separate sessions.
+
+Migration `0213`: one column on `retail_prices`, two on `retail_sale_lines`, four
+CHECKs. No new table, no RLS migration. Applied to dev and to production before
+the merge, per [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
 
 ### 2026-08-25 — What is on the truck, in pounds (`claude/what-a-batch-weighs`)
 
@@ -392,10 +496,10 @@ the link. The link goes on the thing it opens.
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `retail_channels` | **Where the business sells** — a stall, the gate, a shop, a wholesale account | `tenant_id`, FORCE RLS. `channel_kind` open taxonomy (P1), values from the profile. `location` is FREE TEXT and deliberately not an asset: the farm does not own the square its stall stands on |
-| `retail_prices` | **What one item costs in one channel, from one day** | Composite FKs to the channel (CASCADE) and the item. UNIQUE on (channel, item, `effective_from`) — two prices starting the same morning is a question, not a change. No `effective_to`. CHECK: not negative |
+| `retail_prices` | **What one item costs in one channel, from one day** | Composite FKs to the channel (CASCADE) and the item. UNIQUE on (channel, item, `effective_from`) — two prices starting the same morning is a question, not a change. No `effective_to`. CHECK: not negative. **`price_basis` (`'unit'`\|`'lb'`, default `'unit'`) says what the figure is PER** — part of the price, so a basis change is a new row like any other, and `'lb'` is refused for an item stocked by mass |
 | `retail_market_days` | **A day of selling, what it cost to stand there, and the two ends of the cash tin** | Composite FK to the channel. `crew_size` and `hours` are recorded and **not costed**. `opening_float_cents` / `cash_counted_cents` arrived with the till. Deliberately NOT unique on (channel, day): a morning market and an evening one are two days of standing there |
 | `retail_sales` | **A sale.** Somebody paid and took it away | Composite FKs to the channel, the day (nullable) and the location. **`client_ref` UNIQUE per tenant — the column that makes a retry safe.** Nullable, and multiple nulls are fine: a server-side sale has no till behind it. No customer column — a cash buyer is anonymous, and named buyers arrive with commitments in slice 3 on the CRM party spine |
-| `retail_sale_lines` | One thing sold, at the price actually charged | Composite FKs to the sale (CASCADE), item, lot and **the issue that took it off the truck** (NOT NULL — revenue with nothing behind it is not revenue). UNIQUE per movement. `unit_price_cents` is stamped, never re-derived |
+| `retail_sale_lines` | One thing sold, at the price actually charged | Composite FKs to the sale (CASCADE), item, lot and **the issue that took it off the truck** (NOT NULL — revenue with nothing behind it is not revenue). UNIQUE per movement. `unit_price_cents` is stamped, never re-derived — **per stocking unit, or per POUND when `weight_lb` is set**. `weight_lb` is what was on the scale and `line_total_cents` is the money it came to; CHECKed as a pair, and **`quantity` still means PACKAGES** because it is what issues the movement |
 | `retail_stockouts` | **Ran out of something, at a time** | Composite FKs to the day (CASCADE) and the item. UNIQUE per item per day. The only record anywhere of revenue that was NOT taken |
 
 **Everything else lives in a pack this one requires:**
@@ -439,6 +543,28 @@ guard with nothing to read.
   `tests/isolation/retail.test.ts`
 
 ## Decisions & gotchas
+
+- **`retail_sale_lines.quantity` MEANS PACKAGES, ON EVERY LINE, INCLUDING A
+  WEIGHED ONE.** It issues the movement and it is what `soldByItem` /
+  `remainingOnTruck` count the truck down by. Putting a weight in it is the
+  tempting shortcut — 3.7 × 800 is exactly $29.60 with no branch and no new
+  column — and it makes the till take 3.7 packages off a truck holding 12.
+- **A STAMPED `line_total_cents` WINS IN `lineTotalCents`, AND THE TEST IS
+  `!== null` RATHER THAN `??`.** A stamped **zero** is a free weighed line; `??`
+  would fold it back to the derived branch and charge for a giveaway. There is a
+  test pinning it.
+- **THREE PLACES TOTAL A SALE AND THEY MUST SHARE `asTotalled`.** The idempotent
+  replay, the fresh post and the day's list. Three hand-written object literals
+  is how one of them forgets the stamped total and starts pricing weighed lines
+  per package at a per-pound rate — and the replay path is the likeliest, because
+  it folds STORED rows rather than the input it was handed.
+- **A WEIGHT AND A TOTAL ARE A PAIR, REFUSED IN BOTH DIRECTIONS.** A weight with
+  no total is priced per PACKAGE at a per-POUND rate, silently and low (the table
+  CHECKs it). A total with no weight is arithmetic stored twice (only
+  `recordSale` can refuse that one).
+- **`price_basis = 'lb'` IS REFUSED FOR AN ITEM STOCKED BY MASS.** There the
+  quantity already IS the weight, so both bases mean the same thing and the till
+  would ask somebody to weigh a number they had just typed.
 
 - **A MARKET DAY IS OPENED AND THEN CLOSED, AND THE TWO FORMS MUST NOT MERGE
   BACK.** "Start a market day" collects only what is knowable at the start; the

@@ -16,6 +16,12 @@
 export interface SaleLineLike {
   quantity: number;
   unitPriceCents: number;
+  /**
+   * The money, STAMPED, for a line whose total cannot be derived — which today
+   * means a line sold by weight. Null or absent on every other line, including
+   * every line written before catch weight existed.
+   */
+  totalCents?: number | null;
 }
 
 /**
@@ -25,9 +31,44 @@ export interface SaleLineLike {
  * charges $12.93. The half-cent goes up, which is the ordinary retail
  * convention and — unlike banker's rounding — is what a person doing it in
  * their head will also get.
+ *
+ * **THE STAMPED TOTAL WINS, AND IT IS ONE BRANCH ON PURPOSE.** A weighed line
+ * is 3 packages at 3.7 lb and $8.00 a pound: $29.60 exactly. There is no
+ * per-package price that reproduces it — $29.60 over three packages is $9.8667,
+ * which rounds to $9.87 and multiplies back to $29.61 — so the money is
+ * recorded rather than reconstructed, and this reads it. **A till that is a
+ * cent wrong in front of the customer holding the note is the failure this
+ * whole file exists to prevent.**
+ *
+ * Every line without a stamped total takes the original path and produces the
+ * same number it always did. That is why the branch is here rather than a
+ * second function: one place still answers "what does this line come to", and
+ * the day-end report cannot drift from the receipt by taking the other one.
  */
 export function lineTotalCents(line: SaleLineLike): number {
+  if (line.totalCents !== undefined && line.totalCents !== null) {
+    return line.totalCents;
+  }
   return Math.round(line.quantity * line.unitPriceCents);
+}
+
+/**
+ * What a WEIGHED line comes to before anybody haggles it.
+ *
+ * **HERE RATHER THAN IN THE TILL COMPONENT**, because this file's premise is
+ * that the number a customer sees and the number a report sees come from one
+ * place. The till shows this while somebody types on the scale, the same
+ * figure is stamped into `retail_sale_lines.line_total_cents`, and
+ * `lineTotalCents` reads it straight back — so the receipt, the day's takings
+ * and the ledger cannot round differently from each other.
+ *
+ * The rate is per POUND here, not per stocking unit. 3.7 lb at $8.00 is $29.60.
+ */
+export function weighedLineCents(
+  weightLb: number,
+  ratePerLbCents: number,
+): number {
+  return Math.round(weightLb * ratePerLbCents);
 }
 
 /** The sale: the sum of ROUNDED lines, never a rounded sum. */

@@ -20,7 +20,8 @@ import {
   type InventoryCtx,
   type LocationStockLine,
 } from "@/packs/inventory/ops";
-import { isValidSlug } from "./vocabulary";
+import { getUnit } from "@/packs/inventory/core/units";
+import { isPriceBasis, isValidSlug } from "./vocabulary";
 import {
   marketDayCost,
   nextPrice,
@@ -222,6 +223,8 @@ export async function setPrice(
     channelId: string;
     itemId: string;
     priceCents: number;
+    /** `'unit'` (the default) or `'lb'`. See the column and ADR 0016. */
+    priceBasis?: string;
     effectiveFrom: string;
     notes?: string;
   },
@@ -245,6 +248,24 @@ export async function setPrice(
     throw new RetailError("INVALID_PRICE", "a price cannot be negative");
   }
 
+  const priceBasis = (input.priceBasis ?? "unit").trim().toLowerCase();
+  if (!isPriceBasis(priceBasis)) {
+    throw new RetailError("INVALID_PRICE", `unknown price basis: ${input.priceBasis}`);
+  }
+  /**
+   * **PER POUND IS REFUSED FOR SOMETHING ALREADY MEASURED IN POUNDS**, and the
+   * refusal is what keeps the two bases from meaning the same thing. For an
+   * item stocked by mass the quantity IS the weight, so `'lb'` would send the
+   * till asking somebody to weigh a number they had just typed — two entries
+   * for one fact, which is how they come to disagree.
+   */
+  if (priceBasis === "lb" && getUnit(item.stockingUnit)?.dimension === "mass") {
+    throw new RetailError(
+      "INVALID_PRICE",
+      `${item.name} is already counted in ${item.stockingUnit}, so a price here is a price per pound. Per-pound pricing is for things counted in packages, head or dozens.`,
+    );
+  }
+
   const existing = await tx.query.retailPrices.findFirst({
     where: and(
       eq(schema.retailPrices.tenantId, ctx.tenantId),
@@ -256,7 +277,11 @@ export async function setPrice(
   if (existing) {
     const rows = await tx
       .update(schema.retailPrices)
-      .set({ priceCents, notes: input.notes?.trim() ?? existing.notes })
+      .set({
+        priceCents,
+        priceBasis,
+        notes: input.notes?.trim() ?? existing.notes,
+      })
       .where(
         and(
           eq(schema.retailPrices.tenantId, ctx.tenantId),
@@ -274,6 +299,7 @@ export async function setPrice(
       channelId: input.channelId,
       itemId: input.itemId,
       priceCents,
+      priceBasis,
       effectiveFrom: input.effectiveFrom,
       notes: input.notes?.trim() ?? "",
     })
@@ -498,10 +524,44 @@ export async function truckStock(
 export interface SaleLineInput {
   itemId: string;
   lotId?: string | null;
+  /**
+   * **IN THE ITEM'S STOCKING UNIT, AND THIS IS WHAT ISSUES THE STOCK** — even
+   * on a weighed line. Three packages weighed together are quantity 3.
+   */
   quantity: number;
-  /** What was actually charged, per stocking unit. Stamped, never looked up. */
+  /**
+   * What was actually charged, per stocking unit — or per POUND when `weightLb`
+   * is given. Stamped, never looked up.
+   */
   unitPriceCents: number;
+  /** What was on the scale. Null for anything sold by the package. */
+  weightLb?: number | null;
+  /**
+   * The money for this line, required when `weightLb` is given and refused
+   * otherwise: a line whose total IS quantity × price must not carry a second
+   * copy of it. See the column comment and `core/till.ts`.
+   */
+  lineTotalCents?: number | null;
 }
+
+/**
+ * A stored line, as the arithmetic sees it.
+ *
+ * **ONE ADAPTER, USED BY ALL THREE CALLERS.** The three places that total a
+ * sale — the idempotent replay, the fresh post and the day's list — must agree
+ * to the cent forever, and three hand-written object literals is how one of
+ * them quietly forgets the stamped total and starts pricing weighed lines per
+ * package at a per-pound rate.
+ */
+const asTotalled = (line: {
+  quantity: number;
+  unitPriceCents: number;
+  lineTotalCents: number | null;
+}) => ({
+  quantity: line.quantity,
+  unitPriceCents: line.unitPriceCents,
+  totalCents: line.lineTotalCents,
+});
 
 export interface RecordSaleInput {
   /**
@@ -569,12 +629,7 @@ export async function recordSale(
       return {
         sale: existing,
         lines,
-        totalCents: saleTotalCents(
-          lines.map((l) => ({
-            quantity: l.quantity,
-            unitPriceCents: l.unitPriceCents,
-          })),
-        ),
+        totalCents: saleTotalCents(lines.map(asTotalled)),
         alreadyPosted: true,
       };
     }
@@ -598,6 +653,36 @@ export async function recordSale(
     }
     if (line.unitPriceCents < 0) {
       // Free is a real line. A refund is its own sale rather than a negative one.
+      throw new RetailError("INVALID_PRICE", "a price cannot be negative");
+    }
+    /**
+     * **THE WEIGHED-LINE PAIR IS CHECKED BOTH WAYS, and the second direction is
+     * the one that matters.** A weight without a total falls into
+     * `lineTotalCents`'s derived branch and would price the line per PACKAGE at
+     * a per-POUND rate — silently, and low. A total without a weight is a
+     * second copy of arithmetic that must then agree with it forever. The
+     * table CHECKs the first; only this can refuse the second, and both are
+     * said in a sentence rather than delivered as a constraint violation.
+     */
+    const weighed = line.weightLb !== undefined && line.weightLb !== null;
+    const totalled =
+      line.lineTotalCents !== undefined && line.lineTotalCents !== null;
+    if (weighed && line.weightLb! <= 0) {
+      throw new RetailError("SALE_INVALID", "a weight has to be more than nothing");
+    }
+    if (weighed && !totalled) {
+      throw new RetailError(
+        "SALE_INVALID",
+        "a line sold by weight has to say what it came to — the money cannot be worked back out of a per-pound rate without losing a cent",
+      );
+    }
+    if (totalled && !weighed) {
+      throw new RetailError(
+        "SALE_INVALID",
+        "only a line sold by weight carries its own total; everything else is the quantity times the price",
+      );
+    }
+    if (totalled && line.lineTotalCents! < 0) {
       throw new RetailError("INVALID_PRICE", "a price cannot be negative");
     }
     const item = await getItem(tx, ctx.tenantId, line.itemId);
@@ -643,6 +728,11 @@ export async function recordSale(
         lotId: line.lotId ?? null,
         quantity: line.quantity,
         unitPriceCents: Math.round(line.unitPriceCents),
+        weightLb: line.weightLb ?? null,
+        lineTotalCents:
+          line.lineTotalCents === undefined || line.lineTotalCents === null
+            ? null
+            : Math.round(line.lineTotalCents),
         inventoryMovementId: movement.id,
       })
       .returning();
@@ -652,9 +742,7 @@ export async function recordSale(
   return {
     sale,
     lines,
-    totalCents: saleTotalCents(
-      lines.map((l) => ({ quantity: l.quantity, unitPriceCents: l.unitPriceCents })),
-    ),
+    totalCents: saleTotalCents(lines.map(asTotalled)),
     alreadyPosted: false,
   };
 }
@@ -844,12 +932,7 @@ export async function salesForDay(
     return {
       sale,
       lines,
-      totalCents: saleTotalCents(
-        lines.map((l) => ({
-          quantity: l.quantity,
-          unitPriceCents: l.unitPriceCents,
-        })),
-      ),
+      totalCents: saleTotalCents(lines.map(asTotalled)),
     };
   });
 }

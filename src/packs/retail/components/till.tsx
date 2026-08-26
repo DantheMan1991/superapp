@@ -22,6 +22,7 @@ import {
   saleTotalCents,
   soldByItem,
   unconfirmedSales,
+  weighedLineCents,
 } from "../core/till";
 
 /** What the till can sell: a truck line, with the channel's price attached. */
@@ -35,6 +36,11 @@ export interface TillLine {
   onHand: number;
   /** The channel's price today, or null when nobody has priced it here. */
   priceCents: number | null;
+  /**
+   * `'unit'` or `'lb'` — what `priceCents` is per. `'lb'` is what makes the
+   * till ask for a weight. See ADR 0016.
+   */
+  priceBasis: string;
 }
 
 interface Basket {
@@ -43,8 +49,55 @@ interface Basket {
   itemName: string;
   unit: string;
   lotId: string | null;
+  /**
+   * **PACKAGES, ALWAYS — even on a weighed line.** It is what leaves the truck
+   * and what the local countdown subtracts. Three packages weighed together
+   * are one line at quantity 3.
+   */
   quantity: number;
+  /** Per stocking unit, or per POUND when `priceBasis` is `'lb'`. */
   unitPriceCents: number;
+  priceBasis: string;
+  /** What the scale said. Null until somebody types it, on a `'lb'` line. */
+  weightLb: number | null;
+  /**
+   * The money, when somebody typed it over the computed figure.
+   *
+   * Null means "work it out from the weight and the rate". **Cleared whenever
+   * the weight changes**, because a haggled total belongs to the thing that was
+   * on the scale at the time, and silently keeping it against a new weight is
+   * how a till charges for something it is not holding.
+   */
+  totalOverrideCents: number | null;
+}
+
+/**
+ * What a basket line comes to, in the shape the shared arithmetic wants.
+ *
+ * **ONE PLACE, so the receipt cannot disagree with the day-end report.** A
+ * unit line has no total and takes `lineTotalCents`'s derived path exactly as
+ * it always did; a weighed line carries one, computed by `weighedLineCents` or
+ * typed over it.
+ */
+function totalledLine(b: Basket) {
+  return {
+    quantity: b.quantity,
+    unitPriceCents: b.unitPriceCents,
+    totalCents: weighedTotal(b),
+  };
+}
+
+/** Priced by the pound, with nothing on the scale yet. Cannot be sold or totalled. */
+function isUnweighed(b: Basket): boolean {
+  return b.priceBasis === "lb" && b.weightLb === null;
+}
+
+/** The stamped total for a weighed line, or null when the line is not one. */
+function weighedTotal(b: Basket): number | null {
+  if (b.priceBasis !== "lb") return null;
+  if (b.totalOverrideCents !== null) return b.totalOverrideCents;
+  if (b.weightLb === null) return null;
+  return weighedLineCents(b.weightLb, b.unitPriceCents);
 }
 
 const PAYMENT_METHODS = [
@@ -129,7 +182,25 @@ export function Till({
   );
 
 
-  const totalCents = saleTotalCents(basket);
+  /**
+   * **A WEIGHED LINE NOBODY HAS WEIGHED CANNOT BE SOLD**, and it must not be
+   * TOTALLED either. The basket keeps the line — somebody is standing at the
+   * scale with it.
+   */
+  const unweighed = basket.filter(isUnweighed);
+  /**
+   * **THE UNWEIGHED LINE IS LEFT OUT OF THE TOTAL, AND LEAVING IT IN WAS A REAL
+   * BUG.** `lineTotalCents` falls back to quantity × price when no total is
+   * stamped — correct for a unit line, and for a `'lb'` line it is one package
+   * at a per-POUND rate. A basket holding one unweighed package of $8.00/lb
+   * beef read **$8.00**, which is a plausible-looking number, is not what the
+   * customer will pay, and is precisely the per-package-at-a-per-pound-rate
+   * mistake this whole slice is built to prevent. Found by standing at the
+   * screen; every test passed over it.
+   */
+  const totalCents = saleTotalCents(
+    basket.filter((b) => !isUnweighed(b)).map(totalledLine),
+  );
 
   function add(line: TillLine) {
     if (line.priceCents === null) {
@@ -154,6 +225,9 @@ export function Till({
           lotId: line.lotId,
           quantity: 1,
           unitPriceCents: line.priceCents!,
+          priceBasis: line.priceBasis,
+          weightLb: null,
+          totalOverrideCents: null,
         },
       ];
     });
@@ -176,8 +250,31 @@ export function Till({
     );
   }
 
+  function setWeight(key: string, weightLb: number | null) {
+    // THE OVERRIDE GOES WITH IT. A total somebody typed belongs to what was on
+    // the scale at the time; carrying it onto a different weight would charge
+    // for something the customer is not holding.
+    setBasket((current) =>
+      current.map((b) =>
+        b.key === key ? { ...b, weightLb, totalOverrideCents: null } : b,
+      ),
+    );
+  }
+
+  function setLineTotal(key: string, cents: number) {
+    setBasket((current) =>
+      current.map((b) => (b.key === key ? { ...b, totalOverrideCents: cents } : b)),
+    );
+  }
+
   function take() {
     if (basket.length === 0) return;
+    if (unweighed.length > 0) {
+      toast.error(
+        `Weigh ${unweighed.map((b) => b.itemName).join(", ")} first — it is priced by the pound.`,
+      );
+      return;
+    }
     // MINTED BEFORE THE NETWORK. This is what makes a retry safe.
     const clientRef = crypto.randomUUID();
     const snapshot = basket;
@@ -193,8 +290,11 @@ export function Till({
         lines: snapshot.map((b) => ({
           itemId: b.itemId,
           lotId: b.lotId,
+          // PACKAGES. This is what issues the stock, weighed or not.
           quantity: b.quantity,
           unitPriceCents: b.unitPriceCents,
+          weightLb: b.weightLb,
+          lineTotalCents: weighedTotal(b),
         })),
       });
       setPending(false);
@@ -270,7 +370,16 @@ export function Till({
                       {line.priceCents === null ? (
                         <span className="text-muted-foreground">no price</span>
                       ) : (
-                        formatMoney(line.priceCents, currencySymbol)
+                        <>
+                          {formatMoney(line.priceCents, currencySymbol)}
+                          {/* Without this the tile reads "$8.00" for a package
+                              that will ring up at $9.60, which is the one place
+                              somebody standing at a stall would notice too
+                              late. */}
+                          {line.priceBasis === "lb" && (
+                            <span className="text-muted-foreground">/lb</span>
+                          )}
+                        </>
                       )}
                     </span>
                   </button>
@@ -297,36 +406,111 @@ export function Till({
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium">{b.itemName}</span>
                     <span className="text-sm tabular-nums">
-                      {formatMoney(lineTotalCents(b), currencySymbol)}
+                      {isUnweighed(b) ? (
+                        <span className="text-muted-foreground">weigh it</span>
+                      ) : (
+                        formatMoney(lineTotalCents(totalledLine(b)), currencySymbol)
+                      )}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.0001"
-                      value={b.quantity}
-                      onChange={(e) =>
-                        setQuantity(b.key, Number(e.target.value))
-                      }
-                      className="h-8"
-                      aria-label={`How many ${b.unit} of ${b.itemName}`}
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      {b.unit} ×
-                    </span>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={(b.unitPriceCents / 100).toFixed(2)}
-                      onChange={(e) =>
-                        setPrice(b.key, Math.round(Number(e.target.value) * 100))
-                      }
-                      className="h-8"
-                      aria-label={`Price per ${b.unit} of ${b.itemName}`}
-                    />
-                  </div>
+                  {/**
+                   * **TWO SHAPES, BECAUSE THEY ARE TWO DIFFERENT SALES.** A
+                   * unit line is quantity × price and reads exactly as it
+                   * always has. A weighed line is a count of packages, a
+                   * reading off the scale, and money worked out from the two —
+                   * so the money is the box that is editable there, because
+                   * *two for twenty* on a weighed line is a total and not a
+                   * rate.
+                   */}
+                  {b.priceBasis === "lb" ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.0001"
+                          value={b.quantity}
+                          onChange={(e) =>
+                            setQuantity(b.key, Number(e.target.value))
+                          }
+                          className="h-8"
+                          aria-label={`How many ${b.unit} of ${b.itemName}`}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {b.unit} ·
+                        </span>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          autoFocus
+                          placeholder="lb"
+                          value={b.weightLb ?? ""}
+                          onChange={(e) =>
+                            setWeight(
+                              b.key,
+                              e.target.value === "" ? null : Number(e.target.value),
+                            )
+                          }
+                          className="h-8"
+                          aria-label={`Weight in pounds of ${b.itemName}`}
+                        />
+                        <span className="text-xs text-muted-foreground">lb</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          at {formatMoney(b.unitPriceCents, currencySymbol)}/lb =
+                        </span>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={
+                            weighedTotal(b) === null
+                              ? ""
+                              : (weighedTotal(b)! / 100).toFixed(2)
+                          }
+                          onChange={(e) =>
+                            setLineTotal(
+                              b.key,
+                              Math.round(Number(e.target.value) * 100),
+                            )
+                          }
+                          className="h-8"
+                          aria-label={`What ${b.itemName} came to`}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.0001"
+                        value={b.quantity}
+                        onChange={(e) =>
+                          setQuantity(b.key, Number(e.target.value))
+                        }
+                        className="h-8"
+                        aria-label={`How many ${b.unit} of ${b.itemName}`}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {b.unit} ×
+                      </span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={(b.unitPriceCents / 100).toFixed(2)}
+                        onChange={(e) =>
+                          setPrice(b.key, Math.round(Number(e.target.value) * 100))
+                        }
+                        className="h-8"
+                        aria-label={`Price per ${b.unit} of ${b.itemName}`}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -338,6 +522,14 @@ export function Till({
               {formatMoney(totalCents, currencySymbol)}
             </span>
           </div>
+          {unweighed.length > 0 && (
+            // The total is not wrong, it is INCOMPLETE, and the difference has
+            // to be on the screen rather than only in a toast after a tap.
+            <p className="-mt-2 text-xs text-muted-foreground">
+              Not counting {unweighed.map((b) => b.itemName).join(", ")} — still
+              on the scale.
+            </p>
+          )}
 
           <div className="grid gap-2">
             <Label htmlFor="payment">Paid by</Label>
@@ -358,7 +550,11 @@ export function Till({
           <Button
             className="w-full"
             onClick={take}
-            disabled={pending || basket.length === 0}
+            // Disabled rather than erroring on tap: the reason is already on
+            // the screen above, and a dead button beside it reads as the same
+            // sentence. `take` keeps its own guard for anything that reaches it
+            // another way.
+            disabled={pending || basket.length === 0 || unweighed.length > 0}
           >
             {pending ? "Taking…" : "Take payment"}
           </Button>

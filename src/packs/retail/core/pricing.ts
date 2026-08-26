@@ -14,6 +14,16 @@ export interface PriceRow {
   id: string;
   itemId: string;
   priceCents: number;
+  /**
+   * `'unit'` or `'lb'` — what `priceCents` is PER.
+   *
+   * **PART OF THE PRICE, NOT AN ANNOTATION ON IT.** $8.00 is two entirely
+   * different amounts of money for a package of beef depending on this, so it
+   * travels with the figure everywhere the figure goes and a basis change is a
+   * new row exactly as a price change is. Optional here only because rows
+   * written before the column default to `'unit'`, which is what they meant.
+   */
+  priceBasis?: string;
   effectiveFrom: string;
 }
 

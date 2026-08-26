@@ -3,7 +3,8 @@
 - **Date:** 2026-08-25
 - **Status:** Accepted
 - **Affects:** Layer 2a `inventory` (the lot spine and the movement ledger),
-  `production` (run outputs), `retail` (slice 8, unbuilt at the time of writing)
+  `production` (run outputs), `retail` (slice 8 — **built 2026-08-25**, the same
+  day this was accepted)
 
 ## Context
 
@@ -69,8 +70,10 @@ recorded on the receipt rather than a conversion applied to the balance.**
   the count and dropping the weight for want of somewhere to put it.
 - Cost per package becomes a more meaningful figure for meat than cost per
   pound, at no cost — the average-cost fold is untouched.
-- It opens `retail`'s slice 8 (a price per pound at the till) without either
-  pack learning anything about the other.
+- It opened `retail`'s slice 8 (a price per pound at the till) without either
+  pack learning anything about the other. **Built the same day**, and the
+  boundary held: `retail` reads `core/units.ts` to decide whether per-pound
+  pricing is even offered, and `inventory` still knows nothing about a price.
 
 **What it costs, honestly.**
 

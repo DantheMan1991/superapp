@@ -33,11 +33,12 @@
  *     the two is an accounting event that must POST. That is where this pack
  *     stops being a tracking app, and it needs the posting machinery rather
  *     than a boolean. Slice 4.
- *   - **Breed as fractions**, inbreeding coefficients, sire performance, trait
- *     scores — genetics, slice 4. `breed` is free text until then, which is a
- *     deliberate placeholder and not the model: a single breed string thrown at
- *     a crossbred herd loses information irrecoverably, so nothing is allowed
- *     to compute on it.
+ *   - **Inbreeding coefficients, sire performance, trait scores** — the rest of
+ *     genetics, slice 4d. **Breed as fractions arrived in slice 4a**, as
+ *     `livestock_breed_parts` plus the dam and sire columns above, and it is
+ *     the one thing here that turned out to need a table rather than a column:
+ *     a single breed string thrown at a deliberately crossbred herd loses the
+ *     answer irrecoverably.
  *   - **A "under withdrawal" flag on the lot.** Slice 3 adds
  *     `livestock_treatments`, and whether a lot is clear is a FOLD over
  *     `treated_on + days`. A stored flag would stop agreeing with its own inputs
@@ -109,15 +110,48 @@ export const livestockLots = pgTable(
      */
     sex: text("sex"),
     /**
-     * FREE TEXT, and temporarily so. Homestead cattle are deliberately
-     * crossbred for hybrid vigour, so "½ Angus, ¼ Hereford, ¼ Simmental" is the
-     * real answer and a single string throws it away irrecoverably. Slice 4
-     * replaces this with composition fractions computed from parents; until
-     * then nothing is allowed to COMPUTE on this column, only display it.
+     * **SUPERSEDED BY `livestock_breed_parts`, AND AWAITING ITS DROP.** Slice 4a
+     * replaced it: a single string thrown at a deliberately crossbred herd
+     * loses "½ Angus, ¼ Hereford, ¼ Simmental" irrecoverably, which is what the
+     * old comment here promised would happen and why nothing was ever allowed
+     * to compute on it.
+     *
+     * NOT DROPPED IN THE SAME PR THAT SUPERSEDED IT, per
+     * [ADR 0014](../../../docs/decisions/0014-migrations-are-applied-before-the-merge.md):
+     * the expand ships, the deploy goes out, and the contract follows as its own
+     * change. Until then the value a tenant typed is still shown — as a note
+     * asking for it again in fractions, because nothing can parse it.
      */
     breed: text("breed").notNull().default(""),
     /** Hatched, farrowed, calved. Null for stock bought at unknown age. */
     bornOn: date("born_on"),
+    /**
+     * **THE DAM AND THE SIRE, AND THEY ARE NOT `inventory_lots.parent_lot_id`.**
+     *
+     * That column is the SPLIT chain — one parent, meaning "this pen came out of
+     * that pen" — and the 2026-08-13 design's line about births being "parented
+     * by the dam" was written before it existed in code. Following it literally
+     * would put two unrelated meanings in one column: a traceability walk would
+     * cross into a pedigree, a pedigree walk would cross into a batch split, and
+     * neither could tell which edge it was standing on. A birth has TWO parents
+     * and is a biological fact; a split has one and is a bookkeeping one.
+     *
+     * Both nullable, because most animals arrive with no parent on file at all
+     * — that is the normal state of purchased stock, not a missing value.
+     *
+     * NO `onDelete` — i.e. RESTRICT, matching the lineage column this one is
+     * careful not to be. A bare composite SET NULL would null `tenant_id` too
+     * (`drizzle/0192`), and CASCADE would let deleting one cow take her
+     * descendants' records with her.
+     *
+     * **A PARENT NEED NOT BE A LOT OF ONE.** Fifty layers are one lot, and
+     * "these chicks came from that flock" is both true and the only pedigree a
+     * flock will ever have. Requiring an individual here would make the whole
+     * mechanism unusable for poultry, which is most of the animals on the pilot
+     * farm.
+     */
+    damLotId: uuid("dam_lot_id"),
+    sireLotId: uuid("sire_lot_id"),
     notes: text("notes").notNull().default(""),
     /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is always safe. */
     metadata: jsonb("metadata").notNull().default({}),
@@ -141,6 +175,21 @@ export const livestockLots = pgTable(
       columns: [t.tenantId, t.inventoryLotId],
       foreignColumns: [inventoryLots.tenantId, inventoryLots.id],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "livestock_lots_dam_fk",
+      columns: [t.tenantId, t.damLotId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+    foreignKey({
+      name: "livestock_lots_sire_fk",
+      columns: [t.tenantId, t.sireLotId],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+    // "Show me her calves" is the read this pack will make most, and it is the
+    // one that walks DOWN the pedigree — the direction the parent columns make
+    // slow without these.
+    index("livestock_lots_tenant_dam_idx").on(t.tenantId, t.damLotId),
+    index("livestock_lots_tenant_sire_idx").on(t.tenantId, t.sireLotId),
     check(
       "livestock_lots_species_format",
       sql`${t.species} ~ '^[a-z][a-z0-9_]{0,62}$'`,
@@ -148,6 +197,18 @@ export const livestockLots = pgTable(
     check(
       "livestock_lots_sex_valid",
       sql`${t.sex} is null or ${t.sex} in ('male', 'female', 'mixed')`,
+    ),
+    // An animal is not its own parent. Longer loops — a dam whose own dam is
+    // her daughter — are refused in the write path, which walks the pedigree; a
+    // CHECK cannot see other rows. Same division of labour as
+    // `inventory_lots_parent_not_self`.
+    check(
+      "livestock_lots_dam_not_self",
+      sql`${t.damLotId} is null or ${t.damLotId} <> ${t.id}`,
+    ),
+    check(
+      "livestock_lots_sire_not_self",
+      sql`${t.sireLotId} is null or ${t.sireLotId} <> ${t.id}`,
     ),
   ],
 );
@@ -780,6 +841,94 @@ export const livestockTreatments = pgTable(
   ],
 );
 
+/**
+ * WHAT AN ANIMAL IS MADE OF — the STATED half, and only the stated half.
+ *
+ * Homestead cattle are crossbred on purpose, for hybrid vigour. "½ Angus, ¼
+ * Hereford, ¼ Simmental" is the real answer to what a cow is, and it is the
+ * answer a `breed` text column throws away the moment it is written down.
+ *
+ * **PARTS, NOT PERCENTAGES, AND THE REASON IS ROUNDING.** A percentage forces a
+ * decision at WRITE time that the person did not make: a three-way foundation
+ * cross is 33 / 33 / 34, and that extra point is the app putting a claim in
+ * somebody's records that they never stated. Parts are integers — 2 : 1 : 1 —
+ * the denominator is their SUM, and combining a dam with a sire is integer
+ * arithmetic over a common denominator. Halving is exact however many
+ * generations deep it goes, which is precisely what a pedigree does.
+ *
+ * **THE RESOLVED COMPOSITION IS NEVER STORED.** What is here is what somebody
+ * TYPED, which is the right answer for foundation and purchased stock where
+ * there are no parents on file. Everything else is computed from the dam and
+ * the sire at read time, by `core/pedigree.ts` — the same rule that keeps the
+ * head count a fold over movements and FCR a fold over weighings. A stored
+ * composition would stop agreeing with its own pedigree the first time somebody
+ * corrected a grandparent.
+ *
+ * **A STATED COMPOSITION BEATS A COMPUTED ONE**, and that is deliberate rather
+ * than a precedence accident: papers in a drawer outrank the app's arithmetic,
+ * and a person who types one is telling the app something it did not know.
+ */
+export const livestockBreedParts = pgTable(
+  "livestock_breed_parts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    /**
+     * Open taxonomy (P1), slug-formatted like `species`: 'angus',
+     * 'red_angus', 'cornish_cross'. **The pack names no breeds** — one that
+     * knew what a Hereford was would know what industry it was in, which is
+     * the boundary ADR 0004 draws. Suggestions come from the profile.
+     */
+    breed: text("breed").notNull(),
+    /**
+     * How many parts of this breed, out of the sum of the row's siblings.
+     * `1` beside a `1` is a half; `2` beside a `1` and a `1` is a half as well,
+     * and the two are the same fact stated differently.
+     */
+    parts: integer("parts").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_breed_parts_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("livestock_breed_parts_tenant_lot_idx").on(t.tenantId, t.livestockLotId),
+    // One row per breed per animal. Two rows for Angus would be one fact
+    // written twice, and which of them the fold used would be arbitrary.
+    uniqueIndex("livestock_breed_parts_tenant_lot_breed_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+      t.breed,
+    ),
+    // "Show me everything with Angus in it" — the read that makes composition
+    // worth storing as rows rather than as a blob.
+    index("livestock_breed_parts_tenant_breed_idx").on(t.tenantId, t.breed),
+    foreignKey({
+      name: "livestock_breed_parts_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    check(
+      "livestock_breed_parts_breed_format",
+      sql`${t.breed} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    // Zero parts of something is not a component of anything, and a negative
+    // one is not a quantity. The upper bound is a typo guard: nobody states a
+    // cross in ten-thousandths, and an integer overflow in the fold is a
+    // stranger bug to find than a refused number.
+    check(
+      "livestock_breed_parts_parts_valid",
+      sql`${t.parts} > 0 and ${t.parts} <= 10000`,
+    ),
+  ],
+);
+
 export type LivestockLot = typeof livestockLots.$inferSelect;
 export type NewLivestockLot = typeof livestockLots.$inferInsert;
 export type LivestockIdentifier = typeof livestockIdentifiers.$inferSelect;
@@ -790,3 +939,4 @@ export type LivestockFeedGroupMember =
 export type LivestockFeedDraw = typeof livestockFeedDraws.$inferSelect;
 export type LivestockWeight = typeof livestockWeights.$inferSelect;
 export type LivestockTreatment = typeof livestockTreatments.$inferSelect;
+export type LivestockBreedPart = typeof livestockBreedParts.$inferSelect;

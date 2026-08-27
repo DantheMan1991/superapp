@@ -18,8 +18,14 @@ import {
   toWeighIns,
   withdrawalByLot,
   checksOn,
+  breedPartsByLot,
+  compositionFor,
   createLivestockLot,
   farmSnapshot,
+  offspringOf,
+  recordBirth,
+  setBreedParts,
+  setParents,
   getLivestockLot,
   lastCheckedByLot,
   listChecksForLot,
@@ -60,6 +66,8 @@ import {
   restByZone,
 } from "../src/packs/land/ops";
 import { summariseHead, mortalityRate } from "../src/packs/livestock/core/herd";
+import { formatComposition } from "../src/packs/livestock/core/pedigree";
+import { slugLabel } from "../src/packs/inventory/vocabulary";
 import { gainBetween } from "../src/packs/livestock/core/weights";
 import { formatSnapshot } from "../src/packs/livestock/core/digest";
 
@@ -166,8 +174,10 @@ d("livestock ops", () => {
 
     // ...livestock owns only the biology...
     expect(lot.species).toBe("poultry");
-    expect(lot.breed).toBe("Cornish Cross");
     expect(lot.inventoryLotId).toBe(inventoryLotId);
+    // Breed is `livestock_breed_parts` since slice 4a — one breed on create is
+    // the whole animal, and the superseded text column is left alone.
+    expect(lot.breed).toBe("");
 
     // ...and the cost object came from inventory, not from here. Livestock
     // never touches dimension_members.
@@ -400,8 +410,10 @@ d("livestock ops", () => {
     // Splitting a batch of Cornish Cross does not produce a batch of
     // something else.
     expect(pen.lot.species).toBe(lot.species);
-    expect(pen.lot.breed).toBe("Cornish Cross");
     expect(pen.lot.bornOn).toBe("2026-04-15");
+    // The BREEDING travels too, as parts rather than as the superseded string
+    // — but the pen it was split out of is not its dam. See slice 4a.
+    expect(pen.lot.damLotId).toBeNull();
 
     // And the child is a real animal lot, not an anonymous quantity.
     const child = await asOwner((tx) => getLivestockLot(tx, tenantId, pen.lot.id));
@@ -746,7 +758,7 @@ d("livestock ops", () => {
 
     await expect(
       asOwner((tx) =>
-        updateLivestockLot(tx, staffCtx(), lot.id, { breed: "Something else" }),
+        updateLivestockLot(tx, staffCtx(), lot.id, { notes: "Something else" }),
       ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
 
@@ -2525,5 +2537,262 @@ d("livestock ops", () => {
       // which beats reporting that ten cattle lost 100 lb on a trailer.
       expect(gainBetween(weighIns)).toBeNull();
     });
+  });
+
+  // ---- slice 4a: what an animal is made of, and who made it --------------
+
+  it("a single breed on create is the whole animal, as a part", async () => {
+    // The legacy text column is not written any more; the composition is.
+    const { lot } = await newLot("BREED-1");
+    expect(lot.breed).toBe("");
+    const parts = await asOwner((tx) =>
+      breedPartsByLot(tx, tenantId, [lot.id]),
+    );
+    expect(parts.get(lot.id)).toEqual([{ breed: "cornish_cross", parts: 1 }]);
+  });
+
+  it("states a cross, and replaces the whole set rather than adding to it", async () => {
+    const { lot } = await newLot("BREED-2", "cattle");
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), lot.id, [
+        { breed: "angus", parts: 2 },
+        { breed: "hereford", parts: 1 },
+        { breed: "simmental", parts: 1 },
+      ]),
+    );
+    const composition = await asOwner((tx) =>
+      compositionFor(tx, tenantId, lot.id),
+    );
+    expect(composition.source).toBe("stated");
+    expect(formatComposition(composition, slugLabel)).toBe(
+      "½ Angus · ¼ Hereford · ¼ Simmental",
+    );
+
+    // Stating something else replaces it — a composition is one sentence.
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), lot.id, [{ breed: "angus", parts: 1 }]),
+    );
+    const after = await asOwner((tx) => compositionFor(tx, tenantId, lot.id));
+    expect(formatComposition(after, slugLabel)).toBe("Angus");
+  });
+
+  it("clears the superseded breed text when a composition is stated", async () => {
+    const { lot } = await newLot("BREED-3", "cattle");
+    // A lot as it would look if it were entered before slice 4a.
+    await asOwner((tx) =>
+      tx
+        .update(schema.livestockLots)
+        .set({ breed: "half Angus half something" })
+        .where(eq(schema.livestockLots.id, lot.id)),
+    );
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), lot.id, [{ breed: "angus", parts: 1 }]),
+    );
+    const after = await asOwner((tx) => getLivestockLot(tx, tenantId, lot.id));
+    expect(after?.breed).toBe("");
+  });
+
+  it("refuses a breed that is not a slug and a share that is not whole", async () => {
+    const { lot } = await newLot("BREED-4", "cattle");
+    await expect(
+      asOwner((tx) =>
+        setBreedParts(tx, ctx(), lot.id, [{ breed: "an!gus", parts: 1 }]),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_BREED" });
+    await expect(
+      asOwner((tx) =>
+        setBreedParts(tx, ctx(), lot.id, [{ breed: "angus", parts: 0.5 }]),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_BREED" });
+  });
+
+  it("A CALF OUT OF A PUREBRED DAM AND NO SIRE IS HALF UNKNOWN", async () => {
+    // The claim the whole slice rests on, proved through the database rather
+    // than only in the pure test: nothing anywhere renormalises the known half
+    // up to a whole animal.
+    const dam = (await newLot("DAM-1", "cattle")).lot;
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), dam.id, [{ breed: "angus", parts: 1 }]),
+    );
+    const calf = (await newLot("CALF-1", "cattle")).lot;
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), calf.id, []),
+    );
+    await asOwner((tx) => setParents(tx, ctx(), calf.id, { damLotId: dam.id }));
+
+    const composition = await asOwner((tx) =>
+      compositionFor(tx, tenantId, calf.id),
+    );
+    expect(composition.source).toBe("computed");
+    expect(formatComposition(composition, slugLabel)).toBe(
+      "½ Angus · ½ unknown",
+    );
+  });
+
+  it("refuses a parent that would make a loop", async () => {
+    const granddam = (await newLot("GRAN-1", "cattle")).lot;
+    const dam = (await newLot("DAM-2", "cattle")).lot;
+    const calf = (await newLot("CALF-2", "cattle")).lot;
+    await asOwner((tx) =>
+      setParents(tx, ctx(), dam.id, { damLotId: granddam.id }),
+    );
+    await asOwner((tx) => setParents(tx, ctx(), calf.id, { damLotId: dam.id }));
+
+    // The granddam cannot be out of her own granddaughter.
+    await expect(
+      asOwner((tx) =>
+        setParents(tx, ctx(), granddam.id, { damLotId: calf.id }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_PARENT" });
+  });
+
+  it("refuses a stated contradiction of sex, and allows an unrecorded one", async () => {
+    const bull = (await newLot("BULL-1", "cattle")).lot;
+    await asOwner((tx) =>
+      updateLivestockLot(tx, ctx(), bull.id, { sex: "male" }),
+    );
+    const calf = (await newLot("CALF-3", "cattle")).lot;
+
+    await expect(
+      asOwner((tx) => setParents(tx, ctx(), calf.id, { damLotId: bull.id })),
+    ).rejects.toMatchObject({ code: "INVALID_PARENT" });
+
+    // Sire is fine, and so is a parent whose sex nobody recorded — not knowing
+    // is not a contradiction.
+    const unknown = (await newLot("UNKNOWN-1", "cattle")).lot;
+    await asOwner((tx) =>
+      updateLivestockLot(tx, ctx(), unknown.id, { sex: null }),
+    );
+    const set = await asOwner((tx) =>
+      setParents(tx, ctx(), calf.id, {
+        damLotId: unknown.id,
+        sireLotId: bull.id,
+      }),
+    );
+    expect(set.sireLotId).toBe(bull.id);
+    expect(set.damLotId).toBe(unknown.id);
+  });
+
+  it("records a birth: a lot, both parents, and the head — in one act", async () => {
+    const dam = (await newLot("DAM-3", "cattle")).lot;
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), dam.id, [{ breed: "angus", parts: 1 }]),
+    );
+    const sire = (await newLot("SIRE-1", "cattle")).lot;
+    await asOwner((tx) =>
+      updateLivestockLot(tx, ctx(), sire.id, { sex: "male" }),
+    );
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), sire.id, [{ breed: "hereford", parts: 1 }]),
+    );
+
+    const born = await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        damLotId: dam.id,
+        sireLotId: sire.id,
+        itemId,
+        code: "CALF-BORN",
+        head: 1,
+        bornOn: "2026-08-20",
+        sex: "female",
+      }),
+    );
+
+    expect(born.lot.damLotId).toBe(dam.id);
+    expect(born.lot.sireLotId).toBe(sire.id);
+    expect(born.lot.bornOn).toBe("2026-08-20");
+
+    // The head is in INVENTORY's ledger, as every head event in this pack is.
+    const movements = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [born.inventoryLotId]),
+    );
+    const rows = movements.get(born.inventoryLotId) ?? [];
+    expect(summariseHead(rows).balance).toBe(1);
+    expect(rows[0].movementKind).toBe("placement");
+
+    // A calf has no purchase basis, only accumulated cost.
+    const invLot = await asOwner((tx) =>
+      tx.query.inventoryLots.findFirst({
+        where: eq(schema.inventoryLots.id, born.inventoryLotId),
+      }),
+    );
+    expect(invLot?.source).toBe("raised");
+    // **AND IT IS NOT A SPLIT.** The dam did not lose a head, and the lineage
+    // chain a traceability walk follows must not wander into a family tree.
+    expect(invLot?.parentLotId).toBeNull();
+
+    // Half of each parent, worked out rather than typed.
+    const composition = await asOwner((tx) =>
+      compositionFor(tx, tenantId, born.lot.id),
+    );
+    expect(formatComposition(composition, slugLabel)).toBe(
+      "½ Angus · ½ Hereford",
+    );
+
+    // And she shows up on her dam's page.
+    const out = await asOwner((tx) => offspringOf(tx, tenantId, dam.id));
+    expect(out.map((o) => o.id)).toContain(born.lot.id);
+  });
+
+  it("refuses a birth with no parent at all", async () => {
+    await expect(
+      asOwner((tx) =>
+        recordBirth(tx, ctx(), {
+          itemId,
+          code: "ORPHAN",
+          head: 1,
+          bornOn: "2026-08-20",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_PARENT" });
+  });
+
+  it("a split carries the breeding across but does not become a generation", async () => {
+    const { lot } = await newLot("SPLIT-BREED", "cattle");
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), lot.id, [
+        { breed: "angus", parts: 1 },
+        { breed: "hereford", parts: 1 },
+      ]),
+    );
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 10,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const child = await asOwner((tx) =>
+      splitLivestockLot(tx, ctx(), {
+        livestockLotId: lot.id,
+        head: 4,
+        newCode: "SPLIT-BREED-B",
+        occurredOn: "2026-08-02",
+      }),
+    );
+
+    const composition = await asOwner((tx) =>
+      compositionFor(tx, tenantId, child.lot.id),
+    );
+    expect(formatComposition(composition, slugLabel)).toBe(
+      "½ Angus · ½ Hereford",
+    );
+    // Half a pen of half-Angus cattle is still half Angus — and the pen it came
+    // out of is NOT its dam.
+    expect(child.lot.damLotId).toBeNull();
+    expect(child.lot.sireLotId).toBeNull();
+  });
+
+  it("staff cannot state breeding or name a parent", async () => {
+    const { lot } = await newLot("STAFF-BREED", "cattle");
+    await expect(
+      asOwner((tx) =>
+        setBreedParts(tx, staffCtx(), lot.id, [{ breed: "angus", parts: 1 }]),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      asOwner((tx) => setParents(tx, staffCtx(), lot.id, { damLotId: null })),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

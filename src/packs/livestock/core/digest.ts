@@ -30,6 +30,16 @@
 export interface AdvisorLot {
   code: string;
   species: string;
+  /**
+   * The RESOLVED breeding, already formatted: "½ Angus · ¼ Hereford · ¼
+   * unknown". Falls back to the superseded `breed` string while a lot still
+   * carries one and nothing has been entered as fractions.
+   *
+   * A string rather than a structure on purpose — the digest is prose the model
+   * reads, and the unknown share has to survive into that prose. An advisor told
+   * "Angus" about a half-Angus calf would answer with more confidence than the
+   * records support.
+   */
   breed: string;
   sex: string | null;
   /** Null when the birth date is unknown, which is ordinary for bought-in stock. */

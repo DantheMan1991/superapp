@@ -113,6 +113,43 @@ export const homesteadFarm: IndustryProfile = {
         cattle: 300,
         swine: 400,
       },
+      /**
+       * Breeds worth OFFERING, per species — suggestions for the composition
+       * editor, never a closed list. Here for the same reason species and tape
+       * divisors are: a pack that knew what a Hereford was would know what
+       * industry it was in.
+       *
+       * **The point of the list is the crossbreds it makes cheap to state.**
+       * Homestead cattle are crossed on purpose for hybrid vigour, so the
+       * ordinary answer is "½ Angus, ¼ Hereford, ¼ Simmental" and every one of
+       * those three has to be one click rather than one spelling.
+       *
+       * Poultry is the shortest list and the most load-bearing: Cornish Cross
+       * against a slow-growing bird is a completely different feed conversion
+       * and time to market, which is the one breed fact this farm's books
+       * already depend on.
+       */
+      breeds: {
+        cattle: [
+          "angus",
+          "red_angus",
+          "hereford",
+          "simmental",
+          "charolais",
+          "jersey",
+          "holstein",
+          "highland",
+        ],
+        swine: ["berkshire", "duroc", "hampshire", "yorkshire", "tamworth"],
+        poultry: [
+          "cornish_cross",
+          "red_ranger",
+          "freedom_ranger",
+          "rhode_island_red",
+          "barred_rock",
+          "leghorn",
+        ],
+      },
     },
     /**
      * What a run on this farm is. The pack has no list of its own on purpose —

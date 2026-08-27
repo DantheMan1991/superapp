@@ -17,6 +17,11 @@ import { d } from "./_shared";
  * `livestock_identifiers` gets its own policy pair rather than leaning on its
  * lot's, because it carries the official tag that puts a traceability chain
  * onto a processor's paperwork.
+ *
+ * Slice 4a adds `livestock_breed_parts` and the dam/sire columns. The PARENT
+ * columns are the ones worth staring at: a composition is a fold that takes
+ * half of each parent, so a cross-tenant parent would not merely be visible —
+ * it would be half of what this farm's animals are made of.
  */
 d("livestock tables (RLS)", () => {
   const STAMP = `iso-ls-${process.pid}`;
@@ -210,6 +215,13 @@ d("livestock tables (RLS)", () => {
           sampleWeightLb: 1150,
           notes: 'Theirs',
         },
+      ]);
+
+      // Slice 4a. One stated breed each side, so the RLS reads below have
+      // something to fail to see.
+      await tx.insert(schema.livestockBreedParts).values([
+        { tenantId: tenantA, livestockLotId: lotA, breed: "angus", parts: 1 },
+        { tenantId: tenantB, livestockLotId: lotB, breed: "hereford", parts: 1 },
       ]);
 
       await tx.insert(schema.livestockFeedDraws).values([
@@ -785,4 +797,119 @@ d("livestock tables (RLS)", () => {
       ),
     ).toHaveLength(0);
   });
+
+  // ------------------------------------------------- slice 4a: breeding ---
+  //
+  // Two claims, and the second is the one that would be missed. A breed
+  // composition leaking across tenants is ordinary data leakage; a PARENT
+  // leaking is arithmetic — `resolveComposition` folds a parent into half the
+  // animal, so a row from another farm would silently change what this farm's
+  // cattle are made of.
+
+  it("a tenant sees only its own breeding", async () => {
+    const mine = await asOwner((tx) =>
+      tx.select().from(schema.livestockBreedParts),
+    );
+    expect(mine.map((p) => p.breed)).toEqual(["angus"]);
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockBreedParts),
+    );
+    expect(theirs.map((p) => p.breed)).toEqual(["hereford"]);
+  });
+
+  it("CANNOT NAME ANOTHER TENANT'S ANIMAL AS A PARENT", async () => {
+    // The composite FK makes it unrepresentable, so it fails even here under
+    // withSystem where RLS is not watching. This is the one that matters: a
+    // cross-tenant dam would be half of this animal's breeding.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.livestockLots)
+          .set({ damLotId: lotB })
+          .where(eq(schema.livestockLots.id, lotA)),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.livestockLots)
+          .set({ sireLotId: lotB })
+          .where(eq(schema.livestockLots.id, lotA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an animal that is its own parent", async () => {
+    // The one-step loop, stopped by a CHECK. Longer ones are the write path's
+    // job — a CHECK cannot see other rows.
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.livestockLots)
+          .set({ damLotId: lotA })
+          .where(eq(schema.livestockLots.id, lotA)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot state breeding for another tenant's animal", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockBreedParts).values({
+          tenantId: tenantA,
+          livestockLotId: lotB,
+          breed: "stolen",
+          parts: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a breed that is not a slug, and a share of nothing", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockBreedParts).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          breed: "Red Angus",
+          parts: 1,
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockBreedParts).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          breed: "simmental",
+          parts: 0,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses the same breed twice on one animal", async () => {
+    // Two rows for Angus would be one fact written twice, and which one the
+    // fold used would be arbitrary.
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockBreedParts).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          breed: "angus",
+          parts: 3,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("breeding is default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.livestockBreedParts),
+      ),
+    ).toHaveLength(0);
+  });
 });
+

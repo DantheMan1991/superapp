@@ -403,6 +403,30 @@ export async function listLots(
   });
 }
 
+/**
+ * Lots by id, keyed by id, for a caller that already holds a set of them.
+ *
+ * Added for `livestock`'s pedigree screens, which hold animal ids and need the
+ * CODE a person calls each one — the same shape as `movementsByIds`, and here
+ * rather than there because the lot is this pack's row.
+ */
+export async function lotsByIds(
+  tx: Tx,
+  tenantId: string,
+  ids: string[],
+): Promise<Map<string, InventoryLot>> {
+  const out = new Map<string, InventoryLot>();
+  if (ids.length === 0) return out;
+  const rows = await tx.query.inventoryLots.findMany({
+    where: and(
+      eq(schema.inventoryLots.tenantId, tenantId),
+      inArray(schema.inventoryLots.id, ids),
+    ),
+  });
+  for (const row of rows) out.set(row.id, row);
+  return out;
+}
+
 export async function getLot(
   tx: Tx,
   tenantId: string,

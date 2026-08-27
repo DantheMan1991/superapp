@@ -17,6 +17,7 @@ import {
 import { speciesFrom } from "./vocabulary";
 import {
   LivestockError,
+  MAX_BREED_PARTS,
   addIdentifier,
   addLotToFeedGroup,
   closeFeedGroup,
@@ -30,12 +31,15 @@ import {
   markRoundNormal,
   moveLotToZone,
   placeHead,
+  recordBirth,
   recordDailyCheck,
   recordFeedDraw,
   recordTreatment,
   recordWeight,
   removeHead,
   retireIdentifier,
+  setBreedParts,
+  setParents,
   splitLivestockLot,
   updateTreatment,
   updateWeight,
@@ -76,6 +80,13 @@ function toResult(err: unknown): { error: string } {
         return { error: err.message };
       case "INVALID_METHOD":
         return { error: "Pick how it was weighed." };
+      case "INVALID_BREED":
+        return { error: err.message };
+      // Every one of these already says which animal and why — "that animal is
+      // already descended from this one" is the whole explanation, and a
+      // generic sentence here would throw it away.
+      case "INVALID_PARENT":
+        return { error: err.message };
     }
   }
   // Errors thrown by the packs this one composes reach here too, and their
@@ -134,6 +145,155 @@ export async function createLivestockLotAction(input: unknown) {
       targetType: "livestock_lot",
       targetId: result.lot.id,
       meta: { species: result.lot.species, inventoryLotId: result.inventoryLotId },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true, id: result.lot.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * State what an animal is made of. The whole set replaces the whole set.
+ *
+ * The empty list is a legitimate input — it means "I do not know after all" —
+ * so this is not guarded by a `min(1)`.
+ */
+export async function setBreedPartsAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      parts: z
+        .array(
+          z.object({
+            breed: z.string().min(1).max(63),
+            // Whole parts, out of their own sum. The upper bound matches the
+            // column's CHECK so the refusal happens with a sentence rather
+            // than a constraint violation.
+            parts: z.number().int().min(1).max(10_000),
+          }),
+        )
+        .max(MAX_BREED_PARTS),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        setBreedParts(
+          tx,
+          ctxOf(ctx),
+          parsed.data.livestockLotId,
+          parsed.data.parts,
+        ),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.breed.set",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      // Identifiers only: the breeds and their shares, which is a fact about an
+      // animal rather than anything private.
+      meta: { breeds: parsed.data.parts.map((p) => p.breed).join(",") },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Name a dam, a sire, or both — and clearing one is `null` rather than absence.
+ *
+ * The form always sends both keys, so a person who clears the sire box clears
+ * the sire. `undefined` reaches `setParents` only from code that means "leave
+ * that one alone".
+ */
+export async function setParentsAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      damLotId: z.string().uuid().nullable().optional(),
+      sireLotId: z.string().uuid().nullable().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        setParents(tx, ctxOf(ctx), parsed.data.livestockLotId, {
+          damLotId: parsed.data.damLotId,
+          sireLotId: parsed.data.sireLotId,
+        }),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.parents.set",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      meta: {
+        damLotId: parsed.data.damLotId ?? "",
+        sireLotId: parsed.data.sireLotId ?? "",
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** A birth: the lot, both parents and the head, in one transaction. */
+export async function recordBirthAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      damLotId: z.string().uuid().nullable().optional(),
+      sireLotId: z.string().uuid().nullable().optional(),
+      code: z.string().min(1).max(120),
+      head,
+      bornOn: requiredDate,
+      itemId: z.string().uuid().optional(),
+      newItemName: z.string().min(1).max(200).optional(),
+      species: z.string().min(1).max(63).optional(),
+      sex: z.enum(["male", "female", "mixed"]).nullable().optional(),
+      locationAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => recordBirth(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.birth.recorded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: result.lot.id,
+      meta: {
+        damLotId: parsed.data.damLotId ?? "",
+        sireLotId: parsed.data.sireLotId ?? "",
+        head: String(parsed.data.head),
+      },
     });
     revalidatePath(BASE, "layout");
     return { ok: true, id: result.lot.id };

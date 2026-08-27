@@ -99,7 +99,10 @@ file into the root **Photos** folder the module already provisions, and degrade
 to the Inbox when a tenant has renamed or removed it, because inventing a folder
 on an upload path is this code deciding how somebody's cabinet is arranged.
 
-Migrations `0219` and `0220`. 11 new ops tests, 6 new isolation tests.
+Migrations `0219` and `0220`, **applied to BOTH databases before the merge** per
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md) — dev
+and production each at 149 tables with RLS enabled, forced and policied. 11 new
+ops tests, 6 new isolation tests.
 
 ### 2026-08-26 — A second function across the boundary (`claude/a-function-cannot-cross-the-boundary`)
 

@@ -1,0 +1,36 @@
+-- THE CONTRACT STEP for livestock slice 4a. `livestock_lots.breed` stops
+-- existing; `livestock_breed_parts` has been the only store for what an animal
+-- is made of since 0217 added it.
+--
+-- ============================================================================
+-- RUN THIS ONE **AFTER** THE DEPLOY, NOT BEFORE. It is the second migration in
+-- this repo with that requirement (see 0075) and ignoring it takes the
+-- livestock pack down.
+-- ============================================================================
+--
+-- Every other migration here goes out AHEAD of the code — the standing rule in
+-- conventions §4, learned from the 0023/0025 outage — and it works because
+-- those changes are additive and the deployed code simply does not know about
+-- the new column. A DROP inverts the risk. **Drizzle names every column of a
+-- table in the SELECT list it builds**, so the moment this one disappears, code
+-- that predates this deploy answers `column livestock_lots.breed does not
+-- exist` on the livestock hub, every animal's page, the daily round, the feed
+-- report and the advisor's digest. The application must already be serving the
+-- version that stopped reading it.
+--
+-- Nothing enforces the order, because nothing can: the database cannot see
+-- which build is running. What makes the window survivable is that the reverse
+-- order is harmless — the new code neither reads nor writes this column, so a
+-- deploy that lands hours before this file is applied leaves a database
+-- carrying one dead column and nothing else. Deploy first, migrate when it is
+-- live, and the worst case is untidiness rather than an outage.
+--
+-- WHY THE VALUES ARE NOT MIGRATED ACROSS, unlike 0074 in the accounting pair:
+-- they cannot be. The column held free text — "½ Angus, ¼ Hereford" or "Angus
+-- cross" or "black one" — and there is no parser that turns any of that into
+-- fractions without inventing a claim the tenant never made. Slice 4a showed
+-- what was there as a note asking for it again, and clearing it on re-entry was
+-- the whole migration path. What is lost here is a string somebody has either
+-- already replaced with something better or declined to.
+
+ALTER TABLE "livestock_lots" DROP COLUMN "breed";

@@ -466,9 +466,9 @@ export default async function LivestockLotPage({
    * What goes in the header beside the species.
    *
    * The breed has been up there since slice 0 because it is half of how a
-   * person recognises an animal at a glance, and stating a composition CLEARS
-   * the superseded string — so without this, entering the better answer would
-   * have emptied the header. Driven on Hilltop Farm, which is how it was found.
+   * person recognises an animal at a glance — found by driving 4a, where stating
+   * a composition emptied the header. Null when nothing is known, so an animal
+   * nobody has described reads "Poultry" rather than "Poultry · ".
    */
   /**
    * **THE BIRTH FORM'S LIST INCLUDES THIS ANIMAL AND THE PARENTS FORM'S DOES
@@ -490,7 +490,7 @@ export default async function LivestockLotPage({
   ].sort((a, b) => a.code.localeCompare(b.code));
   const breedingLabel =
     composition.source === "unknown"
-      ? lot.breed || null
+      ? null
       : formatComposition(composition, breedLabel);
   const parcelNames = new Map(parcels.map((p) => [p.id, p.name]));
   const zoneOptions = allZones.map((z) => ({
@@ -872,16 +872,6 @@ export default async function LivestockLotPage({
                 <p className="mt-1 text-sm text-muted-foreground">
                   Part of the pedigree could not be followed all the way up, so
                   some of the unknown share is unread rather than unrecorded.
-                </p>
-              )}
-              {/* The superseded column, shown only while it still holds
-                  something. Nothing can parse "½ Angus, ¼ Hereford" back into
-                  fractions, so the old string is a prompt rather than data. */}
-              {lot.breed && (
-                <p className="mt-3 text-sm text-muted-foreground">
-                  Recorded before breeding was kept as fractions:{" "}
-                  <span className="font-medium text-foreground">{lot.breed}</span>
-                  . Enter it again above and this note goes away.
                 </p>
               )}
             </div>

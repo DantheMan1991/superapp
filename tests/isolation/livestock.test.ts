@@ -271,7 +271,7 @@ d("livestock tables (RLS)", () => {
       await asOwner((tx) =>
         tx
           .update(schema.livestockLots)
-          .set({ breed: "Stolen" })
+          .set({ notes: "Stolen" })
           .where(eq(schema.livestockLots.id, lotB))
           .returning(),
       ),

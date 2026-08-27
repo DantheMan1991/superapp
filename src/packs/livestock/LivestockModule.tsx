@@ -236,18 +236,14 @@ export async function LivestockModule({
                       </Link>
                       {inv?.parentLotId && <Badge variant="outline">split</Badge>}
                     </div>
-                    {/* What somebody entered, as fractions — or the legacy
-                        string for a lot recorded before slice 4a. */}
-                    {breeding ? (
+                    {/* What somebody ENTERED, as fractions. A lot whose
+                        breeding is only computed from its parents shows nothing
+                        here and the full answer on its own page — see the
+                        dossier for why the two screens differ. */}
+                    {breeding && (
                       <div className="text-xs text-muted-foreground">
                         {breeding}
                       </div>
-                    ) : (
-                      lot.breed && (
-                        <div className="text-xs text-muted-foreground">
-                          {lot.breed}
-                        </div>
-                      )
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">

@@ -20,7 +20,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | **2** | **Feed + the allocation seam** (FCR itself waits on slice 5) | **shipped 2026-08-20** |
 | **3** | **Health + the withdrawal clock** | **shipped 2026-08-20** |
 | **4a** | **Pedigree + breed as fractions** — dam and sire, composition computed from the parents, a birth that creates a lot | **shipped 2026-08-27** |
-| 4b | Photos — a profile picture and a gallery. **Layer 0**, and `assets` wants the identical thing | |
+| **4b** | **Photos — a profile picture and a gallery.** Layer 0, and `assets` got it in the same PR | **shipped 2026-08-27** |
 | 4c | The breeding calendar — bull exposure → calving window, preg check narrows it, calving fixes it, a "who is due" list | |
 | 4d | Traits scored 1–5, sire performance across years, **the inbreeding warning at turn-in** | |
 | 4e | Registry — number, association, registered name, papers in Documents. Needs 4b | |
@@ -29,6 +29,41 @@ and [land.md](land.md) before changing anything about where animals are.
 | **6** | **Processing handoff → `production`** | **shipped 2026-08-20** |
 
 ## Build log
+
+### 2026-08-27 — Slice 4b: a photo of the animal (`claude/a-photo-of-the-animal`)
+
+The other half of what the founder asked for — *"the ability to add a profile
+picture for each animal as well as a gallery of photos of them"* — and almost
+none of the work was in this pack. **No pack record in the app could hold a file
+at all**: `document_links` has four targets and every one is accounting's. The
+table, the rules and the gallery are Layer 0 and live in
+[documents.md](documents.md); what is here is three thin actions and two screens.
+
+**THE PACK OWNS THE ACTIONS AND CORE OWNS THE TABLE**, which is the whole shape
+of the seam. `document_attachments` is polymorphic and names no pack, so the code
+that DOES name one is `actions.ts`, where `livestock_lot` is a fact rather than a
+string the browser sent. **And because there is no foreign key, `assertLot` is
+the only thing that proves the animal exists** — that is a compensating control,
+not a nicety: without it a photo could be hung on any UUID at all.
+
+**A PHOTO IS A CHORE — `member`, not `owner`.** Placing head, moving a lot and
+recording a check are all member-level; the person in the pen with a phone is
+rarely the owner. Editing the lot stays owner-only, and that split is the one
+this pack has drawn since slice 0.
+
+**The design's list of what a photo is FOR is why the panel is on the lot page
+rather than in a corner of Documents**: identification when a tag cannot be read
+across a field, a condition series showing the gradual loss a daily look never
+does, documentation for the vet, a sales listing, and evidence for a predator or
+insurance claim. The hub carries the picture beside the code for the first of
+those.
+
+The panel renders only where `documents` is switched on, because the FILE is the
+DMS's — a button that uploads into a module the tenant has not enabled would fail
+at the gate, which is a worse answer than not offering it.
+
+Driven on Hilltop Farm end to end. See [documents.md](documents.md) for what
+driving it found.
 
 ### 2026-08-27 — Slice 4a: what an animal is made of, and who made it (`claude/what-an-animal-is-made-of`)
 
@@ -1180,6 +1215,14 @@ This pack is the one that forced the change; the full reasoning is in
   dialog says so — but there is no adjustment screen in `inventory` yet to
   correct the other side with, so somebody who removes a from-stock treatment is
   told about a fix they cannot currently make. Inventory slice 2.
+- **A PHOTO CANNOT BE GIVEN A CAPTION OR A DATE OF ITS OWN.** It carries the
+  document's file name and nothing else, so a condition series is ordered by
+  when it was UPLOADED rather than by when it was taken — which is the wrong
+  clock for the exact use the design named it for.
+- **Nothing detaches a lot's photos when the lot goes.** `detachAllForEntity`
+  exists and this pack does not call it, because nothing deletes a livestock lot
+  today. The day something does, that call is the promise standing in for a
+  foreign key.
 - **RECORDING A BIRTH NEEDS THE OWNER**, because it creates a lot and picks the
   stock line the offspring are counted in — consistent with `createLivestockLot`
   and with the recorded split of chores from decisions. A 2am calving is a chore

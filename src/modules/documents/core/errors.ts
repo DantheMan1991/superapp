@@ -21,6 +21,11 @@ export type DocsErrorCode =
   | "DOCUMENT_NOT_FOUND"
   | "DOCUMENT_TRASHED"
   | "DOCUMENT_HAS_LINKS"
+  | "DOCUMENT_ATTACHED"
+  | "ATTACHMENT_EXISTS"
+  | "ATTACHMENT_NOT_FOUND"
+  | "ATTACHMENT_NOT_AN_IMAGE"
+  | "ATTACHMENT_TARGET_INVALID"
   | "DOCUMENT_UPLOAD_INVALID"
   | "DOCUMENT_NOT_VERSIONABLE"
   | "VERSION_NOT_FOUND"
@@ -91,6 +96,15 @@ const FRIENDLY: Record<DocsErrorCode, string> = {
   DOCUMENT_TRASHED: "That file is in the trash — restore it first.",
   DOCUMENT_HAS_LINKS:
     "Detach this file from its transactions before trashing it.",
+  DOCUMENT_ATTACHED:
+    "Remove this photo from the record it is on before trashing it.",
+  ATTACHMENT_EXISTS: "That file is already attached here.",
+  ATTACHMENT_NOT_FOUND: "That file isn't attached here.",
+  // Said as a fact about the file rather than as a rule the person broke: a
+  // PDF manual is a perfectly good attachment, it is just not a portrait.
+  ATTACHMENT_NOT_AN_IMAGE:
+    "Only a photo can be the picture — JPEG, PNG, WebP or GIF.",
+  ATTACHMENT_TARGET_INVALID: "That isn't something a file can be attached to.",
   DOCUMENT_UPLOAD_INVALID:
     "That file type or size isn't supported — see the list of accepted types.",
   DOCUMENT_NOT_VERSIONABLE:

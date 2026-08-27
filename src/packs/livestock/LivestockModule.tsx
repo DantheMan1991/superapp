@@ -16,6 +16,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { packContext } from "@/lib/packs/tenant-context";
+import { primaryAttachments } from "@/modules/documents/attachments";
+import { RecordPhotoThumb } from "@/modules/documents/components/record-photos";
 import { listItems, listLots, movementKindsForLots } from "@/packs/inventory/ops";
 import { currentZoneForOccupants } from "@/packs/land/ops";
 import { slugLabel } from "@/packs/inventory/vocabulary";
@@ -68,7 +70,7 @@ export async function LivestockModule({
       const inventoryLotIds = lots.map((l) => l.inventoryLotId);
       // Three queries for the whole page, whatever the lot count: the spine
       // rows, where each lot is, and the movements behind every head figure.
-      const [inventoryLots, zones, movements, withdrawals, breedParts] =
+      const [inventoryLots, zones, movements, withdrawals, breedParts, portraits] =
         await Promise.all([
         listLots(tx, ctx.tenant.id),
         currentZoneForOccupants(
@@ -103,6 +105,16 @@ export async function LivestockModule({
           ctx.tenant.id,
           lots.map((l) => l.id),
         ),
+        // **ONE QUERY FOR A PAGE OF THUMBNAILS**, not one per row. A record
+        // with photos but no chosen picture is absent from this map and gets
+        // the placeholder — picking one is what the primary flag exists to
+        // stop the app doing on somebody's behalf.
+        primaryAttachments(
+          tx,
+          ctx.tenant.id,
+          "livestock_lot",
+          lots.map((l) => l.id),
+        ),
       ]);
 
       return {
@@ -114,6 +126,7 @@ export async function LivestockModule({
         movements,
         withdrawals,
         breedParts,
+        portraits,
       };
     },
     { role: ctx.role },
@@ -128,6 +141,7 @@ export async function LivestockModule({
     movements,
     withdrawals,
     breedParts,
+    portraits,
   } = data;
   const isOwner = ctx.role === "owner";
   const byId = new Map(inventoryLots.map((l) => [l.id, l]));
@@ -207,6 +221,13 @@ export async function LivestockModule({
                 <TableRow key={lot.id}>
                   <TableCell>
                     <div className="flex items-center gap-2 font-medium">
+                      {/* IDENTIFICATION IS THE POINT — the design's first
+                          reason for photos at all is knowing which animal it
+                          is when a tag cannot be read across a field. */}
+                      <RecordPhotoThumb
+                        documentId={portraits.get(lot.id)?.id ?? null}
+                        alt=""
+                      />
                       <Link
                         href={`${BASE}/${lot.id}`}
                         className="hover:underline"

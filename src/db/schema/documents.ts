@@ -303,6 +303,101 @@ export const documentLinks = pgTable(
   ],
 );
 
+/**
+ * A DOCUMENT ATTACHED TO SOMETHING THAT IS NOT AN ACCOUNTING RECORD — a photo
+ * of a cow, a photo of a tractor, a manual, a permit.
+ *
+ * **WHY THIS IS NOT FOUR MORE COLUMNS ON `document_links`.** That table names
+ * its targets in typed columns, which buys referential integrity and costs
+ * something core cannot afford here: a `livestock_lot_id` on a Layer 0 table
+ * would be **core knowing what a livestock lot is**. That is the leak ADR 0004
+ * draws the line against and the exact correction the enterprises slice took a
+ * day after shipping — *a core tool speaks no industry*. It would also mean a
+ * core migration every time a pack wanted a photo, forever.
+ *
+ * So this follows `mail_links` instead, which is the same seam solved the same
+ * way for the same reason: `extension_slug` + `entity_type` + `entity_id`, no
+ * FK to the target, and an uninstalled layer's rows simply never resolve. The
+ * document side IS core, so THAT gets a real composite FK and CASCADE.
+ *
+ * **WHAT IS GIVEN UP, SAID PLAINLY: a deleted target leaves a dangling row.**
+ * Postgres cannot police a polymorphic reference, so the pack that owns the
+ * record detaches on its own delete path, and a reader that finds nothing shows
+ * nothing. `mail_links` has made this trade since the mail module shipped.
+ *
+ * `is_primary` is the profile picture: **at most one per record**, enforced by a
+ * partial unique index. It is not a column on the record itself, because a
+ * primary that could outlive the attachment it names is a dangling pointer with
+ * extra steps — this way detaching the photo takes the flag with it. Whether a
+ * primary must be an IMAGE is the app's rule, not the database's: an attachment
+ * is any document, and a manual is a legitimate one.
+ */
+export const documentAttachments = pgTable(
+  "document_attachments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    /**
+     * Which layer owns this attachment type, so an uninstalled pack's rows can
+     * be ignored rather than misread. Same column, same job, as `mail_links`.
+     */
+    extensionSlug: text("extension_slug").notNull(),
+    /** "livestock_lot" | "asset" | later "zone", "production_run", … */
+    entityType: text("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    /** The profile picture. At most one per record — see the partial unique. */
+    isPrimary: boolean("is_primary").notNull().default(false),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("document_attachments_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("document_attachments_tenant_document_idx").on(
+      t.tenantId,
+      t.documentId,
+    ),
+    // One file attached to one record once. Attaching it twice would put the
+    // same photo in the gallery twice and make "which is primary" ambiguous.
+    uniqueIndex("document_attachments_unique_idx").on(
+      t.tenantId,
+      t.documentId,
+      t.entityType,
+      t.entityId,
+    ),
+    // The join every gallery runs: "every file on this animal".
+    index("document_attachments_entity_idx").on(
+      t.tenantId,
+      t.entityType,
+      t.entityId,
+    ),
+    // **AT MOST ONE PROFILE PICTURE PER RECORD, in the database.** A list
+    // thumbnail wants one canonical photo rather than whichever is newest —
+    // the open item `assets` has carried since 2026-08-15 — and "canonical"
+    // stops being true the moment two rows can claim it.
+    uniqueIndex("document_attachments_primary_idx")
+      .on(t.tenantId, t.entityType, t.entityId)
+      .where(sql`${t.isPrimary}`),
+    foreignKey({
+      name: "document_attachments_document_fk",
+      columns: [t.tenantId, t.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+    }).onDelete("cascade"),
+    check(
+      "document_attachments_entity_type_format",
+      sql`${t.entityType} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check(
+      "document_attachments_extension_slug_format",
+      sql`${t.extensionSlug} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+  ],
+);
+
 /* ------------------------------------------------------------------------
  * Documents module (the DMS): the filing cabinet built ON the generic
  * `documents` record above. Receipts keeps its own surface on the same
@@ -999,6 +1094,7 @@ export const publicAccessAttempts = pgTable(
 export type Document = typeof documents.$inferSelect;
 
 export type DocumentLink = typeof documentLinks.$inferSelect;
+export type DocumentAttachment = typeof documentAttachments.$inferSelect;
 
 export type DocumentFolder = typeof documentFolders.$inferSelect;
 

@@ -4,7 +4,15 @@ import { Beef } from "lucide-react";
 import { LivestockNav } from "@/packs/livestock/components/livestock-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
-import { requireModuleEnabled } from "@/lib/modules";
+import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
+import { attachmentsForRecord } from "@/modules/documents/attachments";
+import { RecordPhotos } from "@/modules/documents/components/record-photos";
+import { isDisplayableImage } from "@/modules/documents/allowlist";
+import {
+  attachLotPhotoAction,
+  detachLotPhotoAction,
+  setLotPhotoPrimaryAction,
+} from "@/packs/livestock/actions";
 import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { todayInTimezone } from "@/lib/timezone";
@@ -233,6 +241,7 @@ export default async function LivestockLotPage({
         offspring,
         candidates,
         headItems,
+        attachments,
       ] = await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
           movementKindsForLots(tx, ctx.tenant.id, [lot.inventoryLotId]),
@@ -293,6 +302,13 @@ export default async function LivestockLotPage({
             excludeId: lot.id,
           }),
           listItems(tx, ctx.tenant.id, { status: "active" }),
+          // Photos, from `documents`. Empty when the module is off, which is
+          // why the section below is gated on the module rather than on this.
+          attachmentsForRecord(tx, ctx.tenant.id, {
+            extensionSlug: "livestock",
+            entityType: "livestock_lot",
+            entityId: lot.id,
+          }),
         ]);
       const structures = await listStructures(
         tx,
@@ -336,6 +352,18 @@ export default async function LivestockLotPage({
         candidates,
         headItems: headItems.filter((i) => i.stockingUnit === "head"),
         breedSuggestions: breedsFrom(pack.config, lot.species),
+        photos: attachments
+          // The gallery renders `<img>`, so anything the browser will not put
+          // on screen has no business in it. An attachment that is not a photo
+          // is a legitimate row and simply belongs on a different panel.
+          .filter((a) => isDisplayableImage(a.document.mimeType))
+          .map((a) => ({
+            documentId: a.document.id,
+            fileName: a.document.fileName,
+            title: a.document.title ?? "",
+            mimeType: a.document.mimeType,
+            isPrimary: a.isPrimary,
+          })),
       };
     },
     { role: ctx.role },
@@ -369,7 +397,12 @@ export default async function LivestockLotPage({
     candidates,
     headItems,
     breedSuggestions,
+    photos,
   } = data;
+  // The FILE lives in the DMS, so the panel exists only where the DMS does. A
+  // button that uploads into a module the tenant has not switched on would
+  // fail at the gate, which is a worse answer than not offering it.
+  const documentsOn = await isModuleEnabled(ctx.tenant.id, "documents");
 
   /**
    * Chores are for whoever is doing them; decisions are the owner's.
@@ -913,6 +946,29 @@ export default async function LivestockLotPage({
           </Table>
         </DataTable>
       </div>
+
+      {documentsOn && (
+        <div className="space-y-3">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
+            Photos {photos.length > 0 && `(${photos.length})`}
+          </h2>
+          {/* The design's own list of what a photo of an animal is FOR:
+              identification when a tag is unreadable across a field, a
+              condition series that shows the gradual loss a daily look cannot,
+              documentation for the vet, a sales listing, and evidence for a
+              predator or insurance claim. */}
+          <RecordPhotos
+            entityId={lot.id}
+            tenantId={ctx.tenant.id}
+            photos={photos}
+            canEdit={ctx.role !== "expert"}
+            subject="animal"
+            attachAction={attachLotPhotoAction}
+            setPrimaryAction={setLotPhotoPrimaryAction}
+            detachAction={detachLotPhotoAction}
+          />
+        </div>
+      )}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">

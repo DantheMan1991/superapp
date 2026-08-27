@@ -491,10 +491,19 @@ shape with livestock lot occupancy, so it waits for the pack that needs it.
   no backfill, because only the tenant knows which account a given purchase was
   coded to. A prompt on assets that depreciate but are unlinked would be worth
   building.
-- **Images / a profile picture per asset** (founder's request, 2026-08-15).
-  Storage is free — Documents already holds files with metadata and the open
-  entity-link pattern attaches them. What needs designing is the *primary*
-  image, since a list thumbnail wants one canonical photo rather than the newest.
+- ~~**Images / a profile picture per asset**~~ — **shipped 2026-08-27**, riding
+  along with livestock slice 4b because the two wanted the identical thing. Two
+  corrections to what this item assumed, both worth keeping:
+  **the entity-link pattern was NOT open** — `document_links` had four targets
+  and all four were accounting's, so the work was a new Layer 0 table
+  (`document_attachments`, polymorphic, following `mail_links`) rather than a
+  reuse. And **the *primary* image this item correctly flagged as the design
+  question** is a partial unique index plus three rules: the first photo becomes
+  it, a later one does not steal it, and detaching it leaves the asset without
+  one rather than promoting the next. See [documents.md](documents.md).
+  **`canEdit` here is not `isOwner`**, unlike every other panel on the asset
+  page: editing an asset is a decision about what the business owns, and
+  photographing one is a record of what is there.
 - **Maintenance has no history view.** `listEvents` exists and nothing renders
   it, so the service log is written and never read back. The panel shows what is
   due, not what was done.

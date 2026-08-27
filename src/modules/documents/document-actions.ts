@@ -459,6 +459,26 @@ export async function trashDocumentsAction(
         if (linked.length > 0) {
           throw new DocsError("DOCUMENT_HAS_LINKS", "document is attached");
         }
+        // And the same rule for a photo hanging on a record. The reason is not
+        // an audit trail this time — it is that a picture disappearing out of
+        // an animal's gallery because somebody tidied the cabinet is a change
+        // made in one place and felt in another. Removing it from the record
+        // is a separate, reversible act, and it is the one to do first.
+        const attached = await tx
+          .select({ documentId: schema.documentAttachments.documentId })
+          .from(schema.documentAttachments)
+          .where(
+            and(
+              eq(schema.documentAttachments.tenantId, ctx.tenantId),
+              inArray(
+                schema.documentAttachments.documentId,
+                parsed.data.documentIds,
+              ),
+            ),
+          );
+        if (attached.length > 0) {
+          throw new DocsError("DOCUMENT_ATTACHED", "document is attached");
+        }
 
         const rows = await tx
           .update(schema.documents)

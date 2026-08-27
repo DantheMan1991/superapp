@@ -8,6 +8,13 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
 import { LedgerError, friendlyMessage } from "@/modules/accounting/core";
+import { allowsWrite } from "@/lib/packs/authorize";
+import { friendlyMessage as friendlyDocsMessage } from "@/modules/documents/core/errors";
+import {
+  detachDocumentFromRecord,
+  registerAttachedPhoto,
+  setPrimaryAttachment,
+} from "@/modules/documents/attachments";
 import {
   AssetError,
   createAsset,
@@ -85,8 +92,155 @@ function toResult(err: unknown): { error: string } {
         return { error: err.message };
     }
   }
+  // Photos are Documents' rows, so its refusals arrive here already written
+  // for a person — "Only a photo can be the picture", not a code.
+  if (err instanceof Error && err.name === "DocsError") {
+    return { error: friendlyDocsMessage(err) };
+  }
   console.error("assets action failed", err);
   return { error: "Something went wrong saving that." };
+}
+
+/**
+ * Photos of a thing the business owns. Livestock slice 4b's Layer 0 half,
+ * arriving here at the same time because `assets` has carried the identical
+ * open item since 2026-08-15 — the founder asked for a picture per asset then.
+ *
+ * **THE PACK OWNS THESE ACTIONS AND CORE OWNS THE TABLE**, which is the whole
+ * shape of the seam: `document_attachments` is polymorphic and names no pack, so
+ * the code that DOES name one is here, where `assets` is a fact rather than a
+ * string the browser sent.
+ *
+ * **AND BECAUSE THERE IS NO FOREIGN KEY, THIS IS THE ONLY THING THAT PROVES THE
+ * ASSET EXISTS.** A polymorphic reference cannot be policed by Postgres — the
+ * trade the schema comment sets out — so `assertAsset` is the compensating
+ * control, not a nicety. Without it a photo could be hung on any UUID at all,
+ * including one belonging to another tenant's record, and nothing would object.
+ */
+const PHOTO_ENTITY = "asset";
+
+const photoTarget = (assetId: string) => ({
+  extensionSlug: PACK,
+  entityType: PHOTO_ENTITY,
+  entityId: assetId,
+});
+
+const photoInput = z.object({
+  entityId: z.string().uuid(),
+  pathname: z.string().min(1).max(500),
+});
+
+const photoRef = z.object({
+  entityId: z.string().uuid(),
+  documentId: z.string().uuid(),
+});
+
+/**
+ * Both modules, both gates. `assets` because the record is this pack's, and
+ * `documents` because the FILE is the DMS's — a business that has not switched
+ * Documents on has nowhere to put a photo, and the page says so rather than
+ * offering a button that fails.
+ */
+async function photoGate() {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  await requireModuleEnabled(ctx.tenant.id, "documents");
+  // Photographing a tractor is a chore — `member` — even though EDITING the
+  // asset is owner-only: a picture is a record of what is there, not a
+  // decision about what the business owns or what it is worth. The accountant role is read-only everywhere.
+  if (!allowsWrite(ctx.role, "member")) {
+    throw new AssetError("FORBIDDEN", "cannot write here");
+  }
+  return ctx;
+}
+
+async function assertAsset(
+  ctx: Awaited<ReturnType<typeof requireTenant>>,
+  assetId: string,
+): Promise<void> {
+  const asset = await withTenant(
+    ctx.tenant.id,
+    (tx) => getAsset(tx, ctx.tenant.id, assetId),
+    { role: ctx.role },
+  );
+  if (!asset) throw new AssetError("NOT_FOUND", `asset ${assetId}`);
+}
+
+export async function attachAssetPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertAsset(ctx, parsed.data.entityId);
+
+    const result = await registerAttachedPhoto(
+      { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role },
+      {
+        pathname: parsed.data.pathname,
+        target: photoTarget(parsed.data.entityId),
+      },
+    );
+    revalidatePath("/dashboard/m/assets");
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setAssetPhotoPrimaryAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertAsset(ctx, parsed.data.entityId);
+
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        setPrimaryAttachment(
+          tx,
+          { tenantId: ctx.tenant.id, userId: ctx.userId },
+          {
+            documentId: parsed.data.documentId,
+            target: photoTarget(parsed.data.entityId),
+          },
+        ),
+      { role: ctx.role },
+    );
+    revalidatePath("/dashboard/m/assets");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function detachAssetPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertAsset(ctx, parsed.data.entityId);
+
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        detachDocumentFromRecord(
+          tx,
+          { tenantId: ctx.tenant.id, userId: ctx.userId },
+          {
+            documentId: parsed.data.documentId,
+            target: photoTarget(parsed.data.entityId),
+          },
+        ),
+      { role: ctx.role },
+    );
+    // The FILE is untouched and stays in the cabinet. Removing a photo from an
+    // asset and deleting a photo are different acts.
+    revalidatePath("/dashboard/m/assets");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
 }
 
 /** Empty string from a form field means "not set", not an empty value. */

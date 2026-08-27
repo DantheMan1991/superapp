@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ClipboardList } from "lucide-react";
+import { ProductionNav } from "@/packs/production/components/production-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -11,7 +12,7 @@ import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { slugLabel } from "@/packs/production/vocabulary";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/app/panel";
 import { getOrder } from "@/packs/production/order-ops";
 import { getProcessor } from "@/packs/production/processor-ops";
 import { runDetail } from "@/packs/production/ops";
@@ -83,6 +84,7 @@ export default async function CutSheetPage({
 
   const sheetWord = labelFor(pack.labels, "cutSheet", "Order");
   const runWord = labelFor(pack.labels, "productionRun", "Run");
+  const processorWord = labelFor(pack.labels, "processor", "Processor");
   const isOpen = run === null || run.run.status === "in_progress";
 
   const feeByLine = new Map(
@@ -145,16 +147,27 @@ export default async function CutSheetPage({
           a sheet with no run sent you to Booked dates, which is where it was
           written rather than where it lives.
         */}
-        <Link
-          href={order.runId ? `${BASE}/${order.runId}` : `${BASE}/orders`}
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="mr-1 h-4 w-4" />
-          {order.runId ? runWord : `Every ${sheetWord.toLowerCase()}`}
-        </Link>
+        {/**
+         * **THE ONLY HAND-ROLLED BACK-LINK IN EITHER PACK THAT SURVIVES THE
+         * SWEEP, because it is the only one that goes somewhere the strip
+         * cannot.** A sheet attached to a run belongs to that run, and no tab
+         * can name a particular one. When there is no run it pointed at
+         * "Every {sheet}" — which IS a tab now — so that half is dropped rather
+         * than kept as a second route to the same page.
+         */}
+        {order.runId && (
+          <Link
+            href={`${BASE}/${order.runId}`}
+            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ChevronLeft className="mr-1 h-4 w-4" />
+            {runWord}
+          </Link>
+        )}
       </div>
 
       <PageHeader
+        icon={<ClipboardList />}
         className="print:hidden"
         title={order.title || sheetWord}
         description={`For ${processorName}${
@@ -172,11 +185,20 @@ export default async function CutSheetPage({
         }
       />
 
-      <Card className="print:border-0 print:shadow-none">
-        <CardHeader className="print:hidden">
-          <CardTitle className="text-base">What they were asked to do</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <ProductionNav
+        sheetWord={sheetWord}
+        processorWord={processorWord}
+      />
+
+      {/* `print:shadow-none` is kept from the Card this replaces — the sheet is
+          printed and handed to a plant, and an elevation shadow renders as a
+          grey smear. `Panel` carries no border, so `print:border-0` had nothing
+          left to switch off. */}
+      <Panel className="p-5 print:shadow-none">
+        <h2 className="mb-4 font-heading text-base font-semibold tracking-heading print:hidden">
+          What they were asked to do
+        </h2>
+        <div className="space-y-4">
           <CutSheet
             order={order}
             lines={lines}
@@ -247,8 +269,8 @@ export default async function CutSheetPage({
               day happens and there are weights to measure against.
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
     </div>
   );
 }

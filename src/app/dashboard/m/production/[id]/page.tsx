@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { Boxes, ClipboardList, Factory, PackageOpen } from "lucide-react";
+import { ProductionNav } from "@/packs/production/components/production-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -12,7 +13,8 @@ import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { Panel } from "@/components/app/panel";
 import {
   Table,
   TableBody,
@@ -240,17 +242,8 @@ export default async function ProductionRunPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <Link
-          href={BASE}
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="mr-1 h-4 w-4" />
-          Production
-        </Link>
-      </div>
-
       <PageHeader
+        icon={<Factory />}
         title={run.code}
         description={`${slugLabel(run.runKind)} · started ${run.startedOn}${
           run.completedOn ? ` · finished ${run.completedOn}` : ""
@@ -322,14 +315,17 @@ export default async function ProductionRunPage({
         }
       />
 
+      <ProductionNav
+        sheetWord={cutSheetWord}
+        processorWord={processorWord}
+      />
+
       <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+        <Panel className="p-5">
+          <p className="text-[13px] text-muted-foreground">
               Yield
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+          </p>
+          <div className="mt-1">
             {yieldResult.yield ? (
               <>
                 <div className="text-2xl font-semibold tabular-nums">
@@ -367,16 +363,14 @@ export default async function ProductionRunPage({
                 </p>
               </>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+        <Panel className="p-5">
+          <p className="text-[13px] text-muted-foreground">
               Cost in
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+          </p>
+          <div className="mt-1">
             <div className="text-2xl font-semibold tabular-nums">
               {formatMoney(detail.potCents, currencySymbol)}
             </div>
@@ -409,16 +403,14 @@ export default async function ProductionRunPage({
                 as an estimate stays with the batch.
               </p>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+        <Panel className="p-5">
+          <p className="text-[13px] text-muted-foreground">
               {isOpen ? "Held by this run" : "Landed in stock"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+          </p>
+          <div className="mt-1">
             <div className="text-2xl font-semibold tabular-nums">
               {formatMoney(isOpen ? heldCents : detail.landedCents, currencySymbol)}
             </div>
@@ -431,8 +423,8 @@ export default async function ProductionRunPage({
                     }`
                   : "Landed."}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       </div>
 
       {/*
@@ -453,10 +445,12 @@ export default async function ProductionRunPage({
         that says something the app no longer thinks it says.
       */}
       {(detail.orders.length > 0 || (isOpen && run.processorId)) && (
-        <Card>
-          <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+        <Panel className="p-5">
+          <div className="flex flex-row items-start justify-between gap-4">
             <div>
-              <CardTitle className="text-base">{cutSheetWord}</CardTitle>
+              <h2 className="font-heading text-base font-semibold tracking-heading">
+                {cutSheetWord}
+              </h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 What {detail.processorName ?? "they"} were asked to do. One
                 animal can carry two — a half sold to a customer is cut to their
@@ -472,8 +466,8 @@ export default async function ProductionRunPage({
                 sheetWord={cutSheetWord}
               />
             )}
-          </CardHeader>
-          <CardContent className="space-y-3">
+          </div>
+          <div className="mt-4 space-y-3">
             {detail.orders.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Nothing asked for yet. What they cut is what you told them to
@@ -544,22 +538,24 @@ export default async function ProductionRunPage({
                 with the feed.
               </p>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">What went in</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {inputs.length === 0 ? (
+      <section>
+        <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+          What went in
+        </h2>
+        <DataTable
+          isEmpty={inputs.length === 0}
+          empty={
             <EmptyState
-              icon={<ChevronLeft className="h-5 w-5" />}
+              icon={<PackageOpen className="h-5 w-5" />}
               title="Nothing has gone in yet"
               description="Adding an input takes it out of stock on the date you give, and carries what that batch had accumulated onto the run."
             />
-          ) : (
+          }
+        >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -612,9 +608,8 @@ export default async function ProductionRunPage({
                 ))}
               </TableBody>
             </Table>
-          )}
-        </CardContent>
-      </Card>
+        </DataTable>
+      </section>
 
       {/**
        * THE CARCASS STAGE, BETWEEN THE ANIMAL AND THE BOX — and it sits between
@@ -625,10 +620,12 @@ export default async function ProductionRunPage({
        * condemnation rate. A stored one would be a factor, and a factor is the
        * unauditable fudge this pack was built to refuse.
        */}
-      <Card>
-        <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+      <Panel className="p-5">
+        <div className="flex flex-row items-start justify-between gap-4">
           <div>
-            <CardTitle className="text-base">{sheetWord}</CardTitle>
+            <h2 className="font-heading text-base font-semibold tracking-heading">
+              {sheetWord}
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               What hung, what was condemned, and the two ratios that need a
               carcass to exist between the animal and the box.
@@ -652,11 +649,11 @@ export default async function ProductionRunPage({
               </Button>
             }
           />
-        </CardHeader>
-        <CardContent className="space-y-4">
+        </div>
+        <div className="mt-4 space-y-4">
           {carcasses.length === 0 ? (
             <EmptyState
-              icon={<ChevronLeft className="h-5 w-5" />}
+              icon={<ClipboardList className="h-5 w-5" />}
               title={`No ${sheetWord.toLowerCase()} yet`}
               description={
                 inputs.length === 0
@@ -871,14 +868,14 @@ export default async function ProductionRunPage({
               </Table>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">What came out</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <section>
+        <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+          What came out
+        </h2>
+        <div className="space-y-3">
           {/*
             WHERE THIS MEAT MAY BE SOLD, said beside the boxes rather than only
             as a badge at the top. The design calls this the existential one:
@@ -899,13 +896,16 @@ export default async function ProductionRunPage({
               )}
             </p>
           )}
-          {outputs.length === 0 ? (
-            <EmptyState
-              icon={<ChevronLeft className="h-5 w-5" />}
-              title="Nothing has come out yet"
-              description="Record boxes as they come off. They land in Inventory together when the run is finished, so the cost split across them adds up to what went in."
-            />
-          ) : (
+          <DataTable
+            isEmpty={outputs.length === 0}
+            empty={
+              <EmptyState
+                icon={<Boxes className="h-5 w-5" />}
+                title="Nothing has come out yet"
+                description="Record boxes as they come off. They land in Inventory together when the run is finished, so the cost split across them adds up to what went in."
+              />
+            }
+          >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -965,19 +965,19 @@ export default async function ProductionRunPage({
                 ))}
               </TableBody>
             </Table>
-          )}
-        </CardContent>
-      </Card>
+          </DataTable>
+        </div>
+      </section>
 
       {run.notes && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Notes</CardTitle>
-          </CardHeader>
-          <CardContent className="whitespace-pre-wrap text-sm text-muted-foreground">
+        <Panel className="p-5">
+          <h2 className="mb-3 font-heading text-base font-semibold tracking-heading">
+            Notes
+          </h2>
+          <div className="whitespace-pre-wrap text-sm text-muted-foreground">
             {run.notes}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       )}
 
       {(run.crewSize !== null || run.labourHours !== null) && (

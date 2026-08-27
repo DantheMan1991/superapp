@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { Building2 } from "lucide-react";
+import { ProductionNav } from "@/packs/production/components/production-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -8,8 +8,7 @@ import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/app/panel";
 import { listProcessors } from "@/packs/production/processor-ops";
 import {
   INSPECTION_LABELS,
@@ -33,8 +32,6 @@ import {
 
 export const dynamic = "force-dynamic";
 
-
-const BASE = "/dashboard/m/production";
 
 /**
  * The processor directory: who does the part of a run this business does not do
@@ -71,48 +68,44 @@ export default async function ProcessorsPage() {
   );
 
   const word = labelFor(pack.labels, "processor", "Processor");
+  const cutSheetWord = labelFor(pack.labels, "cutSheet", "Order");
   const kindOptions = processorHandlesFrom(pack.config);
   const isOwner = ctx.role === "owner";
 
   return (
     <div className="space-y-6">
-      <div>
-        <Button asChild variant="ghost" size="sm" className="-ml-2">
-          <Link href={BASE}>
-            <ChevronLeft className="size-4" />
-            Production
-          </Link>
-        </Button>
-      </div>
-
       {/* NEVER PLURALISE A LABEL — the rule `ProductionModule` records, learned
           when `+ "s"` rendered "No batchs yet" on the first screen anybody
           looked at. The word is the tenant's to rename and no code here knows
           how to make a plural of it, so the heading puts it in front of a noun
           that is already plural-safe and the empty state avoids it entirely. */}
       <PageHeader
+        icon={<Building2 />}
         title={`${word} directory`}
         description={`Who does the work you do not do yourself — what they take, what they charge, how they are inspected, and what you think of them.`}
         actions={isOwner ? <AddProcessorDialog word={word} /> : null}
       />
 
+      <ProductionNav sheetWord={cutSheetWord} processorWord={word} />
+
       {processors.length === 0 ? (
         <EmptyState
+          panel
           title="Nobody on the list yet"
           description={`Add the places you send work to. Dates at a good one go six to twelve months ahead, so the list is worth having well before the season it is needed for.`}
         />
       ) : (
         <div className="space-y-4">
           {processors.map(({ processor, name, handles, cuts, priceItems }) => (
-            <Card key={processor.id}>
-              <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+            <Panel key={processor.id} className="p-5">
+              <div className="flex flex-row items-start justify-between gap-4">
                 <div className="space-y-1">
-                  <CardTitle className="flex items-center gap-2">
+                  <h2 className="flex items-center gap-2 font-heading text-lg font-semibold tracking-heading">
                     {name}
                     {!processor.isActive && (
                       <Badge variant="outline">Not in use</Badge>
                     )}
-                  </CardTitle>
+                  </h2>
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <Badge
                       variant={
@@ -156,9 +149,9 @@ export default async function ProcessorsPage() {
                     }}
                   />
                 )}
-              </CardHeader>
+              </div>
 
-              <CardContent className="space-y-5">
+              <div className="mt-5 space-y-5">
                 <p className="text-sm text-muted-foreground">
                   {inspectionNote(processor.inspection, word)}
                 </p>
@@ -358,8 +351,8 @@ export default async function ProcessorsPage() {
                     {processor.notes}
                   </p>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </Panel>
           ))}
         </div>
       )}

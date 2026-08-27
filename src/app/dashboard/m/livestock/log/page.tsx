@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ChevronLeft, ClipboardCheck } from "lucide-react";
+import { ClipboardCheck } from "lucide-react";
+import { LivestockNav } from "@/packs/livestock/components/livestock-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -7,7 +8,8 @@ import { addDays, todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { StatCard } from "@/components/app/stat-card";
 import {
   Table,
   TableBody,
@@ -170,15 +172,8 @@ export default async function DailyRoundPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="h-4 w-4" />
-        All livestock
-      </Link>
-
       <PageHeader
+        icon={<ClipboardCheck />}
         title="Daily round"
         description={`What you saw today, ${today}. Most days nothing happens — say so in one tap.`}
         actions={
@@ -191,6 +186,8 @@ export default async function DailyRoundPage() {
         }
       />
 
+      <LivestockNav />
+
       {round.length === 0 ? (
         <EmptyState
           panel
@@ -200,59 +197,51 @@ export default async function DailyRoundPage() {
         />
       ) : (
         <>
-          <div className="grid gap-6 md:grid-cols-3">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Checked</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-medium tabular-nums">
-                  {progress.checked} of {progress.total}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {progress.remaining.length === 0
-                    ? "The whole farm, today."
-                    : `${progress.remaining.length} still to look at.`}
-                </p>
-              </CardContent>
-            </Card>
+          <div className="grid gap-3 md:grid-cols-3">
+            <StatCard
+              label="Checked"
+              value={`${progress.checked} of ${progress.total}`}
+              tone={
+                progress.remaining.length === 0 ? "success" : "default"
+              }
+              footnote={
+                progress.remaining.length === 0
+                  ? "The whole farm, today."
+                  : `${progress.remaining.length} still to look at.`
+              }
+            />
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Streak</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-medium tabular-nums">
-                  {streak === 0 ? "—" : `${streak} ${streak === 1 ? "day" : "days"}`}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {/* Today being untouched does not break it — see
-                      `checkStreak`. A counter that resets at breakfast is a
-                      counter nobody keeps. */}
-                  {streak === 0
-                    ? "Record today and it starts."
-                    : "Days in a row the round was walked."}
-                </p>
-              </CardContent>
-            </Card>
+            {/* Today being untouched does not break it — see `checkStreak`. A
+                counter that resets at breakfast is a counter nobody keeps. */}
+            <StatCard
+              label="Streak"
+              value={
+                streak === 0
+                  ? "—"
+                  : `${streak} ${streak === 1 ? "day" : "days"}`
+              }
+              footnote={
+                streak === 0
+                  ? "Record today and it starts."
+                  : "Days in a row the round was walked."
+              }
+            />
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Lost today</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-medium tabular-nums">{lostTotal}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {/* Read back out of inventory's ledger. Not a column here. */}
-                  {lostTotal === 0
-                    ? "Nothing recorded against today."
-                    : "Head, already off the count."}
-                </p>
-              </CardContent>
-            </Card>
+            {/* Read back out of inventory's ledger. Not a column here. */}
+            <StatCard
+              label="Lost today"
+              value={lostTotal}
+              tone={lostTotal === 0 ? "default" : "destructive"}
+              footnote={
+                lostTotal === 0
+                  ? "Nothing recorded against today."
+                  : "Head, already off the count."
+              }
+            />
           </div>
 
-          <Table>
+          <DataTable>
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Lot</TableHead>
@@ -334,12 +323,16 @@ export default async function DailyRoundPage() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+            </Table>
+          </DataTable>
 
           {progress.needsAttention.length > 0 && (
-            <div className="space-y-3">
-              <h2 className="text-sm font-medium">Noted today</h2>
-              <Table>
+            <section>
+              <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+                Noted today
+              </h2>
+              <DataTable>
+                <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Lot</TableHead>
@@ -364,8 +357,9 @@ export default async function DailyRoundPage() {
                       </TableRow>
                     ))}
                 </TableBody>
-              </Table>
-            </div>
+                </Table>
+              </DataTable>
+            </section>
           )}
         </>
       )}

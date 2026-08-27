@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { Beef, ClipboardCheck, Scale, Sparkles } from "lucide-react";
+import { Beef } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -29,6 +29,7 @@ import { ageInDays, formatAge, formatRate, mortalityRate, summariseHead } from "
 import { labelFor } from "@/lib/packs/resolve";
 import { speciesFrom } from "./vocabulary";
 import { LivestockLotForm } from "./components/lot-controls";
+import { LivestockNav } from "./components/livestock-nav";
 
 const BASE = "/dashboard/m/livestock";
 
@@ -104,60 +105,39 @@ export async function LivestockModule({
       <PageHeader
         title="Livestock"
         description={`Every animal is a ${lotWord.toLowerCase()}, and an individual is a ${lotWord.toLowerCase()} of one.`}
+        icon={<Beef />}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {/* FIRST, and not owner-gated. The round is the daily act and the
-                lot form is the occasional one, so the order on the page is the
-                order of how often they are used — not the order they were
-                built in. */}
-            <Button asChild variant="outline">
-              <Link href={`${BASE}/log`}>
-                <ClipboardCheck className="mr-2 h-4 w-4" />
-                Daily round
-              </Link>
-            </Button>
-            {/* Slice 2. Not daily — feed is looked at when a batch is being
-                judged against the last one, which is why it sits after the
-                round rather than beside it. */}
-            <Button asChild variant="outline">
-              <Link href={`${BASE}/feed`}>
-                <Scale className="mr-2 h-4 w-4" />
-                Feed
-              </Link>
-            </Button>
-            {/* The other half of the wedge, and the only thing on this page
-                that works with nothing recorded at all. */}
-            <Button asChild variant="outline">
-              <Link href={`${BASE}/ask`}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Ask
-              </Link>
-            </Button>
-            {/* No longer gated on an item existing: the form can create one. A
-                farm's first animal used to require a trip to Inventory first. */}
-            {isOwner && (
-              <LivestockLotForm
-                items={headItems.map((i) => ({ id: i.id, name: i.name }))}
-                speciesOptions={suggestedSpecies}
-                today={today}
-              />
-            )}
-          </div>
+          isOwner ? (
+            /* No longer gated on an item existing: the form can create one. A
+               farm's first animal used to require a trip to Inventory first. */
+            <LivestockLotForm
+              items={headItems.map((i) => ({ id: i.id, name: i.name }))}
+              speciesOptions={suggestedSpecies}
+              today={today}
+            />
+          ) : undefined
         }
       />
 
-      {lots.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<Beef className="h-5 w-5" />}
-          title="No animals recorded yet"
-          description={
-            isOwner
-              ? "Start a lot — a batch of chicks, a group of feeders, one named cow. What goes in and what leaves are both entries against it, so the count always reconciles."
-              : "An owner starts the first lot. Once they do, the animals show up here."
-          }
-        />
-      ) : (
+      {/* The daily round, feed and Ask were three outline buttons here. Their
+          ORDER is a recorded decision — how often each is used, not the order
+          they were built in — and it is preserved in the strip. */}
+      <LivestockNav />
+
+      <DataTable
+        isEmpty={lots.length === 0}
+        empty={
+          <EmptyState
+            icon={<Beef className="h-5 w-5" />}
+            title="No animals recorded yet"
+            description={
+              isOwner
+                ? "Start a lot — a batch of chicks, a group of feeders, one named cow. What goes in and what leaves are both entries against it, so the count always reconciles."
+                : "An owner starts the first lot. Once they do, the animals show up here."
+            }
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -250,7 +230,7 @@ export async function LivestockModule({
             })}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
     </div>
   );
 }

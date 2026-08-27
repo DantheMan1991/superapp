@@ -25,6 +25,49 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-26 — The pack puts on the design system (`claude/two-packs-follow-the-pattern`)
+
+No behaviour changed. Shipped alongside `production` as PR 3 of five, in the
+shape [inventory.md](inventory.md) set; the sweep itself is in
+[design-system.md](design-system.md).
+
+**THREE OUTLINE BUTTONS OUT OF THE HEADER** — the daily round, feed and Ask —
+leaving `LivestockLotForm` as the action. Their ORDER is preserved in
+`components/livestock-nav.tsx` because it was a recorded decision rather than
+the order they were built in: the round is the daily act, feed is looked at when
+one batch is judged against the last, and Ask is the only screen in the pack
+that works with nothing recorded at all.
+
+**No props on this strip, unlike production's.** None of the four names is a
+word the tenant owns. `lotWord` is — which is exactly why the hub tab is
+"Overview" and not a pluralised `lotWord`, the same rule this pack already
+records as *"NEVER PLURALISE A LABEL"* after the profile turned `Batch` into
+"No batchs yet" on the first screen anybody looked at.
+
+**The three round cards and the four feed cards became `StatCard`s**, including
+the feed-conversion one whose label carries a Measured/Estimated badge — the
+label slot takes a node, so the provenance stays beside the name of the figure
+rather than dropping into a footnote. `Lost today` and `Checked` gained a tone,
+so a bad day and a finished round read at a glance instead of only on the
+number.
+
+**THE SEVEN CARDS ON THE LOT PAGE STAYED `Panel`, NOT `StatCard`.** Several
+carry two or three qualifying lines under the figure — the weight with its tape
+badge, the withdrawal with its milk note — and `StatCard` has exactly one
+`footnote`. Bending it to take a stack would make every other stat card in the
+product harder to reason about. Same call the inventory item page made.
+
+Two dashed-border paragraphs became real `EmptyState`s, six tables went into
+`DataTable`, and section headings moved from 14px to the house 20px.
+
+**A REGEX THAT WRAPS EVERY `<Table>` WILL DOUBLE-WRAP THE ONES YOU ALREADY
+DID.** Two tables on the lot page ended up `DataTable > DataTable > Table` —
+a panel inside a panel, which `tsc` is perfectly happy with. Caught by counting
+opens against `<Table>` opens, not by reading. Count, or convert by hand.
+
+Driven on Hilltop Farm: hub, round, feed, Ask and a lot page, read out of the
+DOM.
+
 ### 2026-08-20 — The pen stopped charging itself for cost that left with the meat (`claude/cost-that-left-with-the-meat`)
 
 **Found by driving `production` slice 0 on the live app**, on a pen with real

@@ -362,8 +362,17 @@ What remains is the three centred states above and `(marketing)`.
   directly on the page background, and 45 raw `<Card>` wrappers are still doing
   `Panel`'s job. They do use `EmptyState` (19 files), so this is a partial
   adoption rather than none. Remaining order, after the tokens landed:
-  **inventory** (the pattern the rest copy) → **production + livestock** (the
-  most pages and the most hand-rolled cards) → **land + retail + assets**.
+  ~~**inventory** (the pattern the rest copy)~~ **done 2026-08-26** →
+  ~~**production + livestock**~~ **done 2026-08-26** → **land + retail +
+  assets**, which is all that is left.
+- **`DataTable` IS "PANEL + TABLE SELECTORS", AND THERE IS NO WAY TO ASK FOR
+  THE SECOND WITHOUT THE FIRST.** A table that genuinely belongs *inside* a
+  `Panel` — because the panel holds other things too, like production's
+  kill-sheet card with its tally, its condemnation causes and then the carcass
+  list — cannot be wrapped without drawing a card inside a card, so it keeps
+  `--border` row hairlines instead of `--divider`. Found while converting
+  production; there is one such table today. The fix, when a second one turns
+  up, is to split the styling out of `DataTable` so `Panel` can opt into it.
 - **A pack hub puts its sections in the header's actions row**, as identical
   outline buttons — five on inventory, four on production, three on livestock —
   so nothing distinguishes a place from a verb, and the one real action sits

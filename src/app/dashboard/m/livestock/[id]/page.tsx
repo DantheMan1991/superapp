@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { Beef } from "lucide-react";
+import { LivestockNav } from "@/packs/livestock/components/livestock-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -9,7 +10,9 @@ import { labelFor } from "@/lib/packs/resolve";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { Panel } from "@/components/app/panel";
 import {
   Table,
   TableBody,
@@ -324,15 +327,8 @@ export default async function LivestockLotPage({
 
   return (
     <div className="space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="h-4 w-4" />
-        All livestock
-      </Link>
-
       <PageHeader
+        icon={<Beef />}
         title={inventoryLot.code}
         description={
           <span className="flex items-center gap-2">
@@ -406,12 +402,14 @@ export default async function LivestockLotPage({
         }
       />
 
+      <LivestockNav />
+
       <div className="grid gap-6 md:grid-cols-3 xl:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Head</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
+            Head
+          </h2>
+          <div className="mt-1">
             <p className="text-2xl font-medium tabular-nums">
               {movements.length === 0 ? "—" : summary.balance}
             </p>
@@ -420,14 +418,12 @@ export default async function LivestockLotPage({
                 ? "Nothing placed yet."
                 : `${summary.intake} in, ${summary.died + summary.removed} out.`}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Lost</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">Lost</h2>
+          <div className="mt-1">
             <p className="text-2xl font-medium tabular-nums">
               {formatRate(rate)}
             </p>
@@ -436,26 +432,23 @@ export default async function LivestockLotPage({
                   gap between 5% and 12% is most of the margin. */}
               {summary.died} died of {summary.intake} placed.
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Age</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">Age</h2>
+          <div className="mt-1">
             <p className="text-2xl font-medium">
               {formatAge(ageInDays(lot.bornOn, today))}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {lot.bornOn ? `Born ${lot.bornOn}` : "Birth date not recorded."}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
               <span className="flex items-center gap-2">
                 <Link href={`${BASE}/feed`} className="hover:underline">
                   Fed
@@ -473,9 +466,8 @@ export default async function LivestockLotPage({
                   </Badge>
                 )}
               </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+            </h2>
+          <div className="mt-1">
             <p className="text-2xl font-medium tabular-nums">
               {/* Zero is the honest answer once something HAS been fed and it
                   cost nothing on record; before that it is still zero, and the
@@ -544,12 +536,11 @@ export default async function LivestockLotPage({
                   : "."}
               </p>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
               <span className="flex items-center gap-2">
                 Weight
                 {/* THE METHOD, BESIDE THE NUMBER. A crate on a scale and a tape
@@ -566,9 +557,8 @@ export default async function LivestockLotPage({
                   </Badge>
                 )}
               </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+            </h2>
+          <div className="mt-1">
             <p className="text-2xl font-medium tabular-nums">
               {formatLb(latest?.averageLb ?? null)}
             </p>
@@ -586,12 +576,11 @@ export default async function LivestockLotPage({
                   : `${shrinkCount} weighings set aside — taken too close to a haul.`}
               </p>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
               <span className="flex items-center gap-2">
                 Withdrawal
                 {/* The one badge in this pack that is a legal fact rather than a
@@ -613,9 +602,8 @@ export default async function LivestockLotPage({
                   </Badge>
                 )}
               </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+            </h2>
+          <div className="mt-1">
             <p className="text-2xl font-medium">
               {withdrawal.meat.state === "under"
                 ? withdrawal.meat.clearsOn
@@ -632,14 +620,12 @@ export default async function LivestockLotPage({
                 {describeWithdrawal(withdrawal.milk)}
               </p>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Where</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">Where</h2>
+          <div className="mt-1">
             <p className="text-2xl font-medium">{zone ? zone.zoneName : "—"}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {/* "Loose" is stated rather than left blank. Cattle roaming a
@@ -649,24 +635,26 @@ export default async function LivestockLotPage({
                 ? `${zone.structureName ? `In ${zone.structureName}` : "Loose"} · since ${zone.startedOn}`
                 : "Not on a paddock. Moving them off is what starts a paddock's rest clock."}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       </div>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
             Tags {identifiers.length > 0 && `(${identifiers.length})`}
           </h2>
           <IdentifierForm livestockLotId={lot.id} today={today} />
         </div>
-        {identifiers.length === 0 ? (
-          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-            No tags yet. An animal carries several — a visual tag you can read
-            across a field, and an official one that reaches processor
-            paperwork.
-          </p>
-        ) : (
+        <DataTable
+          isEmpty={identifiers.length === 0}
+          empty={
+            <EmptyState
+              title="No tags yet"
+              description="An animal carries several — a visual tag you can read across a field, and an official one that reaches processor paperwork."
+            />
+          }
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -695,12 +683,12 @@ export default async function LivestockLotPage({
               ))}
             </TableBody>
           </Table>
-        )}
+        </DataTable>
       </div>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
             Daily checks{" "}
             <span className="font-normal text-muted-foreground">
               {/* The lot's own answer to "when did anyone last look at these
@@ -719,14 +707,15 @@ export default async function LivestockLotPage({
             />
           )}
         </div>
-        {checks.length === 0 ? (
-          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-            Nobody has recorded a check on this lot yet. A day with no entry is
-            a day nobody looked — which is a different fact from a day when
-            nothing happened, and it is the difference the mortality rate above
-            depends on.
-          </p>
-        ) : (
+        <DataTable
+          isEmpty={checks.length === 0}
+          empty={
+            <EmptyState
+              title="No checks recorded"
+              description="A day with no entry is a day nobody looked — which is a different fact from a day when nothing happened, and it is the difference the mortality rate above depends on."
+            />
+          }
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -757,12 +746,12 @@ export default async function LivestockLotPage({
               ))}
             </TableBody>
           </Table>
-        )}
+        </DataTable>
       </div>
 
       {treatments.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-medium">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
             Treatments{" "}
             <span className="font-normal text-muted-foreground">
               {/* The sentence as written. Lowercasing it mangled the product
@@ -771,7 +760,8 @@ export default async function LivestockLotPage({
               · {formatWithdrawal(withdrawal.meat)} for meat
             </span>
           </h2>
-          <Table>
+          <DataTable>
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>When</TableHead>
@@ -858,13 +848,14 @@ export default async function LivestockLotPage({
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+            </Table>
+          </DataTable>
         </div>
       )}
 
       {weights.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-medium">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
             Weighings{" "}
             <span className="font-normal text-muted-foreground">
               {feed?.weight.conversion
@@ -874,7 +865,8 @@ export default async function LivestockLotPage({
                   : ""}
             </span>
           </h2>
-          <Table>
+          <DataTable>
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>When</TableHead>
@@ -949,7 +941,8 @@ export default async function LivestockLotPage({
                 );
               })}
             </TableBody>
-          </Table>
+            </Table>
+          </DataTable>
           {feed?.weight.conversion && (
             <p className="text-xs text-muted-foreground">
               {/* The confidence, said out loud. Feed measured against a scale is
@@ -965,7 +958,7 @@ export default async function LivestockLotPage({
 
       {fedIn.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-medium">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
             Fed in by name{" "}
             <span className="font-normal text-muted-foreground">
               {/* MEASURED ONLY. These are the issues that named this lot; a
@@ -975,7 +968,8 @@ export default async function LivestockLotPage({
               · {formatMoney(feed?.measuredCents ?? 0, currencySymbol)}
             </span>
           </h2>
-          <Table>
+          <DataTable>
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>When</TableHead>
@@ -1003,14 +997,16 @@ export default async function LivestockLotPage({
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+            </Table>
+          </DataTable>
         </div>
       )}
 
       {entries.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-sm font-medium">Head events</h2>
-          <Table>
+          <h2 className="font-heading text-xl font-semibold tracking-heading">Head events</h2>
+          <DataTable>
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>When</TableHead>
@@ -1039,7 +1035,8 @@ export default async function LivestockLotPage({
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+            </Table>
+          </DataTable>
         </div>
       )}
     </div>

@@ -77,6 +77,53 @@ becomes 1d, unchanged.
 
 ## Build log
 
+### 2026-08-26 — The pack puts on the design system (`claude/two-packs-follow-the-pattern`)
+
+No behaviour changed. PR 3 of the five bringing the packs onto the primitive
+layer, done in the shape [inventory.md](inventory.md) set a day earlier;
+[design-system.md](design-system.md) holds the sweep and what it found.
+
+**FOUR OUTLINE BUTTONS OUT OF THE HEADER**, leaving `StartRunForm` as the only
+thing in `actions` — because it is the only verb. Booked dates, the sheet list,
+the reconciliation and the directory are places, and they are now
+`components/production-nav.tsx`.
+
+**THE NAV TAKES ITS LABELS AS PROPS, WHICH `AccountingNav` DOES NOT NEED TO.**
+Two of the five name things the tenant renames — the homestead profile calls a
+processor a *Butcher* — so a module-level constant would have hardcoded one
+tenant's vocabulary into navigation. They arrive already through `labelFor`.
+**And the strip lowercases the sheet word itself** rather than trusting six call
+sites to remember: the first attempt passed `.toLowerCase()` at the call site,
+one of the two edits silently did not match after prettier reflowed the line,
+and the tab shipped reading *Every Cut sheet* until it was read out of the DOM.
+
+**`sheetWord` ON THE RUN PAGE IS THE KILL SHEET, NOT THE CUT SHEET**, and
+passing it to the nav would have put the wrong noun in the navigation on that
+one page. `[id]/page.tsx` declares both; the nav gets `cutSheetWord`. Worth
+knowing before the next thing takes a "sheet word" from this file.
+
+**Eight cards became `Panel`, three tables `DataTable`, and the exemption
+counter a `StatCard`** — its label and value both take a node, so the standing
+badge stays on the label line and the *of 1000* stays small beside the figure.
+Two more back-arrows were standing in as empty-state glyphs (*Nothing has gone
+in yet*, *Nothing has come out yet*); they are a package and a box now.
+
+**ONE HAND-ROLLED BACK-LINK SURVIVES THE SWEEP, on `orders/[id]`**, and it is
+the only one in either pack that goes somewhere a strip cannot: a sheet attached
+to a run belongs to *that* run, and no tab can name a particular one. Its other
+half — pointing at "Every {sheet}" when there was no run — is dropped, because
+that IS a tab now.
+
+**A TABLE INSIDE A `Panel` DOES NOT GET `DataTable`'s ROW STYLING**, and the
+kill-sheet card is where that bites. Its body is genuinely mixed — the tally,
+the condemnation causes, then the carcass list — so it stays a `Panel`, and the
+table in it keeps `--border` hairlines rather than `--divider`. `DataTable` is
+"panel + table selectors" with no way to ask for the second without the first.
+Recorded as an open item rather than solved here.
+
+Driven on Hilltop Farm: every page in the pack, strip active on the right tab,
+read out of the DOM rather than eyeballed.
+
 ### 2026-08-25 — The weight finally reaches the shelf (`claude/what-a-batch-weighs`)
 
 One argument, and the reason it is worth a build-log entry is what it says about

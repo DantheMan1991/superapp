@@ -1,19 +1,16 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { Boxes, Layers } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { formatMoney } from "@/lib/money";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { Panel } from "@/components/app/panel";
+import { InventoryNav } from "@/packs/inventory/components/inventory-nav";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -65,8 +62,6 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 
 export const dynamic = "force-dynamic";
-
-const BASE = "/dashboard/m/inventory";
 
 /**
  * One item: how much there is, WHERE, and which batch it belongs to.
@@ -231,16 +226,9 @@ export default async function InventoryItemPage({
 
   return (
     <div className="space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="h-4 w-4" />
-        All inventory
-      </Link>
-
       <PageHeader
         title={item.name}
+        icon={<Boxes />}
         description={
           <span className="flex items-center gap-2">
             {slugLabel(item.itemKind)}
@@ -304,15 +292,25 @@ export default async function InventoryItemPage({
         }
       />
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">On hand</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-medium tabular-nums">
-              {rows.length === 0 ? "—" : formatQuantity(total, unit)}
-            </p>
+      <InventoryNav isOwner={ctx.role === "owner"} />
+
+      {/**
+       * `Panel`, not `StatCard`. Both of these look like stat cards and neither
+       * is one: "On hand" carries up to four qualifying sentences under the
+       * figure — the weight, the entry count, the average rate, the below-zero
+       * note — and `StatCard` has exactly one `footnote`. Bending it to take a
+       * stack of paragraphs would make every other stat card in the product
+       * harder to reason about. The figure still takes the house heading
+       * treatment so it reads as the same family.
+       */}
+      <div className="grid gap-3 md:grid-cols-2">
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
+            On hand
+          </h2>
+          <p className="mt-1 font-heading text-2xl font-semibold tracking-heading tabular-nums">
+            {rows.length === 0 ? "—" : formatQuantity(total, unit)}
+          </p>
             {rows.length > 0 && totalWeight && (
               <p className="mt-1 text-sm text-muted-foreground tabular-nums">
                 {/* Only shown when somebody weighed a delivery of it. An item
@@ -349,14 +347,12 @@ export default async function InventoryItemPage({
                 before the delivery that covered it was entered.
               </p>
             )}
-          </CardContent>
-        </Card>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Where it is</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="mb-2 font-heading text-base font-semibold tracking-heading">
+            Where it is
+          </h2>
             {byLocation.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Nothing on hand anywhere.
@@ -386,20 +382,23 @@ export default async function InventoryItemPage({
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
+        </Panel>
       </div>
 
-      <div className="space-y-3">
-        <h2 className="text-sm font-medium">
+      <section>
+        <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
           Batches {lots.length > 0 && `(${lots.length})`}
         </h2>
-        {lots.length === 0 ? (
-          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-            No batches yet. A batch is what traceability follows, and what a
-            cost attaches to — one delivery, one hatch, one pen.
-          </p>
-        ) : (
+        <DataTable
+          isEmpty={lots.length === 0}
+          empty={
+            <EmptyState
+              icon={<Layers className="h-5 w-5" />}
+              title="No batches yet"
+              description="A batch is what traceability follows, and what a cost attaches to — one delivery, one hatch, one pen."
+            />
+          }
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -534,12 +533,14 @@ export default async function InventoryItemPage({
               })}
             </TableBody>
           </Table>
-        )}
-      </div>
+        </DataTable>
+      </section>
 
       {corrections.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium">Cost corrections</h2>
+        <section>
+          <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+            Cost corrections
+          </h2>
           {/**
            * **A SECTION OF ITS OWN, not rows folded into "Recent entries".**
            * Every row in that table moved something; none of these did. Listing
@@ -552,6 +553,7 @@ export default async function InventoryItemPage({
            * batch went up by less than the correction, and it is the figure
            * that was frozen at the moment it was written.
            */}
+          <DataTable>
           <Table>
             <TableHeader>
               <TableRow>
@@ -606,12 +608,16 @@ export default async function InventoryItemPage({
               ))}
             </TableBody>
           </Table>
-        </div>
+          </DataTable>
+        </section>
       )}
 
       {movements.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium">Recent entries</h2>
+        <section>
+          <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+            Recent entries
+          </h2>
+          <DataTable>
           <Table>
             <TableHeader>
               <TableRow>
@@ -669,7 +675,8 @@ export default async function InventoryItemPage({
               ))}
             </TableBody>
           </Table>
-        </div>
+          </DataTable>
+        </section>
       )}
     </div>
   );

@@ -33,6 +33,69 @@ this dossier is the build record.
 
 ## Build log
 
+### 2026-08-26 — The pack puts on the design system (`claude/inventory-wears-the-system`)
+
+No behaviour changed. This is PR 2 of the five that bring the packs onto the
+primitive layer they were built alongside and never used, and it is the one the
+other packs copy — see
+[design-system.md](design-system.md) for the sweep and what it found.
+
+**FOUR OF THE FIVE THINGS IN THE HEADER WERE PLACES, NOT VERBS.** Counting,
+What it is worth, Deliveries & invoices and When it is deducted sat in
+`PageHeader`'s `actions` as identical outline buttons, so nothing distinguished
+a destination from an act, and the one real action — Add item — was last in the
+row because it was built last. They are now `components/inventory-nav.tsx`, a
+`CategoryStrip` on all seven surfaces. Tax stays owner-only exactly as the
+button was; **that is presentation, not authorisation** — the page calls
+`requireTenant()`, staff can still open it by URL, and only the acts on it are
+gated.
+
+**EVERY SUB-PAGE HAD INVENTED ITS OWN WAY BACK — six of them in four shapes**: a
+bare `<div>` above the title on `/counts` and `/counts/[id]`, a link inside
+`actions` on `/value`, a flex row on `/matching`, a naked chevron on `/tax` and
+`/[id]`. None named the sibling sections, so Counting could not reach Deliveries
+without a stop at the hub. All six are gone; the strip is one control that is
+also a map.
+
+**THE HUB HAS FIGURES NOW, and the total does not travel without its caveat.**
+Three `StatCard`s — what it is worth, not costed, going off soon — over
+`allItems` so a search box cannot empty them. `/value`'s own header lays down
+the rule that *"if a later change moves the total somewhere the caveat does not
+follow, that is the defect"*, so the shortfall is in **that card's own
+footnote**, not the card beside it: they stack to one column on a phone and a
+neighbour is not "with it". The hub reads `valueStock` with **`asOf: today`**,
+matching what `/value`'s picker defaults to — unbounded would sweep in
+future-dated movements and the hub would quietly disagree with the page it links
+to. Driven: both read $1,779.23, 5 batches, 309 in all.
+
+Every `<Table>` is now inside `<DataTable>` (nine of them), `EmptyState` drops
+its `panel` prop inside one — `DataTable` supplies the panel and both would draw
+a card inside a card — and the two summary cards on `/value` became `StatCard`s.
+`/[id]`'s two cards stayed `Panel`, deliberately: "On hand" carries up to four
+qualifying sentences and `StatCard` has exactly one `footnote`.
+
+**A LITERAL SPACE AFTER `</strong>` DOES NOT SURVIVE TO THE DOM, AND PRETTIER
+WRITES ONE.** `/tax` read `<strong>when it is paid for</strong>{" "}` and
+prettier collapsed it to a plain space while formatting this PR; the rendered
+DOM then came out `paid forand your`. Confirmed A/B/A against a dev server with
+a cleared `.next`, reading `innerHTML` rather than a screenshot — `{" "}`
+renders the space, the literal does not, and prettier rewrites the first into
+the second every time it runs. **The fix is punctuation, not `{" "}`**: the text
+node now starts with a comma, so there is no leading space to lose and nothing
+for prettier to undo. Root cause in the SWC/Turbopack JSX transform is NOT
+established — only the behaviour and the workaround.
+
+**DO NOT RUN PRETTIER ACROSS THIS TREE.** Doing so reformatted seven components
+this PR never touched and rewrote `/[id]` entirely (253 insertions for a 58-line
+change), and each collapsed `{" "}` is a candidate for the bug above. 18 files
+under `src/packs/inventory` do not currently satisfy prettier; that is the
+existing state and reformatting them is its own PR, if it is wanted at all.
+Format only the lines you changed.
+
+**Not driven: `/counts/[id]`.** Hilltop Farm has no counts, `startCount` has no
+inverse, and creating an undeletable draft to look at a layout is a bad trade
+against the fixture. Every other surface was opened and read out of the DOM.
+
 ### 2026-08-25 — A filter bar that was half built (`claude/a-filter-bar-that-was-half-built`)
 
 The founder's ask, alongside the packages one: *"there should also me a filter

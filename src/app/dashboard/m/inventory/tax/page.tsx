@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { Scale } from "lucide-react";
 import { and, eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
@@ -7,7 +6,9 @@ import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { Panel } from "@/components/app/panel";
+import { InventoryNav } from "@/packs/inventory/components/inventory-nav";
 import {
   Table,
   TableBody,
@@ -23,17 +24,17 @@ import { TaxRuleForm } from "@/packs/inventory/components/tax-rule-controls";
 
 export const dynamic = "force-dynamic";
 
-const BASE = "/dashboard/m/inventory";
-
 /**
  * **WHERE AN ACCOUNTANT'S DECISION GETS RECORDED.**
  * [ADR 0013](../../../../../../docs/decisions/0013-inventory-tax-treatment.md).
  *
- * **NOTHING ON THIS PAGE CHANGES A REPORT YET**, and the page says so rather
- * than implying otherwise. Stage 1 is the record and the resolution; the lens
- * that applies anything other than "when it is used" is the next slice. A screen
- * that quietly suggested it was already working would be the exact failure the
- * ADR exists to prevent — a setting that is plausible, balanced and wrong.
+ * **THIS PAGE DOES CHANGE CASH-BASIS REPORTS, and this comment said it did not
+ * for four days after the lens shipped.** Slice 3d iii made "when it is paid
+ * for" apply; the card in the body was corrected then and this header was not,
+ * so the file contradicted itself five lines apart. Corrected 2026-08-26 while
+ * converting the page. A screen — or a comment — that under-claims is not the
+ * safe direction: somebody would set a rule believing it was inert. Accrual
+ * reports remain untouched.
  *
  * **BUILT FROM THE CATEGORIES THE BUSINESS ACTUALLY HOLDS**, not from the
  * suggested list. `item_kind` is an open taxonomy, so a farm that typed
@@ -84,38 +85,41 @@ export default async function InventoryTaxPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="h-4 w-4" />
-        All inventory
-      </Link>
-
       <PageHeader
         title="When stock is deducted"
         description="What an accountant decided about each kind of thing you hold, and where it is written down."
+        icon={<Scale />}
       />
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            {/* **THIS CARD SAID "does not change your reports yet" UNTIL THE
-                LENS SHIPPED, and it kept saying it after.** Caught by opening
-                the page an hour later. A screen that under-claims is not the
-                safe direction: somebody reading it would set a rule believing
-                it was inert, and their cash-basis reports would move. */}
-            What this changes, and what it does not
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
+      <InventoryNav isOwner={isOwner} />
+
+      {/* `Panel`, not `DataTable`: the content here is prose, so there is no
+          table for those extra selectors to match. */}
+      <Panel className="p-5">
+        <h2 className="mb-2 font-heading text-base font-semibold tracking-heading">
+          {/* **THIS CARD SAID "does not change your reports yet" UNTIL THE
+              LENS SHIPPED, and it kept saying it after.** Caught by opening
+              the page an hour later. A screen that under-claims is not the
+              safe direction: somebody reading it would set a rule believing
+              it was inert, and their cash-basis reports would move. */}
+          What this changes, and what it does not
+        </h2>
+        <div className="space-y-2 text-sm text-muted-foreground">
           <p>
             Anything set to <strong>when it is used</strong> leaves your reports
             exactly as they are, and that is where every category starts.
           </p>
           <p>
-            Set a category to <strong>when it is paid for</strong>{" "}
-            and your cash-basis reports change: that stock stops appearing on the balance
+            {/* The comma after `</strong>` is load-bearing, not a style choice.
+                This read `</strong>{" "}` before, prettier collapsed it to a
+                literal space while formatting this PR, and the space then
+                stopped rendering — the DOM came out as `paid forand your`.
+                Reproduced A/B/A against the dev server on 2026-08-26. Starting
+                the following text node with punctuation rather than a space
+                removes the dependency on that behaviour altogether, which
+                `{" "}` does not, because prettier collapses it right back. */}
+            Set a category to <strong>when it is paid for</strong>, and your
+            cash-basis reports change: that stock stops appearing on the balance
             sheet, and its cost lands on the day the supplier&apos;s bill was
             paid, under the account named beside it.{" "}
             <strong>Your accrual reports are untouched</strong> — the books are
@@ -128,101 +132,107 @@ export default async function InventoryTaxPage() {
             business. It offers the moments it can put a date on, and your
             accountant picks.
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <div className="space-y-3">
-        <h2 className="text-sm font-medium">
+      <section>
+        <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
           By category {recorded > 0 && `· ${recorded} recorded`}
         </h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>What</TableHead>
-              <TableHead className="text-right">Items</TableHead>
-              <TableHead>Deducted</TableHead>
-              <TableHead>To</TableHead>
-              <TableHead>Decided by</TableHead>
-              <TableHead className="w-24" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.coverage.map((row) => {
-              const stored = byKind.get(row.itemKind) ?? null;
-              const isDefault = row.itemKind === null;
-              return (
-                <TableRow key={row.itemKind ?? "__default__"}>
-                  <TableCell>
-                    <div className="flex items-center gap-2 font-medium">
-                      {isDefault ? "Everything else" : slugLabel(row.itemKind!)}
-                      {/* Says WHERE the answer came from. A category with no row
+        <DataTable>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>What</TableHead>
+                <TableHead className="text-right">Items</TableHead>
+                <TableHead>Deducted</TableHead>
+                <TableHead>To</TableHead>
+                <TableHead>Decided by</TableHead>
+                <TableHead className="w-24" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.coverage.map((row) => {
+                const stored = byKind.get(row.itemKind) ?? null;
+                const isDefault = row.itemKind === null;
+                return (
+                  <TableRow key={row.itemKind ?? "__default__"}>
+                    <TableCell>
+                      <div className="flex items-center gap-2 font-medium">
+                        {isDefault
+                          ? "Everything else"
+                          : slugLabel(row.itemKind!)}
+                        {/* Says WHERE the answer came from. A category with no row
                           of its own inherits, and a person checking their
                           accountant's decision needs to see that rather than a
                           value with no provenance. */}
-                      {row.resolved.source === "tenant_default" && !isDefault && (
-                        <Badge variant="outline">inherited</Badge>
-                      )}
-                      {row.resolved.source === "built_in" && (
-                        <Badge variant="outline">not decided</Badge>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">
-                    {isDefault ? "—" : row.items}
-                  </TableCell>
-                  <TableCell>
-                    {TIMING_RULE_LABELS[row.resolved.timingRule]}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {row.resolved.expenseAccountId
-                      ? (accountNames.get(row.resolved.expenseAccountId) ?? "—")
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {stored?.decidedBy ? (
-                      <>
-                        {stored.decidedBy}
-                        {stored.decidedOn && (
-                          <div className="text-xs">{stored.decidedOn}</div>
+                        {row.resolved.source === "tenant_default" &&
+                          !isDefault && (
+                            <Badge variant="outline">inherited</Badge>
+                          )}
+                        {row.resolved.source === "built_in" && (
+                          <Badge variant="outline">not decided</Badge>
                         )}
-                      </>
-                    ) : (
-                      "—"
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {isOwner && (
-                      <TaxRuleForm
-                        itemKind={row.itemKind}
-                        current={
-                          stored
-                            ? {
-                                timingRule: stored.timingRule,
-                                expenseAccountId: stored.expenseAccountId,
-                                decidedBy: stored.decidedBy,
-                                decidedOn: stored.decidedOn,
-                                notes: stored.notes,
-                              }
-                            : null
-                        }
-                        accounts={accountChoices}
-                        today={today}
-                        trigger={stored ? "Edit" : "Record"}
-                      />
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {isDefault ? "—" : row.items}
+                    </TableCell>
+                    <TableCell>
+                      {TIMING_RULE_LABELS[row.resolved.timingRule]}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {row.resolved.expenseAccountId
+                        ? (accountNames.get(row.resolved.expenseAccountId) ??
+                          "—")
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {stored?.decidedBy ? (
+                        <>
+                          {stored.decidedBy}
+                          {stored.decidedOn && (
+                            <div className="text-xs">{stored.decidedOn}</div>
+                          )}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {isOwner && (
+                        <TaxRuleForm
+                          itemKind={row.itemKind}
+                          current={
+                            stored
+                              ? {
+                                  timingRule: stored.timingRule,
+                                  expenseAccountId: stored.expenseAccountId,
+                                  decidedBy: stored.decidedBy,
+                                  decidedOn: stored.decidedOn,
+                                  notes: stored.notes,
+                                }
+                              : null
+                          }
+                          accounts={accountChoices}
+                          today={today}
+                          trigger={stored ? "Edit" : "Record"}
+                        />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </DataTable>
         {data.coverage.length === 1 && (
-          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-            No items yet, so there are no categories to decide about. The default
-            row above is what a new one will inherit.
+          <p className="mt-3 text-sm text-muted-foreground">
+            No items yet, so there are no categories to decide about. The
+            default row above is what a new one will inherit.
           </p>
         )}
-      </div>
+      </section>
     </div>
   );
 }

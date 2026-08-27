@@ -1,13 +1,15 @@
 import Link from "next/link";
-import { ChevronLeft, TriangleAlert } from "lucide-react";
+import { FileCheck, TriangleAlert } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
+import { StatCard } from "@/components/app/stat-card";
+import { InventoryNav } from "@/packs/inventory/components/inventory-nav";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -74,16 +76,10 @@ export default async function InventoryMatchingPage() {
       <PageHeader
         title="Deliveries and invoices"
         description="What has arrived, what has been billed for it, and the gap between the two."
-        actions={
-          <Link
-            href={BASE}
-            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ChevronLeft className="mr-1 h-4 w-4" />
-            Inventory
-          </Link>
-        }
+        icon={<FileCheck />}
       />
+
+      <InventoryNav isOwner={isOwner} />
 
       <TreatmentControl
         treatment={treatment}
@@ -95,221 +91,218 @@ export default async function InventoryMatchingPage() {
       />
 
       {treatment === "capitalise" && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Arrived, not yet invoiced
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold tabular-nums">
-              {formatMoney(position.accountCents, currencySymbol)}
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {/* THE ACCOUNT IS THE HEADLINE, because the account is the answer.
-                  The deliveries are the working, and the two are shown together
-                  precisely so a difference is visible instead of assumed away. */}
-              What Goods Received Not Invoiced is holding.{" "}
-              {position.awaitingInvoiceCount === 0
-                ? "Every priced delivery has an invoice against it."
-                : `${position.awaitingInvoiceCount} ${
-                    position.awaitingInvoiceCount === 1
-                      ? "delivery is"
-                      : "deliveries are"
-                  } waiting for one, worth ${formatMoney(
-                    position.awaitingInvoiceCents,
-                    currencySymbol,
-                  )}.`}
+        /* The max-width is on the WRAPPER, not the card: the difference note
+           below is part of the same fact, and a full-width paragraph hanging
+           off a narrow card reads as though it belongs to the next section. */
+        <div className="space-y-2 sm:max-w-sm">
+          {/* THE ACCOUNT IS THE HEADLINE, because the account is the answer.
+              The deliveries are the working, and the two are shown together
+              precisely so a difference is visible instead of assumed away. */}
+          <StatCard
+            label="Arrived, not yet invoiced"
+            value={formatMoney(position.accountCents, currencySymbol)}
+            footnote={
+              <>
+                What Goods Received Not Invoiced is holding.{" "}
+                {position.awaitingInvoiceCount === 0
+                  ? "Every priced delivery has an invoice against it."
+                  : `${position.awaitingInvoiceCount} ${
+                      position.awaitingInvoiceCount === 1
+                        ? "delivery is"
+                        : "deliveries are"
+                    } waiting for one, worth ${formatMoney(
+                      position.awaitingInvoiceCents,
+                      currencySymbol,
+                    )}.`}
+              </>
+            }
+          />
+          {position.differenceCents !== 0 && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {formatMoney(
+                  Math.abs(position.differenceCents),
+                  currencySymbol,
+                )}{" "}
+                of that never reached the books.
+              </span>{" "}
+              Almost always deliveries recorded before stock went on the balance
+              sheet — switching it on does not go back and rewrite them. They
+              can still be matched to a bill; they just have nothing to clear.
             </p>
-            {position.differenceCents !== 0 && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">
-                  {formatMoney(
-                    Math.abs(position.differenceCents),
-                    currencySymbol,
-                  )}{" "}
-                  of that never reached the books.
-                </span>{" "}
-                Almost always deliveries recorded before stock went on the
-                balance sheet — switching it on does not go back and rewrite
-                them. They can still be matched to a bill; they just have
-                nothing to clear.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+          )}
+        </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {treatment === "none"
-              ? "Bills that could be matched, once stock is on the balance sheet"
-              : "Bills waiting to be matched"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {lines.length === 0 ? (
+      <section>
+        <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+          {treatment === "none"
+            ? "Bills that could be matched, once stock is on the balance sheet"
+            : "Bills waiting to be matched"}
+        </h2>
+        <DataTable
+          isEmpty={lines.length === 0}
+          empty={
             <EmptyState
               title="No draft bills"
               description="A bill can only be matched while it is still a draft — once it is approved its entry has posted, and changing what the bill says would not change what was posted."
             />
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Supplier</TableHead>
-                    <TableHead>Line</TableHead>
-                    <TableHead className="text-right">Charged</TableHead>
-                    <TableHead>Matched</TableHead>
-                    <TableHead className="w-40" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {lines.map((line) => (
-                    <TableRow key={line.billLineId}>
-                      <TableCell>
-                        <Link
-                          href={`/dashboard/m/accounting/purchases/bills/${line.billId}`}
-                          className="hover:underline"
-                        >
-                          {line.vendorName}
-                        </Link>
-                        <div className="text-xs text-muted-foreground">
-                          {line.billNumber || line.billDate}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {line.description || "—"}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatMoney(line.invoiceCents, currencySymbol)}
-                      </TableCell>
-                      <TableCell>
-                        {line.matchedCount === 0 ? (
-                          <span className="text-xs text-muted-foreground">
-                            Nothing yet
-                          </span>
-                        ) : (
-                          <Badge variant="secondary">
-                            {line.matchedCount}{" "}
-                            {line.matchedCount === 1 ? "delivery" : "deliveries"}
-                            {" · "}
-                            {formatMoney(line.matchedCents, currencySymbol)}
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {/* Matching is refused while posting is off — a bill
+          }
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Supplier</TableHead>
+                <TableHead>Line</TableHead>
+                <TableHead className="text-right">Charged</TableHead>
+                <TableHead>Matched</TableHead>
+                <TableHead className="w-40" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lines.map((line) => (
+                <TableRow key={line.billLineId}>
+                  <TableCell>
+                    <Link
+                      href={`/dashboard/m/accounting/purchases/bills/${line.billId}`}
+                      className="hover:underline"
+                    >
+                      {line.vendorName}
+                    </Link>
+                    <div className="text-xs text-muted-foreground">
+                      {line.billNumber || line.billDate}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {line.description || "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatMoney(line.invoiceCents, currencySymbol)}
+                  </TableCell>
+                  <TableCell>
+                    {line.matchedCount === 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        Nothing yet
+                      </span>
+                    ) : (
+                      <Badge variant="secondary">
+                        {line.matchedCount}{" "}
+                        {line.matchedCount === 1 ? "delivery" : "deliveries"}
+                        {" · "}
+                        {formatMoney(line.matchedCents, currencySymbol)}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {/* Matching is refused while posting is off — a bill
                             cannot settle a balance no delivery created — so the
                             button is absent rather than present and failing. */}
-                        {isOwner && treatment === "capitalise" && (
-                          <div className="flex items-center justify-end gap-1">
-                            <MatchDialog
-                              billLineId={line.billLineId}
-                              vendorName={line.vendorName}
-                              description={line.description}
-                              invoiceCents={line.invoiceCents}
-                              currencySymbol={currencySymbol}
-                              deliveries={open}
-                            />
-                            {line.matchedCount > 0 && (
-                              <UnmatchButton billLineId={line.billLineId} />
-                            )}
-                          </div>
+                    {isOwner && treatment === "capitalise" && (
+                      <div className="flex items-center justify-end gap-1">
+                        <MatchDialog
+                          billLineId={line.billLineId}
+                          vendorName={line.vendorName}
+                          description={line.description}
+                          invoiceCents={line.invoiceCents}
+                          currencySymbol={currencySymbol}
+                          deliveries={open}
+                        />
+                        {line.matchedCount > 0 && (
+                          <UnmatchButton billLineId={line.billLineId} />
                         )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                      </div>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DataTable>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {treatment === "none"
-              ? "Priced deliveries"
-              : "Deliveries with no invoice yet"}
-          </CardTitle>
-          {treatment === "none" && (
-            <p className="text-xs text-muted-foreground">
-              {/* WITH POSTING OFF THIS IS NOT A RECONCILIATION, and calling it
+      <section>
+        <h2 className="font-heading text-xl font-semibold tracking-heading">
+          {treatment === "none"
+            ? "Priced deliveries"
+            : "Deliveries with no invoice yet"}
+        </h2>
+        {treatment === "none" && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {/* WITH POSTING OFF THIS IS NOT A RECONCILIATION, and calling it
                   one would be the screen claiming the books know something they
                   do not. Nothing here has reached the ledger. */}
-              None of these have reached the books, because stock is not on the
-              balance sheet for this business. This is what would be waiting for
-              an invoice if it were.
-            </p>
-          )}
-        </CardHeader>
-        <CardContent>
-          {open.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {/* A delivery with no PRICE is a different fact and belongs on the
-                  valuation screen's caveat card, not here — it credited nothing,
-                  so there is nothing for a bill to clear against it. */}
-              Nothing waiting. A delivery recorded without a price does not
-              appear here at all — it has no cost for an invoice to settle, and
-              shows on{" "}
-              <Link href={`${BASE}/value`} className="underline">
-                what it is worth
-              </Link>{" "}
-              instead.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>When</TableHead>
-                    <TableHead>What</TableHead>
-                    <TableHead>Batch</TableHead>
-                    <TableHead className="text-right">Still open</TableHead>
-                    <TableHead className="text-right">Worth</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {open.map((row) => (
-                    <TableRow key={row.movementId}>
-                      <TableCell className="tabular-nums text-muted-foreground">
-                        {row.occurredOn}
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href={`${BASE}/${row.itemId}`}
-                          className="hover:underline"
-                        >
-                          {row.itemName}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {row.lotCode ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {row.openQuantity} {row.unit}
-                        {row.matchedQuantity > 0 && (
-                          <span className="text-muted-foreground">
-                            {" "}
-                            of {row.quantity}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatMoney(row.openCostCents, currencySymbol)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            None of these have reached the books, because stock is not on the
+            balance sheet for this business. This is what would be waiting for
+            an invoice if it were.
+          </p>
+        )}
+        <DataTable
+          className="mt-3"
+          isEmpty={open.length === 0}
+          empty={
+            <EmptyState
+              title="Nothing waiting"
+              /* A delivery with no PRICE is a different fact and belongs on the
+                 valuation screen's caveat card, not here — it credited nothing,
+                 so there is nothing for a bill to clear against it. */
+              description={
+                <>
+                  A delivery recorded without a price does not appear here at
+                  all — it has no cost for an invoice to settle, and shows on{" "}
+                  <Link href={`${BASE}/value`} className="underline">
+                    what it is worth
+                  </Link>{" "}
+                  instead.
+                </>
+              }
+            />
+          }
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>What</TableHead>
+                <TableHead>Batch</TableHead>
+                <TableHead className="text-right">Still open</TableHead>
+                <TableHead className="text-right">Worth</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {open.map((row) => (
+                <TableRow key={row.movementId}>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {row.occurredOn}
+                  </TableCell>
+                  <TableCell>
+                    <Link
+                      href={`${BASE}/${row.itemId}`}
+                      className="hover:underline"
+                    >
+                      {row.itemName}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {row.lotCode ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.openQuantity} {row.unit}
+                    {row.matchedQuantity > 0 && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        of {row.quantity}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {formatMoney(row.openCostCents, currencySymbol)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DataTable>
+      </section>
 
       {treatment === "capitalise" && position.awaitingInvoiceCount > 0 && (
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -317,8 +310,8 @@ export default async function InventoryMatchingPage() {
           <span>
             A standing balance here is ordinary — stock usually arrives before
             its invoice. It is worth a look when a delivery has been waiting
-            longer than a supplier normally takes to bill, because that is either
-            an invoice nobody entered or one that never came.
+            longer than a supplier normally takes to bill, because that is
+            either an invoice nobody entered or one that never came.
           </span>
         </p>
       )}

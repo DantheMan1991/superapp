@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ClipboardList } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
+import { InventoryNav } from "@/packs/inventory/components/inventory-nav";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -84,18 +86,9 @@ export default async function InventoryCountPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <Link
-          href={`${BASE}/counts`}
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="mr-1 h-4 w-4" />
-          Counting
-        </Link>
-      </div>
-
       <PageHeader
         title={`Counted ${count.countedOn}`}
+        icon={<ClipboardList />}
         description={`${placeName}${count.countedBy ? ` · ${count.countedBy}` : ""}${
           count.postedOn ? ` · posted ${count.postedOn}` : ""
         }`}
@@ -130,14 +123,22 @@ export default async function InventoryCountPage({
         }
       />
 
-      {lines.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<ChevronLeft className="h-5 w-5" />}
-          title="Nothing counted yet"
-          description="Add a line for each shelf as you walk it. What the record thinks is deliberately not shown until you post — a number on the screen is the fastest way to make a count agree with a record that is wrong."
-        />
-      ) : (
+      {/* The strip's Counting tab is highlighted here and goes exactly where
+          the old `‹ Counting` link went, so the hand-rolled one is gone. */}
+      <InventoryNav isOwner={ctx.role === "owner"} />
+
+      <DataTable
+        isEmpty={lines.length === 0}
+        empty={
+          <EmptyState
+            /* Was a `ChevronLeft` — a back-arrow as the glyph for "nothing
+               counted yet", which is the wrong picture for the sentence. */
+            icon={<ClipboardList className="h-5 w-5" />}
+            title="Nothing counted yet"
+            description="Add a line for each shelf as you walk it. What the record thinks is deliberately not shown until you post — a number on the screen is the fastest way to make a count agree with a record that is wrong."
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -215,7 +216,7 @@ export default async function InventoryCountPage({
             })}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
 
       {isDraft && lines.length > 0 && (
         <p className="text-sm text-muted-foreground">

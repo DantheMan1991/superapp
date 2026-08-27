@@ -19,11 +19,148 @@ and [land.md](land.md) before changing anything about where animals are.
 | **1b** | **Advisory layer — ask and orient, anchored to this farm's own history** | **shipped 2026-08-19** |
 | **2** | **Feed + the allocation seam** (FCR itself waits on slice 5) | **shipped 2026-08-20** |
 | **3** | **Health + the withdrawal clock** | **shipped 2026-08-20** |
-| 4 | Breeding, genetics, registry, **and the breeding/market capital transfer** | |
+| **4a** | **Pedigree + breed as fractions** — dam and sire, composition computed from the parents, a birth that creates a lot | **shipped 2026-08-27** |
+| 4b | Photos — a profile picture and a gallery. **Layer 0**, and `assets` wants the identical thing | |
+| 4c | The breeding calendar — bull exposure → calving window, preg check narrows it, calving fixes it, a "who is due" list | |
+| 4d | Traits scored 1–5, sire performance across years, **the inbreeding warning at turn-in** | |
+| 4e | Registry — number, association, registered name, papers in Documents. Needs 4b | |
+| 4f | **The capital transfer** — market herd ↔ breeding herd, and it POSTS | |
 | **5** | **Weights (tape formulas, sampling) — and the FCR they unlock** | **shipped 2026-08-20** |
 | **6** | **Processing handoff → `production`** | **shipped 2026-08-20** |
 
 ## Build log
+
+### 2026-08-27 — Slice 4a: what an animal is made of, and who made it (`claude/what-an-animal-is-made-of`)
+
+The founder asked for it in one sentence — *"breeding and genetic information
+for each animal, specifically cattle pigs sheep etc… birthing dates and whatever
+else you can think of"* — and slice 4 has been sitting in this table designed
+and unbuilt since 2026-08-13. This is the first third of it: the pedigree and
+the breeding. The calendar, the traits and the capital transfer are 4c, 4d and
+4f, and every one of them hangs off the two columns this slice adds.
+
+**THE DAM AND THE SIRE ARE NOT `inventory_lots.parent_lot_id`, AND THIS WAS THE
+DECISION THE SLICE TURNED ON.** The 2026-08-13 design says births "create lots,
+parented by the dam" — written before the lineage chain existed in code. It does
+now, and it means something else: `parent_lot_id` is the SPLIT chain, one parent,
+walked by a traceability query to find which pen a box of meat was raised in. A
+birth is not a split. The dam does not lose a head when her calf arrives, and
+reusing that column would have put two unrelated meanings on one edge: a batch
+trace would wander into a family tree and a pedigree walk would cross into a pen
+division. So `dam_lot_id` and `sire_lot_id`, composite self-FKs to
+`livestock_lots`, RESTRICT on delete, with a CHECK against the one-step loop.
+**The split now copies both parents onto the child and does NOT become one**,
+which is the same rule stated from the other side.
+
+**BREED IS PARTS, NOT PERCENTAGES, AND THE REASON IS THAT PERCENTAGES LIE ABOUT
+THIRDS.** A three-way foundation cross stored as percentages is 33 / 33 / 34, and
+that extra point is a claim the app invented on somebody's behalf. Parts are
+integers over their own sum — 2 : 1 : 1 is ½, ¼, ¼ — and combining a dam with a
+sire is exact integer arithmetic over a common denominator, so halving stays
+exact however deep the pedigree runs. `livestock_breed_parts`, one row per breed
+per animal, unique on the pair.
+
+**AN UNKNOWN PARENT IS HALF THE ANIMAL, NOT NOTHING.** This is the whole reason
+`core/pedigree.ts` has a header and a test file arguing with itself. A calf out
+of a purebred Angus dam by a bull nobody recorded is **½ Angus · ½ unknown** — it
+is not "Angus" and it is not "100% Angus". Renormalising the known half up to a
+whole is the single most tempting bug in a pedigree fold, it makes a herd read
+purer on paper with every generation, and it is wrong in the direction that
+costs somebody money when they sell. `unknownParts` is carried in the result type
+and PRINTED, rather than dropped at the end.
+
+**IT IS ALSO NEVER STORED.** A composition is a fold over the pedigree, like the
+head count is a fold over movements and FCR is a fold over weighings. The first
+time somebody corrects a grandparent — which is exactly what happens when the
+papers turn up in a drawer — every descendant's answer changes with it.
+
+**A STATED COMPOSITION BEATS A COMPUTED ONE**, deliberately rather than by
+precedence accident: papers outrank arithmetic, and a registered purebred whose
+great-grandsire is missing from the app is still a purebred.
+
+**THE WALK REPORTS WHEN IT STOPPED LOOKING.** `truncated` is separate from the
+unknown share, because "nobody knows" and "we ran out of generations" are
+different sentences and the screen says which. Ten generations and 200 nodes,
+both bounded; a pedigree somebody has managed to loop terminates on a visited
+set rather than hanging, whatever the write path let through.
+
+**WHAT THE WRITE PATH REFUSES, AND WHAT IT POINTEDLY DOES NOT.** A loop (walked,
+because a CHECK cannot see other rows) and a STATED contradiction of sex — a dam
+recorded as male is a mis-click, not a fact about biology. **An unrecorded sex is
+not a contradiction** and goes through, which is this pack's rule everywhere.
+What it does not refuse is a parent of another species: **a mule is a real
+animal**, so the picker offers same-species animals and the app declines to
+invent a rule about what can breed with what.
+
+**A PARENT NEED NOT BE A LOT OF ONE, and that is how chickens get in.** Fifty
+layers are one lot, and "these chicks came from that flock" is both true and the
+only pedigree a flock will ever have. Requiring an individual would have made
+the whole mechanism unusable for most of the animals on the pilot farm — which
+is the lot model paying for itself for the fourth or fifth time.
+
+**A BIRTH IS ONE ACT**: `recordBirth` creates the lot, links both parents and
+places the head in one transaction, `source: "raised"` because a born animal has
+no purchase basis at all. One calf is a lot of one; ten piglets are a lot of ten.
+**The stock line is asked for rather than inherited**, pre-set to the dam's: a cow
+in the breeding herd and her calf destined for beef are frequently not the same
+item, and inheriting silently would file every calf under her mother.
+
+**ONE BREED ON THE CREATE FORM IS THE WHOLE ANIMAL.** A batch of Cornish Cross or
+a purebred cow is the common case and wants one box; a cross is stated on the
+animal's own page where there is room for fractions. Four part-fields on the form
+that starts a pen of broilers would be three too many.
+
+**THE SUPERSEDED `breed` COLUMN IS NOT DROPPED IN THIS PR** — expand now, contract
+after the deploy, per [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md).
+Nothing can parse "½ Angus, ¼ Hereford" back into fractions, so what a tenant
+typed is shown as a NOTE asking for it again, and it disappears the moment
+somebody obliges. A split still copies the legacy string, so a lot entered before
+today does not lose the only breed it has.
+
+**THE ADVISOR NOW SEES THE REAL BREEDING**, resolved and formatted, unknown share
+included. It is asked feed-conversion questions, and Cornish Cross against a
+slow-growing bird is the difference between a six-week bird and a twelve-week
+one. Told "Angus" about a half-Angus calf it would answer with more confidence
+than the records support.
+
+**THE HUB SHOWS THE STATED COMPOSITION ONLY**, and that is a decision rather than
+a shortcut. Resolving every lot means walking every lot's pedigree; the honest
+cheap answer is not a rougher figure but a narrower one. A hub showing a
+worked-out fraction and a detail page showing a differently-worked-out one would
+be two numbers for one fact, which this pack refuses everywhere else.
+
+**DRIVEN ON HILLTOP FARM, AND IT FOUND THREE THINGS NO TEST WAS GOING TO.**
+PEN-1 was given ½ Angus · ¼ Hereford · ¼ Simmental through the dialog, a hatch of
+twelve was recorded off it, and the chick read **¼ Angus · ⅛ Hereford · ⅛
+Simmental · ½ unknown** — the claim, on real data, in the real app. What clicking
+found:
+
+- **Stating a composition EMPTIED THE PAGE HEADER.** The breed has sat beside the
+  species since slice 0 because it is half of how a person recognises an animal,
+  and `setBreedParts` clears the superseded string — so entering the better
+  answer removed the worse one from the header and put nothing back. The header
+  reads the resolved composition now.
+- **THE BIRTH FORM LIED ABOUT ITS OWN DAM.** It pre-selects the animal whose page
+  you are on, and its picker was handed the parent-candidate list, which excludes
+  that animal — correctly, for the *parents* form, where an animal cannot be its
+  own parent. On a BIRTH the animal is the parent and the new lot is the child.
+  The Select had a value with no matching option and rendered "Not recorded" over
+  a dam that was in fact set. Two lists now, and the difference is commented
+  where it is made.
+- **`slugLabel` IS THE WRONG HUMANISER FOR A BREED.** It is sentence case, which
+  is right for a kind of thing and wrong for a name: `cornish_cross` came back
+  "Cornish cross", which reads as a typo to anybody who keeps cattle. `breedLabel`
+  title-cases, and every screen that renders a breed uses it.
+
+Breeds come from the profile, per species (`breedsFrom`), for the same reason
+species do — a pack that knew what a Hereford was would know what industry it
+was in. Migrations `0217` and `0218`; 24 new pure tests, 10 new ops tests, 6 new
+isolation tests. **Applied to BOTH databases before the merge, per
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md)** —
+`db:migrate` and `db:verify-rls` against the dev branch and against production,
+both reporting 148 tables with RLS enabled, forced and policied. Additive only:
+a new table and two nullable columns, so the deployed code is unaffected while
+it waits for the merge.
 
 ### 2026-08-26 — The pack puts on the design system (`claude/two-packs-follow-the-pattern`)
 
@@ -708,7 +845,8 @@ This pack is the one that forced the change; the full reasoning is in
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
-| `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed` |
+| `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed`. **`dam_lot_id` / `sire_lot_id`** are composite SELF-FKs, RESTRICT, with a CHECK against being one's own parent — and they are NOT `inventory_lots.parent_lot_id`, which is the split chain. `breed` is SUPERSEDED and awaiting its drop |
+| `livestock_breed_parts` | **What an animal is made of, as somebody stated it** | One row per breed per animal, unique on `(tenant_id, lot, breed)`. `parts` is an integer out of the row's siblings — 2 : 1 : 1 is ½, ¼, ¼ — because percentages force a rounding decision the person never made. **The RESOLVED composition is never stored**: it is a fold over the pedigree in `core/pedigree.ts`, and a stated one beats a computed one |
 | `livestock_identifiers` | What an animal is called | Many per lot, typed and **date-ranged**. Composite FK to the lot, CASCADE. Indexed by value, because finding an animal by its tag happens in a chute |
 | `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
 | `livestock_feed_groups` | **A shared feeder** — a bin, a bulk bag, a trough | Holds the FEEDER, not the feed: no quantity, no cost, no balance. `status` in `active\|closed`; closed keeps reporting. Deliberately not an asset — a feeding group is a set of animals sharing a cost, so two bins feeding one flock are one group |
@@ -725,6 +863,7 @@ This pack is the one that forced the change; the full reasoning is in
 | Which batch, and what did it come from? | `inventory_lots` |
 | What did this pen cost? | `dimension_members`, synced by `inventory` |
 | What did it eat, and what did that cost? | `inventory_movements` — measured via `issued_to_lot_id`, allocated via a draw |
+| What is it made of, and who were its parents? | This pack — `livestock_breed_parts` and the two parent columns, folded by `core/pedigree.ts` |
 | Which paddock are they on, and in what pen? | `land_occupancy`, via `land's own query |
 | How long has that paddock rested? | `land`, computed from the same record |
 
@@ -797,11 +936,34 @@ This pack is the one that forced the change; the full reasoning is in
   window, which is different for every lot
 - `src/packs/livestock/components/weight-controls.tsx` — the form whose shape
   changes with the method
+- `src/packs/livestock/core/pedigree.ts` — pure. **The composition fold, and the
+  file where being generous is the bug.** Read this before changing anything
+  about breeding: `resolveComposition` takes half from each parent whatever
+  either is made of, and `unknownParts` is carried through and printed rather
+  than normalised away. Also `isAncestor`, which is the write-time loop guard a
+  CHECK cannot be
+- `src/packs/livestock/ops.ts` → `pedigreeIndex` — walks UPWARD generation by
+  generation, so a ten-deep pedigree is ten queries and not a thousand. Bounded
+  twice, and a bound that bites shows up as `truncated` rather than as an
+  unknown parent
+- `src/packs/livestock/ops.ts` → `setParents` — every refusal it makes, and the
+  one it deliberately does not (another species: a mule is real)
+- `src/packs/livestock/ops.ts` → `recordBirth` — the lot, both parents and the
+  head in one transaction. **Read its comment before touching lineage**: it does
+  not set `inventory_lots.parent_lot_id`, and that is the point
+- `src/packs/livestock/components/pedigree-controls.tsx` — the composition
+  editor (parts in, share shown as you type), the parent pickers and the birth
+  form
+- `src/packs/inventory/ops.ts` → `lotsByIds` — added for the pedigree screens,
+  which hold animal ids and need the code a person calls each one
+- `src/packs/livestock/vocabulary.ts` → `breedsFrom` — the profile's breeds per
+  species. The pack names none, for the reason it names no species
 - `src/db/schema/livestock.ts` · `drizzle/0138_*.sql` · `drizzle/0139_livestock_rls.sql`
   · `drizzle/0156_*.sql` · `drizzle/0157_livestock_daily_logs_rls.sql`
   · `drizzle/0162_*.sql` · `drizzle/0163_livestock_feed_rls.sql`
   · `drizzle/0164_*.sql` · `drizzle/0165_livestock_weights_rls.sql`
   · `drizzle/0166_*.sql` · `drizzle/0167_livestock_treatments_rls.sql`
+  · `drizzle/0217_*.sql` · `drizzle/0218_livestock_breed_parts_rls.sql`
 
 ## Decisions & gotchas
 
@@ -957,10 +1119,36 @@ This pack is the one that forced the change; the full reasoning is in
   the balance sheet, and moving between the two is an accounting event that must
   POST. That is where this pack stops being a tracking app, and it needs the
   posting machinery rather than a boolean. Slice 4.
-- **`breed` is free text, and nothing may compute on it.** Homestead cattle are
-  deliberately crossbred, so "½ Angus, ¼ Hereford, ¼ Simmental" is the real
-  answer and a single string throws it away. Slice 4 replaces it with fractions
-  computed from parents; until then it is display-only.
+- **THE DAM AND THE SIRE ARE NOT THE SPLIT CHAIN.** `inventory_lots.parent_lot_id`
+  means "these animals came out of that group" and is what a traceability query
+  walks; `dam_lot_id` and `sire_lot_id` are biology. Never merge them. A split
+  copies both parent columns onto the child and does not become a generation; a
+  birth sets them and leaves `parent_lot_id` null. The 2026-08-13 design's line
+  about births being "parented by the dam" predates the lineage chain existing.
+- **AN UNKNOWN PARENT IS HALF THE ANIMAL, NOT NOTHING.** A calf out of a purebred
+  Angus dam by a bull nobody recorded is ½ Angus and ½ unknown. Renormalising the
+  known half up to a whole makes a herd read purer with every generation and is
+  wrong in the direction that costs money at sale. `unknownParts` is printed,
+  never dropped — the same rule as `none_stated` on a withdrawal clock.
+- **A composition is a FOLD, never a column.** Correcting a grandparent has to
+  change every descendant's answer, and a stored composition would stop agreeing
+  with its own pedigree the first time the papers turned up in a drawer.
+- **Parts, not percentages.** A three-way cross in percentages is 33/33/34 and
+  the extra point is a claim nobody made. Integers over their own sum are exact,
+  and halving stays exact however deep the pedigree runs.
+- **A stated composition beats a computed one.** Papers outrank arithmetic.
+- **A PARENT NEED NOT BE A LOT OF ONE.** "These chicks came from that flock" is
+  the only pedigree fifty layers will ever have, and requiring an individual
+  would put poultry — most of the animals on this farm — outside the feature.
+- **Refuse a stated contradiction, never a missing fact.** A dam recorded as male
+  is refused; a dam whose sex nobody recorded is not. And a parent of another
+  species is NOT refused: a mule is a real animal, so the picker narrows and the
+  app declines to have an opinion about what can breed with what.
+- **`breed` IS SUPERSEDED AND STILL ON THE TABLE.** Expand shipped in 4a; the
+  drop is its own PR after the deploy (ADR 0014). Nothing can parse "½ Angus, ¼
+  Hereford" back into fractions, so the old string is displayed as a prompt to
+  enter it again rather than migrated. Until it goes, `db:generate` keeps
+  emitting it and a split still copies it.
 - **Species come from the profile, never from this pack.** A pack that knows
   what a broiler is has the boundary wrong. `speciesFrom` reads `packConfig` and
   degrades to a free-text field.
@@ -992,6 +1180,30 @@ This pack is the one that forced the change; the full reasoning is in
   dialog says so — but there is no adjustment screen in `inventory` yet to
   correct the other side with, so somebody who removes a from-stock treatment is
   told about a fix they cannot currently make. Inventory slice 2.
+- **RECORDING A BIRTH NEEDS THE OWNER**, because it creates a lot and picks the
+  stock line the offspring are counted in — consistent with `createLivestockLot`
+  and with the recorded split of chores from decisions. A 2am calving is a chore
+  by any other measure, and this is the first write in the pack where the rule
+  and the reality pull in different directions. Worth revisiting with the
+  founder rather than quietly loosening.
+- **A BIRTH CANNOT BE CORRECTED, only unpicked by hand.** The parents can be
+  edited afterwards and the head is an ordinary movement, but there is no "that
+  calving was recorded wrong" path — and the lot it created stays.
+- **NOTHING WARNS ABOUT INBREEDING YET**, which is slice 4d and the one thing in
+  the genetics design with a stated collision: a heifer born this spring breeds
+  at ~15 months, and on a two-year bull rotation **her own sire is likely still
+  standing there**. It slips past because the thinking is herd-level while the
+  risk is per-heifer, so the warning has to fire when the bull is turned in with
+  the replacements, not in a report.
+- **The hub shows the STATED composition only** — see the build log for why. A
+  lot whose breeding is entirely computed from its parents shows nothing there
+  and the full answer on its own page.
+- **A parent picker does not exclude descendants.** Finding them means a walk per
+  candidate; the write path refuses the choice with a sentence that says why.
+  Wrong trade if a herd ever gets deep enough for it to be a common mistake.
+- **No breeding-group or exposure record**, so "when is she due" is unanswerable
+  and `born_on` is the only date this pack knows. That is slice 4c and it is the
+  half of the founder's ask this slice did not reach.
 - **`head_treated` is recorded and nothing reads it.** Written because the design
   asks for it and because a partial treatment is a real thing; no screen or fold
   uses it yet.

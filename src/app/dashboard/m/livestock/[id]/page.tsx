@@ -40,15 +40,33 @@ import {
 import { structureKindsFrom } from "@/packs/land/vocabulary";
 import {
   LEDGER_EPOCH,
+  breedPartsByLot,
+  codesByLivestockLot,
   feedReport,
   getLivestockLot,
   listChecksForLot,
   listIdentifiers,
   listTreatmentsForLot,
   listWeightsForLot,
+  offspringOf,
+  parentCandidates,
+  pedigreeIndex,
   productsInUse,
   toWeighIns,
 } from "@/packs/livestock/ops";
+import {
+  COMPOSITION_SOURCE_LABELS,
+  COMPOSITION_SOURCE_NOTES,
+  ancestorTree,
+  formatComposition,
+  resolveComposition,
+  type AncestorNode,
+} from "@/packs/livestock/core/pedigree";
+import {
+  BreedCompositionForm,
+  RecordBirthForm,
+  SetParentsForm,
+} from "@/packs/livestock/components/pedigree-controls";
 import {
   PROVENANCE_LABELS,
   PROVENANCE_NOTES,
@@ -75,6 +93,8 @@ import {
 } from "@/packs/livestock/core/herd";
 import {
   SEX_LABELS,
+  breedLabel,
+  breedsFrom,
   identifierKindLabel,
   tapeDivisorFrom,
   treatmentRouteLabel,
@@ -115,6 +135,49 @@ const BASE = "/dashboard/m/livestock";
  * occupancy table, and no livestock counter — which is the whole argument for
  * the pack model, visible in one screen.
  */
+/**
+ * One side of a pedigree, indented.
+ *
+ * **A PARENT NOBODY RECORDED IS DRAWN, NOT SKIPPED.** An empty space reads as a
+ * tree that ended; "not recorded" reads as a tree waiting to be filled in, and
+ * filling it in is the entire point of the screen.
+ *
+ * It stops expanding at an animal with no parents on file, which is also what
+ * the depth running out looks like — so the tree never renders a "not recorded"
+ * it has not actually checked.
+ */
+function PedigreeBranch({
+  node,
+  role,
+  codes,
+}: {
+  node: AncestorNode | null;
+  role: string;
+  codes: Map<string, string>;
+}) {
+  return (
+    <li>
+      <span className="text-muted-foreground">{role}: </span>
+      {node ? (
+        <Link
+          href={`${BASE}/${node.id}`}
+          className="font-medium hover:underline"
+        >
+          {codes.get(node.id) ?? "—"}
+        </Link>
+      ) : (
+        <span className="text-muted-foreground">not recorded</span>
+      )}
+      {node && (node.dam || node.sire) && (
+        <ul className="mt-1 ml-4 space-y-1 border-l pl-3">
+          <PedigreeBranch node={node.dam} role="Dam" codes={codes} />
+          <PedigreeBranch node={node.sire} role="Sire" codes={codes} />
+        </ul>
+      )}
+    </li>
+  );
+}
+
 export default async function LivestockLotPage({
   params,
 }: {
@@ -166,6 +229,10 @@ export default async function LivestockLotPage({
         medicines,
         products,
         landPack,
+        pedigree,
+        offspring,
+        candidates,
+        headItems,
       ] = await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
           movementKindsForLots(tx, ctx.tenant.id, [lot.inventoryLotId]),
@@ -214,12 +281,32 @@ export default async function LivestockLotPage({
           // this pack hands the config straight back rather than reading a key
           // out of it, which is the `requires` seam working as intended.
           packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
+          // THE PEDIGREE, WALKED UPWARD AND BOUNDED. What the animal is made
+          // of is a fold over this — never a stored column — for the same
+          // reason the head count is a fold over movements.
+          pedigreeIndex(tx, ctx.tenant.id, [lot.id]),
+          offspringOf(tx, ctx.tenant.id, lot.id),
+          // Same species first, because a mule is real and a mis-click is
+          // likelier. The write path is what refuses an impossible parent.
+          parentCandidates(tx, ctx.tenant.id, {
+            species: lot.species,
+            excludeId: lot.id,
+          }),
+          listItems(tx, ctx.tenant.id, { status: "active" }),
         ]);
       const structures = await listStructures(
         tx,
         ctx.tenant.id,
         structureKindsFrom(landPack.config),
       );
+      // Every animal in the tree, plus the offspring, named in one query. The
+      // index carries ids because the fold that reads it is pure.
+      const pedigreeCodes = await codesByLivestockLot(tx, ctx.tenant.id, [
+        ...pedigree.keys(),
+        ...offspring.map((o) => o.id),
+      ]);
+      const statedBreed =
+        (await breedPartsByLot(tx, ctx.tenant.id, [lot.id])).get(lot.id) ?? [];
       return {
         lot,
         inventoryLot,
@@ -242,6 +329,13 @@ export default async function LivestockLotPage({
         // The divisor for THIS lot's species, resolved once on the server so
         // the form knows whether a tape is even an option.
         tapeDivisor: tapeDivisorFrom(pack.config, lot.species),
+        pedigree,
+        pedigreeCodes,
+        statedBreed,
+        offspring,
+        candidates,
+        headItems: headItems.filter((i) => i.stockingUnit === "head"),
+        breedSuggestions: breedsFrom(pack.config, lot.species),
       };
     },
     { role: ctx.role },
@@ -268,6 +362,13 @@ export default async function LivestockLotPage({
     products,
     labels,
     tapeDivisor,
+    pedigree,
+    pedigreeCodes,
+    statedBreed,
+    offspring,
+    candidates,
+    headItems,
+    breedSuggestions,
   } = data;
 
   /**
@@ -318,6 +419,46 @@ export default async function LivestockLotPage({
   const summary = summariseHead(movements);
   const rate = mortalityRate(summary);
   const preferred = preferredIdentifier(identifiers);
+  /**
+   * What this animal is made of, and who it came from. Both are folds over the
+   * pedigree — nothing about either is stored, so a correction to a grandparent
+   * shows up here the moment it is made.
+   *
+   * THREE GENERATIONS IS WHAT A SCREEN CAN HOLD; the walk itself goes further
+   * and the composition uses all of it.
+   */
+  const composition = resolveComposition(lot.id, pedigree);
+  const tree = ancestorTree(lot.id, pedigree, 3);
+  /**
+   * What goes in the header beside the species.
+   *
+   * The breed has been up there since slice 0 because it is half of how a
+   * person recognises an animal at a glance, and stating a composition CLEARS
+   * the superseded string — so without this, entering the better answer would
+   * have emptied the header. Driven on Hilltop Farm, which is how it was found.
+   */
+  /**
+   * **THE BIRTH FORM'S LIST INCLUDES THIS ANIMAL AND THE PARENTS FORM'S DOES
+   * NOT**, and the difference is not a subtlety: on a birth, this animal is the
+   * PARENT and the new lot is the child, so excluding it made the dam it
+   * pre-selects invisible in its own picker. Found by opening the dialog on
+   * Hilltop Farm, where it rendered "Not recorded" over a dam that was in fact
+   * set — a form that lies about what it is about to do.
+   */
+  const birthCandidates = [
+    ...candidates,
+    {
+      id: lot.id,
+      code: inventoryLot.code,
+      species: lot.species,
+      sex: lot.sex,
+      bornOn: lot.bornOn,
+    },
+  ].sort((a, b) => a.code.localeCompare(b.code));
+  const breedingLabel =
+    composition.source === "unknown"
+      ? lot.breed || null
+      : formatComposition(composition, breedLabel);
   const parcelNames = new Map(parcels.map((p) => [p.id, p.name]));
   const zoneOptions = allZones.map((z) => ({
     id: z.id,
@@ -333,7 +474,7 @@ export default async function LivestockLotPage({
         description={
           <span className="flex items-center gap-2">
             {slugLabel(lot.species)}
-            {lot.breed && ` · ${lot.breed}`}
+            {breedingLabel && ` · ${breedingLabel}`}
             {lot.sex && ` · ${SEX_LABELS[lot.sex] ?? lot.sex}`}
             {preferred && (
               <Badge variant="outline">
@@ -637,6 +778,140 @@ export default async function LivestockLotPage({
             </p>
           </div>
         </Panel>
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
+            Breeding
+          </h2>
+          {isOwner && (
+            <div className="flex flex-wrap items-center gap-2">
+              <BreedCompositionForm
+                livestockLotId={lot.id}
+                suggestions={breedSuggestions}
+                current={statedBreed}
+              />
+              <SetParentsForm
+                livestockLotId={lot.id}
+                candidates={candidates}
+                damLotId={lot.damLotId}
+                sireLotId={lot.sireLotId}
+              />
+              {/* This animal is the dam by default, which is what makes the
+                  button worth having HERE rather than only on the hub. */}
+              <RecordBirthForm
+                damLotId={lot.sex === "male" ? null : lot.id}
+                sireLotId={lot.sex === "male" ? lot.id : null}
+                candidates={birthCandidates}
+                items={headItems.map((i) => ({ id: i.id, name: i.name }))}
+                defaultItemId={inventoryLot.itemId}
+                today={today}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <Panel className="p-5">
+            <h3 className="font-heading text-base font-semibold tracking-heading">
+              <span className="flex items-center gap-2">
+                Made of
+                {/* PROVENANCE ON THE FIGURE, as everywhere else in this pack.
+                    A composition somebody entered and one the app worked out
+                    from two parents look identical on screen and are not the
+                    same kind of fact. */}
+                <Badge variant="outline">
+                  {COMPOSITION_SOURCE_LABELS[composition.source]}
+                </Badge>
+              </span>
+            </h3>
+            <div className="mt-1">
+              <p className="text-2xl font-medium">
+                {composition.source === "unknown"
+                  ? "—"
+                  : formatComposition(composition, breedLabel)}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {COMPOSITION_SOURCE_NOTES[composition.source]}
+              </p>
+              {composition.truncated && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Part of the pedigree could not be followed all the way up, so
+                  some of the unknown share is unread rather than unrecorded.
+                </p>
+              )}
+              {/* The superseded column, shown only while it still holds
+                  something. Nothing can parse "½ Angus, ¼ Hereford" back into
+                  fractions, so the old string is a prompt rather than data. */}
+              {lot.breed && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Recorded before breeding was kept as fractions:{" "}
+                  <span className="font-medium text-foreground">{lot.breed}</span>
+                  . Enter it again above and this note goes away.
+                </p>
+              )}
+            </div>
+          </Panel>
+
+          <Panel className="p-5">
+            <h3 className="font-heading text-base font-semibold tracking-heading">
+              Pedigree
+            </h3>
+            <ul className="mt-3 space-y-2 text-sm">
+              <PedigreeBranch node={tree.dam} role="Dam" codes={pedigreeCodes} />
+              <PedigreeBranch node={tree.sire} role="Sire" codes={pedigreeCodes} />
+            </ul>
+            {!lot.damLotId && !lot.sireLotId && (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Naming even one parent is worth doing — a parent nobody knows is
+                half the animal, and the breeding above will say so rather than
+                rounding the other half up.
+              </p>
+            )}
+          </Panel>
+        </div>
+
+        <DataTable
+          isEmpty={offspring.length === 0}
+          empty={
+            <EmptyState
+              title="Nothing out of this animal yet"
+              description="A birth starts a lot of its own, with both parents on it and the head placed."
+            />
+          }
+        >
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Out of this animal</TableHead>
+                <TableHead>Born</TableHead>
+                <TableHead>Sex</TableHead>
+                <TableHead>Side</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {offspring.map((child) => (
+                <TableRow key={child.id}>
+                  <TableCell className="font-medium">
+                    <Link href={`${BASE}/${child.id}`} className="hover:underline">
+                      {pedigreeCodes.get(child.id) ?? "—"}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {child.bornOn ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {child.sex ? (SEX_LABELS[child.sex] ?? child.sex) : "—"}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {child.damLotId === lot.id ? "Dam" : "Sire"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </DataTable>
       </div>
 
       <div className="space-y-3">

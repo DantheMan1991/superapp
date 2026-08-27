@@ -39,6 +39,7 @@ import {
   SEXES,
   SEX_LABELS,
   breedHint,
+  breedLabel,
   identifierKindLabel,
 } from "../vocabulary";
 
@@ -50,10 +51,13 @@ const UNSET = "";
 export function LivestockLotForm({
   items,
   speciesOptions,
+  breedsBySpecies,
   today,
 }: {
   items: { id: string; name: string }[];
   speciesOptions: string[];
+  /** Breed slugs the profile suggests, per species. Never a closed list. */
+  breedsBySpecies: Record<string, string[]>;
   today: string;
 }) {
   const router = useRouter();
@@ -218,12 +222,26 @@ export function LivestockLotForm({
               {/* A fixed "e.g. Cornish Cross" sat under Species: Cattle and read
                   as an instruction. An example has to follow the species chosen
                   or not be there — reported by the founder, 2026-08-16. */}
+              <datalist id="lot-breed-suggestions">
+                {(breedsBySpecies[chosen] ?? []).map((breed) => (
+                  <option key={breed} value={breedLabel(breed)} />
+                ))}
+              </datalist>
               <Input
                 id="breed"
                 name="breed"
-                maxLength={200}
+                list="lot-breed-suggestions"
+                maxLength={63}
                 placeholder={breedHint(chosen)}
               />
+              {/* ONE BREED HERE IS THE WHOLE ANIMAL. A cross is stated on the
+                  animal's own page, where there is room for fractions — four
+                  part-fields on the form that starts a pen of broilers would be
+                  three fields too many for the common case. */}
+              <p className="text-xs text-muted-foreground">
+                One breed means all of it. Anything crossed is entered on the
+                animal&rsquo;s own page.
+              </p>
             </div>
 
             <div className="grid gap-2">

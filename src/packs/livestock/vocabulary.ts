@@ -112,9 +112,9 @@ export function speciesFrom(config: unknown): string[] {
 /**
  * An example breed for the species chosen, for the placeholder only.
  *
- * A HINT, NEVER A CONSTRAINT. `breed` is free text and nothing computes on it
- * — homestead cattle are deliberately crossbred, so "½ Angus, ¼ Hereford,
- * ¼ Simmental" is the real answer and any list here would be wrong about it.
+ * A HINT, NEVER A CONSTRAINT, and since slice 4a it is also the FALLBACK: when
+ * the profile lists breeds for a species, `breedsFrom` supplies real
+ * suggestions and this is what a species nobody described still gets.
  *
  * It exists because the field carried a fixed "e.g. Cornish Cross", which sat
  * under Species: Cattle and read as an instruction rather than an example.
@@ -131,6 +131,46 @@ const BREED_HINTS: Record<string, string> = {
 
 export function breedHint(species: string): string | undefined {
   return BREED_HINTS[species.trim().toLowerCase().replace(/\s+/g, "_")];
+}
+
+/**
+ * A breed slug as a person writes it: `cornish_cross` becomes "Cornish Cross".
+ *
+ * **NOT `slugLabel`, and the difference is not cosmetic.** That one is sentence
+ * case, which is right for a kind of thing — "Raw materials", "Sold live" — and
+ * wrong for a NAME. A breed is a proper noun, and "Cornish cross" or "Red
+ * angus" reads as a typo to anybody who keeps cattle. Caught on Hilltop Farm
+ * the moment a two-word breed was entered.
+ */
+export function breedLabel(breed: string): string {
+  return breed
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/**
+ * The breeds a profile suggests for one species, as slugs.
+ *
+ * **THE PACK NAMES NO BREEDS**, for the same reason it names no species: one
+ * that knew what a Hereford was would know what industry it was in, which is
+ * the boundary ADR 0004 draws. A profile lists what is common where its tenants
+ * farm, and a tenant crossing something nobody listed types it — the slug format
+ * check is the only thing with an opinion.
+ *
+ * Total by construction, like `speciesFrom` and `tapeDivisorFrom`:
+ * `tenant_modules.config` is jsonb with no shape constraint, so anything
+ * unreadable is an empty list and a free-text field, never a crash.
+ */
+export function breedsFrom(config: unknown, species: string): string[] {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return [];
+  const breeds = (config as Record<string, unknown>).breeds;
+  if (!breeds || typeof breeds !== "object" || Array.isArray(breeds)) return [];
+  const key = species.trim().toLowerCase().replace(/\s+/g, "_");
+  const value = (breeds as Record<string, unknown>)[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string" && v !== "");
 }
 
 /**

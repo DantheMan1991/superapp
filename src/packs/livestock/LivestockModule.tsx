@@ -19,7 +19,8 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { listItems, listLots, movementKindsForLots } from "@/packs/inventory/ops";
 import { currentZoneForOccupants } from "@/packs/land/ops";
 import { slugLabel } from "@/packs/inventory/vocabulary";
-import { listLivestockLots, withdrawalByLot } from "./ops";
+import { breedPartsByLot, listLivestockLots, withdrawalByLot } from "./ops";
+import { formatComposition, statedComposition } from "./core/pedigree";
 import {
   blocksProcessing,
   describeWithdrawal,
@@ -27,7 +28,7 @@ import {
 } from "./core/withdrawal";
 import { ageInDays, formatAge, formatRate, mortalityRate, summariseHead } from "./core/herd";
 import { labelFor } from "@/lib/packs/resolve";
-import { speciesFrom } from "./vocabulary";
+import { breedLabel, breedsFrom, speciesFrom } from "./vocabulary";
 import { LivestockLotForm } from "./components/lot-controls";
 import { LivestockNav } from "./components/livestock-nav";
 
@@ -67,7 +68,8 @@ export async function LivestockModule({
       const inventoryLotIds = lots.map((l) => l.inventoryLotId);
       // Three queries for the whole page, whatever the lot count: the spine
       // rows, where each lot is, and the movements behind every head figure.
-      const [inventoryLots, zones, movements, withdrawals] = await Promise.all([
+      const [inventoryLots, zones, movements, withdrawals, breedParts] =
+        await Promise.all([
         listLots(tx, ctx.tenant.id),
         currentZoneForOccupants(
           tx,
@@ -85,19 +87,57 @@ export async function LivestockModule({
           lots.map((l) => l.id),
           today,
         ),
+        /**
+         * **STATED BREEDING ONLY, ON THIS PAGE.**
+         *
+         * Resolving every lot's composition means walking every lot's pedigree,
+         * and the honest cheaper answer is not "compute a rougher figure" — it
+         * is to show only what somebody entered. A hub that showed a worked-out
+         * fraction here and a differently-worked-out one on the detail page
+         * would be two numbers for one fact, which is the thing this pack
+         * refuses everywhere else. The animal's own page does the full walk and
+         * badges the answer.
+         */
+        breedPartsByLot(
+          tx,
+          ctx.tenant.id,
+          lots.map((l) => l.id),
+        ),
       ]);
 
-      return { lots, pack, items, inventoryLots, zones, movements, withdrawals };
+      return {
+        lots,
+        pack,
+        items,
+        inventoryLots,
+        zones,
+        movements,
+        withdrawals,
+        breedParts,
+      };
     },
     { role: ctx.role },
   );
 
-  const { lots, pack, items, inventoryLots, zones, movements, withdrawals } =
-    data;
+  const {
+    lots,
+    pack,
+    items,
+    inventoryLots,
+    zones,
+    movements,
+    withdrawals,
+    breedParts,
+  } = data;
   const isOwner = ctx.role === "owner";
   const byId = new Map(inventoryLots.map((l) => [l.id, l]));
   const headItems = items.filter((i) => i.stockingUnit === "head");
   const suggestedSpecies = speciesFrom(pack.config);
+  // Resolved here rather than in the form: the profile's config is a server
+  // fact, and the form is a client component that should be handed words.
+  const breedsBySpecies = Object.fromEntries(
+    suggestedSpecies.map((s) => [s, breedsFrom(pack.config, s)]),
+  );
   const lotWord = labelFor(pack.labels, "livestockLot", "Lot");
 
   return (
@@ -113,6 +153,7 @@ export async function LivestockModule({
             <LivestockLotForm
               items={headItems.map((i) => ({ id: i.id, name: i.name }))}
               speciesOptions={suggestedSpecies}
+              breedsBySpecies={breedsBySpecies}
               today={today}
             />
           ) : undefined
@@ -158,6 +199,10 @@ export async function LivestockModule({
               // ledger, that inventory's own pages use.
               const summary = summariseHead(lotMovements);
               const zone = zones.get(lot.inventoryLotId);
+              const stated = statedComposition(breedParts.get(lot.id) ?? []);
+              const breeding = stated
+                ? formatComposition(stated, breedLabel)
+                : null;
               return (
                 <TableRow key={lot.id}>
                   <TableCell>
@@ -170,10 +215,18 @@ export async function LivestockModule({
                       </Link>
                       {inv?.parentLotId && <Badge variant="outline">split</Badge>}
                     </div>
-                    {lot.breed && (
+                    {/* What somebody entered, as fractions — or the legacy
+                        string for a lot recorded before slice 4a. */}
+                    {breeding ? (
                       <div className="text-xs text-muted-foreground">
-                        {lot.breed}
+                        {breeding}
                       </div>
+                    ) : (
+                      lot.breed && (
+                        <div className="text-xs text-muted-foreground">
+                          {lot.breed}
+                        </div>
+                      )
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">

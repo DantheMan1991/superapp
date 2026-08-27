@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -24,6 +24,7 @@ import {
   issueStock,
   listItems,
   listLots as listInventoryLots,
+  lotsByIds,
   movementKindsForLots,
   movementsByIds,
   onHandByItem,
@@ -43,7 +44,7 @@ import {
 } from "@/packs/land/ops";
 import { isValidSlug } from "@/packs/inventory/vocabulary";
 import { convert, getUnit } from "@/packs/inventory/core/units";
-import { tapeDivisorFrom } from "./vocabulary";
+import { breedLabel, tapeDivisorFrom } from "./vocabulary";
 import { addDays } from "@/lib/timezone";
 import { ageInDays, headEffect, summariseHead } from "./core/herd";
 import { checkStreak } from "./core/daily";
@@ -60,6 +61,16 @@ import {
   type FeedQuantity,
   type MembershipSpan,
 } from "./core/feed";
+import {
+  MAX_GENERATIONS,
+  formatComposition,
+  isAncestor,
+  resolveComposition,
+  type BreedPart,
+  type Composition,
+  type PedigreeIndex,
+  type PedigreeNode,
+} from "./core/pedigree";
 import {
   WITHDRAWAL_SOURCES,
   lotWithdrawal,
@@ -126,7 +137,9 @@ export class LivestockError extends Error {
       | "FEED_GROUP_INVALID"
       | "INVALID_METHOD"
       | "INVALID_WEIGHT"
-      | "INVALID_TREATMENT",
+      | "INVALID_TREATMENT"
+      | "INVALID_BREED"
+      | "INVALID_PARENT",
     message: string,
   ) {
     super(message);
@@ -186,6 +199,11 @@ export interface LivestockLotInput {
   code: string;
   species: string;
   sex?: string | null;
+  /**
+   * ONE breed, meaning the whole animal — written to `livestock_breed_parts`
+   * as a single part, never to the superseded `breed` column. A cross is stated
+   * afterwards on the animal's own page.
+   */
   breed?: string;
   bornOn?: string | null;
   /** Where they came from, in inventory's terms. */
@@ -251,11 +269,21 @@ export async function createLivestockLot(
       inventoryLotId: inventoryLot.id,
       species,
       sex: input.sex ?? null,
-      breed: input.breed?.trim() ?? "",
       bornOn: input.bornOn ?? null,
       notes: input.notes?.trim() ?? "",
     })
     .returning();
+
+  // ONE BREED ON CREATE IS THE WHOLE ANIMAL, and that is the common case: a
+  // batch of Cornish Cross, a purebred cow. Anything crossed is stated on the
+  // animal's own page afterwards, where there is room to say ½ and ¼ — a
+  // fractions editor on the form that starts a pen of broilers would be four
+  // fields nobody needs to see. Nothing is written to the superseded `breed`
+  // text column any more.
+  const breed = input.breed?.trim();
+  if (breed) {
+    await setBreedParts(tx, ctx, rows[0].id, [{ breed, parts: 1 }]);
+  }
 
   return { lot: rows[0], inventoryLotId: inventoryLot.id };
 }
@@ -309,7 +337,8 @@ export async function updateLivestockLot(
   tx: Tx,
   ctx: LivestockCtx,
   id: string,
-  input: Partial<Pick<LivestockLotInput, "species" | "sex" | "breed" | "bornOn" | "notes">>,
+  // NO `breed` — the column is superseded and composition is `setBreedParts`.
+  input: Partial<Pick<LivestockLotInput, "species" | "sex" | "bornOn" | "notes">>,
 ): Promise<LivestockLot> {
   requireWrite(ctx, "owner");
   const existing = await getLivestockLot(tx, ctx.tenantId, id);
@@ -329,7 +358,6 @@ export async function updateLivestockLot(
     }
     patch.sex = input.sex;
   }
-  if (input.breed !== undefined) patch.breed = input.breed.trim();
   if (input.bornOn !== undefined) patch.bornOn = input.bornOn;
   if (input.notes !== undefined) patch.notes = input.notes.trim();
 
@@ -478,10 +506,31 @@ export async function splitLivestockLot(
       // Cross does not produce a batch of something else.
       species: parent.species,
       sex: parent.sex,
+      // The legacy string travels too, for as long as it exists: a lot entered
+      // before slice 4a would otherwise lose the only breed it has on a split.
       breed: parent.breed,
       bornOn: parent.bornOn,
+      // **THE PARENTS TRAVEL, THE SPLIT IS NOT ONE OF THEM.** Half a pen of
+      // half-Angus calves is still half Angus, so the composition copies — but
+      // the lot they were split OUT of is not their dam, and writing it here
+      // would turn every pen division into a generation.
+      damLotId: parent.damLotId,
+      sireLotId: parent.sireLotId,
     })
     .returning();
+
+  const parts = await breedPartsByLot(tx, ctx.tenantId, [parent.id]);
+  const stated = parts.get(parent.id) ?? [];
+  if (stated.length > 0) {
+    await tx.insert(schema.livestockBreedParts).values(
+      stated.map((part) => ({
+        tenantId: ctx.tenantId,
+        livestockLotId: rows[0].id,
+        breed: part.breed,
+        parts: part.parts,
+      })),
+    );
+  }
 
   return { lot: rows[0], inventoryLotId: child.id };
 }
@@ -651,6 +700,504 @@ export async function retireIdentifier(
 }
 
 // ------------------------------------------------------------- daily round ---
+
+// ---------------------------------------------------- pedigree & breeding ---
+
+/**
+ * At most this many breeds may be stated for one animal.
+ *
+ * Eight is past anything a real cross reaches — the pilot's most complicated
+ * cow is three — and it is here as a typo guard rather than a rule about
+ * genetics. A hundred rows would be somebody's paste, not somebody's herd.
+ */
+export const MAX_BREED_PARTS = 8;
+
+/** How many animals one pedigree walk loads before it stops climbing. */
+export const PEDIGREE_NODE_CAP = 200;
+
+/**
+ * The STATED composition for several animals at once, keyed by lot id.
+ *
+ * **STATED ONLY — never the resolved answer.** What somebody typed and what the
+ * app worked out from the parents are different kinds of fact, and a list that
+ * mixed them would put them side by side looking identical. That is the same
+ * distinction the feed report draws between measured and allocated, and the
+ * weights screen between a scale and a tape.
+ */
+export async function breedPartsByLot(
+  tx: Tx,
+  tenantId: string,
+  livestockLotIds: string[],
+): Promise<Map<string, BreedPart[]>> {
+  const out = new Map<string, BreedPart[]>();
+  if (livestockLotIds.length === 0) return out;
+  const rows = await tx.query.livestockBreedParts.findMany({
+    where: and(
+      eq(schema.livestockBreedParts.tenantId, tenantId),
+      inArray(schema.livestockBreedParts.livestockLotId, livestockLotIds),
+    ),
+  });
+  for (const row of rows) {
+    const list = out.get(row.livestockLotId) ?? [];
+    list.push({ breed: row.breed, parts: row.parts });
+    out.set(row.livestockLotId, list);
+  }
+  return out;
+}
+
+/**
+ * Walk a pedigree UPWARD and load what the pure fold needs.
+ *
+ * Generation by generation rather than one recursive query per animal: a
+ * pedigree fans out by two each level, so ten generations of one-at-a-time
+ * reads is a thousand round trips and ten batched ones is ten.
+ *
+ * **BOUNDED TWICE, AND A BOUND THAT BITES IS VISIBLE.** `generations` stops the
+ * climb and `PEDIGREE_NODE_CAP` stops the fan-out. An animal the cap left out is
+ * simply absent from the index, and `resolveComposition` reports that as
+ * `truncated` rather than as an unknown parent — because "we stopped looking"
+ * and "nobody knows" are different sentences and the screen says which.
+ */
+export async function pedigreeIndex(
+  tx: Tx,
+  tenantId: string,
+  rootIds: string[],
+  generations: number = MAX_GENERATIONS,
+): Promise<PedigreeIndex> {
+  const found = new Map<
+    string,
+    { id: string; damLotId: string | null; sireLotId: string | null }
+  >();
+  let frontier = [...new Set(rootIds.filter(Boolean))];
+
+  for (let depth = 0; depth <= generations; depth++) {
+    const wanted = frontier.filter((id) => !found.has(id));
+    if (wanted.length === 0 || found.size >= PEDIGREE_NODE_CAP) break;
+    const rows = await tx.query.livestockLots.findMany({
+      where: and(
+        eq(schema.livestockLots.tenantId, tenantId),
+        inArray(
+          schema.livestockLots.id,
+          wanted.slice(0, PEDIGREE_NODE_CAP - found.size),
+        ),
+      ),
+      columns: { id: true, damLotId: true, sireLotId: true },
+    });
+    for (const row of rows) found.set(row.id, row);
+    frontier = rows.flatMap((row) =>
+      [row.damLotId, row.sireLotId].filter((id): id is string => Boolean(id)),
+    );
+  }
+
+  const stated = await breedPartsByLot(tx, tenantId, [...found.keys()]);
+  const index: PedigreeIndex = new Map();
+  for (const [id, row] of found) {
+    const node: PedigreeNode = {
+      id,
+      damLotId: row.damLotId,
+      sireLotId: row.sireLotId,
+      stated: stated.get(id) ?? [],
+    };
+    index.set(id, node);
+  }
+  return index;
+}
+
+/** What one animal is made of, pedigree walked. Nothing about it is stored. */
+export async function compositionFor(
+  tx: Tx,
+  tenantId: string,
+  livestockLotId: string,
+): Promise<Composition> {
+  const index = await pedigreeIndex(tx, tenantId, [livestockLotId]);
+  return resolveComposition(livestockLotId, index);
+}
+
+/**
+ * State what an animal is made of, replacing whatever was there.
+ *
+ * **THE WHOLE SET IS ONE FACT**, so this is a replace and not an upsert. "½
+ * Angus, ¼ Hereford, ¼ Simmental" is a single sentence about a cow, and editing
+ * it one row at a time would allow an intermediate state that sums to something
+ * nobody meant.
+ *
+ * **WRITING A COMPOSITION CLEARS THE LEGACY `breed` TEXT**, which is the only
+ * migration path there can be for that column: nothing can parse "½ Angus, ¼
+ * Hereford" back into fractions, so the old string is shown as a prompt to enter
+ * it again and disappears the moment somebody does.
+ *
+ * `owner`, beside the rest of editing a lot. What an animal IS is a record
+ * somebody keeps, not a chore somebody does.
+ */
+export async function setBreedParts(
+  tx: Tx,
+  ctx: LivestockCtx,
+  livestockLotId: string,
+  parts: BreedPart[],
+): Promise<BreedPart[]> {
+  requireWrite(ctx, "owner");
+  const lot = await getLivestockLot(tx, ctx.tenantId, livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${livestockLotId} not found`);
+  }
+
+  // Merged before validation, so stating Angus twice is one component rather
+  // than a refusal about a mistake nobody meant to make.
+  const merged = new Map<string, number>();
+  for (const part of parts) {
+    const breed = part.breed.trim().toLowerCase().replace(/\s+/g, "_");
+    if (!breed) continue;
+    if (!isValidSlug(breed)) {
+      throw new LivestockError("INVALID_BREED", `invalid breed: ${part.breed}`);
+    }
+    if (!Number.isInteger(part.parts) || part.parts < 1 || part.parts > 10_000) {
+      throw new LivestockError(
+        "INVALID_BREED",
+        "a share must be a whole number of parts, at least one",
+      );
+    }
+    merged.set(breed, (merged.get(breed) ?? 0) + part.parts);
+  }
+  if (merged.size > MAX_BREED_PARTS) {
+    throw new LivestockError(
+      "INVALID_BREED",
+      `at most ${MAX_BREED_PARTS} breeds for one animal`,
+    );
+  }
+
+  await tx
+    .delete(schema.livestockBreedParts)
+    .where(
+      and(
+        eq(schema.livestockBreedParts.tenantId, ctx.tenantId),
+        eq(schema.livestockBreedParts.livestockLotId, livestockLotId),
+      ),
+    );
+
+  const rows = [...merged].map(([breed, count]) => ({
+    tenantId: ctx.tenantId,
+    livestockLotId,
+    breed,
+    parts: count,
+  }));
+  if (rows.length > 0) await tx.insert(schema.livestockBreedParts).values(rows);
+
+  if (rows.length > 0 && lot.breed) {
+    await tx
+      .update(schema.livestockLots)
+      .set({ breed: "", updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.livestockLots.tenantId, ctx.tenantId),
+          eq(schema.livestockLots.id, livestockLotId),
+        ),
+      );
+  }
+
+  return rows.map((r) => ({ breed: r.breed, parts: r.parts }));
+}
+
+/**
+ * Say who an animal's dam and sire are.
+ *
+ * `undefined` leaves a parent alone and `null` clears it — the same distinction
+ * every patch in this pack draws, and it matters here because "I only know the
+ * dam" is the ordinary case rather than an incomplete form.
+ *
+ * **WHAT THIS REFUSES, AND WHY EACH ONE IS A REFUSAL RATHER THAN A WARNING:**
+ *
+ *   - **A loop.** A cow who is her own granddam makes a pedigree that cannot be
+ *     walked and a composition that cannot be computed. A CHECK stops the
+ *     one-step case; only a walk can see the rest.
+ *   - **A stated contradiction of sex.** A dam recorded as male is a mis-click,
+ *     not a fact about biology. **An UNRECORDED sex is not a contradiction** and
+ *     is allowed through — this pack never reads a missing fact as the most
+ *     convenient value.
+ *
+ * **WHAT IT DELIBERATELY DOES NOT REFUSE: a parent of another species.** A mule
+ * is a real animal. The picker offers same-species animals first, which handles
+ * the mis-click without the app inventing a rule about what can breed with what.
+ */
+export async function setParents(
+  tx: Tx,
+  ctx: LivestockCtx,
+  livestockLotId: string,
+  input: { damLotId?: string | null; sireLotId?: string | null },
+): Promise<LivestockLot> {
+  requireWrite(ctx, "owner");
+  const lot = await getLivestockLot(tx, ctx.tenantId, livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${livestockLotId} not found`);
+  }
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  const named: string[] = [];
+  if (input.damLotId !== undefined) {
+    patch.damLotId = input.damLotId;
+    if (input.damLotId) named.push(input.damLotId);
+  }
+  if (input.sireLotId !== undefined) {
+    patch.sireLotId = input.sireLotId;
+    if (input.sireLotId) named.push(input.sireLotId);
+  }
+  if (named.length === 0 && Object.keys(patch).length === 1) return lot;
+
+  // One walk covers both parents: the index is loaded from whichever were
+  // named, and every ancestor of either is in it.
+  const index = named.length > 0
+    ? await pedigreeIndex(tx, ctx.tenantId, named)
+    : (new Map() as PedigreeIndex);
+
+  for (const [role, parentId] of [
+    ["dam", input.damLotId] as const,
+    ["sire", input.sireLotId] as const,
+  ]) {
+    if (!parentId) continue;
+    if (parentId === livestockLotId) {
+      throw new LivestockError(
+        "INVALID_PARENT",
+        "an animal cannot be its own parent",
+      );
+    }
+    const parent = await getLivestockLot(tx, ctx.tenantId, parentId);
+    if (!parent) {
+      throw new LivestockError("INVALID_PARENT", `${role} ${parentId} not found`);
+    }
+    if (role === "dam" && parent.sex === "male") {
+      throw new LivestockError(
+        "INVALID_PARENT",
+        "that animal is recorded as male, so it cannot be the dam",
+      );
+    }
+    if (role === "sire" && parent.sex === "female") {
+      throw new LivestockError(
+        "INVALID_PARENT",
+        "that animal is recorded as female, so it cannot be the sire",
+      );
+    }
+    if (isAncestor(livestockLotId, parentId, index)) {
+      throw new LivestockError(
+        "INVALID_PARENT",
+        "that animal is already descended from this one",
+      );
+    }
+  }
+
+  const rows = await tx
+    .update(schema.livestockLots)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.livestockLots.tenantId, ctx.tenantId),
+        eq(schema.livestockLots.id, livestockLotId),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/** Everything out of this animal, either side. "Show me her calves." */
+export async function offspringOf(
+  tx: Tx,
+  tenantId: string,
+  livestockLotId: string,
+): Promise<LivestockLot[]> {
+  return tx.query.livestockLots.findMany({
+    where: and(
+      eq(schema.livestockLots.tenantId, tenantId),
+      or(
+        eq(schema.livestockLots.damLotId, livestockLotId),
+        eq(schema.livestockLots.sireLotId, livestockLotId),
+      ),
+    ),
+    orderBy: (l, { desc }) => [desc(l.bornOn), desc(l.createdAt)],
+  });
+}
+
+/** An animal a picker may offer as a parent, with the code a person calls it. */
+export type ParentCandidate = {
+  id: string;
+  code: string;
+  species: string;
+  sex: string | null;
+  bornOn: string | null;
+};
+
+/**
+ * Who could be named as a parent.
+ *
+ * Excludes the animal itself and nothing else. Its DESCENDANTS are also
+ * impossible and are not filtered out here — finding them means a walk per
+ * candidate, and the write path refuses the choice with a sentence that says
+ * why. A picker that silently omitted an animal somebody was looking for would
+ * be the worse of the two failures.
+ */
+export async function parentCandidates(
+  tx: Tx,
+  tenantId: string,
+  opts: { species?: string; excludeId?: string } = {},
+): Promise<ParentCandidate[]> {
+  const where = [eq(schema.livestockLots.tenantId, tenantId)];
+  if (opts.species) where.push(eq(schema.livestockLots.species, opts.species));
+  const lots = await tx.query.livestockLots.findMany({ where: and(...where) });
+  const kept = lots.filter((lot) => lot.id !== opts.excludeId);
+  const codes = await lotsByIds(
+    tx,
+    tenantId,
+    kept.map((lot) => lot.inventoryLotId),
+  );
+  return kept
+    .map((lot) => ({
+      id: lot.id,
+      code: codes.get(lot.inventoryLotId)?.code ?? "",
+      species: lot.species,
+      sex: lot.sex,
+      bornOn: lot.bornOn,
+    }))
+    .filter((c) => c.code !== "")
+    .sort((a, b) => a.code.localeCompare(b.code));
+}
+
+/**
+ * The CODE a person calls each animal, by livestock lot id.
+ *
+ * The pedigree index deliberately carries ids and no codes — it is the input to
+ * a pure fold, and a fold that knew about `inventory_lots` would be reaching
+ * across a seam to render a label. So a screen that wants names asks for them
+ * separately, in one query, here.
+ */
+export async function codesByLivestockLot(
+  tx: Tx,
+  tenantId: string,
+  livestockLotIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (livestockLotIds.length === 0) return out;
+  const lots = await tx.query.livestockLots.findMany({
+    where: and(
+      eq(schema.livestockLots.tenantId, tenantId),
+      inArray(schema.livestockLots.id, livestockLotIds),
+    ),
+    columns: { id: true, inventoryLotId: true },
+  });
+  const codes = await lotsByIds(
+    tx,
+    tenantId,
+    lots.map((lot) => lot.inventoryLotId),
+  );
+  for (const lot of lots) {
+    const code = codes.get(lot.inventoryLotId)?.code;
+    if (code) out.set(lot.id, code);
+  }
+  return out;
+}
+
+export interface BirthInput {
+  damLotId?: string | null;
+  sireLotId?: string | null;
+  /** The new lot's code: "COW-14", "Farrowing 2026-03-02". */
+  code: string;
+  /** One for a calf, ten for a farrowing. The lot model absorbs both. */
+  head: number;
+  bornOn: string;
+  /** Where the offspring are counted. Exactly one of these, as on create. */
+  itemId?: string;
+  newItemName?: string;
+  /** Defaults to the dam's, then the sire's. */
+  species?: string;
+  sex?: string | null;
+  locationAssetId?: string | null;
+  notes?: string;
+}
+
+/**
+ * **A BIRTH.** Creates the lot, links both parents, and places the head — one
+ * transaction, because a calf that exists without arriving is a record nobody
+ * asked for.
+ *
+ * **THIS DOES NOT SET `inventory_lots.parent_lot_id`, AND THAT IS THE WHOLE
+ * POINT OF THE COLUMNS IT DOES SET.** That column is the SPLIT chain: it means
+ * "these animals came out of that group", and a traceability walk follows it to
+ * find which pen a box of meat was raised in. A birth is not a split — the dam
+ * does not lose a head when her calf arrives — and putting the dam there would
+ * make a batch trace wander into a family tree. The design note that said births
+ * are "parented by the dam" predates that chain existing in code.
+ *
+ * `source: "raised"`, always. A born animal has no purchase basis at all, only
+ * accumulated production cost, and `inventory` has held that distinction since
+ * its slice 0 precisely so this moment does not have to invent it.
+ *
+ * `owner`, because it creates a lot and chooses the stock line the offspring
+ * are counted in — the same reason `createLivestockLot` is. Whether recording a
+ * 2am calving should really need the owner is an open item, not an oversight.
+ */
+export async function recordBirth(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: BirthInput,
+): Promise<{ lot: LivestockLot; inventoryLotId: string }> {
+  requireWrite(ctx, "owner");
+  if (!input.damLotId && !input.sireLotId) {
+    throw new LivestockError(
+      "INVALID_PARENT",
+      "a birth needs at least a dam or a sire — start a lot instead",
+    );
+  }
+  if (!(input.head > 0)) {
+    throw new LivestockError("LOT_INVALID", "how many were born?");
+  }
+
+  const dam = input.damLotId
+    ? await getLivestockLot(tx, ctx.tenantId, input.damLotId)
+    : null;
+  const sire = input.sireLotId
+    ? await getLivestockLot(tx, ctx.tenantId, input.sireLotId)
+    : null;
+  if (input.damLotId && !dam) {
+    throw new LivestockError("INVALID_PARENT", "that dam no longer exists");
+  }
+  if (input.sireLotId && !sire) {
+    throw new LivestockError("INVALID_PARENT", "that sire no longer exists");
+  }
+
+  const created = await createLivestockLot(tx, ctx, {
+    itemId: input.itemId,
+    newItemName: input.newItemName,
+    code: input.code,
+    // Inherited rather than asked for: a calf out of cattle is cattle, and a
+    // form that asked would be asking a question with one answer.
+    species: input.species ?? dam?.species ?? sire?.species ?? "",
+    sex: input.sex ?? null,
+    bornOn: input.bornOn,
+    source: "raised",
+    notes: input.notes,
+  });
+
+  await setParents(tx, ctx, created.lot.id, {
+    damLotId: input.damLotId ?? null,
+    sireLotId: input.sireLotId ?? null,
+  });
+
+  const inventoryLot = await getInventoryLot(
+    tx,
+    ctx.tenantId,
+    created.inventoryLotId,
+  );
+  if (!inventoryLot) {
+    throw new LivestockError("NOT_FOUND", "the lot went missing mid-write");
+  }
+  await placeHead(tx, ctx, {
+    itemId: inventoryLot.itemId,
+    inventoryLotId: created.inventoryLotId,
+    head: input.head,
+    occurredOn: input.bornOn,
+    locationAssetId: input.locationAssetId ?? null,
+    notes: input.notes,
+  });
+
+  const lot = await getLivestockLot(tx, ctx.tenantId, created.lot.id);
+  return { lot: lot ?? created.lot, inventoryLotId: created.inventoryLotId };
+}
 
 /**
  * Record that somebody looked at a lot today, and what they found.
@@ -2343,6 +2890,7 @@ export async function farmSnapshot(
     items,
     onHand,
     withdrawals,
+    pedigrees,
   ] = await Promise.all([
     listInventoryLots(tx, tenantId),
     movementKindsForLots(tx, tenantId, inventoryLotIds),
@@ -2361,6 +2909,13 @@ export async function farmSnapshot(
       tenantId,
       lots.map((l) => l.id),
       today,
+    ),
+    // Bounded by the same cap as the digest itself: at most SNAPSHOT_LOT_CAP
+    // roots, and `pedigreeIndex` bounds the climb from there.
+    pedigreeIndex(
+      tx,
+      tenantId,
+      lots.map((l) => l.id),
     ),
   ]);
 
@@ -2390,6 +2945,16 @@ export async function farmSnapshot(
   );
 
   const advisorLots: AdvisorLot[] = lots.map((lot) => {
+    /**
+     * THE REAL BREEDING, not the superseded column.
+     *
+     * The advisor is asked feed-conversion questions, and Cornish Cross against
+     * a slow-growing bird is the difference between a six-week bird and a
+     * twelve-week one. A half-and-half cross reads as one — and the unknown
+     * share travels with it, so an answer never sounds more certain about an
+     * animal's breeding than the records are.
+     */
+    const composition = resolveComposition(lot.id, pedigrees);
     const summary = summariseHead(movements.get(lot.inventoryLotId) ?? []);
     const place = places.get(lot.inventoryLotId);
     // The CLASSIFICATION is this pack's, as it has been since slice 0 — what
@@ -2405,7 +2970,10 @@ export async function farmSnapshot(
     return {
       code: byInventoryLot.get(lot.inventoryLotId)?.code ?? "—",
       species: lot.species,
-      breed: lot.breed,
+      breed:
+        composition.source === "unknown"
+          ? lot.breed
+          : formatComposition(composition, breedLabel),
       sex: lot.sex,
       ageDays: ageInDays(lot.bornOn, today),
       head: summary.balance,

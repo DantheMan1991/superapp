@@ -19,6 +19,88 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 > dossier is read at the start of every session that touches this module, so
 > its length is a real cost.
 
+### 2026-08-27 — A file can hang on something that is not a transaction (`claude/a-photo-of-the-animal`)
+
+`document_links` has four targets — journal entry, bank transaction, invoice,
+bill — and all four are accounting's. **So no pack record in this app could hold
+a file at all**, which is what livestock slice 4b needed and what `assets` has
+had as an open item since the founder asked for a picture per asset on
+2026-08-15. One table, both packs.
+
+**NOT TWO MORE COLUMNS ON `document_links`, AND THIS WAS THE DECISION.** Typed
+targets buy referential integrity and cost something core cannot afford here: a
+`livestock_lot_id` on a Layer 0 table is **core knowing what a livestock lot
+is**, which is the leak ADR 0004 draws the line against and the exact correction
+the enterprises slice took a day after shipping. It would also mean a core
+migration every time a pack wanted a photo, forever.
+
+**So `document_attachments` follows `mail_links`** — `extension_slug` +
+`entity_type` + `entity_id`, no FK to the target — which is the same seam solved
+the same way for the same reason. The DOCUMENT side is core, so that keeps a real
+composite FK and CASCADE.
+
+**The trade is stated rather than hidden.** Postgres cannot police a polymorphic
+reference, so a deleted record leaves a dangling row. Three things stand in for
+the missing FK: `detachAllForEntity` for a pack's own delete path, the pack
+action's existence check before any write, and a reader that resolves nothing
+showing nothing.
+
+**THE POLICY INHERITS THE DOCUMENT'S VISIBILITY, as `document_versions` does.**
+A bare tenant check would have leaked in a specific and unhelpful way: an
+owners-only photo would stay unreadable while staff's gallery still COUNTED it,
+so the screen would say "3 photos" over two. Answering *how many things are you
+not showing me* is not much better than showing them. The EXISTS runs against
+`documents`, whose own policy already compares `effective_visibility` with
+`app_current_tenant_role()` — so there is no third copy of the flag.
+
+**AT MOST ONE PROFILE PICTURE PER RECORD, as a partial unique index.** The open
+item `assets` carried named the hard part: a list thumbnail wants one canonical
+photo rather than whichever is newest, and "canonical" stops being true the
+moment two rows can claim it. It is a flag on the ATTACHMENT rather than a
+column on the record, because a primary that could outlive the attachment it
+names is a dangling pointer with extra steps.
+
+Three rules fall out of that and all three are tested:
+
+- **The first photo becomes the picture** — a gallery of one with a blank
+  thumbnail is a bug in every reader's eyes.
+- **A later one does not steal it.** That is a choice, and it has a button.
+- **Detaching the picture leaves the record without one**, rather than promoting
+  whatever is next. The app picking a portrait is what the flag exists to stop.
+
+**A PROFILE PICTURE HAS TO BE A PICTURE — and `image/tiff` is not one.** It is
+accepted for upload, because a scanner makes them, and deliberately absent from
+`INLINE_SAFE`, so it arrives as a download prompt. A portrait nobody can see is
+not a portrait, so `isDisplayableImage` intersects the two sets rather than
+testing the `image/` prefix and getting this wrong once. The rule lives in the
+app rather than in a CHECK because an attachment is any document on purpose: a
+tractor's manual is a legitimate one, and it is not its portrait.
+
+**THE ACTIONS ARE THE PACKS', NOT CORE'S.** `livestock` and `assets` each own
+three thin actions that name their own entity type, run their own module gate
+and check their own record exists; the shared client component takes them as
+props, which is the one function shape allowed across that boundary
+([conventions §9](../conventions.md)). A single generic action here would have
+had to decide whether to trust an `extensionSlug` the browser sent — a permission
+check written in the wrong place.
+
+**Trashing an attached file is refused**, as it already was for an accounting
+link. The reason is different — no audit trail this time — but it is the same
+shape of surprise: a picture disappearing out of an animal's gallery because
+somebody tidied the cabinet is a change made in one place and felt in another.
+
+**DRIVEN ON HILLTOP FARM, and one finding came only from doing it.** Uploaded,
+promoted, detached, and the trash refused with *"Remove this photo from the
+record it is on before trashing it."* The finding: **every photo landed in the
+INBOX and stayed there.** The Inbox is `folder_id is null` by design, and forty
+animals at five photos each would put two hundred things in it that nobody needs
+to act on — which is how a to-do surface stops being read. Attached photos now
+file into the root **Photos** folder the module already provisions, and degrade
+to the Inbox when a tenant has renamed or removed it, because inventing a folder
+on an upload path is this code deciding how somebody's cabinet is arranged.
+
+Migrations `0219` and `0220`. 11 new ops tests, 6 new isolation tests.
+
 ### 2026-08-26 — A second function across the boundary (`claude/a-function-cannot-cross-the-boundary`)
 
 Found while fixing the same bug in `land`, by sweeping every non-client `.tsx`
@@ -299,6 +381,7 @@ document**, across tenants and across roles, on both tables and through the
 | Table | Purpose | Notes (RLS, invariants, FKs) |
 | --- | --- | --- |
 | `documents` (shared) | The generic file record, now carrying DMS columns | `origin` discriminates `accounting`/`dms`; required in `$inferInsert` via `schema.ts`, and DB-defaulted to `'accounting'` so pre-Documents writers keep working (see Decisions). `member_all` policy compares `effective_visibility` against `app_current_tenant_role()`. **No new UNIQUE index may be added** — see Decisions. `extracted_text` (indexed by `search_tsv` at weight D) describes the CURRENT bytes and is denormalized from the current version row; `text_extraction` (`0095`, text + CHECK over six states) says why it is or is not there. Do NOT confuse `text_extraction` with `extraction_status` — the latter is the accounting AI's, and a DMS upload is `skipped` there and meaningful here |
+| `document_attachments` | **A file on a record that is not an accounting one** — a photo of a cow or a tractor, a manual, a permit | **POLYMORPHIC ON PURPOSE**, following `mail_links`: `extension_slug` + `entity_type` + `entity_id`, and **no FK to the target**, because a `livestock_lot_id` here would be core knowing what a farm is (ADR 0004). The document side IS core, so that keeps a composite FK with CASCADE. The trade: a deleted record leaves a dangling row, and `detachAllForEntity` plus the pack action's existence check stand in for the missing key. `is_primary` is the profile picture — **at most one per record**, partial unique index. Policy INHERITS the document's visibility via EXISTS, exactly as `document_versions` does, so an owners-only photo is uncounted rather than merely unreadable |
 | `document_folders` | The tree | Adjacency list (`parent_id`, source of truth) **+** materialized `path`. Self composite FK, NO ACTION. Two partial name uniques (root and non-root). `text_pattern_ops` prefix index, hand-written in 0024. Same visibility policy as `documents` |
 | `document_versions` | File revision history | Written by `versions.ts` since 2026-07-25. Partial unique on `is_current` makes "exactly one current" a DB invariant, and it is NOT deferrable, so the swap must clear the old flag before inserting. `blob_pathname` index is deliberately NOT unique (a restore reuses a blob). Inherits visibility via an `EXISTS` subquery — no third copy of the flag. A document with no history has ZERO rows here, not one — see Decisions. Since `0095` it also carries `extracted_text`/`text_extraction`, and this is the AUTHORITATIVE copy: text describes BYTES, and every other descriptor of the bytes (file_name, mime_type, size, sha256) was already here. `promoteVersion` denormalizes both onto the document |
 | `document_tags` | Tenant tag registry | Written by `tag-ops.ts` since 2026-07-25. `documents.tags text[]` stores slugs from here, so a rename never rewrites documents — and the SLUG IS IMMUTABLE, see Decisions. Slug format enforced by CHECK; `(tenant, slug)` unique is what makes "As Built" and "as-built" the same tag. No FK is possible from an array element, so `setDocumentTags` is the only door |
@@ -326,6 +409,18 @@ Decisions).
 - `src/modules/documents/folder-ops.ts` — folder mutations + `recomputeVisibility`.
 - `src/modules/documents/actions.ts` (folders) and `document-actions.ts` (files).
 - `src/modules/documents/ingest.ts`, `allowlist.ts` — upload verification.
+  `isDisplayableImage` is the intersection of "an image" and `INLINE_SAFE`, and
+  the difference is `image/tiff`: accepted for upload, never rendered.
+- `src/modules/documents/attachments.ts` — **the Layer 0 half of a pack's photo
+  gallery, and it names no pack.** `attachDocumentToRecord`,
+  `setPrimaryAttachment`, `detachDocumentFromRecord`, `detachAllForEntity`,
+  `attachmentsForRecord`, `primaryAttachments` (one query for a page of
+  thumbnails) and `registerAttachedPhoto` (upload + attach, one transaction).
+  Read its header before changing the primary rules — every one of them is
+  about the app not choosing a portrait on somebody's behalf.
+- `src/modules/documents/components/record-photos.tsx` — the shared gallery and
+  the list thumbnail. **Takes the three actions as PROPS**, because the actions
+  belong to the packs; see the component header.
 - `src/modules/documents/versions.ts` — the revision log: `addDocumentVersion`,
   `restoreDocumentVersion`, `listDocumentVersions`, and the lazy
   `materializeCurrentVersion` every write path calls first.

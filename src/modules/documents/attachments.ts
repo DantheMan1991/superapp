@@ -1,11 +1,12 @@
 import "server-only";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { schema, withTenant, type Tx } from "@/db";
 import type { Document, DocumentAttachment } from "@/db/schema";
 import { DocsError } from "./core/errors";
 import { isDisplayableImage } from "./allowlist";
 import { createDmsDocument, inspectUploadedBlob } from "./ingest";
 import { extractDocumentText } from "./text/extract";
+import { folderNameKey } from "./core/tree";
 import { logAuditInTx } from "@/lib/audit";
 
 /**
@@ -375,6 +376,38 @@ export async function attachmentCounts(
 }
 
 /**
+ * The root **Photos** folder the module provisions on install, or null.
+ *
+ * **WITHOUT THIS EVERY ANIMAL PHOTO LANDS IN THE INBOX AND STAYS THERE.** The
+ * Inbox is `folder_id is null` by design — "captured but not filed yet" — and a
+ * farm with forty animals and five photos each would have two hundred things in
+ * it that nobody needs to do anything about, which is how a to-do surface stops
+ * being read. Found by driving it.
+ *
+ * **Degrades to the Inbox rather than creating anything.** A tenant may have
+ * renamed or removed the folder, and inventing one on an upload path would be
+ * this code deciding how somebody's cabinet is arranged. Naming a folder core
+ * ships itself is not core naming a pack.
+ */
+async function defaultPhotoFolderId(
+  tx: Tx,
+  tenantId: string,
+): Promise<string | null> {
+  const folder = await tx.query.documentFolders.findFirst({
+    where: and(
+      eq(schema.documentFolders.tenantId, tenantId),
+      isNull(schema.documentFolders.parentId),
+      eq(schema.documentFolders.nameKey, folderNameKey(PHOTO_FOLDER)),
+    ),
+    columns: { id: true },
+  });
+  return folder?.id ?? null;
+}
+
+/** The name in `templates/defaults.ts`. Resolved by key, so case is no trap. */
+const PHOTO_FOLDER = "Photos";
+
+/**
  * **UPLOAD A PHOTO AND HANG IT ON A RECORD, in one act.** The Layer 0 half of a
  * pack's "add a photo" button — the pack supplies the target and nothing else,
  * because this file must not know what a livestock lot is.
@@ -395,7 +428,10 @@ export async function registerAttachedPhoto(
   args: {
     pathname: string;
     target: AttachmentTarget;
-    /** Files it in a folder as well. Null keeps it out of the tree. */
+    /**
+     * Where it is filed. **Omitted means the root Photos folder** if the
+     * tenant still has one; an explicit `null` keeps it out of the tree.
+     */
     folderId?: string | null;
     title?: string;
     makePrimary?: boolean;
@@ -419,10 +455,14 @@ export async function registerAttachedPhoto(
   return withTenant(
     ctx.tenantId,
     async (tx) => {
+      const folderId =
+        args.folderId === undefined
+          ? await defaultPhotoFolderId(tx, ctx.tenantId)
+          : args.folderId;
       const created = await createDmsDocument(tx, ctx, {
         ...inspected,
         blobPathname: args.pathname,
-        folderId: args.folderId ?? null,
+        folderId,
         title: args.title ?? "",
         description: "",
         // Through the SHARED extractor rather than hardcoded: it answers

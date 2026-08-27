@@ -155,7 +155,12 @@ found:
 Breeds come from the profile, per species (`breedsFrom`), for the same reason
 species do — a pack that knew what a Hereford was would know what industry it
 was in. Migrations `0217` and `0218`; 24 new pure tests, 10 new ops tests, 6 new
-isolation tests. Applied to the dev branch and verified before the PR.
+isolation tests. **Applied to BOTH databases before the merge, per
+[ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md)** —
+`db:migrate` and `db:verify-rls` against the dev branch and against production,
+both reporting 148 tables with RLS enabled, forced and policied. Additive only:
+a new table and two nullable columns, so the deployed code is unaffected while
+it waits for the merge.
 
 ### 2026-08-26 — The pack puts on the design system (`claude/two-packs-follow-the-pattern`)
 

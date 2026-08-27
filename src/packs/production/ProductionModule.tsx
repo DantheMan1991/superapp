@@ -6,14 +6,9 @@ import { todayInTimezone } from "@/lib/timezone";
 import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
+import { StatCard } from "@/components/app/stat-card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -38,6 +33,7 @@ import {
 } from "./vocabulary";
 import { YIELD_REFUSALS, formatLb, formatRatio } from "./core/yield";
 import { StartRunForm } from "./components/run-controls";
+import { ProductionNav } from "./components/production-nav";
 
 const BASE = "/dashboard/m/production";
 
@@ -113,60 +109,32 @@ export async function ProductionModule({
       <PageHeader
         title="Production"
         description={`What went in, what came out, and the yield between them. Every ${runWord.toLowerCase()} lands its outputs in Inventory carrying the cost of what it consumed.`}
+        icon={<Factory />}
         actions={
-          <div className="flex items-center gap-2">
-            {/* Visible to everybody, not just an owner. Reading who takes what
-                and how they are inspected is a question anybody on the place
-                asks; only changing it is the owner's. */}
-            <Button asChild variant="outline">
-              <Link href={`${BASE}/bookings`}>Booked dates</Link>
-            </Button>
-            {/*
-              **BESIDE BOOKED DATES, NOT A CARD ON THIS PAGE.** The founder could
-              not find a cut sheet: the only ways in were a booking row and a
-              card inside an open run. This page's job is the run list and the
-              yield column on it, and a sheet is not a run — it exists before one
-              and often without one.
-
-              NEVER PLURALISED. `cutSheet` is a word the tenant owns and the
-              homestead profile renames it; "Every cut sheet" reads as a list
-              without a `+ "s"` that would produce "Cut sheets" on a word
-              somebody else has renamed to something that does not take one.
-            */}
-            <Button asChild variant="outline">
-              <Link href={`${BASE}/orders`}>
-                Every {labelFor(pack.labels, "cutSheet", "Order").toLowerCase()}
-              </Link>
-            </Button>
-            {/*
-              **ONLY WHEN THERE IS SOMETHING TO RECONCILE.** A farm that keeps no
-              books never puts anything aside for a plant, and a permanently
-              empty reconciliation is a link people learn to ignore. The page
-              itself says the same thing if somebody arrives at it directly.
-            */}
-            <Button asChild variant="outline">
-              <Link href={`${BASE}/billing`}>Processing not invoiced</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href={`${BASE}/processors`}>
-                {labelFor(pack.labels, "processor", "Processor")} directory
-              </Link>
-            </Button>
-            {isOwner ? (
-              <StartRunForm
-                runWord={runWord}
-                kindOptions={runKindsFrom(pack.config)}
-                locations={locations.map((l) => ({ id: l.id, name: l.name }))}
-                processors={processors.map((p) => ({
-                  id: p.processor.id,
-                  name: p.name,
-                }))}
-                processorWord={labelFor(pack.labels, "processor", "Processor")}
-                today={today}
-              />
-            ) : null}
-          </div>
+          isOwner ? (
+            <StartRunForm
+              runWord={runWord}
+              kindOptions={runKindsFrom(pack.config)}
+              locations={locations.map((l) => ({ id: l.id, name: l.name }))}
+              processors={processors.map((p) => ({
+                id: p.processor.id,
+                name: p.name,
+              }))}
+              processorWord={labelFor(pack.labels, "processor", "Processor")}
+              today={today}
+            />
+          ) : undefined
         }
+      />
+
+      {/* The four destinations that used to sit in `actions` above. The
+          arguments those buttons carried — a sheet is not a run, and the
+          founder could not find one — now live in
+          `components/production-nav.tsx`, along with the pluralisation rule
+          their labels depend on. */}
+      <ProductionNav
+        sheetWord={labelFor(pack.labels, "cutSheet", "Order")}
+        processorWord={labelFor(pack.labels, "processor", "Processor")}
       />
 
       {/*
@@ -183,9 +151,13 @@ export async function ProductionModule({
       {exemptions.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2">
           {exemptions.map((rule) => (
-            <Card key={rule.kind}>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
+            /* `StatCard`'s label and value both take a node, which is what
+               keeps the standing badge on the label line and the "of N" small
+               beside the figure — the shape this card already had. */
+            <StatCard
+              key={rule.kind}
+              label={
+                <span className="flex items-center justify-between gap-2">
                   <span>Done here this year · {slugLabel(rule.kind)}</span>
                   {rule.standing !== "clear" && (
                     <Badge
@@ -200,34 +172,38 @@ export async function ProductionModule({
                           : "Over"}
                     </Badge>
                   )}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1">
-                <p className="text-2xl font-semibold tabular-nums">
+                </span>
+              }
+              tone={
+                rule.standing === "over" || rule.standing === "at"
+                  ? "destructive"
+                  : "default"
+              }
+              value={
+                <>
                   {rule.used}
                   <span className="text-base font-normal text-muted-foreground">
-                    {" "}
-                    of {rule.annualHead}
+                    {" of "}
+                    {rule.annualHead}
                   </span>
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {exemptionNote(
-                    rule.standing,
-                    rule.used,
-                    rule.annualHead,
-                    labelFor(pack.labels, "processor", "Processor"),
-                  )}
-                </p>
-              </CardContent>
-            </Card>
+                </>
+              }
+              footnote={exemptionNote(
+                rule.standing,
+                rule.used,
+                rule.annualHead,
+                labelFor(pack.labels, "processor", "Processor"),
+              )}
+            />
           ))}
         </div>
       )}
 
-      {runs.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<Factory className="h-5 w-5" />}
+      <DataTable
+        isEmpty={runs.length === 0}
+        empty={
+          <EmptyState
+            icon={<Factory className="h-5 w-5" />}
           /* NEVER PLURALISE A LABEL. The word is the tenant's to rename, and
              the profile renames this one to "Batch" — which came out of the
              naive `+ "s"` as "No batchs yet" on the first screen anybody
@@ -238,9 +214,10 @@ export async function ProductionModule({
             isOwner
               ? `Start one on the day it happens. What goes in leaves stock and takes its cost with it; what comes out lands in Inventory when you finish, carrying that cost. The ratio between the two is measured, never assumed.`
               : `An owner starts a ${runWord.toLowerCase()}. Once they do, what went in and what came out show up here.`
-          }
-        />
-      ) : (
+            }
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -344,7 +321,7 @@ export async function ProductionModule({
             })}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
     </div>
   );
 }

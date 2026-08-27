@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { Sparkles } from "lucide-react";
+import { LivestockNav } from "@/packs/livestock/components/livestock-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -15,8 +15,6 @@ import { speciesFrom } from "@/packs/livestock/vocabulary";
 import { AdvisorChat } from "@/packs/livestock/components/advisor-chat";
 
 export const dynamic = "force-dynamic";
-
-const BASE = "/dashboard/m/livestock";
 
 /**
  * Ask the advisor — livestock slice 1b, and the half of the day-one wedge that
@@ -73,18 +71,13 @@ export default async function AdvisorPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="h-4 w-4" />
-        All livestock
-      </Link>
-
       <PageHeader
+        icon={<Sparkles />}
         title="Ask"
         description={`Husbandry questions, answered against your own records as of ${today}.`}
       />
+
+      <LivestockNav />
 
       <AdvisorChat
         starters={starterQuestions({ species, sampleLotCode, hasZones })}

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ClipboardList } from "lucide-react";
+import { ProductionNav } from "@/packs/production/components/production-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -8,8 +9,8 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -142,16 +143,8 @@ export default async function CutSheetsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <Button asChild variant="ghost" size="sm" className="-ml-2">
-          <Link href={BASE}>
-            <ChevronLeft className="size-4" />
-            Production
-          </Link>
-        </Button>
-      </div>
-
       <PageHeader
+        icon={<ClipboardList />}
         title={`Every ${sheetWord.toLowerCase()}`}
         /*
           **THE WORD IS THE TENANT'S, AND THIS SENTENCE HAD "plant" IN IT** —
@@ -172,16 +165,21 @@ export default async function CutSheetsPage() {
         }
       />
 
-      {rows.length === 0 ? (
-        <EmptyState
-          title={`Nothing asked for yet`}
+      <ProductionNav sheetWord={sheetWord} processorWord={processorWord} />
+
+      <DataTable
+        isEmpty={rows.length === 0}
+        empty={
+          <EmptyState
+            title={`Nothing asked for yet`}
           description={
             targets.length === 0
               ? `A ${sheetWord.toLowerCase()} is written against a booked date or an open ${runWord.toLowerCase()} at a ${processorWord.toLowerCase()}. Hold a date first, then come back.`
-              : `What they cut is what you told them to cut, and the plant reads this rather than guessing.`
-          }
-        />
-      ) : (
+                : `What they cut is what you told them to cut, and the plant reads this rather than guessing.`
+            }
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -281,7 +279,7 @@ export default async function CutSheetsPage() {
             })}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { Receipt } from "lucide-react";
+import { ProductionNav } from "@/packs/production/components/production-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -8,7 +9,7 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
-import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/app/data-table";
 import {
   Table,
   TableBody,
@@ -95,6 +96,7 @@ export default async function ProcessingBillsPage() {
   const { pack, open, lines, unmoved, books } = data;
   const runWord = labelFor(pack.labels, "productionRun", "Run");
   const processorWord = labelFor(pack.labels, "processor", "Processor");
+  const cutSheetWord = labelFor(pack.labels, "cutSheet", "Order");
   const isOwner = ctx.role === "owner";
 
   const openTotal = open.reduce((sum, o) => sum + o.openCents, 0);
@@ -109,22 +111,20 @@ export default async function ProcessingBillsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <Button asChild variant="ghost" size="sm" className="-ml-2">
-          <Link href={BASE}>
-            <ChevronLeft className="size-4" />
-            Production
-          </Link>
-        </Button>
-      </div>
-
       <PageHeader
+        icon={<Receipt />}
         title="Processing not invoiced"
         description={`What was put aside for a ${processorWord.toLowerCase()} when a ${runWord.toLowerCase()} finished, and which of their bills has settled it. The two sides are the same question from opposite ends, so they are on one page.`}
       />
 
+      <ProductionNav
+        sheetWord={cutSheetWord}
+        processorWord={processorWord}
+      />
+
       {!books ? (
         <EmptyState
+          panel
           title="No books to reconcile against"
           description={`This business does not keep a set of accounts yet, so nothing was ever put aside for a ${processorWord.toLowerCase()} and there is nothing here to settle.`}
         />
@@ -132,10 +132,10 @@ export default async function ProcessingBillsPage() {
         <div className="space-y-8">
           <section className="space-y-2">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-sm font-medium">
+              <h2 className="font-heading text-xl font-semibold tracking-heading">
                 Nobody has invoiced this yet
               </h2>
-              <span className="text-lg font-semibold tabular-nums">
+              <span className="font-heading text-xl font-semibold tracking-heading tabular-nums">
                 {formatMoney(openTotal, currencySymbol)}
               </span>
             </div>
@@ -153,12 +153,15 @@ export default async function ProcessingBillsPage() {
               their bill to the day it paid for points it at this; the account
               itself clears when that bill is approved.
             </p>
-            {open.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nothing outstanding — every {runWord.toLowerCase()} that put
-                something aside has a bill against it.
-              </p>
-            ) : (
+            <DataTable
+              isEmpty={open.length === 0}
+              empty={
+                <EmptyState
+                  title="Nothing outstanding"
+                  description={`Every ${runWord.toLowerCase()} that put something aside has a bill against it.`}
+                />
+              }
+            >
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -200,11 +203,11 @@ export default async function ProcessingBillsPage() {
                   ))}
                 </TableBody>
               </Table>
-            )}
+            </DataTable>
           </section>
 
           <section className="space-y-2">
-            <h2 className="text-sm font-medium">
+            <h2 className="font-heading text-xl font-semibold tracking-heading">
               Their bills, and what they are for
             </h2>
             <p className="text-sm text-muted-foreground">
@@ -212,13 +215,15 @@ export default async function ProcessingBillsPage() {
               Matching one points it at what was put aside, so approving the bill
               settles it rather than charging the meat twice.
             </p>
-            {lines.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No unapproved bills from a {processorWord.toLowerCase()}. A bill
-                has to name a vendor, so a {processorWord.toLowerCase()} that has
-                never sent one does not appear here.
-              </p>
-            ) : (
+            <DataTable
+              isEmpty={lines.length === 0}
+              empty={
+                <EmptyState
+                  title="No unapproved bills"
+                  description={`A bill has to name a vendor, so a ${processorWord.toLowerCase()} that has never sent one does not appear here.`}
+                />
+              }
+            >
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -292,7 +297,7 @@ export default async function ProcessingBillsPage() {
                   ))}
                 </TableBody>
               </Table>
-            )}
+            </DataTable>
           </section>
 
           {/*
@@ -302,7 +307,7 @@ export default async function ProcessingBillsPage() {
           */}
           {unmoved.length > 0 && (
             <section className="space-y-2">
-              <h2 className="text-sm font-medium">
+              <h2 className="font-heading text-xl font-semibold tracking-heading">
                 They charged something other than what was put aside
               </h2>
               <p className="text-sm text-muted-foreground">
@@ -310,7 +315,8 @@ export default async function ProcessingBillsPage() {
                 loss when the bill was matched. This is the other question:
                 whether the meat itself should carry it. Nothing forces it.
               </p>
-              <Table>
+              <DataTable>
+                <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{runWord}</TableHead>
@@ -360,7 +366,8 @@ export default async function ProcessingBillsPage() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+                </Table>
+              </DataTable>
             </section>
           )}
         </div>

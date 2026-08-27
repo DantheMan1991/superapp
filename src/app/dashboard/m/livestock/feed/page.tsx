@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { ChevronLeft, Scale } from "lucide-react";
+import { Scale } from "lucide-react";
+import { LivestockNav } from "@/packs/livestock/components/livestock-nav";
 import { withTenant } from "@/db";
 import { packContext } from "@/lib/packs/tenant-context";
 import { requireTenant } from "@/lib/auth";
@@ -10,7 +11,8 @@ import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { StatCard } from "@/components/app/stat-card";
 import {
   Table,
   TableBody,
@@ -265,15 +267,8 @@ export default async function FeedPage({
 
   return (
     <div className="space-y-6">
-      <Link
-        href={BASE}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="h-4 w-4" />
-        All livestock
-      </Link>
-
       <PageHeader
+        icon={<Scale />}
         title="Feed"
         description="The largest cash cost, and what each lot carried of it. Measured where a bag went to a named lot; allocated where a shared feeder did."
         actions={
@@ -283,6 +278,8 @@ export default async function FeedPage({
           </div>
         }
       />
+
+      <LivestockNav />
 
       <div className="flex flex-wrap items-center gap-2">
         {PERIODS.map((option) => (
@@ -311,92 +308,62 @@ export default async function FeedPage({
         />
       ) : (
         <>
-          <div className="grid gap-6 md:grid-cols-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Fed</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-medium tabular-nums">
-                  {formatMoney(totalCents, currencySymbol)}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {totalCents === 0
-                    ? "Nothing fed on record in this period."
-                    : "Across every lot in this period."}
-                </p>
-              </CardContent>
-            </Card>
+          <div className="grid gap-3 md:grid-cols-4">
+            <StatCard
+              label="Fed"
+              value={formatMoney(totalCents, currencySymbol)}
+              footnote={
+                totalCents === 0
+                  ? "Nothing fed on record in this period."
+                  : "Across every lot in this period."
+              }
+            />
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Measured</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-medium tabular-nums">
-                  {formatMoney(measuredCents, currencySymbol)}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Issued to a lot by name. Stamped when it happened, and it does
-                  not move when the next delivery arrives.
-                </p>
-              </CardContent>
-            </Card>
+            <StatCard
+              label="Measured"
+              value={formatMoney(measuredCents, currencySymbol)}
+              footnote="Issued to a lot by name. Stamped when it happened, and it does not move when the next delivery arrives."
+            />
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Allocated</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-medium tabular-nums">
-                  {formatMoney(allocatedCents, currencySymbol)}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {/* The design's rule, stated where the number is: same
-                      report, different confidence. */}
-                  Drawn for a shared feeder and spread by head × days. An
-                  estimate, and the honest one.
-                </p>
-              </CardContent>
-            </Card>
+            {/* The design's rule, stated where the number is: same report,
+                different confidence. */}
+            <StatCard
+              label="Allocated"
+              value={formatMoney(allocatedCents, currencySymbol)}
+              footnote="Drawn for a shared feeder and spread by head × days. An estimate, and the honest one."
+            />
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">
-                  <span className="flex items-center gap-2">
-                    Feed conversion
-                    {farmConversion && (
-                      <Badge
-                        variant={
-                          farmConversion.confidence === "measured"
-                            ? "outline"
-                            : "default"
-                        }
-                        title={CONFIDENCE_NOTES[farmConversion.confidence]}
-                      >
-                        {farmConversion.confidence === "measured"
-                          ? "Measured"
-                          : "Estimated"}
-                      </Badge>
-                    )}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-medium tabular-nums">
-                  {formatRatio(farmConversion?.ratio ?? null)}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {/* Still said in words when it cannot be computed, rather
-                      than divided into existence. */}
-                  {farmConversion
-                    ? `${formatLb(farmConversion.feedLb)} of feed against ${formatLb(farmConversion.gainLb)} of gain, across every lot weighed twice in this period.`
-                    : anyWeighed
-                      ? "Nothing has been weighed twice yet. Gain needs two weighings — the second one turns this into a number."
-                      : "Needs weights, and nothing has been weighed. Feed per head is below; feed per pound of gain is not a number this farm can produce yet."}
-                </p>
-              </CardContent>
-            </Card>
+            {/* The ratio is still said in words when it cannot be computed,
+                rather than divided into existence. */}
+            <StatCard
+              label={
+                <span className="flex items-center gap-2">
+                  Feed conversion
+                  {farmConversion && (
+                    <Badge
+                      variant={
+                        farmConversion.confidence === "measured"
+                          ? "outline"
+                          : "default"
+                      }
+                      title={CONFIDENCE_NOTES[farmConversion.confidence]}
+                    >
+                      {farmConversion.confidence === "measured"
+                        ? "Measured"
+                        : "Estimated"}
+                    </Badge>
+                  )}
+                </span>
+              }
+              value={formatRatio(farmConversion?.ratio ?? null)}
+              footnote={
+                farmConversion
+                  ? `${formatLb(farmConversion.feedLb)} of feed against ${formatLb(farmConversion.gainLb)} of gain, across every lot weighed twice in this period.`
+                  : anyWeighed
+                    ? "Nothing has been weighed twice yet. Gain needs two weighings — the second one turns this into a number."
+                    : "Needs weights, and nothing has been weighed. Feed per head is below; feed per pound of gain is not a number this farm can produce yet."
+              }
+            />
           </div>
 
           {(unallocatedCents > 0 || unpriced > 0 || report.drawsOmitted > 0) && (
@@ -423,9 +390,12 @@ export default async function FeedPage({
             </div>
           )}
 
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium">By lot</h2>
-            <Table>
+          <section>
+            <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+              By lot
+            </h2>
+            <DataTable>
+              <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Lot</TableHead>
@@ -575,7 +545,8 @@ export default async function FeedPage({
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+              </Table>
+            </DataTable>
             {!anyWeighed && (
               <p className="text-xs text-muted-foreground">
                 {/* One place, said the same way on the lot page — and gone the
@@ -599,7 +570,7 @@ export default async function FeedPage({
               processed and sold on &mdash; while &ldquo;a head now&rdquo; is
               over what the lot is still carrying.
             </p>
-          </div>
+          </section>
         </>
       )}
 
@@ -686,14 +657,15 @@ export default async function FeedPage({
                       </div>
                     </div>
 
-                    {rows.length === 0 ? (
-                      <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                        Nothing is on this feeder yet, so anything drawn for it
-                        has nowhere to land. Add the lots that eat from it —
-                        backdated to when they went on, because the share is
-                        worked out day by day.
-                      </p>
-                    ) : (
+                    <DataTable
+                      isEmpty={rows.length === 0}
+                      empty={
+                        <EmptyState
+                          title="Nothing on this feeder yet"
+                          description="Anything drawn for it has nowhere to land. Add the lots that eat from it — backdated to when they went on, because the share is worked out day by day."
+                        />
+                      }
+                    >
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -762,7 +734,7 @@ export default async function FeedPage({
                           })}
                         </TableBody>
                       </Table>
-                    )}
+                    </DataTable>
                   </div>
                 );
               })}

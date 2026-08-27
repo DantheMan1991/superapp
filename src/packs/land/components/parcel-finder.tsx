@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DataTable } from "@/components/app/data-table";
 import { importParcelsAction, lookupParcelsAction } from "../actions";
 import { formatArea, type AreaUnit } from "../core/area";
 import type { ParcelSearchKind } from "../core/parcel-lookup";
@@ -272,7 +273,8 @@ export function ParcelFinder({
             </Button>
           </div>
 
-          <Table>
+          <DataTable>
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10" />
@@ -319,7 +321,8 @@ export function ParcelFinder({
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+            </Table>
+          </DataTable>
 
           {attribution && (
             <p className="text-xs text-muted-foreground">Source: {attribution}</p>

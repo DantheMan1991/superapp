@@ -6,6 +6,7 @@ import type { TenantContext } from "@/lib/auth";
 import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -115,6 +116,7 @@ export async function AssetsModule({
     <div className="space-y-6">
       <PageHeader
         title="Assets"
+        icon={<Wrench />}
         description="What the business owns — what it cost, where it lives, and what is still in service."
         actions={
           isOwner ? (
@@ -138,18 +140,20 @@ export async function AssetsModule({
         }
       />
 
-      {rows.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<Wrench className="h-5 w-5" />}
+      <DataTable
+        isEmpty={rows.length === 0}
+        empty={
+          <EmptyState
+            icon={<Wrench className="h-5 w-5" />}
           title="Nothing on the books yet"
           description={
             isOwner
               ? "Add the first thing the business owns — a building, a machine, a vehicle. What it cost and where it lives both become reportable."
               : "An owner adds what the business owns. Once they do, it shows up here."
-          }
-        />
-      ) : (
+            }
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -214,7 +218,7 @@ export async function AssetsModule({
             ))}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Map as MapIcon } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -9,12 +9,9 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { Panel } from "@/components/app/panel";
 import {
   Table,
   TableBody,
@@ -179,6 +176,7 @@ export default async function ParcelDetailPage({
       </Link>
 
       <PageHeader
+        icon={<MapIcon />}
         title={parcel.name}
         description={
           <span className="flex items-center gap-2">
@@ -215,11 +213,9 @@ export default async function ParcelDetailPage({
       />
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Details</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">Details</h2>
+          <div className="mt-3">
             <dl className="grid grid-cols-[10rem_1fr] gap-y-3 text-sm">
               <dt className="text-muted-foreground">Tenure</dt>
               <dd>
@@ -267,14 +263,12 @@ export default async function ParcelDetailPage({
                 </>
               )}
             </dl>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Rotation</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">Rotation</h2>
+          <div className="mt-3">
             {rotation === null ? (
               <p className="text-sm text-muted-foreground">
                 {parcel.restTargetDays === null
@@ -310,14 +304,12 @@ export default async function ParcelDetailPage({
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">What changed</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">What changed</h2>
+          <div className="mt-3">
             {changes.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Nothing has been declared yet. Setting what a{" "}
@@ -342,8 +334,8 @@ export default async function ParcelDetailPage({
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       </div>
 
       <div className="space-y-3">
@@ -360,11 +352,15 @@ export default async function ParcelDetailPage({
           )}
         </div>
 
-        {zones.length === 0 ? (
-          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-            No {zoneWord.toLowerCase()}s on this parcel yet.
-          </p>
-        ) : (
+        <DataTable
+          isEmpty={zones.length === 0}
+          empty={
+            <EmptyState
+              title={`No ${zoneWord.toLowerCase()} on this parcel yet`}
+              description={`Divide the ground into ${zoneWord.toLowerCase()}s and everything that happens on it has somewhere to land.`}
+            />
+          }
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -459,7 +455,7 @@ export default async function ParcelDetailPage({
               })}
             </TableBody>
           </Table>
-        )}
+        </DataTable>
       </div>
     </div>
   );

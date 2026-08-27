@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Wrench } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { listEntities } from "@/modules/accounting/core";
@@ -10,12 +10,7 @@ import { formatMoney } from "@/lib/money";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Panel } from "@/components/app/panel";
 import {
   getAsset,
   listChildren,
@@ -267,6 +262,7 @@ export default async function AssetDetailPage({
       </Link>
 
       <PageHeader
+        icon={<Wrench />}
         title={asset.name}
         description={
           <span className="flex items-center gap-2">
@@ -301,11 +297,9 @@ export default async function AssetDetailPage({
       />
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Details</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">Details</h2>
+          <div className="mt-3">
             <dl className="grid grid-cols-[9rem_1fr] gap-y-3 text-sm">
               <dt className="text-muted-foreground">Model</dt>
               <dd>{asset.model || "—"}</dd>
@@ -344,16 +338,14 @@ export default async function AssetDetailPage({
                 </>
               )}
             </dl>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
               Contains {children.length > 0 && `(${children.length})`}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+            </h2>
+          <div className="mt-3">
             {children.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Nothing is kept in this one.
@@ -378,8 +370,8 @@ export default async function AssetDetailPage({
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
         <DepreciationPanel
           assetId={asset.id}

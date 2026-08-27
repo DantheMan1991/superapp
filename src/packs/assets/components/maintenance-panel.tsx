@@ -7,13 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Panel } from "@/components/app/panel";
 import {
   Dialog,
   DialogContent,
@@ -99,14 +93,16 @@ export function MaintenancePanel({
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
+    <Panel className="p-5">
+      <div>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-base">Maintenance</CardTitle>
-            <CardDescription>
+            <h2 className="font-heading text-base font-semibold tracking-heading">
+              Maintenance
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
               What needs doing, and when it was last done.
-            </CardDescription>
+            </p>
           </div>
           {canEdit && (
             <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -210,9 +206,9 @@ export function MaintenancePanel({
             </Dialog>
           )}
         </div>
-      </CardHeader>
+      </div>
 
-      <CardContent className="space-y-4">
+      <div className="mt-4 space-y-4">
         {view.schedules.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No schedules yet. Add one for anything that comes round — a service,
@@ -331,7 +327,7 @@ export function MaintenancePanel({
             ))}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }

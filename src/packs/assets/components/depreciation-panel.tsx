@@ -7,13 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Panel } from "@/components/app/panel";
 import {
   Dialog,
   DialogContent,
@@ -127,16 +121,18 @@ export function DepreciationPanel({
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
+    <Panel className="p-5">
+      <div>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-base">Depreciation</CardTitle>
-            <CardDescription>
+            <h2 className="font-heading text-base font-semibold tracking-heading">
+              Depreciation
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
               {configured
                 ? "Straight-line, posted a month at a time."
                 : "Not depreciated."}
-            </CardDescription>
+            </p>
           </div>
           {canEdit && (
             <Dialog open={setupOpen} onOpenChange={setSetupOpen}>
@@ -234,9 +230,9 @@ export function DepreciationPanel({
             </Dialog>
           )}
         </div>
-      </CardHeader>
+      </div>
 
-      <CardContent>
+      <div className="mt-4">
         {!configured ? (
           <p className="text-sm text-muted-foreground">
             Land and anything held for resale are never written down. Everything
@@ -310,7 +306,7 @@ export function DepreciationPanel({
             )}
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }

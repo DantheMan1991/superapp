@@ -6,8 +6,8 @@ import { todayInTimezone } from "@/lib/timezone";
 import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -96,6 +96,7 @@ export async function RetailModule({
     <div className="space-y-6">
       <PageHeader
         title="Retail"
+        icon={<Store />}
         description={`Where the business sells, what it charges there, and what a ${dayWord.toLowerCase()} costs to stand at.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -115,18 +116,20 @@ export async function RetailModule({
         }
       />
 
-      {channels.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<Store className="h-5 w-5" />}
+      <DataTable
+        isEmpty={channels.length === 0}
+        empty={
+          <EmptyState
+            icon={<Store className="h-5 w-5" />}
           title="Nowhere to sell yet"
           description={
             isOwner
               ? `Add the first ${channelWord.toLowerCase()} — a market stall, the farm gate, a shop. Prices live per ${channelWord.toLowerCase()}, because the same pound is one price at a stall and another at the gate, and neither of them is the price.`
               : `An owner adds somewhere to sell. Once they do, prices and ${dayWord.toLowerCase()}s show up here.`
-          }
-        />
-      ) : (
+            }
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -171,14 +174,14 @@ export async function RetailModule({
             ))}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
 
       {days.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Recent {dayWord.toLowerCase()}s</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <section>
+          <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+            Recent {dayWord.toLowerCase()}s
+          </h2>
+          <DataTable>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -260,16 +263,16 @@ export async function RetailModule({
                 })}
               </TableBody>
             </Table>
-            <p className="mt-3 text-xs text-muted-foreground">
+          </DataTable>
+          <p className="mt-3 text-xs text-muted-foreground">
               {/* Said plainly rather than left as a column of dashes. */}
               Margin is what a day took less what it cost to stand there. The
               hours stay in their own column rather than inside it: own time
               counted as nothing makes every market look worth going to. What
               the goods cost to produce is not in this either — that lives on
-              the stock, and joining the two is a report nobody has built yet.
-            </p>
-          </CardContent>
-        </Card>
+            the stock, and joining the two is a report nobody has built yet.
+          </p>
+        </section>
       )}
     </div>
   );

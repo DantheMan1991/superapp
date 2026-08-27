@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Receipt, Store, Truck } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -11,7 +11,9 @@ import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { Panel } from "@/components/app/panel";
+import { StatCard } from "@/components/app/stat-card";
 import {
   Table,
   TableBody,
@@ -185,6 +187,7 @@ export default async function SellingDayPage({
       </div>
 
       <PageHeader
+        icon={<Store />}
         title={`${dayWord} · ${till.day.heldOn}`}
         description={`${till.channelName}${
           till.day.weather ? ` · ${till.day.weather}` : ""
@@ -254,47 +257,32 @@ export default async function SellingDayPage({
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Took
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold tabular-nums">
-              {formatMoney(till.takings.totalCents, currencySymbol)}
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <StatCard
+          label="Took"
+          value={formatMoney(till.takings.totalCents, currencySymbol)}
+          footnote={
+            <>
               {till.takings.saleCount}{" "}
               {till.takings.saleCount === 1 ? "sale" : "sales"} ·{" "}
               {formatMoney(till.takings.cashCents, currencySymbol)} cash
               {till.takings.otherCents > 0 &&
                 ` · ${formatMoney(till.takings.otherCents, currencySymbol)} other`}
-            </p>
-          </CardContent>
-        </Card>
+            </>
+          }
+        />
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Margin
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div
-              className={`text-2xl font-semibold tabular-nums ${
-                till.result.marginCents < 0 ? "text-destructive" : ""
-              }`}
-            >
-              {/* A LOSING DAY MUST LOOK LIKE ONE. `formatMoney` drops the sign
-                  on purpose - it formats an AMOUNT, and a margin is not one.
-                  Read without the minus, a market that cost $53 and took
-                  nothing reads as $53 EARNED, which is the exact opposite of
-                  the fact this whole pack exists to surface. */}
-              {formatMoneySign(till.result.marginCents, currencySymbol)}
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
+        {/* A LOSING DAY MUST LOOK LIKE ONE. `formatMoney` drops the sign on
+            purpose - it formats an AMOUNT, and a margin is not one. Read
+            without the minus, a market that cost $53 and took nothing reads as
+            $53 EARNED, which is the exact opposite of the fact this whole pack
+            exists to surface. `tone` says the same thing in colour. */}
+        <StatCard
+          label="Margin"
+          tone={till.result.marginCents < 0 ? "destructive" : "default"}
+          value={formatMoneySign(till.result.marginCents, currencySymbol)}
+          footnote={
+            <>
               {/* MARGIN, NOT PROFIT, and the name is doing work: what the goods
                   cost to produce is not in here. */}
               {till.result.costUnrecorded
@@ -305,59 +293,52 @@ export default async function SellingDayPage({
                   till.result.perPersonHourCents,
                   currencySymbol,
                 )} a person-hour.`}
-            </p>
-          </CardContent>
-        </Card>
+            </>
+          }
+        />
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              The tin
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {till.cash.uncounted ? (
+        {/* Not counted and counted-and-right are different facts, which is why
+            the uncounted state is an em dash and not a zero variance. */}
+        <StatCard
+          label="The tin"
+          tone={
+            !till.cash.uncounted && till.cash.varianceCents < 0
+              ? "destructive"
+              : "default"
+          }
+          value={
+            till.cash.uncounted
+              ? "—"
+              : till.cash.varianceCents === 0
+                ? "Balanced"
+                : `${till.cash.varianceCents > 0 ? "+" : "−"}${formatMoney(
+                    Math.abs(till.cash.varianceCents),
+                    currencySymbol,
+                  )}`
+          }
+          footnote={
+            till.cash.uncounted ? (
               <>
-                <div className="text-2xl font-semibold text-muted-foreground">
-                  —
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {/* Not counted and counted-and-right are different facts. */}
-                  Not counted. Expected{" "}
-                  {formatMoney(till.cash.expectedCents, currencySymbol)} —
-                  float plus cash taken.
-                </p>
+                Not counted. Expected{" "}
+                {formatMoney(till.cash.expectedCents, currencySymbol)} — float
+                plus cash taken.
               </>
             ) : (
               <>
-                <div
-                  className={`text-2xl font-semibold tabular-nums ${
-                    till.cash.varianceCents < 0 ? "text-destructive" : ""
-                  }`}
-                >
-                  {till.cash.varianceCents === 0
-                    ? "Balanced"
-                    : `${till.cash.varianceCents > 0 ? "+" : "−"}${formatMoney(
-                        Math.abs(till.cash.varianceCents),
-                        currencySymbol,
-                      )}`}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Counted{" "}
-                  {formatMoney(till.day.cashCountedCents ?? 0, currencySymbol)}{" "}
-                  against {formatMoney(till.cash.expectedCents, currencySymbol)}{" "}
-                  expected.
-                </p>
+                Counted{" "}
+                {formatMoney(till.day.cashCountedCents ?? 0, currencySymbol)}{" "}
+                against {formatMoney(till.cash.expectedCents, currencySymbol)}{" "}
+                expected.
               </>
-            )}
-          </CardContent>
-        </Card>
+            )
+          }
+        />
       </div>
 
       {truckAssetId === null ? (
         <EmptyState
           panel
-          icon={<ChevronLeft className="h-5 w-5" />}
+          icon={<Truck className="h-5 w-5" />}
           title="No truck to sell from"
           description="A market truck is an asset marked as somewhere stock is kept. Add one under Assets and it becomes a place the till can sell out of."
         />
@@ -394,11 +375,11 @@ export default async function SellingDayPage({
         </p>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Ran out of</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <Panel className="p-5">
+        <h2 className="mb-3 font-heading text-base font-semibold tracking-heading">
+          Ran out of
+        </h2>
+        <div>
           <p className="mb-3 text-xs text-muted-foreground">
             {/* The design's sharpest point about this pack, said on the screen
                 where the tap happens. */}
@@ -448,23 +429,23 @@ export default async function SellingDayPage({
               </TableBody>
             </Table>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Sales {till.sales.length > 0 && `(${till.sales.length})`}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {till.sales.length === 0 ? (
+      <section>
+        <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+          Sales {till.sales.length > 0 && `(${till.sales.length})`}
+        </h2>
+        <DataTable
+          isEmpty={till.sales.length === 0}
+          empty={
             <EmptyState
-              icon={<ChevronLeft className="h-5 w-5" />}
+              icon={<Receipt className="h-5 w-5" />}
               title="Nothing sold yet"
               description="Every sale takes its stock off the truck and stamps the price it was actually charged at."
             />
-          ) : (
+          }
+        >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -517,9 +498,8 @@ export default async function SellingDayPage({
                 ))}
               </TableBody>
             </Table>
-          )}
-        </CardContent>
-      </Card>
+        </DataTable>
+      </section>
     </div>
   );
 }

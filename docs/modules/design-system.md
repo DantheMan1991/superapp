@@ -23,6 +23,30 @@ tokens and gets its own pass later.
 
 Newest first. One entry per session/PR that touched this area.
 
+### 2026-08-26 — The last three packs, and where a strip does not belong (`claude/the-last-three-packs`)
+
+The end of the pack sweep. `land`, `retail` and `assets` converted;
+**`grep -rl "components/ui/card" src/packs/` now returns nothing**, where it
+returned 45 wrappers across seven packs this morning.
+
+**THE INTERESTING PART IS THE STRIP THAT WAS NOT BUILT.** The plan for this PR,
+written when the review was — and repeated in this dossier's own open items —
+said Retail and Assets "just need panels and a strip". That was wrong, and the
+count that produced it was the wrong count. Zero outline buttons in a header is
+not evidence that a pack needs navigation; it is a hint that it may have none to
+need. **Every non-hub route in retail and assets is a RECORD**, and land's only
+section is conditional on a parcel source covering the tenant. A `CategoryStrip`
+with one tab is chrome that teaches people the control is useless.
+
+So all three keep their hand-rolled back-links, deliberately: with no sections
+there is nothing to replace them with, and a record-to-list link is the only
+navigation those pages have. **Count routes that are not records, not buttons.**
+
+`LandModule.tsx` imported `Map` bare from lucide, shadowing the global `Map`
+constructor for the whole module — latent, since nothing there builds one, and
+aliased to `MapIcon` while the file was open. `icon-registry.ts` already does
+the same for the same reason.
+
 ### 2026-08-26 — Seven packs wore one green, and five wore the same box (`claude/seven-packs-wore-one-green`)
 
 **THE PACKS WERE NEVER IN THE SWEEP, BECAUSE THE SWEEP WAS PLANNED BEFORE ANY
@@ -355,16 +379,23 @@ What remains is the three centred states above and `(marketing)`.
 - **The sweep.** ~70 surfaces still hand-roll their header, empty state and table
   panel. Planned as one PR per module: accounting → documents + mail → CRM + work
   + scheduling → admin/auth/onboarding.
-- **THE PACKS ARE THE LARGER HALF OF THE SWEEP, and were not in that plan** —
-  it was written on 2026-08-10, before a single pack existed. Measured
-  2026-08-26: **zero of the seven** import `DataTable`, `Panel`, `StatCard`,
-  `CategoryStrip`, `FilterPills` or `SectionRow`; seven bare `<Table>`s sit
-  directly on the page background, and 45 raw `<Card>` wrappers are still doing
-  `Panel`'s job. They do use `EmptyState` (19 files), so this is a partial
-  adoption rather than none. Remaining order, after the tokens landed:
-  ~~**inventory** (the pattern the rest copy)~~ **done 2026-08-26** →
-  ~~**production + livestock**~~ **done 2026-08-26** → **land + retail +
-  assets**, which is all that is left.
+- ~~**THE PACKS ARE THE LARGER HALF OF THE SWEEP, and were not in that plan**~~
+  — **closed 2026-08-26**, in four PRs over one session. The plan was written on
+  2026-08-10, before a single pack existed, so no pack was ever in it. At the
+  start: zero of the seven imported `DataTable`, `Panel`, `StatCard` or
+  `CategoryStrip`, and 45 raw `<Card>` wrappers were doing `Panel`'s job.
+  **`grep -rl "components/ui/card" src/packs/` now returns nothing.** Order run:
+  tokens and icons → inventory → production + livestock → land + retail +
+  assets.
+- **A STRIP IS FOR SECTIONS, AND THREE PACKS DO NOT HAVE ANY.** Inventory,
+  production and livestock each had four or five destinations crammed into
+  `PageHeader`'s actions row, and a `CategoryStrip` is the answer to that. Land,
+  retail and assets do not: every non-hub route in retail and assets is a
+  RECORD, and land's only section is conditional on a parcel source covering the
+  tenant. They got no strip, and their hand-rolled back-links were **kept**,
+  because with no sections there is nothing to replace them with. Counting
+  outline buttons is how you find the first case; counting *routes that are not
+  records* is how you tell the second.
 - **`DataTable` IS "PANEL + TABLE SELECTORS", AND THERE IS NO WAY TO ASK FOR
   THE SECOND WITHOUT THE FIRST.** A table that genuinely belongs *inside* a
   `Panel` — because the panel holds other things too, like production's

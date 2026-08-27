@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel } from "@/components/app/panel";
 import { Badge } from "@/components/ui/badge";
 import { formatMoney } from "@/lib/money";
 import { recordSaleAction, recordStockoutAction } from "../actions";
@@ -331,12 +331,12 @@ export function Till({
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">On the truck</CardTitle>
-        </CardHeader>
-        <CardContent>
+    <div className="grid gap-3 lg:grid-cols-[1fr_20rem]">
+      <Panel className="p-5">
+        <h2 className="mb-3 font-heading text-base font-semibold tracking-heading">
+          On the truck
+        </h2>
+        <div>
           {lines.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Nothing loaded. Move stock onto the truck and it appears here —
@@ -387,14 +387,14 @@ export function Till({
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">This sale</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <Panel className="p-5">
+        <h2 className="mb-3 font-heading text-base font-semibold tracking-heading">
+          This sale
+        </h2>
+        <div className="space-y-3">
           {basket.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Tap what they are buying.
@@ -568,8 +568,8 @@ export function Till({
               Clear
             </Button>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
     </div>
   );
 }

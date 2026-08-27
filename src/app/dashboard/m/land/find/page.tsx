@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Search } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenantOwner } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -57,6 +57,7 @@ export default async function FindParcelsPage() {
       </Link>
 
       <PageHeader
+        icon={<Search />}
         title="Find my parcels"
         description="The county has already drawn your boundaries. Take the ones that are yours, with their acreage, and trace paddocks inside them afterwards."
       />

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Check, ChevronLeft, Circle } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, Circle, Store, Tags } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled, isModuleEnabled } from "@/lib/modules";
@@ -11,7 +11,8 @@ import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { Panel } from "@/components/app/panel";
 import {
   Table,
   TableBody,
@@ -115,6 +116,7 @@ export default async function RetailChannelPage({
       </div>
 
       <PageHeader
+        icon={<Store />}
         title={channel.name}
         description={`${slugLabel(channel.channelKind)}${
           channel.location ? ` · ${channel.location}` : ""
@@ -152,20 +154,20 @@ export default async function RetailChannelPage({
         dayWord={dayWord}
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Prices · {pricedCount} of {prices.length} priced
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {prices.length === 0 ? (
+      <section>
+        <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+          Prices · {pricedCount} of {prices.length} priced
+        </h2>
+        <DataTable
+          isEmpty={prices.length === 0}
+          empty={
             <EmptyState
-              icon={<ChevronLeft className="h-5 w-5" />}
+              icon={<Tags className="h-5 w-5" />}
               title="Nothing to price yet"
               description="Prices are set against what the business holds. Add an item in Inventory and it appears here."
             />
-          ) : (
+          }
+        >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -258,16 +260,15 @@ export default async function RetailChannelPage({
                 })}
               </TableBody>
             </Table>
-          )}
-        </CardContent>
-      </Card>
+        </DataTable>
+      </section>
 
       {prices.some((p) => p.history.length > 1) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">What it used to cost</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <section>
+          <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+            What it used to cost
+          </h2>
+          <DataTable>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -307,27 +308,29 @@ export default async function RetailChannelPage({
                   )}
               </TableBody>
             </Table>
-            <p className="mt-3 text-xs text-muted-foreground">
-              A price change is a new row from a day, never an edit — which is
-              what lets a margin report ask what you charged in June rather than
-              only what you charge now.
-            </p>
-          </CardContent>
-        </Card>
+          </DataTable>
+          <p className="mt-3 text-xs text-muted-foreground">
+            A price change is a new row from a day, never an edit — which is
+            what lets a margin report ask what you charged in June rather than
+            only what you charge now.
+          </p>
+        </section>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{dayWord}s here</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {days.length === 0 ? (
+      <section>
+        <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+          {dayWord}s here
+        </h2>
+        <DataTable
+          isEmpty={days.length === 0}
+          empty={
             <EmptyState
-              icon={<ChevronLeft className="h-5 w-5" />}
+              icon={<CalendarDays className="h-5 w-5" />}
               title={`No ${dayWord.toLowerCase()} recorded here yet`}
               description="Record what it cost to stand there. Two seasons of this is what settles which market is worth going to and which one is habit."
             />
-          ) : (
+          }
+        >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -390,19 +393,16 @@ export default async function RetailChannelPage({
                 })}
               </TableBody>
             </Table>
-          )}
-        </CardContent>
-      </Card>
+        </DataTable>
+      </section>
 
       {channel.notes && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Notes</CardTitle>
-          </CardHeader>
-          <CardContent className="whitespace-pre-wrap text-sm text-muted-foreground">
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">Notes</h2>
+          <div className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">
             {channel.notes}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       )}
     </div>
   );
@@ -467,11 +467,9 @@ function SellingChecklist({
   if (steps.every((step) => step.done)) return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Before you can sell here</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <Panel className="p-5">
+      <h2 className="font-heading text-base font-semibold tracking-heading">Before you can sell here</h2>
+      <div className="mt-3">
         <ol className="space-y-3">
           {steps.map((step) => (
             <li key={step.title} className="flex gap-3">
@@ -511,7 +509,7 @@ function SellingChecklist({
             </li>
           ))}
         </ol>
-      </CardContent>
-    </Card>
+      </div>
+    </Panel>
   );
 }

@@ -51,6 +51,39 @@ examples exist.
 
 ## Build log
 
+### 2026-08-26 — The pack puts on the design system (`claude/the-last-three-packs`)
+
+No behaviour changed. PR 4 of the five that bring the packs onto the primitive
+layer, and the last of them — see [design-system.md](design-system.md) for the
+sweep as a whole.
+
+**THIS PACK GETS NO `CategoryStrip`, AND THAT IS THE FINDING RATHER THAN AN
+OMISSION.** The first three packs each had a header stuffed with four or five
+outline buttons that were really destinations. This one has exactly one section — `/find` — and it is conditional on a
+parcel source covering the tenant, so the strip would have had one tab on most
+farms and two on some. The strip exists to
+show a module's SECTIONS, and a strip with one tab is chrome that teaches
+people the control is useless. So the hand-rolled back-links on the record
+pages **stay**: with no sections there is nothing to replace them with, and a
+record-to-list link is the only navigation those pages have.
+
+Accent chip on every `PageHeader`, `Card` to `Panel`, tables into `DataTable`,
+section headings to the house 20px, and dashed-border paragraphs to real
+`EmptyState`s.
+
+**A BARE `Map` IMPORT FROM lucide SHADOWS THE GLOBAL `Map` CONSTRUCTOR** for
+the whole module, and `LandModule.tsx` had one. Nothing in that file builds a
+lookup today, which is exactly why it was worth aliasing to `MapIcon` now
+rather than after somebody adds one and gets a baffling error. The same trap is
+recorded in `icon-registry.ts`, which aliases for the same reason.
+
+**Not driven: `/land/[id]` and its zone page.** Hilltop Farm has no parcels —
+the hub renders "No ground recorded yet" — and `retireParcel` is a soft retire
+with no hard delete, so creating one to look at a layout would leave permanent
+fixture data. Same call this sweep made about `/inventory/counts/[id]`. The
+conversions there are the same shapes verified on retail and assets, and `tsc`,
+`eslint` and the build are green, but nobody has looked at those two screens.
+
 ### 2026-08-20 — `deleteOccupancy` turned out to be a precedent (`claude/a-weighing-can-be-wrong`)
 
 No code change here. Recorded because `livestock`'s weights copied this pack's

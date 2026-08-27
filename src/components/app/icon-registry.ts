@@ -1,5 +1,6 @@
 import {
   Banknote,
+  Beef,
   BookOpen,
   Boxes,
   Calculator,
@@ -7,14 +8,22 @@ import {
   Clock,
   Contact,
   CreditCard,
+  Factory,
   FolderOpen,
   LayoutDashboard,
   ListChecks,
   Mail,
+  // Aliased on purpose: a bare `Map` import shadows the global `Map`
+  // constructor for the whole module, which is a trap for whoever next reaches
+  // for a lookup in here. lucide exports `Map as LucideMap` too; the name below
+  // is the one the rest of the codebase would guess.
+  Map as MapIcon,
   ScrollText,
   Settings,
   Sparkles,
+  Sprout,
   SquareCheck,
+  Store,
   Users,
   Wrench,
   type LucideIcon,
@@ -42,6 +51,15 @@ import {
  * throwing, which is exactly why three wrong icons shipped unnoticed: add the
  * name here when you add a module.
  *
+ * **AND IT RECURRED, EXACTLY AS THE PARAGRAPH ABOVE PREDICTED IT WOULD.** Every
+ * pack in `src/packs/index.ts` names an icon, and five of the seven — `map`,
+ * `beef`, `sprout`, `factory`, `store` — were never added here, so Land,
+ * Livestock, Crops, Production and Retail all rendered the same generic box as
+ * Inventory, in the rail and in the ⌘K palette, from the day each shipped until
+ * 2026-08-26. The registry is the seam a pack has to touch and the one furthest
+ * from anything a pack author is thinking about. There is still no test that
+ * would catch it: the fix is to add the key in the same commit as the pack.
+ *
  * Components only, no helpers: a `"use client"` module may import from here
  * freely because this file is not itself a client module.
  */
@@ -52,6 +70,7 @@ export const ICONS: Record<string, LucideIcon> = {
   // tenant, `payments` is the tenant taking money from its customer, and the
   // two sit next to each other in the same rail (ADR 0015).
   payments: Banknote,
+  beef: Beef,
   book: BookOpen,
   boxes: Boxes,
   calculator: Calculator,
@@ -61,10 +80,14 @@ export const ICONS: Record<string, LucideIcon> = {
   clock: Clock,
   contact: Contact,
   dashboard: LayoutDashboard,
+  factory: Factory,
   folder: FolderOpen,
   mail: Mail,
+  map: MapIcon,
   settings: Settings,
   sparkles: Sparkles,
+  sprout: Sprout,
+  store: Store,
   users: Users,
   wrench: Wrench,
 };

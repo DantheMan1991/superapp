@@ -51,6 +51,40 @@ examples exist.
 
 ## Build log
 
+### 2026-08-26 — The land page was down, and it was a function prop (`claude/a-function-cannot-cross-the-boundary`)
+
+**`/dashboard/m/land` WAS 500ING ON PRODUCTION**, reported by the founder with
+the error page's reference on it. Not the UI sweep that landed hours earlier —
+that PR's diff on this file is an icon, an import and a `DataTable` wrapper,
+and none of it touches the failing line.
+
+**`LandModule` IS A SERVER COMPONENT AND WAS PASSING A CLIENT ONE A FUNCTION.**
+
+```tsx
+<WhereAmIShortcut zoneHref={(zoneId) => `${BASE}/zones/${zoneId}`} />
+```
+
+React cannot serialise a function across that boundary, so the render threw
+*"Functions cannot be passed directly to Client Components"* and took the route
+with it. `WhereAmIShortcut` now takes `basePath: string` and builds the URL
+itself — the caller still owns the URL, it just hands over the prefix rather
+than the builder.
+
+**IT WAS INVISIBLE BECAUSE IT IS GATED ON `mapped > 0`.** The button only
+renders once some zone has a boundary, so every farm without one — including
+the local dev tenant, which is why the whole four-PR sweep drove this page
+clean — rendered it perfectly. It broke the moment the first boundary was
+traced and stayed broken.
+
+**Reproduced before fixing and re-broken after**, by forcing `hasGeometry` true
+locally: same error, same shape, `digest 3142074346`. The production data was
+ruled out first — a read-only probe ran all three of this page's queries against
+every production tenant and every one succeeded, including the farm with six
+parcels and a mapped zone. The failure was never in the data.
+
+`tests/server-client-boundary.test.ts` now fails on this class. See
+[conventions.md §9](../conventions.md).
+
 ### 2026-08-26 — The pack puts on the design system (`claude/the-last-three-packs`)
 
 No behaviour changed. PR 4 of the five that bring the packs onto the primitive

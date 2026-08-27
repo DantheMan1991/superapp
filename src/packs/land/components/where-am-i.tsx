@@ -105,12 +105,28 @@ export function WhereAmIButton({
  * Standing on the ground and having the app open the right page is the whole
  * of what geometry buys somebody who is not at a desk.
  */
-export function WhereAmIShortcut({ zoneHref }: { zoneHref: (zoneId: string) => string }) {
+export function WhereAmIShortcut({ basePath }: { basePath: string }) {
   const router = useRouter();
   return (
     <WhereAmIButton
       label="Which paddock am I in?"
-      onFound={(zone) => router.push(zoneHref(zone.zoneId))}
+      /**
+       * **`basePath` IS A STRING BECAUSE THIS PROP CROSSES A SERVER/CLIENT
+       * BOUNDARY, AND THE FUNCTION IT REPLACES TOOK THE LAND PAGE DOWN.**
+       * `LandModule` is a Server Component and passed
+       * `zoneHref={(zoneId) => …}`; React cannot serialise a function, so
+       * rendering this threw *"Functions cannot be passed directly to Client
+       * Components"* and the whole route 500'd.
+       *
+       * **It was invisible for a week because it is gated on `mapped > 0`** —
+       * the button only renders once some zone has a boundary, so every farm
+       * without one, including the local dev tenant, rendered the page
+       * perfectly. It broke the moment the first boundary was traced.
+       *
+       * The caller still owns the URL, which was the point of the original
+       * prop; it just hands over the prefix rather than the builder.
+       */
+      onFound={(zone) => router.push(`${basePath}/zones/${zone.zoneId}`)}
     />
   );
 }

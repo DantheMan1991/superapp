@@ -36,6 +36,15 @@ export interface SavedViewItem {
   scope: string;
   href: string;
   createdByClerkUserId: string;
+  /**
+   * **A BOOLEAN PER ROW, BECAUSE THIS TYPE CROSSES A SERVER/CLIENT BOUNDARY.**
+   * The strip took a `canDelete: (view) => boolean` predicate and its only
+   * caller is a Server Component, so React could not serialise it and the page
+   * threw *"Functions cannot be passed directly to Client Components"* on every
+   * render. The caller still decides the rule — owner, or the person who saved
+   * it — and now sends the answer rather than the question.
+   */
+  canDelete: boolean;
 }
 
 /** Name the filter you just built. */
@@ -136,12 +145,9 @@ export function SaveViewButton({
 export function SavedViewsStrip({
   views,
   activeHref,
-  canDelete,
 }: {
   views: SavedViewItem[];
   activeHref: string;
-  /** Ids this caller may delete — their own, or anything if they're an owner. */
-  canDelete: (view: SavedViewItem) => boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -183,7 +189,7 @@ export function SavedViewsStrip({
                 <span className="ml-1 text-muted-foreground">(private)</span>
               )}
             </Link>
-            {canDelete(view) && (
+            {view.canDelete && (
               <button
                 type="button"
                 aria-label={`Delete view ${view.name}`}

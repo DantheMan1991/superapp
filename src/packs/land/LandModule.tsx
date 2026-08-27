@@ -112,11 +112,11 @@ export async function LandModule({
               {/* Only useful once something is mapped, and honest about it:
                   offering it against a farm with no boundaries would answer
                   "not inside any paddock" every time. */}
-              {hasGeometry && (
-                <WhereAmIShortcut
-                  zoneHref={(zoneId) => `${BASE}/zones/${zoneId}`}
-                />
-              )}
+              {/* A STRING, NEVER A FUNCTION. This is a Server Component and
+                  `WhereAmIShortcut` is a client one, so a `zoneHref` builder
+                  could not be serialised and threw on render — taking the
+                  whole page down for any farm that had traced a boundary. */}
+              {hasGeometry && <WhereAmIShortcut basePath={BASE} />}
               {/* Only when a source covers this tenant. A button that leads to
                   a 404 is worse than no button. */}
               {hasParcelSource && (

@@ -304,6 +304,29 @@ relevant guide in `node_modules/next/dist/docs/` before writing framework-level
 code**, and heed deprecation notices. Do not pattern-match from memory of an
 older App Router.
 
+### A function may never cross the server/client boundary
+
+**A prop passed from a Server Component to a `"use client"` component must be
+serialisable, and a function is not.** Passing one throws *"Functions cannot be
+passed directly to Client Components"* at render, which 500s the whole route.
+Pass data — a string, a boolean, a pre-computed answer — or a server action.
+
+**THIS IS NOT SOMETHING THE TOOLCHAIN TELLS YOU.** On 2026-08-26 two instances
+were live in production at once (`/dashboard/m/land` and
+`/dashboard/m/documents/search`), and `tsc`, `eslint` and `npm run build` were
+all green with both. The types match — a function IS a valid
+`(x) => boolean` — and the error exists only at render, on dynamic routes
+nothing prerenders. The land one was gated on `mapped > 0`, so it was invisible
+until somebody traced the first paddock boundary and then broke the page for
+good.
+
+`tests/server-client-boundary.test.ts` is the backstop: it resolves each JSX
+element in a non-client file back to the module it came from and fails if an
+inline function is being handed to a client component. **A prop that "obviously
+needs" a callback usually wants the answer instead of the question** — the
+land fix passes `basePath` and builds the URL client-side; the documents fix
+computes `canDelete` per row and sends a boolean.
+
 ---
 
 ## 10. Definition of done

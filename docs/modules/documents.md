@@ -19,6 +19,27 @@ that changes this module MUST add an entry here (rule in AGENTS.md).
 > dossier is read at the start of every session that touches this module, so
 > its length is a real cost.
 
+### 2026-08-26 — A second function across the boundary (`claude/a-function-cannot-cross-the-boundary`)
+
+Found while fixing the same bug in `land`, by sweeping every non-client `.tsx`
+for inline function props. **`/dashboard/m/documents/search` was 500ing too**,
+and unlike the land one it was not conditional — `SavedViewsStrip` renders
+unconditionally, so the page was down for anyone who opened it.
+
+```tsx
+<SavedViewsStrip canDelete={(view) => ctx.role === "owner" || …} />
+```
+
+`SavedViewsStrip` is `"use client"`. The predicate is now evaluated on the
+server and sent as a `canDelete: boolean` on each `SavedViewItem` — the rule is
+still the page's (owner, or the person who saved it), it just sends the answer
+rather than the question.
+
+Driven: the page was reproduced red with the fix stashed (`digest 1943308174`),
+then green with it applied, on a dev tenant with `documents` switched on for the
+purpose and switched off again after. `tests/server-client-boundary.test.ts` now
+fails on this class; see [conventions.md §9](../conventions.md).
+
 ### 2026-08-12 — The extraction deadline is inclusive, and a flaky test is gone (branch `claude/fix-flaky-extraction-deadline`)
 
 `tests/documents-text.test.ts > "gives up rather than hanging when the deadline

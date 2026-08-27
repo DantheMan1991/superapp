@@ -203,17 +203,19 @@ export default async function DocumentsSearchPage({
       <DocumentsNav />
 
       <SavedViewsStrip
+        /* The rule is still this page's — owner, or the person who saved it —
+           but it is evaluated HERE and sent as a boolean. A predicate could not
+           cross into the client component and threw on every render. */
         views={data.views.map((v) => ({
           id: v.id,
           name: v.name,
           scope: v.scope,
           href: v.href,
           createdByClerkUserId: v.createdByClerkUserId,
+          canDelete:
+            ctx.role === "owner" || v.createdByClerkUserId === ctx.userId,
         }))}
         activeHref={activeHref}
-        canDelete={(view) =>
-          ctx.role === "owner" || view.createdByClerkUserId === ctx.userId
-        }
       />
 
       {hasFilters && (

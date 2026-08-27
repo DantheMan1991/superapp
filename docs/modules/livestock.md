@@ -30,6 +30,74 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-27 — An individual is a lot of one, and now the app says so (`claude/an-individual-is-a-lot-of-one`)
+
+The founder, after 4a and 4b shipped: *"So you create a lot and then you add head
+in the lot, but I don't see how you track each individual animals in the lot."*
+
+**He was right, and the answer was not a missing feature but a missing
+affordance.** An individual has been a lot of one since slice 0 — identifiers,
+weights, treatments, photos and pedigree parents all hang off the LOT, so a lot
+holding one head IS an animal and every one of those tables already means what
+you would expect. What the app offered was the GROUP shape and a sentence in a
+dialog description saying the other was possible, which nobody reads. Ten named
+cows meant ten trips through Split, inventing a code each time.
+
+**Two ways in, and neither is a new mechanism.**
+
+- **"One animal" on the create form**, beside "A group", chosen FIRST because it
+  changes what the rest of the form is asking for. Name instead of lot code, and
+  **the single head is placed here** — a lot of one containing no animal is a
+  record of nothing, and "create it, then go and add a head" was the two-step
+  that made the whole shape feel unsupported. A GROUP still does not place head,
+  deliberately: how many chicks actually arrived in a box of a hundred is a fact
+  somebody checks, and assuming it would be inventing the mortality denominator.
+- **"Record as individuals" on a lot**, which is N splits in one transaction.
+  Names go in as a block of text because that is how somebody has them — off a
+  clipboard, out of a notebook, read off ten ear tags in a row. Each name becomes
+  the lot code AND an identifier, because that is what a person means when they
+  type "Bluebell".
+
+**TWO DATES FOR AN INDIVIDUAL, ON PURPOSE.** "Born or hatched" and "On the farm
+from" are different facts — a cow bought in was born long before she arrived —
+and one field for both would put her age out by however long that was.
+
+## And it found a live safety bug
+
+**HOGS-1 had nineteen days left on its meat withdrawal. Three pigs were split
+out of it. All three read CLEAR.**
+
+`splitLivestockLot` has never carried treatments across — it copies species, sex,
+birth date, breeding and parents — and nothing had ever hit it because splitting
+a TREATED pen was rare. Giving it a button made it a one-click way to empty a
+pen's withdrawal, on the one number in this pack where being quietly wrong ends
+with uninspectable meat in somebody's freezer.
+
+**Fixed by inheriting at READ time, not by copying at split time.** Copies would
+make `updateTreatment` and `deleteTreatment` — which exist because a clock can be
+wrong and has to be correctable — reach the pen and miss every animal that left
+it. One row stays the truth; every animal descended from the lot it was given to
+reads it, through `treatmentsByLot`, which is the single funnel the hub, the
+daily round and `run-handler.ts` all already went through.
+
+**Bounded by when each branch separated.** A dose given to the pen after three
+pigs left was not given to those three, so the bound climbing the chain is the
+`opened_on` of the lot one level below — the day that branch became its own.
+Splits move forward in time, so the bound tightens as the walk climbs. A lot with
+no `opened_on` inherits everything, which is the conservative reading rather than
+the tidy one.
+
+**An inherited row keeps its own `livestock_lot_id`**, which is what lets the
+detail page show it, say *"Given to HOGS-1, before this one was split out"*, and
+offer *"Correct it on HOGS-1"* instead of Correct and Remove. Editing the pen's
+history from an animal's page would silently move the clock for every other
+animal that came out of it.
+
+Driven on Hilltop Farm: Bluebell added as one Angus cow (2 years old, 1 head,
+arriving today, born 2024) in a single dialog; Rosie, Hazel and Mabel split out
+of HOGS-1 in one; all three read **19 days left** afterwards where they had read
+"—" before the fix. 10 new ops tests, no migration.
+
 ### 2026-08-27 — The column that lost the cross (`claude/the-column-that-lost-the-cross`)
 
 **The contract half of slice 4a**, going out as its own change after 4a's deploy
@@ -1018,6 +1086,14 @@ This pack is the one that forced the change; the full reasoning is in
 - `src/packs/livestock/ops.ts` → `recordBirth` — the lot, both parents and the
   head in one transaction. **Read its comment before touching lineage**: it does
   not set `inventory_lots.parent_lot_id`, and that is the point
+- `src/packs/livestock/components/individual-controls.tsx` — "record as
+  individuals": a block of names in, N lots of one out, with the balance and
+  duplicate checks shown before the button rather than as refusals after it
+- `src/packs/livestock/ops.ts` → `splitIntoIndividuals`, `startIndividual` — the
+  two ways an animal becomes its own record. **Read `inheritedTreatmentSources`
+  before touching either**: a split carries the withdrawal clock, and it is the
+  one thing in this pack whose failure is a legal problem rather than a wrong
+  number
 - `src/packs/livestock/components/pedigree-controls.tsx` — the composition
   editor (parts in, share shown as you type), the parent pickers and the birth
   form
@@ -1060,6 +1136,13 @@ This pack is the one that forced the change; the full reasoning is in
   landing in the cost per head and the FCR. It is an EXCLUSION rather than a
   whitelist of `feed`, because waste streams are recorded under whatever kind
   they were bought as.
+- **A WITHDRAWAL IS INHERITED DOWN THE SPLIT CHAIN, at read time.** An animal
+  split out of a treated pen was in that pen when the dose was given, so the
+  clock follows it — bounded by the day its branch separated, because a dose
+  given after it left was not given to it. Never copy the rows instead: a copy
+  makes a correction reach the pen and miss the animals, which is the quiet
+  wrongness the correction paths exist to remove. `treatmentsByLot` is the only
+  place this happens, because it is the funnel every clock reader already used.
 - **The withdrawal applies to the whole lot however many head were treated.**
   `head_treated` is recorded, but nothing here can tell the three that were
   injected from the thirty-seven that were not, and the form says so.
@@ -1281,6 +1364,13 @@ This pack is the one that forced the change; the full reasoning is in
 - **No breeding-group or exposure record**, so "when is she due" is unanswerable
   and `born_on` is the only date this pack knows. That is slice 4c and it is the
   half of the founder's ask this slice did not reach.
+- **A GROUP'S HEAD IS STILL A SECOND STEP.** "One animal" places its single head
+  on creation; a group does not, because how many chicks were in the box is a
+  fact somebody checks. That asymmetry is deliberate and it is still a thing to
+  explain to somebody who has just used the other mode.
+- **Fifty individuals at a time.** Past that the answer is that a pen is the
+  right record, and the cap says so — but a farm splitting sixty gets two trips
+  and no explanation of why.
 - **`head_treated` is recorded and nothing reads it.** Written because the design
   asks for it and because a partial treatment is a real thing; no screen or fold
   uses it yet.

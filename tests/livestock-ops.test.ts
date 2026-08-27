@@ -25,6 +25,8 @@ import {
   offspringOf,
   recordBirth,
   setBreedParts,
+  splitIntoIndividuals,
+  startIndividual,
   setParents,
   getLivestockLot,
   lastCheckedByLot,
@@ -69,6 +71,7 @@ import { summariseHead, mortalityRate } from "../src/packs/livestock/core/herd";
 import { formatComposition } from "../src/packs/livestock/core/pedigree";
 import { slugLabel } from "../src/packs/inventory/vocabulary";
 import { gainBetween } from "../src/packs/livestock/core/weights";
+import { blocksProcessing } from "../src/packs/livestock/core/withdrawal";
 import { formatSnapshot } from "../src/packs/livestock/core/digest";
 
 const RUN = !!process.env.DATABASE_URL;
@@ -2774,5 +2777,389 @@ d("livestock ops", () => {
     await expect(
       asOwner((tx) => setParents(tx, staffCtx(), lot.id, { damLotId: null })),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  // ---- individuals: an animal is a lot of one, and now the app says so ----
+
+  it("splits a pen into named animals, each carrying the biology across", async () => {
+    const { lot } = await newLot("HERD-1", "cattle");
+    await asOwner((tx) =>
+      setBreedParts(tx, ctx(), lot.id, [
+        { breed: "angus", parts: 1 },
+        { breed: "hereford", parts: 1 },
+      ]),
+    );
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 10,
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    const made = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Bluebell", "Daisy", "Rosie"],
+        identifierKind: "name",
+        occurredOn: "2026-08-02",
+      }),
+    );
+    expect(made).toHaveLength(3);
+
+    // Each is a lot of ONE...
+    for (const child of made) {
+      const movements = await asOwner((tx) =>
+        movementKindsForLots(tx, tenantId, [child.inventoryLotId]),
+      );
+      expect(
+        summariseHead(movements.get(child.inventoryLotId) ?? []).balance,
+      ).toBe(1);
+    }
+
+    // ...wearing its name, so it is findable by it in a chute...
+    const tags = await asOwner((tx) =>
+      listIdentifiers(tx, tenantId, made[0].lot.id),
+    );
+    expect(tags.map((t) => t.value)).toEqual(["Bluebell"]);
+    expect(tags[0].identifierKind).toBe("name");
+
+    // ...and carrying the breeding, which is what makes it an ANIMAL rather
+    // than a head of stock that happens to be on its own.
+    const composition = await asOwner((tx) =>
+      compositionFor(tx, tenantId, made[0].lot.id),
+    );
+    expect(formatComposition(composition, slugLabel)).toBe(
+      "\u00bd Angus \u00b7 \u00bd Hereford",
+    );
+
+    // THE LEDGER STILL BALANCES: three head left the pen, seven remain.
+    const parent = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [lot.inventoryLotId]),
+    );
+    expect(summariseHead(parent.get(lot.inventoryLotId) ?? []).balance).toBe(7);
+  });
+
+  it("REFUSES TO NAME MORE ANIMALS THAN ARE THERE", async () => {
+    const { lot } = await newLot("HERD-2", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 2,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        splitIntoIndividuals(tx, ctx(), {
+          livestockLotId: lot.id,
+          names: ["A", "B", "C"],
+          identifierKind: "name",
+          occurredOn: "2026-08-02",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "LOT_INVALID" });
+
+    // And it refused BEFORE splitting any of them, rather than halfway down.
+    const after = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [lot.inventoryLotId]),
+    );
+    expect(summariseHead(after.get(lot.inventoryLotId) ?? []).balance).toBe(2);
+  });
+
+  it("refuses the same name twice, which is a paste that went wrong", async () => {
+    const { lot } = await newLot("HERD-3", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 5,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        splitIntoIndividuals(tx, ctx(), {
+          livestockLotId: lot.id,
+          names: ["Bluebell", "bluebell"],
+          identifierKind: "name",
+          occurredOn: "2026-08-02",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "LOT_INVALID" });
+  });
+
+  it("starts ONE animal with its head already placed", async () => {
+    // The two-step that made the individual case feel unsupported: a lot of
+    // one containing no animal is a record of nothing.
+    const made = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Clover",
+        species: "cattle",
+        sex: "female",
+        breed: "Angus",
+        bornOn: "2024-03-01",
+        occurredOn: "2026-08-02",
+      }),
+    );
+
+    const movements = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [made.inventoryLotId]),
+    );
+    const rows = movements.get(made.inventoryLotId) ?? [];
+    expect(summariseHead(rows).balance).toBe(1);
+    expect(rows[0].movementKind).toBe("placement");
+
+    // Her name is the lot's code AND an identifier.
+    const invLot = await asOwner((tx) =>
+      tx.query.inventoryLots.findFirst({
+        where: eq(schema.inventoryLots.id, made.inventoryLotId),
+      }),
+    );
+    expect(invLot?.code).toBe("Clover");
+    const tags = await asOwner((tx) =>
+      listIdentifiers(tx, tenantId, made.lot.id),
+    );
+    expect(tags[0].value).toBe("Clover");
+
+    // Born long before she arrived, and the two dates stay apart.
+    expect(made.lot.bornOn).toBe("2024-03-01");
+  });
+
+  it("a named animal can be a dam straight away", async () => {
+    // The point of all of it: an individual is a lot of one, so she is a
+    // parent in the pedigree with nothing else needed.
+    const dam = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Buttercup",
+        species: "cattle",
+        sex: "female",
+        breed: "Hereford",
+        occurredOn: "2026-08-02",
+      }),
+    );
+    const calf = await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        damLotId: dam.lot.id,
+        itemId,
+        code: "CALF-IND",
+        head: 1,
+        bornOn: "2026-08-03",
+      }),
+    );
+    const composition = await asOwner((tx) =>
+      compositionFor(tx, tenantId, calf.lot.id),
+    );
+    expect(formatComposition(composition, slugLabel)).toBe(
+      "\u00bd Hereford \u00b7 \u00bd unknown",
+    );
+  });
+
+  it("staff cannot record individuals — it creates lots", async () => {
+    const { lot } = await newLot("HERD-4", "cattle");
+    await expect(
+      asOwner((tx) =>
+        splitIntoIndividuals(tx, staffCtx(), {
+          livestockLotId: lot.id,
+          names: ["Nope"],
+          identifierKind: "name",
+          occurredOn: "2026-08-02",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      asOwner((tx) =>
+        startIndividual(tx, staffCtx(), {
+          itemId,
+          name: "Nope",
+          species: "cattle",
+          occurredOn: "2026-08-02",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  // ---- the withdrawal clock survives a split -----------------------------
+
+  /**
+   * **FOUND BY DRIVING "record as individuals" ON 2026-08-27.** HOGS-1 had
+   * nineteen days left on its meat clock, three pigs were split out of it, and
+   * all three read CLEAR — a one-click way to empty a pen's withdrawal, on the
+   * one number in this pack where being quietly wrong puts uninspectable meat
+   * in somebody's freezer.
+   *
+   * The bug predates the feature (`splitLivestockLot` never carried treatments)
+   * and nothing had ever hit it, because splitting a TREATED pen was rare until
+   * there was a button for it.
+   */
+  it("A SPLIT CARRIES THE WITHDRAWAL CLOCK WITH THE ANIMALS", async () => {
+    const { lot, inventoryLotId } = await newLot("TREATED-PEN", "swine");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 6,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-10",
+        product: "Penicillin G",
+        route: "injection",
+        meatWithdrawalDays: 30,
+        withdrawalSource: "label",
+      }),
+    );
+
+    const made = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Rosie", "Hazel"],
+        identifierKind: "name",
+        occurredOn: "2026-08-20",
+      }),
+    );
+
+    // The clock reads the same on the animals as on the pen they left.
+    const clocks = await asOwner((tx) =>
+      withdrawalByLot(
+        tx,
+        tenantId,
+        [lot.id, ...made.map((m) => m.lot.id)],
+        "2026-08-27",
+      ),
+    );
+    for (const id of [lot.id, ...made.map((m) => m.lot.id)]) {
+      expect(clocks.get(id)?.meat.clearsOn).toBe("2026-09-09");
+      expect(blocksProcessing(clocks.get(id)!.meat)).toBe(true);
+    }
+  });
+
+  it("does NOT inherit a treatment given after the animal left the pen", async () => {
+    // A dose given to the pen on the 25th was not given to the pig that left
+    // on the 20th, and reading it as though it were would hold a clear animal
+    // back — the opposite error, and still an error.
+    const { lot, inventoryLotId } = await newLot("LATER-DOSE", "swine");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 4,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const made = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Gone"],
+        identifierKind: "name",
+        occurredOn: "2026-08-20",
+      }),
+    );
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-25",
+        product: "Penicillin G",
+        route: "injection",
+        meatWithdrawalDays: 30,
+        withdrawalSource: "label",
+      }),
+    );
+
+    const clocks = await asOwner((tx) =>
+      withdrawalByLot(tx, tenantId, [lot.id, made[0].lot.id], "2026-08-27"),
+    );
+    expect(blocksProcessing(clocks.get(lot.id)!.meat)).toBe(true);
+    expect(clocks.get(made[0].lot.id)).toBeUndefined();
+  });
+
+  it("inherits through TWO splits, and the bound tightens as it climbs", async () => {
+    const { lot, inventoryLotId } = await newLot("GRANDPARENT", "swine");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 8,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-05",
+        product: "Penicillin G",
+        route: "injection",
+        meatWithdrawalDays: 30,
+        withdrawalSource: "label",
+      }),
+    );
+    const pen = await asOwner((tx) =>
+      splitLivestockLot(tx, ctx(), {
+        livestockLotId: lot.id,
+        head: 4,
+        newCode: "MIDDLE-PEN",
+        occurredOn: "2026-08-10",
+      }),
+    );
+    const animal = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: pen.lot.id,
+        names: ["Grandchild"],
+        identifierKind: "name",
+        occurredOn: "2026-08-15",
+      }),
+    );
+
+    const clocks = await asOwner((tx) =>
+      withdrawalByLot(tx, tenantId, [animal[0].lot.id], "2026-08-20"),
+    );
+    expect(clocks.get(animal[0].lot.id)?.meat.clearsOn).toBe("2026-09-04");
+  });
+
+  it("shows an inherited treatment WITHOUT claiming it as this lot's row", async () => {
+    // The page uses this to decide whether to offer Correct and Remove: editing
+    // the pen's history from an animal's page would silently move the clock for
+    // every other animal that came out of it.
+    const { lot, inventoryLotId } = await newLot("WHOSE-ROW", "swine");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 3,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      recordTreatment(tx, ctx(), {
+        livestockLotId: lot.id,
+        treatedOn: "2026-08-05",
+        product: "Penicillin G",
+        route: "injection",
+        meatWithdrawalDays: 10,
+        withdrawalSource: "label",
+      }),
+    );
+    const made = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Whose"],
+        identifierKind: "name",
+        occurredOn: "2026-08-10",
+      }),
+    );
+
+    const rows = await asOwner((tx) =>
+      listTreatmentsForLot(tx, tenantId, made[0].lot.id),
+    );
+    expect(rows).toHaveLength(1);
+    // It belongs to the PEN, and says so by carrying the pen's id.
+    expect(rows[0].livestockLotId).toBe(lot.id);
   });
 });

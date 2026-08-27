@@ -25,6 +25,7 @@ import { speciesFrom } from "./vocabulary";
 import {
   LivestockError,
   MAX_BREED_PARTS,
+  MAX_INDIVIDUALS,
   addIdentifier,
   addLotToFeedGroup,
   closeFeedGroup,
@@ -48,7 +49,9 @@ import {
   retireIdentifier,
   setBreedParts,
   setParents,
+  splitIntoIndividuals,
   splitLivestockLot,
+  startIndividual,
   updateTreatment,
   updateWeight,
   type LivestockCtx,
@@ -449,6 +452,95 @@ export async function recordBirthAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true, id: result.lot.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * **RECORD SOME OF A LOT AS INDIVIDUALS.** One name per animal; each becomes a
+ * lot of one, carrying the biology across and wearing its name as an identifier.
+ *
+ * The names arrive as a single block of text because that is how somebody has
+ * them — off a clipboard, out of a notebook, read off ten ear tags in a row —
+ * and asking for ten separate fields would be the friction this action exists
+ * to remove.
+ */
+export async function splitIntoIndividualsAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      names: z.array(z.string().min(1).max(120)).min(1).max(MAX_INDIVIDUALS),
+      identifierKind: z.string().min(1).max(63),
+      occurredOn: requiredDate,
+      locationAssetId: z.string().uuid().nullable().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const created = await withTenant(
+      ctx.tenant.id,
+      (tx) => splitIntoIndividuals(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.individuals.split",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      meta: { count: String(created.length), kind: parsed.data.identifierKind },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true as const, count: created.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Start ONE animal: the lot, its name and the single head, in one act. */
+export async function startIndividualAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      itemId: z.string().uuid().optional(),
+      newItemName: z.string().min(1).max(200).optional(),
+      name: z.string().min(1).max(120),
+      identifierKind: z.string().min(1).max(63).optional(),
+      species: z.string().min(1).max(63),
+      sex: z.enum(["male", "female", "mixed"]).nullable().optional(),
+      breed: z.string().max(63).optional(),
+      bornOn: optionalDate.nullable(),
+      occurredOn: requiredDate,
+      source: z.enum(["purchased", "raised", "produced"]).optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => startIndividual(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.individual.started",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: result.lot.id,
+      meta: {
+        species: result.lot.species,
+        inventoryLotId: result.inventoryLotId,
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true as const, id: result.lot.id };
   } catch (err) {
     return toResult(err);
   }

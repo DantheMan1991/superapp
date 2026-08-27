@@ -530,6 +530,184 @@ export async function splitLivestockLot(
   return { lot: rows[0], inventoryLotId: child.id };
 }
 
+// ------------------------------------------------------------ individuals ---
+
+/**
+ * **AN INDIVIDUAL IS A LOT OF ONE, and until now nothing said so on screen.**
+ *
+ * The model has always supported it — identifiers, weights, treatments, photos
+ * and pedigree parents all hang off the LOT, so a lot holding one head IS an
+ * animal and every one of those tables means what you would expect. What was
+ * missing was any way to ASK for that: the founder's question on 2026-08-27 was
+ * *"you create a lot and then you add head to the lot, but I don't see how you
+ * track each individual animal in the lot"*, and the honest answer was that you
+ * split, ten times, inventing a code each time.
+ *
+ * **WITHIN a lot the app deliberately cannot tell one animal from another**, and
+ * that is not a gap to close. A pen of a thousand broilers must stay one row; a
+ * weight there is a sample average and a treatment holds the whole pen back,
+ * both correctly. These two functions are about making the OTHER shape — the
+ * named cow — as easy to reach as the pen already was.
+ */
+
+/**
+ * How many animals one "record as individuals" may produce at a time.
+ *
+ * Fifty is far past a homestead's cattle and far short of a broiler pen, which
+ * is the point: this is the wrong tool for a flock, and a cap that bites tells
+ * somebody that before it makes five hundred rows they did not want.
+ */
+export const MAX_INDIVIDUALS = 50;
+
+/**
+ * Split head out of a lot into one lot per animal, each named.
+ *
+ * **N SPLITS IN ONE TRANSACTION, not a new mechanism.** Each animal goes through
+ * `splitLivestockLot`, which already carries the species, the sex, the birth
+ * date, the breeding and both parents across — so ten cows out of a pen are ten
+ * animals that know what they are, and the ledger still balances because every
+ * one of them is an ordinary transfer.
+ *
+ * The name is used as BOTH the lot code and an identifier, because that is what
+ * a person means when they type "Bluebell": the app's handle for her and what
+ * she is called are the same word, and making somebody enter it twice would be
+ * this function asking a question it already has the answer to.
+ */
+export async function splitIntoIndividuals(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    livestockLotId: string;
+    /** One per animal: a name, a tag number, whatever they are called. */
+    names: string[];
+    /** `name`, `visual`, `official`, `eid`, `tattoo` — an open taxonomy. */
+    identifierKind: string;
+    occurredOn: string;
+    locationAssetId?: string | null;
+  },
+): Promise<{ lot: LivestockLot; inventoryLotId: string }[]> {
+  requireWrite(ctx, "owner");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId} not found`);
+  }
+
+  const names = input.names.map((n) => n.trim()).filter(Boolean);
+  if (names.length === 0) {
+    throw new LivestockError("LOT_INVALID", "name at least one animal");
+  }
+  if (names.length > MAX_INDIVIDUALS) {
+    throw new LivestockError(
+      "LOT_INVALID",
+      `${MAX_INDIVIDUALS} at a time — a pen this size is better kept as one lot`,
+    );
+  }
+  // Two animals called the same thing is a paste that went wrong, and it would
+  // produce two records nobody could tell apart afterwards — which is the exact
+  // problem this whole function exists to solve.
+  const seen = new Set<string>();
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      throw new LivestockError("LOT_INVALID", `"${name}" is named twice`);
+    }
+    seen.add(key);
+  }
+
+  // Checked UP FRONT rather than discovered on the sixth split. The transaction
+  // would roll the lot back either way; the difference is whether the person is
+  // told how many they have or shown a failure halfway down their list.
+  const movements = await movementKindsForLots(tx, ctx.tenantId, [
+    lot.inventoryLotId,
+  ]);
+  const balance = summariseHead(movements.get(lot.inventoryLotId) ?? []).balance;
+  if (names.length > balance) {
+    throw new LivestockError(
+      "LOT_INVALID",
+      `only ${balance} head here — you named ${names.length}`,
+    );
+  }
+
+  const kind = input.identifierKind.trim().toLowerCase();
+  if (!isValidSlug(kind)) {
+    throw new LivestockError("INVALID_IDENTIFIER", `invalid kind: ${input.identifierKind}`);
+  }
+
+  const created: { lot: LivestockLot; inventoryLotId: string }[] = [];
+  for (const name of names) {
+    const child = await splitLivestockLot(tx, ctx, {
+      livestockLotId: input.livestockLotId,
+      head: 1,
+      newCode: name,
+      occurredOn: input.occurredOn,
+      locationAssetId: input.locationAssetId ?? null,
+    });
+    await addIdentifier(tx, ctx, {
+      livestockLotId: child.lot.id,
+      identifierKind: kind,
+      value: name,
+      appliedOn: input.occurredOn,
+    });
+    created.push(child);
+  }
+  return created;
+}
+
+/**
+ * Start ONE animal: the lot, its name, and the single head — in one act.
+ *
+ * **The head is placed here rather than left to a second step**, and that is the
+ * whole difference from `createLivestockLot`. A lot of one that contains no
+ * animal is a record of nothing, and "create it, then go and add a head to it"
+ * was the two-step that made the individual case feel like it was not really
+ * supported.
+ *
+ * A GROUP still does not place head automatically, deliberately: how many chicks
+ * actually arrived in a box of a hundred is a fact somebody checks, and a form
+ * that assumed it would be inventing the mortality denominator.
+ */
+export async function startIndividual(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: Omit<LivestockLotInput, "code"> & {
+    /** What she is called. Becomes the lot code AND an identifier. */
+    name: string;
+    identifierKind?: string;
+    /** When she arrived or was born. The head event's date. */
+    occurredOn: string;
+    locationAssetId?: string | null;
+  },
+): Promise<{ lot: LivestockLot; inventoryLotId: string }> {
+  requireWrite(ctx, "owner");
+  const name = input.name.trim();
+  if (!name) throw new LivestockError("LOT_INVALID", "give the animal a name");
+
+  const created = await createLivestockLot(tx, ctx, { ...input, code: name });
+  await addIdentifier(tx, ctx, {
+    livestockLotId: created.lot.id,
+    identifierKind: input.identifierKind?.trim().toLowerCase() || "name",
+    value: name,
+    appliedOn: input.occurredOn,
+  });
+
+  const inventoryLot = await getInventoryLot(
+    tx,
+    ctx.tenantId,
+    created.inventoryLotId,
+  );
+  if (!inventoryLot) {
+    throw new LivestockError("NOT_FOUND", "the lot went missing mid-write");
+  }
+  await placeHead(tx, ctx, {
+    itemId: inventoryLot.itemId,
+    inventoryLotId: created.inventoryLotId,
+    head: 1,
+    occurredOn: input.occurredOn,
+    locationAssetId: input.locationAssetId ?? null,
+  });
+  return created;
+}
+
 // -------------------------------------------------------------- occupancy ---
 
 /**
@@ -1662,21 +1840,157 @@ export async function deleteTreatment(
 }
 
 /** One lot's treatments, newest first — the history on its detail page. */
+/**
+ * One lot's treatments, **inherited ones included** — the same list the clock is
+ * folded from, so the screen and the refusal can never disagree.
+ *
+ * A row whose `livestockLotId` is not this lot came from the pen it was split
+ * out of. The page shows it and does not offer to correct it, because it is
+ * another record's row.
+ */
 export async function listTreatmentsForLot(
   tx: Tx,
   tenantId: string,
   livestockLotId: string,
 ): Promise<LivestockTreatment[]> {
-  return tx.query.livestockTreatments.findMany({
-    where: and(
-      eq(schema.livestockTreatments.tenantId, tenantId),
-      eq(schema.livestockTreatments.livestockLotId, livestockLotId),
-    ),
-    orderBy: (t, { desc: byDesc }) => [byDesc(t.treatedOn), byDesc(t.createdAt)],
-  });
+  const byLot = await treatmentsByLot(tx, tenantId, [livestockLotId]);
+  return byLot.get(livestockLotId) ?? [];
 }
 
-/** Every treatment across a set of lots, keyed by lot. One query for a list. */
+/**
+ * How far up the SPLIT chain a withdrawal is inherited before the walk stops.
+ *
+ * Twenty is far past any real chain — a batch of chicks splits across pens once
+ * — and it is here so a chain somebody has managed to loop terminates rather
+ * than hangs. `inventory_lots` has a CHECK against the one-step case.
+ */
+const SPLIT_CHAIN_DEPTH = 20;
+
+/**
+ * **A TREATMENT FOLLOWS THE ANIMALS WHEN A LOT IS SPLIT.**
+ *
+ * Found by driving "record as individuals" on 2026-08-27: HOGS-1 had nineteen
+ * days left on its meat clock, three pigs were split out of it, and all three
+ * read CLEAR. A one-click way to empty a pen's withdrawal — and the dossier
+ * already says this is the one number in the pack where being quietly wrong is
+ * a legal problem, because the end of it is uninspectable meat in a freezer.
+ *
+ * **Inherited at READ time rather than copied at split time**, and the
+ * difference matters: `updateTreatment` and `deleteTreatment` exist because a
+ * clock can be wrong and has to be correctable. Copies would make a correction
+ * reach the pen and miss the animals that left it — quiet wrongness of exactly
+ * the kind this replaces. One row stays the truth; every animal descended from
+ * the pen it was given to reads it.
+ *
+ * **BOUNDED BY WHEN EACH BRANCH SEPARATED.** A treatment given to a pen AFTER
+ * three pigs left it was not given to those three, so the bound at each step up
+ * is the `opened_on` of the lot one level below — the day that branch became its
+ * own. Splits move forward in time, so the bound tightens as the walk climbs.
+ *
+ * **A lot with no `opened_on` inherits everything**, which is the conservative
+ * reading rather than the tidy one: an unknown separation date cannot rule a
+ * treatment out, and this file errs toward saying an animal is still under a
+ * period.
+ */
+async function inheritedTreatmentSources(
+  tx: Tx,
+  tenantId: string,
+  livestockLotIds: string[],
+): Promise<Map<string, { livestockLotId: string; onOrBefore: string | null }[]>> {
+  const out = new Map<
+    string,
+    { livestockLotId: string; onOrBefore: string | null }[]
+  >();
+  if (livestockLotIds.length === 0) return out;
+
+  const lots = await tx.query.livestockLots.findMany({
+    where: and(
+      eq(schema.livestockLots.tenantId, tenantId),
+      inArray(schema.livestockLots.id, livestockLotIds),
+    ),
+    columns: { id: true, inventoryLotId: true },
+  });
+  if (lots.length === 0) return out;
+
+  // The inventory lots in play, loaded generation by generation: a chain of
+  // twenty is twenty round trips rather than twenty per animal.
+  const chain = new Map<
+    string,
+    { id: string; parentLotId: string | null; openedOn: string | null }
+  >();
+  let frontier = lots.map((l) => l.inventoryLotId);
+  for (let depth = 0; depth <= SPLIT_CHAIN_DEPTH && frontier.length > 0; depth++) {
+    const wanted = [...new Set(frontier)].filter((id) => !chain.has(id));
+    if (wanted.length === 0) break;
+    const rows = await tx.query.inventoryLots.findMany({
+      where: and(
+        eq(schema.inventoryLots.tenantId, tenantId),
+        inArray(schema.inventoryLots.id, wanted),
+      ),
+      columns: { id: true, parentLotId: true, openedOn: true },
+    });
+    for (const row of rows) chain.set(row.id, row);
+    frontier = rows
+      .map((row) => row.parentLotId)
+      .filter((id): id is string => Boolean(id));
+  }
+
+  // Every ancestor inventory lot, with the bound that applies to it.
+  const ancestors = new Map<string, { id: string; onOrBefore: string | null }[]>();
+  for (const lot of lots) {
+    const found: { id: string; onOrBefore: string | null }[] = [];
+    const walked = new Set<string>([lot.inventoryLotId]);
+    let current = chain.get(lot.inventoryLotId);
+    // The bound starts at the day THIS lot separated from its parent.
+    let bound = current?.openedOn ?? null;
+    for (let depth = 0; depth < SPLIT_CHAIN_DEPTH; depth++) {
+      const parentId = current?.parentLotId;
+      if (!parentId || walked.has(parentId)) break;
+      walked.add(parentId);
+      found.push({ id: parentId, onOrBefore: bound });
+      current = chain.get(parentId);
+      // One level further up, the branch separated when the lot below it did.
+      if (current?.openedOn && (!bound || current.openedOn < bound)) {
+        bound = current.openedOn;
+      }
+    }
+    if (found.length > 0) ancestors.set(lot.id, found);
+  }
+  if (ancestors.size === 0) return out;
+
+  const ancestorInventoryIds = [
+    ...new Set([...ancestors.values()].flatMap((rows) => rows.map((r) => r.id))),
+  ];
+  const biology = await livestockByInventoryLot(tx, tenantId, ancestorInventoryIds);
+  for (const [lotId, rows] of ancestors) {
+    const mapped = rows
+      .map((row) => {
+        const ancestor = biology.get(row.id);
+        return ancestor
+          ? { livestockLotId: ancestor.id, onOrBefore: row.onOrBefore }
+          : null;
+      })
+      .filter((row): row is { livestockLotId: string; onOrBefore: string | null } =>
+        row !== null,
+      );
+    if (mapped.length > 0) out.set(lotId, mapped);
+  }
+  return out;
+}
+
+/**
+ * Every treatment across a set of lots, keyed by lot — **including the ones
+ * inherited from the pen each animal was split out of.**
+ *
+ * The single funnel for the withdrawal clock, which is why the inheritance
+ * lives here rather than at each call site: `withdrawalByLot` feeds the hub, the
+ * daily round and `run-handler.ts`, and a clock that was right on one of those
+ * and wrong on another would be worse than one that was simply wrong.
+ *
+ * **An inherited row keeps its OWN `livestock_lot_id`**, so a caller can always
+ * tell whose treatment it is — that is what lets the detail page show it without
+ * offering to correct another lot's record.
+ */
 export async function treatmentsByLot(
   tx: Tx,
   tenantId: string,
@@ -1684,17 +1998,45 @@ export async function treatmentsByLot(
 ): Promise<Map<string, LivestockTreatment[]>> {
   const out = new Map<string, LivestockTreatment[]>();
   if (lotIds.length === 0) return out;
+
+  const inherited = await inheritedTreatmentSources(tx, tenantId, lotIds);
+  const wanted = [
+    ...new Set([
+      ...lotIds,
+      ...[...inherited.values()].flatMap((rows) =>
+        rows.map((r) => r.livestockLotId),
+      ),
+    ]),
+  ];
   const rows = await tx.query.livestockTreatments.findMany({
     where: and(
       eq(schema.livestockTreatments.tenantId, tenantId),
-      inArray(schema.livestockTreatments.livestockLotId, lotIds),
+      inArray(schema.livestockTreatments.livestockLotId, wanted),
     ),
     orderBy: (t, { desc: byDesc }) => [byDesc(t.treatedOn)],
   });
+
+  const byOwner = new Map<string, LivestockTreatment[]>();
   for (const row of rows) {
-    const list = out.get(row.livestockLotId);
+    const list = byOwner.get(row.livestockLotId);
     if (list) list.push(row);
-    else out.set(row.livestockLotId, [row]);
+    else byOwner.set(row.livestockLotId, [row]);
+  }
+
+  for (const lotId of lotIds) {
+    const own = byOwner.get(lotId) ?? [];
+    const fromAbove = (inherited.get(lotId) ?? []).flatMap((source) =>
+      (byOwner.get(source.livestockLotId) ?? []).filter(
+        // A null bound cannot rule anything out, and this file errs toward
+        // saying an animal is still under a period.
+        (t) => !source.onOrBefore || t.treatedOn <= source.onOrBefore,
+      ),
+    );
+    const all = [...own, ...fromAbove];
+    if (all.length > 0) {
+      all.sort((a, b) => (a.treatedOn < b.treatedOn ? 1 : -1));
+      out.set(lotId, all);
+    }
   }
   return out;
 }

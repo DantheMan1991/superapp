@@ -42,9 +42,9 @@ import {
   type LandCtx,
   type MoveResult,
 } from "@/packs/land/ops";
-import { isValidSlug, slugLabel } from "@/packs/inventory/vocabulary";
+import { isValidSlug } from "@/packs/inventory/vocabulary";
 import { convert, getUnit } from "@/packs/inventory/core/units";
-import { tapeDivisorFrom } from "./vocabulary";
+import { breedLabel, tapeDivisorFrom } from "./vocabulary";
 import { addDays } from "@/lib/timezone";
 import { ageInDays, headEffect, summariseHead } from "./core/herd";
 import { checkStreak } from "./core/daily";
@@ -2973,7 +2973,7 @@ export async function farmSnapshot(
       breed:
         composition.source === "unknown"
           ? lot.breed
-          : formatComposition(composition, slugLabel),
+          : formatComposition(composition, breedLabel),
       sex: lot.sex,
       ageDays: ageInDays(lot.bornOn, today),
       head: summary.balance,

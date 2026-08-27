@@ -93,6 +93,7 @@ import {
 } from "@/packs/livestock/core/herd";
 import {
   SEX_LABELS,
+  breedLabel,
   breedsFrom,
   identifierKindLabel,
   tapeDivisorFrom,
@@ -428,6 +429,36 @@ export default async function LivestockLotPage({
    */
   const composition = resolveComposition(lot.id, pedigree);
   const tree = ancestorTree(lot.id, pedigree, 3);
+  /**
+   * What goes in the header beside the species.
+   *
+   * The breed has been up there since slice 0 because it is half of how a
+   * person recognises an animal at a glance, and stating a composition CLEARS
+   * the superseded string — so without this, entering the better answer would
+   * have emptied the header. Driven on Hilltop Farm, which is how it was found.
+   */
+  /**
+   * **THE BIRTH FORM'S LIST INCLUDES THIS ANIMAL AND THE PARENTS FORM'S DOES
+   * NOT**, and the difference is not a subtlety: on a birth, this animal is the
+   * PARENT and the new lot is the child, so excluding it made the dam it
+   * pre-selects invisible in its own picker. Found by opening the dialog on
+   * Hilltop Farm, where it rendered "Not recorded" over a dam that was in fact
+   * set — a form that lies about what it is about to do.
+   */
+  const birthCandidates = [
+    ...candidates,
+    {
+      id: lot.id,
+      code: inventoryLot.code,
+      species: lot.species,
+      sex: lot.sex,
+      bornOn: lot.bornOn,
+    },
+  ].sort((a, b) => a.code.localeCompare(b.code));
+  const breedingLabel =
+    composition.source === "unknown"
+      ? lot.breed || null
+      : formatComposition(composition, breedLabel);
   const parcelNames = new Map(parcels.map((p) => [p.id, p.name]));
   const zoneOptions = allZones.map((z) => ({
     id: z.id,
@@ -443,7 +474,7 @@ export default async function LivestockLotPage({
         description={
           <span className="flex items-center gap-2">
             {slugLabel(lot.species)}
-            {lot.breed && ` · ${lot.breed}`}
+            {breedingLabel && ` · ${breedingLabel}`}
             {lot.sex && ` · ${SEX_LABELS[lot.sex] ?? lot.sex}`}
             {preferred && (
               <Badge variant="outline">
@@ -772,7 +803,7 @@ export default async function LivestockLotPage({
               <RecordBirthForm
                 damLotId={lot.sex === "male" ? null : lot.id}
                 sireLotId={lot.sex === "male" ? lot.id : null}
-                candidates={candidates}
+                candidates={birthCandidates}
                 items={headItems.map((i) => ({ id: i.id, name: i.name }))}
                 defaultItemId={inventoryLot.itemId}
                 today={today}
@@ -799,7 +830,7 @@ export default async function LivestockLotPage({
               <p className="text-2xl font-medium">
                 {composition.source === "unknown"
                   ? "—"
-                  : formatComposition(composition, slugLabel)}
+                  : formatComposition(composition, breedLabel)}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
                 {COMPOSITION_SOURCE_NOTES[composition.source]}

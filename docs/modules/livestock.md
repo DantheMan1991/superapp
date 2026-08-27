@@ -129,6 +129,29 @@ cheap answer is not a rougher figure but a narrower one. A hub showing a
 worked-out fraction and a detail page showing a differently-worked-out one would
 be two numbers for one fact, which this pack refuses everywhere else.
 
+**DRIVEN ON HILLTOP FARM, AND IT FOUND THREE THINGS NO TEST WAS GOING TO.**
+PEN-1 was given ½ Angus · ¼ Hereford · ¼ Simmental through the dialog, a hatch of
+twelve was recorded off it, and the chick read **¼ Angus · ⅛ Hereford · ⅛
+Simmental · ½ unknown** — the claim, on real data, in the real app. What clicking
+found:
+
+- **Stating a composition EMPTIED THE PAGE HEADER.** The breed has sat beside the
+  species since slice 0 because it is half of how a person recognises an animal,
+  and `setBreedParts` clears the superseded string — so entering the better
+  answer removed the worse one from the header and put nothing back. The header
+  reads the resolved composition now.
+- **THE BIRTH FORM LIED ABOUT ITS OWN DAM.** It pre-selects the animal whose page
+  you are on, and its picker was handed the parent-candidate list, which excludes
+  that animal — correctly, for the *parents* form, where an animal cannot be its
+  own parent. On a BIRTH the animal is the parent and the new lot is the child.
+  The Select had a value with no matching option and rendered "Not recorded" over
+  a dam that was in fact set. Two lists now, and the difference is commented
+  where it is made.
+- **`slugLabel` IS THE WRONG HUMANISER FOR A BREED.** It is sentence case, which
+  is right for a kind of thing and wrong for a name: `cornish_cross` came back
+  "Cornish cross", which reads as a typo to anybody who keeps cattle. `breedLabel`
+  title-cases, and every screen that renders a breed uses it.
+
 Breeds come from the profile, per species (`breedsFrom`), for the same reason
 species do — a pack that knew what a Hereford was would know what industry it
 was in. Migrations `0217` and `0218`; 24 new pure tests, 10 new ops tests, 6 new

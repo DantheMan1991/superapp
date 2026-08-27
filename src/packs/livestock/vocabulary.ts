@@ -134,6 +134,23 @@ export function breedHint(species: string): string | undefined {
 }
 
 /**
+ * A breed slug as a person writes it: `cornish_cross` becomes "Cornish Cross".
+ *
+ * **NOT `slugLabel`, and the difference is not cosmetic.** That one is sentence
+ * case, which is right for a kind of thing — "Raw materials", "Sold live" — and
+ * wrong for a NAME. A breed is a proper noun, and "Cornish cross" or "Red
+ * angus" reads as a typo to anybody who keeps cattle. Caught on Hilltop Farm
+ * the moment a two-word breed was entered.
+ */
+export function breedLabel(breed: string): string {
+  return breed
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/**
  * The breeds a profile suggests for one species, as slugs.
  *
  * **THE PACK NAMES NO BREEDS**, for the same reason it names no species: one

@@ -32,7 +32,6 @@ import {
   splitLivestockLotAction,
 } from "../actions";
 import { WhereAmIButton } from "@/packs/land/components/where-am-i";
-import { slugLabel } from "@/packs/inventory/vocabulary";
 import {
   IDENTIFIER_KINDS,
   HAND_REMOVAL_REASONS,
@@ -40,6 +39,7 @@ import {
   SEXES,
   SEX_LABELS,
   breedHint,
+  breedLabel,
   identifierKindLabel,
 } from "../vocabulary";
 
@@ -224,7 +224,7 @@ export function LivestockLotForm({
                   or not be there — reported by the founder, 2026-08-16. */}
               <datalist id="lot-breed-suggestions">
                 {(breedsBySpecies[chosen] ?? []).map((breed) => (
-                  <option key={breed} value={slugLabel(breed)} />
+                  <option key={breed} value={breedLabel(breed)} />
                 ))}
               </datalist>
               <Input

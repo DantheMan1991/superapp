@@ -29,8 +29,7 @@ import {
   setBreedPartsAction,
   setParentsAction,
 } from "../actions";
-import { SEXES, SEX_LABELS } from "../vocabulary";
-import { slugLabel } from "@/packs/inventory/vocabulary";
+import { SEXES, SEX_LABELS, breedLabel } from "../vocabulary";
 import type { ParentCandidate } from "../ops";
 
 const NONE = "__none__";
@@ -129,7 +128,7 @@ export function BreedCompositionForm({
         <div className="grid gap-3 py-4">
           <datalist id="breed-suggestions">
             {suggestions.map((breed) => (
-              <option key={breed} value={slugLabel(breed)} />
+              <option key={breed} value={breedLabel(breed)} />
             ))}
           </datalist>
 

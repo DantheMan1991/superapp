@@ -28,7 +28,7 @@ import {
 } from "./core/withdrawal";
 import { ageInDays, formatAge, formatRate, mortalityRate, summariseHead } from "./core/herd";
 import { labelFor } from "@/lib/packs/resolve";
-import { breedsFrom, speciesFrom } from "./vocabulary";
+import { breedLabel, breedsFrom, speciesFrom } from "./vocabulary";
 import { LivestockLotForm } from "./components/lot-controls";
 import { LivestockNav } from "./components/livestock-nav";
 
@@ -201,7 +201,7 @@ export async function LivestockModule({
               const zone = zones.get(lot.inventoryLotId);
               const stated = statedComposition(breedParts.get(lot.id) ?? []);
               const breeding = stated
-                ? formatComposition(stated, slugLabel)
+                ? formatComposition(stated, breedLabel)
                 : null;
               return (
                 <TableRow key={lot.id}>

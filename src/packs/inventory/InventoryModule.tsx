@@ -1,16 +1,11 @@
 import Link from "next/link";
-import {
-  Boxes,
-  ClipboardList,
-  Coins,
-  FileCheck,
-  Scale,
-  SearchX,
-} from "lucide-react";
+import { Boxes, SearchX } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
+import { StatCard } from "@/components/app/stat-card";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -29,14 +24,16 @@ import {
   listKindsInUse,
   listLocations,
   onHandByItem,
+  valueStock,
 } from "./ops";
 import { slugLabel } from "./vocabulary";
 import { formatQuantity } from "./core/units";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { todayInTimezone } from "@/lib/timezone";
+import { formatMoney } from "@/lib/money";
 import { ItemForm } from "./components/item-form";
 import { ItemFilters } from "./components/item-filters";
+import { InventoryNav } from "./components/inventory-nav";
 import { listEnterprises } from "@/lib/enterprises";
 import {
   ENTERPRISE_FALLBACK,
@@ -97,11 +94,21 @@ export async function InventoryModule({
     expiring,
     enterprises,
     allItems,
+    valuation,
   } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [items, onHand, kinds, locations, pack, expiring, enterprises, allItems] =
-        await Promise.all([
+      const [
+        items,
+        onHand,
+        kinds,
+        locations,
+        pack,
+        expiring,
+        enterprises,
+        allItems,
+        valuation,
+      ] = await Promise.all([
         listItems(tx, ctx.tenant.id, {
           kind,
           search,
@@ -125,6 +132,14 @@ export async function InventoryModule({
         listItems(tx, ctx.tenant.id, {
           status: showArchived ? undefined : "active",
         }),
+        /**
+         * **`asOf: today` RATHER THAN THE UNBOUNDED READ, so the headline
+         * figure and the page it links to cannot disagree.** `/value` defaults
+         * its picker to today; leaving this unbounded would sweep in
+         * future-dated movements and the hub would quietly show a different
+         * number from the screen it sends you to for the detail.
+         */
+        valueStock(tx, ctx.tenant.id, { asOf: today }),
       ]);
       return {
         items,
@@ -135,19 +150,24 @@ export async function InventoryModule({
         expiring,
         enterprises,
         allItems,
+        valuation,
       };
     },
     { role: ctx.role },
   );
 
   const isOwner = ctx.role === "owner";
+  const currencySymbol = ctx.tenant.currencySymbol;
   const itemWord = labelFor(labels, "item", "Item");
   const enterpriseWord = labelFor(
     labels,
     ENTERPRISE_LABEL_KEY,
     ENTERPRISE_FALLBACK,
   );
-  const enterpriseOptions = enterprises.map((e) => ({ id: e.id, name: e.name }));
+  const enterpriseOptions = enterprises.map((e) => ({
+    id: e.id,
+    name: e.name,
+  }));
   /**
    * Counted over the UNFILTERED list, and "none" is a pill of its own — see
    * `listItems`, where "what have I not tagged yet" is the question that makes
@@ -157,7 +177,10 @@ export async function InventoryModule({
   let untagged = 0;
   for (const i of allItems) {
     if (i.enterpriseId) {
-      byEnterprise.set(i.enterpriseId, (byEnterprise.get(i.enterpriseId) ?? 0) + 1);
+      byEnterprise.set(
+        i.enterpriseId,
+        (byEnterprise.get(i.enterpriseId) ?? 0) + 1,
+      );
     } else {
       untagged += 1;
     }
@@ -165,71 +188,101 @@ export async function InventoryModule({
 
   return (
     <div className="space-y-6">
+      {/**
+       * **THE FOUR SECTION BUTTONS THAT USED TO LIVE HERE ARE NOW A STRIP.**
+       * A header's actions are verbs, and Counting / What it is worth /
+       * Deliveries & invoices / When it is deducted are places — rendered as
+       * five identical outline buttons they read as one row of undifferentiated
+       * chrome, with the one real action last because it was built last. See
+       * `components/inventory-nav.tsx`.
+       */}
       <PageHeader
         title="Inventory"
         description="What the business holds, where it is, and which batch it came from."
+        icon={<Boxes />}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {/* FIRST, and NOT owner-gated. Counting is the chore and adding an
-                item is the occasional decision, so the order on the page is how
-                often each is used rather than the order they were built in —
-                the call `livestock` made for its daily round. */}
-            <Button asChild variant="outline">
-              <Link href="/dashboard/m/inventory/counts">
-                <ClipboardList className="mr-2 h-4 w-4" />
-                Counting
-              </Link>
-            </Button>
-            {/* Not owner-gated either. What stock is worth is a question a
-                bookkeeper asks far more often than an owner does, and the
-                figure is a read over movements they can already see. */}
-            <Button asChild variant="outline">
-              <Link href="/dashboard/m/inventory/value">
-                <Coins className="mr-2 h-4 w-4" />
-                What it is worth
-              </Link>
-            </Button>
-            {/* Not owner-gated: seeing what has arrived and what has been
-                billed for it is a bookkeeper's daily question. Only the acts
-                — matching, unpicking, switching posting on — are owner-only,
-                and those are gated on the page itself. */}
-            <Button asChild variant="outline">
-              <Link href="/dashboard/m/inventory/matching">
-                <FileCheck className="mr-2 h-4 w-4" />
-                Deliveries & invoices
-              </Link>
-            </Button>
-            {/* OWNER ONLY, unlike the three above, and it is the only one of
-                the four that is not a daily question. Recording what an
-                accountant decided about a tax election is a decision about the
-                business, not a chore, and it sits on the same line as every
-                other cost-object act in this pack. */}
-            {isOwner && (
-              <Button asChild variant="outline">
-                <Link href="/dashboard/m/inventory/tax">
-                  <Scale className="mr-2 h-4 w-4" />
-                  When it is deducted
-                </Link>
-              </Button>
-            )}
-            {isOwner && (
-              <ItemForm
-                kindsInUse={kinds.map((k) => k.kind)}
-                enterprises={enterpriseOptions}
-                enterpriseWord={enterpriseWord}
-                livestockEnabled={livestockEnabled}
-              />
-            )}
-          </div>
+          isOwner ? (
+            <ItemForm
+              kindsInUse={kinds.map((k) => k.kind)}
+              enterprises={enterpriseOptions}
+              enterpriseWord={enterpriseWord}
+              livestockEnabled={livestockEnabled}
+            />
+          ) : undefined
         }
       />
 
+      <InventoryNav isOwner={isOwner} />
+
+      {/**
+       * **STATS ONLY ONCE THERE IS STOCK TO COUNT**, on `allItems` rather than
+       * the filtered `items` — the same argument the filter bar makes below.
+       * Three figures over an empty farm is furniture, and a farm that holds
+       * forty things should not lose its headline numbers to a search box.
+       */}
+      {allItems.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {/**
+           * **THE TOTAL DOES NOT TRAVEL WITHOUT ITS CAVEAT**, and that is a
+           * rule this page inherited rather than invented: `/value`'s own
+           * header says *"if a later change moves the total somewhere the
+           * caveat does not follow, that is the defect"*. So the shortfall is
+           * in THIS card's footnote, not in the card beside it — cards reflow
+           * to one column on a phone, and a neighbour is not "with it".
+           */}
+          <StatCard
+            label="What it is worth"
+            value={formatMoney(valuation.total.valueCents, currencySymbol)}
+            href={`${BASE}/value`}
+            tone="accent"
+            footnote={
+              valuation.total.incomplete
+                ? `Short by ${valuation.total.unvaluedLines} ${
+                    valuation.total.unvaluedLines === 1 ? "batch" : "batches"
+                  } nobody has costed`
+                : valuation.total.valuedLines === 0
+                  ? "Nothing on hand that anybody has costed"
+                  : "Every batch on hand carries a cost"
+            }
+          />
+          {/**
+           * Raised stock has no purchase price, so this is ordinarily non-zero
+           * on a farm and is not styled as a fault. `destructive` would say
+           * "something is broken" about a pen of chicks that was hatched.
+           */}
+          <StatCard
+            label="Not costed"
+            value={
+              valuation.total.incomplete
+                ? valuation.total.unvaluedLines
+                : "None"
+            }
+            href={`${BASE}/value`}
+            footnote={
+              valuation.total.incomplete
+                ? `${valuation.total.unvaluedQuantity} in all — raised stock has no purchase price`
+                : "Every batch on hand has a cost recorded"
+            }
+          />
+          <StatCard
+            label="Going off soon"
+            value={expiring.length === 0 ? "None" : expiring.length}
+            tone={expiring.length > 0 ? "destructive" : "default"}
+            footnote={
+              expiring.length > 0
+                ? "Within six weeks — soonest first, below"
+                : "Nothing within six weeks"
+            }
+          />
+        </div>
+      )}
+
       {expiring.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Going off soon</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <section>
+          <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+            Going off soon
+          </h2>
+          <DataTable>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -269,15 +322,15 @@ export async function InventoryModule({
                 ))}
               </TableBody>
             </Table>
-            <p className="mt-3 text-xs text-muted-foreground">
-              {/* The design asks for the two views that prevent loss — oldest
-                  first, and expiring soon. Sorted by date IS both. */}
-              Soonest first. Use these before the rest; nothing here refuses a
-              later batch, because you can see which one is already open and
-              this cannot.
-            </p>
-          </CardContent>
-        </Card>
+          </DataTable>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {/* The design asks for the two views that prevent loss — oldest
+                first, and expiring soon. Sorted by date IS both. */}
+            Soonest first. Use these before the rest; nothing here refuses a
+            later batch, because you can see which one is already open and this
+            cannot.
+          </p>
+        </section>
       )}
 
       {/**
@@ -311,42 +364,48 @@ export async function InventoryModule({
         />
       )}
 
-      {items.length === 0 ? (
-        /**
-         * **"NOTHING MATCHES" AND "NOTHING TRACKED YET" ARE DIFFERENT FACTS,
-         * and showing the second for the first is how a filter convinces
-         * somebody their data is gone.** The old copy told an owner with forty
-         * items and a stale search box to go and add their first one.
-         */
-        filtering ? (
-          <EmptyState
-            panel
-            icon={<SearchX className="h-5 w-5" />}
-            title="Nothing matches"
-            description={
-              search
-                ? `No ${itemWord.toLowerCase()} here has "${search}" in its name. Names are all this searches — a bag of feed for the beef herd is not called beef.`
-                : "Nothing under this filter. Retired things are hidden unless you ask for them."
-            }
-            action={
-              <Button asChild variant="outline">
-                <Link href={BASE}>Clear filters</Link>
-              </Button>
-            }
-          />
-        ) : (
-          <EmptyState
-            panel
-            icon={<Boxes className="h-5 w-5" />}
-            title="Nothing tracked yet"
-            description={
-              isOwner
-                ? `Add the first ${itemWord.toLowerCase()} you hold — feed, cartons, meat in a freezer. What it is measured in decides how every number about it reads, so it is worth a moment.`
-                : "An owner adds what the business holds. Once they do, it shows up here."
-            }
-          />
-        )
-      ) : (
+      {/**
+       * **`DataTable` SUPPLIES THE PANEL, so `EmptyState` no longer asks for
+       * one.** `panel` on both states drew a second card inside the first —
+       * which is why the prop is dropped here rather than kept "just in case".
+       */}
+      <DataTable
+        isEmpty={items.length === 0}
+        empty={
+          /**
+           * **"NOTHING MATCHES" AND "NOTHING TRACKED YET" ARE DIFFERENT FACTS,
+           * and showing the second for the first is how a filter convinces
+           * somebody their data is gone.** The old copy told an owner with
+           * forty items and a stale search box to go and add their first one.
+           */
+          filtering ? (
+            <EmptyState
+              icon={<SearchX className="h-5 w-5" />}
+              title="Nothing matches"
+              description={
+                search
+                  ? `No ${itemWord.toLowerCase()} here has "${search}" in its name. Names are all this searches — a bag of feed for the beef herd is not called beef.`
+                  : "Nothing under this filter. Retired things are hidden unless you ask for them."
+              }
+              action={
+                <Button asChild variant="outline">
+                  <Link href={BASE}>Clear filters</Link>
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={<Boxes className="h-5 w-5" />}
+              title="Nothing tracked yet"
+              description={
+                isOwner
+                  ? `Add the first ${itemWord.toLowerCase()} you hold — feed, cartons, meat in a freezer. What it is measured in decides how every number about it reads, so it is worth a moment.`
+                  : "An owner adds what the business holds. Once they do, it shows up here."
+              }
+            />
+          )
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -412,7 +471,7 @@ export async function InventoryModule({
             })}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
 
       {items.length > 0 && locations.length === 0 && isOwner && (
         <p className="text-sm text-muted-foreground">

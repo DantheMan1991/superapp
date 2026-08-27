@@ -367,9 +367,18 @@ What remains is the three centred states above and `(marketing)`.
 - **A pack hub puts its sections in the header's actions row**, as identical
   outline buttons — five on inventory, four on production, three on livestock —
   so nothing distinguishes a place from a verb, and the one real action sits
-  last. This is what `CategoryStrip` exists for. Sub-pages are worse than
-  untidy: `/inventory/counts` has no way back to the module at all, and
-  `/inventory/value` hand-rolls its own back-link inside `actions`.
+  last. This is what `CategoryStrip` exists for. Sub-pages then invent their own
+  way back: inventory's six do it in four different shapes (a bare `<div>` above
+  the title, a link inside the header's `actions`, a flex row, a naked chevron),
+  and none of them names the sibling sections — so Counting cannot reach
+  Deliveries without a stop at the hub.
+  **Correction, 2026-08-26:** an earlier revision of this bullet said
+  `/inventory/counts` had *no way back at all*. It does, and always did. The
+  claim came from grepping `ArrowLeft` on pages that use `ChevronLeft` and
+  reading the empty result as an absence — the same mistake in the opposite
+  direction as the one recorded in `docs/conventions.md` about confirming an
+  edit by grep count. **A null grep result is evidence about the pattern, not
+  about the code.**
 - **No pack passes `icon=` to `PageHeader`**, so no pack hub shows the accent
   chip that all 42 core screens carry. Cheap, and it is half of why the pack
   headers read flat next to a core tool's.

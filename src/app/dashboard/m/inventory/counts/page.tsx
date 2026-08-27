@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, ClipboardList } from "lucide-react";
+import { ClipboardList } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -7,8 +7,8 @@ import { todayInTimezone } from "@/lib/timezone";
 import { formatMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -23,6 +23,7 @@ import {
   listCounts,
   listLocations,
 } from "@/packs/inventory/ops";
+import { InventoryNav } from "@/packs/inventory/components/inventory-nav";
 import {
   ADJUSTMENT_REASON_NOTES,
   COUNT_STATUS_LABELS,
@@ -83,19 +84,10 @@ export default async function InventoryCountsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <Link
-          href={BASE}
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="mr-1 h-4 w-4" />
-          All inventory
-        </Link>
-      </div>
-
       <PageHeader
         title="Counting"
         description="The record and reality will disagree. Counting is how that gets discovered — and what keeps turning up is worth more than any single count."
+        icon={<ClipboardList />}
         actions={
           <StartCountForm
             locations={locations.map((l) => ({ id: l.id, name: l.name }))}
@@ -104,15 +96,15 @@ export default async function InventoryCountsPage() {
         }
       />
 
+      <InventoryNav isOwner={ctx.role === "owner"} />
+
       {reasons.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              What keeps happening · last {Math.round(REASON_WINDOW_DAYS / 365)}{" "}
-              year
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+        <section>
+          <h2 className="mb-3 font-heading text-xl font-semibold tracking-heading">
+            What keeps happening · last {Math.round(REASON_WINDOW_DAYS / 365)}{" "}
+            year
+          </h2>
+          <DataTable>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -151,23 +143,25 @@ export default async function InventoryCountsPage() {
                 ))}
               </TableBody>
             </Table>
-            <p className="mt-3 text-xs text-muted-foreground">
-              A reason once is an accident. The same one every month is worth
-              walking out to look at — this pack has an opinion about the pattern
-              and none at all about the cause.
-            </p>
-          </CardContent>
-        </Card>
+          </DataTable>
+          <p className="mt-3 text-xs text-muted-foreground">
+            A reason once is an accident. The same one every month is worth
+            walking out to look at — this pack has an opinion about the pattern
+            and none at all about the cause.
+          </p>
+        </section>
       )}
 
-      {counts.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<ClipboardList className="h-5 w-5" />}
-          title="Nothing counted yet"
-          description="Walk a freezer and write down what is in it. Nothing changes until you post, so a count can be taken over an afternoon and reconciled at the end."
-        />
-      ) : (
+      <DataTable
+        isEmpty={counts.length === 0}
+        empty={
+          <EmptyState
+            icon={<ClipboardList className="h-5 w-5" />}
+            title="Nothing counted yet"
+            description="Walk a freezer and write down what is in it. Nothing changes until you post, so a count can be taken over an afternoon and reconciled at the end."
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -212,7 +206,7 @@ export default async function InventoryCountsPage() {
             ))}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
     </div>
   );
 }

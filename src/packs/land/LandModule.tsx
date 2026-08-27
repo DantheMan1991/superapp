@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Map, Search } from "lucide-react";
+import { Map as MapIcon, Search } from "lucide-react";
 import { withTenant } from "@/db";
 import type { TenantContext } from "@/lib/auth";
 import { packContext } from "@/lib/packs/tenant-context";
@@ -7,6 +7,7 @@ import { labelFor } from "@/lib/packs/resolve";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/app/page-header";
 import { EmptyState } from "@/components/app/empty-state";
+import { DataTable } from "@/components/app/data-table";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -99,6 +100,7 @@ export async function LandModule({
     <div className="space-y-6">
       <PageHeader
         title="Land"
+        icon={<MapIcon />}
         description={
           parcels.length > 0
             ? `${parcels.length} ${parcels.length === 1 ? parcelWord.toLowerCase() : `${parcelWord.toLowerCase()}s`} · ${formatAreaTotal(total, unit)}`
@@ -147,18 +149,20 @@ export async function LandModule({
         />
       )}
 
-      {parcels.length === 0 ? (
-        <EmptyState
-          panel
-          icon={<Map className="h-5 w-5" />}
+      <DataTable
+        isEmpty={parcels.length === 0}
+        empty={
+          <EmptyState
+            icon={<MapIcon className="h-5 w-5" />}
           title="No ground recorded yet"
           description={
             isOwner
               ? `Add the first ${parcelWord.toLowerCase()} — a deed or a lease. Divide it into ${zonesWord.toLowerCase()} and everything that happens on the ground has somewhere to land.`
               : "An owner adds the parcels the business holds. Once they do, they show up here."
-          }
-        />
-      ) : (
+            }
+          />
+        }
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -207,7 +211,7 @@ export async function LandModule({
             ))}
           </TableBody>
         </Table>
-      )}
+      </DataTable>
     </div>
   );
 }

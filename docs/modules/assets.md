@@ -15,6 +15,30 @@ to be listed by a trades profile unchanged.
 
 ## Build log
 
+### 2026-08-26 — The pack puts on the design system (`claude/the-last-three-packs`)
+
+No behaviour changed. PR 4 of the five that bring the packs onto the primitive
+layer, and the last of them — see [design-system.md](design-system.md) for the
+sweep as a whole.
+
+**THIS PACK GETS NO `CategoryStrip`, AND THAT IS THE FINDING RATHER THAN AN
+OMISSION.** The first three packs each had a header stuffed with four or five
+outline buttons that were really destinations. Assets has NONE: `[id]` is a record, and it is the only route
+besides the hub. The strip exists to
+show a module's SECTIONS, and a strip with one tab is chrome that teaches
+people the control is useless. So the hand-rolled back-links on the record
+pages **stay**: with no sections there is nothing to replace them with, and a
+record-to-list link is the only navigation those pages have.
+
+Accent chip on every `PageHeader`, `Card` to `Panel`, tables into `DataTable`,
+section headings to the house 20px, and dashed-border paragraphs to real
+`EmptyState`s.
+
+`depreciation-panel.tsx` and `maintenance-panel.tsx` were the two `Card`s that
+lived in components rather than pages. Both are `Panel` now, keeping their
+header row with the action on the right; `CardDescription` became the
+supporting line it always was.
+
 ### 2026-08-19 — A place things are kept is a property of the asset (`claude/assets-hold-stock`)
 
 The fix for the location picker the inventory drive found. Migration `0155`,

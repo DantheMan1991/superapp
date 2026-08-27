@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Card, CardContent } from "@/components/ui/card";
+import { Panel } from "@/components/app/panel";
 import {
   Dialog,
   DialogContent,
@@ -111,8 +111,7 @@ export function TreatmentControl({
   return (
     <>
       {confirmDialog}
-      <Card>
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
+      <Panel className="flex flex-wrap items-center justify-between gap-4 px-6 py-4">
           <div className="max-w-2xl">
             <div className="text-sm font-medium">
               {on
@@ -148,8 +147,7 @@ export function TreatmentControl({
               onCheckedChange={toggle}
             />
           </div>
-        </CardContent>
-      </Card>
+      </Panel>
     </>
   );
 }

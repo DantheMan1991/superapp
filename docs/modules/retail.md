@@ -37,6 +37,40 @@ Rows are listed in build order; the numbers are left alone because the build log
 
 ## Build log
 
+### 2026-08-26 — The pack puts on the design system (`claude/the-last-three-packs`)
+
+No behaviour changed. PR 4 of the five that bring the packs onto the primitive
+layer, and the last of them — see [design-system.md](design-system.md) for the
+sweep as a whole.
+
+**THIS PACK GETS NO `CategoryStrip`, AND THAT IS THE FINDING RATHER THAN AN
+OMISSION.** The first three packs each had a header stuffed with four or five
+outline buttons that were really destinations. Retail has NONE: every non-hub route in the pack — `[id]` and
+`days/[id]` — is a record, not a section. The strip exists to
+show a module's SECTIONS, and a strip with one tab is chrome that teaches
+people the control is useless. So the hand-rolled back-links on the record
+pages **stay**: with no sections there is nothing to replace them with, and a
+record-to-list link is the only navigation those pages have.
+
+Accent chip on every `PageHeader`, `Card` to `Panel`, tables into `DataTable`,
+section headings to the house 20px, and dashed-border paragraphs to real
+`EmptyState`s.
+
+**The market day's three figures became `StatCard`s, and the margin keeps its
+`tone`.** That card already carried a comment insisting a losing day must LOOK
+like one, because `formatMoney` drops the sign and a market that cost $53 and
+took nothing otherwise reads as $53 earned. `tone="destructive"` says the same
+thing in colour. Driven against the founder's live $29.60 day: it renders
+**−$23.40 in red**.
+
+**The tin keeps its em dash.** Not counted and counted-and-balanced are
+different facts, so the uncounted state is "—" and not a zero variance — the
+`value` prop takes a node, which is what makes that expressible without a
+second card.
+
+One more back-arrow was standing in as an empty-state glyph on *No truck to
+sell from*; it is a truck now, and *Nothing sold yet* is a receipt.
+
 ### 2026-08-25 — The till weighs a package (`claude/the-till-weighs-a-package`)
 
 Slice 8, and the last of the three [ADR 0016](../decisions/0016-a-catch-weight-item-is-stocked-in-packages.md)

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Map as MapIcon } from "lucide-react";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -9,12 +9,9 @@ import { packContext } from "@/lib/packs/tenant-context";
 import { labelFor } from "@/lib/packs/resolve";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { DataTable } from "@/components/app/data-table";
+import { EmptyState } from "@/components/app/empty-state";
+import { Panel } from "@/components/app/panel";
 import {
   Table,
   TableBody,
@@ -148,6 +145,7 @@ export default async function ZoneDetailPage({
       </Link>
 
       <PageHeader
+        icon={<MapIcon />}
         title={zone.name}
         description={
           <span className="flex items-center gap-2">
@@ -205,13 +203,11 @@ export default async function ZoneDetailPage({
       />
 
       <div className="grid gap-6 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
               {rest.status === "occupied" ? "Currently" : "Rested"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+            </h2>
+          <div className="mt-3">
             <p className="text-2xl font-medium tabular-nums">{restHeadline}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {rest.status === "occupied"
@@ -235,14 +231,12 @@ export default async function ZoneDetailPage({
                   .
                 </p>
               )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Grazing days</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">Grazing days</h2>
+          <div className="mt-3">
             <p className="text-2xl font-medium tabular-nums">
               {rest.grazingDays}
             </p>
@@ -250,14 +244,12 @@ export default async function ZoneDetailPage({
               Across {rest.stays} {rest.stays === 1 ? "stay" : "stays"}, all
               time.
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">What it is for</CardTitle>
-          </CardHeader>
-          <CardContent>
+        <Panel className="p-5">
+          <h2 className="font-heading text-base font-semibold tracking-heading">What it is for</h2>
+          <div className="mt-3">
             {uses.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Nothing declared yet.
@@ -274,21 +266,23 @@ export default async function ZoneDetailPage({
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       </div>
 
       <div className="space-y-3">
         <h2 className="text-sm font-medium">
           Stays {rows.length > 0 && `(${rows.length})`}
         </h2>
-        {rows.length === 0 ? (
-          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-            Nothing recorded yet. Every rest and rotation figure is computed
-            from these, so the first one is what makes the rest of the page
-            work.
-          </p>
-        ) : (
+        <DataTable
+          isEmpty={rows.length === 0}
+          empty={
+            <EmptyState
+              title="Nothing recorded yet"
+              description="Every rest and rotation figure is computed from these, so the first one is what makes the rest of the page work."
+            />
+          }
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -338,7 +332,7 @@ export default async function ZoneDetailPage({
               ))}
             </TableBody>
           </Table>
-        )}
+        </DataTable>
       </div>
     </div>
   );

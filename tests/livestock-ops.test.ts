@@ -175,9 +175,6 @@ d("livestock ops", () => {
     // ...livestock owns only the biology...
     expect(lot.species).toBe("poultry");
     expect(lot.inventoryLotId).toBe(inventoryLotId);
-    // Breed is `livestock_breed_parts` since slice 4a — one breed on create is
-    // the whole animal, and the superseded text column is left alone.
-    expect(lot.breed).toBe("");
 
     // ...and the cost object came from inventory, not from here. Livestock
     // never touches dimension_members.
@@ -2543,9 +2540,7 @@ d("livestock ops", () => {
   // ---- slice 4a: what an animal is made of, and who made it --------------
 
   it("a single breed on create is the whole animal, as a part", async () => {
-    // The legacy text column is not written any more; the composition is.
     const { lot } = await newLot("BREED-1");
-    expect(lot.breed).toBe("");
     const parts = await asOwner((tx) =>
       breedPartsByLot(tx, tenantId, [lot.id]),
     );
@@ -2575,22 +2570,6 @@ d("livestock ops", () => {
     );
     const after = await asOwner((tx) => compositionFor(tx, tenantId, lot.id));
     expect(formatComposition(after, slugLabel)).toBe("Angus");
-  });
-
-  it("clears the superseded breed text when a composition is stated", async () => {
-    const { lot } = await newLot("BREED-3", "cattle");
-    // A lot as it would look if it were entered before slice 4a.
-    await asOwner((tx) =>
-      tx
-        .update(schema.livestockLots)
-        .set({ breed: "half Angus half something" })
-        .where(eq(schema.livestockLots.id, lot.id)),
-    );
-    await asOwner((tx) =>
-      setBreedParts(tx, ctx(), lot.id, [{ breed: "angus", parts: 1 }]),
-    );
-    const after = await asOwner((tx) => getLivestockLot(tx, tenantId, lot.id));
-    expect(after?.breed).toBe("");
   });
 
   it("refuses a breed that is not a slug and a share that is not whole", async () => {

@@ -30,6 +30,38 @@ and [land.md](land.md) before changing anything about where animals are.
 
 ## Build log
 
+### 2026-08-27 — The column that lost the cross (`claude/the-column-that-lost-the-cross`)
+
+**The contract half of slice 4a**, going out as its own change after 4a's deploy
+exactly as [ADR 0014](../decisions/0014-migrations-are-applied-before-the-merge.md)
+and the schema comment said it would. `livestock_lots.breed` is gone;
+`livestock_breed_parts` has been the only store since `0217`.
+
+**`0221` RUNS AFTER THE DEPLOY, NOT BEFORE — the second migration in the repo
+that way round**, after `0075`. Every other one goes out ahead of the code
+because additive changes leave the running build working. A DROP inverts that:
+**drizzle names every column of a table in the SELECT list it builds**, so the
+instant this column goes, a build that predates the deploy answers `column
+livestock_lots.breed does not exist` on the hub, every animal's page, the round,
+the feed report and the digest. The reverse order is merely untidy — one dead
+column and nothing else — which is what makes the window survivable.
+[conventions §4](../conventions.md) carries the rule; the migration header
+carries the reasoning.
+
+**THE VALUES ARE NOT MIGRATED ACROSS, and they cannot be.** The accounting pair
+this follows (`0073`/`0074`/`0075`) had a copy step in the middle because an
+email address is an email address. This column held free text — "½ Angus, ¼
+Hereford", "Angus cross", "black one" — and no parser turns any of that into
+fractions without inventing a claim the tenant never made. **Slice 4a WAS the
+migration path**: it showed the old string as a note asking for it again and
+cleared it the moment somebody obliged. What is dropped here is a string that has
+either already been replaced with something better or been declined.
+
+Four screens lose their fallback and say less rather than saying it oddly: the
+lot header reads *"Poultry"* rather than *"Poultry · "* for an animal nobody has
+described, and the hub shows no second line. The one test that existed only to
+prove the clearing worked is gone with the column it cleared.
+
 ### 2026-08-27 — Slice 4b: a photo of the animal (`claude/a-photo-of-the-animal`)
 
 The other half of what the founder asked for — *"the ability to add a profile
@@ -880,7 +912,7 @@ This pack is the one that forced the change; the full reasoning is in
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
-| `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed`. **`dam_lot_id` / `sire_lot_id`** are composite SELF-FKs, RESTRICT, with a CHECK against being one's own parent — and they are NOT `inventory_lots.parent_lot_id`, which is the split chain. `breed` is SUPERSEDED and awaiting its drop |
+| `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed`. **`dam_lot_id` / `sire_lot_id`** are composite SELF-FKs, RESTRICT, with a CHECK against being one's own parent — and they are NOT `inventory_lots.parent_lot_id`, which is the split chain. The free-text `breed` column was DROPPED by `0221` |
 | `livestock_breed_parts` | **What an animal is made of, as somebody stated it** | One row per breed per animal, unique on `(tenant_id, lot, breed)`. `parts` is an integer out of the row's siblings — 2 : 1 : 1 is ½, ¼, ¼ — because percentages force a rounding decision the person never made. **The RESOLVED composition is never stored**: it is a fold over the pedigree in `core/pedigree.ts`, and a stated one beats a computed one |
 | `livestock_identifiers` | What an animal is called | Many per lot, typed and **date-ranged**. Composite FK to the lot, CASCADE. Indexed by value, because finding an animal by its tag happens in a chute |
 | `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
@@ -999,6 +1031,7 @@ This pack is the one that forced the change; the full reasoning is in
   · `drizzle/0164_*.sql` · `drizzle/0165_livestock_weights_rls.sql`
   · `drizzle/0166_*.sql` · `drizzle/0167_livestock_treatments_rls.sql`
   · `drizzle/0217_*.sql` · `drizzle/0218_livestock_breed_parts_rls.sql`
+  · `drizzle/0221_*.sql` (**the contract — runs AFTER the deploy**)
 
 ## Decisions & gotchas
 
@@ -1179,11 +1212,12 @@ This pack is the one that forced the change; the full reasoning is in
   is refused; a dam whose sex nobody recorded is not. And a parent of another
   species is NOT refused: a mule is a real animal, so the picker narrows and the
   app declines to have an opinion about what can breed with what.
-- **`breed` IS SUPERSEDED AND STILL ON THE TABLE.** Expand shipped in 4a; the
-  drop is its own PR after the deploy (ADR 0014). Nothing can parse "½ Angus, ¼
-  Hereford" back into fractions, so the old string is displayed as a prompt to
-  enter it again rather than migrated. Until it goes, `db:generate` keeps
-  emitting it and a split still copies it.
+- **THE `breed` COLUMN IS GONE (`0221`), AND ITS DROP RAN AFTER THE DEPLOY.**
+  The second migration in the repo that way round, after `0075` — drizzle names
+  every column in its SELECT, so a DROP applied ahead of the code takes the pack
+  down. See conventions §4 and the migration's header. Nothing was copied
+  across: free text cannot become fractions, and slice 4a's prompt-to-re-enter
+  was the migration path.
 - **Species come from the profile, never from this pack.** A pack that knows
   what a broiler is has the boundary wrong. `speciesFrom` reads `packConfig` and
   degrades to a free-text field.

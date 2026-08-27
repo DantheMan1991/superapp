@@ -160,7 +160,8 @@ a feature PR; **import `@/lib/money` in new code.**
   `column … does not exist` the instant the column goes. Nothing enforces the
   order; what makes it safe is that the wrong way round is loud and the right
   way round is harmless. Say so in the migration's header, as
-  `0075_accounting_contacts_contract.sql` does.
+  `0075_accounting_contacts_contract.sql` and `0221` (livestock's `breed`) both
+  do — those two are the only migrations in the repo that run after a deploy.
 - **A composite FK cannot take a bare `ON DELETE SET NULL`.** Postgres nulls
   every referencing column, `tenant_id` included, and `tenant_id` is NOT NULL on
   every tenant table — so the delete fails with a not-null violation instead of

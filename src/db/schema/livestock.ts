@@ -109,20 +109,6 @@ export const livestockLots = pgTable(
      * for a straight-run batch of chicks rather than a missing value.
      */
     sex: text("sex"),
-    /**
-     * **SUPERSEDED BY `livestock_breed_parts`, AND AWAITING ITS DROP.** Slice 4a
-     * replaced it: a single string thrown at a deliberately crossbred herd
-     * loses "½ Angus, ¼ Hereford, ¼ Simmental" irrecoverably, which is what the
-     * old comment here promised would happen and why nothing was ever allowed
-     * to compute on it.
-     *
-     * NOT DROPPED IN THE SAME PR THAT SUPERSEDED IT, per
-     * [ADR 0014](../../../docs/decisions/0014-migrations-are-applied-before-the-merge.md):
-     * the expand ships, the deploy goes out, and the contract follows as its own
-     * change. Until then the value a tenant typed is still shown — as a note
-     * asking for it again in fractions, because nothing can parse it.
-     */
-    breed: text("breed").notNull().default(""),
     /** Hatched, farrowed, calved. Null for stock bought at unknown age. */
     bornOn: date("born_on"),
     /**

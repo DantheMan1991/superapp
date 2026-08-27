@@ -201,8 +201,7 @@ export interface LivestockLotInput {
   sex?: string | null;
   /**
    * ONE breed, meaning the whole animal — written to `livestock_breed_parts`
-   * as a single part, never to the superseded `breed` column. A cross is stated
-   * afterwards on the animal's own page.
+   * as a single part. A cross is stated afterwards on the animal's own page.
    */
   breed?: string;
   bornOn?: string | null;
@@ -278,8 +277,7 @@ export async function createLivestockLot(
   // batch of Cornish Cross, a purebred cow. Anything crossed is stated on the
   // animal's own page afterwards, where there is room to say ½ and ¼ — a
   // fractions editor on the form that starts a pen of broilers would be four
-  // fields nobody needs to see. Nothing is written to the superseded `breed`
-  // text column any more.
+  // fields nobody needs to see.
   const breed = input.breed?.trim();
   if (breed) {
     await setBreedParts(tx, ctx, rows[0].id, [{ breed, parts: 1 }]);
@@ -506,9 +504,6 @@ export async function splitLivestockLot(
       // Cross does not produce a batch of something else.
       species: parent.species,
       sex: parent.sex,
-      // The legacy string travels too, for as long as it exists: a lot entered
-      // before slice 4a would otherwise lose the only breed it has on a split.
-      breed: parent.breed,
       bornOn: parent.bornOn,
       // **THE PARENTS TRAVEL, THE SPLIT IS NOT ONE OF THEM.** Half a pen of
       // half-Angus calves is still half Angus, so the composition copies — but
@@ -821,11 +816,6 @@ export async function compositionFor(
  * it one row at a time would allow an intermediate state that sums to something
  * nobody meant.
  *
- * **WRITING A COMPOSITION CLEARS THE LEGACY `breed` TEXT**, which is the only
- * migration path there can be for that column: nothing can parse "½ Angus, ¼
- * Hereford" back into fractions, so the old string is shown as a prompt to enter
- * it again and disappears the moment somebody does.
- *
  * `owner`, beside the rest of editing a lot. What an animal IS is a record
  * somebody keeps, not a chore somebody does.
  */
@@ -881,18 +871,6 @@ export async function setBreedParts(
     parts: count,
   }));
   if (rows.length > 0) await tx.insert(schema.livestockBreedParts).values(rows);
-
-  if (rows.length > 0 && lot.breed) {
-    await tx
-      .update(schema.livestockLots)
-      .set({ breed: "", updatedAt: new Date() })
-      .where(
-        and(
-          eq(schema.livestockLots.tenantId, ctx.tenantId),
-          eq(schema.livestockLots.id, livestockLotId),
-        ),
-      );
-  }
 
   return rows.map((r) => ({ breed: r.breed, parts: r.parts }));
 }
@@ -2970,9 +2948,12 @@ export async function farmSnapshot(
     return {
       code: byInventoryLot.get(lot.inventoryLotId)?.code ?? "—",
       species: lot.species,
+      // Empty when nothing is known, which the digest prints as an omission
+      // rather than as a word. The superseded free-text column used to stand in
+      // here and no longer exists.
       breed:
         composition.source === "unknown"
-          ? lot.breed
+          ? ""
           : formatComposition(composition, breedLabel),
       sex: lot.sex,
       ageDays: ageInDays(lot.bornOn, today),

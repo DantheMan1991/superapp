@@ -1129,7 +1129,8 @@ d("livestock ops", () => {
       expect(snap!.died).toBe(1);
       // ...this pack's biology...
       expect(snap!.species).toBe("cattle");
-      expect(snap!.breed).toBe("Angus cross");
+      // Title-cased: a breed is a name, not a kind of thing. See `breedLabel`.
+      expect(snap!.breed).toBe("Angus Cross");
       expect(snap!.ageDays).toBe(199);
       // ...land's occupancy, including WHEN the stay began, which is what
       // makes "how long have they been on this ground" answerable...

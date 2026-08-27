@@ -86,6 +86,25 @@ export function dispositionFor(mimeType: string): "inline" | "attachment" {
   return INLINE_SAFE.has(mimeType) ? "inline" : "attachment";
 }
 
+/**
+ * A picture the browser will actually PUT ON THE SCREEN — not merely a file
+ * whose type starts with `image/`.
+ *
+ * The difference is real and it is `image/tiff`: accepted for upload, because a
+ * scanner produces them, and deliberately absent from `INLINE_SAFE`, so it
+ * downloads rather than renders. A profile picture that arrives as a download
+ * prompt is not a profile picture, so the two sets are intersected here rather
+ * than a prefix test being written twice and getting this wrong once.
+ */
+export function isDisplayableImage(mimeType: string): boolean {
+  return mimeType.startsWith("image/") && INLINE_SAFE.has(mimeType);
+}
+
+/** The accept attribute for a photo picker. A hint, never the enforcement. */
+export const IMAGE_ACCEPT_ATTR = ALLOWED_MIME_TYPES.filter(
+  isDisplayableImage,
+).join(",");
+
 /** The accept attribute for the file input — a hint, never the enforcement. */
 export const UPLOAD_ACCEPT_ATTR = ALLOWED_MIME_TYPES.join(",");
 

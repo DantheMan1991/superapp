@@ -21,6 +21,8 @@ import { listAssets, listContainerCandidates, listKindsInUse } from "./ops";
 import { getDepreciationStatus } from "./depreciation-ops";
 import { periodOf } from "./core/depreciation";
 import { assetKindLabel } from "./vocabulary";
+import { primaryAttachments } from "@/modules/documents/attachments";
+import { RecordPhotoThumb } from "@/modules/documents/components/record-photos";
 import { AssetForm } from "./components/asset-form";
 import { PostAllDepreciation } from "./components/post-all-depreciation";
 
@@ -51,7 +53,7 @@ export async function AssetsModule({
   const currentPeriod = periodOf(todayInTimezone(ctx.tenant.timezone));
   const currencySymbol = ctx.tenant.currencySymbol;
 
-  const { rows, kinds, containers, companies, due } = await withTenant(
+  const { rows, portraits, kinds, containers, companies, due } = await withTenant(
     ctx.tenant.id,
     async (tx) => {
       const [rows, kinds, containers, companies] = await Promise.all([
@@ -84,8 +86,18 @@ export async function AssetsModule({
         assetsDue += 1;
         totalCents += status.due.reduce((s, r) => s + r.amountCents, 0);
       }
+      // One query for the whole page of thumbnails. A record with photos but
+      // no chosen picture is absent and gets the placeholder — the app does
+      // not pick a portrait on somebody's behalf.
+      const portraits = await primaryAttachments(
+        tx,
+        ctx.tenant.id,
+        "asset",
+        rows.map((a) => a.id),
+      );
       return {
         rows,
+        portraits,
         kinds,
         containers,
         companies,
@@ -170,6 +182,10 @@ export async function AssetsModule({
               <TableRow key={asset.id}>
                 <TableCell>
                   <div className="flex items-center gap-2 font-medium">
+                    <RecordPhotoThumb
+                      documentId={portraits.get(asset.id)?.id ?? null}
+                      alt=""
+                    />
                     <Link
                       href={`/dashboard/m/assets/${asset.id}`}
                       className="hover:underline"

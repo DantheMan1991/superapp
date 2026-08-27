@@ -5,7 +5,15 @@ import { eq } from "drizzle-orm";
 import { schema, withTenant } from "@/db";
 import { listEntities } from "@/modules/accounting/core";
 import { requireTenant } from "@/lib/auth";
-import { requireModuleEnabled } from "@/lib/modules";
+import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
+import { attachmentsForRecord } from "@/modules/documents/attachments";
+import { RecordPhotos } from "@/modules/documents/components/record-photos";
+import { isDisplayableImage } from "@/modules/documents/allowlist";
+import {
+  attachAssetPhotoAction,
+  detachAssetPhotoAction,
+  setAssetPhotoPrimaryAction,
+} from "@/packs/assets/actions";
 import { formatMoney } from "@/lib/money";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
@@ -80,7 +88,7 @@ export default async function AssetDetailPage({
     async (tx) => {
       const asset = await getAsset(tx, ctx.tenant.id, id);
       if (!asset) return null;
-      const [parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers] =
+      const [parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, attachments] =
         await Promise.all([
           asset.parentId ? getAsset(tx, ctx.tenant.id, asset.parentId) : null,
           listChildren(tx, ctx.tenant.id, asset.id),
@@ -95,6 +103,11 @@ export default async function AssetDetailPage({
           listMaintenanceWork(tx, ctx.tenant.id, asset.id),
           latestMeter(tx, ctx.tenant.id, asset.id),
           listAssignableMembers(tx, ctx.tenant.id),
+          attachmentsForRecord(tx, ctx.tenant.id, {
+            extensionSlug: "assets",
+            entityType: "asset",
+            entityId: asset.id,
+          }),
         ]);
       // Registers so the proceeds picker can exclude other companies', and
       // companies so the page can name this asset's owner (ADR 0010).
@@ -105,13 +118,26 @@ export default async function AssetDetailPage({
       const companies = await listEntities(tx, ctx.tenant.id, {
         includeInactive: true,
       });
-      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies };
+      return { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies } = data;
+  const { asset, parent, children, containers, kinds, depreciation, accounts, accumulated, schedules, maintWork, meter, teamMembers, registers, companies, attachments } = data;
+  // The picture per asset the founder asked for on 2026-08-15, arriving with
+  // livestock's — one Layer 0 table, two packs. The FILE is the DMS's, so the
+  // panel exists only where the DMS does.
+  const documentsOn = await isModuleEnabled(ctx.tenant.id, "documents");
+  const photos = attachments
+    .filter((a) => isDisplayableImage(a.document.mimeType))
+    .map((a) => ({
+      documentId: a.document.id,
+      fileName: a.document.fileName,
+      title: a.document.title ?? "",
+      mimeType: a.document.mimeType,
+      isPrimary: a.isPrimary,
+    }));
   const isOwner = ctx.role === "owner";
   /**
    * WHOSE BOOKS THIS ASSET IS ON. Undefined at one company, so nobody who has
@@ -388,6 +414,30 @@ export default async function AssetDetailPage({
           }))}
           canEdit={isOwner}
         />
+
+        {documentsOn && (
+          <Panel className="p-5">
+            <h2 className="font-heading text-base font-semibold tracking-heading">
+              Photos {photos.length > 0 && `(${photos.length})`}
+            </h2>
+            <div className="mt-3">
+              {/* `canEdit` is NOT `isOwner`, unlike every other panel on this
+                  page. Editing an asset is a decision about what the business
+                  owns; photographing one is a record of what is there, and the
+                  person holding the phone in the yard is rarely the owner. */}
+              <RecordPhotos
+                entityId={asset.id}
+                tenantId={ctx.tenant.id}
+                photos={photos}
+                canEdit={ctx.role !== "expert"}
+                subject="asset"
+                attachAction={attachAssetPhotoAction}
+                setPrimaryAction={setAssetPhotoPrimaryAction}
+                detachAction={detachAssetPhotoAction}
+              />
+            </div>
+          </Panel>
+        )}
       </div>
     </div>
   );

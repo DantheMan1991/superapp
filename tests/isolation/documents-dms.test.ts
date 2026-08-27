@@ -729,6 +729,174 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
     ).rejects.toThrow();
   });
 
+
+  /* ---- attachments: a photo hung on a record that is not accounting's ---- */
+
+  /**
+   * `document_attachments` is deliberately POLYMORPHIC — no FK to the target,
+   * because a Layer 0 table that named `livestock_lot` would be core knowing
+   * what a farm is. So the boundary it CAN enforce has to hold completely: the
+   * tenant column, the composite FK to the document, and the policy's
+   * inheritance of that document's visibility.
+   */
+  const ATTACH = {
+    extensionSlug: "livestock",
+    entityType: "livestock_lot",
+  } as const;
+  const entityA = "11111111-1111-4111-8111-111111111111";
+  const entityB = "22222222-2222-4222-8222-222222222222";
+
+  it("an attachment cannot name another tenant's document", async () => {
+    // The composite FK makes it unrepresentable, so it fails under withSystem
+    // where RLS is not watching.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.documentAttachments).values({
+          tenantId: tenantA,
+          documentId: fx.b.openDocId,
+          ...ATTACH,
+          entityId: entityA,
+          createdByClerkUserId: "iso",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("ATTACHMENTS INHERIT THE DOCUMENT'S VISIBILITY, so staff cannot even COUNT them", async () => {
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx.insert(schema.documentAttachments).values([
+          {
+            tenantId: tenantA,
+            documentId: fx.a.openDocId,
+            ...ATTACH,
+            entityId: entityA,
+            createdByClerkUserId: "iso",
+          },
+          {
+            tenantId: tenantA,
+            documentId: fx.a.lockedDocId,
+            ...ATTACH,
+            entityId: entityA,
+            createdByClerkUserId: "iso",
+          },
+        ]),
+      { role: "owner" },
+    );
+
+    // The whole reason the policy is an EXISTS over `documents` rather than a
+    // bare tenant check: with the latter, staff would read two rows, resolve
+    // one file, and be told there is a photo they may not see.
+    const asStaff = await withTenant(tenantA, (tx) =>
+      tx.select().from(schema.documentAttachments),
+    );
+    expect(asStaff.map((a) => a.documentId)).toEqual([fx.a.openDocId]);
+
+    const asOwner = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.documentAttachments),
+      { role: "owner" },
+    );
+    expect(asOwner).toHaveLength(2);
+  });
+
+  it("cannot see, or delete, another tenant's attachments", async () => {
+    await withTenant(
+      tenantB,
+      (tx) =>
+        tx.insert(schema.documentAttachments).values({
+          tenantId: tenantB,
+          documentId: fx.b.openDocId,
+          ...ATTACH,
+          entityId: entityB,
+          createdByClerkUserId: "iso",
+        }),
+      { role: "owner" },
+    );
+
+    const seen = await withTenant(
+      tenantA,
+      (tx) => tx.select().from(schema.documentAttachments),
+      { role: "owner" },
+    );
+    expect(seen.every((a) => a.tenantId === tenantA)).toBe(true);
+
+    const deleted = await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .delete(schema.documentAttachments)
+          .where(eq(schema.documentAttachments.entityId, entityB))
+          .returning(),
+      { role: "owner" },
+    );
+    expect(deleted).toHaveLength(0);
+  });
+
+  it("AT MOST ONE PROFILE PICTURE PER RECORD, in the database", async () => {
+    // A list thumbnail wants one canonical photo. "Canonical" stops being true
+    // the moment two rows can claim it, so it is an index and not a rule the
+    // application remembers to keep.
+    await withTenant(
+      tenantA,
+      (tx) =>
+        tx
+          .update(schema.documentAttachments)
+          .set({ isPrimary: true })
+          .where(eq(schema.documentAttachments.documentId, fx.a.openDocId)),
+      { role: "owner" },
+    );
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx
+            .update(schema.documentAttachments)
+            .set({ isPrimary: true })
+            .where(eq(schema.documentAttachments.documentId, fx.a.lockedDocId)),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("the same file cannot be attached to one record twice", async () => {
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.documentAttachments).values({
+            tenantId: tenantA,
+            documentId: fx.a.openDocId,
+            ...ATTACH,
+            entityId: entityA,
+            createdByClerkUserId: "iso",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an entity type that is not a slug", async () => {
+    // The format CHECK is what keeps a polymorphic column queryable — and it
+    // is the only opinion this table has about what a target is.
+    await expect(
+      withTenant(
+        tenantA,
+        (tx) =>
+          tx.insert(schema.documentAttachments).values({
+            tenantId: tenantA,
+            documentId: fx.a.openDocId,
+            extensionSlug: "livestock",
+            entityType: "Livestock Lot",
+            entityId: entityB,
+            createdByClerkUserId: "iso",
+          }),
+        { role: "owner" },
+      ),
+    ).rejects.toThrow();
+  });
+
   it("default-deny: no context sees no DMS rows at all", async () => {
     const results = await withSystem(async (tx) => {
       await tx.execute(sql`select set_config('app.role', '', true)`);
@@ -740,6 +908,7 @@ d("documents DMS isolation (RLS + role dimension + composite FKs)", () => {
         tx.select().from(schema.documentTags),
         tx.select().from(schema.documentSavedViews),
         tx.select().from(schema.documentSettings),
+        tx.select().from(schema.documentAttachments),
       ]);
     });
     for (const rows of results) expect(rows).toHaveLength(0);

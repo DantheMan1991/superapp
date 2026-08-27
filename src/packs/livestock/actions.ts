@@ -8,6 +8,13 @@ import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
 import { logAudit } from "@/lib/audit";
 import { packContext } from "@/lib/packs/tenant-context";
+import { allowsWrite } from "@/lib/packs/authorize";
+import { friendlyMessage as friendlyDocsMessage } from "@/modules/documents/core/errors";
+import {
+  detachDocumentFromRecord,
+  registerAttachedPhoto,
+  setPrimaryAttachment,
+} from "@/modules/documents/attachments";
 import { todayInTimezone } from "@/lib/timezone";
 import {
   askAdvisor,
@@ -27,6 +34,7 @@ import {
   deleteWeight,
   endFeedGroupMembership,
   farmSnapshot,
+  getLivestockLot,
   lastTreatmentOfProduct,
   markRoundNormal,
   moveLotToZone,
@@ -97,6 +105,11 @@ function toResult(err: unknown): { error: string } {
   if (err instanceof Error && err.name === "LandError") {
     return { error: err.message };
   }
+  // Photos are Documents' rows, so its refusals arrive here already written
+  // for a person — "Only a photo can be the picture", not a code.
+  if (err instanceof Error && err.name === "DocsError") {
+    return { error: friendlyDocsMessage(err) };
+  }
   console.error("livestock action failed", err);
   return { error: "Something went wrong saving that." };
 }
@@ -109,6 +122,145 @@ const head = z.number().positive().max(1_000_000).multipleOf(0.0001);
 
 function ctxOf(ctx: Awaited<ReturnType<typeof requireTenant>>): LivestockCtx {
   return { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role };
+}
+
+/**
+ * Photos of an animal. Slice 4b.
+ *
+ * **THE PACK OWNS THESE ACTIONS AND CORE OWNS THE TABLE**, which is the whole
+ * shape of the seam: `document_attachments` is polymorphic and names no pack, so
+ * the code that DOES name one is here, where `livestock` is a fact rather than a
+ * string the browser sent.
+ *
+ * **AND BECAUSE THERE IS NO FOREIGN KEY, THIS IS THE ONLY THING THAT PROVES THE
+ * ANIMAL EXISTS.** A polymorphic reference cannot be policed by Postgres — the
+ * trade the schema comment sets out — so `assertLot` is the compensating
+ * control, not a nicety. Without it a photo could be hung on any UUID at all,
+ * including one belonging to another tenant's record, and nothing would object.
+ */
+const PHOTO_ENTITY = "livestock_lot";
+
+const photoTarget = (livestockLotId: string) => ({
+  extensionSlug: PACK,
+  entityType: PHOTO_ENTITY,
+  entityId: livestockLotId,
+});
+
+const photoInput = z.object({
+  entityId: z.string().uuid(),
+  pathname: z.string().min(1).max(500),
+});
+
+const photoRef = z.object({
+  entityId: z.string().uuid(),
+  documentId: z.string().uuid(),
+});
+
+/**
+ * Both modules, both gates. `livestock` because the record is this pack's, and
+ * `documents` because the FILE is the DMS's — a farm that has not switched
+ * Documents on has nowhere to put a photo, and the page says so rather than
+ * offering a button that fails.
+ */
+async function photoGate() {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  await requireModuleEnabled(ctx.tenant.id, "documents");
+  // Taking a photo of an animal is a chore — `member`, like placing head and
+  // moving a lot. The accountant role is read-only everywhere.
+  if (!allowsWrite(ctx.role, "member")) {
+    throw new LivestockError("FORBIDDEN", "cannot write here");
+  }
+  return ctx;
+}
+
+async function assertLot(
+  ctx: Awaited<ReturnType<typeof requireTenant>>,
+  livestockLotId: string,
+): Promise<void> {
+  const lot = await withTenant(
+    ctx.tenant.id,
+    (tx) => getLivestockLot(tx, ctx.tenant.id, livestockLotId),
+    { role: ctx.role },
+  );
+  if (!lot) throw new LivestockError("NOT_FOUND", `lot ${livestockLotId}`);
+}
+
+export async function attachLotPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoInput.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertLot(ctx, parsed.data.entityId);
+
+    const result = await registerAttachedPhoto(
+      { tenantId: ctx.tenant.id, userId: ctx.userId, role: ctx.role },
+      {
+        pathname: parsed.data.pathname,
+        target: photoTarget(parsed.data.entityId),
+      },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true as const, documentId: result.documentId };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setLotPhotoPrimaryAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertLot(ctx, parsed.data.entityId);
+
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        setPrimaryAttachment(
+          tx,
+          { tenantId: ctx.tenant.id, userId: ctx.userId },
+          {
+            documentId: parsed.data.documentId,
+            target: photoTarget(parsed.data.entityId),
+          },
+        ),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function detachLotPhotoAction(input: unknown) {
+  try {
+    const ctx = await photoGate();
+    const parsed = photoRef.safeParse(input);
+    if (!parsed.success) return { error: "Check the details and try again." };
+    await assertLot(ctx, parsed.data.entityId);
+
+    await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        detachDocumentFromRecord(
+          tx,
+          { tenantId: ctx.tenant.id, userId: ctx.userId },
+          {
+            documentId: parsed.data.documentId,
+            target: photoTarget(parsed.data.entityId),
+          },
+        ),
+      { role: ctx.role },
+    );
+    // The FILE is untouched and stays in the cabinet. Removing a photo from an
+    // animal and deleting a photo are different acts.
+    revalidatePath(BASE, "layout");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
 }
 
 export async function createLivestockLotAction(input: unknown) {

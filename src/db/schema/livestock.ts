@@ -28,11 +28,11 @@
  *   - **A head count column.** The count is the balance of
  *     `inventory_movements`. A stored counter is a second source of truth that
  *     has to agree with its own history forever.
- *   - **Breeding stock.** A breeding animal is NOT inventory at all — it is a
- *     capital asset on the other side of the balance sheet, and moving between
- *     the two is an accounting event that must POST. That is where this pack
- *     stops being a tracking app, and it needs the posting machinery rather
- *     than a boolean. Slice 4.
+ *   - **A `breeding` FLAG.** Slice 4f arrived and still did not add one: whether
+ *     an animal is breeding stock is a FOLD over
+ *     `livestock_capital_transfers`, because the move between the two sides of
+ *     the balance sheet is an accounting event that POSTS. A boolean would stop
+ *     agreeing with the journal the first time somebody corrected a date.
  *   - **Inbreeding coefficients, sire performance, trait scores** — the rest of
  *     genetics, slice 4d. **Breed as fractions arrived in slice 4a**, as
  *     `livestock_breed_parts` plus the dam and sire columns above, and it is
@@ -71,6 +71,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./platform";
 import { inventoryLots, inventoryMovements } from "./inventory";
+import { assets } from "./assets";
 
 /**
  * The biology extension on an inventory lot. One row per lot, always.
@@ -828,6 +829,100 @@ export const livestockTreatments = pgTable(
 );
 
 /**
+ * **A COW STOPPED BEING INVENTORY, or started being it again.**
+ *
+ * Slice 4f, and the design has called it the line between a tracking app and an
+ * accounting one since 2026-08-13: *"The same animal is inventory or a capital
+ * asset depending on its purpose. A heifer raised for beef is inventory; kept
+ * for breeding she becomes a capital asset… Moving an animal from the market
+ * herd to the breeding herd is therefore an accounting event that must POST, not
+ * a status checkbox. Most farm software treats it as a flag and quietly makes
+ * the books wrong."*
+ *
+ * **SO THERE IS NO FLAG.** Whether an animal is breeding stock today is a FOLD
+ * over these rows — the latest direction wins — for the same reason the head
+ * count is a fold over movements and the withdrawal clock is a fold over
+ * treatments. A boolean would stop agreeing with the journal the first time
+ * somebody corrected a date, and the journal is the half that matters.
+ *
+ * Each row carries the three things the event actually produced, so nothing has
+ * to be re-derived: the HEAD movement that took her out of stock, the ASSET she
+ * became, and the ENTRY that moved the money. `journal_entry_id` is nullable
+ * because a tenant with no books still makes the decision — it simply has
+ * nowhere to post it, exactly as `postMovement` returns null for them.
+ *
+ * **WHAT THIS DELIBERATELY DOES NOT MODEL: tax basis.** A RAISED breeding animal
+ * has no basis for tax — her costs were expensed as they were incurred — while
+ * her book cost is real and depreciable. This records the BOOK event, which is
+ * the one `assets` can already depreciate; the book/tax split is a decision the
+ * assets dossier has open and it is bigger than this slice.
+ */
+export const livestockCapitalTransfers = pgTable(
+  "livestock_capital_transfers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    /** `to_breeding` — out of stock. `to_market` — back into it. */
+    direction: text("direction").notNull(),
+    occurredOn: date("occurred_on").notNull(),
+    /**
+     * What moved, in cents — the lot's carried cost on the way out, the asset's
+     * net book value on the way back. Never negative: `direction` says which
+     * way, and a signed amount would let the two disagree.
+     */
+    amountCents: integer("amount_cents").notNull(),
+    /** The capital asset she became. NO ACTION: an asset is disposed, never deleted. */
+    assetId: uuid("asset_id"),
+    /** The head event that took her out of the ledger, or put her back. */
+    inventoryMovementId: uuid("inventory_movement_id"),
+    /** Null for a tenant with no books. The decision still happened. */
+    journalEntryId: uuid("journal_entry_id"),
+    createdByClerkUserId: text("created_by_clerk_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_capital_transfers_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    // The fold: "is she breeding stock" reads this, newest first.
+    index("livestock_capital_transfers_tenant_lot_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+      t.occurredOn,
+    ),
+    foreignKey({
+      name: "livestock_capital_transfers_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "livestock_capital_transfers_asset_fk",
+      columns: [t.tenantId, t.assetId],
+      foreignColumns: [assets.tenantId, assets.id],
+    }),
+    foreignKey({
+      name: "livestock_capital_transfers_movement_fk",
+      columns: [t.tenantId, t.inventoryMovementId],
+      foreignColumns: [inventoryMovements.tenantId, inventoryMovements.id],
+    }),
+    check(
+      "livestock_capital_transfers_direction_valid",
+      sql`${t.direction} in ('to_breeding', 'to_market')`,
+    ),
+    check(
+      "livestock_capital_transfers_amount_valid",
+      sql`${t.amountCents} >= 0`,
+    ),
+  ],
+);
+
+/**
  * **A HERD: A THING SOMEBODY CREATES AND PUTS ANIMALS INTO.**
  *
  * Asked for on 2026-08-27, and the request was precise: *"There needs to be
@@ -1058,3 +1153,5 @@ export type LivestockTreatment = typeof livestockTreatments.$inferSelect;
 export type LivestockBreedPart = typeof livestockBreedParts.$inferSelect;
 export type LivestockGroup = typeof livestockGroups.$inferSelect;
 export type LivestockGroupMember = typeof livestockGroupMembers.$inferSelect;
+export type LivestockCapitalTransfer =
+  typeof livestockCapitalTransfers.$inferSelect;

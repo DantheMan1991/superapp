@@ -10,6 +10,7 @@ import type {
   LivestockFeedGroupMember,
   LivestockGroup,
   LivestockGroupMember,
+  LivestockCapitalTransfer,
   LivestockIdentifier,
   LivestockLot,
   LivestockTreatment,
@@ -32,8 +33,17 @@ import {
   onHandByItem,
   recordMovement,
   splitLot as splitInventoryLot,
+  adjustLotCost,
   type InventoryCtx,
 } from "@/packs/inventory/ops";
+import { postCapitalisation } from "@/packs/inventory/ledger-ops";
+import {
+  createAsset,
+  disposeAsset,
+  getAsset,
+  type AssetCtx,
+} from "@/packs/assets/ops";
+import { postedToDateCents } from "@/packs/assets/depreciation-ops";
 import {
   currentZoneForOccupants,
   lastHauledOn,
@@ -45,6 +55,7 @@ import {
   type MoveResult,
 } from "@/packs/land/ops";
 import { isValidSlug } from "@/packs/inventory/vocabulary";
+import { carriedValue } from "@/packs/inventory/core/valuation";
 import { convert, getUnit } from "@/packs/inventory/core/units";
 import { breedLabel, tapeDivisorFrom } from "./vocabulary";
 import { addDays } from "@/lib/timezone";
@@ -138,6 +149,7 @@ export class LivestockError extends Error {
       | "LOT_INVALID"
       | "FEED_GROUP_INVALID"
       | "GROUP_INVALID"
+      | "CAPITAL_INVALID"
       | "INVALID_METHOD"
       | "INVALID_WEIGHT"
       | "INVALID_TREATMENT"
@@ -158,6 +170,14 @@ export interface LivestockCtx {
 
 /** The same shape the packs it composes expect. */
 const asInventory = (ctx: LivestockCtx): InventoryCtx => ctx;
+/**
+ * `assets`, for slice 4f only. **NOT in this pack's `requires`**, deliberately:
+ * a farm that never moves an animal to the breeding herd needs no asset
+ * register, and forcing one on every livestock tenant to serve one slice is the
+ * dependency this pack has otherwise been careful about. The ACTION checks the
+ * module is enabled and says so when it is not.
+ */
+const asAssets = (ctx: LivestockCtx): AssetCtx => ctx;
 const asLand = (ctx: LivestockCtx): LandCtx => ctx;
 
 /**
@@ -534,6 +554,409 @@ export async function splitLivestockLot(
   }
 
   return { lot: rows[0], inventoryLotId: child.id };
+}
+
+// ------------------------------------------------------- capital transfers ---
+
+/**
+ * **A BREEDING ANIMAL IS NOT INVENTORY**, and moving between the two sides of
+ * the balance sheet is an accounting event rather than a checkbox.
+ *
+ * The design has said so since 2026-08-13 and named it as the line between a
+ * tracking app and an accounting one: a heifer raised for beef is stock; kept
+ * for breeding she is a capital asset, depreciable, and treated completely
+ * differently when she is sold. Most farm software makes it a flag and quietly
+ * gets the books wrong.
+ *
+ * **HER HEAD STAYS AND ONLY THE MONEY MOVES**, which is the founder's own
+ * correction after seeing the alternative built. Taking her head out of the
+ * ledger made the accounting automatic — she vanished from stock valuation with
+ * no special case — and made the daily work impossible: Treat and Weigh are
+ * gated on head, recording her death would have taken the lot to minus one, and
+ * shared-feeder allocation is head × days. A breeding cow is the animal a farm
+ * touches MOST, and she had become the one it could do least to.
+ *
+ * "Not inventory" is a claim about the BALANCE SHEET — where her value sits —
+ * and reading it as a claim about whether she exists was the mistake.
+ *
+ * So the mechanism is a marker rather than a movement:
+ * `inventory_lots.capitalised_on` stops `valueStock` and `carriedCostByLot`
+ * counting a cost that is now on an asset, and **no head event is written at
+ * all** — the head ledger records what happened to the ANIMALS, and nothing
+ * happened to them. What changed is what the business owns.
+ *
+ *   - **She can still be treated, weighed, fed, moved and lost**, because she
+ *     is still one head of livestock standing in a paddock.
+ *   - **She cannot be PROCESSED**, and that is an explicit refusal in
+ *     `run-handler.ts` rather than an accident of having no head. Culling a
+ *     breeding cow for beef means bringing her back to the market herd first,
+ *     which is the reverse posting — the "entirely different treatment on sale"
+ *     the design asked for.
+ *   - **She disappears from stock valuation**, which is the entire point.
+ */
+
+/** The two directions a transfer can go, and the fold's answer. */
+export type CapitalState = "market" | "breeding";
+
+/**
+ * Is this animal breeding stock today? **A FOLD, never a column.**
+ *
+ * The latest transfer on or before `on` wins. A boolean on the lot would stop
+ * agreeing with the journal the first time somebody corrected a date, and the
+ * journal is the half that matters.
+ */
+export async function capitalStateByLot(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  on: string,
+): Promise<Map<string, CapitalState>> {
+  const out = new Map<string, CapitalState>();
+  if (lotIds.length === 0) return out;
+  const rows = await tx.query.livestockCapitalTransfers.findMany({
+    where: and(
+      eq(schema.livestockCapitalTransfers.tenantId, tenantId),
+      inArray(schema.livestockCapitalTransfers.livestockLotId, lotIds),
+      lte(schema.livestockCapitalTransfers.occurredOn, on),
+    ),
+    orderBy: (t, { asc }) => [asc(t.occurredOn), asc(t.createdAt)],
+  });
+  // Ascending, so the last write for each lot is the newest — and two transfers
+  // on one day are settled by when they were recorded, which is the only
+  // information there is.
+  for (const row of rows) {
+    out.set(
+      row.livestockLotId,
+      row.direction === "to_breeding" ? "breeding" : "market",
+    );
+  }
+  return out;
+}
+
+/** Every transfer for one animal, newest first — the audit trail on her page. */
+export async function capitalTransfersForLot(
+  tx: Tx,
+  tenantId: string,
+  livestockLotId: string,
+): Promise<LivestockCapitalTransfer[]> {
+  return tx.query.livestockCapitalTransfers.findMany({
+    where: and(
+      eq(schema.livestockCapitalTransfers.tenantId, tenantId),
+      eq(schema.livestockCapitalTransfers.livestockLotId, livestockLotId),
+    ),
+    orderBy: (t, { desc: byDesc }) => [byDesc(t.occurredOn), byDesc(t.createdAt)],
+  });
+}
+
+export interface ToBreedingInput {
+  livestockLotId: string;
+  occurredOn: string;
+  /** The fixed-asset account her cost lands in. Required where books exist. */
+  assetAccountId?: string | null;
+  /** What the asset register calls this kind of thing. */
+  assetKind?: string;
+  /** Book depreciation, if she is to depreciate. All four move together. */
+  depreciationMethod?: string;
+  usefulLifeMonths?: number | null;
+  salvageValueCents?: number | null;
+  notes?: string;
+}
+
+/**
+ * **MOVE AN ANIMAL FROM THE MARKET HERD TO THE BREEDING HERD.** One
+ * transaction: the head leaves stock, an asset appears, the money moves.
+ *
+ * **THE AMOUNT IS HER CARRIED COST, and there is no other honest number.** What
+ * she cost to buy plus what has been spent raising her is exactly what the lot
+ * is carrying, and `carriedCostByLot` is the same fold the valuation screen
+ * uses — so the credit to inventory is the figure that was in stock a moment
+ * before, and the two screens cannot disagree.
+ *
+ * **A COW WITH NO RECORDED COST TRANSFERS AT ZERO, and is allowed to.** A farm
+ * that has never costed its animals still owns them, and refusing would be the
+ * app insisting on bookkeeping before it will record a fact. The asset is
+ * created either way; it simply has nothing to depreciate.
+ *
+ * `owner`, and unusually for this pack that is not about who is holding the
+ * gate: this posts a journal entry, and deciding what the business owns is not
+ * a chore.
+ */
+export async function transferToBreeding(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: ToBreedingInput,
+): Promise<LivestockCapitalTransfer> {
+  requireWrite(ctx, "owner");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
+  }
+
+  const state = await capitalStateByLot(
+    tx,
+    ctx.tenantId,
+    [lot.id],
+    input.occurredOn,
+  );
+  if (state.get(lot.id) === "breeding") {
+    throw new LivestockError("CAPITAL_INVALID", "already breeding stock");
+  }
+
+  const inventoryLot = await getInventoryLot(
+    tx,
+    ctx.tenantId,
+    lot.inventoryLotId,
+  );
+  if (!inventoryLot) throw new LivestockError("NOT_FOUND", "lot went missing");
+
+  const movements = await movementKindsForLots(tx, ctx.tenantId, [
+    lot.inventoryLotId,
+  ]);
+  const balance = summariseHead(
+    movements.get(lot.inventoryLotId) ?? [],
+  ).balance;
+  // ONE ANIMAL AT A TIME. A capital asset is a thing, not a quantity — the
+  // asset register depreciates one cow, and "half a pen became breeding stock"
+  // is a split first. The refusal says so.
+  if (balance !== 1) {
+    throw new LivestockError(
+      "CAPITAL_INVALID",
+      balance === 0
+        ? "nothing here to transfer"
+        : `${balance} head here — record the one animal on its own first`,
+    );
+  }
+
+  const carried = await carriedCostByLot(
+    tx,
+    ctx.tenantId,
+    [lot.inventoryLotId],
+    input.occurredOn,
+  );
+  // `carriedValue`, NEVER `remainingCents` directly — a lot nobody costed and a
+  // lot whose cost has all been released both fold to zero, and only one of
+  // those is a number. Null means uncosted, and she transfers at zero.
+  const row = carried.get(lot.inventoryLotId);
+  const amountCents = Math.max(
+    0,
+    Math.round((row ? carriedValue(row) : null) ?? 0),
+  );
+
+  // **NO HEAD EVENT.** She has not been bought, born, sold or died — the
+  // ledger records what happens to animals, and nothing happened to her. The
+  // marker is what stops inventory counting a cost that is now on an asset.
+  await tx
+    .update(schema.inventoryLots)
+    .set({ capitalisedOn: input.occurredOn, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.inventoryLots.tenantId, ctx.tenantId),
+        eq(schema.inventoryLots.id, lot.inventoryLotId),
+      ),
+    );
+
+  /**
+   * **NOTHING TO DEPRECIATE MEANS SHE DOES NOT DEPRECIATE**, whatever the form
+   * asked for. `assets_depreciable_is_complete` refuses a method other than
+   * `none` without an in-service date, a life AND a cost — so an uncosted cow
+   * with straight-line ticked is a constraint violation, which is what driving
+   * this on Hilltop Farm produced before the guard existed.
+   *
+   * Silently dropping the method rather than refusing is the right way round:
+   * the transfer is a fact about what the business owns, and a farm that has
+   * never costed its animals still owns them. Depreciating nothing over sixty
+   * months is not a thing anybody wanted.
+   */
+  const depreciates = amountCents > 0 && Boolean(input.depreciationMethod) &&
+    input.depreciationMethod !== "none";
+  const asset = await createAsset(tx, asAssets(ctx), {
+    kind: input.assetKind?.trim() || "breeding_stock",
+    name: inventoryLot.code,
+    acquiredOn: input.occurredOn,
+    acquisitionCostCents: amountCents || null,
+    assetAccountId: input.assetAccountId ?? null,
+    inServiceOn: depreciates ? input.occurredOn : null,
+    depreciationMethod: depreciates ? input.depreciationMethod : "none",
+    usefulLifeMonths: depreciates ? (input.usefulLifeMonths ?? null) : null,
+    salvageValueCents: depreciates ? (input.salvageValueCents ?? null) : null,
+    notes: input.notes,
+  });
+
+  // The transfer row FIRST, so the entry it produces has something to be
+  // evidence of — and so the idempotency key is this event's own id.
+  const rows = await tx
+    .insert(schema.livestockCapitalTransfers)
+    .values({
+      tenantId: ctx.tenantId,
+      livestockLotId: lot.id,
+      direction: "to_breeding",
+      occurredOn: input.occurredOn,
+      amountCents,
+      assetId: asset.id,
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+
+  if (amountCents > 0 && input.assetAccountId) {
+    const posted = await postCapitalisation(tx, asInventory(ctx), {
+      sourceId: rows[0].id,
+      itemId: inventoryLot.itemId,
+      lotId: lot.inventoryLotId,
+      lotCode: inventoryLot.code,
+      costCents: amountCents,
+      counterAccountId: input.assetAccountId,
+      occurredOn: input.occurredOn,
+      direction: "out",
+    });
+    if (posted) {
+      const updated = await tx
+        .update(schema.livestockCapitalTransfers)
+        .set({ journalEntryId: posted.entryId })
+        .where(
+          and(
+            eq(schema.livestockCapitalTransfers.tenantId, ctx.tenantId),
+            eq(schema.livestockCapitalTransfers.id, rows[0].id),
+          ),
+        )
+        .returning();
+      return updated[0];
+    }
+  }
+  return rows[0];
+}
+
+/**
+ * **BRING A BREEDING ANIMAL BACK INTO THE MARKET HERD** — the cull decision,
+ * and the reverse posting.
+ *
+ * **AT NET BOOK VALUE, not at what she originally cost.** Depreciation has been
+ * running against her since she was capitalised, and putting her back at cost
+ * would re-create value the books have already written off. `postedToDateCents`
+ * is the same figure the asset's own page shows.
+ *
+ * The asset is DISPOSED rather than deleted — an asset register that forgot the
+ * cow it depreciated for four years would be missing the evidence for those four
+ * years of entries.
+ */
+export async function returnToMarket(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    livestockLotId: string;
+    occurredOn: string;
+    notes?: string;
+  },
+): Promise<LivestockCapitalTransfer> {
+  requireWrite(ctx, "owner");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
+  }
+  const state = await capitalStateByLot(
+    tx,
+    ctx.tenantId,
+    [lot.id],
+    input.occurredOn,
+  );
+  if (state.get(lot.id) !== "breeding") {
+    throw new LivestockError("CAPITAL_INVALID", "not breeding stock");
+  }
+
+  const history = await capitalTransfersForLot(tx, ctx.tenantId, lot.id);
+  const outward = history.find((row) => row.direction === "to_breeding");
+  const assetId = outward?.assetId ?? null;
+
+  const inventoryLot = await getInventoryLot(
+    tx,
+    ctx.tenantId,
+    lot.inventoryLotId,
+  );
+  if (!inventoryLot) throw new LivestockError("NOT_FOUND", "lot went missing");
+
+  // Cost less what depreciation has already taken. A cow written down to
+  // nothing comes back at nothing, which is what the books say she is worth.
+  let amountCents = outward?.amountCents ?? 0;
+  let writtenDownCents = 0;
+  let assetAccountId: string | null = null;
+  if (assetId) {
+    const asset = await getAsset(tx, ctx.tenantId, assetId);
+    assetAccountId = asset?.assetAccountId ?? null;
+    const depreciated = await postedToDateCents(tx, ctx.tenantId, assetId);
+    writtenDownCents = Math.min(depreciated, outward?.amountCents ?? 0);
+    amountCents = Math.max(0, (asset?.acquisitionCostCents ?? amountCents) - depreciated);
+    if (asset && asset.status !== "disposed") {
+      // NOT a sale: nothing was received. She moved to the other side of the
+      // balance sheet, and the entry below is where the value went — which is
+      // why this is `disposeAsset` and not `postDisposal`, the path that books
+      // proceeds and a gain.
+      await disposeAsset(tx, asAssets(ctx), assetId, input.occurredOn);
+    }
+  }
+
+  // Clearing the marker restores what the batch was carrying BEFORE she was
+  // capitalised — her original cost. The books have depreciated her since, so
+  // a correction of exactly that much brings the batch back to net book value
+  // and keeps the ledger and the valuation screen agreeing.
+  await tx
+    .update(schema.inventoryLots)
+    .set({ capitalisedOn: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.inventoryLots.tenantId, ctx.tenantId),
+        eq(schema.inventoryLots.id, lot.inventoryLotId),
+      ),
+    );
+  if (writtenDownCents > 0) {
+    await adjustLotCost(tx, asInventory(ctx), {
+      lotId: lot.inventoryLotId,
+      amountCents: -writtenDownCents,
+      occurredOn: input.occurredOn,
+      reason: "capital_return",
+      notes:
+        input.notes ??
+        "Depreciation taken while she was breeding stock",
+    });
+  }
+
+  const rows = await tx
+    .insert(schema.livestockCapitalTransfers)
+    .values({
+      tenantId: ctx.tenantId,
+      livestockLotId: lot.id,
+      direction: "to_market",
+      occurredOn: input.occurredOn,
+      amountCents,
+      assetId,
+      createdByClerkUserId: ctx.userId,
+    })
+    .returning();
+
+  if (amountCents > 0 && assetAccountId) {
+    const posted = await postCapitalisation(tx, asInventory(ctx), {
+      sourceId: rows[0].id,
+      itemId: inventoryLot.itemId,
+      lotId: lot.inventoryLotId,
+      lotCode: inventoryLot.code,
+      costCents: amountCents,
+      counterAccountId: assetAccountId,
+      occurredOn: input.occurredOn,
+      direction: "in",
+    });
+    if (posted) {
+      const updated = await tx
+        .update(schema.livestockCapitalTransfers)
+        .set({ journalEntryId: posted.entryId })
+        .where(
+          and(
+            eq(schema.livestockCapitalTransfers.tenantId, ctx.tenantId),
+            eq(schema.livestockCapitalTransfers.id, rows[0].id),
+          ),
+        )
+        .returning();
+      return updated[0];
+    }
+  }
+  return rows[0];
 }
 
 // ------------------------------------------------------------------ herds ---

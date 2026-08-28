@@ -26,13 +26,16 @@ import {
   recordBirth,
   setBreedParts,
   addLotToGroup,
+  capitalStateByLot,
   createGroup,
   groupForLots,
   groupSummaries,
   moveGroupToZone,
   removeLotFromGroup,
+  returnToMarket,
   splitIntoIndividuals,
   startIndividual,
+  transferToBreeding,
   updateGroup,
   setParents,
   getLivestockLot,
@@ -57,8 +60,11 @@ import {
   type LivestockCtx,
 } from "../src/packs/livestock/ops";
 import {
+  carriedCostByLot,
   consumedCostByLot,
   createItem,
+  recordMovement,
+  valueStock,
   issueStock,
   movementKindsForLots,
   movementRowsForItem,
@@ -76,6 +82,7 @@ import {
 } from "../src/packs/land/ops";
 import { summariseHead, mortalityRate } from "../src/packs/livestock/core/herd";
 import { formatComposition } from "../src/packs/livestock/core/pedigree";
+import { getAsset } from "../src/packs/assets/ops";
 import { slugLabel } from "../src/packs/inventory/vocabulary";
 import { gainBetween } from "../src/packs/livestock/core/weights";
 import { blocksProcessing } from "../src/packs/livestock/core/withdrawal";
@@ -3389,6 +3396,304 @@ d("livestock ops", () => {
     // Creating a herd is a decision; moving animals between them is a chore.
     await expect(
       asOwner((tx) => createGroup(tx, staffCtx(), { name: "Nope" })),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  // ---- slice 4f: a breeding animal is not inventory ----------------------
+
+  /**
+   * **THE SLICE THE DESIGN CALLED THE LINE BETWEEN A TRACKING APP AND AN
+   * ACCOUNTING ONE.** Most farm software makes this a flag; the claim here is
+   * that it is an entry, and these tests are what make the claim checkable.
+   */
+  it("MOVES HER COST OUT OF STOCK AND ONTO THE BALANCE SHEET", async () => {
+    // A purchased animal: one head in, carrying what she cost.
+    const cow = await newLot("CAPITAL-COW", "cattle");
+    await asOwner((tx) =>
+      recordMovement(tx, ctx(), {
+        itemId,
+        lotId: cow.inventoryLotId,
+        quantity: 1,
+        movementKind: "placement",
+        occurredOn: "2026-08-01",
+        costCents: 180_000,
+      }),
+    );
+
+    const transfer = await asOwner((tx) =>
+      transferToBreeding(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        occurredOn: "2026-08-05",
+      }),
+    );
+    expect(transfer.direction).toBe("to_breeding");
+    expect(transfer.amountCents).toBe(180_000);
+
+    // **HER HEAD STAYS.** She is still an animal standing in a paddock — what
+    // moved is her value. Taking the head out was the first version of this
+    // slice and it made her impossible to treat, weigh or lose.
+    const movements = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [cow.inventoryLotId]),
+    );
+    expect(summariseHead(movements.get(cow.inventoryLotId) ?? []).balance).toBe(
+      1,
+    );
+
+    // ...but she is OUT OF STOCK VALUATION, which is the accounting claim.
+    const valued = await asOwner((tx) =>
+      valueStock(tx, tenantId, { asOf: "2026-08-06" }),
+    );
+    expect(
+      valued.rows.some((r) => r.lotCode === "CAPITAL-COW"),
+    ).toBe(false);
+
+    // ...and the batch carries nothing as stock, so the feed report and a
+    // production run cannot spend money that is now on an asset.
+    const carried = await asOwner((tx) =>
+      carriedCostByLot(tx, tenantId, [cow.inventoryLotId], "2026-08-06"),
+    );
+    expect(carried.get(cow.inventoryLotId)?.remainingCents).toBe(0);
+
+    // ...and an ASSET exists carrying what she cost.
+    const asset = await asOwner((tx) =>
+      getAsset(tx, tenantId, transfer.assetId!),
+    );
+    expect(asset?.acquisitionCostCents).toBe(180_000);
+    expect(asset?.name).toBe("CAPITAL-COW");
+
+    // The fold says breeding, and there is no flag anywhere that could
+    // disagree with it.
+    const state = await asOwner((tx) =>
+      capitalStateByLot(tx, tenantId, [cow.lot.id], "2026-08-05"),
+    );
+    expect(state.get(cow.lot.id)).toBe("breeding");
+  });
+
+  it("THE FOLD IS A FACT ABOUT A DATE, not a column", async () => {
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Dated cow",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      transferToBreeding(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        occurredOn: "2026-08-10",
+      }),
+    );
+
+    // Breeding stock from the 10th — and stock before it. A boolean could not
+    // answer the second question at all.
+    const after = await asOwner((tx) =>
+      capitalStateByLot(tx, tenantId, [cow.lot.id], "2026-08-11"),
+    );
+    expect(after.get(cow.lot.id)).toBe("breeding");
+    const before = await asOwner((tx) =>
+      capitalStateByLot(tx, tenantId, [cow.lot.id], "2026-08-09"),
+    );
+    expect(before.has(cow.lot.id)).toBe(false);
+  });
+
+  it("refuses a pen — a capital asset is a thing, not a quantity", async () => {
+    const pen = await newLot("CAPITAL-PEN", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: pen.inventoryLotId,
+        head: 8,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        transferToBreeding(tx, ctx(), {
+          livestockLotId: pen.lot.id,
+          occurredOn: "2026-08-05",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "CAPITAL_INVALID" });
+  });
+
+  it("refuses to capitalise her twice", async () => {
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Twice cow",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      transferToBreeding(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        occurredOn: "2026-08-05",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        transferToBreeding(tx, ctx(), {
+          livestockLotId: cow.lot.id,
+          occurredOn: "2026-08-06",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "CAPITAL_INVALID" });
+  });
+
+  it("brings her back into stock, and she is inventory again", async () => {
+    const cow = await newLot("RETURNING-COW", "cattle");
+    await asOwner((tx) =>
+      recordMovement(tx, ctx(), {
+        itemId,
+        lotId: cow.inventoryLotId,
+        quantity: 1,
+        movementKind: "placement",
+        occurredOn: "2026-08-01",
+        costCents: 90_000,
+      }),
+    );
+    await asOwner((tx) =>
+      transferToBreeding(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        occurredOn: "2026-08-05",
+      }),
+    );
+
+    const back = await asOwner((tx) =>
+      returnToMarket(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        occurredOn: "2026-08-20",
+      }),
+    );
+    expect(back.direction).toBe("to_market");
+    // Nothing has depreciated yet, so she comes back at what she went in at.
+    expect(back.amountCents).toBe(90_000);
+
+    // Her head never went anywhere, and her VALUE is back in stock.
+    const valued = await asOwner((tx) =>
+      valueStock(tx, tenantId, { asOf: "2026-08-21" }),
+    );
+    expect(valued.rows.some((r) => r.lotCode === "RETURNING-COW")).toBe(true);
+    const carried = await asOwner((tx) =>
+      carriedCostByLot(tx, tenantId, [cow.inventoryLotId], "2026-08-21"),
+    );
+    // Nothing depreciated, so she is carried at what she went in at.
+    expect(carried.get(cow.inventoryLotId)?.remainingCents).toBe(90_000);
+
+    // The ASSET is disposed rather than deleted — the register has to keep the
+    // evidence for the entries it made while she was on it.
+    const asset = await asOwner((tx) => getAsset(tx, tenantId, back.assetId!));
+    expect(asset?.status).toBe("disposed");
+    expect(asset?.disposedOn).toBe("2026-08-20");
+
+    const state = await asOwner((tx) =>
+      capitalStateByLot(tx, tenantId, [cow.lot.id], "2026-08-20"),
+    );
+    expect(state.get(cow.lot.id)).toBe("market");
+  });
+
+  it("refuses to return an animal that was never breeding stock", async () => {
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Never breeding",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        returnToMarket(tx, ctx(), {
+          livestockLotId: cow.lot.id,
+          occurredOn: "2026-08-05",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "CAPITAL_INVALID" });
+  });
+
+  it("an uncosted animal transfers at zero rather than being refused", async () => {
+    // A farm that has never costed its animals still owns them, and refusing
+    // would be the app insisting on bookkeeping before it records a fact.
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Uncosted cow",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const transfer = await asOwner((tx) =>
+      transferToBreeding(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        occurredOn: "2026-08-05",
+      }),
+    );
+    expect(transfer.amountCents).toBe(0);
+    expect(transfer.journalEntryId).toBeNull();
+    expect(transfer.assetId).not.toBeNull();
+  });
+
+  it("SHE IS STILL AN ANIMAL — pedigree, treatments and herd all survive", async () => {
+    // The lot survives with all of its biology, which is what lets a breeding
+    // cow go on being a dam. Only her stock-ness went.
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Still a cow",
+        species: "cattle",
+        sex: "female",
+        breed: "Angus",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      transferToBreeding(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        occurredOn: "2026-08-05",
+      }),
+    );
+
+    const calf = await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        damLotId: cow.lot.id,
+        itemId,
+        code: "CALF-OF-CAPITAL",
+        head: 1,
+        bornOn: "2026-08-10",
+      }),
+    );
+    const composition = await asOwner((tx) =>
+      compositionFor(tx, tenantId, calf.lot.id),
+    );
+    expect(formatComposition(composition, slugLabel)).toBe(
+      "\u00bd Angus \u00b7 \u00bd unknown",
+    );
+
+    // And her identifiers are untouched.
+    const tags = await asOwner((tx) =>
+      listIdentifiers(tx, tenantId, cow.lot.id),
+    );
+    expect(tags[0].value).toBe("Still a cow");
+  });
+
+  it("staff cannot move an animal between the two sides of the balance sheet", async () => {
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Staff cow",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        transferToBreeding(tx, staffCtx(), {
+          livestockLotId: cow.lot.id,
+          occurredOn: "2026-08-05",
+        }),
+      ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

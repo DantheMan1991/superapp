@@ -1,0 +1,1 @@
+ALTER TABLE "inventory_lots" ADD COLUMN "capitalised_on" date;

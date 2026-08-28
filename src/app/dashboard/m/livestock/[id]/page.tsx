@@ -70,6 +70,7 @@ import {
   resolveComposition,
   type AncestorNode,
 } from "@/packs/livestock/core/pedigree";
+import { SplitIntoIndividualsForm } from "@/packs/livestock/components/individual-controls";
 import {
   BreedCompositionForm,
   RecordBirthForm,
@@ -317,6 +318,15 @@ export default async function LivestockLotPage({
       );
       // Every animal in the tree, plus the offspring, named in one query. The
       // index carries ids because the fold that reads it is pure.
+      // Whose treatment is whose: an inherited row carries the lot id it was
+      // recorded against, and the page needs that lot's CODE to name it.
+      const inheritedFrom = await codesByLivestockLot(
+        tx,
+        ctx.tenant.id,
+        [...new Set(treatments.map((t) => t.livestockLotId))].filter(
+          (id) => id !== lot.id,
+        ),
+      );
       const pedigreeCodes = await codesByLivestockLot(tx, ctx.tenant.id, [
         ...pedigree.keys(),
         ...offspring.map((o) => o.id),
@@ -352,6 +362,7 @@ export default async function LivestockLotPage({
         candidates,
         headItems: headItems.filter((i) => i.stockingUnit === "head"),
         breedSuggestions: breedsFrom(pack.config, lot.species),
+        inheritedFrom,
         photos: attachments
           // The gallery renders `<img>`, so anything the browser will not put
           // on screen has no business in it. An attachment that is not a photo
@@ -398,6 +409,7 @@ export default async function LivestockLotPage({
     headItems,
     breedSuggestions,
     photos,
+    inheritedFrom,
   } = data;
   // The FILE lives in the DMS, so the panel exists only where the DMS does. A
   // button that uploads into a module the tenant has not switched on would
@@ -556,6 +568,17 @@ export default async function LivestockLotPage({
             {isOwner && summary.balance > 0 && (
               <SplitHerdForm
                 livestockLotId={lot.id}
+                balance={summary.balance}
+                today={today}
+              />
+            )}
+            {/* Offered only where it means something. A lot of ONE already IS
+                an individual, and a button inviting somebody to make it one
+                would teach them the model is stranger than it is. */}
+            {isOwner && summary.balance > 1 && (
+              <SplitIntoIndividualsForm
+                livestockLotId={lot.id}
+                lotCode={inventoryLot.code}
                 balance={summary.balance}
                 today={today}
               />
@@ -1107,6 +1130,17 @@ export default async function LivestockLotPage({
                         .filter(Boolean)
                         .join(" · ") || "—"}
                     </div>
+                    {/* Said out loud rather than left to be inferred from a
+                        missing button: this clock is running because of
+                        something that happened before this animal was its own
+                        record. */}
+                    {t.livestockLotId !== lot.id && (
+                      <div className="text-xs text-muted-foreground">
+                        Given to{" "}
+                        {inheritedFrom.get(t.livestockLotId) ?? "the lot it came from"}
+                        , before this one was split out
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {treatmentRouteLabel(t.route)}
@@ -1137,33 +1171,47 @@ export default async function LivestockLotPage({
                         the clock is what decides whether these can be
                         processed. */}
                     <div className="flex items-center justify-end">
-                      <RecordTreatmentForm
-                        livestockLotId={lot.id}
-                        lotCode={inventoryLot.code}
-                        head={summary.balance}
-                        today={today}
-                        medicines={[]}
-                        products={products}
-                        existing={{
-                          id: t.id,
-                          treatedOn: t.treatedOn,
-                          product: t.product,
-                          dose: t.dose,
-                          route: t.route,
-                          headTreated: t.headTreated,
-                          meatWithdrawalDays: t.meatWithdrawalDays,
-                          milkWithdrawalDays: t.milkWithdrawalDays,
-                          withdrawalSource: t.withdrawalSource,
-                          administeredBy: t.administeredBy,
-                          notes: t.notes,
-                        }}
-                      />
-                      <RemoveTreatmentButton
-                        treatmentId={t.id}
-                        product={t.product}
-                        treatedOn={t.treatedOn}
-                        fromStock={t.inventoryMovementId !== null}
-                      />
+                      {/* AN INHERITED TREATMENT IS ANOTHER RECORD'S ROW. It
+                          reaches this animal because it was in the pen when the
+                          dose was given — see `treatmentsByLot` — and offering
+                          to correct it here would edit the pen's history from
+                          an animal's page, silently changing the clock for
+                          every other animal that came out of it. */}
+                      {t.livestockLotId === lot.id ? (
+                        <>
+                          <RecordTreatmentForm
+                            livestockLotId={lot.id}
+                            lotCode={inventoryLot.code}
+                            head={summary.balance}
+                            today={today}
+                            medicines={[]}
+                            products={products}
+                            existing={{
+                              id: t.id,
+                              treatedOn: t.treatedOn,
+                              product: t.product,
+                              dose: t.dose,
+                              route: t.route,
+                              headTreated: t.headTreated,
+                              meatWithdrawalDays: t.meatWithdrawalDays,
+                              milkWithdrawalDays: t.milkWithdrawalDays,
+                              withdrawalSource: t.withdrawalSource,
+                              administeredBy: t.administeredBy,
+                              notes: t.notes,
+                            }}
+                          />
+                          <RemoveTreatmentButton
+                            treatmentId={t.id}
+                            product={t.product}
+                            treatedOn={t.treatedOn}
+                            fromStock={t.inventoryMovementId !== null}
+                          />
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Correct it on {inheritedFrom.get(t.livestockLotId) ?? "the lot it came from"}
+                        </span>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

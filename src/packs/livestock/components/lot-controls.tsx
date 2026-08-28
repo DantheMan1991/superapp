@@ -26,6 +26,7 @@ import {
 import {
   addIdentifierAction,
   createLivestockLotAction,
+  startIndividualAction,
   moveLotToZoneAction,
   placeHeadAction,
   removeHeadAction,
@@ -47,7 +48,21 @@ const CUSTOM = "__custom__";
 const NONE = "__none__";
 const UNSET = "";
 
-/** Start an animal lot. Creates the inventory lot and the biology together. */
+/**
+ * Start an animal record — **one animal, or a group, and the form says which.**
+ *
+ * The model has always held both: an individual IS a lot of one, and identifiers,
+ * weights, treatments, photos and parents all hang off the lot either way. What
+ * this form used to do was offer only the group shape and mention the other in a
+ * sentence nobody reads — *"an individual is just a lot of one"* — which is how
+ * the founder came to ask, on 2026-08-27, how individuals are tracked at all.
+ *
+ * **The one real difference is the head.** An individual places its single head
+ * here, because a lot of one containing no animal is a record of nothing. A
+ * GROUP still does not, deliberately: how many chicks actually arrived in a box
+ * of a hundred is a fact somebody checks, and assuming it would be inventing the
+ * mortality denominator.
+ */
 export function LivestockLotForm({
   items,
   speciesOptions,
@@ -69,6 +84,8 @@ export function LivestockLotForm({
   // with broilers AND cattle must say which, or the first option silently wins.
   const [itemId, setItemId] = useState(items.length === 1 ? items[0].id : UNSET);
   const [customItem, setCustomItem] = useState("");
+  const [mode, setMode] = useState<"group" | "individual">("group");
+  const individual = mode === "individual";
 
   const chosen = species === CUSTOM ? customSpecies.trim() : species;
   const newItemName = itemId === CUSTOM ? customItem.trim() : "";
@@ -78,22 +95,34 @@ export function LivestockLotForm({
   function submit(formData: FormData) {
     if (!canSubmit) return;
     const sex = String(formData.get("sex") ?? NONE);
+    const shared = {
+      itemId: itemId === CUSTOM ? undefined : itemId,
+      newItemName: newItemName || undefined,
+      species: chosen.toLowerCase().replace(/\s+/g, "_"),
+      sex: sex === NONE ? null : sex,
+      breed: String(formData.get("breed") ?? ""),
+      bornOn: String(formData.get("bornOn") ?? ""),
+      notes: String(formData.get("notes") ?? ""),
+    };
     startTransition(async () => {
-      const result = await createLivestockLotAction({
-        itemId: itemId === CUSTOM ? undefined : itemId,
-        newItemName: newItemName || undefined,
-        code: String(formData.get("code") ?? ""),
-        species: chosen.toLowerCase().replace(/\s+/g, "_"),
-        sex: sex === NONE ? null : sex,
-        breed: String(formData.get("breed") ?? ""),
-        bornOn: String(formData.get("bornOn") ?? ""),
-        notes: String(formData.get("notes") ?? ""),
-      });
+      const result = individual
+        ? await startIndividualAction({
+            ...shared,
+            name: String(formData.get("code") ?? ""),
+            // The head event's date, which is NOT the birth date — a cow bought
+            // in was born long before she arrived, and folding the two together
+            // would put her age out by however long that was.
+            occurredOn: String(formData.get("occurredOn") ?? today),
+          })
+        : await createLivestockLotAction({
+            ...shared,
+            code: String(formData.get("code") ?? ""),
+          });
       if ("error" in result) {
         toast.error(result.error);
         return;
       }
-      toast.success("Lot started");
+      toast.success(individual ? "Animal recorded" : "Lot started");
       setOpen(false);
       router.refresh();
     });
@@ -102,29 +131,59 @@ export function LivestockLotForm({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>Start a lot</Button>
+        <Button>Add animals</Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <form action={submit}>
           <DialogHeader>
-            <DialogTitle>Start an animal lot</DialogTitle>
+            <DialogTitle>
+              {individual ? "Add one animal" : "Start a group"}
+            </DialogTitle>
             <DialogDescription>
-              A batch of chicks, a group of feeders, or one named cow — an
-              individual is just a lot of one.
+              {individual
+                ? "A named cow, a sow, a ram. Her weights, treatments, photos and calves will all be hers."
+                : "A batch of chicks, a pen of feeders, a flock of layers. Individuals can be split out of it later."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
+            {/* THE CHOICE FIRST, because it changes what the rest of the form
+                is asking for. It used to be a sentence in the description and
+                nobody read it. */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={individual ? "default" : "outline"}
+                onClick={() => setMode("individual")}
+              >
+                One animal
+              </Button>
+              <Button
+                type="button"
+                variant={individual ? "outline" : "default"}
+                onClick={() => setMode("group")}
+              >
+                A group
+              </Button>
+            </div>
+
             <div className="grid gap-2">
-              <Label htmlFor="code">Lot code</Label>
+              <Label htmlFor="code">{individual ? "Name" : "Lot code"}</Label>
               <Input
                 id="code"
                 name="code"
                 required
                 maxLength={120}
                 autoFocus
-                placeholder="e.g. B-2026-04-15, Pen 3, #47"
+                placeholder={
+                  individual ? "e.g. Bluebell, #47" : "e.g. B-2026-04-15, Pen 3"
+                }
               />
+              {individual && (
+                <p className="text-xs text-muted-foreground">
+                  Kept as her name as well, so she is findable by it in a chute.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -217,6 +276,27 @@ export function LivestockLotForm({
               </div>
             </div>
 
+            {individual && (
+              <div className="grid gap-2">
+                <Label htmlFor="occurredOn">On the farm from</Label>
+                <Input
+                  id="occurredOn"
+                  name="occurredOn"
+                  type="date"
+                  defaultValue={today}
+                  max={today}
+                  required
+                />
+                {/* Two dates on purpose. A cow bought in was born long before
+                    she arrived, and one field for both would put her age out by
+                    however long that was. */}
+                <p className="text-xs text-muted-foreground">
+                  The day she joins the count — the same as her birth date only
+                  if she was born here.
+                </p>
+              </div>
+            )}
+
             <div className="grid gap-2">
               <Label htmlFor="breed">Breed</Label>
               {/* A fixed "e.g. Cornish Cross" sat under Species: Cattle and read
@@ -252,7 +332,7 @@ export function LivestockLotForm({
 
           <DialogFooter>
             <Button type="submit" disabled={pending || !canSubmit}>
-              {pending ? "Saving…" : "Start lot"}
+              {pending ? "Saving…" : individual ? "Add animal" : "Start group"}
             </Button>
           </DialogFooter>
         </form>

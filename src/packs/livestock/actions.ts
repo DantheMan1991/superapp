@@ -29,6 +29,8 @@ import {
   createGroup,
   moveGroupToZone,
   removeLotFromGroup,
+  returnToMarket,
+  transferToBreeding,
   updateGroup,
   MAX_INDIVIDUALS,
   addIdentifier,
@@ -90,6 +92,9 @@ function toResult(err: unknown): { error: string } {
       case "INVALID_IDENTIFIER":
         return { error: "A tag kind must be lowercase letters and underscores." };
       case "LOT_INVALID":
+      // Every one of these already says what is wrong in a sentence — "8 head
+      // here — record the one animal on its own first" is the whole answer.
+      case "CAPITAL_INVALID":
       case "GROUP_INVALID":
       case "FEED_GROUP_INVALID":
       case "INVALID_WEIGHT":
@@ -118,6 +123,16 @@ function toResult(err: unknown): { error: string } {
   // for a person — "Only a photo can be the picture", not a code.
   if (err instanceof Error && err.name === "DocsError") {
     return { error: friendlyDocsMessage(err) };
+  }
+  // Slice 4f composes `assets` and the ledger, and both throw their own types.
+  // Without these the capital transfer's refusals all arrived as "Something
+  // went wrong saving that" — which is how the missing depreciation guard took
+  // a browser session to diagnose instead of a sentence.
+  if (err instanceof Error && err.name === "AssetError") {
+    return { error: err.message };
+  }
+  if (err instanceof Error && err.name === "LedgerError") {
+    return { error: err.message };
   }
   console.error("livestock action failed", err);
   return { error: "Something went wrong saving that." };
@@ -723,6 +738,98 @@ export async function moveGroupToZoneAction(input: unknown) {
       moved: result.moved.length,
       refused: result.refused.length,
     };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * **THE CAPITAL TRANSFER.** Both directions gate on `assets` as well as this
+ * pack, because a capital asset needs an asset register to live in — and
+ * `livestock` deliberately does not `require` assets, so most of the pack works
+ * without it and this one slice says so out loud instead.
+ */
+async function capitalGate() {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  await requireModuleEnabled(ctx.tenant.id, "assets");
+  return ctx;
+}
+
+export async function transferToBreedingAction(input: unknown) {
+  const ctx = await capitalGate();
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      occurredOn: requiredDate,
+      assetAccountId: z.string().uuid().nullable().optional(),
+      assetKind: z.string().min(1).max(63).optional(),
+      depreciationMethod: z.enum(["none", "straight_line"]).optional(),
+      usefulLifeMonths: z.number().int().positive().max(1200).nullable().optional(),
+      salvageValueCents: z.number().int().min(0).nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const transfer = await withTenant(
+      ctx.tenant.id,
+      (tx) => transferToBreeding(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.capital.to_breeding",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      // Identifiers and the amount — the figure IS the point of the event, and
+      // it is a book value rather than anything private.
+      meta: {
+        amountCents: String(transfer.amountCents),
+        assetId: transfer.assetId ?? "",
+        journalEntryId: transfer.journalEntryId ?? "",
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true as const, amountCents: transfer.amountCents };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function returnToMarketAction(input: unknown) {
+  const ctx = await capitalGate();
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      occurredOn: requiredDate,
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const transfer = await withTenant(
+      ctx.tenant.id,
+      (tx) => returnToMarket(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.capital.to_market",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
+      meta: {
+        amountCents: String(transfer.amountCents),
+        assetId: transfer.assetId ?? "",
+        journalEntryId: transfer.journalEntryId ?? "",
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return { ok: true as const, amountCents: transfer.amountCents };
   } catch (err) {
     return toResult(err);
   }

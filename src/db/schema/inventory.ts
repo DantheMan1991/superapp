@@ -209,6 +209,27 @@ export const inventoryLots = pgTable(
      */
     parentLotId: uuid("parent_lot_id"),
     status: text("status").notNull().default("open"),
+    /**
+     * **THIS BATCH'S COST HAS BEEN CAPITALISED ELSEWHERE — it is no longer
+     * stock.** Null is the ordinary case.
+     *
+     * A breeding cow is the first caller: she is still an animal on the farm,
+     * still eats, is still treated and weighed and can still die — so her HEAD
+     * stays in the ledger — but her value has moved to fixed assets and
+     * counting it in stock would count it twice. Livestock slice 4f, and the
+     * founder's own correction after seeing the alternative: taking her head out
+     * made the accounting automatic and the daily work impossible.
+     *
+     * **NEUTRAL ON PURPOSE.** Nothing here knows what a heifer is. A dealership
+     * moving a demonstrator out of stock marks the same column.
+     *
+     * Both `valueStock` and `carriedCostByLot` respect it, which is what keeps
+     * the ledger and the valuation screen agreeing: the entry moved the money,
+     * and this stops inventory reporting it as well. **There are deliberately no
+     * fake movements** — the head ledger records what happened to the ANIMALS,
+     * and nothing happened to them.
+     */
+    capitalisedOn: date("capitalised_on"),
     openedOn: date("opened_on"),
     /**
      * **WHEN THIS BATCH STOPS BEING GOOD, and it is on the LOT rather than the

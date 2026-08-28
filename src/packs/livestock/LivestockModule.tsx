@@ -23,6 +23,7 @@ import { currentZoneForOccupants } from "@/packs/land/ops";
 import { slugLabel } from "@/packs/inventory/vocabulary";
 import {
   breedPartsByLot,
+  capitalStateByLot,
   groupForLots,
   groupSummaries,
   listLivestockLots,
@@ -86,6 +87,7 @@ export async function LivestockModule({
         portraits,
         herds,
         herdByLot,
+        capitalByLot,
       ] = await Promise.all([
         listLots(tx, ctx.tenant.id),
         currentZoneForOccupants(
@@ -140,6 +142,15 @@ export async function LivestockModule({
           lots.map((l) => l.id),
           today,
         ),
+        // Slice 4f. A breeding animal has NO HEAD in the ledger — she is not
+        // stock — so without this she would sit in the list reading "0" as
+        // though she had died.
+        capitalStateByLot(
+          tx,
+          ctx.tenant.id,
+          lots.map((l) => l.id),
+          today,
+        ),
       ]);
 
       return {
@@ -154,6 +165,7 @@ export async function LivestockModule({
         portraits,
         herds,
         herdByLot,
+        capitalByLot,
       };
     },
     { role: ctx.role },
@@ -171,6 +183,7 @@ export async function LivestockModule({
     portraits,
     herds,
     herdByLot,
+    capitalByLot,
   } = data;
   const isOwner = ctx.role === "owner";
   const byId = new Map(inventoryLots.map((l) => [l.id, l]));
@@ -188,6 +201,12 @@ export async function LivestockModule({
    * complaint on 2026-08-27 was that individuals and groups sat as peer rows and
    * that a thousand animals made it unreadable; an animal in a herd is now shown
    * inside its herd, and this list is what has not been put in one yet.
+   */
+  /**
+   * **A BREEDING ANIMAL IS IN THE LIST LIKE ANY OTHER**, because she still has
+   * a head and is still an animal on the farm — slice 4f moves her value, not
+   * her. She gets a badge rather than a section of her own; grouping breeding
+   * stock together is what a HERD is for, and there is one of those now.
    */
   const loose = lots.filter((lot) => !herdByLot.has(lot.id));
 
@@ -332,6 +351,11 @@ export async function LivestockModule({
                         {inv?.code ?? "—"}
                       </Link>
                       {inv?.parentLotId && <Badge variant="outline">split</Badge>}
+                      {/* Her cost is in fixed assets, so she is out of stock
+                          valuation while her head is still counted here. */}
+                      {capitalByLot.get(lot.id) === "breeding" && (
+                        <Badge variant="outline">breeding stock</Badge>
+                      )}
                     </div>
                     {/* What somebody ENTERED, as fractions. A lot whose
                         breeding is only computed from its parents shows nothing

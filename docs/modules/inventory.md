@@ -1217,6 +1217,12 @@ commitment against a live animal to delivered without sitting on a shelf.
 
 ## Open items
 
+- **`capitalised_on` is set by `livestock` and by nothing else yet.** The column
+  is neutral — a batch whose cost has been capitalised elsewhere is not a farm
+  idea — and `valueStock` and `carriedCostByLot` both respect it. Anything else
+  that capitalises out of stock sets the same column and needs no change here.
+  Added 2026-08-27 for livestock slice 4f; see [livestock.md](livestock.md).
+
 - **THERE IS NO ENTERPRISE DIMENSION, and the search box is standing in for one.**
   "Just chicken" is answered today by typing a word that happens to appear in the
   names — which works on this farm because its items are called *Broiler chicks*,

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import type {
   RunConsumeInput,
@@ -114,6 +114,41 @@ export const livestockRunHandler: RunInputHandler<Tx> = {
         ),
       );
     if (lots.length === 0) return out;
+
+    /**
+     * **A CAPITAL ASSET CANNOT BE PROCESSED.** Slice 4f: a breeding cow keeps
+     * her head in the ledger — she is still an animal standing in a paddock —
+     * so nothing else would stop a run consuming her, and the run would expense
+     * an animal whose cost is sitting in fixed assets.
+     *
+     * The refusal is explicit rather than an accident of having no head, which
+     * is what the first version of 4f relied on and what made her impossible to
+     * treat or weigh. Culling her for beef is a real thing to do; it just goes
+     * through the market herd first, which is where the reverse posting is.
+     */
+    const capitalised = await tx
+      .select({
+        id: schema.inventoryLots.id,
+        capitalisedOn: schema.inventoryLots.capitalisedOn,
+      })
+      .from(schema.inventoryLots)
+      .where(
+        and(
+          eq(schema.inventoryLots.tenantId, tenantId),
+          inArray(schema.inventoryLots.id, lotIds),
+          isNotNull(schema.inventoryLots.capitalisedOn),
+        ),
+      );
+    for (const lot of capitalised) {
+      if ((lot.capitalisedOn ?? "") > today) continue;
+      out.set(lot.id, {
+        slug: "livestock",
+        headline: "Breeding stock",
+        reason:
+          "This animal is a capital asset, not stock — her cost is in fixed assets. Bring her back to the market herd first, which moves the value back and is the entry a sale needs.",
+        clearsOn: null,
+      });
+    }
 
     const treatments = await treatmentsByLot(
       tx,

@@ -1618,6 +1618,13 @@
       "when": 1787909690398,
       "tag": "0230_livestock_record_kind_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 231,
+      "version": "7",
+      "when": 1787909691398,
+      "tag": "0231_herds_become_lots",
+      "breakpoints": true
     }
   ]
 }

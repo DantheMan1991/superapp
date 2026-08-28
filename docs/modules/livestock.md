@@ -192,6 +192,11 @@ the expression is. Every other interpolation added in 8a ends its element
 **Check the rendered page, not the source, whenever this word goes inside a
 sentence** — 8c and 8d will both do it.
 
+**BOTH DATABASES ARE MIGRATED AND VERIFIED** — dev and production each at 153
+tables, every one RLS enabled, forced and with policies, before this was
+merged. Recorded here because 4f's entry did NOT say so, and finding out
+took four commands and a browser session.
+
 Migrations `0227` (the table) and `0228` (RLS, member-wide like the herd table
 it replaces). 8 new ops tests, 8 new isolation tests. Two existing isolation
 tests changed from "tenant A has one lot" to two — the fixture needs a second so

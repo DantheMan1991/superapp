@@ -25,17 +25,12 @@ import { speciesFrom } from "./vocabulary";
 import {
   LivestockError,
   MAX_BREED_PARTS,
-  addLotToGroup,
   addLotToParent,
-  createGroup,
-  moveGroupToZone,
   lotMembers,
   moveLotsToZone,
-  removeLotFromGroup,
   removeLotFromParent,
   returnToMarket,
   transferToBreeding,
-  updateGroup,
   MAX_INDIVIDUALS,
   addIdentifier,
   addLotToFeedGroup,
@@ -573,131 +568,6 @@ export async function startIndividualAction(input: unknown) {
 }
 
 /**
- * Herds. **Creating one is the owner's; putting animals in one and moving it are
- * chores**, at `member` — walking a mob to the next paddock is the definition of
- * one, and the person doing it is not the owner at ten times this size.
- */
-export async function createGroupAction(input: unknown) {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, PACK);
-  const parsed = z
-    .object({
-      name: z.string().min(1).max(120),
-      notes: z.string().max(5000).optional(),
-    })
-    .safeParse(input);
-  if (!parsed.success) return { error: "Check the details and try again." };
-
-  try {
-    const group = await withTenant(
-      ctx.tenant.id,
-      (tx) => createGroup(tx, ctxOf(ctx), parsed.data),
-      { role: ctx.role },
-    );
-    await logAudit({
-      action: "livestock.group.created",
-      tenantId: ctx.tenant.id,
-      actorClerkUserId: ctx.userId,
-      targetType: "livestock_group",
-      targetId: group.id,
-      meta: {},
-    });
-    revalidatePath(BASE, "layout");
-    return { ok: true as const, id: group.id };
-  } catch (err) {
-    return toResult(err);
-  }
-}
-
-export async function updateGroupAction(input: unknown) {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, PACK);
-  const parsed = z
-    .object({
-      id: z.string().uuid(),
-      name: z.string().min(1).max(120).optional(),
-      notes: z.string().max(5000).optional(),
-      status: z.enum(["active", "closed"]).optional(),
-    })
-    .safeParse(input);
-  if (!parsed.success) return { error: "Check the details and try again." };
-
-  try {
-    const { id, ...patch } = parsed.data;
-    await withTenant(
-      ctx.tenant.id,
-      (tx) => updateGroup(tx, ctxOf(ctx), id, patch),
-      { role: ctx.role },
-    );
-    revalidatePath(BASE, "layout");
-    return { ok: true as const };
-  } catch (err) {
-    return toResult(err);
-  }
-}
-
-/**
- * Put an animal in a herd — **which takes it out of whichever herd it was in**,
- * in the same transaction. A cow is not in two herds, and the database says so.
- */
-export async function addLotToGroupAction(input: unknown) {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, PACK);
-  const parsed = z
-    .object({
-      groupId: z.string().uuid(),
-      livestockLotIds: z.array(z.string().uuid()).min(1).max(200),
-      startedOn: requiredDate,
-    })
-    .safeParse(input);
-  if (!parsed.success) return { error: "Check the details and try again." };
-
-  try {
-    await withTenant(
-      ctx.tenant.id,
-      async (tx) => {
-        for (const livestockLotId of parsed.data.livestockLotIds) {
-          await addLotToGroup(tx, ctxOf(ctx), {
-            groupId: parsed.data.groupId,
-            livestockLotId,
-            startedOn: parsed.data.startedOn,
-          });
-        }
-      },
-      { role: ctx.role },
-    );
-    revalidatePath(BASE, "layout");
-    return { ok: true as const, count: parsed.data.livestockLotIds.length };
-  } catch (err) {
-    return toResult(err);
-  }
-}
-
-export async function removeLotFromGroupAction(input: unknown) {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, PACK);
-  const parsed = z
-    .object({
-      livestockLotId: z.string().uuid(),
-      endedOn: requiredDate,
-    })
-    .safeParse(input);
-  if (!parsed.success) return { error: "Check the details and try again." };
-
-  try {
-    await withTenant(
-      ctx.tenant.id,
-      (tx) => removeLotFromGroup(tx, ctxOf(ctx), parsed.data),
-      { role: ctx.role },
-    );
-    revalidatePath(BASE, "layout");
-    return { ok: true as const };
-  } catch (err) {
-    return toResult(err);
-  }
-}
-
-/**
  * **PUT ANIMALS INSIDE A LOT** (slice 8b). What replaces `addLotToGroupAction`.
  *
  * Takes a LIST, because the act somebody is doing is "these six go in the north
@@ -757,57 +627,6 @@ export async function removeLotFromParentAction(input: unknown) {
     );
     revalidatePath(BASE, "layout");
     return { ok: true as const };
-  } catch (err) {
-    return toResult(err);
-  }
-}
-
-/**
- * **MOVE THE WHOLE HERD.** The reason a herd is worth having, and the one place
- * this pack writes `land_occupancy` for more than one lot at a time.
- *
- * Reports what it could not move rather than a bare count: a herd where three
- * of ten refused is a thing somebody has to be told, and a success message
- * saying "moved" would read as ten.
- */
-export async function moveGroupToZoneAction(input: unknown) {
-  const ctx = await requireTenant();
-  await requireModuleEnabled(ctx.tenant.id, PACK);
-  const parsed = z
-    .object({
-      groupId: z.string().uuid(),
-      zoneId: z.string().uuid(),
-      startedOn: requiredDate,
-      structureAssetId: z.string().uuid().nullable().optional(),
-      notes: z.string().max(5000).optional(),
-    })
-    .safeParse(input);
-  if (!parsed.success) return { error: "Check the details and try again." };
-
-  try {
-    const result = await withTenant(
-      ctx.tenant.id,
-      (tx) => moveGroupToZone(tx, ctxOf(ctx), parsed.data),
-      { role: ctx.role },
-    );
-    await logAudit({
-      action: "livestock.group.moved",
-      tenantId: ctx.tenant.id,
-      actorClerkUserId: ctx.userId,
-      targetType: "livestock_group",
-      targetId: parsed.data.groupId,
-      meta: {
-        zoneId: parsed.data.zoneId,
-        moved: String(result.moved.length),
-        refused: String(result.refused.length),
-      },
-    });
-    revalidatePath(BASE, "layout");
-    return {
-      ok: true as const,
-      moved: result.moved.length,
-      refused: result.refused.length,
-    };
   } catch (err) {
     return toResult(err);
   }

@@ -36,8 +36,9 @@ and [land.md](land.md) before changing anything about where animals are.
 | **8b** | **Animals live in a lot** — a lot holds animals and smaller lots, and naming one out of a pen KEEPS her in it | **shipped 2026-08-28** |
 | **8c** | **Two pages** — a lot page and an animal page, neither wearing the other's furniture | **shipped 2026-08-28** |
 | **8d** | **Move several lots at once** — the one thing herds did that nothing else does. Ships BEFORE 8e | **shipped 2026-08-28** |
-| **8e** | **`livestock_groups` dropped** — only after 8d is live | |
+| **8e** | **Herds become lots** — converted and unread. **The DROP is 8g, its own PR** | **shipped 2026-08-28** |
 | **8f** | **Feed reaches a single animal** — in a lot it is the lot's, on her own it is hers | **shipped 2026-08-28** |
+| 8g | **Drop `livestock_groups` and `livestock_group_members`** — only after 8e is deployed | |
 
 ## The model, settled 2026-08-27
 
@@ -131,6 +132,64 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-08-28 — Slice 8e: the herd becomes a lot (`claude/the-herd-becomes-a-lot`)
+
+**Every herd is now a LOT holding what it held, and nothing reads
+`livestock_groups` any more.** Migration `0231`. Slice 8 is complete except the
+DROP, which is deliberately not here.
+
+**THE TABLES ARE NOT DROPPED IN THIS PR, AND THAT IS THE WHOLE SHAPE OF IT.**
+`main` auto-deploys and nothing applies migrations for it, so a DROP shipped
+beside the code that stops reading it would take the running app down in the gap
+between the two. ADR 0014's rule is usually read as *apply the migration before
+merging an addition*; a removal runs the same risk in the other direction, and
+the answer is the same — **two releases.** 8g drops them once this is live.
+
+**A BARE DROP WOULD HAVE LOST REAL GROUPINGS.** Hilltop Farm's "Cows" holds
+Rosie, Hazel, Mabel and Bluebell. Without a conversion they would have become
+four unrelated rows with nothing saying they belong together — the app would
+have "removed herds" by deleting the farm's only herd.
+
+A converted herd is an `inventory_lots` row named for it with **no head of its
+own** (the head was always its members' and stays there), a `livestock_lots` row
+at `record_kind = 'lot'`, and one `livestock_lot_members` row per membership with
+the dates carried across.
+
+**THE LINK IS THE HERD'S ID IN `metadata`, NEVER ITS NAME.** `livestock_groups`
+does not enforce unique names, so two herds called "Cows" would produce two lots
+coded "Cows" and a name join would cross them — duplicating every membership and
+tripping the one-open-per-member index. Found by reading the constraint rather
+than by running it.
+
+**Two skips, both stated in the SQL:**
+
+  - **An animal already placed in a lot by hand keeps that placement.** The
+    partial unique index allows one open membership, and somebody who stated it
+    outranks a migration inferring it.
+  - **A member that HOLDS things is skipped**, for the one-level rule — a herd
+    containing a lot that itself contains animals cannot become a two-level
+    tree.
+
+Closed memberships carry across regardless: history does not collide.
+
+**What came out of the code.** The `herds/[id]` route, `herd-controls.tsx`, 411
+lines of herd ops, five actions, the hub's Herds section, the lot page's herd
+link, and the `livestockGroup` label from both the registry and the
+homestead-farm profile. `NO_UUID` and two type imports went with them — every one
+was only there for herd code.
+
+**The hub has one rule again.** It used to exclude both "in a herd" and "inside
+another lot"; now it shows top-level lots, full stop.
+
+**THE ISOLATION TESTS FOR THE HERD TABLES DELIBERATELY STAY.** The tables are
+still there, and a live table with no certification is exactly what that suite
+exists to catch. They go in 8g with the DROP. The herd OPS tests went now,
+because the functions did.
+
+Applied to dev and verified: 1 herd in, 1 lot out holding 4, and `PEN-1 <-
+Speckles` untouched beside it.
+
 
 ### 2026-08-28 — Slice 8d: a lot moves as one (`claude/a-lot-moves-as-one`)
 

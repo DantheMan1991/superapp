@@ -74,8 +74,6 @@ import {
   listWeightsForLot,
   capitalStateByLot,
   capitalTransfersForLot,
-  groupForLots,
-  listGroups,
   offspringOf,
   lotMemberSummaries,
   lotsAvailableToJoin,
@@ -265,8 +263,6 @@ export default async function LivestockLotPage({
         offspring,
         candidates,
         headItems,
-        herdByLot,
-        herds,
         capitalState,
         capitalTransfers,
         accounts,
@@ -332,10 +328,6 @@ export default async function LivestockLotPage({
             excludeId: lot.id,
           }),
           listItems(tx, ctx.tenant.id, { status: "active" }),
-          // Which herd she is in today. A fact about a DATE, so today is passed
-          // rather than assumed.
-          groupForLots(tx, ctx.tenant.id, [lot.id], today),
-          listGroups(tx, ctx.tenant.id, { status: "active" }),
           // Slice 4f. Whether she is stock or a capital asset is a FOLD over
           // the transfers, never a column — see `capitalStateByLot`.
           capitalStateByLot(tx, ctx.tenant.id, [lot.id], today),
@@ -446,8 +438,6 @@ export default async function LivestockLotPage({
         headItems: headItems.filter((i) => i.stockingUnit === "head"),
         breedSuggestions: breedsFrom(pack.config, lot.species),
         inheritedFrom,
-        herd:
-          herds.find((g) => g.id === herdByLot.get(lot.id)) ?? null,
         capitalState: capitalState.get(lot.id) ?? "market",
         carriedCents: (() => {
           // `carriedValue`, NEVER `remainingCents` — a lot nobody costed and a
@@ -517,7 +507,6 @@ export default async function LivestockLotPage({
     breedSuggestions,
     photos,
     inheritedFrom,
-    herd,
     capitalState,
     capitalTransfers,
     carriedCents,
@@ -660,19 +649,9 @@ export default async function LivestockLotPage({
           <span className="flex items-center gap-2">
             {slugLabel(lot.species)}
             {breedingLabel && ` · ${breedingLabel}`}
-            {/* Which herd she is in, up beside the species — the answer to
-                "where does this animal belong" is half of recognising it. */}
-            {herd && (
-              <Link
-                href={`${BASE}/herds/${herd.id}`}
-                className="underline-offset-4 hover:underline"
-              >
-                · {herd.name}
-              </Link>
-            )}
-            {/* SLICE 8B: which lot she lives in, beside which herd she is
-                in. Both answer "where does this animal belong", and until 8e
-                drops herds a farm can have an answer to each. */}
+            {/* **WHICH LOT SHE LIVES IN** — the answer to "where does this
+                animal belong", and since 8e the only answer there is: every
+                herd became a lot holding what it held. */}
             {insideOf && insideOfCode && (
               <Link
                 href={`${BASE}/${insideOf}`}

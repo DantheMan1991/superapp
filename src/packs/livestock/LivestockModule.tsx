@@ -24,14 +24,11 @@ import { slugLabel } from "@/packs/inventory/vocabulary";
 import {
   breedPartsByLot,
   capitalStateByLot,
-  groupForLots,
   membersByParent,
   parentByLot,
-  groupSummaries,
   listLivestockLots,
   withdrawalByLot,
 } from "./ops";
-import { HerdForm } from "./components/herd-controls";
 import { formatComposition, statedComposition } from "./core/pedigree";
 import {
   blocksProcessing,
@@ -87,8 +84,6 @@ export async function LivestockModule({
         withdrawals,
         breedParts,
         portraits,
-        herds,
-        herdByLot,
         capitalByLot,
         lotParents,
         lotMembersByParent,
@@ -136,16 +131,6 @@ export async function LivestockModule({
           "livestock_lot",
           lots.map((l) => l.id),
         ),
-        // **HERDS FIRST.** A thousand chickens is one row and ten named cows
-        // are one row that opens to ten — which is the whole reason this list
-        // stopped being a flat page of every animal on the farm.
-        groupSummaries(tx, ctx.tenant.id, today, { status: "active" }),
-        groupForLots(
-          tx,
-          ctx.tenant.id,
-          lots.map((l) => l.id),
-          today,
-        ),
         // Slice 4f. A breeding animal has NO HEAD in the ledger — she is not
         // stock — so without this she would sit in the list reading "0" as
         // though she had died.
@@ -183,8 +168,6 @@ export async function LivestockModule({
         withdrawals,
         breedParts,
         portraits,
-        herds,
-        herdByLot,
         capitalByLot,
         lotParents,
         lotMembersByParent,
@@ -203,8 +186,6 @@ export async function LivestockModule({
     withdrawals,
     breedParts,
     portraits,
-    herds,
-    herdByLot,
     capitalByLot,
     lotParents,
     lotMembersByParent,
@@ -219,12 +200,14 @@ export async function LivestockModule({
     suggestedSpecies.map((s) => [s, breedsFrom(pack.config, s)]),
   );
   const lotWord = labelFor(pack.labels, "livestockLot", "Lot");
-  const herdWord = labelFor(pack.labels, "livestockGroup", "Group");
   /**
-   * **Only what is NOT in a herd goes in the flat list.** The founder's
-   * complaint on 2026-08-27 was that individuals and groups sat as peer rows and
-   * that a thousand animals made it unreadable; an animal in a herd is now shown
-   * inside its herd, and this list is what has not been put in one yet.
+   * **Only TOP-LEVEL lots go in this list** — what is inside another lot is
+   * shown on that lot's page (8b), and listing it here as well would be the
+   * same animal twice with its head already counted in the parent's total.
+   *
+   * Herds used to be the other exclusion. Slice 8e converted every one of them
+   * into a lot holding what it held, so there is one kind of container again
+   * and one rule for what this list shows.
    */
   /**
    * **A BREEDING ANIMAL IS IN THE LIST LIKE ANY OTHER**, because she still has
@@ -238,7 +221,7 @@ export async function LivestockModule({
    * animal twice, and her head is already counted in the pen's total.
    */
   const loose = lots.filter(
-    (lot) => !herdByLot.has(lot.id) && !lotParents.has(lot.id),
+    (lot) => !lotParents.has(lot.id),
   );
 
   return (
@@ -250,7 +233,6 @@ export async function LivestockModule({
         actions={
           isOwner ? (
             <div className="flex flex-wrap items-center gap-2">
-            <HerdForm word={herdWord} />
             {/* No longer gated on an item existing: the form can create one. A
                 farm's first animal used to require a trip to Inventory first. */}
             <LivestockLotForm
@@ -270,65 +252,8 @@ export async function LivestockModule({
           they were built in — and it is preserved in the strip. */}
       <LivestockNav />
 
-      {herds.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="font-heading text-xl font-semibold tracking-heading">
-            {herdWord}s
-          </h2>
-          <DataTable isEmpty={false}>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{herdWord}</TableHead>
-                  <TableHead>Species</TableHead>
-                  <TableHead>Where</TableHead>
-                  <TableHead className="text-right">Named</TableHead>
-                  <TableHead className="text-right">Head</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {herds.map((herd) => (
-                  <TableRow key={herd.group.id}>
-                    <TableCell className="font-medium">
-                      <Link
-                        href={`${BASE}/herds/${herd.group.id}`}
-                        className="hover:underline"
-                      >
-                        {herd.group.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {herd.species.map(slugLabel).join(" · ") || "—"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {/* Two paddocks is said out loud — see `groupSummaries`. */}
-                      {herd.where ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {/* How many of them are animals somebody named, as
-                          against head counted in a pen. Both belong in a herd
-                          and they are different things to look at. */}
-                      {herd.individuals || "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
-                      {herd.head}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </DataTable>
-        </div>
-      )}
-
-      {herds.length > 0 && loose.length > 0 && (
-        <h2 className="font-heading text-xl font-semibold tracking-heading">
-          Not in a {herdWord.toLowerCase()}
-        </h2>
-      )}
-
       <DataTable
-        isEmpty={loose.length === 0 && herds.length === 0}
+        isEmpty={loose.length === 0}
         empty={
           <EmptyState
             icon={<Beef className="h-5 w-5" />}

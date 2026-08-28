@@ -26,23 +26,16 @@ import {
   recordBirth,
   recordDirectFeed,
   setBreedParts,
-  addLotToGroup,
   addLotToParent,
   lotMemberSummaries,
   lotMembers,
   lotsAvailableToJoin,
   removeLotFromParent,
   capitalStateByLot,
-  createGroup,
-  groupForLots,
-  groupSummaries,
-  moveGroupToZone,
-  removeLotFromGroup,
   returnToMarket,
   splitIntoIndividuals,
   startIndividual,
   transferToBreeding,
-  updateGroup,
   setParents,
   getLivestockLot,
   lastCheckedByLot,
@@ -3185,227 +3178,15 @@ d("livestock ops", () => {
     expect(rows[0].livestockLotId).toBe(lot.id);
   });
 
-  // ---- herds --------------------------------------------------------------
-
-  it("MOVES THE WHOLE HERD IN ONE ACT, which is the reason a herd exists", async () => {
-    // Ten cows on a paddock used to be ten trips through the move dialog,
-    // because `moveOccupant` takes one occupant.
-    const herd = await asOwner((tx) => createGroup(tx, ctx(), { name: "Cows" }));
-    const made = await asOwner((tx) =>
-      Promise.all([
-        startIndividual(tx, ctx(), {
-          itemId,
-          name: "Bluebell",
-          species: "cattle",
-          occurredOn: "2026-08-01",
-        }),
-        startIndividual(tx, ctx(), {
-          itemId,
-          name: "Daisy",
-          species: "cattle",
-          occurredOn: "2026-08-01",
-        }),
-      ]),
-    );
-    for (const animal of made) {
-      await asOwner((tx) =>
-        addLotToGroup(tx, ctx(), {
-          groupId: herd.id,
-          livestockLotId: animal.lot.id,
-          startedOn: "2026-08-01",
-        }),
-      );
-    }
-
-    const result = await asOwner((tx) =>
-      moveGroupToZone(tx, ctx(), {
-        groupId: herd.id,
-        zoneId,
-        startedOn: "2026-08-02",
-      }),
-    );
-    expect(result.moved).toHaveLength(2);
-    expect(result.refused).toHaveLength(0);
-
-    // Everyone is on the paddock — written through LAND's own table, which is
-    // the seam this pack never reaches around.
-    const places = await asOwner((tx) =>
-      currentZoneForOccupants(
-        tx,
-        tenantId,
-        "livestock",
-        made.map((m) => m.inventoryLotId),
-        "2026-08-02",
-      ),
-    );
-    for (const animal of made) {
-      expect(places.get(animal.inventoryLotId)?.zoneId).toBe(zoneId);
-    }
-  });
-
-  it("adding to a herd TAKES THE ANIMAL OUT OF ITS OLD ONE, in one act", async () => {
-    const cows = await asOwner((tx) =>
-      createGroup(tx, ctx(), { name: "Cows B" }),
-    );
-    const weaners = await asOwner((tx) =>
-      createGroup(tx, ctx(), { name: "Weaners B" }),
-    );
-    const animal = await asOwner((tx) =>
-      startIndividual(tx, ctx(), {
-        itemId,
-        name: "Mover",
-        species: "cattle",
-        occurredOn: "2026-08-01",
-      }),
-    );
-
-    await asOwner((tx) =>
-      addLotToGroup(tx, ctx(), {
-        groupId: cows.id,
-        livestockLotId: animal.lot.id,
-        startedOn: "2026-08-01",
-      }),
-    );
-    await asOwner((tx) =>
-      addLotToGroup(tx, ctx(), {
-        groupId: weaners.id,
-        livestockLotId: animal.lot.id,
-        startedOn: "2026-08-10",
-      }),
-    );
-
-    // She is in the new herd now...
-    const now = await asOwner((tx) =>
-      groupForLots(tx, tenantId, [animal.lot.id], "2026-08-10"),
-    );
-    expect(now.get(animal.lot.id)).toBe(weaners.id);
-
-    // ...and the history still says where she was, which is the whole reason
-    // membership is a dated table rather than a column on the lot.
-    const before = await asOwner((tx) =>
-      groupForLots(tx, tenantId, [animal.lot.id], "2026-08-05"),
-    );
-    expect(before.get(animal.lot.id)).toBe(cows.id);
-
-    // MOVING BETWEEN HERDS IS NOT A HEAD EVENT. She has not been bought, born,
-    // sold or died, and a movement on the ledger for it would corrupt the one
-    // number this pack is built to keep honest.
-    const movements = await asOwner((tx) =>
-      movementKindsForLots(tx, tenantId, [animal.inventoryLotId]),
-    );
-    expect(movements.get(animal.inventoryLotId)).toHaveLength(1);
-  });
-
-  it("counts a herd's head as the sum of its members, named and not", async () => {
-    // The shape the founder asked for: "individual animals or the ability to
-    // just have a number of animals" — in one herd, at the same time.
-    const herd = await asOwner((tx) =>
-      createGroup(tx, ctx(), { name: "Mixed" }),
-    );
-    const named = await asOwner((tx) =>
-      startIndividual(tx, ctx(), {
-        itemId,
-        name: "Named one",
-        species: "swine",
-        occurredOn: "2026-08-01",
-      }),
-    );
-    const pen = await newLot("MIXED-PEN", "swine");
-    await asOwner((tx) =>
-      placeHead(tx, ctx(), {
-        itemId,
-        inventoryLotId: pen.inventoryLotId,
-        head: 47,
-        occurredOn: "2026-08-01",
-      }),
-    );
-    for (const id of [named.lot.id, pen.lot.id]) {
-      await asOwner((tx) =>
-        addLotToGroup(tx, ctx(), {
-          groupId: herd.id,
-          livestockLotId: id,
-          startedOn: "2026-08-01",
-        }),
-      );
-    }
-
-    const summaries = await asOwner((tx) =>
-      groupSummaries(tx, tenantId, "2026-08-02", { status: "active" }),
-    );
-    const mine = summaries.find((s) => s.group.id === herd.id)!;
-    expect(mine.head).toBe(48);
-    // One of the two is an animal somebody named; the other is a count.
-    expect(mine.individuals).toBe(1);
-    expect(mine.species).toEqual(["swine"]);
-  });
-
-  it("takes an animal out, leaving it in no herd at all", async () => {
-    const herd = await asOwner((tx) =>
-      createGroup(tx, ctx(), { name: "Leavers" }),
-    );
-    const animal = await asOwner((tx) =>
-      startIndividual(tx, ctx(), {
-        itemId,
-        name: "Leaver",
-        species: "cattle",
-        occurredOn: "2026-08-01",
-      }),
-    );
-    await asOwner((tx) =>
-      addLotToGroup(tx, ctx(), {
-        groupId: herd.id,
-        livestockLotId: animal.lot.id,
-        startedOn: "2026-08-01",
-      }),
-    );
-    await asOwner((tx) =>
-      removeLotFromGroup(tx, ctx(), {
-        livestockLotId: animal.lot.id,
-        endedOn: "2026-08-05",
-      }),
-    );
-
-    const after = await asOwner((tx) =>
-      groupForLots(tx, tenantId, [animal.lot.id], "2026-08-06"),
-    );
-    expect(after.has(animal.lot.id)).toBe(false);
-    // And taking her out did not touch the animal.
-    const still = await asOwner((tx) =>
-      getLivestockLot(tx, tenantId, animal.lot.id),
-    );
-    expect(still?.id).toBe(animal.lot.id);
-  });
-
-  it("refuses a closed herd, and staff cannot create one", async () => {
-    const herd = await asOwner((tx) =>
-      createGroup(tx, ctx(), { name: "Closing" }),
-    );
-    await asOwner((tx) =>
-      updateGroup(tx, ctx(), herd.id, { status: "closed" }),
-    );
-    const animal = await asOwner((tx) =>
-      startIndividual(tx, ctx(), {
-        itemId,
-        name: "Too late",
-        species: "cattle",
-        occurredOn: "2026-08-01",
-      }),
-    );
-    await expect(
-      asOwner((tx) =>
-        addLotToGroup(tx, ctx(), {
-          groupId: herd.id,
-          livestockLotId: animal.lot.id,
-          startedOn: "2026-08-01",
-        }),
-      ),
-    ).rejects.toMatchObject({ code: "GROUP_INVALID" });
-
-    // Creating a herd is a decision; moving animals between them is a chore.
-    await expect(
-      asOwner((tx) => createGroup(tx, staffCtx(), { name: "Nope" })),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
-  });
+  // ---- herds: REMOVED in slice 8e ----------------------------------------
+  //
+  // Every herd became a LOT holding what it held (`0231`), and the ops these
+  // tests covered are gone. What they were testing is now covered by "animals
+  // live in a lot" (8b) and "a lot moves as one" (8d) below.
+  //
+  // The ISOLATION tests for `livestock_groups` deliberately stay: the tables
+  // still exist until the DROP ships in its own PR, and a live table with no
+  // certification is exactly what that suite is for.
 
   // ---- slice 4f: a breeding animal is not inventory ----------------------
 

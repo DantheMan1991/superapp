@@ -173,6 +173,16 @@ export default async function FeedPage({
     ]),
   );
 
+  /**
+   * SLICE 8F: everyone who can be fed BY NAME. Animals and lots alike — a pen
+   * given its own bag is measured exactly as a cow is, and the founder's rule
+   * ("in a lot it is the lot's, on her own it is hers") is about who is NAMED,
+   * not about how many head they have.
+   */
+  const animalOptions = lots
+    .map((lot) => ({ id: lot.id, code: codeByLot.get(lot.id) ?? "—" }))
+    .sort((a, b) => a.code.localeCompare(b.code));
+
   const totalCents = report.lots.reduce((sum, row) => sum + row.totalCents, 0);
   const measuredCents = report.lots.reduce(
     (sum, row) => sum + row.measuredCents,
@@ -264,6 +274,7 @@ export default async function FeedPage({
     groups.length > 0 && itemOptions.length > 0 ? (
       <RecordDrawForm
         feeders={groups.map((g) => ({ id: g.id, name: g.name }))}
+        animals={animalOptions}
         items={itemOptions}
         lotsByItem={lotOptionsByItem}
         locations={locations.map((l) => ({ id: l.id, name: l.name }))}
@@ -637,6 +648,7 @@ export default async function FeedPage({
                               id: g.id,
                               name: g.name,
                             }))}
+                            animals={animalOptions}
                             items={itemOptions}
                             lotsByItem={lotOptionsByItem}
                             locations={locations.map((l) => ({

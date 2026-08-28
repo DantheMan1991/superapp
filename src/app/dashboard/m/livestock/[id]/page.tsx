@@ -24,7 +24,9 @@ import { labelFor } from "@/lib/packs/resolve";
 import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/app/data-table";
+import { RecordDrawForm } from "@/packs/livestock/components/feed-controls";
 import {
   AddToLotForm,
   TakeOutOfLotButton,
@@ -44,6 +46,8 @@ import {
   consumedByLot,
   getLot as getInventoryLot,
   listItems,
+  listLocations,
+  lotsByItem as lotsByItemQuery,
   listMovements,
   movementKindsForLots,
 } from "@/packs/inventory/ops";
@@ -353,6 +357,18 @@ export default async function LivestockLotPage({
         ctx.tenant.id,
         structureKindsFrom(landPack.config),
       );
+      // SLICE 8F: what this one can be fed, and out of which delivery.
+      // Loaded here rather than passing an empty list, so the form on this
+      // page asks the same questions as the one on the feed page.
+      const feedLocations = await listLocations(tx, ctx.tenant.id);
+      const feedableItems = headItems.filter(
+        (i) => i.itemKind !== "livestock",
+      );
+      const deliveriesByItem = await lotsByItemQuery(
+        tx,
+        ctx.tenant.id,
+        feedableItems.map((i) => i.id),
+      );
       // SLICE 8B: what is inside this lot, and what this lot is inside. Both
       // are questions about a DATE, so today is passed rather than assumed —
       // the same rule the herd and the paddock reads follow.
@@ -395,6 +411,9 @@ export default async function LivestockLotPage({
         (await breedPartsByLot(tx, ctx.tenant.id, [lot.id])).get(lot.id) ?? [];
       return {
         lot,
+        feedLocations,
+        feedableItems,
+        deliveriesByItem,
         members,
         insideOf: insideOf ?? null,
         insideOfCode: insideOfCode ?? null,
@@ -464,6 +483,9 @@ export default async function LivestockLotPage({
   if (!data) notFound();
   const {
     lot,
+    feedLocations,
+    feedableItems,
+    deliveriesByItem,
     members,
     insideOf,
     insideOfCode,
@@ -710,6 +732,43 @@ export default async function LivestockLotPage({
                 // No divisor for this species means a tape produces no weight,
                 // so the method is not offered rather than offered and useless.
                 tapeAvailable={tapeDivisor !== null}
+              />
+            )}
+            {/* **SLICE 8F: FEED THIS ONE, BY NAME.** No feeders are passed, so
+                the dialog opens straight into "Feed one" with this record
+                already picked and no shared-feeder toggle — on her own page,
+                there is only one answer to "who ate it".
+
+                Before this, a named animal could not be fed from this module at
+                all: the only control required a shared feeder, and every named
+                animal on the pilot farm read "—" in every feed column. */}
+            {feedableItems.length > 0 && (
+              <RecordDrawForm
+                feeders={[]}
+                animals={[{ id: lot.id, code: inventoryLot.code }]}
+                defaultAnimalId={lot.id}
+                items={feedableItems.map((i) => ({
+                  id: i.id,
+                  name: i.name,
+                  unit: i.stockingUnit,
+                }))}
+                lotsByItem={Object.fromEntries(
+                  [...deliveriesByItem].map(([itemId, itemLots]) => [
+                    itemId,
+                    itemLots.map((l) => ({ id: l.id, code: l.code })),
+                  ]),
+                )}
+                locations={feedLocations.map((l) => ({
+                  id: l.id,
+                  name: l.name,
+                }))}
+                currencySymbol={currencySymbol}
+                today={today}
+                trigger={
+                  <Button variant="outline" size="sm">
+                    Feed
+                  </Button>
+                }
               />
             )}
             {/* SLICE 8C: not offered on an animal. Splitting one cow into two

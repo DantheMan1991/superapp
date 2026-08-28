@@ -29,6 +29,7 @@ import {
   closeFeedGroupAction,
   createFeedGroupAction,
   endFeedGroupMembershipAction,
+  recordDirectFeedAction,
   recordFeedDrawAction,
 } from "../actions";
 
@@ -355,15 +356,26 @@ export function CloseFeederButton({
  */
 export function RecordDrawForm({
   feeders,
+  animals,
   items,
   lotsByItem,
   locations,
   currencySymbol,
   today,
   defaultFeederId,
+  defaultAnimalId,
   trigger,
 }: {
   feeders: FeederOption[];
+  /**
+   * **SLICE 8F: who can be fed BY NAME.** Every animal and lot on the farm.
+   *
+   * The founder's rule is *in a lot, feed is the lot's; on her own, it is
+   * hers*, and this module only had the first half — a cow standing on her own
+   * could not be fed from here at all, because the only control required a
+   * shared feeder.
+   */
+  animals: { id: string; code: string }[];
   items: FeedItemOption[];
   /** Batches of each item, so a draw can name the delivery it came out of. */
   lotsByItem: Record<string, { id: string; code: string }[]>;
@@ -371,6 +383,8 @@ export function RecordDrawForm({
   currencySymbol: string | null;
   today: string;
   defaultFeederId?: string;
+  /** Opens straight into "by name" with this one picked — the lot page's door. */
+  defaultAnimalId?: string;
   trigger?: React.ReactNode;
 }) {
   const router = useRouter();
@@ -379,6 +393,19 @@ export function RecordDrawForm({
   const [feederId, setFeederId] = useState(defaultFeederId ?? feeders[0]?.id ?? "");
   const [itemId, setItemId] = useState(items[0]?.id ?? "");
   const [lotId, setLotId] = useState(NO_LOT);
+  /**
+   * **WHO ATE IT — a feeder, or somebody named.** The one real choice in this
+   * dialog, because it decides whether the cost is ALLOCATED by head-days or
+   * MEASURED against one record. Opens on whichever the caller has: the feed
+   * page defaults to a feeder, an animal's own page defaults to her.
+   */
+  const [mode, setMode] = useState<"feeder" | "named">(
+    defaultAnimalId || feeders.length === 0 ? "named" : "feeder",
+  );
+  const [animalId, setAnimalId] = useState(
+    defaultAnimalId ?? animals[0]?.id ?? "",
+  );
+  const byName = mode === "named";
 
   const item = useMemo(
     () => items.find((i) => i.id === itemId) ?? null,
@@ -392,21 +419,29 @@ export function RecordDrawForm({
       toast.error("Enter how much was drawn.");
       return;
     }
-    if (!feederId || !itemId) {
-      toast.error("Pick a feeder and what was drawn.");
+    if (!itemId || (byName ? !animalId : !feederId)) {
+      toast.error(
+        byName
+          ? "Pick who ate it and what was drawn."
+          : "Pick a feeder and what was drawn.",
+      );
       return;
     }
     const locationId = String(formData.get("locationAssetId") ?? NO_LOCATION);
+    const shared = {
+      itemId,
+      lotId: lotId === NO_LOT ? null : lotId,
+      quantity,
+      occurredOn: String(formData.get("occurredOn") ?? today),
+      locationAssetId: locationId === NO_LOCATION ? null : locationId,
+      notes: String(formData.get("notes") ?? ""),
+    };
     startTransition(async () => {
-      const result = await recordFeedDrawAction({
-        feedGroupId: feederId,
-        itemId,
-        lotId: lotId === NO_LOT ? null : lotId,
-        quantity,
-        occurredOn: String(formData.get("occurredOn") ?? today),
-        locationAssetId: locationId === NO_LOCATION ? null : locationId,
-        notes: String(formData.get("notes") ?? ""),
-      });
+      // The ONLY difference is who is named, and that is what decides measured
+      // against allocated. Same ledger, same stamping, either way.
+      const result = byName
+        ? await recordDirectFeedAction({ ...shared, livestockLotId: animalId })
+        : await recordFeedDrawAction({ ...shared, feedGroupId: feederId });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -414,10 +449,11 @@ export function RecordDrawForm({
       // Null means the item has no priced receipt behind it — spent grain, or
       // an invoice that has not arrived. Fed, but not spent, and saying "0.00"
       // there would be a claim nobody made.
+      const verb = byName ? "Fed" : "Drawn";
       toast.success(
         result.costCents === null || result.costCents === undefined
-          ? "Drawn · no price on record"
-          : `Drawn · ${formatMoney(result.costCents, currencySymbol)}`,
+          ? `${verb} · no price on record`
+          : `${verb} · ${formatMoney(result.costCents, currencySymbol)}`,
       );
       setOpen(false);
       router.refresh();
@@ -432,31 +468,74 @@ export function RecordDrawForm({
       <DialogContent className="sm:max-w-md">
         <form action={submit}>
           <DialogHeader>
-            <DialogTitle>Draw feed</DialogTitle>
+            <DialogTitle>{byName ? "Feed one" : "Draw feed"}</DialogTitle>
             <DialogDescription>
               Stock leaves now and the cost is worked out now, at today&rsquo;s
-              average. It is spread across the lots on this feeder afterwards,
-              by head and days.
+              average.{" "}
+              {byName
+                ? "It lands entirely on the one you name — measured, not a share of anything."
+                : "It is spread across the lots on this feeder afterwards, by head and days."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
-            {feeders.length > 1 && (
+            {/* **THE CHOICE FIRST, because it changes what the rest is asking
+                for** — the same reason the lot form leads with One animal / A
+                lot. Hidden when there are no feeders: a farm with none has only
+                one answer and does not need to be asked. */}
+            {feeders.length > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={byName ? "outline" : "default"}
+                  onClick={() => setMode("feeder")}
+                >
+                  A shared feeder
+                </Button>
+                <Button
+                  type="button"
+                  variant={byName ? "default" : "outline"}
+                  onClick={() => setMode("named")}
+                >
+                  One by name
+                </Button>
+              </div>
+            )}
+
+            {byName ? (
               <div className="grid gap-2">
-                <Label htmlFor="draw-feeder">Feeder</Label>
-                <Select value={feederId} onValueChange={setFeederId}>
-                  <SelectTrigger id="draw-feeder">
-                    <SelectValue placeholder="Pick a feeder" />
+                <Label htmlFor="draw-animal">Who ate it</Label>
+                <Select value={animalId} onValueChange={setAnimalId}>
+                  <SelectTrigger id="draw-animal">
+                    <SelectValue placeholder="Pick one" />
                   </SelectTrigger>
                   <SelectContent>
-                    {feeders.map((f) => (
-                      <SelectItem key={f.id} value={f.id}>
-                        {f.name}
+                    {animals.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.code}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
+            ) : (
+              feeders.length > 1 && (
+                <div className="grid gap-2">
+                  <Label htmlFor="draw-feeder">Feeder</Label>
+                  <Select value={feederId} onValueChange={setFeederId}>
+                    <SelectTrigger id="draw-feeder">
+                      <SelectValue placeholder="Pick a feeder" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {feeders.map((f) => (
+                        <SelectItem key={f.id} value={f.id}>
+                          {f.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )
             )}
 
             <div className="grid gap-2">

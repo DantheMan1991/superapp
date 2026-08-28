@@ -3980,6 +3980,69 @@ export async function recordFeedDraw(
   return { draw: rows[0], costCents: movement.costCents };
 }
 
+/**
+ * **FEED ONE ANIMAL, OR ONE LOT, BY NAME.** Slice 8f.
+ *
+ * The founder's rule, and the half this pack did not have: *in a lot, feed is
+ * the lot's; on her own, it is hers.* `recordFeedDraw` covers the first and
+ * requires a shared feeder — so a cow standing on her own could not be fed from
+ * this module at all, and every named animal on the pilot farm read `—` in
+ * every feed column.
+ *
+ * **THE ONLY DIFFERENCE FROM A DRAW IS `issuedToLotId`, AND THAT IS THE WHOLE
+ * POINT.** A draw sets it null on purpose, because nobody is named and the cost
+ * has to be spread by head-days; this names somebody, which is what makes the
+ * cost MEASURED rather than allocated. Same ledger, same stamping, same
+ * `issueStock` — `inventory` has carried the column since the costing loop was
+ * closed, and the feed report has read it as "Measured" ever since.
+ *
+ * **SO THERE IS NO NEW TABLE AND NO MIGRATION**, which is not what the slice
+ * plan assumed. What was missing was never the data model; it was the door.
+ *
+ * **AND NO `livestock_feed_draws` ROW**, deliberately. That table exists to say
+ * which FEEDER an issue was drawn for, and there is no feeder here. Writing one
+ * with a made-up group would put this cost into a head-days allocation and
+ * double it.
+ */
+export async function recordDirectFeed(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    /** The animal or lot that ate it. */
+    livestockLotId: string;
+    itemId: string;
+    /** Which delivery it came out of. Null lets inventory choose. */
+    lotId?: string | null;
+    quantity: number;
+    occurredOn: string;
+    locationAssetId?: string | null;
+    notes?: string;
+  },
+): Promise<{ movementId: string; costCents: number | null }> {
+  // `member`, matching `recordFeedDraw`: tipping a bucket into a pen is a chore
+  // done by whoever is holding the bucket.
+  requireWrite(ctx, "member");
+  const target = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!target) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
+  }
+
+  const movement = await issueStock(tx, asInventory(ctx), {
+    itemId: input.itemId,
+    lotId: input.lotId ?? null,
+    quantity: input.quantity,
+    // NAMED, and that is the entire difference. The report reads this column to
+    // decide measured against allocated.
+    issuedToLotId: target.inventoryLotId,
+    occurredOn: input.occurredOn,
+    locationAssetId: input.locationAssetId ?? null,
+    extensionSlug: "livestock",
+    notes: input.notes,
+  });
+
+  return { movementId: movement.id, costCents: movement.costCents };
+}
+
 /** The draws recorded against a set of feeders, keyed by feeder. */
 export async function feedDrawsByGroup(
   tx: Tx,

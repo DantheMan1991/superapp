@@ -28,7 +28,7 @@ const DEATH = new Set(["death", "died", "mortality"]);
  * and has not moved to another lot: unrecognised kinds fall through to
  * `transfer`, and a transfer OUT would leave mortality's denominator intact
  * while a transfer IN would inflate it. Birds that reach the killing cone are
- * the batch succeeding, not the batch losing anything.
+ * the lot succeeding, not the lot losing anything.
  */
 const REMOVAL = new Set([
   "cull",
@@ -87,7 +87,7 @@ export function summariseHead(movements: HeadMovement[]): HeadSummary {
         break;
       case "transfer":
         transferred += m.quantity;
-        // A transfer IN is also head arriving. A pen split off a batch has no
+        // A transfer IN is also head arriving. A pen split off a lot has no
         // `placement` of its own, and without this its mortality rate would
         // divide by zero and read as unknown forever.
         if (m.quantity > 0) intake += m.quantity;

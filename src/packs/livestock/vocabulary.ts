@@ -32,7 +32,7 @@ export const SEXES = ["male", "female", "mixed"] as const;
 export const SEX_LABELS: Record<string, string> = {
   male: "Male",
   female: "Female",
-  // The honest answer for a straight-run batch of chicks, not a missing value.
+  // The honest answer for a straight-run lot of chicks, not a missing value.
   mixed: "Mixed",
 };
 

@@ -138,8 +138,8 @@ export default async function DailyRoundPage() {
    * The round is the lots with animals standing in them.
    *
    * A lot whose balance is zero is not a pen somebody forgot to check — it is a
-   * batch that has gone. Leaving them on the list would grow it by one every
-   * time a batch finished, and the first thing an unusable list teaches is to
+   * lot that has gone. Leaving them on the list would grow it by one every
+   * time a lot finished, and the first thing an unusable list teaches is to
    * stop tapping the button.
    */
   const round = lots

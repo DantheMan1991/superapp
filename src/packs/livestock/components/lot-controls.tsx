@@ -49,18 +49,23 @@ const NONE = "__none__";
 const UNSET = "";
 
 /**
- * Start an animal record — **one animal, or a group, and the form says which.**
+ * Start an animal record — **one animal, or a lot, and the form says which.**
  *
- * The model has always held both: an individual IS a lot of one, and identifiers,
- * weights, treatments, photos and parents all hang off the lot either way. What
- * this form used to do was offer only the group shape and mention the other in a
- * sentence nobody reads — *"an individual is just a lot of one"* — which is how
- * the founder came to ask, on 2026-08-27, how individuals are tracked at all.
+ * **A LOT IS A GROUP OF ANIMALS AND AN ANIMAL IS AN ANIMAL** (slice 8a, the
+ * founder's ruling of 2026-08-27). The two shapes share a table and they do NOT
+ * share a word: this form used to call the group shape "a group", which
+ * collided head-on with the `livestockGroup` label — a farm running the
+ * homestead profile saw *Start a herd* and *Start a group* side by side in one
+ * header, creating two different things.
  *
- * **The one real difference is the head.** An individual places its single head
- * here, because a lot of one containing no animal is a record of nothing. A
- * GROUP still does not, deliberately: how many chicks actually arrived in a box
- * of a hundred is a fact somebody checks, and assuming it would be inventing the
+ * `word` is the tenant's noun for the group shape, so a poultry keeper reads
+ * *Start a flock* — the same treatment `HerdForm` already gets, and the reason
+ * none of these strings is a literal.
+ *
+ * **The one real difference is the head.** An animal places its single head
+ * here, because a record with no animal in it is a record of nothing. A LOT
+ * still does not, deliberately: how many chicks actually arrived in a box of a
+ * hundred is a fact somebody checks, and assuming it would be inventing the
  * mortality denominator.
  */
 export function LivestockLotForm({
@@ -68,12 +73,15 @@ export function LivestockLotForm({
   speciesOptions,
   breedsBySpecies,
   today,
+  word,
 }: {
   items: { id: string; name: string }[];
   speciesOptions: string[];
   /** Breed slugs the profile suggests, per species. Never a closed list. */
   breedsBySpecies: Record<string, string[]>;
   today: string;
+  /** The tenant's word for a group of animals — "Lot", "Flock", "Pen". */
+  word: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -86,6 +94,8 @@ export function LivestockLotForm({
   const [customItem, setCustomItem] = useState("");
   const [mode, setMode] = useState<"group" | "individual">("group");
   const individual = mode === "individual";
+  // The tenant's noun, lowercased for mid-sentence use. "Lot" by default.
+  const lower = word.toLowerCase();
 
   const chosen = species === CUSTOM ? customSpecies.trim() : species;
   const newItemName = itemId === CUSTOM ? customItem.trim() : "";
@@ -122,7 +132,7 @@ export function LivestockLotForm({
         toast.error(result.error);
         return;
       }
-      toast.success(individual ? "Animal recorded" : "Lot started");
+      toast.success(individual ? "Animal recorded" : `${word} started`);
       setOpen(false);
       router.refresh();
     });
@@ -137,12 +147,12 @@ export function LivestockLotForm({
         <form action={submit}>
           <DialogHeader>
             <DialogTitle>
-              {individual ? "Add one animal" : "Start a group"}
+              {individual ? "Add one animal" : `Start a ${lower}`}
             </DialogTitle>
             <DialogDescription>
               {individual
                 ? "A named cow, a sow, a ram. Her weights, treatments, photos and calves will all be hers."
-                : "A batch of chicks, a pen of feeders, a flock of layers. Individuals can be split out of it later."}
+                : "A pen of chicks, a flock of layers, a group of feeders. You can give individual animals a name of their own later."}
             </DialogDescription>
           </DialogHeader>
 
@@ -163,12 +173,17 @@ export function LivestockLotForm({
                 variant={individual ? "outline" : "default"}
                 onClick={() => setMode("group")}
               >
-                A group
+                {`A ${lower}`}
               </Button>
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="code">{individual ? "Name" : "Lot code"}</Label>
+              {/* **A NAME, NOT A CODE** (slice 8a). The label read "Lot code"
+                  over a placeholder of `B-2026-04-15`, which told a farmer to
+                  invent a barcode for a pen he already calls the north pen.
+                  The column is `inventory_lots.code` and is shared, so
+                  `inventory` still calls it a code — the word is per pack. */}
+              <Label htmlFor="code">Name</Label>
               <Input
                 id="code"
                 name="code"
@@ -176,7 +191,9 @@ export function LivestockLotForm({
                 maxLength={120}
                 autoFocus
                 placeholder={
-                  individual ? "e.g. Bluebell, #47" : "e.g. B-2026-04-15, Pen 3"
+                  individual
+                    ? "e.g. Bluebell, #47"
+                    : "e.g. North pen, Spring broilers"
                 }
               />
               {individual && (
@@ -332,7 +349,7 @@ export function LivestockLotForm({
 
           <DialogFooter>
             <Button type="submit" disabled={pending || !canSubmit}>
-              {pending ? "Saving…" : individual ? "Add animal" : "Start group"}
+              {pending ? "Saving…" : individual ? "Add animal" : `Start ${lower}`}
             </Button>
           </DialogFooter>
         </form>
@@ -541,7 +558,7 @@ export function RemoveHeadForm({
   );
 }
 
-/** Split head into a new lot — a batch across pens. */
+/** Split head into a new lot — a lot across pens. */
 export function SplitHerdForm({
   livestockLotId,
   balance,

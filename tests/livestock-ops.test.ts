@@ -2793,7 +2793,7 @@ d("livestock ops", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  // ---- individuals: an animal is a lot of one, and now the app says so ----
+  // ---- individuals: an animal is its own record, not a lot (slice 8a) ----
 
   it("splits a pen into named animals, each carrying the biology across", async () => {
     const { lot } = await newLot("HERD-1", "cattle");
@@ -2944,7 +2944,7 @@ d("livestock ops", () => {
   });
 
   it("a named animal can be a dam straight away", async () => {
-    // The point of all of it: an individual is a lot of one, so she is a
+    // The point of all of it: a named animal is her own record, so she is a
     // parent in the pedigree with nothing else needed.
     const dam = await asOwner((tx) =>
       startIndividual(tx, ctx(), {

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Scale } from "lucide-react";
 import { LivestockNav } from "@/packs/livestock/components/livestock-nav";
 import { withTenant } from "@/db";
+import { labelFor } from "@/lib/packs/resolve";
 import { packContext } from "@/lib/packs/tenant-context";
 import { requireTenant } from "@/lib/auth";
 import { requireModuleEnabled } from "@/lib/modules";
@@ -143,6 +144,7 @@ export default async function FeedPage({
         inventoryLots,
         members,
         lotsForItems,
+        labels: pack.labels,
       };
     },
     { role: ctx.role },
@@ -157,8 +159,13 @@ export default async function FeedPage({
     inventoryLots,
     members,
     lotsForItems,
+    labels,
   } = data;
   const isOwner = ctx.role === "owner";
+  // Slice 8a: the page says the tenant's word for a group of animals, never
+  // "batch" — `production` owns that noun and the farm profile labels a run
+  // with it, so three meanings were sharing one word.
+  const lotWord = labelFor(labels, "livestockLot", "Lot");
   const codeByLot = new Map(
     lots.map((lot) => [
       lot.id,
@@ -219,7 +226,7 @@ export default async function FeedPage({
 
   /**
    * Only lots with animals standing in them can go onto a feeder. Offering a
-   * finished batch would let somebody put an empty pen on the bin, where it
+   * finished lot would let somebody put an empty pen on the bin, where it
    * would contribute nothing to the basis and read as a mistake nobody made.
    */
   const feedableLots = report.lots
@@ -405,7 +412,7 @@ export default async function FeedPage({
                   <TableHead className="text-right">Cost</TableHead>
                   <TableHead className="text-right">A head now</TableHead>
                   <TableHead className="text-right">A head placed</TableHead>
-                  <TableHead className="text-right">vs last batch</TableHead>
+                  <TableHead className="text-right">vs last {lotWord.toLowerCase()}</TableHead>
                   <TableHead className="text-right">Weight</TableHead>
                   <TableHead className="text-right">Gain a day</TableHead>
                   <TableHead className="text-right">Feed : gain</TableHead>
@@ -564,9 +571,9 @@ export default async function FeedPage({
             )}
             <p className="text-xs text-muted-foreground">
               &ldquo;A head placed&rdquo; is the comparison figure: cost at
-              today&rsquo;s count falls as birds die, which makes a bad batch
+              today&rsquo;s count falls as birds die, which makes a bad {lotWord.toLowerCase()}
               look cheaper the worse it goes. It is over the whole bill, because
-              what a batch cost to raise does not change when some of it is
+              what a {lotWord.toLowerCase()} cost to raise does not change when some of it is
               processed and sold on &mdash; while &ldquo;a head now&rdquo; is
               over what the lot is still carrying.
             </p>

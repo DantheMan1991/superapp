@@ -142,7 +142,7 @@ export function averageWeightLb(
  * **Cattle drop 3–5% when hauled and take days to recover**, which the land
  * design names as the thing that will lie to weight data. Three days is the
  * conservative end of "take days to recover": long enough to catch the weighing
- * done the morning after a trailer, short enough not to swallow a whole batch's
+ * done the morning after a trailer, short enough not to swallow a whole lot's
  * worth of observations.
  */
 export const SHRINK_DAYS = 3;
@@ -303,10 +303,10 @@ export function feedConversion(
 /**
  * Feed per pound of LIVEWEIGHT standing — and it is emphatically not FCR.
  *
- * **It exists because the first batch of anything can never have an FCR.** Gain
- * needs two weighings, and a batch already half-grown before anybody owned a
+ * **It exists because the first lot of anything can never have an FCR.** Gain
+ * needs two weighings, and a lot already half-grown before anybody owned a
  * scale has at best one — which is exactly the pilot's position, and exactly the
- * cold start the design says outranks the schema. This gives that batch a real
+ * cold start the design says outranks the schema. This gives that lot a real
  * number from a single weighing, and the label is the whole of the honesty: it
  * counts the weight the animal arrived with as though the feed had made it,
  * which for a day-old chick is nearly true and for a bought-in feeder steer is

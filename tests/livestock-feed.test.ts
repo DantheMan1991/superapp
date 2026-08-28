@@ -366,7 +366,7 @@ describe("feedReportRows", () => {
 
   it("NEVER COMPARES TWO BATCHES STARTED THE SAME DAY", () => {
     // Two pens placed on the same day are contemporaries, not a sequence. The
-    // screen handed one of them a "+$1.00 vs last batch" against the other,
+    // screen handed one of them a "+$1.00 vs last lot" against the other,
     // which is a comparison of a batch with its neighbour dressed up as history.
     const rows = feedReportRows([
       { ...base, lotId: "l1", code: "PEN-1", startedOn: "2026-07-01" },

@@ -184,6 +184,11 @@ have."* Stripping them would have regressed a decision, not tidied one.
 page's `named` badge did the same. Both now read the kind. That is why Rosie's
 badge went missing, and it would have come back the moment she was sold.
 
+**BOTH DATABASES ARE MIGRATED AND VERIFIED** — column present, CHECK present,
+and the backfill run: dev 5 animals / 4 lots, **production 1 animal / 2 lots**.
+`verify-rls` cannot see a column or a data change, so those were checked
+directly rather than inferred — the gap that made `0226` unprovable.
+
 Migrations `0229` (column + CHECK) and `0230` (backfill). 6 new ops tests, 2 new
 isolation tests, including the two regressions the column exists to prevent.
 

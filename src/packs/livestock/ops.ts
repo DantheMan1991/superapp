@@ -222,7 +222,16 @@ export interface LivestockLotInput {
    * chicks in the meantime. Reported by the founder, 2026-08-16.
    */
   newItemName?: string;
-  /** The lot's human code: "B-2026-04-15", "Pen 3", "#47". */
+  /**
+   * `'animal'` for one named individual, `'lot'` for a group of them.
+   *
+   * Slice 8c. **The form has asked this since 8a and threw the answer away**,
+   * re-deriving it on every screen as "balance = 1" — which turned a pen of
+   * three that lost two into an animal, and a breeding cow at zero head into a
+   * lot. Defaults to `'lot'`, the older behaviour.
+   */
+  recordKind?: "animal" | "lot";
+  /** The lot's human name: "North pen", "Spring broilers", "Bluebell". */
   code: string;
   species: string;
   sex?: string | null;
@@ -294,6 +303,7 @@ export async function createLivestockLot(
       tenantId: ctx.tenantId,
       inventoryLotId: inventoryLot.id,
       species,
+      recordKind: input.recordKind ?? "lot",
       sex: input.sex ?? null,
       bornOn: input.bornOn ?? null,
       notes: input.notes?.trim() ?? "",
@@ -506,6 +516,12 @@ export async function splitLivestockLot(
     newCode: string;
     occurredOn: string;
     locationAssetId?: string | null;
+    /**
+     * Slice 8c. A plain split is twenty head into another pen and stays a LOT;
+     * `splitIntoIndividuals` passes `'animal'` because that is the whole
+     * difference between the two callers.
+     */
+    recordKind?: "animal" | "lot";
   },
 ): Promise<{ lot: LivestockLot; inventoryLotId: string }> {
   requireWrite(ctx, "owner");
@@ -527,6 +543,7 @@ export async function splitLivestockLot(
     .values({
       tenantId: ctx.tenantId,
       inventoryLotId: child.id,
+      recordKind: input.recordKind ?? "lot",
       // The biology travels with the animals. Splitting a lot of Cornish
       // Cross does not produce a lot of something else.
       species: parent.species,
@@ -1352,7 +1369,12 @@ export async function groupSummaries(
       eq(schema.livestockLots.tenantId, tenantId),
       inArray(schema.livestockLots.id, lotIds.length > 0 ? lotIds : [NO_UUID]),
     ),
-    columns: { id: true, inventoryLotId: true, species: true },
+    columns: {
+      id: true,
+      inventoryLotId: true,
+      species: true,
+      recordKind: true,
+    },
   });
   const byLot = new Map(lots.map((l) => [l.id, l]));
   const movements = await movementKindsForLots(
@@ -1391,7 +1413,11 @@ export async function groupSummaries(
         movements.get(lot.inventoryLotId) ?? [],
       ).balance;
       head += balance;
-      if (balance === 1) individuals += 1;
+      // SLICE 8C: what the record IS, not what its balance happens to be.
+      // Counting `balance === 1` dropped a breeding cow at zero head out of
+      // the tally while she stood in the paddock, and promoted a pen down to
+      // its last bird into an animal.
+      if (lot.recordKind === "animal") individuals += 1;
       // Only animals that are actually somewhere count toward the answer: an
       // emptied pen still in the herd is not a second paddock.
       const place = places.get(lot.inventoryLotId);
@@ -1663,7 +1689,10 @@ export type LotMemberSummary = {
   code: string;
   species: string;
   head: number;
-  /** True when this member is one animal, so the page can say so without guessing. */
+  /**
+   * True when this member is ONE ANIMAL. Slice 8c: read off `record_kind`, not
+   * off a head balance of one — a pen down to its last bird is still a pen.
+   */
   isIndividual: boolean;
   startedOn: string;
 };
@@ -1682,7 +1711,12 @@ export async function lotMemberSummaries(
       eq(schema.livestockLots.tenantId, tenantId),
       inArray(schema.livestockLots.id, ids),
     ),
-    columns: { id: true, inventoryLotId: true, species: true },
+    columns: {
+      id: true,
+      inventoryLotId: true,
+      species: true,
+      recordKind: true,
+    },
   });
   const byId = new Map(lots.map((l) => [l.id, l]));
   const codes = await lotsByIds(
@@ -1708,7 +1742,7 @@ export async function lotMemberSummaries(
       code: codes.get(lot.inventoryLotId)?.code ?? "—",
       species: lot.species,
       head,
-      isIndividual: head === 1,
+      isIndividual: lot.recordKind === "animal",
       startedOn: m.startedOn,
     });
   }
@@ -1885,6 +1919,9 @@ export async function splitIntoIndividuals(
       newCode: name,
       occurredOn: input.occurredOn,
       locationAssetId: input.locationAssetId ?? null,
+      // The point of this function, said to the database rather than inferred
+      // from the head of one it happens to leave behind.
+      recordKind: "animal",
     });
     await addIdentifier(tx, ctx, {
       livestockLotId: child.lot.id,
@@ -1926,7 +1963,13 @@ export async function startIndividual(
   const name = input.name.trim();
   if (!name) throw new LivestockError("LOT_INVALID", "give the animal a name");
 
-  const created = await createLivestockLot(tx, ctx, { ...input, code: name });
+  // SLICE 8C: she says what she is, once, here. Every screen afterwards reads
+  // it rather than inferring it from a head count that moves.
+  const created = await createLivestockLot(tx, ctx, {
+    ...input,
+    code: name,
+    recordKind: "animal",
+  });
   await addIdentifier(tx, ctx, {
     livestockLotId: created.lot.id,
     identifierKind: input.identifierKind?.trim().toLowerCase() || "name",
@@ -2567,6 +2610,10 @@ export async function recordBirth(
     // Inherited rather than asked for: a calf out of cattle is cattle, and a
     // form that asked would be asking a question with one answer.
     species: input.species ?? dam?.species ?? sire?.species ?? "",
+    // Slice 8c. ONE calf is an animal; a hatch of thirty chicks is a lot. This
+    // is the one place the kind is genuinely read off the head, and it is not a
+    // guess — `input.head` is what somebody just typed into the birth form.
+    recordKind: input.head === 1 ? "animal" : "lot",
     sex: input.sex ?? null,
     bornOn: input.bornOn,
     source: "raised",

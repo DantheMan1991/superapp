@@ -32,6 +32,8 @@ d("livestock tables (RLS)", () => {
   let tenantA: string;
   let tenantB: string;
   let lotA: string;
+  /** Tenant A's head item, for tests that need to make a lot of their own. */
+  let itemA: string;
   /** A SECOND lot in tenant A, so one can be put inside the other. */
   let lotA2: string;
   let invLotA: string;
@@ -70,6 +72,7 @@ d("livestock tables (RLS)", () => {
           { tenantId: tenantB, name: "Their chicks", stockingUnit: "head" },
         ])
         .returning();
+      itemA = items[0].id;
 
       const invLots = await tx
         .insert(schema.inventoryLots)
@@ -1070,6 +1073,44 @@ d("livestock tables (RLS)", () => {
     expect(rows).toHaveLength(1);
   });
 
+
+  // ---- slice 8c: a record says which kind it is ---------------------------
+
+  it("refuses a record kind that is neither an animal nor a lot", async () => {
+    // CLOSED, unlike species and breed. Those are open because the pack must
+    // not know what a broiler is; this is a shape the CODE branches on, and a
+    // third value would render neither page.
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockLots).values({
+          tenantId: tenantA,
+          inventoryLotId: invLotA,
+          species: "poultry",
+          recordKind: "flock",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("defaults to a lot, because the group shape is the older behaviour", async () => {
+    const [inv] = await asOwner((tx) =>
+      tx
+        .insert(schema.inventoryLots)
+        .values({ tenantId: tenantA, itemId: itemA, code: "A-KIND" })
+        .returning(),
+    );
+    const [row] = await asOwner((tx) =>
+      tx
+        .insert(schema.livestockLots)
+        .values({
+          tenantId: tenantA,
+          inventoryLotId: inv.id,
+          species: "poultry",
+        })
+        .returning(),
+    );
+    expect(row.recordKind).toBe("lot");
+  });
 
   // ---- slice 8b: animals live in a lot -----------------------------------
 

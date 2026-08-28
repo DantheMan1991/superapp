@@ -106,8 +106,34 @@ export const livestockLots = pgTable(
      */
     species: text("species").notNull(),
     /**
+     * **IS THIS ONE ANIMAL, OR A GROUP OF THEM?** `'animal' | 'lot'`.
+     *
+     * Slice 8c. **A COLUMN, AND THIS PACK'S FIRST DELIBERATE ONE** — everything
+     * else here is a fold, so the exception needs its reason stated.
+     *
+     * **IT IS NOT DERIVABLE, AND DERIVING IT WAS PRODUCING BUGS.** The obvious
+     * rule is "one head means one animal", and it is wrong twice over:
+     *
+     *   - **A pen of three pigs that loses two would become an animal**, growing
+     *     a pedigree page and a photo gallery about "the gradual change in this
+     *     animal", because the arithmetic changed under it.
+     *   - **A breeding cow at zero head stopped counting as one.** Observed on
+     *     Hilltop Farm 2026-08-27: Rosie lost her `named` badge and dropped out
+     *     of the herd count while standing in a paddock.
+     *
+     * **THE DIFFERENCE IS INTENT, AND SOMEBODY ALREADY STATES IT.** The create
+     * form has asked "One animal" or "A lot" since slice 8a and threw the answer
+     * away. This keeps it. That is why a column is right here and wrong for head
+     * or withdrawal: those are facts about a day that events can restate, and
+     * this is a fact about what the record IS.
+     *
+     * NOT NULL DEFAULT 'lot', because the group shape is the older behaviour and
+     * an unmigrated row is a group until somebody says otherwise.
+     */
+    recordKind: text("record_kind").notNull().default("lot"),
+    /**
      * 'male' | 'female' | 'mixed'. Nullable, and `mixed` is the honest answer
-     * for a straight-run batch of chicks rather than a missing value.
+     * for a straight-run lot of chicks rather than a missing value.
      */
     sex: text("sex"),
     /** Hatched, farrowed, calved. Null for stock bought at unknown age. */
@@ -184,6 +210,13 @@ export const livestockLots = pgTable(
     check(
       "livestock_lots_sex_valid",
       sql`${t.sex} is null or ${t.sex} in ('male', 'female', 'mixed')`,
+    ),
+    // CLOSED, unlike species and breed. Those are open taxonomies because the
+    // pack must not know what a broiler is; this is a shape the CODE branches
+    // on, and a third value would render neither page.
+    check(
+      "livestock_lots_record_kind_valid",
+      sql`${t.recordKind} in ('animal', 'lot')`,
     ),
     // An animal is not its own parent. Longer loops — a dam whose own dam is
     // her daughter — are refused in the write path, which walks the pedigree; a

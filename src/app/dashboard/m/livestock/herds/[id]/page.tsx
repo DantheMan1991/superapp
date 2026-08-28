@@ -187,7 +187,7 @@ export default async function HerdPage({
   const headOf = (inventoryLotId: string) =>
     summariseHead(movements.get(inventoryLotId) ?? []).balance;
   const head = memberLots.reduce((sum, l) => sum + headOf(l.inventoryLotId), 0);
-  const named = memberLots.filter((l) => headOf(l.inventoryLotId) === 1).length;
+  const named = memberLots.filter((l) => l.recordKind === "animal").length;
 
   /**
    * Everything not already in THIS herd, including animals in another one —
@@ -305,10 +305,12 @@ export default async function HerdPage({
                     <Link href={`${BASE}/${lot.id}`} className="hover:underline">
                       {code}
                     </Link>
-                    {/* A lot of one IS an animal — the distinction the founder
-                        asked to see, made where it is visible rather than
-                        implied by a number. */}
-                    {balance === 1 && (
+                    {/* The distinction the founder asked to see, made where it
+                        is visible rather than implied by a number. Since 8c it
+                        is read off the KIND: Rosie at zero head lost this badge
+                        while standing in a paddock, which is what a derived
+                        answer does the first time the arithmetic moves. */}
+                    {lot.recordKind === "animal" && (
                       <Badge variant="outline" className="ml-2">
                         named
                       </Badge>

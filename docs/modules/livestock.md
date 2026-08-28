@@ -168,8 +168,12 @@ was right and is kept: ONE TABLE is still correct, because two entities would
 give every downstream table two code paths. What changed is that the
 distinction is now recorded in `record_kind` rather than inferred.
 
-Dev migrated: **153 tables → 151**, RLS enabled, forced and with policies on
-every one.
+**BOTH DATABASES ARE DROPPED AND VERIFIED: 153 tables → 151**, RLS enabled,
+forced and with policies on every remaining one. Confirmed AFTER as well as
+before — the herd tables are gone from `information_schema` on both, and the
+converted lots still hold their members: dev `Cows` holds 4, **production
+`Dexter Heard` holds 1**. That second one is the whole argument for 8e having
+existed: a bare DROP would have thrown that grouping away.
 
 
 ### 2026-08-28 — A lot has no mother (`claude/a-lot-has-no-mother`)

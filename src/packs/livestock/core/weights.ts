@@ -331,6 +331,29 @@ export function formatLb(value: number | null): string {
 }
 
 /** "2.31 : 1", the way a feed conversion is spoken. */
+/**
+ * **A CONVERSION BELOW 1 : 1 IS NOT A CONVERSION.** Slice 8d.
+ *
+ * A pound of gain cannot come from less than a pound of feed, so a ratio under
+ * one does not mean a miraculous pen — it means **the animals are eating
+ * something this app has no record of.** On a homestead that is almost always
+ * PASTURE, which `land` allocates as a zone cost and deliberately never prices
+ * as feed: the design's "forage never has to be priced" is exactly why the
+ * numerator here can be short.
+ *
+ * **SO THE WARNING SAYS WHAT IT MEANS RATHER THAN "IMPOSSIBLE".** The figure is
+ * a FLOOR — the conversion cannot be better than this — and read that way it is
+ * still worth showing. Hiding it would throw away a real signal, and printing
+ * it bare invites somebody to quote 0.94 : 1 to a neighbour.
+ *
+ * Returns null when there is nothing to say, so a caller can render it or not
+ * without a second condition.
+ */
+export function conversionWarning(ratio: number | null): string | null {
+  if (ratio === null || ratio >= 1) return null;
+  return "Below 1 : 1, so some of what they ate is not recorded here — pasture, most likely. Read it as a floor rather than a conversion.";
+}
+
 export function formatRatio(value: number | null): string {
   if (value === null) return "—";
   return `${value.toFixed(2)} : 1`;

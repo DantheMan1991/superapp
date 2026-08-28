@@ -35,7 +35,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | **8a** | **The words** — a lot is a group and has a NAME, an animal is an animal; "batch" and "lot of one" leave the copy | **shipped 2026-08-28** |
 | **8b** | **Animals live in a lot** — a lot holds animals and smaller lots, and naming one out of a pen KEEPS her in it | **shipped 2026-08-28** |
 | **8c** | **Two pages** — a lot page and an animal page, neither wearing the other's furniture | **shipped 2026-08-28** |
-| **8d** | **Move several lots at once** — the one thing herds did that nothing else does. Ships BEFORE 8e | |
+| **8d** | **Move several lots at once** — the one thing herds did that nothing else does. Ships BEFORE 8e | **shipped 2026-08-28** |
 | **8e** | **`livestock_groups` dropped** — only after 8d is live | |
 | **8f** | **Feed reaches a single animal** — in a lot it is the lot's, on her own it is hers | **shipped 2026-08-28** |
 
@@ -131,6 +131,67 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-08-28 — Slice 8d: a lot moves as one (`claude/a-lot-moves-as-one`)
+
+**The last thing herds could do that lots could not**, and with it gone 8e has
+nothing left to preserve. No migration.
+
+**MOVING A LOT MOVES WHAT IS INSIDE IT.** `moveGroupToZone` walked a herd's
+membership so ten cows were one trip through the dialog instead of ten. Once
+animals live inside a lot (8b), the same walk over the same shape gives lots the
+same power — `moveLotsToZone` expands each lot to itself plus its members,
+dedupes, and puts every one through `land`'s own `moveOccupant`.
+
+**IT EXPANDS RATHER THAN ASKING THE CALLER TO.** Name the north field and the
+three pens inside it come, along with the cow somebody named out of one of them.
+A caller that had to list them would go stale the moment an animal was added,
+and the whole point is that a lot moves as one thing.
+
+**THE DEDUPE IS NOT TIDINESS.** "Move these two" where one is inside the other
+would move the inner one twice on one day, and `moveOccupant` would end the stay
+it had just opened. The lot page hits the same edge from the other side, which is
+why the action moves the primary lot through the SINGLE path and only its
+members through the bulk one — the single path is what returns `movedOff`, and
+the toast's *"North Pasture is resting from…"* is the half of a move nobody sees.
+
+### Mixed species: warned, never refused
+
+The founder asked for a guard. **A hard refusal would have been the wrong one**,
+for two reasons that outrank tidiness:
+
+  - **It is real.** Pigs and poultry on one paddock, moved together, is a
+    homestead's ordinary Tuesday. So is a nurse cow with orphan lambs.
+  - **It would make the pilot farm unrepresentable.** Hilltop's "Cows" holds
+    three swine and one cow *today*. A constraint that cannot describe the farm
+    it was built for is describing something else.
+
+So the add dialog says so before rather than refusing after — the same treatment
+an unknown withdrawal period gets: state the fact, let the person decide.
+
+### The headline numbers now tell on themselves
+
+**A CONVERSION UNDER 1 : 1 IS NOT A MIRACLE PEN.** A pound of gain cannot come
+from less than a pound of feed, so the farm-wide 0.94 : 1 on Hilltop means
+**they are eating something this app has no record of** — pasture, which `land`
+allocates as a zone cost and which the design deliberately never prices as feed.
+`conversionWarning` says that, and says to read the figure as a **floor**. Not
+hidden: hiding it throws away a real signal, and printing it bare invites
+somebody to quote 0.94 : 1 to a neighbour.
+
+**A YIELD OVER 100% IS AN UNWEIGHED INPUT.** Weight is not created by cutting an
+animal up, so `production`'s 150% finished kill is an input nobody weighed, an
+output weighed in its packaging, or somebody else's cuts on this run.
+`yieldWarning` says which three to check. Also not refused — the yield fold
+already rejects PARTIAL weights, so anything reaching this point was weighed on
+both sides and the arithmetic is honestly reporting what was entered.
+
+Both live in `core/` beside the figures they judge, both are pure, and both
+return null when there is nothing to say so a caller renders them without a
+second condition.
+
+4 new ops tests, 4 new pure tests. **No migration.**
+
 
 ### 2026-08-28 — Slice 8f: a cow eats alone (`claude/a-cow-eats-alone`)
 
@@ -1908,7 +1969,7 @@ on the dev branch, 2026-08-27** — the terminology review that produced
 - **SPLIT AND RECORD-AS-INDIVIDUALS ARE ONE MECHANISM WEARING TWO BUTTONS.**
   `splitIntoIndividuals` loops `splitLivestockLot`. Two dialogs, two words, one
   act — and on a POULTRY pen the placeholder names are *"Bluebell, Daisy"*.
-- **NOTHING GUARDS WHAT GOES IN A GROUP OF ANIMALS.** "Cows" holds three swine
+- ~~NOTHING GUARDS WHAT GOES IN A GROUP OF ANIMALS~~ — **answered 2026-08-28 (8d), and the answer is a WARNING rather than a refusal.** See the build log: a mixed lot is real, and refusing one would make Hilltop's own "Cows" unrepresentable. Original note: "Cows" holds three swine
   and one cow, and *Add animals* will put the 100-bird broiler pen in it, or
   PEN-2 which has no head at all. Whether a lot may mix species is an open rule
   in **either** direction, and it gets more load-bearing when the lot becomes the
@@ -1919,7 +1980,7 @@ on the dev branch, 2026-08-27** — the terminology review that produced
 - **THE FEED PAGE DOES NOT KNOW WHAT A GROUP IS.** Feeders are a third grouping
   that lines up with neither lots nor herds, and the page has no group column at
   all.
-- **NO PLAUSIBILITY GUARD ON THE HEADLINE NUMBERS.** The feed page reports a
+- ~~NO PLAUSIBILITY GUARD ON THE HEADLINE NUMBERS~~ — **closed 2026-08-28 (8d).** `conversionWarning` and `yieldWarning`; both say what the number MEANS rather than calling it impossible. Original note: The feed page reports a
   farm-wide conversion of **0.94 : 1** — under 1.0 is physically impossible — and
   `production` shows a finished kill at **150% yield**. Test data in both cases,
   and nothing anywhere says so.

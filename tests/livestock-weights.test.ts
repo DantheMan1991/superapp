@@ -4,6 +4,7 @@ import {
   averageWeightLb,
   combinedConfidence,
   describeSample,
+  conversionWarning,
   feedConversion,
   feedPerLiveweightLb,
   formatLb,
@@ -305,5 +306,24 @@ describe("formatting", () => {
     expect(describeSample("scale", 1, 1)).toBe("1 on the scale");
     expect(describeSample("sample", 200, 200)).toBe("all 200 on the scale");
     expect(describeSample("tape", 1, 12)).toBe("Tape");
+  });
+});
+
+describe("conversionWarning — slice 8d", () => {
+  it("says nothing about a ratio that is physically possible", () => {
+    expect(conversionWarning(2.4)).toBeNull();
+    expect(conversionWarning(1)).toBeNull();
+    expect(conversionWarning(null)).toBeNull();
+  });
+
+  it("TELLS ON A RATIO UNDER 1 : 1, and says what it actually means", () => {
+    // A pound of gain cannot come from less than a pound of feed, so this is
+    // not a miraculous pen — it is feed nobody recorded, and on a homestead
+    // that is pasture, which land allocates and deliberately never prices.
+    const said = conversionWarning(0.94);
+    expect(said).not.toBeNull();
+    expect(said).toMatch(/pasture/i);
+    // Read as a FLOOR rather than hidden: the figure is still worth something.
+    expect(said).toMatch(/floor/i);
   });
 });

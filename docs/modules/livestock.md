@@ -187,8 +187,14 @@ still there, and a live table with no certification is exactly what that suite
 exists to catch. They go in 8g with the DROP. The herd OPS tests went now,
 because the functions did.
 
-Applied to dev and verified: 1 herd in, 1 lot out holding 4, and `PEN-1 <-
-Speckles` untouched beside it.
+**BOTH DATABASES ARE MIGRATED AND VERIFIED**, and production had a herd too:
+dev 1 herd → 1 lot holding 4, **production 1 herd → 1 lot holding 1**. Checked
+before and after, because `verify-rls` sees tables and this migration only
+moves rows. Both at 153 tables, RLS enabled, forced, with policies.
+
+Driven on dev: the hub is ONE list — no Herds section, no *Start a herd*, no
+*Not in a herd* — and `Cows` lists Bluebell, Rosie, Hazel and Mabel with the
+dates their herd memberships had.
 
 
 ### 2026-08-28 — Slice 8d: a lot moves as one (`claude/a-lot-moves-as-one`)

@@ -133,6 +133,55 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-08-28 — A lot has no mother (`claude/a-lot-has-no-mother`)
+
+**Two things the founder found by driving slice 8, and one of them is 8c's
+mistake.** No migration.
+
+**A LOT WAS BEING OFFERED A SIRE AND A DAM.** *"The lot is not the animal."* He
+is right, and 8c's reasoning for keeping the whole Breeding section on both
+pages was wrong — it conflated two different claims:
+
+  - a lot can **BE** a parent. *"These chicks came from that flock"* is true, it
+    is the only pedigree a flock will ever have, and the offspring table still
+    says so. **Kept.**
+  - a lot **HAVING** one dam and one sire. For a hundred broilers that is not a
+    fact about anything. **Gone** — `SetParentsForm` and the Dam/Sire panel are
+    now `isAnimal` only.
+
+**What a lot is MADE OF stays**, because "Cornish Cross" is a real answer to
+what a pen is. So does **Record a birth**: a cohort produces offspring even
+though a cohort has no mother, and that is the layers→hatch path the schema was
+built for. **That last one is the judgement call in this PR** — say so if a lot
+should not be offered it either.
+
+**AND THERE WAS NO WAY TO PUT A NAMED ANIMAL IN A LOT.** *"I see how I can
+increase head count, which works for chickens but not when I want to track the
+individual animal. Maybe I'm missing something."* He was not missing anything.
+
+`lotsAvailableToJoin` only ever offered lots that **already existed**, so a lot
+created five seconds ago said *"Nothing to add"* — the one thing a person does
+straight after making a lot was the one thing the dialog could not do. Naming an
+animal meant going to the hub, creating her loose, coming back, and picking her
+out of a list: **four steps across two pages, and nothing said so.**
+
+**Place head was never the same thing.** It adds ANONYMOUS head, which is right
+for a hundred broilers and wrong for a cow you intend to weigh, treat and breed
+by name. The empty state said "the head counted above is loose in it" and read
+as though that were the answer.
+
+So `startIndividual` takes an optional `parentLotId` and the dialog leads with
+**A new animal** / **One already here** — new first when there is nothing to
+pick, so the dead end is unreachable. She is created, her one head is placed and
+she joins the lot **in one transaction**: she exists in it or not at all. She
+inherits the lot's species and stock line, so the form asks for a name and
+nothing else.
+
+Driven on Hilltop Farm: PEN-2 had 0 head and nothing in it — the founder's exact
+case — and now holds Henrietta, created from its own page. Set parents, Pedigree
+and Dam are all absent from it. 125/125 ops.
+
+
 ### 2026-08-28 — Slice 8e: the herd becomes a lot (`claude/the-herd-becomes-a-lot`)
 
 **Every herd is now a LOT holding what it held, and nothing reads

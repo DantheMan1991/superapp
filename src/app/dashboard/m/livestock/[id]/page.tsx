@@ -1101,6 +1101,8 @@ export default async function LivestockLotPage({
               <AddToLotForm
                 parentLotId={lot.id}
                 parentSpecies={slugLabel(lot.species).toLowerCase()}
+                parentSpeciesSlug={lot.species}
+                parentItemId={inventoryLot.itemId}
                 candidates={joinable}
                 today={today}
                 word={lotWord}
@@ -1112,7 +1114,7 @@ export default async function LivestockLotPage({
             empty={
               <EmptyState
                 title={`Nothing in this ${lotWord.toLowerCase()} yet`}
-                description={`The head counted above is loose in it. Add a named animal or a smaller ${lotWord.toLowerCase()}, or name animals out of this one — they stay in it.`}
+                description={`The head counted above is loose in it — that is right for animals nobody names. Use Add animals to start a named one in here, put an existing one in, or name animals out of this ${lotWord.toLowerCase()} — they stay in it.`}
               />
             }
           >
@@ -1189,12 +1191,23 @@ export default async function LivestockLotPage({
                 suggestions={breedSuggestions}
                 current={statedBreed}
               />
-              <SetParentsForm
-                livestockLotId={lot.id}
-                candidates={candidates}
-                damLotId={lot.damLotId}
-                sireLotId={lot.sireLotId}
-              />
+              {/* **A LOT HAS NO MOTHER AND NO FATHER.** The founder,
+                  2026-08-28: *"it gives me the ability to add a sire and a dam.
+                  The lot is not the animal."*
+
+                  8c got this wrong by conflating two things. A lot can BE a
+                  parent — "these chicks came from that flock" is true, and the
+                  offspring table below still says so. A lot HAVING one dam and
+                  one sire is a different claim, and for a hundred broilers it
+                  is not a fact about anything. */}
+              {isAnimal && (
+                <SetParentsForm
+                  livestockLotId={lot.id}
+                  candidates={candidates}
+                  damLotId={lot.damLotId}
+                  sireLotId={lot.sireLotId}
+                />
+              )}
               {/* This animal is the dam by default, which is what makes the
                   button worth having HERE rather than only on the hub. */}
               <RecordBirthForm
@@ -1241,22 +1254,31 @@ export default async function LivestockLotPage({
             </div>
           </Panel>
 
-          <Panel className="p-5">
-            <h3 className="font-heading text-base font-semibold tracking-heading">
-              Pedigree
-            </h3>
-            <ul className="mt-3 space-y-2 text-sm">
-              <PedigreeBranch node={tree.dam} role="Dam" codes={pedigreeCodes} />
-              <PedigreeBranch node={tree.sire} role="Sire" codes={pedigreeCodes} />
-            </ul>
-            {!lot.damLotId && !lot.sireLotId && (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Naming even one parent is worth doing — a parent nobody knows is
-                half the animal, and the breeding above will say so rather than
-                rounding the other half up.
-              </p>
-            )}
-          </Panel>
+          {/* Animal-only, with Set parents above it — a cohort does not
+              have a mother. What a LOT is made of still shows, because a pen of
+              Cornish Cross is a real answer to "what are they". */}
+          {isAnimal && (
+            <Panel className="p-5">
+              <h3 className="font-heading text-base font-semibold tracking-heading">
+                Pedigree
+              </h3>
+              <ul className="mt-3 space-y-2 text-sm">
+                <PedigreeBranch node={tree.dam} role="Dam" codes={pedigreeCodes} />
+                <PedigreeBranch
+                  node={tree.sire}
+                  role="Sire"
+                  codes={pedigreeCodes}
+                />
+              </ul>
+              {!lot.damLotId && !lot.sireLotId && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Naming even one parent is worth doing — a parent nobody knows
+                  is half the animal, and the breeding above will say so rather
+                  than rounding the other half up.
+                </p>
+              )}
+            </Panel>
+          )}
         </div>
 
         <DataTable

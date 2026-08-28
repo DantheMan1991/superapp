@@ -1552,6 +1552,18 @@ export async function startIndividual(
     /** When she arrived or was born. The head event's date. */
     occurredOn: string;
     locationAssetId?: string | null;
+    /**
+     * **START HER INSIDE A LOT.** The founder's second complaint, 2026-08-28:
+     * *"I don't see how to add individual animals to the lot."*
+     *
+     * He was right. `lotsAvailableToJoin` only ever offered lots that ALREADY
+     * EXISTED, so a lot created five seconds ago showed "Nothing to add" — the
+     * one thing a person does immediately after making a lot was the one thing
+     * the app could not do. Placing head worked and is right for a hundred
+     * broilers, but it adds anonymous head, which is the opposite of what
+     * naming an animal is for.
+     */
+    parentLotId?: string | null;
   },
 ): Promise<{ lot: LivestockLot; inventoryLotId: string }> {
   requireWrite(ctx, "owner");
@@ -1587,6 +1599,17 @@ export async function startIndividual(
     occurredOn: input.occurredOn,
     locationAssetId: input.locationAssetId ?? null,
   });
+
+  // Into the lot she was started in, in the SAME transaction — she exists in it
+  // or not at all. Two steps could leave a named animal loose on the hub with
+  // nobody to notice, which is the state 8b existed to end.
+  if (input.parentLotId) {
+    await addLotToParent(tx, ctx, {
+      parentLotId: input.parentLotId,
+      memberLotId: created.lot.id,
+      startedOn: input.occurredOn,
+    });
+  }
   return created;
 }
 

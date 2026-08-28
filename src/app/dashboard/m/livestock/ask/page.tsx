@@ -52,7 +52,7 @@ export default async function AdvisorPage() {
       ]);
       const byId = new Map(inventoryLots.map((l) => [l.id, l]));
       // The biggest live lot, so the suggested question is about the animals
-      // somebody actually thinks about rather than a batch that has gone.
+      // somebody actually thinks about rather than a lot that has gone.
       const live = lots
         .map((lot) => ({
           code: byId.get(lot.inventoryLotId)?.code ?? null,

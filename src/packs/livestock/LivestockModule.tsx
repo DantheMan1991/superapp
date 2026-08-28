@@ -214,7 +214,7 @@ export async function LivestockModule({
     <div className="space-y-6">
       <PageHeader
         title="Livestock"
-        description={`Every animal is a ${lotWord.toLowerCase()}, and an individual is a ${lotWord.toLowerCase()} of one.`}
+        description={`A ${lotWord.toLowerCase()} is a group of animals. An animal you name has a page of its own.`}
         icon={<Beef />}
         actions={
           isOwner ? (
@@ -223,6 +223,7 @@ export async function LivestockModule({
             {/* No longer gated on an item existing: the form can create one. A
                 farm's first animal used to require a trip to Inventory first. */}
             <LivestockLotForm
+              word={lotWord}
               items={headItems.map((i) => ({ id: i.id, name: i.name }))}
               speciesOptions={suggestedSpecies}
               breedsBySpecies={breedsBySpecies}
@@ -303,8 +304,8 @@ export async function LivestockModule({
             title="No animals recorded yet"
             description={
               isOwner
-                ? "Start a lot — a batch of chicks, a group of feeders, one named cow. What goes in and what leaves are both entries against it, so the count always reconciles."
-                : "An owner starts the first lot. Once they do, the animals show up here."
+                ? `Start a ${lotWord.toLowerCase()} — a pen of chicks, a flock of layers, a group of feeders. Or add one animal on its own. What goes in and what leaves are both entries against it, so the count always reconciles.`
+                : `An owner starts the first ${lotWord.toLowerCase()}. Once they do, the animals show up here.`
             }
           />
         }

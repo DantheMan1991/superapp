@@ -300,7 +300,7 @@ export async function createLivestockLot(
     .returning();
 
   // ONE BREED ON CREATE IS THE WHOLE ANIMAL, and that is the common case: a
-  // batch of Cornish Cross, a purebred cow. Anything crossed is stated on the
+  // lot of Cornish Cross, a purebred cow. Anything crossed is stated on the
   // animal's own page afterwards, where there is room to say ½ and ¼ — a
   // fractions editor on the form that starts a pen of broilers would be four
   // fields nobody needs to see.
@@ -490,7 +490,7 @@ export async function removeHead(
 /**
  * Split head into a new lot, carrying the biology across.
  *
- * The operation the pilot's broilers need — a batch of chicks arrives as one
+ * The operation the pilot's broilers need — a lot of chicks arrives as one
  * purchase and splits across pens — and the one that makes "promote the pigs to
  * individuals when the slaughter date is booked" fall out instead of being
  * bespoke. Inventory does the split and the balancing; this adds the biology
@@ -526,8 +526,8 @@ export async function splitLivestockLot(
     .values({
       tenantId: ctx.tenantId,
       inventoryLotId: child.id,
-      // The biology travels with the animals. Splitting a batch of Cornish
-      // Cross does not produce a batch of something else.
+      // The biology travels with the animals. Splitting a lot of Cornish
+      // Cross does not produce a lot of something else.
       species: parent.species,
       sex: parent.sex,
       bornOn: parent.bornOn,
@@ -893,9 +893,9 @@ export async function returnToMarket(
     }
   }
 
-  // Clearing the marker restores what the batch was carrying BEFORE she was
+  // Clearing the marker restores what the lot was carrying BEFORE she was
   // capitalised — her original cost. The books have depreciated her since, so
-  // a correction of exactly that much brings the batch back to net book value
+  // a correction of exactly that much brings the lot back to net book value
   // and keeps the ledger and the valuation screen agreeing.
   await tx
     .update(schema.inventoryLots)
@@ -2107,7 +2107,7 @@ export interface BirthInput {
  * "these animals came out of that group", and a traceability walk follows it to
  * find which pen a box of meat was raised in. A birth is not a split — the dam
  * does not lose a head when her calf arrives — and putting the dam there would
- * make a batch trace wander into a family tree. The design note that said births
+ * make a lot trace wander into a family tree. The design note that said births
  * are "parented by the dam" predates that chain existing in code.
  *
  * `source: "raised"`, always. A born animal has no purchase basis at all, only
@@ -2691,7 +2691,7 @@ export async function listTreatmentsForLot(
 /**
  * How far up the SPLIT chain a withdrawal is inherited before the walk stops.
  *
- * Twenty is far past any real chain — a batch of chicks splits across pens once
+ * Twenty is far past any real chain — a lot of chicks splits across pens once
  * — and it is here so a chain somebody has managed to loop terminates rather
  * than hangs. `inventory_lots` has a CHECK against the one-step case.
  */
@@ -3254,7 +3254,7 @@ const NOT_FEED_KINDS = new Set(["medicine", "livestock", "supply"]);
 /**
  * "Everything ever recorded", as a date.
  *
- * A report over a whole batch's life needs a lower bound and there is no honest
+ * A report over a whole lot's life needs a lower bound and there is no honest
  * one — so this is a floor that predates any farm record rather than a guess at
  * when the tenant started. The day-by-day walk never actually iterates from here:
  * `feedReport` clamps each feeder's window to its first membership, because days
@@ -3589,7 +3589,7 @@ export interface LotWeightSummary {
   /**
    * Feed per pound of LIVEWEIGHT, which is NOT conversion — it counts the weight
    * the animal arrived with as though the feed had made it. The only figure a
-   * first batch with a single weighing can honestly produce.
+   * first lot with a single weighing can honestly produce.
    */
   feedPerLiveweight: number | null;
   weighInCount: number;
@@ -3836,7 +3836,7 @@ export async function feedReport(
         ageDays: ageInDays(lot.bornOn, to),
         head: summary.balance,
         intake: summary.intake,
-        // `opened_on` is when the batch started; `born_on` is the fallback for a
+        // `opened_on` is when the lot started; `born_on` is the fallback for a
         // lot created before anything was placed into it.
         startedOn: inventoryLot?.openedOn ?? lot.bornOn ?? null,
         measuredCents: fed.reduce((sum, f) => sum + f.costCents, 0),
@@ -3867,7 +3867,7 @@ export async function feedReport(
    * and last usable weighing. Feed fed before anybody put a bird on a scale
    * produced gain nobody measured, so counting it would inflate the one number
    * the enterprise is judged on — badly, for exactly the farm that starts
-   * weighing halfway through its first batch.
+   * weighing halfway through its first lot.
    */
   const lotsWithWeight = rows.map((row) => {
     const lot = lotById.get(row.lotId);
@@ -3936,7 +3936,7 @@ export async function feedReport(
       }
     }
 
-    // The first-batch answer, and NOT a conversion — see `feedPerLiveweightLb`.
+    // The first-lot answer, and NOT a conversion — see `feedPerLiveweightLb`.
     const feedLbAll = toPoundsOfFeed(row.quantities);
 
     return {
@@ -4073,10 +4073,10 @@ export async function farmSnapshot(
   /**
    * Feed, from slice 2, and it is the same read the feed report makes.
    *
-   * Deliberately not a cheaper approximation: an advisor asked "is this batch
+   * Deliberately not a cheaper approximation: an advisor asked "is this lot
    * costing more than the last one" must see the figure the screen shows, or the
    * two will disagree in front of the person who asked. The window is
-   * everything, because a batch is judged over its life.
+   * everything, because a lot is judged over its life.
    */
   const feed = await feedReport(tx, tenantId, {
     from: LEDGER_EPOCH,

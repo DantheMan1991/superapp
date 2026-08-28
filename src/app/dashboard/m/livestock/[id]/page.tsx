@@ -330,7 +330,7 @@ export default async function LivestockLotPage({
           capitalStateByLot(tx, ctx.tenant.id, [lot.id], today),
           capitalTransfersForLot(tx, ctx.tenant.id, lot.id),
           listAccounts(tx, ctx.tenant.id),
-          // What the batch is carrying — the figure the transfer will move, so
+          // What the lot is carrying — the figure the transfer will move, so
           // the dialog can name it before anybody presses the button.
           carriedCostByLot(tx, ctx.tenant.id, [lot.inventoryLotId], today),
           // Photos, from `documents`. Empty when the module is off, which is
@@ -1502,7 +1502,7 @@ export default async function LivestockLotPage({
                   <TableCell className="text-right tabular-nums">
                     {/* The cost stamped when it was issued. It does not move
                         when the next delivery arrives, which is what makes
-                        comparing batches mean anything. */}
+                        comparing lots mean anything. */}
                     {movement.costCents === null
                       ? "—"
                       : formatMoney(movement.costCents, currencySymbol)}

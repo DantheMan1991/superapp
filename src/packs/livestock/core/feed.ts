@@ -303,7 +303,7 @@ export function formatQuantities(parts: FeedQuantity[]): string {
  * How a feed figure was arrived at. **PERMANENT, not a migration state.**
  *
  * `measured` is a bag issued to a named pen; `allocated` is a share of a bin;
- * `mixed` is the ordinary case for a batch brooded on bagged starter and
+ * `mixed` is the ordinary case for a lot brooded on bagged starter and
  * finished on bulk grower, and it must read as its own answer rather than as
  * either of the other two.
  */
@@ -347,7 +347,7 @@ export interface FeedLotInput {
   head: number;
   /** Everything that ever arrived — the denominator of "per head placed". */
   intake: number;
-  /** The day this batch started, for ordering one batch against the last. */
+  /** The day this lot started, for ordering one lot against the last. */
   startedOn: string | null;
   measuredCents: number;
   measuredQuantities: FeedQuantity[];
@@ -393,9 +393,9 @@ export interface FeedLotRow extends FeedLotInput {
   centsPerHead: number | null;
   centsPerHeadPlaced: number | null;
   /**
-   * Difference in cost per head placed against the previous batch of the SAME
-   * species. Null when there is no previous batch to compare with — which is
-   * every batch on a farm in its first season, and is the cold start the design
+   * Difference in cost per head placed against the previous lot of the SAME
+   * species. Null when there is no previous lot to compare with — which is
+   * every lot on a farm in its first season, and is the cold start the design
    * warns about rather than a fault.
    */
   vsPreviousCents: number | null;
@@ -411,7 +411,7 @@ function round4(value: number): number {
  *
  * **NULL WHEN NOTHING HAS BEEN FED, NOT ZERO**, and this was found by looking at
  * the screen rather than by a test. A pen with 50 birds and no feed on record
- * rendered "$0.00 a head", which reads as *feeding this batch cost nothing* —
+ * rendered "$0.00 a head", which reads as *feeding this lot cost nothing* —
  * the same lie `mortalityRate` refuses when it returns null instead of 0% for a
  * pen no chick has been placed in. "Not known yet" and "free" are different
  * facts and only one of them is ever true here.
@@ -428,13 +428,13 @@ function perUnit(cents: number, units: number): number | null {
 /**
  * The report the broiler enterprise is judged on.
  *
- * **BATCH AGAINST BATCH IS THE POINT, and the comparison is per head PLACED.**
- * Cost per head at today's count moves as birds die, which makes a bad batch
+ * **LOT AGAINST LOT IS THE POINT, and the comparison is per head PLACED.**
+ * Cost per head at today's count moves as birds die, which makes a bad lot
  * look cheaper the worse it goes; cost per head placed is what was spent to
- * attempt each bird, and it is the figure that answers "was this batch better
+ * attempt each bird, and it is the figure that answers "was this lot better
  * than the last one". Both are on the row, and the comparison uses the second.
  *
- * Batches are compared within a species and in date order, because comparing a
+ * Lots are compared within a species and in date order, because comparing a
  * pen of broilers against a steer is arithmetic rather than information.
  */
 export function feedReportRows(lots: FeedLotInput[]): FeedLotRow[] {
@@ -462,7 +462,7 @@ export function feedReportRows(lots: FeedLotInput[]): FeedLotRow[] {
        * carrying".
        *
        * `centsPerHeadPlaced` deliberately keeps the GROSS total: it is the
-       * batch-against-batch comparison, and what a batch cost to raise does not
+       * lot-against-lot comparison, and what a lot cost to raise does not
        * change because some of it has been sold on.
        */
       centsPerHead: perUnit(totalCents - lot.releasedCents, lot.head),
@@ -479,8 +479,8 @@ export function feedReportRows(lots: FeedLotInput[]): FeedLotRow[] {
     else bySpecies.set(row.species, [row]);
   }
   for (const list of bySpecies.values()) {
-    // Oldest first, so "previous" means the batch before this one. A lot with no
-    // start date sorts out entirely and is never anybody's previous batch — an
+    // Oldest first, so "previous" means the lot before this one. A lot with no
+    // start date sorts out entirely and is never anybody's previous lot — an
     // unknown date cannot establish an order, and guessing one would make the
     // delta a comparison against an arbitrary row.
     const ordered = [...list]
@@ -498,14 +498,14 @@ export function feedReportRows(lots: FeedLotInput[]): FeedLotRow[] {
       const current = ordered[i];
       if (current.centsPerHeadPlaced === null) continue;
       /**
-       * **THE PREVIOUS BATCH HAS TO BE PREVIOUS, AND IT HAS TO HAVE BEEN FED.**
+       * **THE PREVIOUS LOT HAS TO BE PREVIOUS, AND IT HAS TO HAVE BEEN FED.**
        * Both halves came from driving this screen, where two pens started on the
        * same day and one of them had no feed recorded: the other was handed a
-       * "+$1.00 vs last batch" that compared it against nothing at all.
+       * "+$1.00 vs last lot" that compared it against nothing at all.
        *
-       * So: strictly earlier, because two batches placed the same day are
+       * So: strictly earlier, because two lots placed the same day are
        * contemporaries rather than a sequence; and with a cost per head of its
-       * own, because a batch nobody has recorded feed for is not a baseline.
+       * own, because a lot nobody has recorded feed for is not a baseline.
        */
       for (let j = i - 1; j >= 0; j--) {
         const candidate = ordered[j];
@@ -519,7 +519,7 @@ export function feedReportRows(lots: FeedLotInput[]): FeedLotRow[] {
     }
   }
 
-  // Newest batch first: the one being fed right now is the one being asked
+  // Newest lot first: the one being fed right now is the one being asked
   // about. Undated lots keep their position at the end.
   return [...rows].sort((a, b) => {
     if (a.startedOn === null && b.startedOn === null) return 0;

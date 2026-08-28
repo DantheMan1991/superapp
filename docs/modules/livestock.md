@@ -32,7 +32,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | **5** | **Weights (tape formulas, sampling) — and the FCR they unlock** | **shipped 2026-08-20** |
 | **6** | **Processing handoff → `production`** | **shipped 2026-08-20** |
 | ~~**7**~~ | ~~Herds — a set of animals somebody creates, that moves as one~~ **SUPERSEDED by slice 8** | shipped 2026-08-27, being undone |
-| **8a** | **The words** — a lot is a group and has a NAME, an animal is an animal; "batch" and "lot of one" leave the copy | |
+| **8a** | **The words** — a lot is a group and has a NAME, an animal is an animal; "batch" and "lot of one" leave the copy | **shipped 2026-08-28** |
 | **8b** | **Animals live in a lot** — membership retargeted from herd to lot, and naming one out of a pen KEEPS her in it | |
 | **8c** | **Two pages** — a lot page and an animal page, neither wearing the other's furniture | |
 | **8d** | **Move several lots at once** — the one thing herds did that nothing else does. Ships BEFORE 8e | |
@@ -130,6 +130,53 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-08-28 — Slice 8a: the words (`claude/a-lot-is-a-group-of-animals`)
+
+**Copy, labels and comments. No schema, no migration, no logic** — the first
+slice of the ruling in [The model, settled](#the-model-settled-2026-08-27), and
+deliberately the one that changes no behaviour at all.
+
+**THE HEADER WAS THE DATA MODEL PRINTED AS A TAGLINE.** *"Every animal is a lot,
+and an individual is a lot of one"* is now *"A lot is a group of animals. An
+animal you name has a page of its own."* The old sentence was written for
+whoever was building the tables and it ended up above the tenant's animals.
+
+**"START A HERD" AND "START A GROUP" NO LONGER SIT IN ONE HEADER.** The lot form
+called its group shape "a group", which is the literal fallback of the
+`livestockGroup` label — so a homestead-profile farm saw two adjacent buttons
+that created two different things and used one word between them. `LivestockLotForm`
+now takes `word` like `HerdForm` already did, and reads *Start a lot* / *A lot* /
+*Start lot* — or *Start a flock* for a tenant who says flock.
+
+**A NAME, NOT A CODE.** The field was labelled *"Lot code"* over a placeholder
+of `B-2026-04-15`, which tells a farmer to invent a barcode for a pen he already
+calls the north pen. It is *Name*, placeholder *"e.g. North pen, Spring
+broilers"*. **The column is still `inventory_lots.code`** and `inventory` still
+calls it a code — the word is per pack, the storage is one.
+
+**"BATCH" IS OUT OF THE PACK, INCLUDING THE COMMENTS**, and the comments are the
+point: every user-facing "batch" in this pack was written by somebody reading a
+comment that used it. `production` owns the noun — the farm profile labels a run
+"Batch" — and `inventory` uses it for a stock lot, which made three meanings for
+one word across three packs. 45 occurrences replaced.
+
+**WHAT KEPT IT, and the distinction is the whole reason this was not one
+regex:** `feed-controls.tsx` says batch about a DELIVERY of feed, which is
+inventory's sense and correct; `ops.ts` has "ten batched ones", a different word
+entirely. Both left alone.
+
+The advisor's prompt and the digest's suggested questions changed too — an AI
+told to say "your last batch averaged 5.4" will say batch to the farmer, which
+is the copy leaking back in through the one surface nobody greps.
+
+Driven on Hilltop Farm: the hub, the lot dialog in both modes, and the feed
+page's *vs last lot* column. `tsc` and `lint` clean.
+
+**Slices 8b–8f are untouched by this.** Herds still exist, animals still cannot
+live inside a lot, and a lone animal still cannot be fed — 8a moved no data and
+no behaviour, on purpose, so the rename can land before the structure changes.
+
 
 ### 2026-08-27 — Slice 4f: a cow is not inventory (`claude/a-cow-is-not-inventory`)
 

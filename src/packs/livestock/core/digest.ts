@@ -5,7 +5,7 @@
  * **THE ANCHORING IS THE DIFFERENTIATION, NOT THE MODEL.** The profile's AI
  * thesis, written down after being rediscovered three times: a general model can
  * tell anyone that a finishing pig eats roughly five pounds a day. Only this app
- * can add *"your last batch averaged 5.4 and finished at 250 lb in four
+ * can add *"your last lot averaged 5.4 and finished at 250 lb in four
  * months"*, because only this app has both the question and the records. A
  * chatbot with no digest is a worse version of a search engine; the digest is
  * the whole product.
@@ -396,7 +396,7 @@ export function starterQuestions(input: {
     // No profile, no animals, no ground. The advisory layer is the half of the
     // wedge that works with nothing recorded, so this is a first-class case.
     out.push(
-      "What should I expect for mortality on a first batch of broilers?",
+      "What should I expect for mortality on a first lot of broilers?",
       "How much pasture does a cow need?",
     );
   }

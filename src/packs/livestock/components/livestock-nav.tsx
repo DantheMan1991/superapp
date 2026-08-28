@@ -18,7 +18,7 @@ const BASE = "/dashboard/m/livestock";
  *
  * Ordered as the buttons were, and that order is a recorded decision rather
  * than the order they were built in: the round is the DAILY act, feed is looked
- * at when one batch is being judged against the last, and Ask is the only
+ * at when one lot is being judged against the last, and Ask is the only
  * screen in the pack that works with nothing recorded at all.
  *
  * No props, unlike `ProductionNav`: none of these four names is a word the

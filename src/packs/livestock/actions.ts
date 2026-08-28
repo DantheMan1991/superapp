@@ -26,9 +26,11 @@ import {
   LivestockError,
   MAX_BREED_PARTS,
   addLotToGroup,
+  addLotToParent,
   createGroup,
   moveGroupToZone,
   removeLotFromGroup,
+  removeLotFromParent,
   returnToMarket,
   transferToBreeding,
   updateGroup,
@@ -683,6 +685,71 @@ export async function removeLotFromGroupAction(input: unknown) {
     await withTenant(
       ctx.tenant.id,
       (tx) => removeLotFromGroup(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * **PUT ANIMALS INSIDE A LOT** (slice 8b). What replaces `addLotToGroupAction`.
+ *
+ * Takes a LIST, because the act somebody is doing is "these six go in the north
+ * pen" and six dialogs is the friction `splitIntoIndividuals` already exists to
+ * remove. One transaction: they all go in or none does.
+ */
+export async function addLotToParentAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      parentLotId: z.string().uuid(),
+      memberLotIds: z.array(z.string().uuid()).min(1).max(200),
+      startedOn: requiredDate,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      async (tx) => {
+        for (const memberLotId of parsed.data.memberLotIds) {
+          await addLotToParent(tx, ctxOf(ctx), {
+            parentLotId: parsed.data.parentLotId,
+            memberLotId,
+            startedOn: parsed.data.startedOn,
+          });
+        }
+      },
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    return { ok: true as const, count: parsed.data.memberLotIds.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/** Take one animal or sub-lot out of the lot it is in. */
+export async function removeLotFromParentAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      memberLotId: z.string().uuid(),
+      endedOn: requiredDate,
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => removeLotFromParent(tx, ctxOf(ctx), parsed.data),
       { role: ctx.role },
     );
     revalidatePath(BASE, "layout");

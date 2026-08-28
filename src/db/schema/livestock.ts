@@ -1053,6 +1053,103 @@ export const livestockGroupMembers = pgTable(
 );
 
 /**
+ * **WHICH LOT AN ANIMAL LIVES IN — and a lot can hold other lots.**
+ *
+ * Slice 8b, and the table that makes the founder's ruling true in the data:
+ * *a lot is a group of animals, an animal is an animal, and naming one out of a
+ * pen must not evict her from it.*
+ *
+ * **BOTH SIDES ARE `livestock_lots`, which is the whole point.** The container
+ * is a lot and so is the member, because the thing being contained is either a
+ * named animal (a record with one head) or a smaller lot (a record with fifty).
+ * Three broiler runs standing in one field stay THREE lots — per-lot feed
+ * conversion is this pack's headline number and merging them would destroy it —
+ * while still being one thing somebody walks to the next paddock.
+ *
+ * **THIS IS WHAT REPLACES HERDS.** `livestock_groups` was a second container
+ * invented to hold animals that had been split out of their lot, with the same
+ * shape as this and a different name. It is dropped in 8e; until then both
+ * exist and only this one is written by new code.
+ *
+ * **ONE LEVEL DEEP, AND THE WRITE PATH IS WHAT ENFORCES IT.** A member may not
+ * itself have members, and a lot that is already a member may not take any — so
+ * the structure is a container and its contents, never a tree somebody has to
+ * walk. A CHECK cannot see other rows, so this lives in `addLotToParent`, the
+ * same division of labour as the pedigree loop check.
+ *
+ * **DATE-RANGED, for the reason `livestock_group_members` and `land_occupancy`
+ * are.** *Which lot is she in* is a question about today and a column would
+ * answer it; *which lot was she in when that calf was born* is a question about
+ * a date, and a column that gets overwritten cannot answer it at all.
+ * `ended_on` is the INCLUSIVE last day, matching land.
+ *
+ * **AT MOST ONE OPEN MEMBERSHIP PER MEMBER**, enforced by the partial unique
+ * index below. An animal is in one place. That is what lets "move her to the
+ * other lot" be ONE act — close here, open there — rather than a question about
+ * which of two answers is current.
+ *
+ * **NO HEAD IS EVER WRITTEN BY A MEMBERSHIP CHANGE.** The head ledger records
+ * what happened to the ANIMALS, and joining a lot is not something that happens
+ * to an animal. A parent's total is its own balance PLUS its members' — a fold,
+ * like every other count in this pack, never a stored column.
+ */
+export const livestockLotMembers = pgTable(
+  "livestock_lot_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** The lot doing the containing. */
+    parentLotId: uuid("parent_lot_id").notNull(),
+    /** The animal or smaller lot inside it. */
+    memberLotId: uuid("member_lot_id").notNull(),
+    startedOn: date("started_on").notNull(),
+    /** INCLUSIVE last day in the lot. Null means still in it. */
+    endedOn: date("ended_on"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_lot_members_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("livestock_lot_members_tenant_parent_idx").on(
+      t.tenantId,
+      t.parentLotId,
+    ),
+    index("livestock_lot_members_tenant_member_idx").on(
+      t.tenantId,
+      t.memberLotId,
+    ),
+    // ONE LOT AT A TIME. See above — this is what makes moving between lots a
+    // single act instead of an ambiguity.
+    uniqueIndex("livestock_lot_members_one_open_idx")
+      .on(t.tenantId, t.memberLotId)
+      .where(sql`${t.endedOn} is null`),
+    foreignKey({
+      name: "livestock_lot_members_parent_fk",
+      columns: [t.tenantId, t.parentLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "livestock_lot_members_member_fk",
+      columns: [t.tenantId, t.memberLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    // A lot cannot contain itself. Deeper loops are impossible by the
+    // one-level rule the write path enforces, so this is the whole cycle check.
+    check(
+      "livestock_lot_members_not_self",
+      sql`${t.memberLotId} <> ${t.parentLotId}`,
+    ),
+    check(
+      "livestock_lot_members_range_ordered",
+      sql`${t.endedOn} is null or ${t.endedOn} >= ${t.startedOn}`,
+    ),
+  ],
+);
+
+/**
  * WHAT AN ANIMAL IS MADE OF — the STATED half, and only the stated half.
  *
  * Homestead cattle are crossbred on purpose, for hybrid vigour. "½ Angus, ¼
@@ -1153,5 +1250,6 @@ export type LivestockTreatment = typeof livestockTreatments.$inferSelect;
 export type LivestockBreedPart = typeof livestockBreedParts.$inferSelect;
 export type LivestockGroup = typeof livestockGroups.$inferSelect;
 export type LivestockGroupMember = typeof livestockGroupMembers.$inferSelect;
+export type LivestockLotMember = typeof livestockLotMembers.$inferSelect;
 export type LivestockCapitalTransfer =
   typeof livestockCapitalTransfers.$inferSelect;

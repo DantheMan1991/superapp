@@ -25,6 +25,10 @@ import { todayInTimezone } from "@/lib/timezone";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
 import { DataTable } from "@/components/app/data-table";
+import {
+  AddToLotForm,
+  TakeOutOfLotButton,
+} from "@/packs/livestock/components/lot-members-controls";
 import { EmptyState } from "@/components/app/empty-state";
 import { Panel } from "@/components/app/panel";
 import {
@@ -69,6 +73,9 @@ import {
   groupForLots,
   listGroups,
   offspringOf,
+  lotMemberSummaries,
+  lotsAvailableToJoin,
+  parentByLot,
   parentCandidates,
   pedigreeIndex,
   productsInUse,
@@ -346,6 +353,21 @@ export default async function LivestockLotPage({
         ctx.tenant.id,
         structureKindsFrom(landPack.config),
       );
+      // SLICE 8B: what is inside this lot, and what this lot is inside. Both
+      // are questions about a DATE, so today is passed rather than assumed —
+      // the same rule the herd and the paddock reads follow.
+      const members = await lotMemberSummaries(tx, ctx.tenant.id, lot.id, today);
+      const insideOf = (await parentByLot(tx, ctx.tenant.id, [lot.id], today)).get(
+        lot.id,
+      );
+      const insideOfCode = insideOf
+        ? (await codesByLivestockLot(tx, ctx.tenant.id, [insideOf])).get(insideOf)
+        : null;
+      // Only offered when this lot could actually hold things: one that is
+      // already inside another cannot, and the picker must not say otherwise.
+      const joinable = insideOf
+        ? []
+        : await lotsAvailableToJoin(tx, ctx.tenant.id, lot.id);
       // Every animal in the tree, plus the offspring, named in one query. The
       // index carries ids because the fold that reads it is pure.
       // Whose treatment is whose: an inherited row carries the lot id it was
@@ -373,6 +395,10 @@ export default async function LivestockLotPage({
         (await breedPartsByLot(tx, ctx.tenant.id, [lot.id])).get(lot.id) ?? [];
       return {
         lot,
+        members,
+        insideOf: insideOf ?? null,
+        insideOfCode: insideOfCode ?? null,
+        joinable,
         inventoryLot,
         identifiers,
         movements: movements.get(lot.inventoryLotId) ?? [],
@@ -438,6 +464,10 @@ export default async function LivestockLotPage({
   if (!data) notFound();
   const {
     lot,
+    members,
+    insideOf,
+    insideOfCode,
+    joinable,
     inventoryLot,
     identifiers,
     movements,
@@ -500,6 +530,7 @@ export default async function LivestockLotPage({
    */
   const isOwner = ctx.role === "owner";
   const structureWord = labelFor(labels, "structure", "Pen or barn");
+  const lotWord = labelFor(labels, "livestockLot", "Lot");
   // Measured plus allocated. The card says which, and the split is spelled out
   // underneath whenever a shared feeder contributed.
   const feedCents = feed?.totalCents ?? 0;
@@ -602,6 +633,17 @@ export default async function LivestockLotPage({
                 className="underline-offset-4 hover:underline"
               >
                 · {herd.name}
+              </Link>
+            )}
+            {/* SLICE 8B: which lot she lives in, beside which herd she is
+                in. Both answer "where does this animal belong", and until 8e
+                drops herds a farm can have an answer to each. */}
+            {insideOf && insideOfCode && (
+              <Link
+                href={`${BASE}/${insideOf}`}
+                className="underline-offset-4 hover:underline"
+              >
+                · in {insideOfCode}
               </Link>
             )}
             {lot.sex && ` · ${SEX_LABELS[lot.sex] ?? lot.sex}`}
@@ -978,6 +1020,94 @@ export default async function LivestockLotPage({
             )}
           </div>
         </Panel>
+      )}
+
+      {/* **WHAT IS IN THIS LOT** (slice 8b). Rendered whenever the lot holds
+          anything OR could — a lot that is itself inside another cannot hold
+          things, so it gets nothing here rather than an empty invitation. */}
+      {(members.length > 0 || (!insideOf && isOwner)) && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-heading text-xl font-semibold tracking-heading">
+              In this {lotWord.toLowerCase()}
+            </h2>
+            {isOwner && !insideOf && (
+              <AddToLotForm
+                parentLotId={lot.id}
+                candidates={joinable}
+                today={today}
+                word={lotWord}
+              />
+            )}
+          </div>
+          <DataTable
+            isEmpty={members.length === 0}
+            empty={
+              <EmptyState
+                title={`Nothing in this ${lotWord.toLowerCase()} yet`}
+                description={`The head counted above is loose in it. Add a named animal or a smaller ${lotWord.toLowerCase()}, or name animals out of this one — they stay in it.`}
+              />
+            }
+          >
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Animal</TableHead>
+                  <TableHead>Species</TableHead>
+                  <TableHead>In since</TableHead>
+                  <TableHead className="text-right">Head</TableHead>
+                  {isOwner && <TableHead className="w-24" />}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {members.map((m) => (
+                  <TableRow key={m.livestockLotId}>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`${BASE}/${m.livestockLotId}`}
+                        className="hover:underline"
+                      >
+                        {m.code}
+                      </Link>
+                      {/* One head is one animal. Said out loud because the
+                          whole point of the slice is that the two are not the
+                          same kind of thing. */}
+                      {m.isIndividual && (
+                        <Badge variant="outline" className="ml-2">
+                          animal
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {m.species.charAt(0).toUpperCase() + m.species.slice(1)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {m.startedOn}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums font-medium">
+                      {m.head}
+                    </TableCell>
+                    {isOwner && (
+                      <TableCell className="text-right">
+                        <TakeOutOfLotButton
+                          memberLotId={m.livestockLotId}
+                          code={m.code}
+                          today={today}
+                        />
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </DataTable>
+          {members.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              The head shown at the top of this page is what is loose in the{" "}
+              {lotWord.toLowerCase()} itself. These are counted on top of it.
+            </p>
+          )}
+        </div>
       )}
 
       <div className="space-y-3">

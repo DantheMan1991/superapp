@@ -10,6 +10,7 @@ import type {
   LivestockFeedGroupMember,
   LivestockGroup,
   LivestockGroupMember,
+  LivestockLotMember,
   LivestockCapitalTransfer,
   LivestockIdentifier,
   LivestockLot,
@@ -549,6 +550,58 @@ export async function splitLivestockLot(
         livestockLotId: rows[0].id,
         breed: part.breed,
         parts: part.parts,
+      })),
+    );
+  }
+
+  // **SHE STAYS WHERE SHE WAS.** Slice 8b, and the reason the whole slice
+  // exists: naming a cow out of a pen used to drop her out of it, so the
+  // founder's "add individual animals to a lot" was not merely undiscoverable,
+  // it was undone by the only mechanism that could have produced one.
+  //
+  // WHICH lot she joins is decided by the one-level rule. If the pen is itself
+  // inside something — three broiler runs in a field — she joins the FIELD,
+  // because joining the pen would make her a grandchild and there is no such
+  // thing here. Otherwise she joins the pen she came out of.
+  const parentIsInside = await tx.query.livestockLotMembers.findFirst({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, ctx.tenantId),
+      eq(schema.livestockLotMembers.memberLotId, parent.id),
+      isNull(schema.livestockLotMembers.endedOn),
+    ),
+  });
+  await tx.insert(schema.livestockLotMembers).values({
+    tenantId: ctx.tenantId,
+    parentLotId: parentIsInside ? parentIsInside.parentLotId : parent.id,
+    memberLotId: rows[0].id,
+    startedOn: input.occurredOn,
+  });
+
+  // **AND SHE KEEPS EATING.** Feed allocation is head × days over feeder
+  // membership, so a cow split off a pen that was on the bin silently stopped
+  // accruing any feed cost at all — the split carried her species, her sex and
+  // her whole pedigree across and dropped the one thing that was costing money.
+  //
+  // Deliberately only OPEN memberships: a feeder the pen came off last month is
+  // not one she is on today, and copying closed spans would invent head-days
+  // she was never there for.
+  const feeders = await tx.query.livestockFeedGroupMembers.findMany({
+    where: and(
+      eq(schema.livestockFeedGroupMembers.tenantId, ctx.tenantId),
+      eq(schema.livestockFeedGroupMembers.livestockLotId, parent.id),
+      isNull(schema.livestockFeedGroupMembers.endedOn),
+    ),
+  });
+  if (feeders.length > 0) {
+    await tx.insert(schema.livestockFeedGroupMembers).values(
+      feeders.map((f) => ({
+        tenantId: ctx.tenantId,
+        feedGroupId: f.feedGroupId,
+        livestockLotId: rows[0].id,
+        // From the SPLIT, not from when the pen went on the bin. She was part
+        // of the pen's head before today and the pen's own share already
+        // counted her; backdating would charge her twice over the same days.
+        startedOn: input.occurredOn,
       })),
     );
   }
@@ -1380,6 +1433,366 @@ export async function groupSummaries(
  * both correctly. These two functions are about making the OTHER shape — the
  * named cow — as easy to reach as the pen already was.
  */
+
+// -------------------------------------------------- animals live in a lot ---
+
+/**
+ * **A LOT HOLDS ANIMALS AND SMALLER LOTS** (slice 8b). What replaces herds.
+ *
+ * Everything below reads and writes `livestock_lot_members`. The herd functions
+ * above still work and are still what the hub renders until 8d ships the bulk
+ * move; nothing new should be written against them.
+ */
+
+/** Who is in this lot on `on` — animals and sub-lots alike. */
+export async function lotMembers(
+  tx: Tx,
+  tenantId: string,
+  parentLotId: string,
+  on: string,
+): Promise<LivestockLotMember[]> {
+  const rows = await tx.query.livestockLotMembers.findMany({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, tenantId),
+      eq(schema.livestockLotMembers.parentLotId, parentLotId),
+      lte(schema.livestockLotMembers.startedOn, on),
+    ),
+    orderBy: (m, { asc }) => [asc(m.startedOn)],
+  });
+  return rows.filter((row) => !row.endedOn || row.endedOn >= on);
+}
+
+/**
+ * Members of many lots at once, keyed by parent.
+ *
+ * ONE QUERY, because the hub asks this of every lot it renders and a call per
+ * row is the N+1 the flat list already suffers for its codes.
+ */
+export async function membersByParent(
+  tx: Tx,
+  tenantId: string,
+  parentLotIds: string[],
+  on: string,
+): Promise<Map<string, LivestockLotMember[]>> {
+  const out = new Map<string, LivestockLotMember[]>();
+  if (parentLotIds.length === 0) return out;
+  const rows = await tx.query.livestockLotMembers.findMany({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, tenantId),
+      inArray(schema.livestockLotMembers.parentLotId, parentLotIds),
+      lte(schema.livestockLotMembers.startedOn, on),
+    ),
+    orderBy: (m, { asc }) => [asc(m.startedOn)],
+  });
+  for (const row of rows) {
+    if (row.endedOn && row.endedOn < on) continue;
+    const list = out.get(row.parentLotId) ?? [];
+    list.push(row);
+    out.set(row.parentLotId, list);
+  }
+  return out;
+}
+
+/**
+ * Which lot each of these lots is IN, keyed by member.
+ *
+ * The reverse read, and the one the hub needs to stop listing a named animal
+ * twice — once inside her lot and once as a lot of her own.
+ */
+export async function parentByLot(
+  tx: Tx,
+  tenantId: string,
+  memberLotIds: string[],
+  on: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (memberLotIds.length === 0) return out;
+  const rows = await tx.query.livestockLotMembers.findMany({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, tenantId),
+      inArray(schema.livestockLotMembers.memberLotId, memberLotIds),
+      lte(schema.livestockLotMembers.startedOn, on),
+    ),
+  });
+  for (const row of rows) {
+    if (row.endedOn && row.endedOn < on) continue;
+    out.set(row.memberLotId, row.parentLotId);
+  }
+  return out;
+}
+
+/**
+ * Put a lot or an animal INSIDE another lot — **and take it out of wherever it
+ * was.**
+ *
+ * One act, because one open membership per member is a database constraint
+ * rather than a convention. A caller that closed the old one first could fail
+ * between the two and leave an animal nowhere.
+ *
+ * **ONE LEVEL DEEP, ENFORCED HERE.** A CHECK cannot see other rows, so the two
+ * rules that keep this a container-and-contents rather than a tree live in the
+ * write path, the same division of labour as the pedigree loop check:
+ *
+ *   - a lot that already HOLDS things cannot be put inside something
+ *   - a lot that is already INSIDE something cannot be given things to hold
+ *
+ * Both refusals say which rule was hit, because "that did not work" on a screen
+ * with two lots on it is not a diagnosis.
+ *
+ * `member`: putting an animal in a lot is a chore done by whoever is moving
+ * her, the same level as walking her to a paddock. Matching `addLotToGroup`,
+ * the function this replaces.
+ */
+export async function addLotToParent(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { parentLotId: string; memberLotId: string; startedOn: string },
+): Promise<LivestockLotMember> {
+  requireWrite(ctx, "member");
+  if (input.parentLotId === input.memberLotId) {
+    throw new LivestockError("LOT_INVALID", "a lot cannot be put inside itself");
+  }
+  const [parent, member] = await Promise.all([
+    getLivestockLot(tx, ctx.tenantId, input.parentLotId),
+    getLivestockLot(tx, ctx.tenantId, input.memberLotId),
+  ]);
+  if (!parent) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.parentLotId}`);
+  }
+  if (!member) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.memberLotId}`);
+  }
+
+  // Rule one: the thing going in must not itself be holding anything.
+  const memberHolds = await tx.query.livestockLotMembers.findFirst({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, ctx.tenantId),
+      eq(schema.livestockLotMembers.parentLotId, input.memberLotId),
+      isNull(schema.livestockLotMembers.endedOn),
+    ),
+  });
+  if (memberHolds) {
+    throw new LivestockError(
+      "LOT_INVALID",
+      "that one already holds animals of its own — take them out of it first",
+    );
+  }
+
+  // Rule two: the thing receiving must not itself be inside something.
+  const parentIsInside = await tx.query.livestockLotMembers.findFirst({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, ctx.tenantId),
+      eq(schema.livestockLotMembers.memberLotId, input.parentLotId),
+      isNull(schema.livestockLotMembers.endedOn),
+    ),
+  });
+  if (parentIsInside) {
+    throw new LivestockError(
+      "LOT_INVALID",
+      "that lot is already inside another one, and lots only nest one deep",
+    );
+  }
+
+  const open = await tx.query.livestockLotMembers.findFirst({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, ctx.tenantId),
+      eq(schema.livestockLotMembers.memberLotId, input.memberLotId),
+      isNull(schema.livestockLotMembers.endedOn),
+    ),
+  });
+  if (open) {
+    if (open.parentLotId === input.parentLotId) return open;
+    // The day BEFORE the new stay starts, so the two spans meet without
+    // overlapping — the inclusive-end arithmetic land already settled.
+    await tx
+      .update(schema.livestockLotMembers)
+      .set({ endedOn: addDays(input.startedOn, -1) })
+      .where(
+        and(
+          eq(schema.livestockLotMembers.tenantId, ctx.tenantId),
+          eq(schema.livestockLotMembers.id, open.id),
+        ),
+      );
+  }
+
+  const rows = await tx
+    .insert(schema.livestockLotMembers)
+    .values({
+      tenantId: ctx.tenantId,
+      parentLotId: input.parentLotId,
+      memberLotId: input.memberLotId,
+      startedOn: input.startedOn,
+    })
+    .returning();
+  return rows[0];
+}
+
+/** Take a lot or an animal out of the lot it is in, leaving it in none. */
+export async function removeLotFromParent(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { memberLotId: string; endedOn: string },
+): Promise<void> {
+  requireWrite(ctx, "member");
+  const rows = await tx
+    .update(schema.livestockLotMembers)
+    .set({ endedOn: input.endedOn })
+    .where(
+      and(
+        eq(schema.livestockLotMembers.tenantId, ctx.tenantId),
+        eq(schema.livestockLotMembers.memberLotId, input.memberLotId),
+        isNull(schema.livestockLotMembers.endedOn),
+      ),
+    )
+    .returning({ id: schema.livestockLotMembers.id });
+  if (rows.length === 0) {
+    throw new LivestockError("NOT_FOUND", "that one is not in a lot");
+  }
+}
+
+/**
+ * What is inside a lot, ready to render: **code, species and head, per member.**
+ *
+ * A page that assembled this itself would need four queries and would get the
+ * head count from somewhere other than the ledger the rest of the pack folds —
+ * which is how two screens come to disagree about the same pen.
+ */
+export type LotMemberSummary = {
+  livestockLotId: string;
+  inventoryLotId: string;
+  code: string;
+  species: string;
+  head: number;
+  /** True when this member is one animal, so the page can say so without guessing. */
+  isIndividual: boolean;
+  startedOn: string;
+};
+
+export async function lotMemberSummaries(
+  tx: Tx,
+  tenantId: string,
+  parentLotId: string,
+  on: string,
+): Promise<LotMemberSummary[]> {
+  const members = await lotMembers(tx, tenantId, parentLotId, on);
+  if (members.length === 0) return [];
+  const ids = members.map((m) => m.memberLotId);
+  const lots = await tx.query.livestockLots.findMany({
+    where: and(
+      eq(schema.livestockLots.tenantId, tenantId),
+      inArray(schema.livestockLots.id, ids),
+    ),
+    columns: { id: true, inventoryLotId: true, species: true },
+  });
+  const byId = new Map(lots.map((l) => [l.id, l]));
+  const codes = await lotsByIds(
+    tx,
+    tenantId,
+    lots.map((l) => l.inventoryLotId),
+  );
+  // THE SAME FOLD THE LOT PAGE USES, over the same ledger. Never a second way
+  // of counting head.
+  const movements = await movementKindsForLots(
+    tx,
+    tenantId,
+    lots.map((l) => l.inventoryLotId),
+  );
+  const out: LotMemberSummary[] = [];
+  for (const m of members) {
+    const lot = byId.get(m.memberLotId);
+    if (!lot) continue;
+    const head = summariseHead(movements.get(lot.inventoryLotId) ?? []).balance;
+    out.push({
+      livestockLotId: lot.id,
+      inventoryLotId: lot.inventoryLotId,
+      code: codes.get(lot.inventoryLotId)?.code ?? "—",
+      species: lot.species,
+      head,
+      isIndividual: head === 1,
+      startedOn: m.startedOn,
+    });
+  }
+  return out;
+}
+
+/**
+ * What could go INTO this lot — **and nothing the write path would refuse.**
+ *
+ * A picker that offered a lot already holding animals, or one already inside
+ * something else, would be an invitation to a refusal. Both rules are the
+ * one-level rule from `addLotToParent`, applied here so the person never meets
+ * it as an error.
+ *
+ * Excludes the parent itself, and anything already in this lot.
+ *
+ * **NO DATE PARAMETER, unlike its neighbours.** Every other read here answers a
+ * question about a day because history matters; this one answers "what can go
+ * in RIGHT NOW", which is only ever about open memberships. A date it ignored
+ * would be a promise it does not keep.
+ */
+export async function lotsAvailableToJoin(
+  tx: Tx,
+  tenantId: string,
+  parentLotId: string,
+): Promise<{ livestockLotId: string; code: string; species: string; head: number }[]> {
+  const all = await tx.query.livestockLots.findMany({
+    where: eq(schema.livestockLots.tenantId, tenantId),
+    columns: { id: true, inventoryLotId: true, species: true },
+  });
+  const candidates = all.filter((l) => l.id !== parentLotId);
+  if (candidates.length === 0) return [];
+
+  // Anything with an OPEN membership is already somewhere, and anything that is
+  // an open PARENT is holding things. Both are disqualified, in two queries
+  // rather than two per candidate.
+  const open = await tx.query.livestockLotMembers.findMany({
+    where: and(
+      eq(schema.livestockLotMembers.tenantId, tenantId),
+      isNull(schema.livestockLotMembers.endedOn),
+    ),
+    columns: { parentLotId: true, memberLotId: true },
+  });
+  const alreadyInside = new Set(open.map((r) => r.memberLotId));
+  const holdsThings = new Set(open.map((r) => r.parentLotId));
+
+  const eligible = candidates.filter(
+    (l) => !alreadyInside.has(l.id) && !holdsThings.has(l.id),
+  );
+  if (eligible.length === 0) return [];
+
+  const codes = await lotsByIds(
+    tx,
+    tenantId,
+    eligible.map((l) => l.inventoryLotId),
+  );
+  const movements = await movementKindsForLots(
+    tx,
+    tenantId,
+    eligible.map((l) => l.inventoryLotId),
+  );
+  return eligible
+    .map((l) => ({
+      livestockLotId: l.id,
+      code: codes.get(l.inventoryLotId)?.code ?? "—",
+      species: l.species,
+      head: summariseHead(movements.get(l.inventoryLotId) ?? []).balance,
+    }))
+    .sort((a, b) => a.code.localeCompare(b.code));
+}
+
+/**
+ * How many animals a lot stands for: **its own head PLUS its members'.**
+ *
+ * A FOLD, never a column, for the same reason the balance is. A pen of 100 that
+ * has had four cows named out of it is 96 + 1 + 1 + 1 + 1, and the day somebody
+ * corrects one of those splits the total corrects itself.
+ */
+export function totalHead(
+  ownBalance: number,
+  memberBalances: number[],
+): number {
+  return memberBalances.reduce((sum, n) => sum + n, ownBalance);
+}
 
 /**
  * How many animals one "record as individuals" may produce at a time.

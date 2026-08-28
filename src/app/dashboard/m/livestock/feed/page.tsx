@@ -571,10 +571,11 @@ export default async function FeedPage({
             )}
             <p className="text-xs text-muted-foreground">
               &ldquo;A head placed&rdquo; is the comparison figure: cost at
-              today&rsquo;s count falls as birds die, which makes a bad {lotWord.toLowerCase()}
-              look cheaper the worse it goes. It is over the whole bill, because
-              what a {lotWord.toLowerCase()} cost to raise does not change when some of it is
-              processed and sold on &mdash; while &ldquo;a head now&rdquo; is
+              today&rsquo;s count falls as birds die, which makes a bad{" "}
+              {lotWord.toLowerCase()} look cheaper the worse it goes. It is over the whole bill, because
+              what a {lotWord.toLowerCase()}{" "}
+              cost to raise does not change when some of it is processed and
+              sold on &mdash; while &ldquo;a head now&rdquo; is
               over what the lot is still carrying.
             </p>
           </section>
@@ -751,3 +752,4 @@ export default async function FeedPage({
     </div>
   );
 }
+

@@ -33,7 +33,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | **6** | **Processing handoff → `production`** | **shipped 2026-08-20** |
 | ~~**7**~~ | ~~Herds — a set of animals somebody creates, that moves as one~~ **SUPERSEDED by slice 8** | shipped 2026-08-27, being undone |
 | **8a** | **The words** — a lot is a group and has a NAME, an animal is an animal; "batch" and "lot of one" leave the copy | **shipped 2026-08-28** |
-| **8b** | **Animals live in a lot** — membership retargeted from herd to lot, and naming one out of a pen KEEPS her in it | |
+| **8b** | **Animals live in a lot** — a lot holds animals and smaller lots, and naming one out of a pen KEEPS her in it | **shipped 2026-08-28** |
 | **8c** | **Two pages** — a lot page and an animal page, neither wearing the other's furniture | |
 | **8d** | **Move several lots at once** — the one thing herds did that nothing else does. Ships BEFORE 8e | |
 | **8e** | **`livestock_groups` dropped** — only after 8d is live | |
@@ -130,6 +130,79 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-08-28 — Slice 8b: animals live in a lot (`claude/animals-live-in-a-lot`)
+
+**The slice the founder actually asked for**, and the one that makes
+[The model, settled](#the-model-settled-2026-08-27) true in the data rather than
+only in the copy. `livestock_lot_members`, migrations `0227` and `0228`.
+
+**A LOT HOLDS ANIMALS AND SMALLER LOTS, AND BOTH SIDES OF THE TABLE ARE
+`livestock_lots`.** The founder's call, taken as a question before anything was
+built: a herd held LOTS, so if a lot could only hold individual animals then
+herds were not redundant after all and 8d would need a mechanism of its own.
+Three broiler runs standing in one field stay THREE lots — per-lot feed
+conversion is this pack's headline number and merging them would destroy it —
+while still being one thing somebody walks to the next paddock.
+
+**NAMING A COW OUT OF A PEN NOW LEAVES HER IN IT.** This is the bug the whole
+slice exists for. `splitLivestockLot` carried her species, her sex, her birth
+date, her breeding and both parents across — and dropped her out of her group,
+so *"create lots and then add individual animals to it"* was undone by the only
+mechanism that could have produced one. The split now writes the membership.
+
+**AND SHE KEEPS EATING.** The same split dropped her FEEDER membership, and
+allocation is head-days over feeder membership — so naming a cow out of a pen
+that was on the bin silently stopped her accruing any feed cost at all. Carried
+now, and **from the split date, not from when the pen went on the bin**: the
+pen's own share already counted her before today, and backdating would charge
+her twice over the same days.
+
+**ONE LEVEL DEEP, AND WHICH LOT A SPLIT JOINS FALLS OUT OF IT.** If the pen is
+itself inside a field, a cow named out of the pen joins the FIELD — joining the
+pen would make her a grandchild and there is no such thing here. Two refusals in
+`addLotToParent` keep it that way: a member may not hold things, and a holder may
+not be a member. Both live in the write path because a CHECK cannot see other
+rows, the same division of labour as the pedigree loop check.
+
+**THE HUB SHOWS THE TOTAL, NOT WHAT IS LOOSE.** A pen of 100 that has had four
+cows named out of it is 96 loose plus four animals, and a row reading 96 would
+say the farm had lost four. Members are folded into the count and excluded from
+the flat list, so a named animal appears once — inside her lot — rather than
+twice.
+
+**A NEW TABLE RATHER THAN A RETARGETED ONE, and this deviates from what the
+design section said.** It called for `livestock_group_members` to survive with
+its parent FK moved to `livestock_lots`. That would have broken herds the moment
+it shipped, and the same section requires them to keep working until 8d. The
+SHAPE survived; the table did not. `livestock_groups` is still dropped in 8e,
+and its rows want migrating to lots when it goes — a herd becomes a lot holding
+what it held.
+
+`lotsAvailableToJoin` takes **no date**, unlike every other read here, and says
+so: it answers "what can go in right now", which is only ever about open
+memberships, and a date it ignored would be a promise it does not keep.
+
+**A TRAP 8A LEFT, FOUND BY DRIVING AND FIXED HERE.** Interpolating the tenant's
+word mid-sentence ate the space beside it: the feed page read *"makes a bad
+lotlook cheaper"* and *"what a lotcost to raise"*. `{expr}` with ordinary text
+after it is NOT reliably spaced — an explicit `{" "}` on the side that touches
+the expression is. Every other interpolation added in 8a ends its element
+(`In this {lotWord}</h2>`) and was fine; only the two mid-sentence ones broke.
+**Check the rendered page, not the source, whenever this word goes inside a
+sentence** — 8c and 8d will both do it.
+
+**BOTH DATABASES ARE MIGRATED AND VERIFIED** — dev and production each at 153
+tables, every one RLS enabled, forced and with policies, before this was
+merged. Recorded here because 4f's entry did NOT say so, and finding out
+took four commands and a browser session.
+
+Migrations `0227` (the table) and `0228` (RLS, member-wide like the herd table
+it replaces). 8 new ops tests, 8 new isolation tests. Two existing isolation
+tests changed from "tenant A has one lot" to two — the fixture needs a second so
+one can go inside the other, and what those tests are about is that neither
+belongs to the other tenant.
+
 
 ### 2026-08-28 — Slice 8a: the words (`claude/a-lot-is-a-group-of-animals`)
 
@@ -1308,7 +1381,8 @@ This pack is the one that forced the change; the full reasoning is in
 | `livestock_breed_parts` | **What an animal is made of, as somebody stated it** | One row per breed per animal, unique on `(tenant_id, lot, breed)`. `parts` is an integer out of the row's siblings — 2 : 1 : 1 is ½, ¼, ¼ — because percentages force a rounding decision the person never made. **The RESOLVED composition is never stored**: it is a fold over the pedigree in `core/pedigree.ts`, and a stated one beats a computed one |
 | `livestock_capital_transfers` | **An animal stopped being inventory, or started again** | Slice 4f. Direction `to_breeding\|to_market`, the amount that moved, and the three things the event produced: the ASSET she became, the ENTRY that moved the money, and (historically) a movement. **There is no `breeding` flag anywhere** — the state is a fold over these rows, newest first. `journal_entry_id` is null for a tenant with no books: the decision still happened |
 | `livestock_groups` | ~~A herd, mob or flock~~ **BEING DROPPED — slice 8e.** See [The model, settled](#the-model-settled-2026-08-27) | Holds LOTS, not animals, which is what lets one hold a named cow and a counted pen at once. Same shape as `livestock_feed_groups`: named, `active\|closed`, closed keeps reporting. **The head total is a fold over its members and is never stored** |
-| `livestock_group_members` | Which lots are in a herd, **between which dates**. **SURVIVES slice 8 with its parent FK retargeted at `livestock_lots`** — this is the mechanism "animals live in a lot" needs | Inclusive `ended_on`, matching `land_occupancy`. **At most ONE OPEN membership per lot across all herds**, partial unique index — a cow is not in two herds, and that is what makes moving between them one act. Composite FKs to both sides, CASCADE. **No head event is ever written by a membership change** |
+| `livestock_lot_members` | **Which lot an animal lives in — and a lot can hold other lots** | Slice 8b, and what replaces herds. **BOTH SIDES are `livestock_lots`**, because the thing contained is either a named animal (one head) or a smaller lot (fifty). Date-ranged, inclusive `ended_on`. **At most ONE OPEN membership per member**, partial unique index. **ONE LEVEL DEEP, enforced in `addLotToParent`** — a member may not hold things and a holder may not be a member; a CHECK cannot see other rows. `not_self` CHECK is the whole cycle guard, because one level makes longer loops unrepresentable. **No head event is ever written by a membership change** |
+| `livestock_group_members` | Which lots are in a herd, **between which dates**. **BEING DROPPED — slice 8e.** Its SHAPE survived as `livestock_lot_members` rather than the table itself: retargeting in place would have broken herds immediately, and they must keep working until 8d ships the bulk move | Inclusive `ended_on`, matching `land_occupancy`. **At most ONE OPEN membership per lot across all herds**, partial unique index — a cow is not in two herds, and that is what makes moving between them one act. Composite FKs to both sides, CASCADE. **No head event is ever written by a membership change** |
 | `livestock_identifiers` | What an animal is called | Many per lot, typed and **date-ranged**. Composite FK to the lot, CASCADE. Indexed by value, because finding an animal by its tag happens in a chute |
 | `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
 | `livestock_feed_groups` | **A shared feeder** — a bin, a bulk bag, a trough | Holds the FEEDER, not the feed: no quantity, no cost, no balance. `status` in `active\|closed`; closed keeps reporting. Deliberately not an asset — a feeding group is a set of animals sharing a cost, so two bins feeding one flock are one group |

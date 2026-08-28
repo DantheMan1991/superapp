@@ -25,6 +25,8 @@ import {
   breedPartsByLot,
   capitalStateByLot,
   groupForLots,
+  membersByParent,
+  parentByLot,
   groupSummaries,
   listLivestockLots,
   withdrawalByLot,
@@ -88,6 +90,8 @@ export async function LivestockModule({
         herds,
         herdByLot,
         capitalByLot,
+        lotParents,
+        lotMembersByParent,
       ] = await Promise.all([
         listLots(tx, ctx.tenant.id),
         currentZoneForOccupants(
@@ -151,6 +155,22 @@ export async function LivestockModule({
           lots.map((l) => l.id),
           today,
         ),
+        // SLICE 8B. Which lot each animal lives in, and what each lot holds.
+        // The first keeps a named animal from appearing twice; the second lets
+        // a lot's row show the total it stands for rather than only what is
+        // loose in it.
+        parentByLot(
+          tx,
+          ctx.tenant.id,
+          lots.map((l) => l.id),
+          today,
+        ),
+        membersByParent(
+          tx,
+          ctx.tenant.id,
+          lots.map((l) => l.id),
+          today,
+        ),
       ]);
 
       return {
@@ -166,6 +186,8 @@ export async function LivestockModule({
         herds,
         herdByLot,
         capitalByLot,
+        lotParents,
+        lotMembersByParent,
       };
     },
     { role: ctx.role },
@@ -184,6 +206,8 @@ export async function LivestockModule({
     herds,
     herdByLot,
     capitalByLot,
+    lotParents,
+    lotMembersByParent,
   } = data;
   const isOwner = ctx.role === "owner";
   const byId = new Map(inventoryLots.map((l) => [l.id, l]));
@@ -208,7 +232,14 @@ export async function LivestockModule({
    * her. She gets a badge rather than a section of her own; grouping breeding
    * stock together is what a HERD is for, and there is one of those now.
    */
-  const loose = lots.filter((lot) => !herdByLot.has(lot.id));
+  /**
+   * **AND NOT WHAT IS INSIDE ANOTHER LOT** (slice 8b). A cow named out of a pen
+   * is shown on that pen's page; listing her here as well would be the same
+   * animal twice, and her head is already counted in the pen's total.
+   */
+  const loose = lots.filter(
+    (lot) => !herdByLot.has(lot.id) && !lotParents.has(lot.id),
+  );
 
   return (
     <div className="space-y-6">
@@ -413,9 +444,41 @@ export async function LivestockModule({
                     })()}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {/* An em dash before anything has been placed. "No animals"
+                    {/* **THE TOTAL, NOT WHAT IS LOOSE** (slice 8b). A pen of 100
+                        that has had four cows named out of it holds 96 loose
+                        plus four animals, and a row reading 96 would say the
+                        farm had lost four. The members' head is folded in here
+                        for the same reason the balance is a fold: two ways of
+                        counting the same pen is how two screens come to
+                        disagree.
+
+                        An em dash before anything has been placed. "No animals"
                         and "none recorded yet" are different facts. */}
-                    {lotMovements.length === 0 ? "—" : summary.balance}
+                    {(() => {
+                      const held = lotMembersByParent.get(lot.id) ?? [];
+                      if (lotMovements.length === 0 && held.length === 0) {
+                        return "—";
+                      }
+                      const inside = held.reduce((sum, m) => {
+                        const mLot = lots.find(
+                          (l) => l.id === m.memberLotId,
+                        );
+                        if (!mLot) return sum;
+                        const mv = movements.get(mLot.inventoryLotId) ?? [];
+                        return sum + summariseHead(mv).balance;
+                      }, 0);
+                      const total = summary.balance + inside;
+                      return (
+                        <span className="font-medium">
+                          {total}
+                          {inside > 0 && (
+                            <span className="ml-1 text-xs font-normal text-muted-foreground">
+                              ({held.length} in)
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })()}
                   </TableCell>
                 </TableRow>
               );

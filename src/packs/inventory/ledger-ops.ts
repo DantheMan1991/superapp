@@ -676,6 +676,88 @@ export async function postMovement(
 
 
 /**
+ * **STOCK BECAME A CAPITAL ASSET, or came back from being one.**
+ *
+ * The posting half of a reclassification: the business still owns the thing, it
+ * has simply stopped being for sale. Dr the fixed-asset account, Cr inventory —
+ * and the reverse on the way back.
+ *
+ * **THIS IS NOT `postMovement` WITH A DIFFERENT ACCOUNT, and the difference is
+ * the whole point.** An ordinary outgoing movement credits inventory and debits
+ * COGS, which says the cost was consumed. Capitalising says the opposite: the
+ * cost survives, on the other side of the balance sheet. A farm that ran a
+ * breeding cow out through the normal path would have expensed an animal it
+ * still owns and understated its assets by her whole cost.
+ *
+ * **NEUTRAL ON PURPOSE.** Nothing here knows what a heifer is. A dealership
+ * moving a demonstrator out of stock, a hire company capitalising a machine off
+ * the shelf — same entry, same seam. `livestock` is only its first caller.
+ *
+ * Returns null when the tenant does not post inventory at all, exactly as
+ * `postMovement` does: the reclassification still HAPPENED and is still
+ * recorded, it just has no books to land in.
+ */
+export async function postCapitalisation(
+  tx: Tx,
+  ctx: InventoryCtx,
+  input: {
+    /** What this entry is evidence of — the transfer row's id. */
+    sourceId: string;
+    itemId: string;
+    lotId: string;
+    lotCode?: string | null;
+    /** What moved, in cents. Always positive; `direction` says which way. */
+    costCents: number;
+    /** The fixed-asset account the cost lands in, or leaves from. */
+    counterAccountId: string;
+    occurredOn: string;
+    /** `out` — stock became an asset. `in` — an asset came back to stock. */
+    direction: "out" | "in";
+  },
+): Promise<{ entryId: string } | null> {
+  if (!input.costCents) return null;
+  const treatment = await inventoryTreatmentOf(tx, ctx.tenantId);
+  if (treatment === "none") return null;
+
+  const accounts = await resolveInventoryAccounts(tx, ctx.tenantId);
+  // The BATCH's company, not the movement's location: a reclassification is
+  // money rather than a place, the same reasoning `postCostAdjustment` uses.
+  const entityId = await resolveLotEntity(tx, ctx.tenantId, input.lotId);
+  const item = await tx.query.inventoryItems.findFirst({
+    where: eq(schema.inventoryItems.id, input.itemId),
+    columns: { name: true },
+  });
+
+  const out = input.direction === "out";
+  // Positive = debit, negative = credit — the ledger's own convention.
+  const lines = out
+    ? [
+        { accountId: input.counterAccountId, amountCents: input.costCents },
+        { accountId: accounts.inventoryAccountId, amountCents: -input.costCents },
+      ]
+    : [
+        { accountId: accounts.inventoryAccountId, amountCents: input.costCents },
+        { accountId: input.counterAccountId, amountCents: -input.costCents },
+      ];
+
+  const { entry } = await postEntry(tx, ledgerCtx(ctx), {
+    entityId,
+    status: "posted",
+    entryDate: input.occurredOn,
+    memo:
+      `${out ? "Capitalised" : "Returned to stock"} — ${item?.name ?? "stock"}` +
+      (input.lotCode ? ` (${input.lotCode})` : ""),
+    source: "inventory_adjustment",
+    sourceId: input.sourceId,
+    // ADR 0011: posts without the owner check, because the authorisation
+    // happened where the stock moved.
+    idempotencyKey: `inventory:capitalisation:${input.sourceId}`,
+    lines,
+  });
+  return { entryId: entry.id };
+}
+
+/**
  * **THE COMPANY A BATCH'S COST BELONGS TO.**
  *
  * A cost correction has no location of its own — it is money, not a movement —

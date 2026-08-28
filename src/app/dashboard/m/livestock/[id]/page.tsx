@@ -5,6 +5,12 @@ import { LivestockNav } from "@/packs/livestock/components/livestock-nav";
 import { withTenant } from "@/db";
 import { requireTenant } from "@/lib/auth";
 import { isModuleEnabled, requireModuleEnabled } from "@/lib/modules";
+import { listAccounts } from "@/modules/accounting/core";
+import { postedToDateCents } from "@/packs/assets/depreciation-ops";
+import {
+  ToBreedingForm,
+  ToMarketForm,
+} from "@/packs/livestock/components/capital-controls";
 import { attachmentsForRecord } from "@/modules/documents/attachments";
 import { RecordPhotos } from "@/modules/documents/components/record-photos";
 import { isDisplayableImage } from "@/modules/documents/allowlist";
@@ -30,6 +36,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  carriedCostByLot,
   consumedByLot,
   getLot as getInventoryLot,
   listItems,
@@ -37,6 +44,7 @@ import {
   movementKindsForLots,
 } from "@/packs/inventory/ops";
 import { formatMoney } from "@/lib/money";
+import { carriedValue } from "@/packs/inventory/core/valuation";
 import { movementKindLabel, slugLabel } from "@/packs/inventory/vocabulary";
 import {
   currentZoneForOccupants,
@@ -56,6 +64,8 @@ import {
   listIdentifiers,
   listTreatmentsForLot,
   listWeightsForLot,
+  capitalStateByLot,
+  capitalTransfersForLot,
   groupForLots,
   listGroups,
   offspringOf,
@@ -246,6 +256,10 @@ export default async function LivestockLotPage({
         headItems,
         herdByLot,
         herds,
+        capitalState,
+        capitalTransfers,
+        accounts,
+        carriedCosts,
         attachments,
       ] = await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
@@ -311,6 +325,14 @@ export default async function LivestockLotPage({
           // rather than assumed.
           groupForLots(tx, ctx.tenant.id, [lot.id], today),
           listGroups(tx, ctx.tenant.id, { status: "active" }),
+          // Slice 4f. Whether she is stock or a capital asset is a FOLD over
+          // the transfers, never a column — see `capitalStateByLot`.
+          capitalStateByLot(tx, ctx.tenant.id, [lot.id], today),
+          capitalTransfersForLot(tx, ctx.tenant.id, lot.id),
+          listAccounts(tx, ctx.tenant.id),
+          // What the batch is carrying — the figure the transfer will move, so
+          // the dialog can name it before anybody presses the button.
+          carriedCostByLot(tx, ctx.tenant.id, [lot.inventoryLotId], today),
           // Photos, from `documents`. Empty when the module is off, which is
           // why the section below is gated on the module rather than on this.
           attachmentsForRecord(tx, ctx.tenant.id, {
@@ -339,6 +361,14 @@ export default async function LivestockLotPage({
         ...pedigree.keys(),
         ...offspring.map((o) => o.id),
       ]);
+      // What the books have already taken off her, so "back to the market
+      // herd" can quote net book value rather than cost.
+      const breedingAssetId =
+        capitalTransfers.find((t) => t.direction === "to_breeding")?.assetId ??
+        null;
+      const depreciatedCents = breedingAssetId
+        ? await postedToDateCents(tx, ctx.tenant.id, breedingAssetId)
+        : 0;
       const statedBreed =
         (await breedPartsByLot(tx, ctx.tenant.id, [lot.id])).get(lot.id) ?? [];
       return {
@@ -373,6 +403,21 @@ export default async function LivestockLotPage({
         inheritedFrom,
         herd:
           herds.find((g) => g.id === herdByLot.get(lot.id)) ?? null,
+        capitalState: capitalState.get(lot.id) ?? "market",
+        carriedCents: (() => {
+          // `carriedValue`, NEVER `remainingCents` — a lot nobody costed and a
+          // lot whose cost has all been released both fold to zero, and only
+          // one of those is a number.
+          const row = carriedCosts.get(lot.inventoryLotId);
+          return Math.max(0, Math.round((row ? carriedValue(row) : null) ?? 0));
+        })(),
+        capitalTransfers,
+        depreciatedCents,
+        // Only accounts that can CARRY an asset. The chart is the tenant's, so
+        // the picker offers what is in it rather than a name this pack invented.
+        fixedAssetAccounts: accounts
+          .filter((a) => a.accountType === "asset" && a.subtype === "fixed_asset")
+          .map((a) => ({ id: a.id, code: a.code, name: a.name })),
         photos: attachments
           // The gallery renders `<img>`, so anything the browser will not put
           // on screen has no business in it. An attachment that is not a photo
@@ -421,11 +466,29 @@ export default async function LivestockLotPage({
     photos,
     inheritedFrom,
     herd,
+    capitalState,
+    capitalTransfers,
+    carriedCents,
+    depreciatedCents,
+    fixedAssetAccounts,
   } = data;
+  /**
+   * **HER HEAD STAYS.** Slice 4f moves the MONEY, not the animal: she is still
+   * one head standing in a paddock, so every control on this page goes on
+   * working. What changed is which side of the balance sheet her value sits on,
+   * and the panel below is where that is said.
+   */
+  const isBreeding = capitalState === "breeding";
+  const capitalisedCents =
+    capitalTransfers.find((t) => t.direction === "to_breeding")?.amountCents ?? 0;
+  const bookValueCents = Math.max(0, capitalisedCents - depreciatedCents);
   // The FILE lives in the DMS, so the panel exists only where the DMS does. A
   // button that uploads into a module the tenant has not switched on would
   // fail at the gate, which is a worse answer than not offering it.
   const documentsOn = await isModuleEnabled(ctx.tenant.id, "documents");
+  // A capital asset needs an asset register to live in. `livestock` does not
+  // require `assets`, so the panel exists only where it is switched on.
+  const assetsOn = await isModuleEnabled(ctx.tenant.id, "assets");
 
   /**
    * Chores are for whoever is doing them; decisions are the owner's.
@@ -856,6 +919,66 @@ export default async function LivestockLotPage({
           </div>
         </Panel>
       </div>
+
+      {assetsOn && (
+        <Panel className="p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="font-heading text-base font-semibold tracking-heading">
+                <span className="flex items-center gap-2">
+                  On the books as
+                  <Badge variant="outline">
+                    {isBreeding ? "Capital asset" : "Stock"}
+                  </Badge>
+                </span>
+              </h2>
+              <p className="mt-1 text-2xl font-medium">
+                {isBreeding
+                  ? formatMoney(bookValueCents, currencySymbol)
+                  : formatMoney(carriedCents, currencySymbol)}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {isBreeding
+                  ? `Breeding stock since ${capitalTransfers[0]?.occurredOn ?? "—"}. Her cost moved to fixed assets and depreciates from there, so she is out of stock valuation — she is still an animal here, and a run cannot take her until she comes back to the market herd.`
+                  : "Inventory — what she cost to buy plus what has been spent raising her. A breeding animal is a capital asset instead, and moving her posts an entry rather than setting a flag."}
+              </p>
+              {isBreeding && depreciatedCents > 0 && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {formatMoney(capitalisedCents, currencySymbol)}{" "}
+                  capitalised, {formatMoney(depreciatedCents, currencySymbol)}{" "}
+                  depreciated so far.
+                </p>
+              )}
+            </div>
+            {isOwner && (
+              <div className="flex flex-wrap items-center gap-2">
+                {isBreeding ? (
+                  <ToMarketForm
+                    livestockLotId={lot.id}
+                    code={inventoryLot.code}
+                    bookValueCents={bookValueCents}
+                    currencySymbol={currencySymbol}
+                    today={today}
+                  />
+                ) : (
+                  /* One animal, because a capital asset is a thing rather than
+                     a quantity — the ops layer refuses a pen and says so. */
+                  summary.balance === 1 && (
+                    <ToBreedingForm
+                      livestockLotId={lot.id}
+                      code={inventoryLot.code}
+                      carriedCents={carriedCents}
+                      currencySymbol={currencySymbol}
+                      accounts={fixedAssetAccounts}
+                      today={today}
+                    />
+                  )
+                )}
+              </div>
+            )}
+          </div>
+        </Panel>
+      )}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">

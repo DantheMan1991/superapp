@@ -1048,6 +1048,85 @@ d("livestock tables (RLS)", () => {
     expect(rows).toHaveLength(1);
   });
 
+
+  // ---- slice 4f: the capital transfer ------------------------------------
+
+  it("CANNOT CAPITALISE ANOTHER TENANT'S ANIMAL", async () => {
+    // The fold that decides whether an animal is breeding stock reads the
+    // LATEST row, so one foreign row could silently reclassify an animal — and
+    // these rows are the evidence behind entries that move money between
+    // inventory and fixed assets.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockCapitalTransfers).values({
+          tenantId: tenantA,
+          livestockLotId: lotB,
+          direction: "to_breeding",
+          occurredOn: "2026-08-01",
+          amountCents: 100,
+          createdByClerkUserId: "iso",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses an invented direction and a negative amount", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockCapitalTransfers).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          direction: "to_somewhere",
+          occurredOn: "2026-08-01",
+          amountCents: 100,
+          createdByClerkUserId: "iso",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockCapitalTransfers).values({
+          tenantId: tenantA,
+          livestockLotId: lotA,
+          direction: "to_breeding",
+          occurredOn: "2026-08-01",
+          amountCents: -1,
+          createdByClerkUserId: "iso",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a tenant sees only its own capital transfers", async () => {
+    await asOwner((tx) =>
+      tx.insert(schema.livestockCapitalTransfers).values({
+        tenantId: tenantA,
+        livestockLotId: lotA,
+        direction: "to_breeding",
+        occurredOn: "2026-08-01",
+        amountCents: 12_345,
+        createdByClerkUserId: "iso",
+      }),
+    );
+    const mine = await asOwner((tx) =>
+      tx.select().from(schema.livestockCapitalTransfers),
+    );
+    expect(mine.map((t) => t.amountCents)).toEqual([12_345]);
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockCapitalTransfers),
+    );
+    expect(theirs).toHaveLength(0);
+  });
+
+  it("capital transfers are default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.livestockCapitalTransfers),
+      ),
+    ).toHaveLength(0);
+  });
+
   it("herds are default-deny with no tenant context", async () => {
     const nowhere = "00000000-0000-0000-0000-000000000000";
     const seen = await withTenant(nowhere, async (tx) => [

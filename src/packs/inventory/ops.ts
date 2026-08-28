@@ -1740,6 +1740,22 @@ export async function movementsByIds(
  * for one and a half pens. `core/costing.ts` explains the arithmetic; this only
  * fetches the rows.
  */
+/**
+ * A batch carrying nothing, for a lot whose cost has been capitalised.
+ *
+ * Every field zeroed rather than a partial object: `hasRecordedCost` folds over
+ * several of them, and a half-filled shape would make `carriedValue` answer
+ * "somebody costed this" about a batch whose cost is on an asset.
+ */
+const EMPTY_CARRIED: LotCarriedCost = {
+  purchasedCents: 0,
+  consumedCents: 0,
+  releasedCents: 0,
+  adjustedOnHandCents: 0,
+  adjustedIssuedCents: 0,
+  remainingCents: 0,
+};
+
 export async function carriedCostByLot(
   tx: Tx,
   tenantId: string,
@@ -1838,7 +1854,39 @@ export async function carriedCostByLot(
     else adjustedByLot.set(row.lotId, [row]);
   }
 
+  /**
+   * **A CAPITALISED BATCH CARRIES NOTHING AS STOCK.** Its cost moved to the
+   * other side of the balance sheet, and every caller of this — the feed
+   * report, production's cost roll, the valuation screen — would otherwise
+   * report money that is already on an asset. The thing is still there; its
+   * VALUE is not here. See `inventory_lots.capitalised_on`.
+   */
+  const capitalised = await tx
+    .select({
+      id: schema.inventoryLots.id,
+      capitalisedOn: schema.inventoryLots.capitalisedOn,
+    })
+    .from(schema.inventoryLots)
+    .where(
+      and(
+        eq(schema.inventoryLots.tenantId, tenantId),
+        inArray(schema.inventoryLots.id, lotIds),
+        isNotNull(schema.inventoryLots.capitalisedOn),
+      ),
+    );
+  const suppressed = new Set(
+    capitalised
+      // As of the caller's own date, so a report dated before she was
+      // capitalised still sees her cost where it was.
+      .filter((row) => !asOf || (row.capitalisedOn ?? "") <= asOf)
+      .map((row) => row.id),
+  );
+
   for (const lotId of lotIds) {
+    if (suppressed.has(lotId)) {
+      out.set(lotId, EMPTY_CARRIED);
+      continue;
+    }
     out.set(
       lotId,
       lotCarried(
@@ -2997,6 +3045,7 @@ export async function valueStock(
       lotId: schema.inventoryMovements.lotId,
       lotCode: schema.inventoryLots.code,
       lotSource: schema.inventoryLots.source,
+      capitalisedOn: schema.inventoryLots.capitalisedOn,
       quantity: sql<string>`sum(${schema.inventoryMovements.quantity})`,
     })
     .from(schema.inventoryMovements)
@@ -3024,11 +3073,22 @@ export async function valueStock(
       schema.inventoryMovements.lotId,
       schema.inventoryLots.code,
       schema.inventoryLots.source,
+      schema.inventoryLots.capitalisedOn,
     );
 
   const standing = rows
     .map((row) => ({ ...row, quantity: roundQuantity(Number(row.quantity)) }))
-    .filter((row) => row.quantity !== 0);
+    .filter((row) => row.quantity !== 0)
+    // **A CAPITALISED BATCH IS NOT STOCK.** Its cost is on the other side of
+    // the balance sheet, and a line here would count it twice — the thing is
+    // still THERE (a breeding cow is very much there), it is simply not
+    // inventory. As of the report's own date, so a valuation run before she was
+    // capitalised still includes her.
+    .filter(
+      (row) =>
+        !row.capitalisedOn ||
+        (opts.asOf ? row.capitalisedOn > opts.asOf : false),
+    );
 
   const lotIds = [
     ...new Set(

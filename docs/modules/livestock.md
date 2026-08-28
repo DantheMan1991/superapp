@@ -24,12 +24,101 @@ and [land.md](land.md) before changing anything about where animals are.
 | 4c | The breeding calendar — bull exposure → calving window, preg check narrows it, calving fixes it, a "who is due" list | |
 | 4d | Traits scored 1–5, sire performance across years, **the inbreeding warning at turn-in** | |
 | 4e | Registry — number, association, registered name, papers in Documents. Needs 4b | |
-| 4f | **The capital transfer** — market herd ↔ breeding herd, and it POSTS | |
+| **4f** | **The capital transfer** — market herd ↔ breeding herd, and it POSTS | **shipped 2026-08-27** |
 | **5** | **Weights (tape formulas, sampling) — and the FCR they unlock** | **shipped 2026-08-20** |
 | **6** | **Processing handoff → `production`** | **shipped 2026-08-20** |
 | **7** | **Herds — a set of animals somebody creates, that moves as one** | **shipped 2026-08-27** |
 
 ## Build log
+
+### 2026-08-27 — Slice 4f: a cow is not inventory (`claude/a-cow-is-not-inventory`)
+
+The last slice of 4, and the one the design has called the line between a
+tracking app and an accounting one since 2026-08-13: *"The same animal is
+inventory or a capital asset depending on its purpose… Moving an animal from the
+market herd to the breeding herd is therefore an accounting event that must POST,
+not a status checkbox. Most farm software treats it as a flag and quietly makes
+the books wrong."*
+
+**SO THERE IS NO FLAG.** Whether an animal is breeding stock today is a fold over
+`livestock_capital_transfers` — the latest direction wins — for the same reason
+the head count is a fold over movements and the withdrawal clock is a fold over
+treatments. A boolean would stop agreeing with the journal the first time
+somebody corrected a date, and the journal is the half that matters.
+
+**THE ENTRY IS THE POINT, AND IT IS NOT THE ONE AN ORDINARY ISSUE WOULD MAKE.**
+`postCapitalisation` posts **Dr fixed assets, Cr inventory**. The normal outgoing
+path debits COGS, which says the cost was consumed — a farm that ran a breeding
+cow through it would have expensed an animal it still owns and understated its
+assets by her whole cost. The seam lives in `inventory`, names no pack, and would
+serve a dealership moving a demonstrator out of stock unchanged.
+
+**THE AMOUNT IS HER CARRIED COST**, through `carriedValue` — the same fold the
+valuation screen uses, so the credit to inventory is exactly the figure that was
+in stock a moment before and the two screens cannot disagree. Coming back, it is
+**net book value**: depreciation has been running, and putting her back at cost
+would re-create value the books have already written off.
+
+## The first version was wrong, and driving it is what showed that
+
+**Built first: her HEAD left the ledger.** The reasoning looked airtight — this
+pack's oldest sentence is that the head ledger and the inventory ledger are the
+same ledger, so an animal that is not stock is not in it — and the accounting
+fell out with no special case at all.
+
+**Then Rosie's page was opened.** Treat and Weigh had disappeared, because both
+are gated on head. Record loss was still there and would have taken her to minus
+one. Shared-feeder allocation is head × days, so it had stopped reaching her. A
+breeding cow is the animal a farm touches MOST — treated, weighed, bred, and
+eventually dead — and she had become the one it could do least to.
+
+The founder's call, given both options: **keep her head, move only the money.**
+"Not inventory" is a claim about the BALANCE SHEET, about where her value sits,
+and reading it as a claim about whether she exists was the mistake.
+
+**So the mechanism is a marker, not a movement.** `inventory_lots.capitalised_on`
+— neutral, no pack named — and both `valueStock` and `carriedCostByLot` respect
+it, which is what keeps the ledger and the valuation screen agreeing without
+inventing head events. **Nothing is written to the head ledger at all**, because
+the head ledger records what happened to the ANIMALS and nothing happened to her.
+
+**The refusal that replaces "she has no head" is explicit.** `run-handler.ts`
+blocks a run on a capitalised lot and says why: *her cost is in fixed assets;
+bring her back to the market herd first, which moves the value back and is the
+entry a sale needs.* That is the design's "entirely different treatment on sale",
+and it is a rule rather than an accident of arithmetic.
+
+**Coming back writes a cost correction of exactly the depreciation taken**
+(`capital_return`), so clearing the marker does not spring her batch back to
+original cost while the entry credits fixed assets at net book value. The two
+halves have to land on the same number or the valuation screen drifts from the
+ledger by the depreciation.
+
+Two more things driving found, both fixed:
+
+- **An uncosted animal could not be capitalised at all.**
+  `assets_depreciable_is_complete` refuses a method other than `none` without a
+  cost, and the form ticks depreciation by default — so a farm that had never
+  costed its animals hit a constraint violation. Nothing to depreciate now forces
+  the method to `none` rather than refusing the transfer: the transfer is a fact
+  about what the business owns, and a farm that has never costed its animals
+  still owns them.
+- **Every refusal arrived as "Something went wrong saving that."** This slice
+  composes `assets` and the ledger and both throw their own error types, neither
+  of which livestock's `toResult` knew. That is what turned a one-sentence
+  diagnosis into a browser session.
+
+**A FIXED-ASSET ACCOUNT FOR LIVESTOCK DOES NOT EXIST IN THE FARM CHART.** The
+picker offered `1600 · Equipment` and `1650 · Vehicles`, because those are the
+only fixed-asset accounts the generic chart has — so a cow goes in Equipment
+until a farm chart of accounts is seeded, which
+[packs-and-profiles.md](packs-and-profiles.md) already calls the largest gap in
+the installer. Recorded in Open items rather than worked around.
+
+Driven on Hilltop Farm: Hazel moved to breeding stock and reads **1 head, "On the
+books as: Capital asset"**, with Treat, Weigh, Split and Record loss all still
+there — the exact controls the first version had taken away. Migrations `0224`,
+`0225` and `0226`; 8 new ops tests, 4 new isolation tests.
 
 ### 2026-08-27 — Slice 7: a herd you can move (`claude/a-herd-you-can-move`)
 
@@ -1070,6 +1159,7 @@ This pack is the one that forced the change; the full reasoning is in
 | --- | --- | --- |
 | `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed`. **`dam_lot_id` / `sire_lot_id`** are composite SELF-FKs, RESTRICT, with a CHECK against being one's own parent — and they are NOT `inventory_lots.parent_lot_id`, which is the split chain. The free-text `breed` column was DROPPED by `0221` |
 | `livestock_breed_parts` | **What an animal is made of, as somebody stated it** | One row per breed per animal, unique on `(tenant_id, lot, breed)`. `parts` is an integer out of the row's siblings — 2 : 1 : 1 is ½, ¼, ¼ — because percentages force a rounding decision the person never made. **The RESOLVED composition is never stored**: it is a fold over the pedigree in `core/pedigree.ts`, and a stated one beats a computed one |
+| `livestock_capital_transfers` | **An animal stopped being inventory, or started again** | Slice 4f. Direction `to_breeding\|to_market`, the amount that moved, and the three things the event produced: the ASSET she became, the ENTRY that moved the money, and (historically) a movement. **There is no `breeding` flag anywhere** — the state is a fold over these rows, newest first. `journal_entry_id` is null for a tenant with no books: the decision still happened |
 | `livestock_groups` | **A herd, mob or flock — a set of animals somebody created** | Holds LOTS, not animals, which is what lets one hold a named cow and a counted pen at once. Same shape as `livestock_feed_groups`: named, `active\|closed`, closed keeps reporting. **The head total is a fold over its members and is never stored** |
 | `livestock_group_members` | Which lots are in a herd, **between which dates** | Inclusive `ended_on`, matching `land_occupancy`. **At most ONE OPEN membership per lot across all herds**, partial unique index — a cow is not in two herds, and that is what makes moving between them one act. Composite FKs to both sides, CASCADE. **No head event is ever written by a membership change** |
 | `livestock_identifiers` | What an animal is called | Many per lot, typed and **date-ranged**. Composite FK to the lot, CASCADE. Indexed by value, because finding an animal by its tag happens in a chute |
@@ -1176,6 +1266,17 @@ This pack is the one that forced the change; the full reasoning is in
 - `src/packs/livestock/ops.ts` → `recordBirth` — the lot, both parents and the
   head in one transaction. **Read its comment before touching lineage**: it does
   not set `inventory_lots.parent_lot_id`, and that is the point
+- `src/packs/livestock/ops.ts` → `transferToBreeding`, `returnToMarket`,
+  `capitalStateByLot` — **slice 4f, and the only place this pack posts a journal
+  entry.** Read the section header before changing any of it: the head stays,
+  the money moves, and the first version got that the other way round
+- `src/packs/inventory/ledger-ops.ts` → `postCapitalisation` — Dr fixed assets,
+  Cr inventory. **Not `postMovement` with a different account**, and its header
+  says why
+- `src/packs/inventory/ops.ts` → `valueStock`, `carriedCostByLot` — both respect
+  `capitalised_on`, which is what stops a capitalised cost being counted twice
+- `src/packs/livestock/components/capital-controls.tsx` — the two dialogs, whose
+  copy carries more accounting than anything else in the pack on purpose
 - `src/packs/livestock/ops.ts` → `moveGroupToZone` — **the reason a herd is worth
   having.** Every member through `land`'s own `moveOccupant`, in one
   transaction, reporting what it could not move rather than a count
@@ -1208,6 +1309,8 @@ This pack is the one that forced the change; the full reasoning is in
   · `drizzle/0217_*.sql` · `drizzle/0218_livestock_breed_parts_rls.sql`
   · `drizzle/0221_*.sql` (**the contract — runs AFTER the deploy**)
   · `drizzle/0222_*.sql` (**hand-reordered**) · `drizzle/0223_livestock_groups_rls.sql`
+  · `drizzle/0224_*.sql` · `drizzle/0225_livestock_capital_transfers_rls.sql`
+  · `drizzle/0226_*.sql` (`inventory_lots.capitalised_on`)
 
 ## Decisions & gotchas
 
@@ -1236,6 +1339,21 @@ This pack is the one that forced the change; the full reasoning is in
   landing in the cost per head and the FCR. It is an EXCLUSION rather than a
   whitelist of `feed`, because waste streams are recorded under whatever kind
   they were bought as.
+- **A BREEDING ANIMAL KEEPS HER HEAD AND LOSES HER VALUE.** `capitalised_on` on
+  the inventory lot takes her out of `valueStock` and `carriedCostByLot`; nothing
+  is written to the head ledger, because nothing happened to the animal. The
+  first version of 4f took her head out instead and it made her impossible to
+  treat, weigh or lose — see the build log.
+- **THE CAPITAL ENTRY IS Dr FIXED ASSETS, Cr INVENTORY — never Dr COGS.** The
+  ordinary outgoing posting expenses the cost, which writes off an animal the
+  business still owns. `postCapitalisation` exists so the counter-account is the
+  caller's to name.
+- **A capitalised animal cannot be PROCESSED**, refused explicitly in
+  `run-handler.ts` rather than by having no head. Culling her goes through the
+  market herd, which is where the reverse posting is.
+- **Coming back is at NET BOOK VALUE**, and the cost correction that writes down
+  the batch by the depreciation taken is what keeps the valuation screen and the
+  ledger on the same number.
 - **A HERD HOLDS LOTS, AND THE LOT STAYS THE COSTING UNIT.** Nothing in
   `inventory`, `production` or the books learned a second grain, and a herd's
   head is a fold over its members. Never put a count on the herd.
@@ -1474,6 +1592,22 @@ This pack is the one that forced the change; the full reasoning is in
 - **No breeding-group or exposure record**, so "when is she due" is unanswerable
   and `born_on` is the only date this pack knows. That is slice 4c and it is the
   half of the founder's ask this slice did not reach.
+- **THERE IS NO BREEDING-LIVESTOCK ACCOUNT IN THE FARM CHART.** The picker
+  offers `1600 · Equipment` and `1650 · Vehicles`, because the generic chart has
+  no `1700 Breeding livestock`. A cow in Equipment is wrong on a balance sheet
+  and right in the app, which is the worst combination. Waits on the farm chart
+  of accounts — [packs-and-profiles.md](packs-and-profiles.md)'s largest gap.
+- **NO TAX BASIS.** A raised breeding animal has no basis for tax — her costs
+  were expensed as they were incurred — while her book cost is real. Only the
+  BOOK event is recorded, which is the one `assets` can depreciate. The
+  book/tax split is [assets.md](assets.md)'s open decision and it is bigger
+  than this slice.
+- **A capitalised animal cannot be moved to breeding stock as part of a pen.**
+  One animal at a time, because a capital asset is a thing rather than a
+  quantity — a pen is split first, and the refusal says so.
+- **Depreciation is not posted automatically**, which is `assets`' own decision
+  and inherited here: a breeding cow depreciates when somebody presses the
+  button on the assets page.
 - **THE FLAT LIST IS STILL UNPAGED.** Herds fixed the shape of the hub but not
   its size: "Not in a herd" renders every ungrouped lot with no search and no
   limit. A farm that puts everything in herds never sees it; one that does not

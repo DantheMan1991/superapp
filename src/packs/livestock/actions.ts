@@ -51,6 +51,7 @@ import {
   placeHead,
   recordBirth,
   recordDailyCheck,
+  recordDirectFeed,
   recordFeedDraw,
   recordTreatment,
   recordWeight,
@@ -1804,6 +1805,50 @@ export async function recordFeedDrawAction(input: unknown) {
       actorClerkUserId: ctx.userId,
       targetType: "livestock_feed_group",
       targetId: parsed.data.feedGroupId,
+      meta: { itemId: parsed.data.itemId, occurredOn: parsed.data.occurredOn },
+    });
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/inventory", "layout");
+    return { ok: true, costCents: result.costCents };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * **FEED ONE ANIMAL BY NAME** — slice 8f, the other half of the founder's rule.
+ *
+ * Mirrors `recordFeedDrawAction` exactly except for the target: a lot instead
+ * of a feeder, which is what makes the cost measured rather than allocated.
+ */
+export async function recordDirectFeedAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotId: z.string().uuid(),
+      itemId: z.string().uuid(),
+      lotId: z.string().uuid().nullable().optional(),
+      quantity: z.number().positive().max(10_000_000).multipleOf(0.0001),
+      occurredOn: requiredDate,
+      locationAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => recordDirectFeed(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.feed.issued",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotId,
       meta: { itemId: parsed.data.itemId, occurredOn: parsed.data.occurredOn },
     });
     revalidatePath(BASE, "layout");

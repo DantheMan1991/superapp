@@ -37,7 +37,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | **8c** | **Two pages** — a lot page and an animal page, neither wearing the other's furniture | **shipped 2026-08-28** |
 | **8d** | **Move several lots at once** — the one thing herds did that nothing else does. Ships BEFORE 8e | |
 | **8e** | **`livestock_groups` dropped** — only after 8d is live | |
-| **8f** | **Feed reaches a single animal** — in a lot it is the lot's, on her own it is hers | |
+| **8f** | **Feed reaches a single animal** — in a lot it is the lot's, on her own it is hers | **shipped 2026-08-28** |
 
 ## The model, settled 2026-08-27
 
@@ -106,8 +106,9 @@ own concept.
 the pack has half of it: `livestock_feed_draws.feed_group_id` is `NOT NULL`, so
 the only feed control in this module requires a shared feeder and **a lone animal
 cannot be fed here at all** — all four named animals on Hilltop Farm read `—` for
-every feed column. Direct-to-lot issues exist, but only from `inventory`. Slice
-8f.
+every feed column. Direct-to-lot issues exist, but only from `inventory`. **Closed by 8f, and it
+needed NO migration** — see that build-log entry: the data model already had
+every part of this and what was missing was the door.
 
 ### The order this has to go in
 
@@ -130,6 +131,53 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-08-28 — Slice 8f: a cow eats alone (`claude/a-cow-eats-alone`)
+
+**The other half of the founder's feed rule** — *in a lot, feed is the lot's; on
+her own, it is hers.* This pack had only the first half: the one feed control in
+the module required a shared feeder, so **a cow standing on her own could not be
+fed from here at all**, and every named animal on Hilltop Farm read `—` in every
+feed column.
+
+**NO MIGRATION, AND THE SLICE PLAN SAID THERE WOULD BE ONE.** The plan assumed
+`livestock_feed_draws.feed_group_id` had to become nullable with a lot column
+beside it. **It was wrong, and checking first is what found that.** Every part
+already existed:
+
+  - `inventory_movements.issued_to_lot_id` — *"WHICH LOT ATE IT. The join that
+    closes the livestock costing loop"* — has been there since the loop was
+    closed
+  - `issueStock` has always accepted it
+  - `core/feed.ts` has always read it as **measured** rather than allocated
+  - `inventory`'s own stock screen has always offered a *"Fed to"* picker
+
+**What was missing was never the data model. It was the door.**
+
+**THE ONLY DIFFERENCE FROM A DRAW IS ONE NULL.** `recordFeedDraw` sets
+`issuedToLotId: null` deliberately — *"NOBODY IS NAMED. That is what makes this
+an allocated cost rather than a measured one"* — so `recordDirectFeed` is the
+same function with somebody named. Same ledger, same stamping, same
+`issueStock`.
+
+**AND IT WRITES NO `livestock_feed_draws` ROW.** That table says which FEEDER an
+issue was drawn for, and there is no feeder. A row with a made-up group would
+put the cost into a head-days allocation as well and double it.
+
+**Two doors, and the second one asks nothing.** The feed page's dialog gained a
+choice — *A shared feeder* / *One by name* — leading, the way the lot form leads
+with One animal / A lot. On an animal's OWN page the button passes no feeders at
+all, so the dialog opens straight into *"Feed one"* with her already picked and
+no toggle: on her page there is only one answer to "who ate it".
+
+Driven on Hilltop Farm. Rosie went from *"$0.00 · Nothing fed to this lot yet"*
+to **Fed · `Measured` · $30.67 · 25 lb**, and the feed page's By-lot row now
+reads `Rosie · 1 · 25 lb · $30.67 · Measured`. The badge is the point: the cost
+landed entirely on her rather than being spread by head-days.
+
+3 new ops tests. **No migration, so nothing to apply to either database** —
+worth saying out loud on a pack where the last four slices all carried one.
+
 
 ### 2026-08-28 — Slice 8c: a flock is not a cow (`claude/a-flock-is-not-a-cow`)
 

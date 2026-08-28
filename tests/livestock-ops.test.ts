@@ -24,6 +24,7 @@ import {
   farmSnapshot,
   offspringOf,
   recordBirth,
+  recordDirectFeed,
   setBreedParts,
   addLotToGroup,
   addLotToParent,
@@ -4116,5 +4117,117 @@ d("livestock ops", () => {
       }),
     );
     expect(hatch.lot.recordKind).toBe("lot");
+  });
+
+  // ---- slice 8f: feed reaches a single animal -----------------------------
+
+  it("A COW STANDING ON HER OWN CAN BE FED, AND IT IS MEASURED", async () => {
+    // The founder's rule: in a lot, feed is the lot's; on her own, it is hers.
+    // Before this the module had only the first half — the one feed control
+    // required a shared feeder, so every named animal read "—" in every feed
+    // column and nothing could change that from here.
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Marigold",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const feed = await asOwner((tx) =>
+      createItem(tx, ctx(), {
+        name: "Dairy ration",
+        stockingUnit: "lb",
+        itemKind: "feed",
+      }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ctx(), {
+        itemId: feed.id,
+        newLotCode: "RATION-1",
+        quantity: 100,
+        costCents: 4000,
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    const result = await asOwner((tx) =>
+      recordDirectFeed(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        itemId: feed.id,
+        quantity: 25,
+        occurredOn: "2026-08-05",
+      }),
+    );
+    expect(result.costCents).toBe(1000);
+
+    const report = await asOwner((tx) =>
+      feedReport(tx, tenantId, { from: "2026-07-01", to: "2026-08-31" }),
+    );
+    const hers = report.lots.find((r) => r.lotId === cow.lot.id);
+    expect(hers).toBeDefined();
+    // MEASURED, not allocated: it landed entirely on her rather than being
+    // spread by head-days, which is the whole difference from a draw.
+    expect(hers?.measuredCents).toBe(1000);
+    expect(hers?.allocatedCents).toBe(0);
+    expect(hers?.provenance).toBe("measured");
+  });
+
+  it("feeding by name writes NO feeder row", async () => {
+    // `livestock_feed_draws` says which FEEDER an issue was drawn for, and
+    // there is no feeder here. A row with a made-up group would put this cost
+    // into a head-days allocation as well, and double it.
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Nutmeg",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const feed = await asOwner((tx) =>
+      createItem(tx, ctx(), { name: "Hay", stockingUnit: "lb", itemKind: "feed" }),
+    );
+    await asOwner((tx) =>
+      receiveStock(tx, ctx(), {
+        itemId: feed.id,
+        newLotCode: "HAY-1",
+        quantity: 50,
+        costCents: 500,
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    const before = await asOwner((tx) =>
+      tx.select().from(schema.livestockFeedDraws),
+    );
+    await asOwner((tx) =>
+      recordDirectFeed(tx, ctx(), {
+        livestockLotId: cow.lot.id,
+        itemId: feed.id,
+        quantity: 10,
+        occurredOn: "2026-08-06",
+      }),
+    );
+    const after = await asOwner((tx) =>
+      tx.select().from(schema.livestockFeedDraws),
+    );
+    expect(after.length).toBe(before.length);
+  });
+
+  it("refuses to feed something that is not there", async () => {
+    const feed = await asOwner((tx) =>
+      createItem(tx, ctx(), { name: "Straw", stockingUnit: "lb", itemKind: "feed" }),
+    );
+    await expect(
+      asOwner((tx) =>
+        recordDirectFeed(tx, ctx(), {
+          livestockLotId: "00000000-0000-0000-0000-000000000000",
+          itemId: feed.id,
+          quantity: 5,
+          occurredOn: "2026-08-06",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });

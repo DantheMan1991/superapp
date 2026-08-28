@@ -21,7 +21,14 @@ import { RecordPhotoThumb } from "@/modules/documents/components/record-photos";
 import { listItems, listLots, movementKindsForLots } from "@/packs/inventory/ops";
 import { currentZoneForOccupants } from "@/packs/land/ops";
 import { slugLabel } from "@/packs/inventory/vocabulary";
-import { breedPartsByLot, listLivestockLots, withdrawalByLot } from "./ops";
+import {
+  breedPartsByLot,
+  groupForLots,
+  groupSummaries,
+  listLivestockLots,
+  withdrawalByLot,
+} from "./ops";
+import { HerdForm } from "./components/herd-controls";
 import { formatComposition, statedComposition } from "./core/pedigree";
 import {
   blocksProcessing,
@@ -70,8 +77,16 @@ export async function LivestockModule({
       const inventoryLotIds = lots.map((l) => l.inventoryLotId);
       // Three queries for the whole page, whatever the lot count: the spine
       // rows, where each lot is, and the movements behind every head figure.
-      const [inventoryLots, zones, movements, withdrawals, breedParts, portraits] =
-        await Promise.all([
+      const [
+        inventoryLots,
+        zones,
+        movements,
+        withdrawals,
+        breedParts,
+        portraits,
+        herds,
+        herdByLot,
+      ] = await Promise.all([
         listLots(tx, ctx.tenant.id),
         currentZoneForOccupants(
           tx,
@@ -115,6 +130,16 @@ export async function LivestockModule({
           "livestock_lot",
           lots.map((l) => l.id),
         ),
+        // **HERDS FIRST.** A thousand chickens is one row and ten named cows
+        // are one row that opens to ten — which is the whole reason this list
+        // stopped being a flat page of every animal on the farm.
+        groupSummaries(tx, ctx.tenant.id, today, { status: "active" }),
+        groupForLots(
+          tx,
+          ctx.tenant.id,
+          lots.map((l) => l.id),
+          today,
+        ),
       ]);
 
       return {
@@ -127,6 +152,8 @@ export async function LivestockModule({
         withdrawals,
         breedParts,
         portraits,
+        herds,
+        herdByLot,
       };
     },
     { role: ctx.role },
@@ -142,6 +169,8 @@ export async function LivestockModule({
     withdrawals,
     breedParts,
     portraits,
+    herds,
+    herdByLot,
   } = data;
   const isOwner = ctx.role === "owner";
   const byId = new Map(inventoryLots.map((l) => [l.id, l]));
@@ -153,6 +182,14 @@ export async function LivestockModule({
     suggestedSpecies.map((s) => [s, breedsFrom(pack.config, s)]),
   );
   const lotWord = labelFor(pack.labels, "livestockLot", "Lot");
+  const herdWord = labelFor(pack.labels, "livestockGroup", "Group");
+  /**
+   * **Only what is NOT in a herd goes in the flat list.** The founder's
+   * complaint on 2026-08-27 was that individuals and groups sat as peer rows and
+   * that a thousand animals made it unreadable; an animal in a herd is now shown
+   * inside its herd, and this list is what has not been put in one yet.
+   */
+  const loose = lots.filter((lot) => !herdByLot.has(lot.id));
 
   return (
     <div className="space-y-6">
@@ -162,14 +199,17 @@ export async function LivestockModule({
         icon={<Beef />}
         actions={
           isOwner ? (
-            /* No longer gated on an item existing: the form can create one. A
-               farm's first animal used to require a trip to Inventory first. */
+            <div className="flex flex-wrap items-center gap-2">
+            <HerdForm word={herdWord} />
+            {/* No longer gated on an item existing: the form can create one. A
+                farm's first animal used to require a trip to Inventory first. */}
             <LivestockLotForm
               items={headItems.map((i) => ({ id: i.id, name: i.name }))}
               speciesOptions={suggestedSpecies}
               breedsBySpecies={breedsBySpecies}
               today={today}
             />
+            </div>
           ) : undefined
         }
       />
@@ -179,8 +219,65 @@ export async function LivestockModule({
           they were built in — and it is preserved in the strip. */}
       <LivestockNav />
 
+      {herds.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="font-heading text-xl font-semibold tracking-heading">
+            {herdWord}s
+          </h2>
+          <DataTable isEmpty={false}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{herdWord}</TableHead>
+                  <TableHead>Species</TableHead>
+                  <TableHead>Where</TableHead>
+                  <TableHead className="text-right">Named</TableHead>
+                  <TableHead className="text-right">Head</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {herds.map((herd) => (
+                  <TableRow key={herd.group.id}>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`${BASE}/herds/${herd.group.id}`}
+                        className="hover:underline"
+                      >
+                        {herd.group.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {herd.species.map(slugLabel).join(" · ") || "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {/* Two paddocks is said out loud — see `groupSummaries`. */}
+                      {herd.where ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {/* How many of them are animals somebody named, as
+                          against head counted in a pen. Both belong in a herd
+                          and they are different things to look at. */}
+                      {herd.individuals || "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums font-medium">
+                      {herd.head}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </DataTable>
+        </div>
+      )}
+
+      {herds.length > 0 && loose.length > 0 && (
+        <h2 className="font-heading text-xl font-semibold tracking-heading">
+          Not in a {herdWord.toLowerCase()}
+        </h2>
+      )}
+
       <DataTable
-        isEmpty={lots.length === 0}
+        isEmpty={loose.length === 0 && herds.length === 0}
         empty={
           <EmptyState
             icon={<Beef className="h-5 w-5" />}
@@ -206,7 +303,7 @@ export async function LivestockModule({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {lots.map((lot) => {
+            {loose.map((lot) => {
               const inv = byId.get(lot.inventoryLotId);
               const lotMovements = movements.get(lot.inventoryLotId) ?? [];
               // The head count IS the balance — the same fold, over the same

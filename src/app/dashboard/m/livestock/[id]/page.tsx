@@ -56,6 +56,8 @@ import {
   listIdentifiers,
   listTreatmentsForLot,
   listWeightsForLot,
+  groupForLots,
+  listGroups,
   offspringOf,
   parentCandidates,
   pedigreeIndex,
@@ -242,6 +244,8 @@ export default async function LivestockLotPage({
         offspring,
         candidates,
         headItems,
+        herdByLot,
+        herds,
         attachments,
       ] = await Promise.all([
           listIdentifiers(tx, ctx.tenant.id, lot.id),
@@ -303,6 +307,10 @@ export default async function LivestockLotPage({
             excludeId: lot.id,
           }),
           listItems(tx, ctx.tenant.id, { status: "active" }),
+          // Which herd she is in today. A fact about a DATE, so today is passed
+          // rather than assumed.
+          groupForLots(tx, ctx.tenant.id, [lot.id], today),
+          listGroups(tx, ctx.tenant.id, { status: "active" }),
           // Photos, from `documents`. Empty when the module is off, which is
           // why the section below is gated on the module rather than on this.
           attachmentsForRecord(tx, ctx.tenant.id, {
@@ -363,6 +371,8 @@ export default async function LivestockLotPage({
         headItems: headItems.filter((i) => i.stockingUnit === "head"),
         breedSuggestions: breedsFrom(pack.config, lot.species),
         inheritedFrom,
+        herd:
+          herds.find((g) => g.id === herdByLot.get(lot.id)) ?? null,
         photos: attachments
           // The gallery renders `<img>`, so anything the browser will not put
           // on screen has no business in it. An attachment that is not a photo
@@ -410,6 +420,7 @@ export default async function LivestockLotPage({
     breedSuggestions,
     photos,
     inheritedFrom,
+    herd,
   } = data;
   // The FILE lives in the DMS, so the panel exists only where the DMS does. A
   // button that uploads into a module the tenant has not switched on would
@@ -520,6 +531,16 @@ export default async function LivestockLotPage({
           <span className="flex items-center gap-2">
             {slugLabel(lot.species)}
             {breedingLabel && ` · ${breedingLabel}`}
+            {/* Which herd she is in, up beside the species — the answer to
+                "where does this animal belong" is half of recognising it. */}
+            {herd && (
+              <Link
+                href={`${BASE}/herds/${herd.id}`}
+                className="underline-offset-4 hover:underline"
+              >
+                · {herd.name}
+              </Link>
+            )}
             {lot.sex && ` · ${SEX_LABELS[lot.sex] ?? lot.sex}`}
             {preferred && (
               <Badge variant="outline">

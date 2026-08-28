@@ -138,6 +138,12 @@ export const packRegistry: Record<string, PackDefinition> = {
           "A group of animals, or one animal. A poultry keeper says flock; a cattle operation says herd.",
       },
       {
+        key: "livestockGroup",
+        fallback: "Group",
+        describes:
+          "A set of animals managed together, that somebody creates and puts animals into. A cattle operation says herd; sheep say mob; poultry say flock.",
+      },
+      {
         key: "structure",
         fallback: "Pen or barn",
         describes:

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
@@ -8,6 +8,8 @@ import type {
   LivestockFeedDraw,
   LivestockFeedGroup,
   LivestockFeedGroupMember,
+  LivestockGroup,
+  LivestockGroupMember,
   LivestockIdentifier,
   LivestockLot,
   LivestockTreatment,
@@ -135,6 +137,7 @@ export class LivestockError extends Error {
       | "ITEM_REQUIRED"
       | "LOT_INVALID"
       | "FEED_GROUP_INVALID"
+      | "GROUP_INVALID"
       | "INVALID_METHOD"
       | "INVALID_WEIGHT"
       | "INVALID_TREATMENT"
@@ -174,6 +177,9 @@ function requireWrite(ctx: LivestockCtx, level: WriteLevel): void {
 }
 
 const SEXES = new Set(["male", "female", "mixed"]);
+
+/** A uuid nothing can be, for an `inArray` that must match no rows. */
+const NO_UUID = "00000000-0000-0000-0000-000000000000";
 
 // ------------------------------------------------------------------- lots ---
 
@@ -528,6 +534,408 @@ export async function splitLivestockLot(
   }
 
   return { lot: rows[0], inventoryLotId: child.id };
+}
+
+// ------------------------------------------------------------------ herds ---
+
+/**
+ * **A HERD IS A THING SOMEBODY CREATES AND PUTS ANIMALS INTO**, and it holds
+ * LOTS rather than animals — which is what lets one hold Bluebell (a lot of one)
+ * and a pen of forty-seven unnamed head at the same time.
+ *
+ * Everything here is a fold or a membership write. **No head event is ever
+ * recorded by moving between herds**: a cow changing herds has not been bought,
+ * born, sold or died, and putting a movement on the ledger for it would corrupt
+ * the one number the whole pack is built to keep honest. That is the difference
+ * between this and the split/merge dance it replaces.
+ */
+
+export async function createGroup(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { name: string; notes?: string },
+): Promise<LivestockGroup> {
+  requireWrite(ctx, "owner");
+  const name = input.name.trim();
+  if (!name) throw new LivestockError("GROUP_INVALID", "give the herd a name");
+  const rows = await tx
+    .insert(schema.livestockGroups)
+    .values({
+      tenantId: ctx.tenantId,
+      name,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+export async function updateGroup(
+  tx: Tx,
+  ctx: LivestockCtx,
+  id: string,
+  input: { name?: string; notes?: string; status?: string },
+): Promise<LivestockGroup> {
+  requireWrite(ctx, "owner");
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.name !== undefined) {
+    const name = input.name.trim();
+    if (!name) throw new LivestockError("GROUP_INVALID", "give the herd a name");
+    patch.name = name;
+  }
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.status !== undefined) {
+    if (input.status !== "active" && input.status !== "closed") {
+      throw new LivestockError("GROUP_INVALID", `invalid status: ${input.status}`);
+    }
+    patch.status = input.status;
+  }
+  const rows = await tx
+    .update(schema.livestockGroups)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.livestockGroups.tenantId, ctx.tenantId),
+        eq(schema.livestockGroups.id, id),
+      ),
+    )
+    .returning();
+  if (rows.length === 0) throw new LivestockError("NOT_FOUND", `herd ${id}`);
+  return rows[0];
+}
+
+export async function getGroup(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+): Promise<LivestockGroup | null> {
+  const row = await tx.query.livestockGroups.findFirst({
+    where: and(
+      eq(schema.livestockGroups.tenantId, tenantId),
+      eq(schema.livestockGroups.id, id),
+    ),
+  });
+  return row ?? null;
+}
+
+export async function listGroups(
+  tx: Tx,
+  tenantId: string,
+  filter: { status?: string } = {},
+): Promise<LivestockGroup[]> {
+  const where = [eq(schema.livestockGroups.tenantId, tenantId)];
+  if (filter.status) where.push(eq(schema.livestockGroups.status, filter.status));
+  return tx.query.livestockGroups.findMany({
+    where: and(...where),
+    orderBy: (g, { asc }) => [asc(g.name)],
+  });
+}
+
+/**
+ * Which herd each lot is in TODAY, keyed by lot id.
+ *
+ * `on` rather than "now": membership is date-ranged, so *which herd was she in
+ * when that calf was born* is answerable, and a caller that means today has to
+ * say today.
+ */
+export async function groupForLots(
+  tx: Tx,
+  tenantId: string,
+  lotIds: string[],
+  on: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (lotIds.length === 0) return out;
+  const rows = await tx.query.livestockGroupMembers.findMany({
+    where: and(
+      eq(schema.livestockGroupMembers.tenantId, tenantId),
+      inArray(schema.livestockGroupMembers.livestockLotId, lotIds),
+      lte(schema.livestockGroupMembers.startedOn, on),
+    ),
+  });
+  for (const row of rows) {
+    // Inclusive end, matching land_occupancy and the feed groups.
+    if (row.endedOn && row.endedOn < on) continue;
+    out.set(row.livestockLotId, row.livestockGroupId);
+  }
+  return out;
+}
+
+/** The lots in one herd on a given day. */
+export async function groupMembers(
+  tx: Tx,
+  tenantId: string,
+  groupId: string,
+  on: string,
+): Promise<LivestockGroupMember[]> {
+  const rows = await tx.query.livestockGroupMembers.findMany({
+    where: and(
+      eq(schema.livestockGroupMembers.tenantId, tenantId),
+      eq(schema.livestockGroupMembers.livestockGroupId, groupId),
+      lte(schema.livestockGroupMembers.startedOn, on),
+    ),
+    orderBy: (m, { asc }) => [asc(m.startedOn)],
+  });
+  return rows.filter((row) => !row.endedOn || row.endedOn >= on);
+}
+
+/**
+ * Put a lot in a herd — **and take it out of whichever herd it was in.**
+ *
+ * One act, because one open membership per lot is a database constraint rather
+ * than a convention. A caller that had to close the old one first could fail
+ * between the two and leave a cow in no herd at all.
+ *
+ * `member`: moving animals between herds is a chore done by whoever is moving
+ * them, the same level as putting a pen on a feeder or walking them to a
+ * paddock. CREATING a herd is the owner's, beside every other decision that
+ * makes a new thing to report on.
+ */
+export async function addLotToGroup(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { groupId: string; livestockLotId: string; startedOn: string },
+): Promise<LivestockGroupMember> {
+  requireWrite(ctx, "member");
+  const group = await getGroup(tx, ctx.tenantId, input.groupId);
+  if (!group) throw new LivestockError("NOT_FOUND", `herd ${input.groupId}`);
+  if (group.status !== "active") {
+    throw new LivestockError("GROUP_INVALID", "that herd is closed");
+  }
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
+  }
+
+  const open = await tx.query.livestockGroupMembers.findFirst({
+    where: and(
+      eq(schema.livestockGroupMembers.tenantId, ctx.tenantId),
+      eq(schema.livestockGroupMembers.livestockLotId, input.livestockLotId),
+      isNull(schema.livestockGroupMembers.endedOn),
+    ),
+  });
+  if (open) {
+    if (open.livestockGroupId === input.groupId) return open;
+    // The day BEFORE the new stay starts, so the two spans meet without
+    // overlapping — the inclusive-end arithmetic land already settled.
+    await tx
+      .update(schema.livestockGroupMembers)
+      .set({ endedOn: addDays(input.startedOn, -1) })
+      .where(
+        and(
+          eq(schema.livestockGroupMembers.tenantId, ctx.tenantId),
+          eq(schema.livestockGroupMembers.id, open.id),
+        ),
+      );
+  }
+
+  const rows = await tx
+    .insert(schema.livestockGroupMembers)
+    .values({
+      tenantId: ctx.tenantId,
+      livestockGroupId: input.groupId,
+      livestockLotId: input.livestockLotId,
+      startedOn: input.startedOn,
+    })
+    .returning();
+  return rows[0];
+}
+
+/** Take a lot out of its herd, leaving it in none. */
+export async function removeLotFromGroup(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { livestockLotId: string; endedOn: string },
+): Promise<void> {
+  requireWrite(ctx, "member");
+  const rows = await tx
+    .update(schema.livestockGroupMembers)
+    .set({ endedOn: input.endedOn })
+    .where(
+      and(
+        eq(schema.livestockGroupMembers.tenantId, ctx.tenantId),
+        eq(schema.livestockGroupMembers.livestockLotId, input.livestockLotId),
+        isNull(schema.livestockGroupMembers.endedOn),
+      ),
+    )
+    .returning({ id: schema.livestockGroupMembers.id });
+  if (rows.length === 0) {
+    throw new LivestockError("NOT_FOUND", "that animal is not in a herd");
+  }
+}
+
+/**
+ * **MOVE THE WHOLE HERD, and this is the reason a herd is worth having.**
+ *
+ * Ten cows on a paddock used to be ten trips through the move dialog, because
+ * `moveOccupant` takes one occupant. This walks the membership and moves every
+ * one of them in a single transaction, so the herd either arrives or does not.
+ *
+ * **Each member still goes through `land`'s own `moveOccupant`**, exactly as a
+ * single lot does — the inclusive-date arithmetic that makes the old stay end
+ * the day before the new one begins is land's, and a bulk path that
+ * re-implemented it would drift from the single path the first time somebody
+ * fixed one of them.
+ *
+ * Returns what it moved and what it skipped rather than a count, because a herd
+ * where three of ten refused is a thing somebody has to be told about — silence
+ * there would read as ten.
+ */
+export async function moveGroupToZone(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    groupId: string;
+    zoneId: string;
+    startedOn: string;
+    structureAssetId?: string | null;
+    notes?: string;
+  },
+): Promise<{ moved: string[]; refused: { lotId: string; reason: string }[] }> {
+  requireWrite(ctx, "member");
+  const group = await getGroup(tx, ctx.tenantId, input.groupId);
+  if (!group) throw new LivestockError("NOT_FOUND", `herd ${input.groupId}`);
+
+  const members = await groupMembers(
+    tx,
+    ctx.tenantId,
+    input.groupId,
+    input.startedOn,
+  );
+  const moved: string[] = [];
+  const refused: { lotId: string; reason: string }[] = [];
+  for (const member of members) {
+    try {
+      await moveLotToZone(tx, ctx, {
+        livestockLotId: member.livestockLotId,
+        zoneId: input.zoneId,
+        startedOn: input.startedOn,
+        structureAssetId: input.structureAssetId ?? null,
+        notes: input.notes,
+      });
+      moved.push(member.livestockLotId);
+    } catch (err) {
+      // A lot with no head left is the ordinary case here — an emptied pen
+      // still in the herd — and one refusal must not strand the other nine.
+      refused.push({
+        lotId: member.livestockLotId,
+        reason: err instanceof Error ? err.message : "could not be moved",
+      });
+    }
+  }
+  return { moved, refused };
+}
+
+/** Head, and how many of the members are named animals rather than counts. */
+export type GroupSummary = {
+  group: LivestockGroup;
+  lotIds: string[];
+  head: number;
+  /** Lots holding exactly one head — the animals somebody named. */
+  individuals: number;
+  species: string[];
+  /**
+   * Where the herd is, in one phrase. **A herd standing on two paddocks says so
+   * rather than picking one** — that is either a move half done or a herd that
+   * wants splitting, and both are things somebody should see.
+   */
+  where: string | null;
+};
+
+/**
+ * Every herd with its totals, in as few queries as the shape allows.
+ *
+ * **The head figure is the sum of its members' balances**, folded from
+ * `inventory`'s ledger like every other head number in this pack. Nothing is
+ * stored on the herd, so a loss recorded on one animal shows up in its herd's
+ * total without anybody re-counting.
+ */
+export async function groupSummaries(
+  tx: Tx,
+  tenantId: string,
+  on: string,
+  filter: { status?: string } = {},
+): Promise<GroupSummary[]> {
+  const groups = await listGroups(tx, tenantId, filter);
+  if (groups.length === 0) return [];
+
+  const rows = await tx.query.livestockGroupMembers.findMany({
+    where: and(
+      eq(schema.livestockGroupMembers.tenantId, tenantId),
+      inArray(
+        schema.livestockGroupMembers.livestockGroupId,
+        groups.map((g) => g.id),
+      ),
+      lte(schema.livestockGroupMembers.startedOn, on),
+    ),
+  });
+  const current = rows.filter((row) => !row.endedOn || row.endedOn >= on);
+  const lotIds = [...new Set(current.map((row) => row.livestockLotId))];
+
+  const lots = await tx.query.livestockLots.findMany({
+    where: and(
+      eq(schema.livestockLots.tenantId, tenantId),
+      inArray(schema.livestockLots.id, lotIds.length > 0 ? lotIds : [NO_UUID]),
+    ),
+    columns: { id: true, inventoryLotId: true, species: true },
+  });
+  const byLot = new Map(lots.map((l) => [l.id, l]));
+  const movements = await movementKindsForLots(
+    tx,
+    tenantId,
+    lots.map((l) => l.inventoryLotId),
+  );
+  // From `land`, through land's own query — this pack never touches
+  // land_occupancy directly, herd or no herd.
+  const places = await currentZoneForOccupants(
+    tx,
+    tenantId,
+    "livestock",
+    lots.map((l) => l.inventoryLotId),
+    on,
+  );
+
+  const membersByGroup = new Map<string, string[]>();
+  for (const row of current) {
+    const list = membersByGroup.get(row.livestockGroupId) ?? [];
+    list.push(row.livestockLotId);
+    membersByGroup.set(row.livestockGroupId, list);
+  }
+
+  return groups.map((group) => {
+    const ids = membersByGroup.get(group.id) ?? [];
+    let head = 0;
+    let individuals = 0;
+    const species = new Set<string>();
+    const zoneNames = new Set<string>();
+    for (const id of ids) {
+      const lot = byLot.get(id);
+      if (!lot) continue;
+      species.add(lot.species);
+      const balance = summariseHead(
+        movements.get(lot.inventoryLotId) ?? [],
+      ).balance;
+      head += balance;
+      if (balance === 1) individuals += 1;
+      // Only animals that are actually somewhere count toward the answer: an
+      // emptied pen still in the herd is not a second paddock.
+      const place = places.get(lot.inventoryLotId);
+      if (place && balance > 0) zoneNames.add(place.zoneName);
+    }
+    const names = [...zoneNames].sort();
+    return {
+      group,
+      lotIds: ids,
+      head,
+      individuals,
+      species: [...species].sort(),
+      where:
+        names.length === 0
+          ? null
+          : names.length === 1
+            ? names[0]
+            : `${names.length} places`,
+    };
+  });
 }
 
 // ------------------------------------------------------------ individuals ---

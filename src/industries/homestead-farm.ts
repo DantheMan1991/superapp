@@ -42,6 +42,13 @@ export const homesteadFarm: IndustryProfile = {
     enterprise: "Enterprise",
     zone: "Paddock",
     lot: "Lot",
+    /**
+     * **A SET OF ANIMALS MANAGED TOGETHER.** Core calls it a Group because a
+     * core tool speaks no industry, and every livestock trade has its own word
+     * — a mob of sheep, a flock of poultry. This farm runs cattle and pigs, and
+     * for both of those it is a herd.
+     */
+    livestockGroup: "Herd",
     productionRun: "Batch",
     /**
      * The carcass stage, in this industry's word for it. The pack's own fallback

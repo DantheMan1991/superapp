@@ -828,6 +828,136 @@ export const livestockTreatments = pgTable(
 );
 
 /**
+ * **A HERD: A THING SOMEBODY CREATES AND PUTS ANIMALS INTO.**
+ *
+ * Asked for on 2026-08-27, and the request was precise: *"There needs to be
+ * individual animals, then I need to be able to create groups or herds or pens.
+ * Then within that I need to have individual animals or the ability to just have
+ * a number of animals… I need to be able to move a herd paddock to paddock and
+ * that moves all of the animals."*
+ *
+ * **THE LOT STAYS THE COSTING UNIT AND THIS SITS ABOVE IT.** A herd holds LOTS,
+ * not animals — which is what lets one hold Bluebell (a lot of one) and a pen of
+ * forty-seven unnamed head side by side, exactly as asked. Head, cost and every
+ * ledger question stay per-lot, so nothing in `inventory`, `production` or the
+ * books had to learn a second grain; a herd's totals are the sum of its members
+ * and are computed, never stored.
+ *
+ * **WHY THIS IS NOT THE SPLIT CHAIN.** `inventory_lots.parent_lot_id` already
+ * records "these three came out of that pen", and drawing it as a tree covers a
+ * batch that was broken up. It cannot gather: ten cows bought one at a time have
+ * no common ancestor, and a herd of them is exactly what somebody wants to make.
+ *
+ * **AND NOT LAND OCCUPANCY EITHER.** "Whoever is on North Pasture" is free and
+ * already recorded, but two herds can share a paddock and one herd can span two,
+ * so a place is not a membership. The relationship runs the other way: moving a
+ * HERD is what writes everyone's occupancy at once.
+ *
+ * Same shape as `livestock_feed_groups`, deliberately — a named thing, a dated
+ * membership, closed rather than deleted — because this pack already has that
+ * pattern working and a second one would be a second thing to learn.
+ */
+export const livestockGroups = pgTable(
+  "livestock_groups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** What a person calls it: "Cows", "Replacements", "Weaners", "Flock A". */
+    name: text("name").notNull(),
+    /** `active` | `closed`. Closed keeps reporting; it stops being offered. */
+    status: text("status").notNull().default("active"),
+    notes: text("notes").notNull().default(""),
+    /** P2 extension bag: `NOT NULL DEFAULT '{}'` so `metadata->>'x'` is safe. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_groups_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("livestock_groups_tenant_status_idx").on(t.tenantId, t.status),
+    check(
+      "livestock_groups_status_valid",
+      sql`${t.status} in ('active', 'closed')`,
+    ),
+    check("livestock_groups_name_present", sql`length(btrim(${t.name})) > 0`),
+  ],
+);
+
+/**
+ * Which lots are in a herd, **between which dates.**
+ *
+ * The dates are the whole reason this is a table rather than a column on the
+ * lot. *Which herd is she in* is a question about today and a column would
+ * answer it; *which herd was she in when that calf was born* is a question about
+ * a date, and a column that gets overwritten cannot answer it at all. Same
+ * reasoning, and the same inclusive `ended_on`, as `livestock_feed_group_members`
+ * and `land_occupancy`.
+ *
+ * **AT MOST ONE OPEN MEMBERSHIP PER LOT, ACROSS ALL HERDS**, enforced by the
+ * partial unique index below. A cow is not in two herds, and making that
+ * unrepresentable is what lets "move her to the other herd" be ONE act — close
+ * here, open there — rather than a question about which of two answers is
+ * current. It is deliberately stricter than the feed-group rule, where a pen
+ * genuinely can draw from two bins.
+ */
+export const livestockGroupMembers = pgTable(
+  "livestock_group_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    livestockGroupId: uuid("livestock_group_id").notNull(),
+    livestockLotId: uuid("livestock_lot_id").notNull(),
+    startedOn: date("started_on").notNull(),
+    /** INCLUSIVE last day in the herd. Null means still in it. */
+    endedOn: date("ended_on"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("livestock_group_members_tenant_id_id_idx").on(
+      t.tenantId,
+      t.id,
+    ),
+    index("livestock_group_members_tenant_group_idx").on(
+      t.tenantId,
+      t.livestockGroupId,
+    ),
+    index("livestock_group_members_tenant_lot_idx").on(
+      t.tenantId,
+      t.livestockLotId,
+    ),
+    // ONE HERD AT A TIME. See the comment above — this is what makes moving
+    // between herds a single act instead of an ambiguity.
+    uniqueIndex("livestock_group_members_one_open_idx")
+      .on(t.tenantId, t.livestockLotId)
+      .where(sql`${t.endedOn} is null`),
+    foreignKey({
+      name: "livestock_group_members_group_fk",
+      columns: [t.tenantId, t.livestockGroupId],
+      foreignColumns: [livestockGroups.tenantId, livestockGroups.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "livestock_group_members_lot_fk",
+      columns: [t.tenantId, t.livestockLotId],
+      foreignColumns: [livestockLots.tenantId, livestockLots.id],
+    }).onDelete("cascade"),
+    check(
+      "livestock_group_members_range_ordered",
+      sql`${t.endedOn} is null or ${t.endedOn} >= ${t.startedOn}`,
+    ),
+  ],
+);
+
+/**
  * WHAT AN ANIMAL IS MADE OF — the STATED half, and only the stated half.
  *
  * Homestead cattle are crossbred on purpose, for hybrid vigour. "½ Angus, ¼
@@ -926,3 +1056,5 @@ export type LivestockFeedDraw = typeof livestockFeedDraws.$inferSelect;
 export type LivestockWeight = typeof livestockWeights.$inferSelect;
 export type LivestockTreatment = typeof livestockTreatments.$inferSelect;
 export type LivestockBreedPart = typeof livestockBreedParts.$inferSelect;
+export type LivestockGroup = typeof livestockGroups.$inferSelect;
+export type LivestockGroupMember = typeof livestockGroupMembers.$inferSelect;

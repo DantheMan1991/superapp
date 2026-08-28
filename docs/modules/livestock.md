@@ -27,8 +27,96 @@ and [land.md](land.md) before changing anything about where animals are.
 | 4f | **The capital transfer** — market herd ↔ breeding herd, and it POSTS | |
 | **5** | **Weights (tape formulas, sampling) — and the FCR they unlock** | **shipped 2026-08-20** |
 | **6** | **Processing handoff → `production`** | **shipped 2026-08-20** |
+| **7** | **Herds — a set of animals somebody creates, that moves as one** | **shipped 2026-08-27** |
 
 ## Build log
+
+### 2026-08-27 — Slice 7: a herd you can move (`claude/a-herd-you-can-move`)
+
+The founder, looking at the list after individuals shipped: *"there is a list of
+the animals and some are a lot which is one individual animal and some are part
+of another which is a group. that is confusing. When you have 1000 animals this
+display is messy. There needs to be individual animals, then I need to be able to
+create groups or herds or pens… I need to be able to move a herd paddock to
+paddock and that moves all of the animals."*
+
+**Three of those were real gaps rather than misunderstandings**, and checking
+before answering is what separated them:
+
+- **The list was flat and unpaged.** One filter, species, and no limit. At a
+  thousand animals it rendered a thousand rows, and it was unreadable at fifty.
+- **There was no herd.** Nothing grouped animals, so ten cows to a new paddock
+  was ten trips through the move dialog — `moveOccupant` takes one occupant.
+- **Moving an animal between groups was not a thing.** Split one out, merge one
+  in, and both write head events for something that is not a head event.
+
+**WHAT THE HERD IS NOT.** Two cheaper answers were available and both are wrong,
+which is worth recording because they will look attractive again:
+
+- **Not the split chain.** `inventory_lots.parent_lot_id` already records "these
+  three came out of that pen" and drawing it as a tree would have cost almost
+  nothing — but it cannot GATHER. Ten cows bought one at a time have no common
+  ancestor, and a herd of them is exactly what somebody wants to make.
+- **Not land occupancy.** "Whoever is on North Pasture" is free and already
+  recorded, but two herds can share a paddock and one herd can span two, so a
+  place is not a membership. The relationship runs the other way: moving a HERD
+  is what writes everyone's occupancy at once.
+
+**THE LOT STAYS THE COSTING UNIT AND THE HERD SITS ABOVE IT.** A herd holds
+LOTS, which is what lets one hold Bluebell (a lot of one) and a pen of
+forty-seven unnamed head side by side — the shape asked for in the same
+sentence. Head, cost and every ledger question stay per-lot, so nothing in
+`inventory`, `production` or the books had to learn a second grain, and a herd's
+totals are a fold over its members that is never stored.
+
+**MOVING BETWEEN HERDS IS NOT A HEAD EVENT**, and that is the sharpest reason
+this is a membership table rather than the split/merge dance it replaces. A cow
+changing herds has not been bought, born, sold or died; a movement on the ledger
+for it would corrupt the one number the whole pack is built to keep honest. There
+is a test that counts her movements before and after and finds one.
+
+**ONE OPEN MEMBERSHIP PER LOT, ACROSS ALL HERDS**, as a partial unique index. A
+cow is not in two herds, and making that unrepresentable is what lets "move her
+to the other herd" be a single act — close here, open there, in one transaction —
+instead of a question about which of two answers is current. Deliberately
+stricter than the feed-group rule, where a pen genuinely can draw from two bins.
+
+**Dated membership, inclusive `ended_on`**, matching `land_occupancy` and
+`livestock_feed_group_members`. *Which herd is she in* is a question about today
+and a column would answer it; *which herd was she in when that calf was born* is
+a question about a date, and a column that gets overwritten cannot answer it at
+all.
+
+**`moveGroupToZone` REPORTS WHAT IT COULD NOT MOVE.** Each member still goes
+through `land`'s own `moveOccupant` — the inclusive-date arithmetic that ends the
+old stay the day before the new one begins is land's, and a bulk path that
+re-implemented it would drift the first time somebody fixed one of them. One
+refusal must not strand the other nine, so failures are collected and the toast
+says *"Moved 7 · 3 could not be moved"* rather than a bare success.
+
+**MIGRATION `0222` WAS HAND-REORDERED — the sixth time in this repo.** The
+composite FK `(tenant_id, livestock_group_id)` needs `livestock_groups`'
+`(tenant_id, id)` unique index to EXIST when the constraint is added, and drizzle
+emits every ADD CONSTRAINT ahead of every CREATE INDEX. The rule recorded at
+`0138` held: *check whether the TARGET is new*. `livestock_group_members_lot_fk`
+points at `livestock_lots`, which has had its index since `0138`, and needed no
+help; `livestock_groups` is created here, so it did. The failure is loud —
+*there is no unique constraint matching given keys* — and the whole migration
+rolls back, which is why it was found on the dev branch.
+
+**The word is the tenant's.** `livestockGroup` is declared with the neutral
+fallback "Group", because a core-shaped noun is what a pack owes every profile,
+and the homestead profile makes it **Herd**. Sheep say mob and poultry say flock,
+and neither needs code.
+
+Driven on Hilltop Farm end to end: a herd created, Bluebell and the three sows
+added to it in one dialog, a paddock made, and **all four moved to North Pasture
+in one action** — the toast said *4 moved* and every row read North Pasture
+afterwards. The hub now reads **Herds** (one row: Cows · Cattle · Swine · North
+Pasture · 4 named · 4 head) then **Not in a herd** (the four pens), which is the
+display the complaint asked for: a thousand chickens is one row.
+
+Migrations `0222` and `0223`; 6 new ops tests, 7 new isolation tests.
 
 ### 2026-08-27 — An individual is a lot of one, and now the app says so (`claude/an-individual-is-a-lot-of-one`)
 
@@ -982,6 +1070,8 @@ This pack is the one that forced the change; the full reasoning is in
 | --- | --- | --- |
 | `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed`. **`dam_lot_id` / `sire_lot_id`** are composite SELF-FKs, RESTRICT, with a CHECK against being one's own parent — and they are NOT `inventory_lots.parent_lot_id`, which is the split chain. The free-text `breed` column was DROPPED by `0221` |
 | `livestock_breed_parts` | **What an animal is made of, as somebody stated it** | One row per breed per animal, unique on `(tenant_id, lot, breed)`. `parts` is an integer out of the row's siblings — 2 : 1 : 1 is ½, ¼, ¼ — because percentages force a rounding decision the person never made. **The RESOLVED composition is never stored**: it is a fold over the pedigree in `core/pedigree.ts`, and a stated one beats a computed one |
+| `livestock_groups` | **A herd, mob or flock — a set of animals somebody created** | Holds LOTS, not animals, which is what lets one hold a named cow and a counted pen at once. Same shape as `livestock_feed_groups`: named, `active\|closed`, closed keeps reporting. **The head total is a fold over its members and is never stored** |
+| `livestock_group_members` | Which lots are in a herd, **between which dates** | Inclusive `ended_on`, matching `land_occupancy`. **At most ONE OPEN membership per lot across all herds**, partial unique index — a cow is not in two herds, and that is what makes moving between them one act. Composite FKs to both sides, CASCADE. **No head event is ever written by a membership change** |
 | `livestock_identifiers` | What an animal is called | Many per lot, typed and **date-ranged**. Composite FK to the lot, CASCADE. Indexed by value, because finding an animal by its tag happens in a chute |
 | `livestock_daily_logs` | **Somebody looked.** One row per lot per day | UNIQUE on `(tenant_id, livestock_lot_id, logged_on)` — one look is one fact, and the constraint is what lets the one-tap round insert ON CONFLICT DO NOTHING. `status` in `normal\|attention`. **No deaths column**: losses are movements, joined by lot and date |
 | `livestock_feed_groups` | **A shared feeder** — a bin, a bulk bag, a trough | Holds the FEEDER, not the feed: no quantity, no cost, no balance. `status` in `active\|closed`; closed keeps reporting. Deliberately not an asset — a feeding group is a set of animals sharing a cost, so two bins feeding one flock are one group |
@@ -1086,6 +1176,15 @@ This pack is the one that forced the change; the full reasoning is in
 - `src/packs/livestock/ops.ts` → `recordBirth` — the lot, both parents and the
   head in one transaction. **Read its comment before touching lineage**: it does
   not set `inventory_lots.parent_lot_id`, and that is the point
+- `src/packs/livestock/ops.ts` → `moveGroupToZone` — **the reason a herd is worth
+  having.** Every member through `land`'s own `moveOccupant`, in one
+  transaction, reporting what it could not move rather than a count
+- `src/packs/livestock/ops.ts` → `groupSummaries` — the hub's herd rows: head,
+  how many are named, and where, in as few queries as the shape allows
+- `src/packs/livestock/components/herd-controls.tsx` — start, move, add, take
+  out, edit. **Every string takes the tenant's word as a prop**
+- `src/app/dashboard/m/livestock/herds/[id]/page.tsx` — one herd and what is in
+  it, named animals and counted pens in the same table
 - `src/packs/livestock/components/individual-controls.tsx` — "record as
   individuals": a block of names in, N lots of one out, with the balance and
   duplicate checks shown before the button rather than as refusals after it
@@ -1108,6 +1207,7 @@ This pack is the one that forced the change; the full reasoning is in
   · `drizzle/0166_*.sql` · `drizzle/0167_livestock_treatments_rls.sql`
   · `drizzle/0217_*.sql` · `drizzle/0218_livestock_breed_parts_rls.sql`
   · `drizzle/0221_*.sql` (**the contract — runs AFTER the deploy**)
+  · `drizzle/0222_*.sql` (**hand-reordered**) · `drizzle/0223_livestock_groups_rls.sql`
 
 ## Decisions & gotchas
 
@@ -1136,6 +1236,16 @@ This pack is the one that forced the change; the full reasoning is in
   landing in the cost per head and the FCR. It is an EXCLUSION rather than a
   whitelist of `feed`, because waste streams are recorded under whatever kind
   they were bought as.
+- **A HERD HOLDS LOTS, AND THE LOT STAYS THE COSTING UNIT.** Nothing in
+  `inventory`, `production` or the books learned a second grain, and a herd's
+  head is a fold over its members. Never put a count on the herd.
+- **MOVING BETWEEN HERDS IS NOT A HEAD EVENT.** A cow changing herds has not
+  been bought, born, sold or died. If a future slice is tempted to record one,
+  that is the ledger corruption this table exists to avoid.
+- **A herd is not the split chain and not a paddock.** The split chain cannot
+  gather animals that were never together; a paddock can hold two herds and a
+  herd can span two paddocks. Both were considered and both are written up in
+  the build log.
 - **A WITHDRAWAL IS INHERITED DOWN THE SPLIT CHAIN, at read time.** An animal
   split out of a treated pen was in that pen when the dose was given, so the
   clock follows it — bounded by the day its branch separated, because a dose
@@ -1364,6 +1474,14 @@ This pack is the one that forced the change; the full reasoning is in
 - **No breeding-group or exposure record**, so "when is she due" is unanswerable
   and `born_on` is the only date this pack knows. That is slice 4c and it is the
   half of the founder's ask this slice did not reach.
+- **THE FLAT LIST IS STILL UNPAGED.** Herds fixed the shape of the hub but not
+  its size: "Not in a herd" renders every ungrouped lot with no search and no
+  limit. A farm that puts everything in herds never sees it; one that does not
+  has the same thousand rows as before.
+- **A herd cannot be moved to a STRUCTURE without a paddock**, because
+  `moveOccupant` is a zone move. A barn that is not on a zone is unreachable.
+- **Nothing warns that a herd is standing on two paddocks.** The hub says "2
+  places" and leaves the reader to decide whether that is a move half done.
 - **A GROUP'S HEAD IS STILL A SECOND STEP.** "One animal" places its single head
   on creation; a group does not, because how many chicks were in the box is a
   fact somebody checks. That asymmetry is deliberate and it is still a thing to

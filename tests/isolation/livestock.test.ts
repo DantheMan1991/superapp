@@ -38,6 +38,8 @@ d("livestock tables (RLS)", () => {
   let feederA: string;
   let feederB: string;
   let movementA: string;
+  let herdA: string;
+  let herdB: string;
   let movementB: string;
 
   const asStaff = <T>(fn: (tx: Tx) => Promise<T>) =>
@@ -216,6 +218,24 @@ d("livestock tables (RLS)", () => {
           notes: 'Theirs',
         },
       ]);
+
+      // Slice 7. A herd each side, with our own animal in ours — enough for
+      // the cross-tenant membership writes below to have something to fail at.
+      const herds = await tx
+        .insert(schema.livestockGroups)
+        .values([
+          { tenantId: tenantA, name: "Our herd" },
+          { tenantId: tenantB, name: "Their herd" },
+        ])
+        .returning();
+      herdA = herds[0].id;
+      herdB = herds[1].id;
+      await tx.insert(schema.livestockGroupMembers).values({
+        tenantId: tenantA,
+        livestockGroupId: herdA,
+        livestockLotId: lotA,
+        startedOn: "2026-08-01",
+      });
 
       // Slice 4a. One stated breed each side, so the RLS reads below have
       // something to fail to see.
@@ -901,6 +921,140 @@ d("livestock tables (RLS)", () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+
+
+  // ---- herds: a set of animals somebody created and put lots into ----------
+
+  it("a tenant sees only its own herds", async () => {
+    const mine = await asOwner((tx) => tx.select().from(schema.livestockGroups));
+    expect(mine.map((g) => g.name)).toEqual(["Our herd"]);
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.livestockGroups),
+    );
+    expect(theirs.map((g) => g.name)).toEqual(["Their herd"]);
+  });
+
+  it("CANNOT PUT ANOTHER TENANT'S ANIMAL IN OUR HERD", async () => {
+    // The composite FK makes it unrepresentable, so it fails under withSystem
+    // where RLS is not watching. This is the one that would MOVE ANIMALS:
+    // `moveGroupToZone` writes land_occupancy for every member it finds.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockGroupMembers).values({
+          tenantId: tenantA,
+          livestockGroupId: herdA,
+          livestockLotId: lotB,
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot put our animal in another tenant's herd", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockGroupMembers).values({
+          tenantId: tenantA,
+          livestockGroupId: herdB,
+          livestockLotId: lotA,
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("ONE OPEN MEMBERSHIP PER ANIMAL, ACROSS ALL HERDS", async () => {
+    // A cow is not in two herds. Making that unrepresentable is what lets
+    // "move her to the other herd" be one act rather than a question about
+    // which of two answers is current.
+    const [second] = await asOwner((tx) =>
+      tx
+        .insert(schema.livestockGroups)
+        .values({ tenantId: tenantA, name: "Second herd" })
+        .returning(),
+    );
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockGroupMembers).values({
+          tenantId: tenantA,
+          livestockGroupId: second.id,
+          livestockLotId: lotA,
+          startedOn: "2026-08-02",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // A CLOSED one is fine — that is exactly what a history looks like.
+    const ok = await asOwner((tx) =>
+      tx
+        .insert(schema.livestockGroupMembers)
+        .values({
+          tenantId: tenantA,
+          livestockGroupId: second.id,
+          livestockLotId: lotA,
+          startedOn: "2026-07-01",
+          endedOn: "2026-07-31",
+        })
+        .returning(),
+    );
+    expect(ok).toHaveLength(1);
+  });
+
+  it("refuses a membership that ends before it starts", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockGroupMembers).values({
+          tenantId: tenantA,
+          livestockGroupId: herdA,
+          livestockLotId: lotA,
+          startedOn: "2026-08-10",
+          endedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a herd with a blank name and an invented status", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx
+          .insert(schema.livestockGroups)
+          .values({ tenantId: tenantA, name: "   " }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      asOwner((tx) =>
+        tx
+          .insert(schema.livestockGroups)
+          .values({ tenantId: tenantA, name: "Odd", status: "retired" }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a staff member can move animals between herds, because it is a chore", async () => {
+    const rows = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockGroupMembers)
+        .values({
+          tenantId: tenantA,
+          livestockGroupId: herdA,
+          livestockLotId: lotA,
+          startedOn: "2026-06-01",
+          endedOn: "2026-06-30",
+        })
+        .returning(),
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("herds are default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    const seen = await withTenant(nowhere, async (tx) => [
+      await tx.select().from(schema.livestockGroups),
+      await tx.select().from(schema.livestockGroupMembers),
+    ]);
+    for (const rows of seen) expect(rows).toHaveLength(0);
   });
 
   it("breeding is default-deny with no tenant context", async () => {

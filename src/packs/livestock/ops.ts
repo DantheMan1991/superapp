@@ -2359,8 +2359,64 @@ export async function recordBirth(
     notes: input.notes,
   });
 
+  // **THE CALF STAYS WITH ITS MOTHER'S LOT.** The founder, 2026-08-28: *"the
+  // birthing thing says it creates a new lot, but don't we want it to stay in
+  // the same lot with its mother and the other cows in that lot."*
+  //
+  // He is right, and it is the same rule a SPLIT already follows — name a cow
+  // out of a pen and she stays in it (8b). A birth was the one way to create an
+  // animal that landed nowhere, so a calf born to a cow in the north herd
+  // appeared on the hub as an unrelated record and somebody had to go and put
+  // her back.
+  //
+  // Which lot, in order, and all three readings of "her mother's lot":
+  //   1. the dam's own lot, if she is in one — the calf joins her herdmates
+  //   2. else the dam HERSELF when she is a lot rather than an animal — chicks
+  //      out of a layer flock belong in that flock
+  //   3. else nowhere, because a loose cow has no lot to put a calf in
+  // The sire stands in when there is no dam on the record.
+  const bornInto = await lotForOffspring(tx, ctx, {
+    damLotId: input.damLotId ?? null,
+    sireLotId: input.sireLotId ?? null,
+    on: input.bornOn,
+  });
+  if (bornInto && bornInto !== created.lot.id) {
+    await addLotToParent(tx, ctx, {
+      parentLotId: bornInto,
+      memberLotId: created.lot.id,
+      startedOn: input.bornOn,
+    });
+  }
+
   const lot = await getLivestockLot(tx, ctx.tenantId, created.lot.id);
   return { lot: lot ?? created.lot, inventoryLotId: created.inventoryLotId };
+}
+
+/**
+ * Which lot a newborn belongs in — **the one its mother is in.**
+ *
+ * Exported because it is a rule rather than a detail: anything else that
+ * creates an animal from a parent should land it in the same place, and a
+ * second copy of this ordering would drift from the first.
+ */
+export async function lotForOffspring(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { damLotId: string | null; sireLotId: string | null; on: string },
+): Promise<string | null> {
+  for (const parentId of [input.damLotId, input.sireLotId]) {
+    if (!parentId) continue;
+    // Is the parent in a lot? Then that is where the offspring goes — one level
+    // deep, so joining the parent instead would make a grandchild.
+    const inside = await parentByLot(tx, ctx.tenantId, [parentId], input.on);
+    const within = inside.get(parentId);
+    if (within) return within;
+    // Otherwise the parent may BE a lot — a layer flock — and chicks out of it
+    // belong in it.
+    const parent = await getLivestockLot(tx, ctx.tenantId, parentId);
+    if (parent?.recordKind === "lot") return parent.id;
+  }
+  return null;
 }
 
 /**

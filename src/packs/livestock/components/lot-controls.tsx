@@ -288,8 +288,33 @@ export function LivestockLotForm({
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="bornOn">Born or hatched</Label>
+                <Label htmlFor="bornOn">
+                  Born or hatched
+                  {!individual && (
+                    <span className="ml-1 font-normal text-muted-foreground">
+                      · optional
+                    </span>
+                  )}
+                </Label>
                 <Input id="bornOn" name="bornOn" type="date" max={today} />
+                {/* **A LOT DOES NOT HAVE A BIRTHDAY** (the founder, 2026-08-28:
+                    "a lot never has a birthdate, it is just a container"). He is
+                    right, and the field is not about the container — it is about
+                    the ANIMALS counted in it, which is why it survives at all:
+                    head counted in bulk has no per-animal record anywhere for a
+                    hatch date to live, and Age, days-to-slaughter and the
+                    production pack's age-band pricing all read it.
+
+                    So it stays for the case it is FOR — a batch that shares a
+                    date — and says so instead of implying the lot was born. */}
+                {!individual && (
+                  <p className="text-xs text-muted-foreground">
+                    For head counted in bulk that all share a date — a box of
+                    chicks, a delivery of feeder pigs. Leave it blank for a{" "}
+                    {lower} you are going to put named animals in; they carry
+                    their own.
+                  </p>
+                )}
               </div>
             </div>
 

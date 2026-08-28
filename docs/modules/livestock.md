@@ -133,6 +133,56 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-08-28 — A calf stays with its mother (`claude/a-calf-stays-with-its-mother`)
+
+**Two more found by driving, and the second is a real model error.** No
+migration.
+
+**A BIRTH WAS THE ONE WAY TO CREATE AN ANIMAL THAT LANDED NOWHERE.** The
+founder: *"the birthing thing says it creates a new lot, but don't we want it to
+stay in the same lot with its mother and the other cows in that lot."*
+
+He is right, and it is the same rule a SPLIT has followed since 8b — name a cow
+out of a pen and she stays in it. A birth was the exception nobody noticed: a
+calf born to a cow in the north herd appeared on the hub as an unrelated record
+and somebody had to go and put her back.
+
+`lotForOffspring` takes the three readings of "her mother's lot", in order:
+
+  1. **the dam's own lot**, if she is in one — the calf joins her herdmates
+  2. **else the dam HERSELF** when she is a lot rather than an animal — chicks
+     out of a layer flock belong in that flock
+  3. **else nowhere.** A loose cow has no lot to put a calf in, and inventing
+     one would be the app making a grouping nobody asked for.
+
+The sire stands in when there is no dam on the record. Exported rather than
+inlined, because it is a RULE: anything else that makes an animal from a parent
+should land it in the same place, and a second copy would drift.
+
+**One level deep still holds.** The calf joins the dam's LOT, never the dam —
+joining her would make a grandchild, and there is no such thing here.
+
+**AND A LOT DOES NOT HAVE A BIRTHDAY.** *"A lot never has a birthdate. It is
+just a container."* True, and the field is not about the container — it is about
+the ANIMALS counted in it. That is why it survives rather than being removed:
+**head counted in bulk has no per-animal record anywhere for a hatch date to
+live**, and Age, days-to-slaughter and `production`'s age-band pricing all read
+it. Removing it would blank all three for every flock and pen.
+
+So it stays for the case it is FOR, marked *optional* and saying so: *"for head
+counted in bulk that all share a date — a box of chicks, a delivery of feeder
+pigs. Leave it blank for a lot you are going to put named animals in; they carry
+their own."* The founder's call, taken as a question first.
+
+**Also: the retired doctrine, again.** The birth dialog still read *"One calf is
+a lot of one."* Now *"One calf is an animal with a page of her own."* That
+sentence has now been removed from copy in 8a, from the schema header in 8g, and
+from here — worth noticing how long a retired phrase survives in the corners.
+
+Driven on Hilltop Farm: a birth recorded from Rosie, who is in `Cows`, put
+**Piglet Pip in `Cows`** beside her. 128/128 ops.
+
+
 ### 2026-08-28 — Slice 8g: the herd tables go (`claude/drop-the-herd-tables`)
 
 **The second of two releases, and that separation is the whole slice.** `0232`

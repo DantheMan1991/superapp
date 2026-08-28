@@ -425,8 +425,10 @@ export function RecordBirthForm({
           <DialogHeader>
             <DialogTitle>Record a birth</DialogTitle>
             <DialogDescription>
-              Starts a new lot with both parents on it and places the head. One
-              calf is a lot of one; ten piglets are a lot of ten.
+              Starts a record of its own with both parents on it, places the
+              head, and <strong>puts it in the same lot as its mother</strong>.
+              One calf is an animal with a page of her own; ten piglets are a
+              lot of ten.
             </DialogDescription>
           </DialogHeader>
 

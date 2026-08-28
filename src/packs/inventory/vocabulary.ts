@@ -162,6 +162,12 @@ export const COST_ADJUSTMENT_REASONS = [
 ] as const;
 
 export const COST_ADJUSTMENT_REASON_LABELS: Record<string, string> = {
+  // NOT in the array above, deliberately: the reasons there are what a PERSON
+  // picks when correcting a ticket, and nobody hand-writes this one. It is
+  // written by `livestock`'s capital transfer when an animal comes back from
+  // being breeding stock, carrying the depreciation taken while she was one —
+  // and it still needs a label, because the correction shows on her batch.
+  capital_return: "Depreciation taken as breeding stock",
   ticket_wrong: "The ticket was wrong",
   freight_omitted: "Freight was left out",
   no_price_on_ticket: "The ticket had no price",

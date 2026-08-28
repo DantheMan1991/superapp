@@ -38,7 +38,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | **8d** | **Move several lots at once** — the one thing herds did that nothing else does. Ships BEFORE 8e | **shipped 2026-08-28** |
 | **8e** | **Herds become lots** — converted and unread. **The DROP is 8g, its own PR** | **shipped 2026-08-28** |
 | **8f** | **Feed reaches a single animal** — in a lot it is the lot's, on her own it is hers | **shipped 2026-08-28** |
-| 8g | **Drop `livestock_groups` and `livestock_group_members`** — only after 8e is deployed | |
+| **8g** | **Drop `livestock_groups` and `livestock_group_members`** — the second of two releases | **shipped 2026-08-28** |
 
 ## The model, settled 2026-08-27
 
@@ -132,6 +132,49 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-08-28 — Slice 8g: the herd tables go (`claude/drop-the-herd-tables`)
+
+**The second of two releases, and that separation is the whole slice.** `0232`
+drops `livestock_groups` and `livestock_group_members`. Slice 8 is done.
+
+8e converted every herd into a LOT and stopped the code reading these tables.
+This drops them, one deploy later. **`main` auto-deploys and nothing applies
+migrations for it**, so a DROP shipped beside the code that stops reading a
+table takes the running app down in the gap between the two — ADR 0014's rule,
+read backwards for a removal. Splitting it cost one extra PR and bought the
+guarantee that no release ever has code and schema disagreeing.
+
+**TWO CHECKS BEFORE RUNNING IT, both on both databases:**
+
+  - **Every herd had a converted lot.** A query for herds with no
+    `metadata->>'migratedFromHerd'` counterpart returned **0 on dev and 0 on
+    production** — so nothing here loses a grouping. Had it returned anything,
+    the DROP would have deleted a real fact and no test would have noticed.
+  - **No foreign key outside these two tables points at them**, so the CASCADE
+    takes only their own constraints and policies. `CASCADE` on a DROP is worth
+    proving rather than assuming; it is exactly the clause that quietly removes
+    something else.
+
+**The isolation tests for the herd tables go now, with the tables.** They stayed
+alive through 8e on purpose — the tables were still there, and a live table with
+no certification is what that suite exists to catch.
+
+**Also corrected: the retired doctrine at the top of the schema.**
+`livestock_lots`' own comment still opened with *"Every animal record is a lot,
+and an individual is a lot of one"* — the sentence 8a retired and the founder
+objected to. It sat where every agent reads it first. Half of the old reasoning
+was right and is kept: ONE TABLE is still correct, because two entities would
+give every downstream table two code paths. What changed is that the
+distinction is now recorded in `record_kind` rather than inferred.
+
+**BOTH DATABASES ARE DROPPED AND VERIFIED: 153 tables → 151**, RLS enabled,
+forced and with policies on every remaining one. Confirmed AFTER as well as
+before — the herd tables are gone from `information_schema` on both, and the
+converted lots still hold their members: dev `Cows` holds 4, **production
+`Dexter Heard` holds 1**. That second one is the whole argument for 8e having
+existed: a bare DROP would have thrown that grouping away.
+
 
 ### 2026-08-28 — A lot has no mother (`claude/a-lot-has-no-mother`)
 

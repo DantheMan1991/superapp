@@ -1625,6 +1625,13 @@
       "when": 1787909691398,
       "tag": "0231_herds_become_lots",
       "breakpoints": true
+    },
+    {
+      "idx": 232,
+      "version": "7",
+      "when": 1787930581748,
+      "tag": "0232_drop_livestock_groups",
+      "breakpoints": true
     }
   ]
 }

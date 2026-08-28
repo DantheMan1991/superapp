@@ -46,6 +46,7 @@ import {
   YIELD_REFUSALS,
   formatLb,
   formatRatio,
+  yieldWarning,
 } from "@/packs/production/core/yield";
 import {
   LIVE_SOURCE_NOTES,
@@ -336,6 +337,18 @@ export default async function ProductionRunPage({
                   {formatLb(yieldResult.yield.inLb)} in. Measured on this run —
                   never a stored factor, because the next one will differ.
                 </p>
+                {/* **OVER 100% IS NOT A GOOD DAY** (livestock slice 8d, applied
+                    where the number lives). Weight is not created by cutting an
+                    animal up, so this is an unweighed input, an output weighed
+                    in its packaging, or somebody else's cuts on this run. Said
+                    rather than suppressed: the fold already refuses partial
+                    weights, so anything reaching here is honestly reporting
+                    what was entered. */}
+                {yieldWarning(yieldResult.yield.ratio) && (
+                  <p className="mt-1 text-xs font-medium text-destructive">
+                    {yieldWarning(yieldResult.yield.ratio)}
+                  </p>
+                )}
                 {/**
                  * **THE DENOMINATOR STILL SAYS EVERYTHING THAT WENT IN, and the
                  * sheet does not change it.** That was slice 0's call and it was

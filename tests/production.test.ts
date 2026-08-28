@@ -4,6 +4,7 @@ import {
   formatLb,
   formatRatio,
   runYield,
+  yieldWarning,
 } from "../src/packs/production/core/yield";
 import {
   LIVE_SOURCE_NOTES,
@@ -1356,5 +1357,21 @@ describe("snapshotLabel", () => {
     // The composed label begins with its category, so the screen does not print
     // "Slaughter · Cornish Cross · 501 to 1000 head · Slaughter".
     expect(categoryRepeatsLabel("Slaughter", snapshotLabel(CORNISH[3]))).toBe(true);
+  });
+});
+
+describe("yieldWarning — livestock slice 8d", () => {
+  it("says nothing about a yield that is possible", () => {
+    expect(yieldWarning(0.699)).toBeNull();
+    expect(yieldWarning(1)).toBeNull();
+    expect(yieldWarning(null)).toBeNull();
+  });
+
+  it("TELLS ON MORE COMING OUT THAN WENT IN", () => {
+    // Weight is not created by cutting an animal up. Hilltop Farm has a
+    // finished kill reading 150%, which is 100 lb in and 150 lb out.
+    const said = yieldWarning(1.5);
+    expect(said).not.toBeNull();
+    expect(said).toMatch(/never weighed|packaging/i);
   });
 });

@@ -29,6 +29,8 @@ import {
   addLotToParent,
   createGroup,
   moveGroupToZone,
+  lotMembers,
+  moveLotsToZone,
   removeLotFromGroup,
   removeLotFromParent,
   returnToMarket,
@@ -812,6 +814,59 @@ export async function moveGroupToZoneAction(input: unknown) {
 }
 
 /**
+ * **MOVE LOTS AND EVERYTHING IN THEM.** Slice 8d, and what replaces
+ * `moveGroupToZoneAction` — the one thing a herd could do that a lot could not.
+ *
+ * Takes a LIST, so the hub can move several at once, and each one brings its
+ * members without the caller naming them. Reports what it refused rather than a
+ * bare count: a field where three of ten pens would not move is a thing
+ * somebody has to be told, and "moved" would read as ten.
+ */
+export async function moveLotsToZoneAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      livestockLotIds: z.array(z.string().uuid()).min(1).max(200),
+      zoneId: z.string().uuid(),
+      startedOn: requiredDate,
+      structureAssetId: z.string().uuid().nullable().optional(),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => moveLotsToZone(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "livestock.lots.moved",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "livestock_lot",
+      targetId: parsed.data.livestockLotIds[0],
+      meta: {
+        zoneId: parsed.data.zoneId,
+        asked: String(parsed.data.livestockLotIds.length),
+        moved: String(result.moved.length),
+        refused: String(result.refused.length),
+      },
+    });
+    revalidatePath(BASE, "layout");
+    return {
+      ok: true as const,
+      moved: result.moved.length,
+      refused: result.refused.length,
+    };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
  * **THE CAPITAL TRANSFER.** Both directions gate on `assets` as well as this
  * pack, because a capital asset needs an asset register to live in — and
  * `livestock` deliberately does not `require` assets, so most of the pack works
@@ -1029,7 +1084,39 @@ export async function moveLotToZoneAction(input: unknown) {
   try {
     const result = await withTenant(
       ctx.tenant.id,
-      (tx) => moveLotToZone(tx, ctxOf(ctx), parsed.data),
+      async (tx) => {
+        const primary = await moveLotToZone(tx, ctxOf(ctx), parsed.data);
+        // **SLICE 8D: THE CONTENTS COME TOO.** A lot moves as one thing — that
+        // is what made a herd worth having, and once animals live inside a lot
+        // (8b) the same walk gives lots the same power. Moving the field
+        // without the three pens inside it would leave them standing on ground
+        // the field has left, which is exactly the half-done move the hub
+        // already warns about.
+        //
+        // The lot itself goes FIRST and through the single path, so the
+        // `movedOff` answer the toast needs is the primary lot's — a bulk call
+        // would return counts and lose which paddock just started resting.
+        //
+        // Only the MEMBERS go through the bulk path. Passing the lot itself
+        // would move it twice on one day, and `moveOccupant` would end the stay
+        // it had just opened.
+        const inside = await lotMembers(
+          tx,
+          ctx.tenant.id,
+          parsed.data.livestockLotId,
+          parsed.data.startedOn,
+        );
+        const rest = inside.length
+          ? await moveLotsToZone(tx, ctxOf(ctx), {
+              livestockLotIds: inside.map((m) => m.memberLotId),
+              zoneId: parsed.data.zoneId,
+              startedOn: parsed.data.startedOn,
+              structureAssetId: parsed.data.structureAssetId ?? null,
+              notes: parsed.data.notes,
+            })
+          : { moved: [] as string[], refused: [] };
+        return { ...primary, alsoMoved: rest.moved.length };
+      },
       { role: ctx.role },
     );
     await logAudit({
@@ -1050,7 +1137,7 @@ export async function moveLotToZoneAction(input: unknown) {
     // Land's pages read this record too, so both trees are revalidated.
     revalidatePath(BASE, "layout");
     revalidatePath("/dashboard/m/land", "layout");
-    return { ok: true, movedOff: result.movedOff };
+    return { ok: true, movedOff: result.movedOff, alsoMoved: result.alsoMoved };
   } catch (err) {
     return toResult(err);
   }

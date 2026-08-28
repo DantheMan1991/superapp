@@ -702,10 +702,15 @@ export function MoveToZoneForm({
       const leftName = off
         ? (zones.find((z) => z.id === off.zoneId)?.name ?? "the last paddock")
         : null;
+      // SLICE 8D: say how many came with it. A lot moves as one thing, and
+      // silence about the other nine would read as "only this one went".
+      const also = "alsoMoved" in result ? (result.alsoMoved ?? 0) : 0;
+      const withThem =
+        also > 0 ? ` with ${also} more from inside it` : "";
       toast.success(
         off
-          ? `Moved — ${leftName} is resting from ${off.endedOn}`
-          : "Moved",
+          ? `Moved${withThem} — ${leftName} is resting from ${off.endedOn}`
+          : `Moved${withThem}`,
       );
       setOpen(false);
       router.refresh();

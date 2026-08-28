@@ -106,6 +106,25 @@ export function runYield(
   return { yield: { inLb, outLb, ratio: outLb / inLb } };
 }
 
+/**
+ * **MORE CAME OUT THAN WENT IN.** Livestock slice 8d, applied here because the
+ * number lives here.
+ *
+ * A yield above 100% is not a good day: weight is not created by cutting an
+ * animal up. It means one of three things, and all three are worth somebody
+ * looking at — **an input that was never weighed**, an output weighed with its
+ * packaging, or a run that received cuts belonging to a different animal.
+ *
+ * NOT refused and not hidden. The fold already refuses a run with partial
+ * weights (`PARTIAL_INPUT_WEIGHTS`), so anything reaching this point has been
+ * weighed on both sides and the arithmetic is honestly reporting what was
+ * entered. Saying so is more use than suppressing it.
+ */
+export function yieldWarning(ratio: number | null): string | null {
+  if (ratio === null || ratio <= 1) return null;
+  return "More came out than went in, which cannot be right — check for an input that was never weighed, or an output weighed in its packaging.";
+}
+
 /** "60.0%", or an em dash. Never a rounded-to-zero percentage for a real ratio. */
 export function formatRatio(ratio: number | null): string {
   if (ratio === null) return "—";

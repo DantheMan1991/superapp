@@ -50,6 +50,8 @@ import {
   listIdentifiers,
   markRoundNormal,
   moveLotToZone,
+  moveLotsToZone,
+  speciesMix,
   placeHead,
   recordDailyCheck,
   recordFeedDraw,
@@ -4229,5 +4231,146 @@ d("livestock ops", () => {
         }),
       ),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  // ---- slice 8d: a lot moves as one -------------------------------------
+
+  it("MOVING A LOT MOVES WHAT IS INSIDE IT", async () => {
+    // The one thing a herd could do that a lot could not. Once animals live
+    // inside a lot (8b), the same walk gives lots the same power — and then
+    // livestock_groups has nothing left that is its own.
+    const field = await newLot("FIELD-8D", "cattle");
+    const pen = await newLot("PEN-8D", "cattle");
+    const cow = await newLot("ROWAN", "cattle");
+    for (const l of [field, pen, cow]) {
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId,
+          inventoryLotId: l.lot.inventoryLotId,
+          head: 1,
+          occurredOn: "2026-08-01",
+        }),
+      );
+    }
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: field.lot.id,
+        memberLotId: pen.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: field.lot.id,
+        memberLotId: cow.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+
+    const result = await asOwner((tx) =>
+      moveLotsToZone(tx, ctx(), {
+        livestockLotIds: [field.lot.id],
+        zoneId,
+        startedOn: "2026-08-12",
+      }),
+    );
+
+    // The field, the pen and the cow — three, from naming one.
+    expect(result.moved).toHaveLength(3);
+    expect(result.refused).toHaveLength(0);
+    expect(result.moved.sort()).toEqual(
+      [field.lot.id, pen.lot.id, cow.lot.id].sort(),
+    );
+  });
+
+  it("DEDUPES when a lot and something inside it are both named", async () => {
+    // Moving the inner one twice on one day would have moveOccupant end the
+    // stay it had just opened.
+    const field = await newLot("FIELD-8D2", "cattle");
+    const pen = await newLot("PEN-8D2", "cattle");
+    for (const l of [field, pen]) {
+      await asOwner((tx) =>
+        placeHead(tx, ctx(), {
+          itemId,
+          inventoryLotId: l.lot.inventoryLotId,
+          head: 1,
+          occurredOn: "2026-08-01",
+        }),
+      );
+    }
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: field.lot.id,
+        memberLotId: pen.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+
+    const result = await asOwner((tx) =>
+      moveLotsToZone(tx, ctx(), {
+        livestockLotIds: [field.lot.id, pen.lot.id],
+        zoneId,
+        startedOn: "2026-08-13",
+      }),
+    );
+    expect(result.moved).toHaveLength(2);
+    expect(new Set(result.moved).size).toBe(2);
+  });
+
+  it("one refusal does not strand the rest", async () => {
+    // An emptied pen still inside a field is the ordinary case: land refuses to
+    // put nobody on a paddock, and the other members must still arrive.
+    const field = await newLot("FIELD-8D3", "poultry");
+    const empty = await newLot("EMPTY-8D3", "poultry");
+    const full = await newLot("FULL-8D3", "poultry");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: field.lot.inventoryLotId,
+        head: 5,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: full.lot.inventoryLotId,
+        head: 5,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    for (const l of [empty, full]) {
+      await asOwner((tx) =>
+        addLotToParent(tx, ctx(), {
+          parentLotId: field.lot.id,
+          memberLotId: l.lot.id,
+          startedOn: "2026-08-01",
+        }),
+      );
+    }
+
+    const result = await asOwner((tx) =>
+      moveLotsToZone(tx, ctx(), {
+        livestockLotIds: [field.lot.id],
+        zoneId,
+        startedOn: "2026-08-14",
+      }),
+    );
+    // Whatever land makes of the empty one, the two with head arrive and the
+    // caller is told the count rather than a bare "moved".
+    expect(result.moved).toContain(field.lot.id);
+    expect(result.moved).toContain(full.lot.id);
+    expect(result.moved.length + result.refused.length).toBe(3);
+  });
+
+  it("speciesMix names what is standing in one lot, once each", () => {
+    expect(speciesMix("cattle", [])).toEqual(["cattle"]);
+    expect(speciesMix("cattle", ["cattle", "cattle"])).toEqual(["cattle"]);
+    // Hilltop Farm's own "Cows" holds three swine and one cow. Allowed, and
+    // said out loud rather than refused.
+    expect(speciesMix("cattle", ["swine", "swine"])).toEqual([
+      "cattle",
+      "swine",
+    ]);
   });
 });

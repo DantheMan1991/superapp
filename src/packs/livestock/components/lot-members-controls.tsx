@@ -41,11 +41,14 @@ export type Joinable = {
  */
 export function AddToLotForm({
   parentLotId,
+  parentSpecies,
   candidates,
   today,
   word,
 }: {
   parentLotId: string;
+  /** What is already in here, so a mixed pick can say so before it happens. */
+  parentSpecies: string;
   candidates: Joinable[];
   today: string;
   /** The tenant's word for a group of animals — "Lot", "Flock", "Pen". */
@@ -57,6 +60,24 @@ export function AddToLotForm({
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [startedOn, setStartedOn] = useState(today);
   const lower = word.toLowerCase();
+
+  /**
+   * **A MIXED SPECIES PICK IS WARNED, NEVER REFUSED** (slice 8d).
+   *
+   * Pigs and poultry on one paddock, moved together, is a homestead's ordinary
+   * Tuesday — and Hilltop Farm's own "Cows" holds three swine and one cow, so a
+   * constraint that could not describe the pilot farm would be describing
+   * something else. The app says so and lets the person decide, the same
+   * treatment an unknown withdrawal period gets.
+   */
+  const mixed = [
+    ...new Set(
+      candidates
+        .filter((c) => picked.has(c.livestockLotId))
+        .map((c) => c.species)
+        .filter((sp) => sp !== parentSpecies),
+    ),
+  ];
 
   function toggle(id: string) {
     setPicked((prev) => {
@@ -128,6 +149,15 @@ export function AddToLotForm({
                 </label>
               ))}
             </div>
+            {mixed.length > 0 && (
+              <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                This {lower} holds {parentSpecies}, and you have picked{" "}
+                {mixed.join(" and ")}. That is allowed — a mixed {lower} is a
+                real thing — but head, feed and the daily round will report them
+                together.
+              </p>
+            )}
+
             <div className="grid gap-2">
               <Label htmlFor="startedOn">From</Label>
               <Input

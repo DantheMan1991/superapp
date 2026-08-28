@@ -48,6 +48,7 @@ import {
   WEIGHT_METHOD_NOTES,
   formatLb,
   formatRatio,
+  conversionWarning,
 } from "@/packs/livestock/core/weights";
 import { formatAge } from "@/packs/livestock/core/herd";
 import {
@@ -376,7 +377,14 @@ export default async function FeedPage({
               value={formatRatio(farmConversion?.ratio ?? null)}
               footnote={
                 farmConversion
-                  ? `${formatLb(farmConversion.feedLb)} of feed against ${formatLb(farmConversion.gainLb)} of gain, across every lot weighed twice in this period.`
+                  ? // SLICE 8D: a figure under 1 : 1 gets told on itself. The
+                    // farm-wide card is where somebody reads a headline number
+                    // and repeats it, so the caveat belongs here most of all.
+                    `${formatLb(farmConversion.feedLb)} of feed against ${formatLb(farmConversion.gainLb)} of gain, across every lot weighed twice in this period.${
+                      conversionWarning(farmConversion.ratio)
+                        ? ` ${conversionWarning(farmConversion.ratio)}`
+                        : ""
+                    }`
                   : anyWeighed
                     ? "Nothing has been weighed twice yet. Gain needs two weighings — the second one turns this into a number."
                     : "Needs weights, and nothing has been weighed. Feed per head is below; feed per pound of gain is not a number this farm can produce yet."

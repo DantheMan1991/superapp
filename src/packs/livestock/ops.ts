@@ -2053,6 +2053,105 @@ export async function moveLotToZone(
   });
 }
 
+/**
+ * **MOVE LOTS, AND EVERYTHING INSIDE THEM, IN ONE ACT.** Slice 8d.
+ *
+ * **THIS IS WHAT REPLACES HERDS**, and it is the only thing a herd could do that
+ * a lot could not. `moveGroupToZone` walked a herd's membership so ten cows were
+ * one trip through the dialog instead of ten; once animals live inside a lot
+ * (8b), the same walk over the same shape gives lots the same power — and then
+ * `livestock_groups` has nothing left that is its own.
+ *
+ * **IT EXPANDS, RATHER THAN ASKING THE CALLER TO.** Give it the north field and
+ * it moves the field, the three pens inside it and the cow somebody named out of
+ * one of them. A caller that had to list them would go stale the moment an
+ * animal was added, and the whole point is that a lot moves as one thing.
+ *
+ * **DEDUPED**, because "move these two" where one is inside the other must not
+ * move the inner one twice — `moveOccupant` would end the stay it just opened.
+ *
+ * **Each one still goes through `land`'s own `moveOccupant`**, exactly as a
+ * single lot does. The inclusive-date arithmetic that makes the old stay end the
+ * day before the new one begins is land's, and a bulk path that re-implemented
+ * it would drift from the single path the first time somebody fixed one of them.
+ *
+ * Returns what it moved AND what it refused rather than a count: a field where
+ * three of ten pens refused is a thing somebody has to be told, and "moved"
+ * would read as ten. Same contract as `moveGroupToZone`, deliberately, so the
+ * screens can swap one for the other.
+ */
+export async function moveLotsToZone(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: {
+    /** The lots to move. Their members come too, without being named. */
+    livestockLotIds: string[];
+    zoneId: string;
+    startedOn: string;
+    structureAssetId?: string | null;
+    notes?: string;
+  },
+): Promise<{ moved: string[]; refused: { lotId: string; reason: string }[] }> {
+  requireWrite(ctx, "member");
+
+  // Expand each lot to itself plus whatever is in it, then dedupe. A Set keyed
+  // on the livestock lot id is the whole cycle guard this needs, because
+  // membership is one level deep by construction (8b).
+  const targets = new Set<string>();
+  for (const id of input.livestockLotIds) {
+    targets.add(id);
+    const inside = await lotMembers(tx, ctx.tenantId, id, input.startedOn);
+    for (const m of inside) targets.add(m.memberLotId);
+  }
+
+  const moved: string[] = [];
+  const refused: { lotId: string; reason: string }[] = [];
+  for (const livestockLotId of targets) {
+    try {
+      await moveLotToZone(tx, ctx, {
+        livestockLotId,
+        zoneId: input.zoneId,
+        startedOn: input.startedOn,
+        structureAssetId: input.structureAssetId ?? null,
+        notes: input.notes,
+      });
+      moved.push(livestockLotId);
+    } catch (err) {
+      // An emptied pen still inside a field is the ordinary case here, and one
+      // refusal must not strand the other nine.
+      refused.push({
+        lotId: livestockLotId,
+        reason: err instanceof Error ? err.message : "could not be moved",
+      });
+    }
+  }
+  return { moved, refused };
+}
+
+/**
+ * **THE SPECIES STANDING IN ONE LOT.** Slice 8d.
+ *
+ * A lot holding more than one is NOT refused, and that is a decision rather
+ * than an omission:
+ *
+ *   - **It is real.** Pigs and poultry on one paddock, moved together, is a
+ *     homestead's ordinary Tuesday. So is a nurse cow with orphan lambs.
+ *   - **Refusing would make existing data unrepresentable.** Hilltop Farm's
+ *     "Cows" holds three swine and one cow today, and a constraint that could
+ *     not describe the pilot farm would be describing something else.
+ *
+ * So the app SAYS SO instead. The mix is surfaced wherever the lot is, and the
+ * add dialog warns before rather than refusing after — which is the same
+ * treatment the withdrawal clock gets for an unknown period: state the fact,
+ * let the person decide.
+ */
+export function speciesMix(
+  ownSpecies: string,
+  memberSpecies: string[],
+): string[] {
+  return [...new Set([ownSpecies, ...memberSpecies])].sort();
+}
+
 // ------------------------------------------------------------ identifiers ---
 
 export async function listIdentifiers(

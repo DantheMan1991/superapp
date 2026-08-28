@@ -1121,6 +1121,7 @@ export default async function LivestockLotPage({
             {isOwner && !insideOf && (
               <AddToLotForm
                 parentLotId={lot.id}
+                parentSpecies={slugLabel(lot.species).toLowerCase()}
                 candidates={joinable}
                 today={today}
                 word={lotWord}

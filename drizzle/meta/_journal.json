@@ -1604,6 +1604,20 @@
       "when": 1787906220324,
       "tag": "0228_livestock_lot_members_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 229,
+      "version": "7",
+      "when": 1787909689398,
+      "tag": "0229_square_robin_chapel",
+      "breakpoints": true
+    },
+    {
+      "idx": 230,
+      "version": "7",
+      "when": 1787909690398,
+      "tag": "0230_livestock_record_kind_backfill",
+      "breakpoints": true
     }
   ]
 }

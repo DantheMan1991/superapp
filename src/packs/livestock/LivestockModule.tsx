@@ -382,6 +382,13 @@ export async function LivestockModule({
                       >
                         {inv?.code ?? "—"}
                       </Link>
+                      {/* SLICE 8C: which KIND of record this row is. The list
+                          holds a named cow and a hundred broilers as peer rows
+                          and gave no way to tell them apart — the founder's
+                          first complaint about this screen. */}
+                      {lot.recordKind === "animal" && (
+                        <Badge variant="outline">animal</Badge>
+                      )}
                       {inv?.parentLotId && <Badge variant="outline">split</Badge>}
                       {/* Her cost is in fixed assets, so she is out of stock
                           valuation while her head is still counted here. */}

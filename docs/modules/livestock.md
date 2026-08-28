@@ -34,7 +34,7 @@ and [land.md](land.md) before changing anything about where animals are.
 | ~~**7**~~ | ~~Herds — a set of animals somebody creates, that moves as one~~ **SUPERSEDED by slice 8** | shipped 2026-08-27, being undone |
 | **8a** | **The words** — a lot is a group and has a NAME, an animal is an animal; "batch" and "lot of one" leave the copy | **shipped 2026-08-28** |
 | **8b** | **Animals live in a lot** — a lot holds animals and smaller lots, and naming one out of a pen KEEPS her in it | **shipped 2026-08-28** |
-| **8c** | **Two pages** — a lot page and an animal page, neither wearing the other's furniture | |
+| **8c** | **Two pages** — a lot page and an animal page, neither wearing the other's furniture | **shipped 2026-08-28** |
 | **8d** | **Move several lots at once** — the one thing herds did that nothing else does. Ships BEFORE 8e | |
 | **8e** | **`livestock_groups` dropped** — only after 8d is live | |
 | **8f** | **Feed reaches a single animal** — in a lot it is the lot's, on her own it is hers | |
@@ -130,6 +130,68 @@ alternative — the bar `docs/decisions/` exists for. Recorded here so the next
 session raises one rather than discovering the reversal in a build log.
 
 ## Build log
+
+### 2026-08-28 — Slice 8c: a flock is not a cow (`claude/a-flock-is-not-a-cow`)
+
+**One page was rendering two different things.** A named cow and a hundred
+broilers went through the same component, so a flock got a Pedigree section, a
+photo gallery promising *"a series over time shows the gradual change in this
+animal"*, an offspring table headed *"Out of this animal"*, and a valuation card
+reading *"what **she** cost to buy plus what has been spent raising **her**"*.
+
+**THE COLUMN IS THE SLICE, AND IT IS THIS PACK'S FIRST DELIBERATE ONE.**
+`livestock_lots.record_kind` — `'animal' | 'lot'`, NOT NULL DEFAULT `'lot'`,
+CLOSED by CHECK. Everything else here is a fold, so the exception has to justify
+itself.
+
+**IT IS NOT DERIVABLE, AND DERIVING IT WAS ALREADY PRODUCING BUGS.** The obvious
+rule is "one head means one animal", which the app was applying live on four
+screens. It is wrong in both directions and both were observed, not imagined:
+
+  - **A pen of three that loses two became an animal**, growing a pedigree page
+    because the arithmetic moved under it.
+  - **A breeding cow at zero head stopped being one.** Rosie on Hilltop Farm,
+    2026-08-27: she lost her `named` badge and dropped out of the herd's
+    "3 named" count while standing in a paddock.
+
+**THE DIFFERENCE IS INTENT, AND SOMEBODY ALREADY STATES IT.** The create form has
+asked *One animal* or *A lot* since 8a and threw the answer away. This keeps it.
+That is precisely why a column is right here and wrong for head, withdrawal or
+capital state: **those are facts about a DAY that later events restate, and this
+is a fact about what the record IS.**
+
+**The backfill uses the old rule once, on purpose.** `0230` sets `'animal'` where
+the head balance is exactly one — the same rule every screen was applying — so
+nothing's answer changes on the day it runs. What changes is that the answer
+stops moving afterwards. On Hilltop Farm it produced exactly the right five
+animals and four lots.
+
+**What each page stops wearing.** Photos take the subject word (the component was
+already parameterised and was always passed `"animal"`). The offspring table, the
+tag empty-state and the valuation copy all branch. **Split** and **Record as
+individuals** disappear from an animal — splitting one cow into two pens is not a
+thing, and the button said otherwise. **In this lot** disappears too, because an
+animal holds nothing.
+
+**PEDIGREE AND BIRTHS STAY ON BOTH, deliberately.** It would have been easy to
+call them animal-only and wrong: `livestock_lots`' own comment has said since 4a
+that *"a parent need not be a lot of one — fifty layers are one lot, and 'these
+chicks came from that flock' is both true and the only pedigree a flock will ever
+have."* Stripping them would have regressed a decision, not tidied one.
+
+**The same derived-from-head bug was in two more places** and is fixed with it:
+`groupSummaries` counted a herd's individuals as `balance === 1`, and the herd
+page's `named` badge did the same. Both now read the kind. That is why Rosie's
+badge went missing, and it would have come back the moment she was sold.
+
+**BOTH DATABASES ARE MIGRATED AND VERIFIED** — column present, CHECK present,
+and the backfill run: dev 5 animals / 4 lots, **production 1 animal / 2 lots**.
+`verify-rls` cannot see a column or a data change, so those were checked
+directly rather than inferred — the gap that made `0226` unprovable.
+
+Migrations `0229` (column + CHECK) and `0230` (backfill). 6 new ops tests, 2 new
+isolation tests, including the two regressions the column exists to prevent.
+
 
 ### 2026-08-28 — Slice 8b: animals live in a lot (`claude/animals-live-in-a-lot`)
 
@@ -1377,7 +1439,7 @@ This pack is the one that forced the change; the full reasoning is in
 
 | Table | Purpose | Notes |
 | --- | --- | --- |
-| `livestock_lots` | The biology on an inventory lot | **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed`. **`dam_lot_id` / `sire_lot_id`** are composite SELF-FKs, RESTRICT, with a CHECK against being one's own parent — and they are NOT `inventory_lots.parent_lot_id`, which is the split chain. The free-text `breed` column was DROPPED by `0221` |
+| `livestock_lots` | The biology on an inventory lot | **`record_kind`** in `animal\|lot`, NOT NULL DEFAULT `lot`, CLOSED by CHECK — slice 8c, and **this pack's one deliberate non-fold**; see the build log for why it is not derivable. **1:1**, enforced by a unique index on `(tenant_id, inventory_lot_id)`. Composite FK to `inventory_lots`, CASCADE. `species` open taxonomy; `sex` in `male\|female\|mixed`. **`dam_lot_id` / `sire_lot_id`** are composite SELF-FKs, RESTRICT, with a CHECK against being one's own parent — and they are NOT `inventory_lots.parent_lot_id`, which is the split chain. The free-text `breed` column was DROPPED by `0221` |
 | `livestock_breed_parts` | **What an animal is made of, as somebody stated it** | One row per breed per animal, unique on `(tenant_id, lot, breed)`. `parts` is an integer out of the row's siblings — 2 : 1 : 1 is ½, ¼, ¼ — because percentages force a rounding decision the person never made. **The RESOLVED composition is never stored**: it is a fold over the pedigree in `core/pedigree.ts`, and a stated one beats a computed one |
 | `livestock_capital_transfers` | **An animal stopped being inventory, or started again** | Slice 4f. Direction `to_breeding\|to_market`, the amount that moved, and the three things the event produced: the ASSET she became, the ENTRY that moved the money, and (historically) a movement. **There is no `breeding` flag anywhere** — the state is a fold over these rows, newest first. `journal_entry_id` is null for a tenant with no books: the decision still happened |
 | `livestock_groups` | ~~A herd, mob or flock~~ **BEING DROPPED — slice 8e.** See [The model, settled](#the-model-settled-2026-08-27) | Holds LOTS, not animals, which is what lets one hold a named cow and a counted pen at once. Same shape as `livestock_feed_groups`: named, `active\|closed`, closed keeps reporting. **The head total is a fold over its members and is never stored** |

@@ -531,6 +531,19 @@ export default async function LivestockLotPage({
   const isOwner = ctx.role === "owner";
   const structureWord = labelFor(labels, "structure", "Pen or barn");
   const lotWord = labelFor(labels, "livestockLot", "Lot");
+  /**
+   * **SLICE 8C: ONE PAGE, TWO SUBJECTS.** A named cow and a hundred broilers
+   * were rendered by the same component, so a flock was offered a photo
+   * gallery about "the gradual change in this animal" and a valuation card
+   * about "what SHE cost to buy".
+   *
+   * Read off `record_kind`, never off a head balance of one — a pen down to
+   * its last bird is still a pen, and a breeding cow at zero head is still a
+   * cow. That was the bug the column was added to end.
+   */
+  const isAnimal = lot.recordKind === "animal";
+  /** What to call this record mid-sentence. Never the word "lot" for a cow. */
+  const subjectWord = isAnimal ? "animal" : lotWord.toLowerCase();
   // Measured plus allocated. The card says which, and the split is spelled out
   // underneath whenever a shared feeder contributed.
   const feedCents = feed?.totalCents ?? 0;
@@ -656,11 +669,19 @@ export default async function LivestockLotPage({
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <PlaceHeadForm
-              itemId={inventoryLot.itemId}
-              inventoryLotId={inventoryLot.id}
-              today={today}
-            />
+            {/* **NOT OFFERED ON AN ANIMAL THAT ALREADY HAS HER HEAD** (slice 8c).
+                It read as an invitation to add a second head to one cow, which
+                is the contradiction the founder opened this whole review with.
+                `startIndividual` places her single head at creation, so the only
+                animal that needs this is one whose head was never recorded — and
+                she still gets it. */}
+            {(!isAnimal || summary.balance === 0) && (
+              <PlaceHeadForm
+                itemId={inventoryLot.itemId}
+                inventoryLotId={inventoryLot.id}
+                today={today}
+              />
+            )}
             <RemoveHeadForm
               itemId={inventoryLot.itemId}
               inventoryLotId={inventoryLot.id}
@@ -691,17 +712,20 @@ export default async function LivestockLotPage({
                 tapeAvailable={tapeDivisor !== null}
               />
             )}
-            {isOwner && summary.balance > 0 && (
+            {/* SLICE 8C: not offered on an animal. Splitting one cow into two
+                pens is not a thing, and the button said otherwise. */}
+            {isOwner && !isAnimal && summary.balance > 0 && (
               <SplitHerdForm
                 livestockLotId={lot.id}
                 balance={summary.balance}
                 today={today}
               />
             )}
-            {/* Offered only where it means something. A lot of ONE already IS
-                an individual, and a button inviting somebody to make it one
-                would teach them the model is stranger than it is. */}
-            {isOwner && summary.balance > 1 && (
+            {/* Offered only where it means something. An ANIMAL already is
+                one, and a button inviting somebody to make it one would teach
+                them the model is stranger than it is. Since 8c that is read
+                off the kind rather than off a balance of one. */}
+            {isOwner && !isAnimal && summary.balance > 1 && (
               <SplitIntoIndividualsForm
                 livestockLotId={lot.id}
                 lotCode={inventoryLot.code}
@@ -982,7 +1006,9 @@ export default async function LivestockLotPage({
               <p className="mt-1 text-sm text-muted-foreground">
                 {isBreeding
                   ? `Breeding stock since ${capitalTransfers[0]?.occurredOn ?? "—"}. Her cost moved to fixed assets and depreciates from there, so she is out of stock valuation — she is still an animal here, and a run cannot take her until she comes back to the market herd.`
-                  : "Inventory — what she cost to buy plus what has been spent raising her. A breeding animal is a capital asset instead, and moving her posts an entry rather than setting a flag."}
+                  : isAnimal
+                    ? "Inventory — what she cost to buy plus what has been spent raising her. A breeding animal is a capital asset instead, and moving her posts an entry rather than setting a flag."
+                    : `Inventory — what these cost to buy plus what has been spent raising them. A breeding animal is a capital asset instead, and moving one posts an entry rather than setting a flag.`}
               </p>
               {isBreeding && depreciatedCents > 0 && (
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -1025,7 +1051,9 @@ export default async function LivestockLotPage({
       {/* **WHAT IS IN THIS LOT** (slice 8b). Rendered whenever the lot holds
           anything OR could — a lot that is itself inside another cannot hold
           things, so it gets nothing here rather than an empty invitation. */}
-      {(members.length > 0 || (!insideOf && isOwner)) && (
+      {/* An ANIMAL holds nothing, so it is not offered the section at all —
+          only a lot can contain things (slice 8c). */}
+      {!isAnimal && (members.length > 0 || (!insideOf && isOwner)) && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-heading text-xl font-semibold tracking-heading">
@@ -1196,7 +1224,7 @@ export default async function LivestockLotPage({
           isEmpty={offspring.length === 0}
           empty={
             <EmptyState
-              title="Nothing out of this animal yet"
+              title={`Nothing out of this ${subjectWord} yet`}
               description="A birth starts a lot of its own, with both parents on it and the head placed."
             />
           }
@@ -1204,7 +1232,7 @@ export default async function LivestockLotPage({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Out of this animal</TableHead>
+                <TableHead>Out of this {subjectWord}</TableHead>
                 <TableHead>Born</TableHead>
                 <TableHead>Sex</TableHead>
                 <TableHead>Side</TableHead>
@@ -1249,7 +1277,7 @@ export default async function LivestockLotPage({
             tenantId={ctx.tenant.id}
             photos={photos}
             canEdit={ctx.role !== "expert"}
-            subject="animal"
+            subject={subjectWord}
             attachAction={attachLotPhotoAction}
             setPrimaryAction={setLotPhotoPrimaryAction}
             detachAction={detachLotPhotoAction}
@@ -1269,7 +1297,11 @@ export default async function LivestockLotPage({
           empty={
             <EmptyState
               title="No tags yet"
-              description="An animal carries several — a visual tag you can read across a field, and an official one that reaches processor paperwork."
+              description={
+                isAnimal
+                  ? "An animal carries several — a visual tag you can read across a field, and an official one that reaches processor paperwork."
+                  : `A ${lotWord.toLowerCase()} can carry a tag of its own — a pen number, or the lot number a processor will ask for.`
+              }
             />
           }
         >

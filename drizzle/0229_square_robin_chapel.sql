@@ -1,0 +1,2 @@
+ALTER TABLE "livestock_lots" ADD COLUMN "record_kind" text DEFAULT 'lot' NOT NULL;--> statement-breakpoint
+ALTER TABLE "livestock_lots" ADD CONSTRAINT "livestock_lots_record_kind_valid" CHECK ("livestock_lots"."record_kind" in ('animal', 'lot'));

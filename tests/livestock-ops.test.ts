@@ -3958,4 +3958,163 @@ d("livestock ops", () => {
       summariseHead(movements.get(cow.lot.inventoryLotId) ?? []).balance,
     ).toBe(1);
   });
+
+  // ---- slice 8c: a record says which kind it is ---------------------------
+
+  it("a lot is a lot and an animal is an animal, from the moment each is made", async () => {
+    const pen = await newLot("PEN-20", "cattle");
+    expect(pen.lot.recordKind).toBe("lot");
+
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Willow",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    expect(cow.lot.recordKind).toBe("animal");
+  });
+
+  it("A PEN DOWN TO ITS LAST BIRD IS STILL A PEN", async () => {
+    // The regression the column exists to prevent. "Balance = 1" was the old
+    // rule, so a pen of three that lost two grew a pedigree page and a photo
+    // gallery about the gradual change in "this animal".
+    const { lot } = await newLot("PEN-21", "poultry");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 3,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      removeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 2,
+        reason: "death",
+        occurredOn: "2026-08-05",
+      }),
+    );
+
+    const movements = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [lot.inventoryLotId]),
+    );
+    expect(summariseHead(movements.get(lot.inventoryLotId) ?? []).balance).toBe(1);
+
+    const after = await asOwner((tx) => getLivestockLot(tx, tenantId, lot.id));
+    expect(after?.recordKind).toBe("lot");
+  });
+
+  it("AN ANIMAL AT ZERO HEAD IS STILL AN ANIMAL", async () => {
+    // The other half of the same bug, observed on Hilltop Farm: Rosie lost her
+    // badge and dropped out of the herd count while standing in a paddock.
+    const cow = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Clover",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      removeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: cow.inventoryLotId,
+        head: 1,
+        reason: "sold_live",
+        occurredOn: "2026-08-06",
+      }),
+    );
+
+    const movements = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [cow.inventoryLotId]),
+    );
+    expect(summariseHead(movements.get(cow.inventoryLotId) ?? []).balance).toBe(0);
+
+    const after = await asOwner((tx) => getLivestockLot(tx, tenantId, cow.lot.id));
+    expect(after?.recordKind).toBe("animal");
+  });
+
+  it("naming animals out of a pen makes animals and leaves the pen a lot", async () => {
+    const { lot } = await newLot("PEN-22", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 8,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const made = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Fern", "Sage"],
+        identifierKind: "name",
+        occurredOn: "2026-08-02",
+      }),
+    );
+    for (const child of made) expect(child.lot.recordKind).toBe("animal");
+
+    const parent = await asOwner((tx) => getLivestockLot(tx, tenantId, lot.id));
+    expect(parent?.recordKind).toBe("lot");
+  });
+
+  it("a PLAIN split makes another lot, not an animal", async () => {
+    // Twenty head into the next pen is a pen. Only `splitIntoIndividuals` says
+    // otherwise, which is the whole difference between the two callers.
+    const { lot } = await newLot("PEN-23", "poultry");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 40,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const child = await asOwner((tx) =>
+      splitLivestockLot(tx, ctx(), {
+        livestockLotId: lot.id,
+        head: 20,
+        newCode: "PEN-23b",
+        occurredOn: "2026-08-02",
+      }),
+    );
+    expect(child.lot.recordKind).toBe("lot");
+  });
+
+  it("one calf is an animal; a hatch of thirty is a lot", async () => {
+    const dam = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Juno",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    const calf = await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        itemId,
+        code: "Juno's calf",
+        damLotId: dam.lot.id,
+        head: 1,
+        bornOn: "2026-08-10",
+      }),
+    );
+    expect(calf.lot.recordKind).toBe("animal");
+
+    const hatch = await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        itemId,
+        code: "HATCH-9",
+        damLotId: dam.lot.id,
+        head: 30,
+        bornOn: "2026-08-11",
+      }),
+    );
+    expect(hatch.lot.recordKind).toBe("lot");
+  });
 });

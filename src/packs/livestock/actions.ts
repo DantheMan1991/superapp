@@ -539,6 +539,8 @@ export async function startIndividualAction(input: unknown) {
       occurredOn: requiredDate,
       source: z.enum(["purchased", "raised", "produced"]).optional(),
       notes: z.string().max(5000).optional(),
+      /** Start her straight inside a lot. Optional — most animals are loose. */
+      parentLotId: z.string().uuid().nullable().optional(),
     })
     .safeParse(input);
   if (!parsed.success) return { error: "Check the details and try again." };

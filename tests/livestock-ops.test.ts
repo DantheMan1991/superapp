@@ -29,6 +29,7 @@ import {
   addLotToParent,
   lotMemberSummaries,
   lotMembers,
+  parentByLot,
   lotsAvailableToJoin,
   removeLotFromParent,
   capitalStateByLot,
@@ -4153,5 +4154,56 @@ d("livestock ops", () => {
       "cattle",
       "swine",
     ]);
+  });
+
+  // ---- a named animal can be started INSIDE a lot ------------------------
+
+  it("STARTS A NAMED ANIMAL DIRECTLY IN A LOT", async () => {
+    // The founder, 2026-08-28: "I don't see how to add individual animals to
+    // the lot. I see how I can increase head count, which works for chickens
+    // but not when I want to track the individual animal."
+    //
+    // He was right. The picker only ever offered lots that already existed, so
+    // a lot made five seconds ago had nothing to offer — and placing head adds
+    // ANONYMOUS head, which is the opposite of naming one.
+    const pen = await newLot("NURSERY", "cattle");
+
+    const made = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Primrose",
+        species: "cattle",
+        occurredOn: "2026-08-20",
+        parentLotId: pen.lot.id,
+      }),
+    );
+
+    // She is an animal, she has her one head, and she is in the lot — all of it
+    // in one act.
+    expect(made.lot.recordKind).toBe("animal");
+    const movements = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [made.inventoryLotId]),
+    );
+    expect(summariseHead(movements.get(made.inventoryLotId) ?? []).balance).toBe(1);
+
+    const inside = await asOwner((tx) =>
+      lotMembers(tx, tenantId, pen.lot.id, "2026-08-20"),
+    );
+    expect(inside.map((m) => m.memberLotId)).toEqual([made.lot.id]);
+  });
+
+  it("still starts her loose when no lot is named", async () => {
+    const made = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Tansy",
+        species: "cattle",
+        occurredOn: "2026-08-20",
+      }),
+    );
+    const parent = await asOwner((tx) =>
+      parentByLot(tx, tenantId, [made.lot.id], "2026-08-20"),
+    );
+    expect(parent.get(made.lot.id)).toBeUndefined();
   });
 });

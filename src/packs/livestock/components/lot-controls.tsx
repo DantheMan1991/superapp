@@ -602,8 +602,10 @@ export function SplitHerdForm({
           <DialogHeader>
             <DialogTitle>Split this lot</DialogTitle>
             <DialogDescription>
-              Moves head into a new lot that remembers where it came from and
-              carries the same breed and birth date. {balance} head here now.
+              Moves head into a new lot that carries the same breed and birth
+              date &mdash; and <strong>stays inside this one</strong>, so the
+              total here does not change. It keeps eating from the same feeders.
+              {balance} head here now.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">

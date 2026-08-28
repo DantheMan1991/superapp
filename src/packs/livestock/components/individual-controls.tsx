@@ -117,7 +117,8 @@ export function SplitIntoIndividualsForm({
               Each one becomes a record of its own, carrying this lot&rsquo;s
               species, birth date, breeding and parents across. From then on its
               weights, treatments, photos and calves are its own rather than the
-              group&rsquo;s.
+              lot&rsquo;s. <strong>They stay in this lot</strong> and keep eating
+              from the same feeders.
             </DialogDescription>
           </DialogHeader>
 

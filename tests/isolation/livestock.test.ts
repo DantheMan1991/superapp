@@ -32,6 +32,8 @@ d("livestock tables (RLS)", () => {
   let tenantA: string;
   let tenantB: string;
   let lotA: string;
+  /** A SECOND lot in tenant A, so one can be put inside the other. */
+  let lotA2: string;
   let invLotA: string;
   let invLotB: string;
   let lotB: string;
@@ -74,6 +76,7 @@ d("livestock tables (RLS)", () => {
         .values([
           { tenantId: tenantA, itemId: items[0].id, code: "A-1" },
           { tenantId: tenantB, itemId: items[1].id, code: "B-1" },
+          { tenantId: tenantA, itemId: items[0].id, code: "A-2" },
         ])
         .returning();
       invLotA = invLots[0].id;
@@ -88,10 +91,26 @@ d("livestock tables (RLS)", () => {
             species: "poultry",
           },
           { tenantId: tenantB, inventoryLotId: invLots[1].id, species: "cattle" },
+          {
+            tenantId: tenantA,
+            inventoryLotId: invLots[2].id,
+            species: "poultry",
+          },
         ])
         .returning();
       lotA = lots[0].id;
       lotB = lots[1].id;
+      lotA2 = lots[2].id;
+
+      // Slice 8b: A-2 lives inside A-1. One OPEN membership, so the
+      // one-open-per-animal test has something to collide with rather than
+      // having to create it and leave it behind for the next test.
+      await tx.insert(schema.livestockLotMembers).values({
+        tenantId: tenantA,
+        parentLotId: lots[0].id,
+        memberLotId: lots[2].id,
+        startedOn: "2026-08-01",
+      });
 
       await tx.insert(schema.livestockDailyLogs).values([
         {
@@ -271,7 +290,10 @@ d("livestock tables (RLS)", () => {
 
   it("a tenant sees only its own animal lots", async () => {
     const mine = await asOwner((tx) => tx.select().from(schema.livestockLots));
-    expect(mine.map((l) => l.species)).toEqual(["poultry"]);
+    // TWO since slice 8b: the fixture needs a second lot so one can be put
+    // inside the other. What this test is about is that neither is theirs.
+    expect(mine).toHaveLength(2);
+    expect(mine.every((l) => l.species === "poultry")).toBe(true);
     const theirs = await asOtherTenant((tx) =>
       tx.select().from(schema.livestockLots),
     );
@@ -388,7 +410,7 @@ d("livestock tables (RLS)", () => {
   it("staff see the same animals as an owner", async () => {
     expect(
       await asStaff((tx) => tx.select().from(schema.livestockLots)),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(
       await asStaff((tx) => tx.select().from(schema.livestockIdentifiers)),
     ).toHaveLength(1);
@@ -1048,6 +1070,137 @@ d("livestock tables (RLS)", () => {
     expect(rows).toHaveLength(1);
   });
 
+
+  // ---- slice 8b: animals live in a lot -----------------------------------
+
+  it("CANNOT PUT ANOTHER TENANT'S ANIMAL IN OUR LOT", async () => {
+    // The composite FK makes it unrepresentable, so it fails even under
+    // withSystem where RLS is not watching. This is the one that would
+    // MISCOUNT: a lot's total is its own head plus its members', so a foreign
+    // row adds another farm's animals to this farm's pen — and the same fold
+    // feeds the daily round and the feed allocation.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockLotMembers).values({
+          tenantId: tenantA,
+          parentLotId: lotA,
+          memberLotId: lotB,
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot put our animal in another tenant's lot", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.livestockLotMembers).values({
+          tenantId: tenantA,
+          parentLotId: lotB,
+          memberLotId: lotA,
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a lot cannot be put inside itself", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockLotMembers).values({
+          tenantId: tenantA,
+          parentLotId: lotA,
+          memberLotId: lotA,
+          startedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("ONE OPEN MEMBERSHIP PER ANIMAL, ACROSS ALL LOTS", async () => {
+    // An animal is in one place. Making that unrepresentable is what lets
+    // "move her to the other lot" be one act rather than a question about
+    // which of two answers is current.
+    // The fixture already has A-2 open inside A-1. A second open row for the
+    // same animal is what must be impossible.
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockLotMembers).values({
+          tenantId: tenantA,
+          parentLotId: lotA,
+          memberLotId: lotA2,
+          startedOn: "2026-08-05",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    // A CLOSED one is fine — that is exactly what a history looks like.
+    const ok = await asOwner((tx) =>
+      tx
+        .insert(schema.livestockLotMembers)
+        .values({
+          tenantId: tenantA,
+          parentLotId: lotA,
+          memberLotId: lotA2,
+          startedOn: "2026-07-01",
+          endedOn: "2026-07-31",
+        })
+        .returning(),
+    );
+    expect(ok).toHaveLength(1);
+  });
+
+  it("refuses a membership that ends before it starts", async () => {
+    await expect(
+      asOwner((tx) =>
+        tx.insert(schema.livestockLotMembers).values({
+          tenantId: tenantA,
+          parentLotId: lotA,
+          memberLotId: lotA2,
+          startedOn: "2026-08-10",
+          endedOn: "2026-08-01",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a staff member can put an animal in a lot, because it is a chore", async () => {
+    const rows = await asStaff((tx) =>
+      tx
+        .insert(schema.livestockLotMembers)
+        .values({
+          tenantId: tenantA,
+          parentLotId: lotA,
+          memberLotId: lotA2,
+          startedOn: "2026-06-01",
+          endedOn: "2026-06-30",
+        })
+        .returning(),
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("a tenant sees only its own lot memberships", async () => {
+    const mine = await asOwner((tx) =>
+      tx.select().from(schema.livestockLotMembers),
+    );
+    expect(mine.length).toBeGreaterThan(0);
+    expect(mine.every((r) => r.tenantId === tenantA)).toBe(true);
+    expect(
+      await asOtherTenant((tx) =>
+        tx.select().from(schema.livestockLotMembers),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("lot membership is default-deny with no tenant context", async () => {
+    const nowhere = "00000000-0000-0000-0000-000000000000";
+    expect(
+      await withTenant(nowhere, (tx) =>
+        tx.select().from(schema.livestockLotMembers),
+      ),
+    ).toHaveLength(0);
+  });
 
   // ---- slice 4f: the capital transfer ------------------------------------
 

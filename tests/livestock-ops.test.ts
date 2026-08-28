@@ -26,6 +26,11 @@ import {
   recordBirth,
   setBreedParts,
   addLotToGroup,
+  addLotToParent,
+  lotMemberSummaries,
+  lotMembers,
+  lotsAvailableToJoin,
+  removeLotFromParent,
   capitalStateByLot,
   createGroup,
   groupForLots,
@@ -3695,5 +3700,262 @@ d("livestock ops", () => {
         }),
       ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  // ---- slice 8b: animals live in a lot -----------------------------------
+
+  it("NAMING A COW OUT OF A PEN LEAVES HER IN IT", async () => {
+    // The whole slice. Before this, splitting her out DROPPED her out of the
+    // pen — so "add individual animals to a lot" was undone by the only
+    // mechanism that could have produced one.
+    const { lot } = await newLot("PEN-9", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 10,
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    const [made] = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Bluebell"],
+        identifierKind: "name",
+        occurredOn: "2026-08-02",
+      }),
+    );
+
+    const inside = await asOwner((tx) =>
+      lotMembers(tx, tenantId, lot.id, "2026-08-02"),
+    );
+    expect(inside.map((m) => m.memberLotId)).toEqual([made.lot.id]);
+
+    // And the pen still stands for ten: nine loose plus her.
+    const summaries = await asOwner((tx) =>
+      lotMemberSummaries(tx, tenantId, lot.id, "2026-08-02"),
+    );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].code).toBe("Bluebell");
+    expect(summaries[0].head).toBe(1);
+    expect(summaries[0].isIndividual).toBe(true);
+  });
+
+  it("SHE KEEPS EATING — a split carries feeder membership across", async () => {
+    // The silent money bug. Allocation is head-days over feeder membership, so
+    // a cow split off a pen that was on the bin stopped accruing feed cost
+    // entirely: the split carried her whole pedigree and dropped the one thing
+    // that was costing money.
+    const { lot } = await newLot("PEN-10", "swine");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: lot.inventoryLotId,
+        head: 6,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const bin = await asOwner((tx) =>
+      createFeedGroup(tx, ctx(), { name: "Hog bin" }),
+    );
+    await asOwner((tx) =>
+      addLotToFeedGroup(tx, ctx(), {
+        feedGroupId: bin.id,
+        livestockLotId: lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+
+    const [made] = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: lot.id,
+        names: ["Rosie"],
+        identifierKind: "name",
+        occurredOn: "2026-08-05",
+      }),
+    );
+
+    const members = await asOwner((tx) =>
+      feedGroupMembers(tx, tenantId, [bin.id]),
+    );
+    const hers = (members.get(bin.id) ?? []).filter(
+      (m) => m.livestockLotId === made.lot.id,
+    );
+    expect(hers).toHaveLength(1);
+    // FROM THE SPLIT, not from when the pen went on the bin: the pen's own
+    // share already counted her before today, and backdating would charge her
+    // twice over the same days.
+    expect(hers[0].startedOn).toBe("2026-08-05");
+    expect(hers[0].endedOn).toBeNull();
+  });
+
+  it("a split out of a nested lot joins the OUTER one, never a third level", async () => {
+    const field = await newLot("NORTH-FIELD", "cattle");
+    const pen = await newLot("PEN-11", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: pen.lot.inventoryLotId,
+        head: 5,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: field.lot.id,
+        memberLotId: pen.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+
+    const [made] = await asOwner((tx) =>
+      splitIntoIndividuals(tx, ctx(), {
+        livestockLotId: pen.lot.id,
+        names: ["Daisy"],
+        identifierKind: "name",
+        occurredOn: "2026-08-03",
+      }),
+    );
+
+    // She is in the FIELD, not in the pen — one level deep, always.
+    const inPen = await asOwner((tx) =>
+      lotMembers(tx, tenantId, pen.lot.id, "2026-08-03"),
+    );
+    expect(inPen).toHaveLength(0);
+    const inField = await asOwner((tx) =>
+      lotMembers(tx, tenantId, field.lot.id, "2026-08-03"),
+    );
+    expect(inField.map((m) => m.memberLotId).sort()).toEqual(
+      [pen.lot.id, made.lot.id].sort(),
+    );
+  });
+
+  it("moving between lots is ONE act — the old membership closes itself", async () => {
+    const one = await newLot("LOT-A", "cattle");
+    const two = await newLot("LOT-B", "cattle");
+    const cow = await newLot("MABEL", "cattle");
+
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: one.lot.id,
+        memberLotId: cow.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: two.lot.id,
+        memberLotId: cow.lot.id,
+        startedOn: "2026-08-10",
+      }),
+    );
+
+    // Gone from the first, in the second, and the history still reads right on
+    // the day before the move.
+    expect(
+      await asOwner((tx) => lotMembers(tx, tenantId, one.lot.id, "2026-08-10")),
+    ).toHaveLength(0);
+    expect(
+      await asOwner((tx) => lotMembers(tx, tenantId, one.lot.id, "2026-08-09")),
+    ).toHaveLength(1);
+    expect(
+      await asOwner((tx) => lotMembers(tx, tenantId, two.lot.id, "2026-08-10")),
+    ).toHaveLength(1);
+  });
+
+  it("REFUSES A THIRD LEVEL, from either direction", async () => {
+    const field = await newLot("FIELD-2", "cattle");
+    const pen = await newLot("PEN-12", "cattle");
+    const cow = await newLot("HAZEL", "cattle");
+
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: pen.lot.id,
+        memberLotId: cow.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+
+    // The pen HOLDS something, so it cannot itself go inside the field...
+    await expect(
+      asOwner((tx) =>
+        addLotToParent(tx, ctx(), {
+          parentLotId: field.lot.id,
+          memberLotId: pen.lot.id,
+          startedOn: "2026-08-02",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "LOT_INVALID" });
+
+    // ...and a lot that is already INSIDE something cannot be given things.
+    const other = await newLot("SPARE", "cattle");
+    await expect(
+      asOwner((tx) =>
+        addLotToParent(tx, ctx(), {
+          parentLotId: cow.lot.id,
+          memberLotId: other.lot.id,
+          startedOn: "2026-08-02",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "LOT_INVALID" });
+  });
+
+  it("the picker offers nothing the write path would refuse", async () => {
+    const field = await newLot("FIELD-3", "cattle");
+    const pen = await newLot("PEN-13", "cattle");
+    const cow = await newLot("IVY", "cattle");
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: pen.lot.id,
+        memberLotId: cow.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+
+    const offered = await asOwner((tx) =>
+      lotsAvailableToJoin(tx, tenantId, field.lot.id),
+    );
+    const ids = offered.map((o) => o.livestockLotId);
+    expect(ids).not.toContain(field.lot.id); // itself
+    expect(ids).not.toContain(pen.lot.id); // holds something
+    expect(ids).not.toContain(cow.lot.id); // already inside something
+  });
+
+  it("taking one out is not a head event", async () => {
+    const pen = await newLot("PEN-14", "cattle");
+    const cow = await newLot("POPPY", "cattle");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: cow.lot.inventoryLotId,
+        head: 1,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: pen.lot.id,
+        memberLotId: cow.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      removeLotFromParent(tx, ctx(), {
+        memberLotId: cow.lot.id,
+        endedOn: "2026-08-09",
+      }),
+    );
+
+    expect(
+      await asOwner((tx) => lotMembers(tx, tenantId, pen.lot.id, "2026-08-10")),
+    ).toHaveLength(0);
+    // She is still an animal on the farm. Leaving a lot is not leaving.
+    const movements = await asOwner((tx) =>
+      movementKindsForLots(tx, tenantId, [cow.lot.inventoryLotId]),
+    );
+    expect(
+      summariseHead(movements.get(cow.lot.inventoryLotId) ?? []).balance,
+    ).toBe(1);
   });
 });

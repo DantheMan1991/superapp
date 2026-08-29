@@ -27,9 +27,16 @@ import {
   retireParcel,
   retireZone,
   activateZone,
+  addPlanItem,
+  createPlan,
+  deletePlan,
+  deletePlanItem,
   getFeature,
   getParcel,
+  getPlan,
   layoutPaddocks,
+  saveTakeoff,
+  updatePlanItem,
   setFeatureGeometry,
   setFeatureStatus,
   setParcelBoundary,
@@ -1120,6 +1127,226 @@ export async function activateZoneAction(input: unknown) {
       meta: { parcelId: zone.parcelId },
     });
     revalidatePath(`${BASE}/${zone.parcelId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// ----------------------------------------------- plans and the takeoff ---
+
+/**
+ * **OWNER-ONLY, all of it.** Drawing a fence is a chore; deciding to spend
+ * money on four paddocks is not. The one act in this area a person in a field
+ * performs is marking a feature built, and that stayed where it was.
+ */
+
+const takeoffLineSchema = z.object({
+  material: z.string().min(1).max(63),
+  label: z.string().min(1).max(200),
+  quantity: z.number().positive().max(100_000_000),
+  unit: z.enum(["each", "ft", "m"]),
+  sourceFeatureId: z.string().uuid().nullable().optional(),
+  // A price nobody typed is null, not zero — zero is a thing that is free.
+  unitCost: z.number().min(0).max(10_000_000).nullable().optional(),
+  notes: z.string().max(2000).optional(),
+});
+
+export async function createPlanAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      parcelId: z.string().uuid(),
+      name: z.string().min(1).max(200),
+      notes: z.string().max(5000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const plan = await withTenant(
+      ctx.tenant.id,
+      (tx) => createPlan(tx, landCtx(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.plan.created",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_plan",
+      targetId: plan.id,
+      meta: { parcelId: plan.parcelId },
+    });
+    revalidatePath(`${BASE}/${parsed.data.parcelId}`);
+    return { ok: true, id: plan.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deletePlanAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    // Read it first: afterwards there is nothing left to say what went.
+    const before = await withTenant(
+      ctx.tenant.id,
+      (tx) => getPlan(tx, ctx.tenant.id, parsed.data.id),
+      { role: ctx.role },
+    );
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => deletePlan(tx, landCtx(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.plan.deleted",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_plan",
+      targetId: parsed.data.id,
+      meta: { name: before?.name ?? null },
+    });
+    if (before) revalidatePath(`${BASE}/${before.parcelId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Save the list as it stands.
+ *
+ * **THE LINES ARRIVE FROM THE CLIENT, COMPUTED**, and that is deliberate rather
+ * than lazy: what gets stored has to be exactly what the person was looking at
+ * when they pressed the button. The arithmetic is pure and lives in
+ * `core/takeoff.ts`, so the screen and this action run the same function — and
+ * `saveTakeoff` validates every line before it is written, because "arrives
+ * from the client" and "is trusted" are different things.
+ */
+export async function saveTakeoffAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      planId: z.string().uuid(),
+      lines: z.array(takeoffLineSchema).max(500),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const items = await withTenant(
+      ctx.tenant.id,
+      (tx) => saveTakeoff(tx, landCtx(ctx), parsed.data.planId, parsed.data.lines),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.plan.taken_off",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_plan",
+      targetId: parsed.data.planId,
+      meta: { lines: parsed.data.lines.length, stored: items.length },
+    });
+    revalidatePath(BASE);
+    return { ok: true, items: items.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function addPlanItemAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = takeoffLineSchema
+    .omit({ sourceFeatureId: true })
+    .extend({ planId: z.string().uuid() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const { planId, ...line } = parsed.data;
+
+  try {
+    const item = await withTenant(
+      ctx.tenant.id,
+      (tx) => addPlanItem(tx, landCtx(ctx), planId, line),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.plan.item_added",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_plan",
+      targetId: planId,
+      meta: { material: item.material },
+    });
+    revalidatePath(BASE);
+    return { ok: true, id: item.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function updatePlanItemAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      quantity: z.number().positive().max(100_000_000).optional(),
+      unitCost: z.number().min(0).max(10_000_000).nullable().optional(),
+      notes: z.string().max(2000).optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const { id, ...patch } = parsed.data;
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => updatePlanItem(tx, landCtx(ctx), id, patch),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.plan.item_updated",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_plan_item",
+      targetId: id,
+      meta: { fields: Object.keys(patch) },
+    });
+    revalidatePath(BASE);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deletePlanItemAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => deletePlanItem(tx, landCtx(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.plan.item_deleted",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_plan_item",
+      targetId: parsed.data.id,
+      meta: {},
+    });
+    revalidatePath(BASE);
     return { ok: true };
   } catch (err) {
     return toResult(err);

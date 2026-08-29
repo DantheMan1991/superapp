@@ -25,12 +25,14 @@ import {
   currentUses,
   getParcel,
   listFeatures,
+  listPlanItems,
+  listPlans,
   listUsesInUse,
   listZones,
   restByZone,
   usesByZone,
 } from "@/packs/land/ops";
-import { asBoundary } from "@/packs/land/core/geo";
+import { asBoundary, asFeatureGeometry } from "@/packs/land/core/geo";
 import {
   availableFeatureKinds,
   isFeatureStatus,
@@ -59,6 +61,7 @@ import {
 import { ZoneForm } from "@/packs/land/components/zone-form";
 import { PaddockLayout } from "@/packs/land/components/paddock-layout";
 import { PlannedZones } from "@/packs/land/components/planned-zones";
+import { PlanTakeoff } from "@/packs/land/components/plan-takeoff";
 import { ZoneControls } from "@/packs/land/components/zone-controls";
 import { BoundarySummary } from "@/packs/land/components/boundary-summary";
 
@@ -115,7 +118,7 @@ export default async function ParcelDetailPage({
         status: "planned",
       });
       const zoneIds = zones.map((z) => z.id);
-      const [current, history, usesInUse, pack, rest, stayDays, features] =
+      const [current, history, usesInUse, pack, rest, stayDays, features, plans] =
         await Promise.all([
           currentUses(tx, ctx.tenant.id, zoneIds),
           usesByZone(tx, ctx.tenant.id, zoneIds),
@@ -127,7 +130,14 @@ export default async function ParcelDetailPage({
           // behind a toggle; the map dims it. Filtering here would make the
           // toggle a second round trip for data the page already had.
           listFeatures(tx, ctx.tenant.id, { parcelId: id }),
+          // Plans and their saved lists (slice 2b.4). Loaded together because
+          // a plan with no list and a plan whose list has drifted look
+          // different on screen, and both need the items to tell.
+          listPlans(tx, ctx.tenant.id, { parcelId: id }),
         ]);
+      const planItems = await Promise.all(
+        plans.map((plan) => listPlanItems(tx, ctx.tenant.id, plan.id)),
+      );
       return {
         parcel,
         zones,
@@ -139,6 +149,8 @@ export default async function ParcelDetailPage({
         rest,
         stayDays,
         features,
+        plans,
+        planItems,
       };
     },
     { role: ctx.role },
@@ -156,6 +168,8 @@ export default async function ParcelDetailPage({
     rest,
     stayDays,
     features,
+    plans,
+    planItems,
   } = data;
 
   // The finding this whole category was argued for. Returns null rather than
@@ -294,6 +308,53 @@ export default async function ParcelDetailPage({
           />
         </div>
       </Panel>
+
+      {plans.length > 0 && (
+        <Panel className="p-5">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="font-heading text-base font-semibold tracking-heading">
+              What it will take
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Counted off the drawing. Nothing here is guessed.
+            </p>
+          </div>
+          <div className="mt-4 space-y-4">
+            {plans.map((plan, index) => (
+              <PlanTakeoff
+                key={plan.id}
+                lengthUnit={lengthUnitFrom(pack.config)}
+                canEdit={isOwner && parcel.status === "active"}
+                plan={{
+                  id: plan.id,
+                  name: plan.name,
+                  takenOffAt: plan.takenOffAt
+                    ? plan.takenOffAt.toISOString()
+                    : null,
+                  features: features
+                    .filter((feature) => feature.planId === plan.id)
+                    .map((feature) => ({
+                      id: feature.id,
+                      name: feature.name,
+                      kind: feature.kind,
+                      geometry: asFeatureGeometry(feature.geometry),
+                      attributes: readAttributes(feature.attributes),
+                    })),
+                  items: planItems[index].map((item) => ({
+                    id: item.id,
+                    material: item.material,
+                    label: item.label,
+                    quantity: item.quantity,
+                    unit: item.unit,
+                    unitCost: item.unitCost,
+                    sourceFeatureId: item.sourceFeatureId,
+                  })),
+                }}
+              />
+            ))}
+          </div>
+        </Panel>
+      )}
 
       <div className="grid gap-6 md:grid-cols-2">
         <Panel className="p-5">

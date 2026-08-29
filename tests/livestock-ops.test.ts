@@ -30,7 +30,9 @@ import {
   lotMemberSummaries,
   lotMembers,
   parentByLot,
+  closeLivestockLot,
   lotsAvailableToJoin,
+  reopenLivestockLot,
   removeLotFromParent,
   capitalStateByLot,
   returnToMarket,
@@ -63,6 +65,7 @@ import {
 } from "../src/packs/livestock/ops";
 import {
   carriedCostByLot,
+  getLot as getInventoryLot,
   consumedCostByLot,
   createItem,
   recordMovement,
@@ -4302,5 +4305,111 @@ d("livestock ops", () => {
       parentByLot(tx, tenantId, [calf.lot.id], "2026-08-17"),
     );
     expect(parent.get(calf.lot.id)).toBeUndefined();
+  });
+
+  // ---- an emptied pen is not a lot any more ------------------------------
+
+  it("CLOSES AN EMPTIED LOT, AND OPENS IT AGAIN", async () => {
+    // The founder's PEN-2, 2026-08-28: a pen whose broilers went to the
+    // processor months ago, still on every list and still offered as somewhere
+    // to put animals.
+    const { lot, inventoryLotId } = await newLot("PEN-CLOSE", "poultry");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 5,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await asOwner((tx) =>
+      removeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 5,
+        reason: "sold_live",
+        occurredOn: "2026-08-05",
+      }),
+    );
+
+    await asOwner((tx) =>
+      closeLivestockLot(tx, ctx(), {
+        livestockLotId: lot.id,
+        on: "2026-08-06",
+      }),
+    );
+    const closed = await asOwner((tx) =>
+      getInventoryLot(tx, tenantId, inventoryLotId),
+    );
+    expect(closed?.status).toBe("closed");
+
+    // Closing hides; it never deletes. The record and its history stay.
+    await asOwner((tx) =>
+      reopenLivestockLot(tx, ctx(), { livestockLotId: lot.id }),
+    );
+    const reopened = await asOwner((tx) =>
+      getInventoryLot(tx, tenantId, inventoryLotId),
+    );
+    expect(reopened?.status).toBe("open");
+  });
+
+  it("REFUSES TO CLOSE A LOT WITH HEAD STILL IN IT", async () => {
+    // Closing one with animals in it would hide them, and the hub is exactly
+    // where somebody would go looking.
+    const { lot, inventoryLotId } = await newLot("PEN-FULL", "poultry");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId,
+        head: 12,
+        occurredOn: "2026-08-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        closeLivestockLot(tx, ctx(), {
+          livestockLotId: lot.id,
+          on: "2026-08-06",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "LOT_INVALID" });
+  });
+
+  it("refuses to close a lot that still holds a named animal", async () => {
+    const pen = await newLot("PEN-HOLDS", "cattle");
+    const cow = await newLot("WILLOW-C", "cattle");
+    await asOwner((tx) =>
+      addLotToParent(tx, ctx(), {
+        parentLotId: pen.lot.id,
+        memberLotId: cow.lot.id,
+        startedOn: "2026-08-01",
+      }),
+    );
+    await expect(
+      asOwner((tx) =>
+        closeLivestockLot(tx, ctx(), {
+          livestockLotId: pen.lot.id,
+          on: "2026-08-06",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "LOT_INVALID" });
+  });
+
+  it("a closed lot is not offered as somewhere to put animals", async () => {
+    // The other half of the PEN-2 complaint.
+    const { lot, inventoryLotId } = await newLot("PEN-GONE", "cattle");
+    const target = await newLot("FIELD-OPEN", "cattle");
+    void inventoryLotId;
+    await asOwner((tx) =>
+      closeLivestockLot(tx, ctx(), {
+        livestockLotId: lot.id,
+        on: "2026-08-06",
+      }),
+    );
+
+    const offered = await asOwner((tx) =>
+      lotsAvailableToJoin(tx, tenantId, target.lot.id),
+    );
+    expect(offered.map((o) => o.livestockLotId)).not.toContain(lot.id);
   });
 });

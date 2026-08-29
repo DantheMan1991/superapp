@@ -26,6 +26,8 @@ import {
   LivestockError,
   MAX_BREED_PARTS,
   addLotToParent,
+  closeLivestockLot,
+  reopenLivestockLot,
   lotMembers,
   moveLotsToZone,
   removeLotFromParent,
@@ -564,6 +566,57 @@ export async function startIndividualAction(input: unknown) {
     });
     revalidatePath(BASE, "layout");
     return { ok: true as const, id: result.lot.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * **CLOSE AN EMPTIED LOT**, and open it again. The founder's PEN-2, 2026-08-28.
+ *
+ * `owner`: retiring something the whole farm's screens read is a decision, not
+ * a chore — unlike putting an animal in a lot, which is done by whoever is
+ * moving her.
+ */
+export async function closeLivestockLotAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ livestockLotId: z.string().uuid(), on: requiredDate })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => closeLivestockLot(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/inventory", "layout");
+    return { ok: true as const };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function reopenLivestockLotAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ livestockLotId: z.string().uuid() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => reopenLivestockLot(tx, ctxOf(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    revalidatePath(BASE, "layout");
+    revalidatePath("/dashboard/m/inventory", "layout");
+    return { ok: true as const };
   } catch (err) {
     return toResult(err);
   }

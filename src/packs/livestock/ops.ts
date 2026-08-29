@@ -21,6 +21,7 @@ import {
   consumedDatedByLots,
   createItem,
   createLot as createInventoryLot,
+  closeLot as closeInventoryLot,
   getLot as getInventoryLot,
   datedMovementsForLots,
   issueStock,
@@ -402,6 +403,89 @@ export async function updateLivestockLot(
     )
     .returning();
   return rows[0];
+}
+
+/**
+ * **AN EMPTIED PEN IS FINISHED, AND SAYING SO IS THE ONLY WAY THE APP CAN
+ * KNOW.**
+ *
+ * The founder, 2026-08-28: PEN-2 has no head and *"still appears everywhere,
+ * including as a candidate to add to a lot"*. It had 50 broilers, they went to
+ * the processor, and it has been dead weight on every screen since.
+ *
+ * **THE APP CANNOT INFER THIS AND MUST NOT TRY.** A lot at zero head is either a
+ * pen that finished last season or a pen somebody made ten seconds ago and is
+ * about to fill — the ledger says the same thing about both, and guessing would
+ * hide the second one the moment it was created. So it is an act, and a
+ * reversible one.
+ *
+ * **THE STATUS IS `inventory_lots.status`, NOT A COLUMN OF OUR OWN.** Inventory
+ * has had `open | closed` and a `closeLot` since its slice 0, and livestock has
+ * simply never used it. A second flag here would be a second answer to the same
+ * question.
+ *
+ * **REFUSED WHILE ANYTHING IS STILL IN IT**, both ways it can be: head standing
+ * in the pen, or animals named into it. Closing a lot that still holds a cow
+ * would hide her with it, and the hub is where somebody would go looking.
+ */
+export async function closeLivestockLot(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { livestockLotId: string; on: string },
+): Promise<void> {
+  requireWrite(ctx, "owner");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
+  }
+
+  const movements = await movementKindsForLots(tx, ctx.tenantId, [
+    lot.inventoryLotId,
+  ]);
+  const balance = summariseHead(movements.get(lot.inventoryLotId) ?? []).balance;
+  if (balance > 0) {
+    throw new LivestockError(
+      "LOT_INVALID",
+      `${balance} head still in it — record what happened to them first`,
+    );
+  }
+
+  const holds = await lotMembers(
+    tx,
+    ctx.tenantId,
+    input.livestockLotId,
+    input.on,
+  );
+  if (holds.length > 0) {
+    throw new LivestockError(
+      "LOT_INVALID",
+      "it still holds animals — take them out first",
+    );
+  }
+
+  await closeInventoryLot(tx, asInventory(ctx), lot.inventoryLotId);
+}
+
+/** Put a closed lot back in the working lists. Closing is never destructive. */
+export async function reopenLivestockLot(
+  tx: Tx,
+  ctx: LivestockCtx,
+  input: { livestockLotId: string },
+): Promise<void> {
+  requireWrite(ctx, "owner");
+  const lot = await getLivestockLot(tx, ctx.tenantId, input.livestockLotId);
+  if (!lot) {
+    throw new LivestockError("NOT_FOUND", `lot ${input.livestockLotId}`);
+  }
+  await tx
+    .update(schema.inventoryLots)
+    .set({ status: "open", updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.inventoryLots.tenantId, ctx.tenantId),
+        eq(schema.inventoryLots.id, lot.inventoryLotId),
+      ),
+    );
 }
 
 // ------------------------------------------------------------ head events ---
@@ -1080,7 +1164,9 @@ export async function lotMembers(
     ),
     orderBy: (m, { asc }) => [asc(m.startedOn)],
   });
-  return rows.filter((row) => !row.endedOn || row.endedOn >= on);
+  // EXCLUSIVE end — see the column comment. A membership ended today is over
+  // today, so "take her out" takes effect when it is pressed.
+  return rows.filter((row) => !row.endedOn || row.endedOn > on);
 }
 
 /**
@@ -1106,7 +1192,7 @@ export async function membersByParent(
     orderBy: (m, { asc }) => [asc(m.startedOn)],
   });
   for (const row of rows) {
-    if (row.endedOn && row.endedOn < on) continue;
+    if (row.endedOn && row.endedOn <= on) continue;
     const list = out.get(row.parentLotId) ?? [];
     list.push(row);
     out.set(row.parentLotId, list);
@@ -1136,7 +1222,7 @@ export async function parentByLot(
     ),
   });
   for (const row of rows) {
-    if (row.endedOn && row.endedOn < on) continue;
+    if (row.endedOn && row.endedOn <= on) continue;
     out.set(row.memberLotId, row.parentLotId);
   }
   return out;
@@ -1223,11 +1309,11 @@ export async function addLotToParent(
   });
   if (open) {
     if (open.parentLotId === input.parentLotId) return open;
-    // The day BEFORE the new stay starts, so the two spans meet without
-    // overlapping — the inclusive-end arithmetic land already settled.
+    // The new row's own start date. With an EXCLUSIVE end the two spans meet
+    // exactly here — no off-by-one day, and no gap on the day of the move.
     await tx
       .update(schema.livestockLotMembers)
-      .set({ endedOn: addDays(input.startedOn, -1) })
+      .set({ endedOn: input.startedOn })
       .where(
         and(
           eq(schema.livestockLotMembers.tenantId, ctx.tenantId),
@@ -1368,7 +1454,23 @@ export async function lotsAvailableToJoin(
     where: eq(schema.livestockLots.tenantId, tenantId),
     columns: { id: true, inventoryLotId: true, species: true },
   });
-  const candidates = all.filter((l) => l.id !== parentLotId);
+  // **A CLOSED LOT IS NOT ON OFFER.** An emptied pen somebody has finished with
+  // has nothing to contribute, and offering it was half the founder's PEN-2
+  // complaint on 2026-08-28.
+  const openIds = new Set(
+    (
+      await tx.query.inventoryLots.findMany({
+        where: and(
+          eq(schema.inventoryLots.tenantId, tenantId),
+          eq(schema.inventoryLots.status, "open"),
+        ),
+        columns: { id: true },
+      })
+    ).map((r) => r.id),
+  );
+  const candidates = all.filter(
+    (l) => l.id !== parentLotId && openIds.has(l.inventoryLotId),
+  );
   if (candidates.length === 0) return [];
 
   // Anything with an OPEN membership is already somewhere, and anything that is

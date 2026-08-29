@@ -1032,7 +1032,23 @@ export const livestockLotMembers = pgTable(
     /** The animal or smaller lot inside it. */
     memberLotId: uuid("member_lot_id").notNull(),
     startedOn: date("started_on").notNull(),
-    /** INCLUSIVE last day in the lot. Null means still in it. */
+    /**
+     * **EXCLUSIVE — the first day she is NOT in it.** Null means still in it.
+     *
+     * **THIS DIVERGES FROM `land_occupancy` AND THE FEED GROUPS ON PURPOSE**,
+     * and the reason is a bug the founder hit on 2026-08-28: he pressed *Take
+     * out* and nothing happened. Under an inclusive end, ending a membership
+     * TODAY still counts as in-the-lot today, so the animal stayed on the page
+     * and the button read as broken.
+     *
+     * A paddock stay is inclusive because the animals genuinely grazed that
+     * ground that day and the rest clock has to know. **A lot membership is not
+     * a duration, it is a placement** — and a placement somebody ends is ended.
+     *
+     * It also makes a MOVE simpler rather than harder: `addLotToParent` closes
+     * the superseded row at the new row's `started_on`, so the two meet exactly
+     * with no off-by-one day to reason about.
+     */
     endedOn: date("ended_on"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

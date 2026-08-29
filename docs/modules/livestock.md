@@ -133,6 +133,74 @@ session raises one rather than discovering the reversal in a build log.
 
 ## Build log
 
+### 2026-08-28 — An empty pen is not a lot (`claude/an-empty-pen-is-not-a-lot`)
+
+**Three the founder asked for after driving.** No migration.
+
+**A LOT DOES NOT GIVE BIRTH.** *Record a birth* was the last animal-shaped
+control left on a lot page, and it survived the sire-and-dam fix only because
+the flock→hatch case looked like a reason to keep it. It is not: a birth is
+recorded on the MOTHER's page, and a mother is an animal. **A hatch parented by
+a flock is still reachable** — the dam picker lists lots as well as animals — it
+just starts from an animal rather than from the container.
+
+**AN EMPTIED PEN CAN BE PUT AWAY.** PEN-2 held 50 broilers, they went to the
+processor, and it has been on every screen since — including as somewhere to put
+animals. **The app cannot infer this and must not try:** a lot at zero head is
+either finished or about to be filled, and the ledger says the same thing about
+both. So it is an act, and reversible.
+
+**The status is `inventory_lots.status`, not a column of our own.** Inventory has
+had `open | closed` and a `closeLot` since its slice 0 and livestock simply never
+used it. Refused while anything is still in it — head standing, or animals named
+into it — because closing a lot that holds a cow would hide her, and the hub is
+where somebody would go looking. Closed lots leave the hub by default (`?closed=1`
+brings them back, the same shape as `inventory`'s retired items) and are no longer
+offered by `lotsAvailableToJoin`.
+
+**A REGRESSION I INTRODUCED AND CAUGHT BY OPENING THE PAGE.** Filtering earlier
+meant members were no longer in the array the head cell looked them up in, so
+`Cows` read **0** while holding four animals. The fix inverts `parentByLot` —
+which phase one already has — into members-per-parent, and fetches the members'
+movements alongside their parents'. **No test noticed**; the page said 0 and the
+farm had four.
+
+**THE HUB NARROWS BEFORE IT WORKS, NOT AFTER.** The dossier's "fine at 20 lots,
+wrong at 200" was not really about rendering — it was that every lot's movements,
+zone, withdrawal clock, breeding and thumbnail were fetched whatever you were
+looking for. The load is now two phases: what exists, then the expensive reads
+**for the rows that survived**. Search and the closed filter cut the work, not
+just the list.
+
+**The order of the three narrowings is load-bearing.** Membership first and never
+after the cap — a member excluded here is one shown on its parent's page instead,
+and capping first could let a named cow through as a top-level row while her
+herdmates were cut. `LOT_PAGE_SIZE` is 100, and the footer **names what it left
+out**, because a list that quietly stops is one somebody trusts to be complete.
+
+**AND "TAKE OUT" DID NOTHING, which is how a fourth thing got found.** Pressing
+it set `ended_on` to today — and `ended_on` was INCLUSIVE, copied from
+`land_occupancy`, so the animal was still in the lot for the rest of that day and
+the button read as broken.
+
+**`livestock_lot_members.ended_on` is now EXCLUSIVE**, and that divergence from
+land is deliberate: a paddock stay is inclusive because the animals genuinely
+grazed that ground that day and the rest clock has to know. **A lot membership is
+not a duration, it is a placement** — and a placement somebody ends is ended. It
+simplifies a move as well: the superseded row closes at the new row's
+`started_on`, so the two meet exactly with no off-by-one day.
+
+**A TRAP IN THIS SESSION'S OWN VERIFICATION, worth more than the fixes.**
+`tsc --noEmit` was reporting clean while a real error sat in the file being
+edited. Next writes `.next/dev/types/validator.ts`, it was momentarily malformed,
+**tsc bailed on its parse errors before reaching `src/`** — and the habit of
+piping through `grep -v ".next"` hid exactly the line that said so. With
+`incremental: true` a stale `tsconfig.tsbuildinfo` can hold the answer too.
+**Clear both and read the raw output when a check passes on a file you know you
+just broke.** Found by noticing that a `Cannot find name` could not possibly be
+clean.
+
+
 ### 2026-08-28 — A calf stays with its mother (`claude/a-calf-stays-with-its-mother`)
 
 **Two more found by driving, and the second is a real model error.** No

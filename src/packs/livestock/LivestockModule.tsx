@@ -24,7 +24,6 @@ import { slugLabel } from "@/packs/inventory/vocabulary";
 import {
   breedPartsByLot,
   capitalStateByLot,
-  membersByParent,
   parentByLot,
   listLivestockLots,
   withdrawalByLot,
@@ -40,8 +39,23 @@ import { labelFor } from "@/lib/packs/resolve";
 import { breedLabel, breedsFrom, speciesFrom } from "./vocabulary";
 import { LivestockLotForm } from "./components/lot-controls";
 import { LivestockNav } from "./components/livestock-nav";
+import { LotFilters } from "./components/lot-filters";
 
 const BASE = "/dashboard/m/livestock";
+
+/**
+ * How many lots this page renders before it stops and says so.
+ *
+ * **A HUNDRED IS PAST ANY HOMESTEAD AND SHORT OF A FEEDLOT**, which is the
+ * point: the pilot never meets it, and the farm at 10× gets a page that loads
+ * rather than one that fetches two hundred lots' movements, zones, withdrawal
+ * clocks, breeding and thumbnails to draw a screen nobody can read anyway.
+ *
+ * The footer names what it left out. **A list that quietly stops is a list
+ * somebody trusts to be complete** — the same rule the feed report follows when
+ * it says how much cost it could not allocate.
+ */
+const LOT_PAGE_SIZE = 100;
 
 /**
  * The `livestock` pack's home: every animal lot, what is in it, and where it is.
@@ -61,34 +75,112 @@ export async function LivestockModule({
 }) {
   const speciesParam = searchParams.species;
   const species = typeof speciesParam === "string" ? speciesParam : undefined;
+  const searchParam = searchParams.q;
+  const search = (typeof searchParam === "string" ? searchParam : "").trim();
+  /**
+   * **CLOSED LOTS ARE OUT BY DEFAULT.** The founder's PEN-2: an emptied pen
+   * that "still appears everywhere". Same `?closed=1` shape as `inventory`'s
+   * retired items, so the two lists behave alike.
+   */
+  const showClosed = searchParams.closed === "1";
   const today = todayInTimezone(ctx.tenant.timezone);
 
   const data = await withTenant(
     ctx.tenant.id,
     async (tx) => {
-      const [lots, pack, items] = await Promise.all([
-        listLivestockLots(tx, ctx.tenant.id, { species }),
+      /**
+       * **PHASE ONE: WHAT EXISTS. PHASE TWO: THE EXPENSIVE READS, FOR THE ROWS
+       * THAT SURVIVED.**
+       *
+       * The spine and the membership map moved up here so the narrowing below
+       * happens BEFORE the per-lot work. A search that filtered only the render
+       * would still pay for every lot's movements, zone, withdrawal clock,
+       * breeding and thumbnail — which is the shape that made this page the
+       * dossier's "fine at 20 lots, wrong at 200".
+       */
+      // The lot rows first and alone, because three of the four reads below
+      // need their ids.
+      const allLots = await listLivestockLots(tx, ctx.tenant.id, { species });
+      const [pack, items, inventoryLots, lotParents] = await Promise.all([
         packContext(tx, ctx.tenant.id, ctx.tenant.industry, "livestock"),
         // Only items counted in head can hold animals, which is what makes
         // "head is a unit of measure" true in the UI as well as the schema.
         listItems(tx, ctx.tenant.id, { status: "active" }),
+        listLots(tx, ctx.tenant.id),
+        parentByLot(
+          tx,
+          ctx.tenant.id,
+          allLots.map((l) => l.id),
+          today,
+        ),
       ]);
 
+      const invById = new Map(inventoryLots.map((l) => [l.id, l]));
+      const needle = search.toLowerCase();
+      /**
+       * **THE THREE NARROWINGS, IN THE ORDER THEY HAVE TO HAPPEN.**
+       *
+       * Membership FIRST and never after the cap: a member excluded here is one
+       * shown on its parent's page instead, and capping before this could let a
+       * named cow through as a top-level row while her herdmates were cut.
+       */
+      const topLevel = allLots.filter((l) => !lotParents.has(l.id));
+      const visible = topLevel.filter((l) => {
+        const inv = invById.get(l.inventoryLotId);
+        if (!showClosed && inv?.status === "closed") return false;
+        if (!needle) return true;
+        return (
+          (inv?.code ?? "").toLowerCase().includes(needle) ||
+          l.species.toLowerCase().includes(needle)
+        );
+      });
+      const matched = visible.length;
+      /**
+       * **THE MEMBERS OF EACH VISIBLE LOT, INVERTED OUT OF `lotParents`.**
+       *
+       * `parentByLot` already answers "which lot is this animal in" for every
+       * lot on the farm, so turning it round costs nothing and saves a second
+       * membership query.
+       *
+       * **AND THEIR MOVEMENTS ARE FETCHED WITH THE PARENTS'.** A lot's row shows
+       * its own head PLUS its members', and the members are NOT in the filtered
+       * list — that is the whole point of filtering them out. Reading their head
+       * from the page's own lot array made "Cows" read 0 while it held four
+       * animals: caught by opening the page, not by any test.
+       */
+      const membersOf = new Map<string, string[]>();
+      for (const [memberId, parentId] of lotParents) {
+        const list = membersOf.get(parentId) ?? [];
+        list.push(memberId);
+        membersOf.set(parentId, list);
+      }
+      const allById = new Map(allLots.map((l) => [l.id, l]));
+      // A CAP, said out loud rather than a silent truncation — the footer
+      // reports what it left out, because a list that quietly stops is a list
+      // somebody trusts to be complete.
+      const lots = visible.slice(0, LOT_PAGE_SIZE);
+
       const inventoryLotIds = lots.map((l) => l.inventoryLotId);
-      // Three queries for the whole page, whatever the lot count: the spine
-      // rows, where each lot is, and the movements behind every head figure.
+      // Parents AND their members, because the head shown is the sum of both.
+      const headLotIds = [
+        ...new Set([
+          ...inventoryLotIds,
+          ...lots.flatMap((l) =>
+            (membersOf.get(l.id) ?? []).flatMap((memberId) => {
+              const m = allById.get(memberId);
+              return m ? [m.inventoryLotId] : [];
+            }),
+          ),
+        ]),
+      ];
       const [
-        inventoryLots,
         zones,
         movements,
         withdrawals,
         breedParts,
         portraits,
         capitalByLot,
-        lotParents,
-        lotMembersByParent,
       ] = await Promise.all([
-        listLots(tx, ctx.tenant.id),
         currentZoneForOccupants(
           tx,
           ctx.tenant.id,
@@ -96,7 +188,7 @@ export async function LivestockModule({
           inventoryLotIds,
           today,
         ),
-        movementKindsForLots(tx, ctx.tenant.id, inventoryLotIds),
+        movementKindsForLots(tx, ctx.tenant.id, headLotIds),
         // A LOT UNDER WITHDRAWAL HAS TO BE VISIBLE WHERE SOMEBODY IS ALREADY
         // LOOKING, not only on a page they would have to think to open.
         withdrawalByLot(
@@ -140,22 +232,6 @@ export async function LivestockModule({
           lots.map((l) => l.id),
           today,
         ),
-        // SLICE 8B. Which lot each animal lives in, and what each lot holds.
-        // The first keeps a named animal from appearing twice; the second lets
-        // a lot's row show the total it stands for rather than only what is
-        // loose in it.
-        parentByLot(
-          tx,
-          ctx.tenant.id,
-          lots.map((l) => l.id),
-          today,
-        ),
-        membersByParent(
-          tx,
-          ctx.tenant.id,
-          lots.map((l) => l.id),
-          today,
-        ),
       ]);
 
       return {
@@ -169,8 +245,9 @@ export async function LivestockModule({
         breedParts,
         portraits,
         capitalByLot,
-        lotParents,
-        lotMembersByParent,
+        membersOf,
+        allById,
+        matched,
       };
     },
     { role: ctx.role },
@@ -187,8 +264,9 @@ export async function LivestockModule({
     breedParts,
     portraits,
     capitalByLot,
-    lotParents,
-    lotMembersByParent,
+    membersOf,
+    allById,
+    matched,
   } = data;
   const isOwner = ctx.role === "owner";
   const byId = new Map(inventoryLots.map((l) => [l.id, l]));
@@ -220,9 +298,9 @@ export async function LivestockModule({
    * is shown on that pen's page; listing her here as well would be the same
    * animal twice, and her head is already counted in the pen's total.
    */
-  const loose = lots.filter(
-    (lot) => !lotParents.has(lot.id),
-  );
+  // Already narrowed on the server, before the expensive reads. Kept as its own
+  // name because every table below reads it.
+  const loose = lots;
 
   return (
     <div className="space-y-6">
@@ -251,6 +329,22 @@ export async function LivestockModule({
           ORDER is a recorded decision — how often each is used, not the order
           they were built in — and it is preserved in the strip. */}
       <LivestockNav />
+
+      {/* **ALWAYS SHOWN, like `inventory`'s.** A threshold was the first
+          instinct — a farm with five lots does not need a search box — but it
+          hides the "Show closed" toggle exactly when somebody has closed their
+          first lot and wonders where it went. A consistent bar beats a clever
+          one. */}
+      {(
+        <LotFilters
+          base={BASE}
+          search={search}
+          showClosed={showClosed}
+          shown={loose.length}
+          matched={matched}
+          word={lotWord}
+        />
+      )}
 
       <DataTable
         isEmpty={loose.length === 0}
@@ -387,14 +481,12 @@ export async function LivestockModule({
                         An em dash before anything has been placed. "No animals"
                         and "none recorded yet" are different facts. */}
                     {(() => {
-                      const held = lotMembersByParent.get(lot.id) ?? [];
+                      const held = membersOf.get(lot.id) ?? [];
                       if (lotMovements.length === 0 && held.length === 0) {
                         return "—";
                       }
-                      const inside = held.reduce((sum, m) => {
-                        const mLot = lots.find(
-                          (l) => l.id === m.memberLotId,
-                        );
+                      const inside = held.reduce((sum, memberId) => {
+                        const mLot = allById.get(memberId);
                         if (!mLot) return sum;
                         const mv = movements.get(mLot.inventoryLotId) ?? [];
                         return sum + summariseHead(mv).balance;

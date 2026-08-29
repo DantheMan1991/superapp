@@ -26,8 +26,10 @@ import {
   endZoneUse,
   retireParcel,
   retireZone,
+  activateZone,
   getFeature,
   getParcel,
+  layoutPaddocks,
   setFeatureGeometry,
   setFeatureStatus,
   setParcelBoundary,
@@ -104,6 +106,10 @@ function toResult(err: unknown): { error: string } {
       case "INVALID_FEED":
         return { error: err.message };
       case "INVALID_WIDTH":
+        return { error: err.message };
+      // The subdivider writes for a person — "that ground is in two pieces" —
+      // so its refusals reach the screen unaltered.
+      case "LAYOUT_INVALID":
         return { error: err.message };
     }
   }
@@ -1029,6 +1035,86 @@ export async function deleteFeatureAction(input: unknown) {
       meta: { kind: before?.kind ?? null, status: before?.status ?? null },
     });
     if (before) revalidatePath(`${BASE}/${before.parcelId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Divide ground into paddocks, and make a planned one real.
+ *
+ * **OWNER-ONLY, unlike the rest of the feature surface.** Drawing a fence is a
+ * chore; deciding that this field is four paddocks is not — they become cost
+ * objects the moment they are activated, and `upsertDimensionMember` requires
+ * the owner role. See the ops comment.
+ */
+const layoutSchema = z.object({
+  parcelId: z.string().uuid(),
+  zoneId: z.string().uuid().nullable().optional(),
+  laneFeatureId: z.string().uuid(),
+  // The upper bound matches `MAX_PADDOCKS`; the lower one is the subdivider's,
+  // which refuses one paddock because that is not a division.
+  count: z.number().int().min(2).max(60),
+  namePrefix: z.string().max(60).optional(),
+});
+
+export async function layoutPaddocksAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = layoutSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const result = await withTenant(
+      ctx.tenant.id,
+      (tx) => layoutPaddocks(tx, landCtx(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.paddocks.laid_out",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_parcel",
+      targetId: parsed.data.parcelId,
+      meta: {
+        count: parsed.data.count,
+        zones: result.zoneIds.length,
+        features: result.featureIds.length,
+        unreachable: result.warnings.length,
+      },
+    });
+    revalidatePath(`${BASE}/${parsed.data.parcelId}`);
+    return { ok: true, ...result };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function activateZoneAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const zone = await withTenant(
+      ctx.tenant.id,
+      (tx) => activateZone(tx, landCtx(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    // Its own action name, like `land.feature.status`: this is the entry
+    // somebody will go looking for — the moment proposed ground became a
+    // paddock the books can group by.
+    await logAudit({
+      action: "land.zone.activated",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_zone",
+      targetId: zone.id,
+      meta: { parcelId: zone.parcelId },
+    });
+    revalidatePath(`${BASE}/${zone.parcelId}`);
     return { ok: true };
   } catch (err) {
     return toResult(err);

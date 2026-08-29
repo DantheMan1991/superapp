@@ -108,6 +108,13 @@ export interface PlanFeature {
  */
 const WALK_COLOR = "#2563eb";
 
+/**
+ * Ground a layout proposed and nobody has fenced. Dotted and faint for the
+ * same reason a planned FENCE is: a proposal must never read as a fact, and
+ * this one covers acres rather than a line.
+ */
+const PROPOSED = "#7c3aed";
+
 const PAPER = { light: "#f6f5f3", dark: "#1c1917" };
 const GROUND = { light: "#e7e5e4", dark: "#292524" };
 
@@ -200,8 +207,13 @@ export function SitePlanMap({
 }: {
   parcelId: string;
   parcelBoundary: Boundary | null;
-  /** Drawn faintly underneath, so a fence has paddocks to sit between. */
-  zones: { name: string; geometry: unknown }[];
+  /**
+   * Drawn faintly underneath, so a fence has paddocks to sit between.
+   * `planned` ones — ground a layout proposed and nobody has fenced — are
+   * drawn separately and more strongly: they are a proposal to look at, not
+   * context to ignore.
+   */
+  zones: { name: string; geometry: unknown; status: string }[];
   features: PlanFeature[];
   kinds: TenantFeatureKind[];
   basemap: Basemap;
@@ -453,7 +465,17 @@ export function SitePlanMap({
         // The ground: the parcel and its paddocks, faint, never editable here.
         instance.addSource("ground", {
           type: "geojson",
-          data: groundCollection(parcelBoundary, zones),
+          data: groundCollection(
+            parcelBoundary,
+            zones.filter((zone) => zone.status !== "planned"),
+          ),
+        });
+        instance.addSource("ground-planned", {
+          type: "geojson",
+          data: groundCollection(
+            null,
+            zones.filter((zone) => zone.status === "planned"),
+          ),
         });
         instance.addLayer({
           id: "ground-fill",
@@ -472,6 +494,30 @@ export function SitePlanMap({
             "line-color": dark ? "#78716c" : "#a8a29e",
             "line-width": 1.25,
             "line-dasharray": [2, 2],
+          },
+        });
+
+        /**
+         * Proposed ground, between the context and the features. Its own pair
+         * of layers rather than a filter, because `line-dasharray` is not
+         * data-driven in MapLibre — the same constraint the feature symbology
+         * ran into.
+         */
+        instance.addLayer({
+          id: "ground-planned-fill",
+          type: "fill",
+          source: "ground-planned",
+          paint: { "fill-color": PROPOSED, "fill-opacity": 0.12 },
+        });
+        instance.addLayer({
+          id: "ground-planned-line",
+          type: "line",
+          source: "ground-planned",
+          paint: {
+            "line-color": PROPOSED,
+            "line-width": 1.75,
+            "line-dasharray": [1, 2],
+            "line-opacity": 0.9,
           },
         });
 

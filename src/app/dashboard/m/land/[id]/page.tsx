@@ -57,6 +57,8 @@ import {
   type ParcelDetailView,
 } from "@/packs/land/components/parcel-controls";
 import { ZoneForm } from "@/packs/land/components/zone-form";
+import { PaddockLayout } from "@/packs/land/components/paddock-layout";
+import { PlannedZones } from "@/packs/land/components/planned-zones";
 import { ZoneControls } from "@/packs/land/components/zone-controls";
 import { BoundarySummary } from "@/packs/land/components/boundary-summary";
 
@@ -99,6 +101,19 @@ export default async function ParcelDetailPage({
         parcelId: id,
         status: "active",
       });
+      /**
+       * Ground a layout proposed and nobody has fenced yet (slice 2b.2).
+       *
+       * A SEPARATE READ, NOT A WIDENED ONE. Every figure below — rest, the
+       * paddock count, the rotation arithmetic, `zoneCoverage` — is about
+       * ground that exists, and folding planned rows into `zones` would put
+       * unfenced acres into all of them at once. It travels on its own so the
+       * only things that see it are the plan and its own list.
+       */
+      const plannedZones = await listZones(tx, ctx.tenant.id, {
+        parcelId: id,
+        status: "planned",
+      });
       const zoneIds = zones.map((z) => z.id);
       const [current, history, usesInUse, pack, rest, stayDays, features] =
         await Promise.all([
@@ -116,6 +131,7 @@ export default async function ParcelDetailPage({
       return {
         parcel,
         zones,
+        plannedZones,
         current,
         history,
         usesInUse,
@@ -132,6 +148,7 @@ export default async function ParcelDetailPage({
   const {
     parcel,
     zones,
+    plannedZones,
     current,
     history,
     usesInUse,
@@ -249,9 +266,10 @@ export default async function ParcelDetailPage({
           <SitePlan
             parcelId={parcel.id}
             parcelBoundary={asBoundary(parcel.geometry)}
-            zones={zones.map((zone) => ({
+            zones={[...zones, ...plannedZones].map((zone) => ({
               name: zone.name,
               geometry: zone.geometry,
+              status: zone.status,
             }))}
             features={features.map((feature) => ({
               id: feature.id,
@@ -409,13 +427,45 @@ export default async function ParcelDetailPage({
             {zoneWord}s {zones.length > 0 && `(${zones.length})`}
           </h2>
           {isOwner && parcel.status === "active" && (
-            <ZoneForm
-              parcelId={parcel.id}
-              unit={unit}
-              zoneWord={zoneWord}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <PaddockLayout
+                parcelId={parcel.id}
+                zoneWord={zoneWord}
+                lanes={features
+                  .filter(
+                    (feature) =>
+                      feature.kind === "lane" &&
+                      feature.status !== "removed" &&
+                      feature.geometry !== null,
+                  )
+                  .map((feature) => ({
+                    id: feature.id,
+                    label: feature.name || "Lane",
+                  }))}
+                areas={[
+                  { id: null, label: `All of ${parcel.name}` },
+                  ...zones
+                    .filter((zone) => zone.geometry !== null)
+                    .map((zone) => ({ id: zone.id, label: zone.name })),
+                ]}
+              />
+              <ZoneForm parcelId={parcel.id} unit={unit} zoneWord={zoneWord} />
+            </div>
           )}
         </div>
+
+        {plannedZones.length > 0 && (
+          <PlannedZones
+            zones={plannedZones.map((zone) => ({
+              id: zone.id,
+              name: zone.name,
+              areaAcres: zone.areaAcres,
+            }))}
+            unit={unit}
+            zoneWord={zoneWord}
+            canActivate={isOwner && parcel.status === "active"}
+          />
+        )}
 
         <DataTable
           isEmpty={zones.length === 0}

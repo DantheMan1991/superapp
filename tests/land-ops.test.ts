@@ -8,6 +8,8 @@ import {
   asFeatureGeometry,
   boundaryAreaAcres,
   geometryLengthM,
+  type Boundary,
+  type FeatureGeometry,
 } from "../src/packs/land/core/geo";
 import {
   LandError,
@@ -15,6 +17,7 @@ import {
   ZONE_DIMENSION,
   combineParcels,
   completedStayDays,
+  activateZone,
   createFeature,
   createParcel,
   createZone,
@@ -22,6 +25,7 @@ import {
   deleteFeature,
   deleteOccupancy,
   getFeature,
+  layoutPaddocks,
   listFeatures,
   setFeatureGeometry,
   setFeatureStatus,
@@ -1977,6 +1981,335 @@ d("land ops", () => {
       );
       expect(planned).toHaveLength(1);
       expect(planned[0].status).toBe("planned");
+    });
+  });
+
+  // ---- paddock layout (slice 2b.2) --------------------------------------
+
+  describe("laying out paddocks", () => {
+    const FIELD: Boundary = {
+      type: "Polygon",
+      coordinates: [
+        [
+          [-82.48, 40.4],
+          [-82.47526, 40.4],
+          [-82.47526, 40.40361],
+          [-82.48, 40.40361],
+          [-82.48, 40.4],
+        ],
+      ],
+    };
+    const LANE: FeatureGeometry = {
+      type: "LineString",
+      coordinates: [
+        [-82.4798, 40.4],
+        [-82.4798, 40.40361],
+      ],
+    };
+
+    /** A parcel with a boundary and a lane drawn on it, ready to divide. */
+    async function fieldWithLane(name: string) {
+      const parcel = await newParcel(name);
+      await asOwner((tx) => setParcelBoundary(tx, ownerCtx(), parcel.id, FIELD));
+      const lane = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "lane",
+          name: "Centre lane",
+          geometry: LANE,
+        }),
+      );
+      return { parcel, lane };
+    }
+
+    it("creates the paddocks AND their fences in one act", async () => {
+      const { parcel, lane } = await fieldWithLane("Four Up");
+      const result = await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 4,
+        }),
+      );
+
+      expect(result.zoneIds).toHaveLength(4);
+      expect(result.warnings).toEqual([]);
+
+      const zones = await asOwner((tx) =>
+        listZones(tx, tenantId, { parcelId: parcel.id }),
+      );
+      expect(zones).toHaveLength(4);
+
+      // Three dividing fences and four gates. The fourth division would be the
+      // field's own boundary, which is already there.
+      const features = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id }),
+      );
+      expect(features.filter((f) => f.kind === "fence")).toHaveLength(3);
+      expect(features.filter((f) => f.kind === "gate")).toHaveLength(4);
+    });
+
+    it("makes everything PLANNED, because none of it is built yet", async () => {
+      const { parcel, lane } = await fieldWithLane("All Planned");
+      await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 3,
+        }),
+      );
+
+      const zones = await asOwner((tx) =>
+        listZones(tx, tenantId, { parcelId: parcel.id }),
+      );
+      expect(zones.every((z) => z.status === "planned")).toBe(true);
+
+      const features = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id }),
+      );
+      // The lane itself was drawn as built; everything the layout made is not.
+      expect(
+        features.filter((f) => f.kind !== "lane").every((f) => f.status === "planned"),
+      ).toBe(true);
+    });
+
+    it("does NOT make a cost object out of unfenced ground", async () => {
+      // The whole reason `planned` exists on a zone. A dimension member for
+      // ground with no fence round it puts empty columns in every report.
+      const { parcel, lane } = await fieldWithLane("No Dimension Yet");
+      const result = await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 2,
+        }),
+      );
+      const members = await membersOf(ZONE_DIMENSION);
+      for (const zoneId of result.zoneIds) {
+        expect(members.map((m) => m.packEntityId)).not.toContain(zoneId);
+      }
+    });
+
+    it("records the DRAWN acreage as the paddock's acreage", async () => {
+      // The one place this pack's declared-versus-computed rule is deliberately
+      // NOT applied. A parcel has a deed to disagree with; a paddock has no
+      // external source, so the drawing IS the record.
+      const { parcel, lane } = await fieldWithLane("Acreage");
+      await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 4,
+        }),
+      );
+      const zones = await asOwner((tx) =>
+        listZones(tx, tenantId, { parcelId: parcel.id }),
+      );
+      for (const zone of zones) {
+        expect(zone.areaAcres).not.toBeNull();
+        const drawn = boundaryAreaAcres(asBoundary(zone.geometry)!);
+        expect(zone.areaAcres!).toBeCloseTo(drawn, 3);
+      }
+      // And they add back up to the field.
+      const total = zones.reduce((sum, z) => sum + (z.areaAcres ?? 0), 0);
+      expect(total).toBeCloseTo(boundaryAreaAcres(FIELD), 2);
+    });
+
+    it("names them off a prefix so a farm can have more than one set", async () => {
+      const { parcel, lane } = await fieldWithLane("Named");
+      await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 3,
+          namePrefix: "North",
+        }),
+      );
+      const zones = await asOwner((tx) =>
+        listZones(tx, tenantId, { parcelId: parcel.id }),
+      );
+      expect(zones.map((z) => z.name).sort()).toEqual([
+        "North 1",
+        "North 2",
+        "North 3",
+      ]);
+    });
+
+    it("is a DECISION, not a chore — staff cannot lay out paddocks", async () => {
+      const { parcel, lane } = await fieldWithLane("Owner Only");
+      await expect(
+        asOwner((tx) =>
+          layoutPaddocks(tx, staffCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 3,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("refuses ground with no boundary, in words a person can act on", async () => {
+      const parcel = await newParcel("Untraced");
+      const lane = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "lane",
+          geometry: LANE,
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 3,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+    });
+
+    it("refuses a lane that has not been drawn", async () => {
+      const parcel = await newParcel("Undrawn Lane");
+      await asOwner((tx) => setParcelBoundary(tx, ownerCtx(), parcel.id, FIELD));
+      const lane = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), { parcelId: parcel.id, kind: "lane" }),
+      );
+      await expect(
+        asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 3,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+    });
+
+    describe("a planned paddock is not ground you can use", () => {
+      it("REFUSES OCCUPANCY, which is the guard `planned` had to add", async () => {
+        // Every other read already filtered on `active`; this one never looked
+        // at status at all, and would have fed the rest clock from a paddock
+        // whose fence nobody has built.
+        const { parcel, lane } = await fieldWithLane("No Cows Yet");
+        const result = await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 2,
+          }),
+        );
+        await expect(
+          asOwner((tx) =>
+            startOccupancy(tx, ownerCtx(), result.zoneIds[0], {
+              occupantLabel: "The herd",
+              startedOn: "2026-08-29",
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+      });
+
+      it("is not the answer to which paddock am I standing in", async () => {
+        const { parcel, lane } = await fieldWithLane("Not Here");
+        await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 2,
+          }),
+        );
+        // Dead centre of the field, which is inside one of the planned strips.
+        const found = await asOwner((tx) =>
+          zoneAtPoint(tx, tenantId, [-82.4776, 40.4018]),
+        );
+        expect(found).toBeNull();
+      });
+    });
+
+    describe("activating one", () => {
+      it("makes it a cost object at the moment it becomes real", async () => {
+        const { parcel, lane } = await fieldWithLane("Built It");
+        const result = await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 2,
+          }),
+        );
+        const zone = await asOwner((tx) =>
+          activateZone(tx, ownerCtx(), result.zoneIds[0]),
+        );
+        expect(zone.status).toBe("active");
+
+        const members = await membersOf(ZONE_DIMENSION);
+        const member = members.find((m) => m.packEntityId === zone.id);
+        expect(member).toBeDefined();
+        expect(member?.displayName).toBe(zone.name);
+      });
+
+      it("lets the cows on once it is real", async () => {
+        const { parcel, lane } = await fieldWithLane("Cows Now");
+        const result = await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 2,
+          }),
+        );
+        await asOwner((tx) => activateZone(tx, ownerCtx(), result.zoneIds[0]));
+        const stay = await asOwner((tx) =>
+          startOccupancy(tx, ownerCtx(), result.zoneIds[0], {
+            occupantLabel: "The herd",
+            startedOn: "2026-08-29",
+          }),
+        );
+        expect(stay.zoneId).toBe(result.zoneIds[0]);
+      });
+
+      it("is idempotent, because two people can walk a fence in together", async () => {
+        const { parcel, lane } = await fieldWithLane("Twice");
+        const result = await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 2,
+          }),
+        );
+        await asOwner((tx) => activateZone(tx, ownerCtx(), result.zoneIds[0]));
+        const again = await asOwner((tx) =>
+          activateZone(tx, ownerCtx(), result.zoneIds[0]),
+        );
+        expect(again.status).toBe("active");
+      });
+
+      it("refuses to resurrect retired ground this way", async () => {
+        const { parcel, lane } = await fieldWithLane("Retired");
+        const result = await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 2,
+          }),
+        );
+        await asOwner((tx) => activateZone(tx, ownerCtx(), result.zoneIds[0]));
+        await asOwner((tx) => retireZone(tx, ownerCtx(), result.zoneIds[0]));
+        await expect(
+          asOwner((tx) => activateZone(tx, ownerCtx(), result.zoneIds[0])),
+        ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+      });
+
+      it("is the owner's call", async () => {
+        const { parcel, lane } = await fieldWithLane("Owner Activates");
+        const result = await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            count: 2,
+          }),
+        );
+        await expect(
+          asOwner((tx) => activateZone(tx, staffCtx(), result.zoneIds[0])),
+        ).rejects.toMatchObject({ code: "FORBIDDEN" });
+      });
     });
   });
 });

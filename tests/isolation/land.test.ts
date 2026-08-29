@@ -12,12 +12,16 @@ import { d } from "./_shared";
  * tenant_id, FORCE RLS, default-deny with no context, and no cross-tenant read,
  * write or enumeration.
  *
- * It also certifies the two composite FKs, which are what this pack has that a
- * flat list of places does not. `land_zones_parcel_fk` and
- * `land_zone_uses_zone_fk` are both (tenant_id, x) → (tenant_id, id), so a
- * zone on another tenant's parcel — and a use on another tenant's zone — are
+ * It also certifies the composite FKs, which are what this pack has that a
+ * flat list of places does not. `land_zones_parcel_fk`,
+ * `land_zone_uses_zone_fk` and `land_features_parcel_fk` are all
+ * (tenant_id, x) → (tenant_id, id), so a zone on another tenant's parcel — and
+ * a use on another tenant's zone, and a fence on another tenant's ground — are
  * UNREPRESENTABLE rather than merely refused by application code. They fail
- * even under `withSystem`, where RLS is not watching.
+ * even under `withSystem`, where RLS is not watching. `land_features_fed_by_fk`
+ * is the same shape pointed at its OWN table, which is the one drizzle-kit
+ * emits in an order Postgres rejects (drizzle/0233) and therefore the one most
+ * likely to be quietly lost by a future generated migration.
  *
  * Fixtures are built under `withSystem` on purpose: this suite certifies what
  * the DATABASE enforces, and routing setup through `src/packs/land/ops.ts`
@@ -397,6 +401,181 @@ d("land tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+
+  // ---- features --------------------------------------------------------
+
+  /**
+   * `land_features` — the site plan's rows (slice 2b.0).
+   *
+   * A LEAK HERE IS WORSE THAN A MISCOUNT. The screen this table was built for
+   * tells somebody standing in a field what is under them, so a foreign
+   * buried-electric line reaching this tenant is the map lying about ground
+   * they are about to dig into. That is why the certification below covers
+   * enumeration as carefully as it covers reads.
+   *
+   * It also certifies the SELF-REFERENTIAL composite FK, which nothing else in
+   * this pack has: `(tenant_id, fed_by_id) → (tenant_id, id)` on the same
+   * table, so a fence fed by another tenant's energizer is unrepresentable
+   * rather than merely refused. It is the constraint most likely to be quietly
+   * dropped by a future migration, because drizzle-kit emits it in an order
+   * Postgres rejects — see drizzle/0233.
+   */
+
+  it("a tenant sees only its own features", async () => {
+    await withSystem(async (tx) => {
+      await tx.insert(schema.landFeatures).values([
+        {
+          tenantId: tenantA,
+          parcelId: homeA,
+          kind: "fence",
+          name: "North line",
+          status: "built",
+        },
+        {
+          tenantId: tenantB,
+          parcelId: leasedB,
+          kind: "buried_electric",
+          name: "Service to shop",
+          status: "built",
+        },
+      ]);
+    });
+
+    const mine = await asStaff((tx) => tx.select().from(schema.landFeatures));
+    expect(mine.map((f) => f.name)).toEqual(["North line"]);
+
+    const theirs = await asOtherTenant((tx) =>
+      tx.select().from(schema.landFeatures),
+    );
+    expect(theirs.map((f) => f.name)).toEqual(["Service to shop"]);
+  });
+
+  it("cannot count another tenant's features", async () => {
+    const rows = await asOwner((tx) =>
+      tx
+        .select()
+        .from(schema.landFeatures)
+        .where(eq(schema.landFeatures.tenantId, tenantB)),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it("cannot write a feature into another tenant", async () => {
+    await expect(
+      asOtherTenant((tx) =>
+        tx.insert(schema.landFeatures).values({
+          tenantId: tenantA,
+          parcelId: homeA,
+          kind: "fence",
+          name: "Trespass",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot put a feature on another tenant's parcel", async () => {
+    // The composite FK makes it unrepresentable rather than merely forbidden,
+    // so it fails even here under withSystem, where RLS is not watching.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landFeatures).values({
+          tenantId: tenantA,
+          parcelId: leasedB,
+          kind: "fence",
+          name: "Trespass",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("cannot be fed by another tenant's feature", async () => {
+    const theirs = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.landFeatures)
+        .values({
+          tenantId: tenantB,
+          parcelId: leasedB,
+          kind: "energizer",
+          name: "Their charger",
+        })
+        .returning();
+      return rows[0].id;
+    });
+
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landFeatures).values({
+          tenantId: tenantA,
+          parcelId: homeA,
+          kind: "fence",
+          name: "Borrowed power",
+          fedById: theirs,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a feature that feeds itself", async () => {
+    // The one cycle a single row can make on its own, and the one a fat finger
+    // makes. Longer cycles are not checked and are not claimed to be.
+    const id = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.landFeatures)
+        .values({ tenantId: tenantA, parcelId: homeA, kind: "fence" })
+        .returning();
+      return rows[0].id;
+    });
+
+    await expect(
+      withSystem((tx) =>
+        tx
+          .update(schema.landFeatures)
+          .set({ fedById: id })
+          .where(eq(schema.landFeatures.id, id)),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a status that is not planned, built or removed", async () => {
+    // The column the whole slice turns on. A fourth value would be a proposal
+    // and a fact wearing the same clothes again, which is the thing the split
+    // exists to prevent.
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landFeatures).values({
+          tenantId: tenantA,
+          parcelId: homeA,
+          kind: "fence",
+          status: "proposed",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a kind that is not lowercase snake case", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landFeatures).values({
+          tenantId: tenantA,
+          parcelId: homeA,
+          kind: "Buried Electric",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("accepts a kind this pack has never heard of, because the taxonomy is open", async () => {
+    // `trough` is a farm profile's word and the pack refuses to know it
+    // (ADR 0004). The DATABASE must still take it, or the escape hatch is not
+    // one.
+    const rows = await withSystem((tx) =>
+      tx
+        .insert(schema.landFeatures)
+        .values({ tenantId: tenantA, parcelId: homeA, kind: "trough" })
+        .returning(),
+    );
+    expect(rows[0].kind).toBe("trough");
+  });
   // ---- shared ----------------------------------------------------------
 
   it("staff see the same land as an owner — RLS is tenancy, not role", async () => {
@@ -432,6 +611,9 @@ d("land tables (RLS)", () => {
     ).toHaveLength(0);
     expect(
       await withTenant(nowhere, (tx) => tx.select().from(schema.landOccupancy)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.landFeatures)),
     ).toHaveLength(0);
   });
 

@@ -17,15 +17,21 @@ import { lookupCurrency, lookupParcels } from "./parcel-lookup-service";
 import {
   LandError,
   combineParcels,
+  createFeature,
   createParcel,
   createZone,
+  deleteFeature,
   deleteOccupancy,
   endOccupancy,
   endZoneUse,
   retireParcel,
   retireZone,
+  getFeature,
   getParcel,
+  setFeatureGeometry,
+  setFeatureStatus,
   setParcelBoundary,
+  updateFeature,
   zoneAtPoint,
   setZoneBoundary,
   startOccupancy,
@@ -84,6 +90,18 @@ function toResult(err: unknown): { error: string } {
       case "INVALID_COMBINE":
         return { error: err.message };
       case "INVALID_GEOMETRY":
+        return { error: err.message };
+      case "INVALID_KIND":
+        return {
+          error: "A kind must be lowercase letters, numbers and underscores.",
+        };
+      case "INVALID_STATUS":
+        return { error: "Pick planned, built or removed." };
+      // Both write for a person and name the offending detail, so they reach
+      // the screen unaltered — the same courtesy the geometry parser gets.
+      case "INVALID_ATTRIBUTES":
+        return { error: err.message };
+      case "INVALID_FEED":
         return { error: err.message };
     }
   }
@@ -801,6 +819,212 @@ export async function combineParcelsAction(input: unknown) {
       zonesMoved: result.zonesMoved,
       name: result.parcel.name,
     };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+// --------------------------------------------------------------- features ---
+
+/**
+ * The site plan's write surface (slice 2b.0).
+ *
+ * Same three obligations as every other action here — re-verify the tenant,
+ * check the pack is on, work inside `withTenant` — with one difference worth
+ * naming: **these are member-level writes.** A feature is not a cost object, so
+ * nothing forces the owner line, and the person who knows where the waterline
+ * actually went is usually not the owner. See the ops comment for the argument.
+ *
+ * GEOMETRY IS NEVER VALIDATED HERE. Zod checks that something arrived; the
+ * GeoJSON itself goes to `parseFeatureGeometry`, whose refusals are written for
+ * a person ("that line needs at least two points") and reach the screen intact.
+ * A second Zod shape for GeoJSON would be a worse copy of that parser.
+ */
+
+/**
+ * A flat bag of scalars. The depth limit, the key format and the size cap are
+ * enforced in ops so they hold for every caller; this only keeps a nested
+ * document from reaching them.
+ */
+const attributes = z
+  .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+  .optional();
+
+const featureSchema = z.object({
+  parcelId: z.string().uuid(),
+  kind: z.string().min(1).max(63),
+  name: z.string().max(200).optional(),
+  status: z.enum(["planned", "built", "removed"]).optional(),
+  geometry: z.unknown().optional(),
+  attributes,
+  fedById: z.string().uuid().nullable().optional(),
+  notes: z.string().max(5000).optional(),
+});
+
+export async function createFeatureAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = featureSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const feature = await withTenant(
+      ctx.tenant.id,
+      (tx) => createFeature(tx, landCtx(ctx), parsed.data),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.feature.created",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_feature",
+      targetId: feature.id,
+      meta: { kind: feature.kind, status: feature.status },
+    });
+    revalidatePath(`${BASE}/${parsed.data.parcelId}`);
+    return { ok: true, id: feature.id };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+const updateFeatureSchema = featureSchema
+  .omit({ parcelId: true, geometry: true })
+  .partial()
+  .extend({ id: z.string().uuid() });
+
+export async function updateFeatureAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = updateFeatureSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+  const { id, ...patch } = parsed.data;
+
+  try {
+    const feature = await withTenant(
+      ctx.tenant.id,
+      (tx) => updateFeature(tx, landCtx(ctx), id, patch),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.feature.updated",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_feature",
+      targetId: id,
+      meta: { fields: Object.keys(patch) },
+    });
+    revalidatePath(`${BASE}/${feature.parcelId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function setFeatureGeometryAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({ id: z.string().uuid(), geometry: z.unknown() })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const feature = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        setFeatureGeometry(tx, landCtx(ctx), parsed.data.id, parsed.data.geometry),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.feature.redrawn",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_feature",
+      targetId: parsed.data.id,
+      meta: { drawn: feature.geometry !== null },
+    });
+    revalidatePath(`${BASE}/${feature.parcelId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Promotion, and it is audited under its own name.
+ *
+ * `land.feature.status` rather than `land.feature.updated` because THIS is the
+ * entry somebody will one day go looking for — the moment a proposed waterline
+ * became a fact about the ground. Burying it among renames would make the audit
+ * log technically complete and practically useless.
+ */
+export async function setFeatureStatusAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z
+    .object({
+      id: z.string().uuid(),
+      status: z.enum(["planned", "built", "removed"]),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const before = await withTenant(
+      ctx.tenant.id,
+      (tx) => getFeature(tx, ctx.tenant.id, parsed.data.id),
+      { role: ctx.role },
+    );
+    const feature = await withTenant(
+      ctx.tenant.id,
+      (tx) => setFeatureStatus(tx, landCtx(ctx), parsed.data.id, parsed.data.status),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.feature.status",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_feature",
+      targetId: parsed.data.id,
+      meta: { from: before?.status ?? null, to: feature.status, kind: feature.kind },
+    });
+    revalidatePath(`${BASE}/${feature.parcelId}`);
+    return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+export async function deleteFeatureAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = z.object({ id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    // Read it BEFORE the delete: the audit entry needs to say what went, and
+    // afterwards there is nothing left to ask.
+    const before = await withTenant(
+      ctx.tenant.id,
+      (tx) => getFeature(tx, ctx.tenant.id, parsed.data.id),
+      { role: ctx.role },
+    );
+    await withTenant(
+      ctx.tenant.id,
+      (tx) => deleteFeature(tx, landCtx(ctx), parsed.data.id),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.feature.deleted",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_feature",
+      targetId: parsed.data.id,
+      meta: { kind: before?.kind ?? null, status: before?.status ?? null },
+    });
+    if (before) revalidatePath(`${BASE}/${before.parcelId}`);
+    return { ok: true };
   } catch (err) {
     return toResult(err);
   }

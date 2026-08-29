@@ -29,6 +29,7 @@ import { DataTable } from "@/components/app/data-table";
 import { RecordDrawForm } from "@/packs/livestock/components/feed-controls";
 import {
   AddToLotForm,
+  CloseLotButton,
   TakeOutOfLotButton,
 } from "@/packs/livestock/components/lot-members-controls";
 import { EmptyState } from "@/components/app/empty-state";
@@ -553,6 +554,8 @@ export default async function LivestockLotPage({
    * cow. That was the bug the column was added to end.
    */
   const isAnimal = lot.recordKind === "animal";
+  /** Closed lots stay readable; they just leave the working lists. */
+  const isClosed = inventoryLot.status === "closed";
   /** What to call this record mid-sentence. Never the word "lot" for a cow. */
   const subjectWord = isAnimal ? "animal" : lotWord.toLowerCase();
   // Measured plus allocated. The card says which, and the split is spelled out
@@ -660,6 +663,9 @@ export default async function LivestockLotPage({
                 · in {insideOfCode}
               </Link>
             )}
+            {/* Said in the subtitle, because a closed lot's page otherwise
+                looks exactly like a working one. */}
+            {isClosed && <Badge variant="outline">closed</Badge>}
             {lot.sex && ` · ${SEX_LABELS[lot.sex] ?? lot.sex}`}
             {preferred && (
               <Badge variant="outline">
@@ -771,6 +777,23 @@ export default async function LivestockLotPage({
                 today={today}
               />
             )}
+            {/* **AN EMPTIED LOT CAN BE PUT AWAY** (PEN-2, 2026-08-28). Offered
+                only on a lot with nothing left in it — head or members — and
+                on a closed one, to bring it back. An ANIMAL is never closed
+                this way: what happened to her is a head event, and "sold" or
+                "died" says more than "closed". */}
+            {isOwner &&
+              !isAnimal &&
+              members.length === 0 &&
+              (summary.balance === 0 || isClosed) && (
+                <CloseLotButton
+                  livestockLotId={lot.id}
+                  code={inventoryLot.code}
+                  closed={isClosed}
+                  today={today}
+                  word={lotWord}
+                />
+              )}
             {zoneOptions.length > 0 && (
               <MoveToZoneForm
                 livestockLotId={lot.id}
@@ -1208,8 +1231,16 @@ export default async function LivestockLotPage({
                   sireLotId={lot.sireLotId}
                 />
               )}
-              {/* This animal is the dam by default, which is what makes the
-                  button worth having HERE rather than only on the hub. */}
+              {/* **A LOT DOES NOT GIVE BIRTH.** The founder, 2026-08-28, after
+                  the sire-and-dam fix left this behind: a birth is recorded on
+                  the MOTHER's page, and a mother is an animal.
+
+                  A hatch parented by a flock is still reachable — the dam
+                  picker lists lots as well as animals — it is just started from
+                  an animal rather than from the container. This animal is the
+                  dam by default, which is what makes the button worth having
+                  here rather than only on the hub. */}
+              {isAnimal && (
               <RecordBirthForm
                 damLotId={lot.sex === "male" ? null : lot.id}
                 sireLotId={lot.sex === "male" ? lot.id : null}
@@ -1218,6 +1249,7 @@ export default async function LivestockLotPage({
                 defaultItemId={inventoryLot.itemId}
                 today={today}
               />
+              )}
             </div>
           )}
         </div>
@@ -1286,7 +1318,11 @@ export default async function LivestockLotPage({
           empty={
             <EmptyState
               title={`Nothing out of this ${subjectWord} yet`}
-              description="A birth starts a lot of its own, with both parents on it and the head placed."
+              description={
+                isAnimal
+                  ? "A birth lands in the same lot she is in, with both parents on it and the head placed."
+                  : `Anything born to this ${lotWord.toLowerCase()} shows here. A birth is recorded on the mother's own page.`
+              }
             />
           }
         >

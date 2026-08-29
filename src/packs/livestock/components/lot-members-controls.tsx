@@ -18,7 +18,9 @@ import {
 } from "@/components/ui/dialog";
 import {
   addLotToParentAction,
+  closeLivestockLotAction,
   removeLotFromParentAction,
+  reopenLivestockLotAction,
   startIndividualAction,
 } from "../actions";
 
@@ -307,6 +309,68 @@ export function TakeOutOfLotButton({
       }
     >
       {pending ? "…" : "Take out"}
+    </Button>
+  );
+}
+
+
+/**
+ * **CLOSE AN EMPTIED LOT, OR OPEN IT AGAIN.**
+ *
+ * The founder's PEN-2, 2026-08-28: a pen whose 50 broilers went to the
+ * processor months ago, still on every list and still offered as something to
+ * put animals into.
+ *
+ * **THE APP CANNOT INFER THIS.** A lot at zero head is either finished or about
+ * to be filled, and the ledger says the same thing about both — so it is an act
+ * somebody takes, and a reversible one. Offered only when there is nothing left
+ * in it, which the server checks again.
+ */
+export function CloseLotButton({
+  livestockLotId,
+  code,
+  closed,
+  today,
+  word,
+}: {
+  livestockLotId: string;
+  code: string;
+  closed: boolean;
+  today: string;
+  /** The tenant's word for a group of animals. */
+  word: string;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const lower = word.toLowerCase();
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const result = closed
+            ? await reopenLivestockLotAction({ livestockLotId })
+            : await closeLivestockLotAction({ livestockLotId, on: today });
+          if ("error" in result) {
+            toast.error(result.error);
+            return;
+          }
+          // Closing hides; it never deletes. The toast says which, because
+          // "closed" beside a record somebody spent a season on wants to be
+          // clearly reversible.
+          toast.success(
+            closed
+              ? `${code} is back in the list`
+              : `${code} closed — still in the records`,
+          );
+          router.refresh();
+        })
+      }
+    >
+      {pending ? "…" : closed ? `Reopen this ${lower}` : `Close this ${lower}`}
     </Button>
   );
 }

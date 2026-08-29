@@ -325,6 +325,8 @@ export function SitePlanMap({
    */
   const [input, setInput] = useState<InputMode>("tap");
   const [walk, setWalk] = useState<WalkPoint[]>([]);
+  /** Whether a walked RUN comes back to where it started. See `canClose`. */
+  const [closeWalk, setCloseWalk] = useState(false);
   /** Set while REDRAWING an existing feature; null while tracing a new one. */
   const [redrawing, setRedrawing] = useState<PlanFeature | null>(null);
   /**
@@ -799,7 +801,7 @@ export function SitePlanMap({
         properties: {},
         geometry: { type: "Point", coordinates: point.position },
       }));
-    const shape = walkToGeometry(walk, drawingShape);
+    const shape = walkToGeometry(walk, drawingShape, closeWalk);
     if (shape && shape.type !== "Point") {
       shapes.push({ type: "Feature" as const, properties: {}, geometry: shape });
     }
@@ -807,7 +809,7 @@ export function SitePlanMap({
       type: "FeatureCollection",
       features: shapes,
     });
-  }, [drawingShape, ready, walk]);
+  }, [closeWalk, drawingShape, ready, walk]);
 
   /** Keep the drawn data in step after a save, without rebuilding the map. */
   useEffect(() => {
@@ -905,6 +907,7 @@ export function SitePlanMap({
         const existingWalked = feature ? asFeatureGeometry(feature.geometry) : null;
         drawingRef.current = true;
         setWalk([]);
+        setCloseWalk(false);
         setTapMeasured(null);
         setRedrawing(feature);
         setDrawingShape(
@@ -1057,7 +1060,7 @@ export function SitePlanMap({
      */
     let geometry: object | null = null;
     if (input === "walk") {
-      geometry = walkToGeometry(walk, drawingShape);
+      geometry = walkToGeometry(walk, drawingShape, closeWalk);
       if (!geometry) {
         toast.error("Not enough corners walked yet.");
         return;
@@ -1124,6 +1127,7 @@ export function SitePlanMap({
     selectedZoneId,
     drawKind,
     drawStatus,
+    closeWalk,
     drawingShape,
     input,
     parcelId,
@@ -1161,7 +1165,9 @@ export function SitePlanMap({
    * its vertices live inside Terra Draw and only an event tells us they moved.
    */
   const measured =
-    input === "walk" ? walkToGeometry(walk, drawingShape) : tapMeasured;
+    input === "walk"
+      ? walkToGeometry(walk, drawingShape, closeWalk)
+      : tapMeasured;
 
   const dropWalkPoint = useCallback((point: WalkPoint) => {
     setWalk((current) => [...current, point]);
@@ -1395,6 +1401,8 @@ export function SitePlanMap({
           points={walk}
           shape={drawingShape}
           lengthUnit={lengthUnit}
+          closed={closeWalk}
+          onClosedChange={setCloseWalk}
           onDrop={dropWalkPoint}
           onUndo={undoWalkPoint}
         />

@@ -4,6 +4,7 @@ import {
   ACCURACY_GOOD_M,
   MIN_POINT_SPACING_M,
   accuracyBand,
+  canClose,
   hasEnoughPoints,
   pointsNeeded,
   tooCloseToLast,
@@ -200,5 +201,78 @@ describe("the mis-tap guard", () => {
     // A larger one would start refusing real corners on a tight jog around a
     // gatepost. This only catches the tap that was never meant.
     expect(MIN_POINT_SPACING_M).toBeLessThan(ACCURACY_GOOD_M);
+  });
+});
+
+describe("closing a walked fence into a loop", () => {
+  /**
+   * Found in a field: four corners walked round a paddock came out as THREE
+   * sides. That is correct for a fence that stops, and wrong for one that goes
+   * all the way round, so it is a choice rather than a default.
+   */
+  it("leaves an open run open, which is still the common case", () => {
+    const open = walkToGeometry(CORNERS, "line");
+    expect(open).not.toBeNull();
+    const coords = (open as { coordinates: Position[] }).coordinates;
+    expect(coords).toHaveLength(4);
+    expect(coords[0]).not.toEqual(coords[3]);
+  });
+
+  it("adds the side you cannot walk", () => {
+    const closed = walkToGeometry(CORNERS, "line", true);
+    const coords = (closed as { coordinates: Position[] }).coordinates;
+    // Four corners, five positions: the last is the first again.
+    expect(coords).toHaveLength(5);
+    expect(coords[4]).toEqual(coords[0]);
+  });
+
+  it("is still a LineString, because a ring of fence is a line", () => {
+    // A Polygon would give it an area nobody asked for, and `geometryLengthM`
+    // would report its PERIMETER rather than its run — the same number here by
+    // luck, and not the same thing.
+    const closed = walkToGeometry(CORNERS, "line", true);
+    expect(closed?.type).toBe("LineString");
+    expect(validateFeatureGeometry(closed).ok).toBe(true);
+  });
+
+  it("counts the closing side in the length", () => {
+    const open = walkToGeometry(CORNERS, "line")!;
+    const closed = walkToGeometry(CORNERS, "line", true)!;
+    const backToStart = haversineM(
+      CORNERS[3].position,
+      CORNERS[0].position,
+    );
+    expect(geometryLengthM(closed)).toBeCloseTo(
+      geometryLengthM(open) + backToStart,
+      6,
+    );
+  });
+
+  it("takes the closing side from the FIRST corner, not a second reading of it", () => {
+    // You cannot walk back to a corner you have already left — no two GPS
+    // readings of the same spot agree, and a metre-wide gap in a fence is a
+    // metre of wire nobody buys.
+    const closed = walkToGeometry(CORNERS, "line", true);
+    const coords = (closed as { coordinates: Position[] }).coordinates;
+    expect(coords[4]).toEqual(CORNERS[0].position);
+  });
+
+  it("refuses to close a two-corner line, which would be a fence walked back along itself", () => {
+    expect(canClose(CORNERS.slice(0, 2), "line")).toBe(false);
+    const closed = walkToGeometry(CORNERS.slice(0, 2), "line", true);
+    expect((closed as { coordinates: Position[] }).coordinates).toHaveLength(2);
+  });
+
+  it("does not offer it for a point or an area", () => {
+    expect(canClose(CORNERS, "point")).toBe(false);
+    // An area closes itself; asking again would be a second closing repeat.
+    expect(canClose(CORNERS, "area")).toBe(false);
+    const ring = walkToGeometry(CORNERS, "area", true);
+    const coords = (ring as { coordinates: Position[][] }).coordinates[0];
+    expect(coords).toHaveLength(5);
+  });
+
+  it("offers it as soon as there are three corners", () => {
+    expect(canClose(CORNERS.slice(0, 3), "line")).toBe(true);
   });
 });

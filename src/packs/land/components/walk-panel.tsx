@@ -6,6 +6,7 @@ import { MapPin, Satellite, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   accuracyBand,
+  canClose,
   pointsNeeded,
   tooCloseToLast,
   worstAccuracyM,
@@ -36,12 +37,17 @@ export function WalkPanel({
   points,
   shape,
   lengthUnit,
+  closed,
+  onClosedChange,
   onDrop,
   onUndo,
 }: {
   points: WalkPoint[];
   shape: GeometryShape;
   lengthUnit: LengthUnit;
+  /** Whether the run comes back to where it started. */
+  closed: boolean;
+  onClosedChange: (closed: boolean) => void;
   onDrop: (point: WalkPoint) => void;
   onUndo: () => void;
 }) {
@@ -143,6 +149,31 @@ export function WalkPanel({
           </Button>
         </div>
       </div>
+
+      {/*
+        **FOUR CORNERS ARE THREE SIDES UNLESS YOU SAY OTHERWISE**, which is what
+        walking a fence round a paddock found: the run stopped at the last
+        corner instead of coming back. Both are real fences, so this is a
+        choice and not a default — and it only appears once there are three
+        corners, because closing two is a fence walked back along itself.
+      */}
+      {canClose(points, shape) && (
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={closed}
+            onChange={(event) => onClosedChange(event.target.checked)}
+            className="size-4 rounded border-input"
+          />
+          <span>Close it back to the first corner</span>
+          <span className="text-xs text-muted-foreground">
+            {/* The real counts, not a worked example: a run of six corners
+                reading "3 sides from 4" is worse than no hint at all. */}
+            {closed ? points.length : points.length - 1} sides from{" "}
+            {points.length} corners
+          </span>
+        </label>
+      )}
 
       <p className="mt-2 text-xs text-muted-foreground">
         {error ? (

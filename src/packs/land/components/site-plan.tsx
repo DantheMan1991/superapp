@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/app/empty-state";
 import { MapIcon } from "lucide-react";
 import { SitePlanMap } from "./site-plan-map";
 import { FeaturePanel, StatusBadge, type PanelFeature } from "./feature-panel";
+import { PlanLegend } from "./plan-legend";
 import { featureKindLabel, type TenantFeatureKind } from "../core/features";
 import {
   asFeatureGeometry,
@@ -108,6 +109,10 @@ export function SitePlan({
         selectedId={selectedId}
         onSelect={setSelectedId}
       />
+
+      {/* Under the map, above the list: it explains what you are looking at,
+          so it belongs between the drawing and the inventory of it. */}
+      <PlanLegend features={features} />
 
       {selected && (
         <FeaturePanel

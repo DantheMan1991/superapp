@@ -1,0 +1,2 @@
+ALTER TABLE "land_features" ADD COLUMN "line_width" numeric(4, 2);--> statement-breakpoint
+ALTER TABLE "land_features" ADD CONSTRAINT "land_features_line_width_range" CHECK ("land_features"."line_width" is null or ("land_features"."line_width" >= 0.5 and "land_features"."line_width" <= 12));

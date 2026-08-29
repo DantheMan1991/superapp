@@ -587,6 +587,22 @@ export const landFeatures = pgTable(
      * ought to require dealing with what is recorded as running off it.
      */
     fedById: uuid("fed_by_id"),
+    /**
+     * How thick to draw it, in screen pixels. Null means the kind's own weight.
+     *
+     * **A DRAWING PROPERTY, AND DELIBERATELY NOT IN `attributes`.** That bag
+     * holds what is TRUE of a thing — three strands, buried thirty inches — and
+     * the takeoff computes from it. A stroke weight is the one value that would
+     * mean nothing on the ground, and it must never reach a materials list.
+     *
+     * Bounded by a CHECK rather than trusted: this arrives from a form, and a
+     * line a thousand pixels wide would cover the parcel it is drawn on.
+     */
+    lineWidth: numeric("line_width", {
+      precision: 4,
+      scale: 2,
+      mode: "number",
+    }),
     notes: text("notes").notNull().default(""),
     /** P2 extension bag. See `attributes` above for why they are two columns. */
     metadata: jsonb("metadata").notNull().default({}),
@@ -627,6 +643,10 @@ export const landFeatures = pgTable(
     // A feature cannot feed itself. The one-row cycle is the only one this
     // column can make on its own, and it is the one a fat finger makes.
     check("land_features_fed_by_not_self", sql`${t.fedById} is distinct from ${t.id}`),
+    check(
+      "land_features_line_width_range",
+      sql`${t.lineWidth} is null or (${t.lineWidth} >= 0.5 and ${t.lineWidth} <= 12)`,
+    ),
   ],
 );
 

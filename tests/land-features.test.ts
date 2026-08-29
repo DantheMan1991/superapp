@@ -22,7 +22,12 @@ import {
   featureKindsFrom,
   featureStyle,
   isFeatureStatus,
+  isLineWidth,
   isValidFeatureKind,
+  LINE_WIDTH_MAX,
+  LINE_WIDTH_MIN,
+  LINE_WIDTH_PRESETS,
+  resolveWidth,
   shapeFor,
   STATUS_STYLES,
   SUGGESTED_FEATURE_KINDS,
@@ -404,6 +409,73 @@ describe("symbology", () => {
     expect(
       STATUS_STYLES.built.opacity - STATUS_STYLES.planned.opacity,
     ).toBeGreaterThanOrEqual(0.4);
+  });
+});
+
+describe("woods, trees, and a shape that is a hint", () => {
+  it("has a block of trees AND a line of them, which are different things", () => {
+    const kinds = SUGGESTED_FEATURE_KINDS.map((k) => k.kind);
+    expect(kinds).toContain("tree_line");
+    expect(kinds).toContain("woods");
+    expect(shapeFor("tree_line")).toBe("line");
+    expect(shapeFor("woods")).toBe("area");
+    // Same colour family, because they are both vegetation, and a legend that
+    // showed them in different greens would imply a distinction that is not
+    // there. The SHAPE is what tells them apart.
+    expect(featureStyle("woods", "area").color).toBe(
+      featureStyle("tree_line", "line").color,
+    );
+  });
+
+  it("can drop a single tree", () => {
+    expect(shapeFor("tree")).toBe("point");
+    expect(featureStyle("tree", "point").width).toBeGreaterThan(0);
+  });
+
+  it("styles any kind as any shape, because the kind's shape is a HINT", () => {
+    // The draw tool now lets the shape be overridden, so every combination is
+    // reachable from the screen and none of them may render nothing.
+    for (const kind of SUGGESTED_FEATURE_KINDS) {
+      for (const shape of ["point", "line", "area"] as const) {
+        const style = featureStyle(kind.kind, shape);
+        expect(style.width).toBeGreaterThan(0);
+        expect(style.color).toBeTruthy();
+      }
+    }
+  });
+});
+
+describe("line thickness", () => {
+  it("falls back to the kind's own weight for anything unusable", () => {
+    const own = featureStyle("fence", "line").width;
+    expect(resolveWidth("fence", "line", null)).toBe(own);
+    expect(resolveWidth("fence", "line", undefined)).toBe(own);
+    // Out of range, NaN and a string all mean "default" rather than a line a
+    // thousand pixels wide covering the parcel it is drawn on.
+    expect(resolveWidth("fence", "line", 0)).toBe(own);
+    expect(resolveWidth("fence", "line", 99)).toBe(own);
+    expect(resolveWidth("fence", "line", Number.NaN)).toBe(own);
+    expect(resolveWidth("fence", "line", "3" as unknown as number)).toBe(own);
+  });
+
+  it("uses an override that is in range", () => {
+    expect(resolveWidth("buried_electric", "line", 1)).toBe(1);
+    expect(resolveWidth("lane", "line", 6)).toBe(6);
+  });
+
+  it("offers presets that the column would actually accept", () => {
+    for (const preset of LINE_WIDTH_PRESETS) {
+      expect(isLineWidth(preset.width)).toBe(true);
+      expect(preset.width).toBeGreaterThanOrEqual(LINE_WIDTH_MIN);
+      expect(preset.width).toBeLessThanOrEqual(LINE_WIDTH_MAX);
+    }
+  });
+
+  it("agrees with the CHECK on both bounds", () => {
+    expect(isLineWidth(LINE_WIDTH_MIN)).toBe(true);
+    expect(isLineWidth(LINE_WIDTH_MAX)).toBe(true);
+    expect(isLineWidth(LINE_WIDTH_MIN - 0.01)).toBe(false);
+    expect(isLineWidth(LINE_WIDTH_MAX + 0.01)).toBe(false);
   });
 });
 

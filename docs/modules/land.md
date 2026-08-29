@@ -320,6 +320,74 @@ Ship the questions, not the toolbox.
 
 ## Build log
 
+### 2026-08-28 — What a quick review of 2b.0 found (`claude/the-plan-needs-a-key`)
+
+Five things, all from the founder clicking through the slice the same evening it
+merged. Four were gaps and one was a bug of mine. Migration `0235` — one nullable
+column — applied to dev and production before the merge.
+
+**A block of trees is not a long thin one.** `tree_line` drew a line and there
+was no way to say "these forty acres are woods", which `pond` could already do
+because it happens to be declared as an area. **`woods` is now its own kind**
+rather than a tree line somebody drew as a polygon: the word reaches the legend
+and, later, whatever asks how much ground is wooded. Same green as `tree_line`
+on purpose — they are both vegetation, and different greens would imply a
+distinction that is not there. The SHAPE is what tells them apart. `tree` was
+added at the same time, for a single specimen worth pointing at.
+
+**Worth knowing before adding more of these:** woods here is NOT the same thing
+as a `woodlot` zone use. A zone is a management unit with an acreage that
+rotation and per-acre reporting can see; a feature is a shape on a drawing.
+Drawing woods does not make them a zone, and it should not.
+
+**THE KIND'S SHAPE WAS ALWAYS A HINT, AND NOW THE SCREEN SAYS SO.**
+`featureStyle` has taken a kind and a shape separately since 2b.0 precisely
+because the two come apart — and the draw tool was the only thing that minded,
+because it opened one mode with no way out. There is a three-button shape
+picker beside the kind now, defaulting to the kind's own and cleared whenever
+the kind changes. A barn you only know the rough position of is a point; a pond
+traced as its outline is an area; the data model never had a problem with
+either. A REDRAW does not read it: changing a fence line into a polygon halfway
+through its life would strand every length ever reported from it.
+
+**Line thickness, per feature.** *"Click on the electric line and make it much
+thinner."* `line_width` is a nullable column with a CHECK, and **deliberately
+not a key in `attributes`** — that bag holds what is TRUE of a thing, and the
+takeoff will compute from it. A stroke weight is the one value that means
+nothing on the ground, and it must never reach a materials list. Null means the
+kind's own weight, so the relative weights the palette sets (a lane is heavier
+than a fence on purpose) survive until somebody overrides one. In screen pixels
+rather than feet: a width in feet is truer to a drawing and would also make a
+waterline invisible at parcel zoom and forty pixels wide at gate zoom.
+
+**A key.** `plan-legend.tsx`, and the rule that makes it useful is what it
+LEAVES OUT: only the kinds actually on this parcel, never the whole vocabulary.
+A key listing sixteen kinds when three are drawn is a catalogue, and a catalogue
+is the thing you stop reading. The status rows appear only when there is more
+than one status present — on a plan of nothing but built fences, "Built" is not
+news. The swatches are inline SVG driven by the SAME `featureStyle` and
+`STATUS_STYLES` the map uses, because a legend drawn from a second copy of the
+palette is a legend that goes quietly wrong. One conversion is needed and is
+easy to miss: MapLibre expresses a dash in line-widths and SVG in user units.
+
+**And the bug: the cursor was a grab hand while drawing.** *"It shows the hand
+tool when drawing which makes it hard to pinpoint the right spot."* It was
+`site-plan-map.tsx`'s own hover handler — the one that shows a pointer over a
+clickable feature — running on every mouse move and resetting the canvas cursor
+to the default, which MapLibre paints as `grab`. Terra Draw never stood a
+chance. The handler now returns early while drawing, the click handler does too
+(selecting something underneath would swap the panel out mid-trace), and the
+canvas gets an explicit `crosshair` for the duration. **Both handlers read the
+mode from a ref, not from state**, because they are registered once when the map
+is created and would otherwise close over whatever `mode` was then — always
+`"view"`.
+
+**Driven again on Hilltop Farm**: woods traced over the wooded block as an area
+(2,128 ft of perimeter, which is the right answer for an area), the buried
+electric dropped to Hairline and visibly thinner on the map, the key showing
+four kinds and both statuses, and `canvas.style.cursor` read back as
+`crosshair` mid-draw and empty again after cancel.
+
 ### 2026-08-28 — Slice 2b.0: the site plan is one map with the aerial off (`claude/the-site-plan-design`)
 
 **`land_features`** — points, lines and areas on the ground, in one table, with
@@ -1216,7 +1284,7 @@ Platform-wide change; the reasoning is in
 | `land_zones` | Management units inside a parcel. **`geometry` jsonb since 2a.0**, same rules as the parcel's | Composite FK `land_zones_parcel_fk` on `(tenant_id, parcel_id)` → `(tenant_id, id)`, **RESTRICT**, so cross-tenant nesting is unrepresentable and a parcel cannot be deleted out from under its zones |
 | `land_zone_uses` | What a zone is for, over a date range | Composite FK to the zone, **CASCADE**. `ended_on` is **INCLUSIVE**; null means current. CHECK `ended_on >= started_on`; `use` matches `^[a-z][a-z0-9_]{0,62}$` (**format only**) |
 | `land_occupancy` | What was actually ON a zone, in what structure, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
-| `land_features` | **Slice 2b.0.** Things ON the ground: fences, gates, buildings, waterlines, buried cable. One table for points, lines AND areas — `geometry` jsonb, read through `asFeatureGeometry`, nullable meaning "not drawn yet" | Composite FK `land_features_parcel_fk` → the parcel, **RESTRICT**. Attached to a PARCEL, never a zone: a fence runs *between* paddocks. `land_features_fed_by_fk` is the same shape pointed at **its own table**. CHECKs: `status` in `planned\|built\|removed`; `kind` format-only; `fed_by_id` is distinct from `id`. **No posts** — a fence is one row with a spacing |
+| `land_features` | **Slice 2b.0.** Things ON the ground: fences, gates, buildings, woods, waterlines, buried cable. One table for points, lines AND areas — `geometry` jsonb, read through `asFeatureGeometry`, nullable meaning "not drawn yet" | Composite FK `land_features_parcel_fk` → the parcel, **RESTRICT**. Attached to a PARCEL, never a zone: a fence runs *between* paddocks. `land_features_fed_by_fk` is the same shape pointed at **its own table**. CHECKs: `status` in `planned\|built\|removed`; `kind` format-only; `fed_by_id` is distinct from `id`; `line_width` null or 0.5–12. **No posts** — a fence is one row with a spacing. `line_width` is a DRAWING property and deliberately not in `attributes`, which the takeoff will compute from |
 
 Mirrored into **`dimension_members`** with `dimension_type = 'parcel'` and
 `'zone'`, in the same transaction as the write. That is what makes ground a cost
@@ -1255,7 +1323,11 @@ rented ground, and retrofitting it means rewriting the report.
   `packConfig.land.featureKinds`, and an unknown kind draws with the fallback
   for its shape
 - `src/packs/land/components/site-plan-map.tsx` — the site plan. One map, a
-  basemap toggle, and Terra Draw in point/line/polygon modes
+  basemap toggle, a shape picker, and Terra Draw in point/line/polygon modes.
+  **The map handlers read the draw mode from a REF**, because they are
+  registered once and would otherwise close over the mode at creation
+- `src/packs/land/components/plan-legend.tsx` — the key. Only the kinds
+  actually on this parcel, drawn from the same `featureStyle` the map uses
 - `src/packs/land/core/parcel-lookup.ts` — pure. The source registry, the
   where-clause building and the candidate mapping
 - `src/packs/land/parcel-lookup-service.ts` — the only outward fetch in this

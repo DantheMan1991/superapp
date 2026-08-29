@@ -24,6 +24,7 @@ import {
 import {
   FEATURE_STATUSES,
   FEATURE_STATUS_LABELS,
+  LINE_WIDTH_PRESETS,
   featureKindLabel,
   type FeatureStatus,
   type TenantFeatureKind,
@@ -75,6 +76,10 @@ export function FeaturePanel({
   const [details, setDetails] = useState<[string, string][]>(
     Object.entries(feature.attributes).map(([k, v]) => [k, String(v)]),
   );
+  // "default" rather than "" — a Radix Select treats an empty value as no
+  // selection and renders a blank trigger, which reads as a missing setting.
+  const widthValue =
+    feature.lineWidth === null ? "default" : String(feature.lineWidth);
 
   const geometry = asFeatureGeometry(feature.geometry);
   const length = geometry ? geometryLengthM(geometry) : null;
@@ -111,6 +116,10 @@ export function FeaturePanel({
         kind: String(formData.get("kind") ?? feature.kind),
         notes: String(formData.get("notes") ?? ""),
         fedById: String(formData.get("fedById") ?? "") || null,
+        lineWidth:
+          String(formData.get("lineWidth") ?? "default") === "default"
+            ? null
+            : Number(formData.get("lineWidth")),
         attributes,
       });
       if ("error" in result) {
@@ -289,6 +298,27 @@ export function FeaturePanel({
               </Select>
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="lineWidth">Thickness</Label>
+            <Select name="lineWidth" defaultValue={widthValue}>
+              <SelectTrigger id="lineWidth">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {/* The kind's own weight is a real choice and the default one,
+                    so it is an option rather than an empty state. */}
+                <SelectItem value="default">
+                  Default for {featureKindLabel(feature.kind).toLowerCase()}
+                </SelectItem>
+                {LINE_WIDTH_PRESETS.map((preset) => (
+                  <SelectItem key={preset.width} value={String(preset.width)}>
+                    {preset.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="space-y-1.5">
             <Label>Details</Label>

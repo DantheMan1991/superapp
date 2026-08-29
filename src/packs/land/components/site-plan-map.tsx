@@ -5,7 +5,16 @@ import { useRouter } from "next/navigation";
 import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 import type { GeoJSONStoreFeatures, TerraDraw } from "terra-draw";
 import { toast } from "sonner";
-import { Crosshair, Layers, Pencil, Trash2, Undo2 } from "lucide-react";
+import {
+  Crosshair,
+  Layers,
+  MapPin,
+  Pencil,
+  Pentagon,
+  Spline,
+  Trash2,
+  Undo2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +38,7 @@ import {
 import {
   featureKindLabel,
   featureStyle,
+  resolveWidth,
   STATUS_STYLES,
   type FeatureStatus,
   type TenantFeatureKind,
@@ -70,6 +80,8 @@ export interface PlanFeature {
   status: FeatureStatus;
   /** The raw jsonb column. Anything unreadable degrades to "not drawn". */
   geometry: unknown;
+  /** Stroke weight override; null means the kind's own. */
+  lineWidth: number | null;
 }
 
 /**
@@ -134,6 +146,20 @@ const DRAWN_TYPE: Record<GeometryShape, string> = {
   area: "Polygon",
 };
 
+/**
+ * The shape picker, in the order a plan is usually built: the outline first,
+ * then what runs across it, then what sits on it.
+ */
+const SHAPE_CHOICES: {
+  shape: GeometryShape;
+  label: string;
+  Icon: typeof Spline;
+}[] = [
+  { shape: "area", label: "Draw an area", Icon: Pentagon },
+  { shape: "line", label: "Draw a line", Icon: Spline },
+  { shape: "point", label: "Drop a point", Icon: MapPin },
+];
+
 function lastDrawn(
   snapshot: GeoJSONStoreFeatures[],
   shape: GeometryShape,
@@ -178,6 +204,8 @@ export function SitePlanMap({
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<ViewMode>("aerial");
   const [mode, setMode] = useState<Mode>("view");
+  /** Mirrors `mode` for the map handlers, which are registered once. */
+  const drawingRef = useRef(false);
   const [drawKind, setDrawKind] = useState(kinds[0]?.kind ?? "fence");
   /**
    * Whether what is about to be drawn EXISTS or is being proposed.
@@ -189,6 +217,20 @@ export function SitePlanMap({
    * afterwards, which is not how anybody costs a fence.
    */
   const [drawStatus, setDrawStatus] = useState<FeatureStatus>("built");
+  /**
+   * A shape chosen instead of the kind's own, or null to follow the kind.
+   *
+   * **THE KIND'S SHAPE WAS ALWAYS A HINT AND NOW THE SCREEN SAYS SO.**
+   * `featureStyle` has taken a kind and a shape separately since 2b.0
+   * precisely because the two come apart: a stand of trees is a `woods` area
+   * and a windbreak is a `tree_line`, but a barn somebody only knows the rough
+   * position of is a point, and a pond traced as its outline is an area. The
+   * data model never minded; only the draw tool did, because it opened one
+   * mode and offered no way out of it. Cleared whenever the kind changes, so
+   * picking a kind gets you that kind's usual shape without any memory of the
+   * last override.
+   */
+  const [shapeOverride, setShapeOverride] = useState<GeometryShape | null>(null);
   /** Set while REDRAWING an existing feature; null while tracing a new one. */
   const [redrawing, setRedrawing] = useState<PlanFeature | null>(null);
   /**
@@ -230,6 +272,7 @@ export function SitePlanMap({
       if (!geometry) continue;
       const shape = shapeOf(geometry);
       const style = featureStyle(feature.kind, shape);
+      const width = resolveWidth(feature.kind, shape, feature.lineWidth);
       const status = STATUS_STYLES[feature.status];
       // Status wins over the kind's own dash rather than combining with it:
       // two patterns multiplied together read as neither, and a proposal has
@@ -245,11 +288,11 @@ export function SitePlanMap({
           id: feature.id,
           color: style.color,
           casing: style.casing,
-          width: selected ? style.width + 2 : style.width,
-          casingWidth: (selected ? style.width + 2 : style.width) + 2.5,
+          width: selected ? width + 2 : width,
+          casingWidth: (selected ? width + 2 : width) + 2.5,
           opacity: status.opacity,
           fill: style.fill * status.opacity,
-          radius: style.width,
+          radius: width,
           dashKey: dashKey(dash),
         },
       });
@@ -423,6 +466,9 @@ export function SitePlanMap({
       });
 
       instance.on("click", (event) => {
+        // Terra Draw owns the clicks while a shape is being drawn; selecting
+        // something underneath it would swap the panel out mid-trace.
+        if (drawingRef.current) return;
         const hits = instance.queryRenderedFeatures(event.point, {
           layers: instance
             .getStyle()
@@ -433,6 +479,14 @@ export function SitePlanMap({
         onSelect(typeof id === "string" ? id : null);
       });
       instance.on("mousemove", (event) => {
+        // **NOT WHILE DRAWING**, and this handler is why the cursor was a grab
+        // hand over a fence line you were trying to place a corner on: it runs
+        // on every mouse move and reset the canvas cursor to the default, which
+        // MapLibre paints as `grab`. A hand has no point to aim with. Reading
+        // the mode from a ref rather than from state because the handler is
+        // registered once, at map creation, and would otherwise close over
+        // whatever `mode` was then — always "view".
+        if (drawingRef.current) return;
         const hits = instance.queryRenderedFeatures(event.point, {
           layers: instance
             .getStyle()
@@ -619,11 +673,14 @@ export function SitePlanMap({
       ]);
 
       const existing = feature ? asFeatureGeometry(feature.geometry) : null;
+      // A redraw keeps the shape it already IS — changing a fence line into a
+      // polygon halfway through its life would strand every length ever
+      // reported from it. Only a new feature reads the picker.
       const shape = feature
         ? existing
           ? shapeOf(existing)
           : shapeOfKind(feature.kind)
-        : shapeOfKind(drawKind);
+        : (shapeOverride ?? shapeOfKind(drawKind));
 
       const instanceDraw = new TerraDraw({
         adapter: new TerraDrawMapLibreGLAdapter({ map: instance }),
@@ -693,17 +750,29 @@ export function SitePlanMap({
       instanceDraw.on("finish", measure);
 
       draw.current = instanceDraw;
+      drawingRef.current = true;
+      // **A CROSSHAIR, NOT A HAND.** MapLibre paints `grab` on its canvas
+      // because panning is what a map normally does; placing a corner on a
+      // fence line needs something with a point to aim with. Set here rather
+      // than in CSS so it survives the hover handler above, which is what was
+      // putting the hand back on every mouse move.
+      instance.getCanvas().style.cursor = "crosshair";
       setMeasured(existing);
       setRedrawing(feature);
       setDrawingShape(shape);
       setMode("draw");
     },
-    [drawKind, shapeOfKind],
+    [drawKind, shapeOfKind, shapeOverride],
   );
 
   const stopDrawing = useCallback(() => {
     draw.current?.stop();
     draw.current = null;
+    drawingRef.current = false;
+    const canvas = map.current?.getCanvas();
+    // Back to MapLibre's own cursor: "" lets it paint grab/grabbing again,
+    // which is right the moment panning is what the map is for.
+    if (canvas) canvas.style.cursor = "";
     setMeasured(null);
     setRedrawing(null);
     setMode("view");
@@ -772,10 +841,10 @@ export function SitePlanMap({
   }, []);
 
   const selectedKind = kinds.find((k) => k.kind === drawKind);
+  const nextShape = shapeOverride ?? selectedKind?.shape ?? "point";
   // While a session is open the shape is whatever that session opened with;
   // otherwise it is what the picker would open next.
-  const drawShape =
-    mode === "draw" ? drawingShape : (selectedKind?.shape ?? "point");
+  const drawShape = mode === "draw" ? drawingShape : nextShape;
 
   return (
     <div className="space-y-3">
@@ -820,8 +889,17 @@ export function SitePlanMap({
           <>
             {canEdit && (
               <>
-                <Select value={drawKind} onValueChange={setDrawKind}>
-                  <SelectTrigger size="sm" className="w-[190px]">
+                <Select
+                  value={drawKind}
+                  onValueChange={(value) => {
+                    setDrawKind(value);
+                    // Picking a kind gets you that kind's usual shape. Carrying
+                    // the last override forward would silently draw the next
+                    // waterline as an area because the last thing was woods.
+                    setShapeOverride(null);
+                  }}
+                >
+                  <SelectTrigger size="sm" className="w-[170px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -832,6 +910,25 @@ export function SitePlanMap({
                     ))}
                   </SelectContent>
                 </Select>
+                <div className="inline-flex overflow-hidden rounded-md border">
+                  {SHAPE_CHOICES.map(({ shape, label, Icon }) => (
+                    <button
+                      key={shape}
+                      type="button"
+                      title={label}
+                      aria-label={label}
+                      aria-pressed={nextShape === shape}
+                      onClick={() => setShapeOverride(shape)}
+                      className={`px-2.5 py-1.5 transition-colors ${
+                        nextShape === shape
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </button>
+                  ))}
+                </div>
                 <div className="inline-flex overflow-hidden rounded-md border">
                   {(["built", "planned"] as const).map((option) => (
                     <button

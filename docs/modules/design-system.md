@@ -21,6 +21,63 @@ tokens and gets its own pass later.
 
 ## Build log
 
+### 2026-08-29 — The org switcher was unclickable on a phone (`claude/the-switcher-behind-the-menu`)
+
+**Reported from a phone**, with a screenshot: the organisation switcher's popover
+opened over the mobile drawer, and tapping "Hilltop Farm" activated whatever nav
+item happened to be behind it instead.
+
+**THE CAUSE, and it is one line in a dependency.** The mobile drawer is a Radix
+`Sheet`, which is a Dialog. A modal Radix layer does this while it is open —
+`@radix-ui/react-dismissable-layer`:
+
+```js
+ownerDocument.body.style.pointerEvents = "none";
+```
+
+and re-enables pointer events only for the layers Radix itself manages. Clerk's
+`<OrganizationSwitcher>` and `<UserButton>` portal their popovers to `body`,
+outside that registry, so the popover **painted on top and was not clickable** —
+every tap fell through to the drawer beneath it. A popover that is visible and
+inert is worse than one that does not open, because the tap does something else
+instead of nothing.
+
+**THE FIX IS STRUCTURAL: the identity widgets do not go inside the drawer.**
+`AppShell` gained an `identity` slot beside `footer`:
+
+  - **desktop** — rendered in the sidebar footer, exactly where it was. That
+    rail is a plain `<aside>`, not a dialog, and has never had this problem.
+  - **mobile** — rendered in the top bar, OUTSIDE the drawer.
+
+`footer` keeps the ordinary links (Platform admin, Client view), which have no
+popover and are fine in a modal.
+
+**Why not fix it in CSS.** A descendant can re-enable `pointer-events: auto`
+under an ancestor that disabled it, so a rule aimed at Clerk's portal would
+work — but it would have to NAME Clerk's portal elements, and `clerk-js` is
+loaded from Clerk's CDN at runtime. Those class names are not in the lock file
+and can change without anything being deployed here. It would also need a
+matching `onInteractOutside` guard on the sheet, or the drawer would dismiss
+itself on the same tap. Keeping the widgets out of the modal cannot break in
+either way.
+
+**The admin shell had the identical bug** — `<UserButton />` in its drawer
+footer — and is fixed the same way. It was never reported because nobody had
+opened it on a phone.
+
+**NOT VERIFIED RUNNING, and that is worth saying plainly.** The dev server was
+restarted during the session and the browser lost its Clerk session; signing in
+again would mean handling the founder's credentials, which is not something to
+do. So this ships on: the exact dependency line quoted above, a green build and
+lint, and the structural argument that a popover outside a modal is not subject
+to the modal's pointer lock. **No regression test is possible either** — the
+repo has no component-testing stack (`@testing-library`, jsdom — none are
+dependencies), and introducing one to cover this would be a much larger change
+than the fix.
+
+**It needs confirming on a phone**: open the drawer, tap the org switcher, tap
+the other organisation.
+
 Newest first. One entry per session/PR that touched this area.
 
 ### 2026-08-26 — The last three packs, and where a strip does not belong (`claude/the-last-three-packs`)
@@ -375,6 +432,16 @@ heading, and they are not oversights:
 What remains is the three centred states above and `(marketing)`.
 
 ## Open items
+
+- **The mobile org switcher fix is unconfirmed on a real phone.** It ships on a
+  quoted dependency line and a structural argument, not on a reproduction — the
+  session was lost mid-session and signing back in would have meant handling the
+  founder's credentials. **A NEVER-PUT-A-PORTALLED-POPOVER-IN-THE-DRAWER rule
+  now lives on `AppShell`'s `identity` prop**; anything added to `footer` that
+  opens one will have the same bug.
+- **There is no component-testing stack.** No `@testing-library`, no jsdom. UI
+  regressions like the one above cannot be caught by `npm test`, only by
+  somebody opening the screen — which is how this one was found.
 
 - **The sweep.** ~70 surfaces still hand-roll their header, empty state and table
   panel. Planned as one PR per module: accounting → documents + mail → CRM + work

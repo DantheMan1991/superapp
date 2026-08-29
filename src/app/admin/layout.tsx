@@ -48,18 +48,23 @@ export default async function AdminLayout({
         },
       ]}
       footer={
-        <div className="flex items-center justify-between">
-          {/* Same race as the client shell: see after-hydration.tsx. */}
-          <AfterHydration>
-            <UserButton />
-          </AfterHydration>
-          <a
-            href="/dashboard"
-            className="text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
-          >
-            Client view →
-          </a>
-        </div>
+        <a
+          href="/dashboard"
+          className="block text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
+        >
+          Client view →
+        </a>
+      }
+      /*
+        Out of the drawer for the same reason the client shell's is: the mobile
+        drawer is a modal dialog, and Clerk portals this popover to `body`
+        where pointer events are disabled while it is open.
+      */
+      identity={
+        // Same race as the client shell: see after-hydration.tsx.
+        <AfterHydration>
+          <UserButton />
+        </AfterHydration>
       }
     >
       {children}

@@ -258,16 +258,11 @@ export default async function ParcelDetailPage({
         name={parcel.name}
         declaredAcres={parcel.areaAcres}
         geometry={parcel.geometry}
-        context={zones.map((zone) => ({
-          name: zone.name,
-          geometry: zone.geometry,
-        }))}
-        packConfig={pack.config}
         unit={unit}
         canEdit={isOwner && parcel.status === "active"}
         // The site plan below draws the boundary now. What is left here is the
         // reading — measured against recorded — and the paste box.
-        withMap={false}
+        drawnAt="#site-plan"
       />
 
       <Panel className="p-5">
@@ -284,9 +279,11 @@ export default async function ParcelDetailPage({
             parcelId={parcel.id}
             parcelBoundary={asBoundary(parcel.geometry)}
             zones={[...zones, ...plannedZones].map((zone) => ({
+              id: zone.id,
               name: zone.name,
               geometry: zone.geometry,
               status: zone.status,
+              areaAcres: zone.areaAcres,
             }))}
             features={features.map((feature) => ({
               id: feature.id,

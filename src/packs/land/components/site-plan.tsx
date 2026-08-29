@@ -61,7 +61,13 @@ export function SitePlan({
 }: {
   parcelId: string;
   parcelBoundary: Boundary | null;
-  zones: { name: string; geometry: unknown; status: string }[];
+  zones: {
+    id: string;
+    name: string;
+    geometry: unknown;
+    status: string;
+    areaAcres: number | null;
+  }[];
   features: PanelFeature[];
   kinds: TenantFeatureKind[];
   basemap: Basemap;
@@ -74,6 +80,15 @@ export function SitePlan({
   declaredAcres: number | null;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Which paddock's outline is being worked on, or null for the parcel's.
+   *
+   * Held beside the feature selection rather than folded into it: a feature and
+   * a paddock are different things with different panels, and one nullable id
+   * each says so more plainly than a tagged union that every reader has to
+   * unwrap.
+   */
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [showRemoved, setShowRemoved] = useState(false);
 
   const listed = useMemo(
@@ -135,6 +150,8 @@ export function SitePlan({
         declaredAcres={declaredAcres}
         selectedId={selectedId}
         onSelect={setSelectedId}
+        selectedZoneId={selectedZoneId}
+        onSelectZone={setSelectedZoneId}
       />
 
       {/* Under the map, above the list: it explains what you are looking at,

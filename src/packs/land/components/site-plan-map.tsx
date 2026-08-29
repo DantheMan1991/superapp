@@ -50,6 +50,7 @@ import {
   createFeatureAction,
   setFeatureGeometryAction,
   setParcelBoundaryAction,
+  setZoneBoundaryAction,
 } from "../actions";
 import { CONTINENTAL_US, FIELD_ZOOM } from "../core/basemap";
 import { WalkPanel } from "./walk-panel";
@@ -226,6 +227,8 @@ export function SitePlanMap({
   declaredAcres,
   selectedId,
   onSelect,
+  selectedZoneId,
+  onSelectZone,
 }: {
   parcelId: string;
   parcelBoundary: Boundary | null;
@@ -235,7 +238,14 @@ export function SitePlanMap({
    * drawn separately and more strongly: they are a proposal to look at, not
    * context to ignore.
    */
-  zones: { name: string; geometry: unknown; status: string }[];
+  zones: {
+    id: string;
+    name: string;
+    geometry: unknown;
+    status: string;
+    /** What is RECORDED for it, for the live comparison while tracing. */
+    areaAcres: number | null;
+  }[];
   features: PlanFeature[];
   kinds: TenantFeatureKind[];
   basemap: Basemap;
@@ -249,6 +259,9 @@ export function SitePlanMap({
   declaredAcres: number | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  /** Which paddock's outline is being worked on, or null for the parcel's. */
+  selectedZoneId: string | null;
+  onSelectZone: (id: string | null) => void;
 }) {
   const router = useRouter();
   const container = useRef<HTMLDivElement>(null);
@@ -285,8 +298,22 @@ export function SitePlanMap({
    * last override.
    */
   const [shapeOverride, setShapeOverride] = useState<GeometryShape | null>(null);
-  /** Whether what is about to be drawn is the parcel's own outline. */
+  /** Whether what is about to be drawn is an OUTLINE — the parcel's or a paddock's. */
   const boundaryTarget = drawKind === BOUNDARY_TARGET;
+  const selectedZone = zones.find((zone) => zone.id === selectedZoneId) ?? null;
+  const boundaryTargetName = selectedZone?.name ?? parcelName;
+  const boundaryTargetGeometry = selectedZone
+    ? asBoundary(selectedZone.geometry)
+    : parcelBoundary;
+  /**
+   * The recorded figure to measure against — **the TARGET's, not always the
+   * parcel's.** Tracing a paddock and being told it is 37 acres short of the
+   * deed is comparing it to the wrong thing; what matters is whether it agrees
+   * with what was recorded for that paddock.
+   */
+  const boundaryTargetAcres = selectedZone
+    ? selectedZone.areaAcres
+    : declaredAcres;
   /**
    * How the next shape gets its vertices: by clicking the map, or by standing
    * on each corner.
@@ -592,7 +619,35 @@ export function SitePlanMap({
             .filter((id) => id.startsWith("feature-")),
         });
         const id = hits[0]?.properties?.id;
-        onSelect(typeof id === "string" ? id : null);
+        if (typeof id === "string") {
+          onSelect(id);
+          return;
+        }
+
+        /**
+         * Nothing on top, so look at the GROUND. A paddock is clickable here
+         * because tracing its outline is the same act as tracing the parcel's,
+         * and giving it its own map on its own page was the last of the
+         * duplication this pack carried.
+         */
+        const ground = instance.queryRenderedFeatures(event.point, {
+          layers: instance
+            .getStyle()
+            .layers.map((l) => l.id)
+            .filter((layerId) => layerId.startsWith("ground-")),
+        });
+        const zoneId = ground.find((f) => f.properties?.zoneId)?.properties
+          ?.zoneId;
+        onSelect(null);
+        if (typeof zoneId === "string") {
+          onSelectZone(zoneId);
+          // Clicking a paddock means you want to do something to THAT paddock,
+          // and the only thing this map does to one is trace it. Leaving the
+          // picker on "Fence" would make the click look like it did nothing.
+          setDrawKind(BOUNDARY_TARGET);
+        } else {
+          onSelectZone(null);
+        }
       });
       instance.on("mousemove", (event) => {
         // **NOT WHILE DRAWING**, and this handler is why the cursor was a grab
@@ -1020,18 +1075,24 @@ export function SitePlanMap({
 
     setPending(true);
     const result = boundaryTarget
-      ? // The boundary REPLACES rather than creating, so it has its own action
+      ? selectedZoneId
+        ? // Same act, same geometry, different owner of the row.
+          await setZoneBoundaryAction({
+            id: selectedZoneId,
+            geojson: JSON.stringify(geometry),
+          })
+        : // The boundary REPLACES rather than creating, so it has its own action
         // — and its own audit entry, which somebody will go looking for.
         //
         // **IT TAKES A JSON STRING, NOT AN OBJECT.** That action was written for
         // the paste box, where what arrives is text somebody copied out of a
         // county GIS export, and `parseBoundary` reads either. Passing the
         // object failed Zod and returned a generic "check the details" that is
-        // easy to miss in a toast — which is exactly how this was found.
-        await setParcelBoundaryAction({
-          id: parcelId,
-          geojson: JSON.stringify(geometry),
-        })
+          // easy to miss in a toast — which is exactly how this was found.
+          await setParcelBoundaryAction({
+            id: parcelId,
+            geojson: JSON.stringify(geometry),
+          })
       : redrawing
         ? await setFeatureGeometryAction({ id: redrawing.id, geometry })
         : await createFeatureAction({
@@ -1048,7 +1109,7 @@ export function SitePlanMap({
     }
     toast.success(
       boundaryTarget
-        ? `${parcelName}'s boundary saved`
+        ? `${boundaryTargetName}'s boundary saved`
         : redrawing
           ? "Redrawn"
           : drawStatus === "planned"
@@ -1059,12 +1120,13 @@ export function SitePlanMap({
     router.refresh();
   }, [
     boundaryTarget,
+    boundaryTargetName,
+    selectedZoneId,
     drawKind,
     drawStatus,
     drawingShape,
     input,
     parcelId,
-    parcelName,
     redrawing,
     router,
     stopDrawing,
@@ -1152,7 +1214,7 @@ export function SitePlanMap({
                 shape={drawShape}
                 input={input}
                 boundary={boundaryTarget}
-                declaredAcres={declaredAcres}
+                declaredAcres={boundaryTargetAcres}
                 areaUnit={areaUnit}
                 lengthUnit={lengthUnit}
               />
@@ -1174,6 +1236,10 @@ export function SitePlanMap({
                     // the last override forward would silently draw the next
                     // waterline as an area because the last thing was woods.
                     setShapeOverride(null);
+                    // The picker's boundary entry always means the PARCEL. A
+                    // paddock is chosen by clicking it, so choosing from here
+                    // has to let go of whichever one was last clicked.
+                    if (value === BOUNDARY_TARGET) onSelectZone(null);
                   }}
                 >
                   <SelectTrigger size="sm" className="w-[170px]">
@@ -1182,7 +1248,7 @@ export function SitePlanMap({
                   <SelectContent>
                     {canEditBoundary && (
                       <SelectItem value={BOUNDARY_TARGET}>
-                        {parcelName}&rsquo;s boundary
+                        {boundaryTargetName}&rsquo;s boundary
                       </SelectItem>
                     )}
                     {kinds.map((kind) => (
@@ -1260,18 +1326,18 @@ export function SitePlanMap({
                 {/* The existing outline, with handles. `startDrawing` takes a
                     FEATURE, so the boundary borrows the shape of one — nothing
                     is written until Save, which routes on `boundaryTarget`. */}
-                {boundaryTarget && parcelBoundary && input === "tap" && (
+                {boundaryTarget && boundaryTargetGeometry && input === "tap" && (
                   <Button
                     size="sm"
                     variant="outline"
                     disabled={!ready}
                     onClick={() =>
                       startDrawing({
-                        id: parcelId,
+                        id: selectedZoneId ?? parcelId,
                         kind: "fence",
-                        name: parcelName,
+                        name: boundaryTargetName,
                         status: "built",
-                        geometry: parcelBoundary,
+                        geometry: boundaryTargetGeometry,
                         lineWidth: null,
                       })
                     }
@@ -1514,22 +1580,33 @@ function labelPoint(geometry: FeatureGeometry): [number, number] | null {
   return all.length > 0 ? all[0] : null;
 }
 
+/**
+ * The ground under the plan, carrying identity.
+ *
+ * **THE ZONE ID TRAVELS WITH THE SHAPE** so a paddock can be clicked and its
+ * outline traced here — which is what let the last separate map go. The parcel
+ * has no id in the properties: it is selected from the picker, being the one
+ * shape on the page there is exactly one of.
+ */
 function groundCollection(
   parcel: Boundary | null,
-  zones: { name: string; geometry: unknown }[],
+  zones: { id: string; name: string; geometry: unknown }[],
 ) {
-  const shapes = [
-    ...(parcel ? [parcel] : []),
-    ...zones
-      .map((zone) => asBoundary(zone.geometry))
-      .filter((b): b is Boundary => b !== null),
-  ];
-  return {
-    type: "FeatureCollection" as const,
-    features: shapes.map((geometry) => ({
-      type: "Feature" as const,
-      properties: {},
-      geometry,
-    })),
-  };
+  const features: {
+    type: "Feature";
+    properties: Record<string, unknown>;
+    geometry: Boundary;
+  }[] = [];
+  if (parcel) features.push({ type: "Feature", properties: {}, geometry: parcel });
+  for (const zone of zones) {
+    const boundary = asBoundary(zone.geometry);
+    if (boundary) {
+      features.push({
+        type: "Feature",
+        properties: { zoneId: zone.id, zoneName: zone.name },
+        geometry: boundary,
+      });
+    }
+  }
+  return { type: "FeatureCollection" as const, features };
 }

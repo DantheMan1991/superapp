@@ -553,6 +553,56 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-08-29 — The last map (`claude/the-last-map`)
+
+**No migration. `boundary-map.tsx` is deleted.** There is now exactly one map in
+the pack, and it is the site plan.
+
+**The founder asked why the zone page still had one.** The honest answer was
+that the previous slice fixed the page carrying TWO and left alone the page
+carrying one — which is not a reason, it is where the line happened to fall. A
+paddock's outline is the same act on the same geometry as a parcel's, so it
+belongs in the same tool.
+
+**A paddock is chosen by CLICKING IT, not from a list.** The parcel is a
+singleton and fits in the kind picker; paddocks are many, and a farm at 10x has
+two hundred. So the zone id travels with the shape in the ground source, the
+click handler falls through to the ground layers when nothing is on top, and
+selecting one switches the picker to `North 4's boundary`. Clicking a paddock
+and having the picker stay on "Fence" would make the click look like it did
+nothing.
+
+**What the zone page kept, and what it lost.** Gone: the map, the sibling-zone
+query that only ever fed it, and `context`/`packConfig` props that existed for
+no other reason. Kept: the READING — measured against recorded and the sentence
+about why they may disagree — plus the paste box, and a line saying where the
+outline is drawn now.
+
+**A bug the change surfaced.** Tracing a paddock compared its acreage to the
+PARCEL's recorded figure: `2.3318 acres · −37.6682 acres against the 40 acres
+recorded`. The comparison had been wired to the page's parcel because until this
+slice the only thing traced here WAS the parcel. It now measures against the
+target's own figure — `−7.5224 acres against the 9.8542 acres recorded` — which
+is the only version of that sentence that means anything.
+
+**Driven on Hilltop Farm.**
+
+  - Zone page: **zero maps**, reading intact, and it points at the site plan.
+  - Parcel page: **one map**, and the boundary panel above it reads
+    `measures 40.1256 acres` against `Recorded 40 acres`.
+  - Clicking a proposed paddock switched the picker to `North 4's boundary` and
+    offered Trace / Move the corners.
+  - Walking four corners saved to **the zone** — North 4's drawn geometry
+    became 2.3318 acres while its recorded figure stayed 9.8542 and the other
+    three paddocks and the parcel were untouched. The declared-versus-drawn rule
+    holds for a zone exactly as it does for a parcel.
+
+**Demo data note:** Home Farm's `North 4` is left as the small square walked
+during that test, rather than the strip the layout cut. It is the clearest
+possible illustration of drawn disagreeing with recorded, so it stays.
+
+**Open after this slice:** unchanged. Nothing has been walked with a REAL phone.
+
 ### 2026-08-29 — One map for the whole parcel (`claude/one-map-for-the-whole-parcel`)
 
 **No migration.** The parcel's own boundary is drawn in the site plan now, and
@@ -1984,7 +2034,9 @@ rented ground, and retrofitting it means rewriting the report.
   `packConfig.land.featureKinds`, and an unknown kind draws with the fallback
   for its shape
 - `src/packs/land/components/site-plan-map.tsx` — the site plan, and **the only
-  map on the parcel page since 2026-08-29**: it draws the parcel's own boundary
+  map in the pack since 2026-08-29** (`boundary-map.tsx` is deleted). It draws
+  the parcel's outline AND any paddock's — a paddock is chosen by clicking it,
+  because a farm at 10x has two hundred and they do not belong in a picker: it draws the parcel's own boundary
   too, at the top of the kind picker, owner-only and always an area. A basemap
   toggle, a shape picker, tap-or-walk input, and Terra Draw in
   point/line/polygon modes.

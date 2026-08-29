@@ -1,9 +1,10 @@
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { formatArea, type AreaUnit } from "../core/area";
 import { areaDisagrees, asBoundary, compareArea } from "../core/geo";
-import { basemapFrom } from "../core/basemap";
+
 import { BoundaryForm } from "./boundary-controls";
-import { BoundaryMap, type MapContextShape } from "./boundary-map";
+
 
 /**
  * The boundary: the map, and what it measures against what somebody typed in.
@@ -30,11 +31,9 @@ export function BoundarySummary({
   name,
   declaredAcres,
   geometry,
-  context,
-  packConfig,
   unit,
   canEdit,
-  withMap = true,
+  drawnAt,
 }: {
   target: "zone" | "parcel";
   id: string;
@@ -43,9 +42,6 @@ export function BoundarySummary({
   /** The raw jsonb column. Anything unreadable degrades to "no boundary". */
   geometry: unknown;
   /** Neighbouring ground — the parcel and its other zones — drawn for reference. */
-  context: { name: string; geometry: unknown }[];
-  /** The land pack's `packConfig`, for a tenant outside NAIP coverage. */
-  packConfig: unknown;
   unit: AreaUnit;
   canEdit: boolean;
   /**
@@ -62,14 +58,11 @@ export function BoundarySummary({
    * accurate than anything traced by hand, and it is now the side door to a
    * front door that lives somewhere else.
    */
-  withMap?: boolean;
+  /** Where the outline IS drawn. Both callers pass it; the map lives there. */
+  drawnAt?: string;
 }) {
   const boundary = asBoundary(geometry);
   const comparison = compareArea(declaredAcres, boundary);
-  const shapes: MapContextShape[] = context
-    .map((shape) => ({ name: shape.name, boundary: asBoundary(shape.geometry) }))
-    .filter((shape): shape is MapContextShape => shape.boundary !== null);
-
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -94,17 +87,14 @@ export function BoundarySummary({
         )}
       </div>
 
-      {withMap && (
-        <BoundaryMap
-          target={target}
-          id={id}
-          declaredAcres={declaredAcres}
-          current={boundary}
-          context={shapes}
-          unit={unit}
-          basemap={basemapFrom(packConfig)}
-          canEdit={canEdit}
-        />
+      {drawnAt && (
+        <p className="text-xs text-muted-foreground">
+          Traced on{" "}
+          <Link href={drawnAt} className="underline underline-offset-2">
+            the site plan
+          </Link>
+          {" — click it there, or use the paste box above."}
+        </p>
       )}
 
       {boundary !== null && (

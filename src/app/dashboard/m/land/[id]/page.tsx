@@ -264,6 +264,7 @@ export default async function ParcelDetailPage({
               // same total-by-construction discipline as everything else here.
               attributes: readAttributes(feature.attributes),
               fedById: feature.fedById,
+              lineWidth: feature.lineWidth,
             }))}
             kinds={availableFeatureKinds(pack.config)}
             basemap={basemapFrom(pack.config)}

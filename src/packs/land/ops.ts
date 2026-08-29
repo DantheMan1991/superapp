@@ -29,7 +29,10 @@ import {
 } from "./core/geo";
 import {
   isFeatureStatus,
+  isLineWidth,
   isValidFeatureKind,
+  LINE_WIDTH_MAX,
+  LINE_WIDTH_MIN,
   type FeatureStatus,
 } from "./core/features";
 
@@ -79,7 +82,9 @@ export class LandError extends Error {
       /** An attribute bag that is nested, oversized or wrongly named. */
       | "INVALID_ATTRIBUTES"
       /** A `fed_by` pointing at nothing, at itself, or at something removed. */
-      | "INVALID_FEED",
+      | "INVALID_FEED"
+      /** A stroke weight outside what the CHECK will take. */
+      | "INVALID_WIDTH",
     message: string,
   ) {
     super(message);
@@ -1648,6 +1653,8 @@ export interface FeatureInput {
   geometry?: unknown;
   attributes?: Record<string, unknown>;
   fedById?: string | null;
+  /** Stroke weight in screen pixels; null means the kind's own. */
+  lineWidth?: number | null;
   notes?: string;
 }
 
@@ -1707,6 +1714,22 @@ function featureGeometryOrThrow(input: unknown): FeatureGeometry | null {
   const result = parseFeatureGeometry(input);
   if (!result.ok) throw new LandError("INVALID_GEOMETRY", result.error);
   return result.geometry;
+}
+
+/**
+ * The stroke weight, bounded. The CHECK would refuse an out-of-range value
+ * anyway; this exists so the person gets a sentence instead of a constraint
+ * violation, the same courtesy `fedByOrThrow` extends.
+ */
+function lineWidthOrThrow(width: number | null | undefined): number | null {
+  if (width === null || width === undefined) return null;
+  if (!isLineWidth(width)) {
+    throw new LandError(
+      "INVALID_WIDTH",
+      `a line has to be between ${LINE_WIDTH_MIN} and ${LINE_WIDTH_MAX} wide`,
+    );
+  }
+  return width;
 }
 
 function statusOrThrow(status: string): FeatureStatus {
@@ -1805,6 +1828,7 @@ export async function createFeature(
       geometry: featureGeometryOrThrow(input.geometry),
       attributes: attributesOrThrow(input.attributes),
       fedById: await fedByOrThrow(tx, ctx.tenantId, null, input.fedById ?? null),
+      lineWidth: lineWidthOrThrow(input.lineWidth),
       notes: input.notes?.trim() ?? "",
     })
     .returning();
@@ -1839,6 +1863,12 @@ export async function updateFeature(
   }
   if (input.fedById !== undefined) {
     patch.fedById = await fedByOrThrow(tx, ctx.tenantId, id, input.fedById);
+  }
+  // NULL IS A REAL VALUE HERE, not "leave it alone": it is how somebody puts a
+  // line back to its kind's own weight, so it has to be distinguishable from
+  // the field not being sent at all.
+  if (input.lineWidth !== undefined) {
+    patch.lineWidth = lineWidthOrThrow(input.lineWidth);
   }
 
   const rows = await tx

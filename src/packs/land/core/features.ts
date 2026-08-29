@@ -201,6 +201,26 @@ export const SUGGESTED_FEATURE_KINDS: readonly FeatureKind[] = [
     style: line(COLORS.vegetation, 4, [1, 1]),
   },
   {
+    // A BLOCK OF TREES IS NOT A LONG THIN ONE, which is why this is its own
+    // kind rather than a tree line somebody drew as an area. The words end up
+    // in the legend and, later, in whatever asks how much ground is wooded.
+    //
+    // NOT THE SAME THING AS A `woodlot` ZONE USE. A zone is a management unit
+    // with an acreage that rotation and per-acre reporting can see; this is a
+    // shape on a drawing. Draw the woods here to have them on the plan; make
+    // the woods a ZONE if you want their acreage in a report.
+    kind: "woods",
+    label: "Woods",
+    shape: "area",
+    style: area(COLORS.vegetation, 0.3),
+  },
+  {
+    kind: "tree",
+    label: "Tree",
+    shape: "point",
+    style: marker(COLORS.vegetation),
+  },
+  {
     kind: "well",
     label: "Well",
     shape: "point",
@@ -385,6 +405,59 @@ export function availableFeatureKinds(config: unknown): TenantFeatureKind[] {
     })),
     ...featureKindsFrom(config),
   ];
+}
+
+/**
+ * How thick a line is drawn, when the kind's own weight is not what you want.
+ *
+ * **A DRAWING PROPERTY, NOT A FACT ABOUT THE FENCE**, which is why it is its
+ * own nullable column rather than a key in `attributes`. That bag holds what is
+ * TRUE of a thing — three strands, buried thirty inches — and the takeoff will
+ * compute from it; a stroke weight would be the one entry in it that means
+ * nothing on the ground and must never reach a materials list.
+ *
+ * NULL MEANS THE KIND'S OWN WEIGHT, so the relative weights the palette sets —
+ * a lane is drawn heavier than a fence on purpose — survive until somebody
+ * deliberately overrides one.
+ *
+ * In screen pixels, not feet. A width in feet would be truer to a drawing and
+ * would also make a waterline invisible at parcel zoom and forty pixels wide at
+ * gate zoom, which is not what anybody adjusting a line thickness wants.
+ */
+export const LINE_WIDTH_MIN = 0.5;
+export const LINE_WIDTH_MAX = 12;
+
+export const LINE_WIDTH_PRESETS: { label: string; width: number }[] = [
+  { label: "Hairline", width: 1 },
+  { label: "Thin", width: 1.5 },
+  { label: "Medium", width: 2.5 },
+  { label: "Thick", width: 4 },
+  { label: "Heavy", width: 6 },
+];
+
+export function isLineWidth(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= LINE_WIDTH_MIN &&
+    value <= LINE_WIDTH_MAX
+  );
+}
+
+/**
+ * The width to draw with: the override if there is a usable one, the kind's
+ * own otherwise.
+ *
+ * TOTAL BY CONSTRUCTION, like every other reader here — the column is numeric
+ * and nullable and a value outside the range means the default rather than a
+ * line drawn a thousand pixels wide.
+ */
+export function resolveWidth(
+  kind: string,
+  shape: GeometryShape,
+  override: number | null | undefined,
+): number {
+  return isLineWidth(override) ? override : featureStyle(kind, shape).width;
 }
 
 /**

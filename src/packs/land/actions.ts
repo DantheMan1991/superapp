@@ -103,6 +103,8 @@ function toResult(err: unknown): { error: string } {
         return { error: err.message };
       case "INVALID_FEED":
         return { error: err.message };
+      case "INVALID_WIDTH":
+        return { error: err.message };
     }
   }
   console.error("land action failed", err);
@@ -858,6 +860,9 @@ const featureSchema = z.object({
   geometry: z.unknown().optional(),
   attributes,
   fedById: z.string().uuid().nullable().optional(),
+  // Bounds match the CHECK and `isLineWidth`. Null puts it back to the kind's
+  // own weight, which is why it is nullable rather than merely optional.
+  lineWidth: z.number().min(0.5).max(12).nullable().optional(),
   notes: z.string().max(5000).optional(),
 });
 

@@ -28,8 +28,11 @@ the first act of building it. Agreed 2026-08-15:
 | **2a.1b** | **Find my parcels** — the county's own boundary by parcel number or tax mailing address | **shipped 2026-08-19** |
 | **2a.2** | **Standing in a field** — point-in-polygon fills the paddock in for you | **shipped 2026-08-19** |
 | **2b.0** | **The as-built layer** — `land_features`, `planned`/`built`/`removed`, symbology, the length function, the aerial/plan toggle | **shipped 2026-08-28** |
-| 2b.1 | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | |
-| 2b.2 | **"What is here"** — the phone screen: what am I standing on, within 100 ft | |
+| 2b.1 | **Walk to place a point** — an input mode for every kind, with the accuracy figure shown. [Designed 2026-08-29](#the-paddock-layout--designed-2026-08-29-not-yet-built) | |
+| 2b.2 | **Subdivide** — walk the lane, say how many, get n planned paddocks with their dividing fences and gates. `planned` arrives on zones | |
+| 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | |
+| 2b.4 | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | |
+| ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
 
@@ -47,8 +50,8 @@ no coordinates, so a map shipped without a way to draw would render an empty
 grey rectangle and prove nothing.
 
 **Never in `land`:** profit per acre (downstream of the allocation engine), the
-grazing wedge and dry-matter measurement, and every **optimizer** — a routine
-that decides a layout for you, of which water layout is the named example.
+grazing wedge and dry-matter measurement, and any **optimizer whose output
+cannot be checked by eye** — pipe sizing, friction loss, gravity versus pumped.
 Operations first, planning second.
 
 **That rule used to say "every planner", and it was wrong** — corrected
@@ -58,7 +61,19 @@ OPTIMIZER designs for you: a spanning tree over hydrant points, gravity versus
 pumped, pipe sizing. It stays out, and the category design already drew that
 line for a second reason — *"this is planning support, not engineering… pipe
 sizing, friction loss and pump selection are somebody's stamped design and the
-liability is not ours to carry."* A TAKEOFF is arithmetic on a shape you drew
+liability is not ours to carry."*
+
+**Sharpened again 2026-08-29, and the qualifier is the whole rule now.** The
+2026-08-28 wording banned every optimizer, which would also have banned dividing
+a paddock into four equal strips — arithmetic with a VISIBLE answer, where being
+wrong means you look at it and drag it. What actually needs refusing is output
+nobody can verify by looking, because that is where a wrong number becomes
+somebody's stamped design. A layout you can see is a PROPOSAL, and the
+planned/built machinery already exists to hold proposals. Water layout stays
+out on the original grounds, which were never about optimisation as such. See
+[The paddock layout](#the-paddock-layout--designed-2026-08-29-not-yet-built).
+
+A TAKEOFF is arithmetic on a shape you drew
 yourself: 1,240 ft of fence ÷ 8 ft spacing = 156 posts. That is in, and it is
 slice 2b. Nothing about it decides anything for anybody.
 
@@ -317,6 +332,220 @@ absorbs it with no new concept, which is the test of whether deferring something
 is safe.
 
 Ship the questions, not the toolbox.
+
+## The paddock layout — designed 2026-08-29, NOT YET BUILT
+
+**Read this before starting 2b.1.** It is the design for 2b.1 through 2b.4, and
+it changes what the pack is FOR in a way worth understanding before touching it.
+
+### The direction of causality flips, and that is the whole point
+
+Everything built through 2b.0 treats the map as a **record of what exists**. You
+trace what is there, and the drawing is checked against the ground. What the
+founder asked for on 2026-08-29 is the opposite: **a plan you execute in the
+field.** In his words — *"you click on the start of a paddock and using GPS it
+directs you until you are standing right in the right spot to set the posts and
+wire."*
+
+**And he identified the reason it cannot be built on 2b.0's foundation:** *"It
+is not accurate enough for me to just draw lines on a map and then go out in the
+field and assume I am putting them in close to the right spot."*
+
+That is correct, and it is the load-bearing fact of this whole design:
+
+  - **NAIP imagery** is georeferenced to within a few metres of truth. A line
+    traced perfectly off the photo can sit several metres from where it looks.
+  - **Phone GPS** is roughly 3–5 m under open sky and worse under a tree line.
+
+**Trace off imagery and navigate by GPS and those errors are INDEPENDENT, so
+they add.** Five to ten metres is a visible dogleg in a fence run.
+
+### The fix is his, and it is not the obvious one
+
+*"I picture out in the field and standing in the areas where the path is and
+setting location in the app."*
+
+**Walked points are not more accurate in absolute terms — they are more
+accurate RELATIVE TO EACH OTHER AND TO YOU LATER.** The same phone, in similar
+sky, on similar satellites, is wrong in much the same direction twice. So
+walking a line and later navigating back to it lands far closer than either
+error figure suggests; plausibly 1–2 m where the absolute figure is 5.
+
+Trace-then-navigate stacks two unrelated errors. Walk-then-navigate cancels most
+of one. **That is why 2b.1 comes first**: it is the assumption everything else
+rests on, and it should be proved by walking a tree line before anything is
+built on top of it.
+
+**THE STANDING RULE THIS PRODUCES: survey by walking, not by tracing, for
+anything you intend to BUILD.** Tracing stays right for recording what is
+already there, which is what 2b.0 is for.
+
+### Enclosure detection is NOT needed, and that matters
+
+The founder originally wanted *"click on a fenced in area and say add 4 paddocks
+to this"*, which reads as inferring a polygon from a ring of fence lines. That
+is genuinely hard — hand-traced fences do not meet, so the ring does not close
+and a flood fill escapes into the rest of the parcel.
+
+**It is also not required for anything he described.** "Add 4 paddocks to this"
+subdivides something that is ALREADY a polygon: a parcel, a zone, or an area
+that was walked. The operation is *divide this polygon into n pieces*, which
+needs no topology inference at all. Enclosure detection is a later convenience
+for ground that exists only as loose lines, and it is off the critical path.
+
+### The lane makes the layout EASIER, not harder
+
+This looked like a complication and is the opposite. *"Divide a polygon into 4
+efficient pieces"* is badly posed — efficient by area, by fence length, or by
+shape? Those fight.
+
+**"Every paddock must touch the lane" collapses the search space to one answer:
+parallel strips perpendicular to the lane.** One parameter (the lane's
+direction), n−1 cuts, equal area each. A sweep with a binary search on the
+offset — deterministic, fast, and checkable by eye, which is the property that
+matters most (see the rule below).
+
+**Equal AREA, with drag to adjust.** Settled with the founder. Equal grazing
+DAYS is what rotational grazing actually wants, and it depends on forage — which
+is the plate-meter treadmill this dossier already refuses. Equal area is the
+honest approximation and the drag handle is the escape.
+
+**A BENT LANE IS WHERE THIS GETS FIDDLY, and the founder has said the lane's
+shape follows the ground.** Cuts perpendicular to the lane's local direction fan
+out around a dogleg and can CROSS each other on the inside of the bend,
+producing a wedge that is not a paddock. **Detect the crossing and say so**
+rather than silently emitting a bad shape. A cleverer algorithm exists; it does
+not earn its keep against a drag handle.
+
+**Lane position is the founder's, not the app's.** Down the middle serves both
+sides and halves the lane fence per paddock; along an edge serves one. Show the
+difference as fence-feet-per-paddock-served and let him choose. Planning
+support, not a decision made for him.
+
+### THE CORRECTION: the layout creates ZONES, not just fences
+
+**The first version of this design said the layout should output proposed FENCES
+and let a zone be created once the fence was built. The founder pushed back and
+he was right.** Recorded here because the reasoning is what matters:
+
+  - **It did not remove enclosure detection, it deferred it.** When the fence
+    went up, something would have had to work out what polygon those fences
+    enclosed — the exact problem this design avoids — and deferred it to the
+    worst possible moment, standing in a field.
+  - **The layout ALREADY KNOWS the polygons.** It computed them to cut the
+    strips. Throwing that away and re-deriving it later is silly.
+
+**And the better reason, which is a fact about farms rather than about code: a
+paddock boundary is not always a fence.** A creek, a road, a hedge, a bluff.
+Zone geometry and fence geometry coincide often and need not, so they are two
+objects rather than one duplicated — which is what makes storing both correct
+instead of merely convenient.
+
+**So the layout is ONE ACT that creates n planned zones AND their dividing
+fences and gates.** The paddocks are the point; the fences are what you go and
+build.
+
+### `planned` arrives on `land_zones`, and it changes five reads
+
+`land_zones.status` is `active | retired`. `planned` goes on the front, which is
+the same lifecycle the pack already models — but it changes what several
+existing reads MEAN, and each is a decision rather than a filter to sprinkle on:
+
+| Read | A planned zone | Why |
+| --- | --- | --- |
+| `zoneAtPoint` | **excluded** | You are not standing in a paddock that has no fence round it |
+| `dimension_members` | **not synced** | A cost object for unfenced ground puts empty columns in every report. It syncs when it goes active |
+| Occupancy | **refused** | With a message saying to build it first, not a constraint violation |
+| Rest / rotation | **excluded** | It would dilute every paddock-count and rest figure |
+| The map and the list | **shown, ghosted** | Same treatment a planned fence already gets |
+
+Five call sites to audit. Not a rewrite, and cheaper than the alternative of
+inventing a second table for proposed ground.
+
+### Gates: draw them, never store their state
+
+The founder's rotation is *"all paddocks gated closed until it is time to move
+them; open that one and close the one they are coming from."*
+
+A gate is a physical thing with a position, worth drawing, and the layout can
+place one where each paddock meets the lane for free. **Its open/closed state
+must not be stored.** Apply the pack's own test:
+
+  - *"Which gate do I open next?"* — the rotation order answers it.
+  - *"Where are the cows?"* — occupancy answers it, and is already written every
+    time they move.
+
+The paddock they are in has its gate open. That is DERIVABLE, and a stored copy
+is a second source of truth that goes wrong the first time somebody forgets to
+tap — leaving the app insisting a gate is shut while you are looking at it
+hanging open.
+
+### Walk-to-place is an INPUT MODE, not a feature
+
+*"This ability to walk the field and click to set a point... should be available
+for all of the items — tree line, underground electric etc."* Right, and framing
+it as an input mode is what makes it small.
+
+It is a second way to place a vertex in the tool that already exists:
+
+  - **Tap the map** — where you are now
+  - **Use my location** — a button that drops a vertex at the GPS position
+
+Same geometry, same live measurement, same save path, every kind for free.
+
+  - **TAP AT CORNERS, NOT A CONTINUOUS TRACK.** Settled with the founder. A
+    recorded track eats battery, captures every wobble in a walk, and needs
+    simplifying afterwards anyway. A fence has corners.
+  - **SHOW THE ACCURACY FIGURE NEXT TO THE BUTTON.** `coords.accuracy` is
+    reported by every browser and a vertex dropped at ±20 m is one to redo. A
+    screen that shows a position without its accuracy is the screen that gets
+    a post planted in the wrong place with total confidence.
+  - This is also the machinery "what paddock am I in" was waiting for, which is
+    why that slice was absorbed rather than kept.
+
+### Navigating to a point, and the honest limit
+
+Bearing and distance from here to there, live — `haversineM` and an azimuth,
+both small. What is not small is the truth about the last few metres:
+
+  - **Consumer GPS will not reliably close better than about 3 m.** Fine for
+    polywire. Marginal for permanent corner posts.
+  - **The accuracy figure is part of the instruction**, not decoration. "Within
+    3 m" and "within 20 m" mean different things about whether to dig.
+  - **Centimetres mean an external RTK receiver and a correction service** — a
+    few hundred dollars of hardware, not code. Worth knowing it exists. Nothing
+    here should be built assuming it.
+
+### The optimizer rule needs a sharper edge, for the second time
+
+The build log of 2026-08-28 corrected *"never a planner"* to *"never an
+optimizer"*. Auto-layout is an optimizer, so either that was wrong or the rule
+is still blunt. It is the rule.
+
+What the ban protects against is **output you cannot check by looking** — pipe
+sizing, friction loss, gravity analysis, where being wrong is somebody's stamped
+design and the liability is not ours. Dividing a polygon into four equal strips
+is not that. It is arithmetic with a visible answer, and if it is wrong you see
+it and drag it.
+
+**The rule, sharpened: an optimizer is banned when its output cannot be verified
+by eye.** Layout you can see is a PROPOSAL, and the planned/built machinery
+already exists to hold proposals. Water layout stays banned on the original
+grounds, which were never about optimisation as such.
+
+### What to resist
+
+  - **Storing gate state.** Above, and it is the most tempting one.
+  - **A continuous GPS track.** Corners, on a button. The 2b.0 rule stands: this
+    is a button, not a background service, and nothing here needs to know where
+    anybody was an hour ago.
+  - **A cleverer algorithm for the bent lane.** Report the crossing, offer the
+    handle.
+  - **Equal grazing days.** It needs forage measurement, which this dossier
+    refuses for good reasons that have not changed.
+  - **Enclosure detection.** Off the critical path; revisit only when there are
+    enough WALKED fences to know whether they close.
+  - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
 

@@ -42,8 +42,61 @@ export interface MultiPolygon {
   coordinates: LinearRing[][];
 }
 
-/** What a parcel or a zone stores. Lines and points are slice 2b. */
+/** What a parcel or a zone stores. A boundary is always an area. */
 export type Boundary = Polygon | MultiPolygon;
+
+export interface Point {
+  type: "Point";
+  coordinates: Position;
+}
+
+export interface LineString {
+  type: "LineString";
+  coordinates: Position[];
+}
+
+export interface MultiLineString {
+  type: "MultiLineString";
+  coordinates: Position[][];
+}
+
+/**
+ * What a FEATURE stores (slice 2b) — a superset of `Boundary`.
+ *
+ * A trough is a point, a fence is a line, a building is an area, and all three
+ * are one table because they are one kind of thing: something on the ground
+ * with a status. **The type is wider than `Boundary` and the two are not
+ * interchangeable** — a parcel boundary that could legally be a Point would
+ * make every acreage in the pack optional.
+ *
+ * MultiLineString exists because a fence with a gate in it is one fence and two
+ * runs of wire, and forcing that to be two features would make "how long is the
+ * north fence" a question you have to add up by hand.
+ */
+export type FeatureGeometry = Boundary | Point | LineString | MultiLineString;
+
+/**
+ * What a geometry IS, for symbology and for measurement.
+ *
+ * Deliberately three words rather than six GeoJSON type names: a renderer cares
+ * whether to draw a marker, a stroke or a fill, and a measurement cares whether
+ * the answer is a position, a length or an area. Nothing in this pack needs to
+ * branch on Polygon-versus-MultiPolygon, and every place that tried to would
+ * have to handle both anyway.
+ */
+export type GeometryShape = "point" | "line" | "area";
+
+export function shapeOf(geometry: FeatureGeometry): GeometryShape {
+  switch (geometry.type) {
+    case "Point":
+      return "point";
+    case "LineString":
+    case "MultiLineString":
+      return "line";
+    default:
+      return "area";
+  }
+}
 
 /** Exact, by definition: 1 international acre = 4046.8564224 m². */
 const SQ_M_PER_ACRE = 4046.8564224;
@@ -114,8 +167,9 @@ export function parseBoundary(input: unknown): ParseResult {
     return validateBoundary(node);
   }
   if (typeof node.type === "string") {
-    // Points and lines are real land features — troughs, fences, lanes — and
-    // they are slice 2b. Refusing them by name beats "invalid GeoJSON".
+    // Points and lines are real land features — troughs, fences, lanes — but
+    // they live on `land_features`, not on a parcel or a zone. Refusing them by
+    // name beats "invalid GeoJSON"; `parseFeatureGeometry` is what accepts them.
     return {
       ok: false,
       error: `A boundary has to be a Polygon or MultiPolygon. That is a ${node.type}.`,
@@ -202,6 +256,224 @@ export function asBoundary(value: unknown): Boundary | null {
   if (value === null || value === undefined) return null;
   const result = validateBoundary(value);
   return result.ok ? result.boundary : null;
+}
+
+// ----------------------------------------------------- feature geometry ---
+
+/**
+ * The same job as `validateBoundary`, over the wider feature type.
+ *
+ * SEPARATE FUNCTIONS RATHER THAN A FLAG, deliberately. A parcel's boundary and
+ * a feature's geometry accept different things, and a shared validator with a
+ * `allowPoints` parameter would put the decision at every call site — where
+ * getting it wrong means a parcel whose "boundary" is a single point and whose
+ * acreage is therefore silently zero. Two functions cannot be called wrongly.
+ *
+ * A LINE NEEDS TWO POSITIONS AND A RING NEEDS FOUR. A one-point line is what a
+ * drawing tool leaves behind when somebody clicks once and changes their mind,
+ * and it measures zero feet while looking like a fence.
+ */
+export type FeatureParseResult =
+  | { ok: true; geometry: FeatureGeometry }
+  | { ok: false; error: string };
+
+function validPosition(value: unknown): value is Position {
+  if (!Array.isArray(value) || value.length < 2) return false;
+  const [lon, lat] = value;
+  if (typeof lon !== "number" || !Number.isFinite(lon)) return false;
+  if (typeof lat !== "number" || !Number.isFinite(lat)) return false;
+  return lon >= -180 && lon <= 180 && lat >= -90 && lat <= 90;
+}
+
+function validLine(value: unknown): value is Position[] {
+  return (
+    Array.isArray(value) && value.length >= 2 && value.every(validPosition)
+  );
+}
+
+/** Drop altitude and anything after it, as `toRing` does for boundaries. */
+function toLine(line: Position[]): Position[] {
+  return line.map((p) => [p[0], p[1]] as Position);
+}
+
+export function validateFeatureGeometry(input: unknown): FeatureParseResult {
+  if (!input || typeof input !== "object") {
+    return { ok: false, error: "That is not GeoJSON." };
+  }
+  const node = input as Record<string, unknown>;
+
+  if (node.type === "Point") {
+    if (!validPosition(node.coordinates)) {
+      return {
+        ok: false,
+        error:
+          "That point is not usable — coordinates have to be longitude then latitude.",
+      };
+    }
+    const [lon, lat] = node.coordinates;
+    return { ok: true, geometry: { type: "Point", coordinates: [lon, lat] } };
+  }
+
+  if (node.type === "LineString") {
+    if (!validLine(node.coordinates)) {
+      return {
+        ok: false,
+        error:
+          "That line is not usable — it needs at least two points, and coordinates have to be longitude then latitude.",
+      };
+    }
+    return {
+      ok: true,
+      geometry: { type: "LineString", coordinates: toLine(node.coordinates) },
+    };
+  }
+
+  if (node.type === "MultiLineString") {
+    const lines = node.coordinates;
+    if (!Array.isArray(lines) || lines.length === 0 || !lines.every(validLine)) {
+      return {
+        ok: false,
+        error: "One of those lines is not usable — each needs at least two points.",
+      };
+    }
+    return {
+      ok: true,
+      geometry: {
+        type: "MultiLineString",
+        coordinates: lines.map((l) => toLine(l as Position[])),
+      },
+    };
+  }
+
+  const asArea = validateBoundary(input);
+  if (asArea.ok) return { ok: true, geometry: asArea.boundary };
+  if (node.type === "Polygon" || node.type === "MultiPolygon") return asArea;
+
+  return {
+    ok: false,
+    error: "A feature has to be a point, a line or an area.",
+  };
+}
+
+/**
+ * A feature geometry out of whatever somebody pasted — the `parseBoundary`
+ * courtesy, extended to points and lines. Unwraps a Feature and a
+ * single-shape FeatureCollection for the same reason: that is what every
+ * exporter actually hands you.
+ */
+export function parseFeatureGeometry(input: unknown): FeatureParseResult {
+  let value = input;
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text) return { ok: false, error: "Nothing pasted." };
+    try {
+      value = JSON.parse(text);
+    } catch {
+      return { ok: false, error: "That is not valid JSON." };
+    }
+  }
+  if (!value || typeof value !== "object") {
+    return { ok: false, error: "That is not GeoJSON." };
+  }
+
+  const node = value as Record<string, unknown>;
+  if (node.type === "FeatureCollection") {
+    const features = Array.isArray(node.features) ? node.features : [];
+    const shapes = features.filter(
+      (f): f is Record<string, unknown> =>
+        Boolean(f) && typeof f === "object" && "geometry" in f,
+    );
+    if (shapes.length === 0) {
+      return { ok: false, error: "That file has no shapes in it." };
+    }
+    if (shapes.length > 1) {
+      return {
+        ok: false,
+        error: `That file has ${shapes.length} shapes in it. Paste just the one for this feature.`,
+      };
+    }
+    return parseFeatureGeometry(shapes[0].geometry);
+  }
+  if (node.type === "Feature") return parseFeatureGeometry(node.geometry);
+
+  return validateFeatureGeometry(node);
+}
+
+/**
+ * Is this stored jsonb a feature geometry this code can read?
+ *
+ * Same total-by-construction discipline as `asBoundary`: a row written by hand
+ * or by an older version degrades to "no geometry" rather than crashing the
+ * map. **A feature with no readable geometry is still a real row** — it has a
+ * name, a kind and a status, and it should appear in the list saying it needs
+ * redrawing rather than vanishing from it.
+ */
+export function asFeatureGeometry(value: unknown): FeatureGeometry | null {
+  if (value === null || value === undefined) return null;
+  const result = validateFeatureGeometry(value);
+  return result.ok ? result.geometry : null;
+}
+
+// ------------------------------------------------------------- distance ---
+
+/**
+ * Great-circle distance between two positions, in metres.
+ *
+ * **THE FUNCTION THE PACK HAS BEEN MISSING**, and the one that makes a site
+ * plan a tool rather than a picture. Three questions run through it: how long
+ * is this fence, how much wire does it need, and what am I standing next to.
+ *
+ * Haversine on a sphere of the same WGS84 radius `ringAreaSqM` uses, so a
+ * length and an area computed here are consistent with each other. The
+ * ellipsoidal answer (Vincenty) differs by around 0.3% at worst, which is far
+ * inside the error of a line traced off aerial imagery by hand.
+ */
+export function haversineM(a: Position, b: Position): number {
+  const [lon1, lat1] = a;
+  const [lon2, lat2] = b;
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * sinLon * sinLon;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function pathLengthM(path: Position[]): number {
+  let total = 0;
+  for (let i = 1; i < path.length; i += 1) {
+    total += haversineM(path[i - 1], path[i]);
+  }
+  return total;
+}
+
+/**
+ * How long is it, in metres.
+ *
+ * **A POINT IS ZERO AND AN AREA IS ITS PERIMETER**, and neither is a fudge. A
+ * perimeter is the honest length of an area feature because the question people
+ * ask about a drawn paddock is how much fence goes round it — the same question
+ * they ask about a fence line. Holes are included: an interior fence round a
+ * pond is fence you have to build.
+ */
+export function geometryLengthM(geometry: FeatureGeometry): number {
+  switch (geometry.type) {
+    case "Point":
+      return 0;
+    case "LineString":
+      return pathLengthM(geometry.coordinates);
+    case "MultiLineString":
+      return geometry.coordinates.reduce((t, l) => t + pathLengthM(l), 0);
+    case "Polygon":
+      return geometry.coordinates.reduce((t, r) => t + pathLengthM(r), 0);
+    default:
+      return geometry.coordinates.reduce(
+        (t, rings) => t + rings.reduce((s, r) => s + pathLengthM(r), 0),
+        0,
+      );
+  }
 }
 
 // ----------------------------------------------------------------- area ---

@@ -3,17 +3,29 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
-import { asBoundary, boundaryAreaAcres } from "../src/packs/land/core/geo";
+import {
+  asBoundary,
+  asFeatureGeometry,
+  boundaryAreaAcres,
+  geometryLengthM,
+} from "../src/packs/land/core/geo";
 import {
   LandError,
   PARCEL_DIMENSION,
   ZONE_DIMENSION,
   combineParcels,
   completedStayDays,
+  createFeature,
   createParcel,
   createZone,
   currentUses,
+  deleteFeature,
   deleteOccupancy,
+  getFeature,
+  listFeatures,
+  setFeatureGeometry,
+  setFeatureStatus,
+  updateFeature,
   endOccupancy,
   endZoneUse,
   listOccupancy,
@@ -1610,6 +1622,361 @@ d("land ops", () => {
           combineParcels(tx, staffCtx(), { survivorId: a.id, absorbedIds: [b.id] }),
         ),
       ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+  });
+
+  // ---- features (slice 2b.0) -------------------------------------------
+
+  describe("features", () => {
+    const fenceLine = {
+      type: "LineString",
+      coordinates: [
+        [-82.5, 40.4],
+        [-82.5, 40.401],
+      ],
+    };
+
+    it("is a CHORE, not a decision — staff may draw what they built", async () => {
+      // The deliberate difference from parcels and zones. A feature syncs no
+      // dimension member, so `requireOwnerRole` never forces the owner line,
+      // and the person who knows where the waterline went is not the owner.
+      const parcel = await newParcel("Staff Draws");
+      const feature = await asOwner((tx) =>
+        createFeature(tx, staffCtx(), {
+          parcelId: parcel.id,
+          kind: "waterline",
+          name: "To the barn",
+          geometry: fenceLine,
+        }),
+      );
+      expect(feature.kind).toBe("waterline");
+      expect(feature.status).toBe("built");
+    });
+
+    it("does NOT become a cost object — land owns where, assets owns cost", async () => {
+      const parcel = await newParcel("No Dimension");
+      const feature = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), { parcelId: parcel.id, kind: "fence" }),
+      );
+      const members = await membersOf(ZONE_DIMENSION);
+      const parcels = await membersOf(PARCEL_DIMENSION);
+      expect(members.map((m) => m.packEntityId)).not.toContain(feature.id);
+      expect(parcels.map((m) => m.packEntityId)).not.toContain(feature.id);
+    });
+
+    it("defaults to built, because tracing what is there is the common act", async () => {
+      const parcel = await newParcel("Default Status");
+      const feature = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), { parcelId: parcel.id, kind: "fence" }),
+      );
+      expect(feature.status).toBe("built");
+    });
+
+    it("takes a feature with NO geometry, which means not drawn yet", async () => {
+      const parcel = await newParcel("Undrawn");
+      const feature = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          name: "South line",
+        }),
+      );
+      expect(feature.geometry).toBeNull();
+    });
+
+    it("PROMOTES a proposal in one act, keeping the id and the geometry", async () => {
+      // The act the status column exists for. Nothing is redrawn, so nothing
+      // can be redrawn differently — which is what makes the plan a record.
+      const parcel = await newParcel("Promotion");
+      const planned = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          status: "planned",
+          geometry: fenceLine,
+          attributes: { wire_count: 3, hot: true },
+        }),
+      );
+
+      const built = await asOwner((tx) =>
+        setFeatureStatus(tx, staffCtx(), planned.id, "built"),
+      );
+      expect(built.id).toBe(planned.id);
+      expect(built.status).toBe("built");
+      expect(built.geometry).toEqual(planned.geometry);
+      expect(built.attributes).toEqual({ wire_count: 3, hot: true });
+    });
+
+    it("refuses a status it does not know", async () => {
+      const parcel = await newParcel("Bad Status");
+      const feature = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), { parcelId: parcel.id, kind: "fence" }),
+      );
+      await expect(
+        asOwner((tx) => setFeatureStatus(tx, ownerCtx(), feature.id, "proposed")),
+      ).rejects.toMatchObject({ code: "INVALID_STATUS" });
+    });
+
+    it("measures a redrawn line rather than trusting what was sent", async () => {
+      const parcel = await newParcel("Redraw");
+      const feature = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), { parcelId: parcel.id, kind: "fence" }),
+      );
+      const drawn = await asOwner((tx) =>
+        setFeatureGeometry(tx, staffCtx(), feature.id, fenceLine),
+      );
+      const geometry = asFeatureGeometry(drawn.geometry);
+      expect(geometry).not.toBeNull();
+      // ~111 m: a thousandth of a degree of latitude.
+      expect(geometryLengthM(geometry!)).toBeGreaterThan(110);
+      expect(geometryLengthM(geometry!)).toBeLessThan(112);
+    });
+
+    it("refuses a one-point line with the parser's own words", async () => {
+      const parcel = await newParcel("Stub Line");
+      await expect(
+        asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            kind: "fence",
+            geometry: { type: "LineString", coordinates: [[-82.5, 40.4]] },
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "INVALID_GEOMETRY" });
+    });
+
+    it("refuses a feature on a parcel that does not exist", async () => {
+      await expect(
+        asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: randomUUID(),
+            kind: "fence",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "PARCEL_INVALID" });
+    });
+
+    describe("the attribute bag", () => {
+      it("keeps scalars and drops a cleared field rather than storing blank", async () => {
+        const parcel = await newParcel("Attributes");
+        const feature = await asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            kind: "fence",
+            attributes: {
+              wire_count: 3,
+              hot: true,
+              note: "  spaced 8ft  ",
+              cleared: "   ",
+            },
+          }),
+        );
+        expect(feature.attributes).toEqual({
+          wire_count: 3,
+          hot: true,
+          note: "spaced 8ft",
+        });
+      });
+
+      it("REPLACES the bag rather than merging, so a detail can be removed", async () => {
+        const parcel = await newParcel("Replace Bag");
+        const feature = await asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            kind: "fence",
+            attributes: { wire_count: 3, hot: true },
+          }),
+        );
+        const updated = await asOwner((tx) =>
+          updateFeature(tx, ownerCtx(), feature.id, {
+            attributes: { wire_count: 5 },
+          }),
+        );
+        expect(updated.attributes).toEqual({ wire_count: 5 });
+      });
+
+      it("refuses a nested document, which no reader here would understand", async () => {
+        const parcel = await newParcel("Nested");
+        await expect(
+          asOwner((tx) =>
+            createFeature(tx, ownerCtx(), {
+              parcelId: parcel.id,
+              kind: "fence",
+              attributes: { spec: { gauge: 12 } as unknown as string },
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "INVALID_ATTRIBUTES" });
+      });
+
+      it("refuses a key that would not be queryable in jsonb", async () => {
+        const parcel = await newParcel("Bad Key");
+        await expect(
+          asOwner((tx) =>
+            createFeature(tx, ownerCtx(), {
+              parcelId: parcel.id,
+              kind: "fence",
+              attributes: { "Wire Count": 3 },
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "INVALID_ATTRIBUTES" });
+      });
+    });
+
+    describe("what feeds what", () => {
+      it("points a fence at its energizer", async () => {
+        const parcel = await newParcel("Energized");
+        const charger = await asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            kind: "energizer",
+            name: "Barn charger",
+          }),
+        );
+        const fence = await asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            kind: "fence",
+            fedById: charger.id,
+          }),
+        );
+        expect(fence.fedById).toBe(charger.id);
+
+        // The read the column exists for: everything on one energizer, with no
+        // traversal and no graph.
+        const onCharger = await asOwner((tx) =>
+          listFeatures(tx, tenantId, { parcelId: parcel.id }),
+        );
+        expect(onCharger.filter((f) => f.fedById === charger.id)).toHaveLength(1);
+      });
+
+      it("refuses a source that has been removed", async () => {
+        const parcel = await newParcel("Pulled Charger");
+        const charger = await asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            kind: "energizer",
+            status: "removed",
+          }),
+        );
+        await expect(
+          asOwner((tx) =>
+            createFeature(tx, ownerCtx(), {
+              parcelId: parcel.id,
+              kind: "fence",
+              fedById: charger.id,
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "INVALID_FEED" });
+      });
+
+      it("refuses a source that does not exist", async () => {
+        const parcel = await newParcel("Ghost Charger");
+        await expect(
+          asOwner((tx) =>
+            createFeature(tx, ownerCtx(), {
+              parcelId: parcel.id,
+              kind: "fence",
+              fedById: randomUUID(),
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "INVALID_FEED" });
+      });
+
+      it("refuses to delete something other features run off", async () => {
+        // The FK would refuse anyway. This exists so the person gets a sentence
+        // rather than a constraint violation.
+        const parcel = await newParcel("Still Feeding");
+        const charger = await asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            kind: "energizer",
+          }),
+        );
+        await asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            kind: "fence",
+            fedById: charger.id,
+          }),
+        );
+        await expect(
+          asOwner((tx) => deleteFeature(tx, ownerCtx(), charger.id)),
+        ).rejects.toMatchObject({ code: "INVALID_FEED" });
+      });
+    });
+
+    it("DELETES a mistake, which is not the same act as marking it removed", async () => {
+      // `removed` means it was there and is not any more. A delete means it was
+      // never there — a stray double click, a trough on the wrong parcel.
+      const parcel = await newParcel("Mistake");
+      const feature = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), { parcelId: parcel.id, kind: "fence" }),
+      );
+      await asOwner((tx) => deleteFeature(tx, staffCtx(), feature.id));
+      expect(
+        await asOwner((tx) => getFeature(tx, tenantId, feature.id)),
+      ).toBeNull();
+
+      const removed = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          status: "removed",
+        }),
+      );
+      expect(
+        await asOwner((tx) => getFeature(tx, tenantId, removed.id)),
+      ).not.toBeNull();
+    });
+
+    it("lists by kind then name, so a plan reads as a legend", async () => {
+      const parcel = await newParcel("Legend Order");
+      await asOwner(async (tx) => {
+        await createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "waterline",
+          name: "To barn",
+        });
+        await createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          name: "South",
+        });
+        await createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          name: "North",
+        });
+      });
+      const listed = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id }),
+      );
+      expect(listed.map((f) => `${f.kind}:${f.name}`)).toEqual([
+        "fence:North",
+        "fence:South",
+        "waterline:To barn",
+      ]);
+    });
+
+    it("filters by status, which is how the map hides what was pulled out", async () => {
+      const parcel = await newParcel("Status Filter");
+      await asOwner(async (tx) => {
+        await createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          status: "built",
+        });
+        await createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          status: "planned",
+        });
+      });
+      const planned = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+      );
+      expect(planned).toHaveLength(1);
+      expect(planned[0].status).toBe("planned");
     });
   });
 });

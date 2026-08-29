@@ -27,7 +27,9 @@ the first act of building it. Agreed 2026-08-15:
 | **2a.1** | **The map** — MapLibre over NAIP aerial, and DRAWING in the same slice | **shipped 2026-08-19** |
 | **2a.1b** | **Find my parcels** — the county's own boundary by parcel number or tax mailing address | **shipped 2026-08-19** |
 | **2a.2** | **Standing in a field** — point-in-polygon fills the paddock in for you | **shipped 2026-08-19** |
-| 2b | **Features** — points and lines: troughs, hydrants, wells, fences, lanes. The `assets` seam | |
+| **2b.0** | **The as-built layer** — `land_features`, `planned`/`built`/`removed`, symbology, the length function, the aerial/plan toggle | **shipped 2026-08-28** |
+| 2b.1 | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | |
+| 2b.2 | **"What is here"** — the phone screen: what am I standing on, within 100 ft | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
 
@@ -45,20 +47,45 @@ no coordinates, so a map shipped without a way to draw would render an empty
 grey rectangle and prove nothing.
 
 **Never in `land`:** profit per acre (downstream of the allocation engine), the
-grazing wedge and dry-matter measurement, and every planner including water
-layout. Operations first, planning second — and no planner before three
-examples exist.
+grazing wedge and dry-matter measurement, and every **optimizer** — a routine
+that decides a layout for you, of which water layout is the named example.
+Operations first, planning second.
 
-## The site plan — brainstormed 2026-08-28, NOT YET BUILT
+**That rule used to say "every planner", and it was wrong** — corrected
+2026-08-28 with the founder, who had never agreed to it and pointed out that he
+had asked for planning from the start. One word was covering two things. An
+OPTIMIZER designs for you: a spanning tree over hydrant points, gravity versus
+pumped, pipe sizing. It stays out, and the category design already drew that
+line for a second reason — *"this is planning support, not engineering… pipe
+sizing, friction loss and pump selection are somebody's stamped design and the
+liability is not ours to carry."* A TAKEOFF is arithmetic on a shape you drew
+yourself: 1,240 ft of fence ÷ 8 ft spacing = 156 posts. That is in, and it is
+slice 2b. Nothing about it decides anything for anybody.
+
+## The site plan — designed 2026-08-28, **2b.0 SHIPPED**
+
+**Read this before starting 2b.1 or 2b.2.** The first version of this section
+was a brainstorm; it was argued through with the founder the same afternoon and
+**four of its conclusions changed**, and then 2b.0 was built from it that
+evening. What follows is the settled shape. **The as-built layer, the status
+column, the symbology and the length function are now live**; plans, the saved
+takeoff and the phone screen are not. The sections below describe all of it,
+because the argument for the unbuilt half is the same argument that produced
+the built half — but the slice table above is what says which is which.
+
+2b was expected to split the way 2a did, and it did: the table + status +
+symbology + length pay for themselves on their own, and everything else waits
+on a consumer. It split when it came to be built, not before.
 
 **The founder's ask, in his words:** take the parcel map and identify what is
 actually there — tree lines, fencing rows, buildings — *"and then keep that map
 but also generate a site plan drawing that I can add features like fencing,
-gates, buildings, waterlines to. It needs measuring tools. A full suite."*
-
-**Read this before starting slice 2b.** It is the same slice seen from further
-out, and the shape below is what a session picking it up should argue with
-rather than re-derive.
+gates, buildings, waterlines to. It needs measuring tools. A full suite."* And,
+in the conversation that settled it: *"I just need it transferred to a line
+drawing"*; buried electric lines, and *"the fence has the 3 strand hot"*; a new
+fence where *"it then helps you figure out the materials you would need"*; and
+on the phone, *"it auto displays relevant information to whatever is at your
+location."*
 
 ### Most of the foundation is already here
 
@@ -70,90 +97,333 @@ natively, so it is free now and painful to retrofit."* Shipped and usable:
   - **Spherical area**, accurate enough to agree with a county figure to 0.003%
   - **Point-in-polygon**, bounding box, centroid — `core/geo.ts`
   - **Boundaries on parcels and zones**, validated and parsed
+  - **Terra Draw** already mounted and already lazy-loaded for the polygon mode.
+    Points and lines are modes it ships with.
 
-What is missing is a table for features, a length function, and the one decision
-below.
+### One map, two views, and NO transfer step
 
-### THE DECISION THAT DECIDES THE REST: as-built vs planned
+**Settled: the site plan is not a second drawing.** The founder's phrasing
+sounded like one — *"transferred to a line drawing"* — and the brainstorm left
+the choice open. It is one map, one set of georeferenced objects, and a basemap
+switch: aerial on to trace and to check reality, aerial off to read the plan.
 
-The ask contains two different things wearing the same clothes:
+**Why that is the whole answer and not a compromise.** The aerial is a TRACING
+SOURCE — you find the tree line on the photo because that is the only place it
+is visible — and the object you draw from it is stored in lat/long like
+everything else here. So there is nothing to transfer, nothing to copy, and no
+second coordinate frame to keep in step. A correction to a fence is a correction
+to both views, because there is only one fence.
 
-  - **What IS there.** A tree line, the existing perimeter fence, the barn.
-    Traced off imagery. A survey.
-  - **What MIGHT be there.** A fence you are costing, a waterline you have not
-    dug, a gate you are deciding the position of. A proposal.
+**What makes it read as a drawing is SYMBOLOGY, not a second surface.** With the
+imagery off, undifferentiated grey lines on white are worse than the photo. A
+tree line drawn scalloped and green, a fence with tick marks, buried electric
+dashed red, a waterline blue, a building as a filled polygon carrying its name:
+that lookup from feature kind to line style is the entire difference between "a
+plan" and "some lines", and it is a table rather than an engine. **This is where
+the drawing work actually is** — budget for it as the substance of the slice,
+not as polish at the end of it.
 
-**Same geometry, different status, and the difference is load-bearing:**
+The sheet-shaped parts of "a drawing" — north arrow, title block, scale bar, PDF
+export — answer no question on the list and are out of 2b.
 
-  - A *planned* waterline must not answer "which paddocks have water", which the
-    design already names as the binding constraint on rotation at 10×
-  - A *planned* fence must not become an `assets` row with a depreciation
-    schedule, because it does not exist and nothing has been spent
-  - But a planned thing has to be able to BECOME built in one act — redrawing it
-    to promote it would make the plan a sketchpad instead of a record
+### The unit of a feature: a thing you would say the name of
 
-**Get this in from the first migration.** It is the same argument the design
-already won about points and lines: free now, painful to retrofit. A `status` on
-the feature is probably enough; what must not happen is a separate "plans" table
-that duplicates geometry, because then a built fence and the plan it came from
-drift apart.
+**Settled, and it is the change that made the rest cheap.** The founder asked
+for *"individual fence posts"*, was asked what question a post row would answer,
+and said he does not need them.
 
-### Where it meets `assets`, already settled in the design
+**A fence is ONE LineString with attributes** — post spacing, wire count, which
+strands are hot, type — and posts are RENDERED as ticks along it and COUNTED by
+dividing. Store 400 posts instead and every promotion of a proposal to built is
+a 400-row transaction, four hundred rows can individually disagree with the line
+they sit on, and none of it answers a question the line did not.
+
+**The rule for what earns a row: something you would say the name of, or
+something another record points at.** A gate, a corner brace, a hydrant, a
+trough, a valve, a tank, an energizer — those are points, and they are named
+("the gate at the top of the lane"). Post #237 is not a thing anybody refers to.
+
+This is the same argument the pack has already won twice — a polywire strip is
+an AREA ON AN EVENT rather than a geometry, and a zone's use is a dated row
+rather than a column — and it lands the same way: model the thing people talk
+about, derive the rest.
+
+### Status: `planned` / `built` / `removed`, in the first migration
+
+**Unchanged from the brainstorm, and the mobile screen supplied a better
+justification than the one it was written with.** One table, a status column,
+promotion in place. Never a separate "plans" table duplicating geometry, or a
+built fence and the proposal it came from drift apart.
+
+The brainstorm justified it with reports — *a planned waterline must not answer
+"which paddocks have water"*. The sharper case is 2b's own phone screen:
+**standing in a field, the app must never tell you there is a buried electric
+line under you when that line is a proposal.** That is the status column earning
+its keep on day one rather than in some future report.
+
+`removed` is the third value, on the reasoning that already makes `land_parcels`
+`retired` and never deleted. **No dates on it** — a feature is not a dated
+history the way occupancy is, and nobody has asked where the fence ran in 2019.
+If that question arrives it is two nullable date columns, added cheaply.
+
+### Plans: a named set of proposals, with a SAVED takeoff
+
+**New in the 2026-08-28 conversation.** The founder asked for the materials list
+to be savable, and saving it pulls in a grouping the brainstorm had deferred.
+
+A plan is a **named set of planned features** — "north fence 2027", "waterline
+via the lane". Features carry a nullable `plan_id`. It is one small table doing
+three jobs at once:
+
+  - it is what a saved takeoff attaches to (a fence project is several runs,
+    some gates and a brace, not one line)
+  - it answers the mutual-exclusivity problem the brainstorm flagged and had no
+    answer for: two competing waterline routes are two plans, and only one gets
+    built
+  - it is what you mark built, by promoting its features
+
+**NO STATUS COLUMN ON A PLAN.** Its features already carry status, so "is it
+built" is derivable, and a second status is a second thing that can be wrong.
+
+**The saved quantities are a SNAPSHOT, and the drawing is allowed to drift from
+them.** Not a new rule: it is exactly what `land_parcels.area_acres` already
+does, where the declared figure is deliberately not recomputed from the geometry
+because *"they disagree for real reasons… the screens report the difference;
+nothing corrects it."* Same treatment here. You ordered from 1,240 ft, the line
+now measures 1,310 ft, the screen shows both. Recomputing on read would silently
+rewrite what you bought from, which is the one thing a saved estimate exists to
+prevent.
+
+**Line items are rows rather than a jsonb blob, and a line may be hand-added.** A
+materials list that can only hold what geometry produced is useless the first
+time you need insulators and a bag of staples, so an item's source feature is
+nullable: from the drawing, or typed in. Rows because the obvious next consumer
+is a bill for those materials and this repo already matches bills — a blob would
+have to be exploded the day anybody used it.
+
+**A unit cost is what you typed, on that line, on that day. It is NEVER a
+catalog.** The moment there is a price list there are vendors, quotes and
+effective dates, and 2b has quietly become purchasing. Quantities are the
+deliverable; a dollar figure is a convenience stored beside them.
+
+### Buried electric and hot wires: two asks, one cheap and one not
+
+*"All of that is important"*, so all of it is in — but the three parts are not
+the same size.
+
+  - *"The fence has the 3 strand hot"* is an **attribute** on the fence line.
+    Free.
+  - *"There is a buried electric line where you are at"* is a **feature** of its
+    own kind. Free.
+  - **"Why is this stretch dead"** is a CIRCUIT GRAPH, and it is the expensive
+    one: feature-to-feature connections and traversal through junctions.
+
+**The middle answer 2b should ship:** an energizer is a point feature, and a
+fence run carries a nullable `fed_by` pointing at it. That answers "show me
+everything on the north energizer" and "what feeds this run" with one column and
+no traversal at all. Real tracing waits until somebody is standing in front of a
+dead fence asking for it.
+
+### Measurement: one function buys three things
+
+`core/geo.ts` has area and containment and **no length**, and haversine distance
+is the missing piece behind all three of the slice's real questions:
+
+  1. **How long is this fence** — distance along a LineString
+  2. **What do I need to build it** — that same length, divided by spacing
+  3. **What is within 100 ft of me** — distance from a point to a LineString
+
+**Write it first.** It is a small pure function, area already exists and must be
+reused rather than re-derived on the client, and the rest of the slice waits on
+it.
+
+### "What is here": the mobile screen, and its boundary
+
+*"It auto displays relevant information to whatever is at your location"* is the
+strongest item on the list and it is almost entirely machinery that exists.
+Which zone am I in is `pointInBoundary`, **shipped in 2a.2** as
+`where-am-i.tsx`. What is near me is the length function above against a fixed
+radius (100 ft, not a setting). What it shows is the attribute bag: three
+strands hot, buried electric here, this trough is on the north line.
+
+**It is a button, not a background service.** No tracking, no breadcrumb trail,
+no location history. Battery and permissions both say on-demand, and nothing in
+this pack needs to know where anybody was an hour ago.
+
+### Where it meets `assets` — the seam is real, the column is not yet
 
 *"A fence has geometry from one and a cost, life and maintenance schedule from
-the other (fence is typically 7-year property)."* So a BUILT feature may point
-at an asset; a PLANNED one has no asset yet, which is a second reason status
-comes first. **`land` owns where it is, `assets` owns what it cost** — the same
-split `livestock` has with `inventory`, and the pack model's whole argument.
+the other (fence is typically 7-year property)."* **`land` owns where it is,
+`assets` owns what it cost.** Unchanged, and it now covers buildings too.
 
-### Measurement — one real gap
+**But the FK stays out of the first migration** — changed from the brainstorm,
+and confirmed with the founder ("I'd say we can link them later"). The status
+column genuinely is free-now-painful-later, because status changes what every
+read of the table MEANS. A nullable `asset_id` does not: it can be added at any
+point without reinterpreting a single existing row, and `assets.ts` itself
+refuses columns only a future routine would read. Drawing a barn creates a
+feature, not an asset. Linking is a later, separate act.
 
-`core/geo.ts` has area and containment and **no length**. A fence run, a
-waterline, a lane: all LineStrings, all needing haversine distance along the
-line. It is a small pure function and it is what makes the thing feel like a
-tool rather than a picture. Area already exists and should be reused, never
-re-derived on the client.
+### Answered: this is `land`'s site plan, not a neutral drawing surface
 
-### The open question a session should settle FIRST
+**The brainstorm left this open as the founder's call and it was settled
+2026-08-28: build it in `land`.** The Documents construction layer — drawings
+with markups and measurements — looks like the same tool and shares only its
+toolbar:
 
-**Is this `land`'s site plan, or a drawing surface `land` happens to use?**
+| | Land site plan | Documents markup |
+| --- | --- | --- |
+| Coordinates | lat/long, WGS84 | points on a sheet |
+| Length | haversine metres | pixels × a calibrated scale |
+| Background | NAIP tiles by z/x/y | one raster page |
+| Anchored to | a parcel, permanently | a document VERSION, superseded by rev C |
+| "Correct" means | agrees with the ground | agrees with the sheet |
 
-The founder has a second, closely related ambition already recorded: the
-Documents module's construction layer — *drawings with markups and
-measurements*. A site-plan editor and a drawing-markup tool are close cousins:
-both are "put shapes and dimensions over a base image and measure them".
+A surface serving both abstracts over the coordinate system, the unit, the
+background loader and the versioning target, which is four branches wearing an
+abstraction's clothes. **The pack has made this call before:** `land_occupancy`
+lives here rather than in a neutral core for exactly this reason — the table
+lives with the thing that reads it.
 
-Two honest answers, and the choice belongs to the founder rather than to
-whoever picks this up:
-
-  1. **Build it in `land`, farm-shaped.** Faster, and `land` is an agricultural
-     pack so it may name a hydrant without breaking ADR 0004. Risks building the
-     measuring and drawing surface twice.
-  2. **Build the surface neutral and let `land` supply the vocabulary.** Slower
-     to first value, but the construction client gets it free.
-
-**Do not start drawing tools before this is answered.** It is the difference
-between one surface and two.
+The reuse that may genuinely arrive is a Terra Draw toolbar component, and that
+is a UI extraction to perform the day a second real consumer exists, from
+working code rather than from a guess. `core/geo.ts` stays pure and is the only
+deliberate seam.
 
 ### What to resist
 
 *"A full suite"* is where this goes wrong, and the pack model already has the
-answer: **modules stay empty slots until a paying client pulls them in.** A
-CAD-lite editor is an enormous surface and most of it is never used.
+answer: **modules stay empty slots until a paying client pulls them in.**
 
-The honest test for each tool is what QUESTION it answers:
+Each tool justifies itself by the QUESTION it answers:
 
-  - the as-built layer earns its keep immediately — you can see your farm
-  - a length tool earns its keep the first time somebody asks *how many feet of
-    fence is that*
-  - a water layer earns its keep the first time it answers *which paddocks have
-    water*
-  - a general polyline-editing suite with layer groups and snapping earns
-    nothing until one of those questions needs it
+  - **the as-built layer** — *what is actually on my ground* — pays immediately
+  - **length** — *how many feet of fence is that*
+  - **the takeoff** — *what do I need to buy to build it*
+  - **"what is here"** — *what am I standing on*
+  - **water points against zones** — *which paddocks have water*, and this one
+    needs NO new math: `pointInBoundary` already ships
+
+Out of 2b, each because nothing on that list needs it: snapping and ortho
+constraints, layer groups and visibility management, an undo stack beyond what
+Terra Draw gives free, title blocks and PDF export, a price catalog, a status on
+a plan, individual posts, and circuit traversal.
+
+**Standalone dimension annotations are out too, and cost nothing to defer** — a
+fence's length renders on the fence, derived. A floating dimension between two
+arbitrary points is a construction want rather than a farm one, and if it ever
+arrives it is a feature of kind `dimension` with a two-point line. The model
+absorbs it with no new concept, which is the test of whether deferring something
+is safe.
 
 Ship the questions, not the toolbox.
 
 ## Build log
+
+### 2026-08-28 — Slice 2b.0: the site plan is one map with the aerial off (`claude/the-site-plan-design`)
+
+**`land_features`** — points, lines and areas on the ground, in one table, with
+`planned` / `built` / `removed` on every row. Migration `0233` (table) + `0234`
+(RLS), applied to dev AND production before the merge.
+
+**What shipped**
+
+- **`core/geo.ts` grew a length function**, which is what the design said to
+  write first and it was right: fence lengths, the future takeoff and the future
+  "what is within 100 ft of me" are all `haversineM`. `FeatureGeometry` is a
+  wider type than `Boundary` with its **own validator** — two functions rather
+  than one with a flag, because a shared validator would put the decision at
+  every call site, and getting it wrong there means a parcel whose "boundary" is
+  a single point and whose acreage is therefore silently zero.
+- **`core/length.ts`**, the sibling of `area.ts`, with one difference worth
+  knowing: **length has no canonical store.** Nothing writes a length, so there
+  is no `toMetres` matching `toAcres` — it is derived from the geometry every
+  time it is shown, and rounded to the whole unit because a line traced off
+  aerial imagery cannot support more.
+- **`core/features.ts`** — kinds, symbology, status styles. Industry-neutral
+  per ADR 0004: no `trough`, no `energizer`, both of which the founder wants and
+  both of which arrive through `packConfig.land.featureKinds`. An unknown kind
+  draws with the fallback for its shape and is never refused.
+- **The map**, `site-plan-map.tsx`, separate from `boundary-map.tsx` because
+  that one edits a single polygon and this one renders many features in two
+  states. Aerial/plan toggle, Terra Draw in point/line/polygon modes, live
+  measurement while drawing, click to select, promote in one act.
+
+**Three things that were only found by driving it**
+
+- **The cold start put the map on the arctic.** `boundary-map.tsx` passes
+  `bounds: CONTINENTAL_US` to the constructor and this one did not, so a parcel
+  with no boundary opened at zoom 0 over the null island. That reads as a broken
+  map rather than an empty one, and it is the same lesson 2a.1 wrote up. The
+  error handler was missing for the same reason and is now there — **MapLibre
+  errors are events, not exceptions.**
+- **The measurement said "Placed. Save it" in the middle of tracing a fence.**
+  Terra Draw's snapshot holds a `Point` for every vertex placed, so taking the
+  newest feature from it gets a vertex rather than the line.
+  `boundary-map.tsx` filters by geometry type and polygons never showed it.
+  `lastDrawn()` now filters, and the shape is held in state rather than
+  recomputed at save time — a redraw takes its shape from the geometry ALREADY
+  STORED, and the kind picker is free to say something else.
+- **The palette had the halo on the wrong side.** Near-white lines over a dark
+  casing read beautifully on the photograph and almost vanished on the plan,
+  where a white line sits on white paper. Found by clicking the toggle. It is
+  mid-tone ink with a **light** halo now: on the photo the halo separates the
+  line from a busy background, on paper it is invisible and the line carries
+  itself.
+
+**And one that matters more than the other three.** For a kind that is ALREADY
+dashed — every buried service is — `planned` at 0.75 opacity with a `[2,2]`
+dash was nearly indistinguishable from `built`. That is the exact confusion the
+status column exists to prevent, in the one place it matters most: somebody
+standing over a line deciding whether it is safe to dig. Colour carries the kind,
+so opacity is the only lever left, and it has to be wide enough to survive a
+dashed kind — **half strength, fine dots**. `tests/land-features.test.ts` locks
+the gap at 0.4 minimum so a future palette edit cannot quietly close it.
+
+**Decisions worth knowing**
+
+- **A fence is ONE row with a post spacing.** The founder asked for individual
+  posts, was asked what question a post row would answer, and said he does not
+  need them. The rule: a thing earns a row when somebody would say its name out
+  loud, or when another record points at it.
+- **Features hang off a PARCEL, never a zone.** A fence runs *between* paddocks
+  and a lane runs *through* them, so a `zone_id` would force a choice that is
+  wrong for the commonest features on any farm. Which zones a feature touches is
+  a spatial question with a spatial answer.
+- **Member-write, not owner-write**, and it is a deliberate difference from
+  parcels and zones. Those are owner-only because `upsertDimensionMember` calls
+  `requireOwnerRole`; a feature syncs no dimension, so the forcing reason is
+  absent. Drawing the fence you just built is a chore, and the person who knows
+  where the waterline went is not the owner.
+- **The `assets` FK is NOT in this migration**, changed from the brainstorm and
+  confirmed with the founder. Status is free-now-painful-later because it
+  changes what every read MEANS; a nullable `asset_id` does not.
+- **`attributes` and `metadata` are two bags with two owners** — the pack's and
+  extensions'. New pattern in this repo, documented on the column, because one
+  shared bag would make a stray key indistinguishable from a field the pack
+  computes from.
+- **Labels are HTML markers, not a symbol layer**, which closes the question
+  2a.1 left open. A `text-field` needs a `glyphs` endpoint — another external
+  host to depend on and agree terms with. A marker needs none of that and
+  inherits the app's own typography.
+- **`line-dasharray` is not data-driven in MapLibre.** Colour, width and opacity
+  read per feature with `["get", …]`; a dash cannot, so every distinct pattern
+  gets its own layer, built from the patterns actually present.
+- **drizzle-kit emits a self-referential FK before the unique index it needs**,
+  and Postgres rejects that. `0233` is hand-reordered and says so at the top. The
+  isolation suite certifies the constraint precisely because a future generated
+  migration could quietly lose it.
+
+**Driven on the dev branch's Hilltop Farm**, which now has a traced boundary and
+three features on it: a built fence, a built buried-electric run and a proposed
+fence. Drawn, measured, saved, selected, renamed, given a `wire_count`, and
+promoted from proposal to fact — the length on screen while drawing matched the
+length stored, because it is the same function.
+
+**Open after this slice:** nothing reads `attributes` yet (2b.1 does), `fed_by`
+has a column and a picker but no screen that traces a circuit, and 2b.2's phone
+screen is unbuilt — so `haversineM` currently has one consumer of the three it
+was written for.
 
 ### 2026-08-26 — The land page was down, and it was a function prop (`claude/a-function-cannot-cross-the-boundary`)
 
@@ -946,6 +1216,7 @@ Platform-wide change; the reasoning is in
 | `land_zones` | Management units inside a parcel. **`geometry` jsonb since 2a.0**, same rules as the parcel's | Composite FK `land_zones_parcel_fk` on `(tenant_id, parcel_id)` → `(tenant_id, id)`, **RESTRICT**, so cross-tenant nesting is unrepresentable and a parcel cannot be deleted out from under its zones |
 | `land_zone_uses` | What a zone is for, over a date range | Composite FK to the zone, **CASCADE**. `ended_on` is **INCLUSIVE**; null means current. CHECK `ended_on >= started_on`; `use` matches `^[a-z][a-z0-9_]{0,62}$` (**format only**) |
 | `land_occupancy` | What was actually ON a zone, in what structure, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
+| `land_features` | **Slice 2b.0.** Things ON the ground: fences, gates, buildings, waterlines, buried cable. One table for points, lines AND areas — `geometry` jsonb, read through `asFeatureGeometry`, nullable meaning "not drawn yet" | Composite FK `land_features_parcel_fk` → the parcel, **RESTRICT**. Attached to a PARCEL, never a zone: a fence runs *between* paddocks. `land_features_fed_by_fk` is the same shape pointed at **its own table**. CHECKs: `status` in `planned\|built\|removed`; `kind` format-only; `fed_by_id` is distinct from `id`. **No posts** — a fence is one row with a spacing |
 
 Mirrored into **`dimension_members`** with `dimension_type = 'parcel'` and
 `'zone'`, in the same transaction as the write. That is what makes ground a cost
@@ -970,7 +1241,21 @@ rented ground, and retrofitting it means rewriting the report.
 - `src/packs/land/core/geo.ts` — pure. Parsing what somebody pasted, spherical
   area, ray-casting containment, bbox and centroid, and the declared-vs-drawn
   comparison. **Coordinates are [longitude, latitude]**, which reads backwards
-  to anyone used to saying it out loud
+  to anyone used to saying it out loud. Since 2b.0 it also holds
+  `FeatureGeometry` (the wider type), its own validator — **separate from
+  `validateBoundary` so neither can be called wrongly** — and `haversineM` /
+  `geometryLengthM`
+- `src/packs/land/core/length.ts` — pure. The sibling of `area.ts`, with one
+  difference: **length has no canonical store.** Nothing writes a length, so
+  there is no `toMetres` matching `toAcres`; it is computed from the geometry
+  every time it is shown
+- `src/packs/land/core/features.ts` — pure. Feature kinds, per-kind symbology,
+  the status styles, and `featureKindsFrom` for a profile's own words.
+  **Industry-neutral (ADR 0004): no `trough`, no `energizer`** — those come from
+  `packConfig.land.featureKinds`, and an unknown kind draws with the fallback
+  for its shape
+- `src/packs/land/components/site-plan-map.tsx` — the site plan. One map, a
+  basemap toggle, and Terra Draw in point/line/polygon modes
 - `src/packs/land/core/parcel-lookup.ts` — pure. The source registry, the
   where-clause building and the candidate mapping
 - `src/packs/land/parcel-lookup-service.ts` — the only outward fetch in this
@@ -1113,6 +1398,20 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
+- **Nobody has drawn a feature on production.** 2b.0 was driven end to end on
+  the dev branch's Hilltop Farm — drawn, measured, saved, promoted — and every
+  bug it found is written up in the build log. Production has the table, the RLS
+  and the screen, and nothing on it.
+- **`haversineM` has one consumer of the three it was written for.** Fence
+  lengths use it; the takeoff (2b.1) and "what is within 100 ft of me" (2b.2) do
+  not exist yet. That is the same shape as `zoneAtPoint` shipping ahead of 2a.2,
+  and it is deliberate for the same reason — but it is a debt until they land.
+- **Nothing reads `attributes`.** The panel displays whatever is in the bag and
+  the pack computes from none of it. Per-kind fields (`spacing_ft`, strand
+  counts) wait for 2b.1, because that is the slice where a wrong key stops being
+  cosmetic and starts producing a wrong materials list.
+- **`fed_by_id` has a column and a picker and no screen that uses it.** "Show me
+  everything on the north energizer" is one query away and nothing asks it yet.
 - ~~Nobody has pasted a boundary yet~~ — **closed 2026-08-19.** Driven on
   production; the measured acreage, the disagreement badge and both refusal
   paths all behaved. It found the empty Replace box, now fixed.

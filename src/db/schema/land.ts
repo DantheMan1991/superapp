@@ -25,12 +25,12 @@
  *     pack may not read another pack's tables, but `livestock` and `crops` are
  *     what write into it.
  *
+ * **Points and lines arrived in slice 2b** as `land_features` below — troughs,
+ * gates, fences, waterlines, buried cable. A fence is not a boundary, so it is
+ * its own table rather than a widened `geometry` column.
+ *
  * Deliberately NOT here yet, each because nothing would read it:
  *
- *   - **Points and lines** — troughs, hydrants, wells, fences, lanes. Slice 2b,
- *     and the `assets` seam: a fence has geometry from here and a cost, a life
- *     and a service schedule from there. Polygons arrived in 2a as `geometry`
- *     below; these need their own table, because a fence is not a boundary.
  *   - **Centroid** lat/long for weather. Still not a column, and now for a
  *     better reason than "later": it is DERIVED from `geometry` by
  *     `centroid()`, so storing it would be a second copy to keep in step with
@@ -470,6 +470,166 @@ export const landOccupancy = pgTable(
   ],
 );
 
+/**
+ * A FEATURE: something on the ground that is not the ground itself.
+ *
+ * A fence, a gate, a trough, a waterline, a buried cable, a tree line, a barn.
+ * **ONE TABLE FOR ALL THREE GEOMETRIES**, because they are one kind of thing —
+ * something in a place, with a status — and splitting them into `land_points`
+ * and `land_lines` would be two tables of the same nine columns whose only
+ * difference is what `geometry` holds. `core/geo.ts` already reads all three.
+ *
+ * THE THING THIS TABLE DOES NOT HOLD IS THE POST. A fence is ONE row with a
+ * post spacing in `attributes`, and its posts are rendered as ticks and counted
+ * by dividing — never stored. The rule, from the site-plan design: **a thing
+ * earns a row when somebody would say its name out loud, or when another record
+ * points at it.** A gate and an energizer do; post #237 does not. Storing the
+ * posts would make promoting one proposal a four-hundred-row transaction, and
+ * every one of those rows could then disagree with the line it sits on.
+ *
+ * IT IS ATTACHED TO A PARCEL, NOT TO A ZONE, and that is not an omission. A
+ * fence runs BETWEEN paddocks and a lane runs THROUGH them, so a zone_id would
+ * force a choice that is wrong for the commonest features on any farm. Which
+ * zones a feature touches is a spatial question with a spatial answer —
+ * `pointInBoundary` and the geometry — and computing it beats storing a guess.
+ */
+export const landFeatures = pgTable(
+  "land_features",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Composite FK, so a feature is always on same-tenant ground. */
+    parcelId: uuid("parcel_id").notNull(),
+    /**
+     * Open taxonomy (P1): 'fence', 'gate', 'waterline', 'buried_electric',
+     * 'tree_line' — and whatever a profile or a tenant needs. FORMAT is
+     * constrained so the column stays queryable; VALUES deliberately are not.
+     * Same arrangement as `assets.kind` and `land_zone_uses.use`.
+     *
+     * The pack's own list is in `src/packs/land/core/features.ts` and names no
+     * industry (ADR 0004): `trough` and `energizer` are a farm profile's words,
+     * contributed through `packConfig.land.featureKinds`, and an unrecognised
+     * kind draws with the fallback style for its shape rather than being
+     * refused.
+     */
+    kind: text("kind").notNull(),
+    /**
+     * Optional, and the emptiness is real rather than lazy. A gate is "the gate
+     * at the top of the lane" and gets named; the third run of fence along the
+     * road is just fence, and demanding a name for it would produce "Fence 3".
+     * Screens fall back to the kind's label.
+     */
+    name: text("name").notNull().default(""),
+    /**
+     * `planned`, `built` or `removed`. **THE COLUMN THE WHOLE SLICE TURNS ON.**
+     *
+     * A proposal and a fact are the same shape, so the difference has to live
+     * on the row rather than in a separate plans table that would duplicate the
+     * geometry and then drift from it. Promotion is one UPDATE, which is what
+     * makes the plan a record instead of a sketchpad.
+     *
+     * **A PLANNED FEATURE MUST NEVER ANSWER A QUESTION ABOUT WHAT EXISTS.** The
+     * sharp case is not a report: it is the phone screen telling somebody
+     * standing in a field that there is buried electric under them. A proposal
+     * shown as a fact is the map lying about the ground.
+     *
+     * `removed` rather than a delete, the same rule that retires a sold parcel:
+     * a fence that stood for nine years was real, and anything that ever
+     * referred to it still has to render.
+     */
+    status: text("status").notNull().default("built"),
+    /**
+     * GeoJSON — Point, LineString, MultiLineString, Polygon or MultiPolygon.
+     * **Wider than a parcel's `geometry`, which is always an area**, and read
+     * through `asFeatureGeometry` rather than `asBoundary`.
+     *
+     * NULLABLE, and the state means "not drawn yet" rather than "nothing here".
+     * A fence you have listed but not traced is a real row with a real name,
+     * and it belongs in the list saying it needs drawing. Length renders as an
+     * em dash, never as zero — `formatLength` enforces that.
+     *
+     * **NOT VALIDATED BY THE DATABASE**, same as the boundary columns: jsonb has
+     * no shape constraint, so every reader goes through the total parser.
+     */
+    geometry: jsonb("geometry"),
+    /**
+     * What the pack knows about this kind of feature: wire count, which strands
+     * are hot, post spacing, pipe diameter, burial depth.
+     *
+     * **A BAG RATHER THAN COLUMNS, BECAUSE THE KINDS ARE OPEN.** A fence has a
+     * spacing and a strand count, a waterline has a diameter and a depth, and a
+     * tree line has neither. Real columns for each would be a wide sparse table
+     * that needs a migration every time a profile invents a kind — which is
+     * exactly what the open taxonomy exists to avoid.
+     *
+     * DISTINCT FROM `metadata` BELOW, and the split is by owner: `attributes`
+     * is the PACK's, written by its own forms and read by its own symbology and
+     * takeoff; `metadata` is the P2 extension bag, for anything else. One bag
+     * shared between them would make a tenant's stray key indistinguishable
+     * from a field the pack computes from.
+     */
+    attributes: jsonb("attributes").notNull().default({}),
+    /**
+     * The feature that supplies this one. An energizer for a fence run, a well
+     * for a waterline.
+     *
+     * **A POINTER, NOT A GRAPH.** It answers "what feeds this" and "show me
+     * everything on the north energizer" — which are the questions people
+     * actually ask — with one column and no traversal. Tracing a circuit
+     * through junctions is a different feature and waits for somebody standing
+     * in front of a dead fence wanting it.
+     *
+     * Self-referential and composite, so a feature can only be fed by a
+     * same-tenant one. NO `onDelete`, i.e. RESTRICT: a composite *bare* SET NULL
+     * would null `tenant_id` too (`drizzle/0192`), and removing an energizer
+     * ought to require dealing with what is recorded as running off it.
+     */
+    fedById: uuid("fed_by_id"),
+    notes: text("notes").notNull().default(""),
+    /** P2 extension bag. See `attributes` above for why they are two columns. */
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("land_features_tenant_id_id_idx").on(t.tenantId, t.id),
+    // The map's read: everything on this parcel, drawn at once.
+    index("land_features_tenant_parcel_idx").on(t.tenantId, t.parcelId),
+    // "Which fences are still only planned", and the list's default filter.
+    index("land_features_tenant_status_idx").on(t.tenantId, t.status),
+    // "How much fence do we have" — the takeoff's read, and the kind filter.
+    index("land_features_tenant_kind_idx").on(t.tenantId, t.kind),
+    // "Everything on the north energizer".
+    index("land_features_tenant_fed_by_idx").on(t.tenantId, t.fedById),
+    // RESTRICT, matching land_zones: deleting a parcel must not silently take
+    // every fence, gate and waterline drawn on it.
+    foreignKey({
+      name: "land_features_parcel_fk",
+      columns: [t.tenantId, t.parcelId],
+      foreignColumns: [landParcels.tenantId, landParcels.id],
+    }),
+    foreignKey({
+      name: "land_features_fed_by_fk",
+      columns: [t.tenantId, t.fedById],
+      foreignColumns: [t.tenantId, t.id],
+    }),
+    check("land_features_kind_format", sql`${t.kind} ~ '^[a-z][a-z0-9_]{0,62}$'`),
+    check(
+      "land_features_status_valid",
+      sql`${t.status} in ('planned', 'built', 'removed')`,
+    ),
+    // A feature cannot feed itself. The one-row cycle is the only one this
+    // column can make on its own, and it is the one a fat finger makes.
+    check("land_features_fed_by_not_self", sql`${t.fedById} is distinct from ${t.id}`),
+  ],
+);
+
 export type LandParcel = typeof landParcels.$inferSelect;
 export type NewLandParcel = typeof landParcels.$inferInsert;
 export type LandZone = typeof landZones.$inferSelect;
@@ -477,3 +637,5 @@ export type NewLandZone = typeof landZones.$inferInsert;
 export type LandZoneUse = typeof landZoneUses.$inferSelect;
 export type LandOccupancy = typeof landOccupancy.$inferSelect;
 export type NewLandOccupancy = typeof landOccupancy.$inferInsert;
+export type LandFeature = typeof landFeatures.$inferSelect;
+export type NewLandFeature = typeof landFeatures.$inferInsert;

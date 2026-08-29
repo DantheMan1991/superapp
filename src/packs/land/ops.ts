@@ -3,6 +3,7 @@ import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
+  LandFeature,
   LandOccupancy,
   LandParcel,
   LandZone,
@@ -19,11 +20,18 @@ import {
   asBoundary,
   boundaryAreaSqM,
   parseBoundary,
+  parseFeatureGeometry,
   pointInBoundary,
   type Boundary,
+  type FeatureGeometry,
   type LinearRing,
   type Position,
 } from "./core/geo";
+import {
+  isFeatureStatus,
+  isValidFeatureKind,
+  type FeatureStatus,
+} from "./core/features";
 
 /**
  * Land operations. Every function takes a `Tx` so the caller owns the
@@ -63,7 +71,15 @@ export class LandError extends Error {
       | "INVALID_OCCUPANT"
       | "INVALID_GEOMETRY"
       /** Fewer than two parcels, or one that cannot take part. */
-      | "INVALID_COMBINE",
+      | "INVALID_COMBINE"
+      /** A feature kind that is not lowercase-snake, so the column would refuse it. */
+      | "INVALID_KIND"
+      /** Not planned, built or removed. */
+      | "INVALID_STATUS"
+      /** An attribute bag that is nested, oversized or wrongly named. */
+      | "INVALID_ATTRIBUTES"
+      /** A `fed_by` pointing at nothing, at itself, or at something removed. */
+      | "INVALID_FEED",
     message: string,
   ) {
     super(message);
@@ -1591,4 +1607,364 @@ export async function mappedZoneCount(tx: Tx, tenantId: string): Promise<number>
       ),
     );
   return rows[0]?.count ?? 0;
+}
+
+// --------------------------------------------------------------- features ---
+
+/**
+ * Features — the site plan's rows. Slice 2b.0.
+ *
+ * **MEMBER-WRITE, NOT OWNER-WRITE, AND THAT IS A DELIBERATE DIFFERENCE FROM
+ * PARCELS AND ZONES.** Those are owner-only because they are cost objects:
+ * `upsertDimensionMember` calls `requireOwnerRole`, so a staff-created paddock
+ * could not sync and would be invisible to every report. A feature syncs
+ * nothing — a fence is not a dimension, and `land` owns where it is while
+ * `assets` owns what it cost — so the forcing reason is simply absent.
+ *
+ * What is left is the question the RLS migration already answered for reads:
+ * drawing the fence you have just finished building is a field chore, like
+ * recording a move. At 10x, the person who knows where the waterline actually
+ * went is not the owner, and an owner-only write means that knowledge never
+ * reaches the map at all. Same level as occupancy, for the same reason.
+ */
+
+/**
+ * What may live in the attribute bag.
+ *
+ * FLAT AND SCALAR, ENFORCED. The column is jsonb and would happily take a
+ * nested document, but `attributes` is the pack's own bag — read by symbology,
+ * by the field screen and (in 2b.1) by the takeoff — and every one of those
+ * reads wants `wire_count: 3`, not a tree. A depth limit at the boundary is
+ * cheaper than every reader defending itself.
+ */
+export type AttributeValue = string | number | boolean;
+
+export interface FeatureInput {
+  parcelId: string;
+  kind: string;
+  name?: string;
+  status?: string;
+  /** GeoJSON, or null for a feature listed but not yet drawn. */
+  geometry?: unknown;
+  attributes?: Record<string, unknown>;
+  fedById?: string | null;
+  notes?: string;
+}
+
+/** Keys are the same shape as a kind, so an attribute stays queryable in jsonb. */
+const ATTRIBUTE_KEY_FORMAT = /^[a-z][a-z0-9_]{0,62}$/;
+const MAX_ATTRIBUTES = 32;
+const MAX_ATTRIBUTE_LENGTH = 200;
+
+function attributesOrThrow(input: unknown): Record<string, AttributeValue> {
+  if (input === null || input === undefined) return {};
+  if (typeof input !== "object" || Array.isArray(input)) {
+    throw new LandError("INVALID_ATTRIBUTES", "attributes must be an object");
+  }
+  const entries = Object.entries(input as Record<string, unknown>);
+  if (entries.length > MAX_ATTRIBUTES) {
+    throw new LandError(
+      "INVALID_ATTRIBUTES",
+      `a feature can carry at most ${MAX_ATTRIBUTES} details`,
+    );
+  }
+  const out: Record<string, AttributeValue> = {};
+  for (const [key, value] of entries) {
+    if (!ATTRIBUTE_KEY_FORMAT.test(key)) {
+      throw new LandError(
+        "INVALID_ATTRIBUTES",
+        `"${key}" is not a usable detail name — lowercase letters, numbers and underscores`,
+      );
+    }
+    if (typeof value === "string") {
+      if (value.length > MAX_ATTRIBUTE_LENGTH) {
+        throw new LandError("INVALID_ATTRIBUTES", `"${key}" is too long`);
+      }
+      // An empty string is an ERASURE, not a value: it is what a cleared form
+      // field sends, and storing it would leave a blank detail on the screen
+      // that nothing can get rid of.
+      if (value.trim() !== "") out[key] = value.trim();
+    } else if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        throw new LandError("INVALID_ATTRIBUTES", `"${key}" is not a number`);
+      }
+      out[key] = value;
+    } else if (typeof value === "boolean") {
+      out[key] = value;
+    } else if (value !== null && value !== undefined) {
+      throw new LandError(
+        "INVALID_ATTRIBUTES",
+        `"${key}" has to be text, a number or a yes/no`,
+      );
+    }
+  }
+  return out;
+}
+
+/** Parse-or-refuse for the wider feature geometry. Sibling of `boundaryOrThrow`. */
+function featureGeometryOrThrow(input: unknown): FeatureGeometry | null {
+  if (input === null || input === undefined) return null;
+  const result = parseFeatureGeometry(input);
+  if (!result.ok) throw new LandError("INVALID_GEOMETRY", result.error);
+  return result.geometry;
+}
+
+function statusOrThrow(status: string): FeatureStatus {
+  if (!isFeatureStatus(status)) {
+    throw new LandError("INVALID_STATUS", `${status} is not a feature status`);
+  }
+  return status;
+}
+
+export async function listFeatures(
+  tx: Tx,
+  tenantId: string,
+  filter: { parcelId?: string; status?: string; kind?: string } = {},
+): Promise<LandFeature[]> {
+  const where = [eq(schema.landFeatures.tenantId, tenantId)];
+  if (filter.parcelId) {
+    where.push(eq(schema.landFeatures.parcelId, filter.parcelId));
+  }
+  if (filter.status) where.push(eq(schema.landFeatures.status, filter.status));
+  if (filter.kind) where.push(eq(schema.landFeatures.kind, filter.kind));
+  return tx.query.landFeatures.findMany({
+    where: and(...where),
+    // Kind then name, so a list of forty features reads as a legend rather than
+    // as whatever order somebody happened to draw them in.
+    orderBy: (f, { asc: byAsc }) => [
+      byAsc(f.kind),
+      byAsc(f.name),
+      byAsc(f.createdAt),
+    ],
+  });
+}
+
+export async function getFeature(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+): Promise<LandFeature | null> {
+  const row = await tx.query.landFeatures.findFirst({
+    where: and(
+      eq(schema.landFeatures.tenantId, tenantId),
+      eq(schema.landFeatures.id, id),
+    ),
+  });
+  return row ?? null;
+}
+
+/**
+ * The feed pointer, checked before it is written.
+ *
+ * The composite FK already makes a cross-tenant pointer unrepresentable and the
+ * CHECK forbids the one-row cycle. What neither can catch is a pointer at a
+ * feature that has been REMOVED, which would leave a fence claiming to run off
+ * an energizer somebody pulled out — so that is checked here, where there is a
+ * person to tell.
+ */
+async function fedByOrThrow(
+  tx: Tx,
+  tenantId: string,
+  selfId: string | null,
+  fedById: string | null,
+): Promise<string | null> {
+  if (!fedById) return null;
+  if (selfId && fedById === selfId) {
+    throw new LandError("INVALID_FEED", "a feature cannot feed itself");
+  }
+  const source = await getFeature(tx, tenantId, fedById);
+  if (!source) throw new LandError("INVALID_FEED", "that source does not exist");
+  if (source.status === "removed") {
+    throw new LandError("INVALID_FEED", "that source has been removed");
+  }
+  return fedById;
+}
+
+export async function createFeature(
+  tx: Tx,
+  ctx: LandCtx,
+  input: FeatureInput,
+): Promise<LandFeature> {
+  requireWrite(ctx, "member");
+  const parcel = await getParcel(tx, ctx.tenantId, input.parcelId);
+  if (!parcel) {
+    throw new LandError("PARCEL_INVALID", "that parcel does not exist");
+  }
+  if (!isValidFeatureKind(input.kind)) {
+    throw new LandError("INVALID_KIND", `${input.kind} is not a usable kind`);
+  }
+
+  const rows = await tx
+    .insert(schema.landFeatures)
+    .values({
+      tenantId: ctx.tenantId,
+      parcelId: input.parcelId,
+      kind: input.kind,
+      name: input.name?.trim() ?? "",
+      status: statusOrThrow(input.status ?? "built"),
+      geometry: featureGeometryOrThrow(input.geometry),
+      attributes: attributesOrThrow(input.attributes),
+      fedById: await fedByOrThrow(tx, ctx.tenantId, null, input.fedById ?? null),
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+export async function updateFeature(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+  input: Partial<Omit<FeatureInput, "parcelId" | "geometry">>,
+): Promise<LandFeature> {
+  requireWrite(ctx, "member");
+  const existing = await getFeature(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `feature ${id} not found`);
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.status !== undefined) patch.status = statusOrThrow(input.status);
+  if (input.kind !== undefined) {
+    if (!isValidFeatureKind(input.kind)) {
+      throw new LandError("INVALID_KIND", `${input.kind} is not a usable kind`);
+    }
+    patch.kind = input.kind;
+  }
+  // REPLACES THE BAG RATHER THAN MERGING IT. A merge cannot express removing a
+  // detail, and a form that can set a field but never clear it is the bug this
+  // shape avoids — the caller sends the whole bag it wants stored.
+  if (input.attributes !== undefined) {
+    patch.attributes = attributesOrThrow(input.attributes);
+  }
+  if (input.fedById !== undefined) {
+    patch.fedById = await fedByOrThrow(tx, ctx.tenantId, id, input.fedById);
+  }
+
+  const rows = await tx
+    .update(schema.landFeatures)
+    .set(patch)
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, ctx.tenantId),
+        eq(schema.landFeatures.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Redraw. Separate from `updateFeature` for the reason `setZoneBoundary` is
+ * separate: geometry arrives from the map as raw GeoJSON and everything else
+ * arrives from a form, and one function taking both would be validating the
+ * wrong half of its input on most calls.
+ */
+export async function setFeatureGeometry(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+  input: unknown,
+): Promise<LandFeature> {
+  requireWrite(ctx, "member");
+  const existing = await getFeature(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `feature ${id} not found`);
+
+  const geometry = featureGeometryOrThrow(input);
+  const rows = await tx
+    .update(schema.landFeatures)
+    .set({ geometry, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, ctx.tenantId),
+        eq(schema.landFeatures.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/**
+ * **PROMOTION — THE ACT THE STATUS COLUMN EXISTS FOR.**
+ *
+ * A planned fence becomes a built one in ONE UPDATE, with the same geometry,
+ * the same id and the same attributes. That is what makes the site plan a
+ * record rather than a sketchpad: nothing is redrawn, so nothing can be redrawn
+ * differently, and anything already pointing at the proposal keeps pointing at
+ * the fence it became.
+ *
+ * Its own function rather than a field on `updateFeature` — which can also set
+ * status — because this is the one transition worth auditing by name, and an
+ * action layer logging `land.feature.updated` for it would bury the moment a
+ * proposal became a fact under every rename.
+ */
+export async function setFeatureStatus(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+  status: string,
+): Promise<LandFeature> {
+  requireWrite(ctx, "member");
+  const existing = await getFeature(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `feature ${id} not found`);
+
+  const rows = await tx
+    .update(schema.landFeatures)
+    .set({ status: statusOrThrow(status), updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, ctx.tenantId),
+        eq(schema.landFeatures.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+/**
+ * Delete, and it is NOT the same act as setting `removed`.
+ *
+ * `removed` means the fence WAS there and is not any more — history worth
+ * keeping, and the reason the status has three values rather than two. A delete
+ * means it was NEVER there: a line drawn by accident, a stray double click, a
+ * trough put on the wrong parcel. `deleteOccupancy` is the precedent and it
+ * drew exactly this distinction.
+ *
+ * Refused while anything is fed by it. The FK would refuse anyway, but "three
+ * fences run off this one" is a better sentence than a constraint violation.
+ */
+export async function deleteFeature(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+): Promise<void> {
+  requireWrite(ctx, "member");
+  const existing = await getFeature(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `feature ${id} not found`);
+
+  const fed = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.landFeatures)
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, ctx.tenantId),
+        eq(schema.landFeatures.fedById, id),
+      ),
+    );
+  const count = fed[0]?.count ?? 0;
+  if (count > 0) {
+    throw new LandError(
+      "INVALID_FEED",
+      `${count} other ${count === 1 ? "feature runs" : "features run"} off this one`,
+    );
+  }
+
+  await tx
+    .delete(schema.landFeatures)
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, ctx.tenantId),
+        eq(schema.landFeatures.id, id),
+      ),
+    );
 }

@@ -24,11 +24,21 @@ import {
   completedStayDays,
   currentUses,
   getParcel,
+  listFeatures,
   listUsesInUse,
   listZones,
   restByZone,
   usesByZone,
 } from "@/packs/land/ops";
+import { asBoundary } from "@/packs/land/core/geo";
+import {
+  availableFeatureKinds,
+  isFeatureStatus,
+  readAttributes,
+} from "@/packs/land/core/features";
+import { basemapFrom } from "@/packs/land/core/basemap";
+import { lengthUnitFrom } from "@/packs/land/core/length";
+import { SitePlan } from "@/packs/land/components/site-plan";
 import { formatDays, rotationFinding } from "@/packs/land/core/rest";
 import {
   TENURE_LABELS,
@@ -90,7 +100,7 @@ export default async function ParcelDetailPage({
         status: "active",
       });
       const zoneIds = zones.map((z) => z.id);
-      const [current, history, usesInUse, pack, rest, stayDays] =
+      const [current, history, usesInUse, pack, rest, stayDays, features] =
         await Promise.all([
           currentUses(tx, ctx.tenant.id, zoneIds),
           usesByZone(tx, ctx.tenant.id, zoneIds),
@@ -98,6 +108,10 @@ export default async function ParcelDetailPage({
           packContext(tx, ctx.tenant.id, ctx.tenant.industry, "land"),
           restByZone(tx, ctx.tenant.id, zoneIds, today),
           completedStayDays(tx, ctx.tenant.id, id, today),
+          // EVERY status, `removed` included. The list filters history out
+          // behind a toggle; the map dims it. Filtering here would make the
+          // toggle a second round trip for data the page already had.
+          listFeatures(tx, ctx.tenant.id, { parcelId: id }),
         ]);
       return {
         parcel,
@@ -108,14 +122,24 @@ export default async function ParcelDetailPage({
         pack,
         rest,
         stayDays,
+        features,
       };
     },
     { role: ctx.role },
   );
 
   if (!data) notFound();
-  const { parcel, zones, current, history, usesInUse, pack, rest, stayDays } =
-    data;
+  const {
+    parcel,
+    zones,
+    current,
+    history,
+    usesInUse,
+    pack,
+    rest,
+    stayDays,
+    features,
+  } = data;
 
   // The finding this whole category was argued for. Returns null rather than
   // guessing when there is not enough history — a rotation figure computed
@@ -211,6 +235,46 @@ export default async function ParcelDetailPage({
         unit={unit}
         canEdit={isOwner && parcel.status === "active"}
       />
+
+      <Panel className="p-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="font-heading text-base font-semibold tracking-heading">
+            Site plan
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            What is on the ground — and what is only proposed.
+          </p>
+        </div>
+        <div className="mt-4">
+          <SitePlan
+            parcelId={parcel.id}
+            parcelBoundary={asBoundary(parcel.geometry)}
+            zones={zones.map((zone) => ({
+              name: zone.name,
+              geometry: zone.geometry,
+            }))}
+            features={features.map((feature) => ({
+              id: feature.id,
+              kind: feature.kind,
+              name: feature.name,
+              status: isFeatureStatus(feature.status) ? feature.status : "built",
+              geometry: feature.geometry,
+              notes: feature.notes,
+              // jsonb with no shape constraint, so the bag is read through the
+              // same total-by-construction discipline as everything else here.
+              attributes: readAttributes(feature.attributes),
+              fedById: feature.fedById,
+            }))}
+            kinds={availableFeatureKinds(pack.config)}
+            basemap={basemapFrom(pack.config)}
+            areaUnit={unit}
+            lengthUnit={lengthUnitFrom(pack.config)}
+            // A CHORE, NOT A DECISION — see the ops comment. Drawing the fence
+            // you just built is not the owner's job, so this is not `isOwner`.
+            canEdit={parcel.status === "active"}
+          />
+        </div>
+      </Panel>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Panel className="p-5">

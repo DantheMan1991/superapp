@@ -30,7 +30,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2b.0** | **The as-built layer** — `land_features`, `planned`/`built`/`removed`, symbology, the length function, the aerial/plan toggle | **shipped 2026-08-28** |
 | **2b.1** | **Walk to place a point** — an input mode for every kind, with the accuracy figure shown. [Designed 2026-08-29](#the-paddock-layout--designed-2026-08-29-not-yet-built) | **shipped 2026-08-29** |
 | **2b.2** | **Subdivide** — pick the ground and a lane, say how many, get n planned paddocks with their dividing fences and gates. `planned` arrives on zones | **shipped 2026-08-29** |
-| 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | |
+| 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | **unblocked 2026-08-29** — the field test it waited on has happened |
 | **2b.4** | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | **shipped 2026-08-29** |
 | ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
@@ -552,6 +552,56 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-29 — Four corners were three sides (`claude/close-the-loop`)
+
+**No migration.**
+
+**FIRST, THE OPEN ITEM THAT HAS BEEN AT THE TOP OF THIS FILE SINCE 2b.1 IS
+CLOSED.** The founder took the boundary tool into a field on a real phone and
+walked a property's four corners. In his words: *"it worked perfectly."*
+
+That is the assumption the whole 2b.1–2b.4 direction rests on — that a line
+WALKED and later navigated back to with the same phone is wrong in much the same
+direction twice, where a traced line and a GPS position are wrong independently
+and their errors add. It has now been tested on real ground rather than argued
+for, and **2b.3 (navigate to a point) is no longer waiting on anything.**
+
+**AND THE SAME WALK FOUND A GAP.** He also walked a fence round all four corners
+and got **three sides**. A LineString of four positions has three segments; the
+closing side is the one you cannot walk, because you would have to arrive back
+at a corner you have already left and no two GPS readings of the same spot
+agree.
+
+His framing was exactly right — *"That might be right sometimes, but there
+should be an option"* — so it is a choice and not a default:
+
+  - `canClose(points, shape)` is true only for a LINE with **three or more**
+    corners. An area closes itself already; a two-corner line "closed" is A→B→A,
+    a fence walked out and back along its own length, which would double every
+    figure counted off it.
+  - `walkToGeometry(points, shape, closed)` appends the FIRST position rather
+    than a second reading of it. A closed fence meets itself exactly, and a
+    metre-wide gap in the drawing is a metre of wire nobody buys.
+  - **It stays a LineString.** A ring of fence is a line that comes back. Making
+    it a Polygon would give it an area nobody asked for and would make
+    `geometryLengthM` report a perimeter — the same number here by luck, and not
+    the same thing. The takeoff buys wire against that figure.
+  - The checkbox appears in the walk panel once there are three corners, and
+    says the real counts: `4 sides from 4 corners` against `3 sides from 4
+    corners`, computed rather than worked as an example.
+
+**Tested, and the gap in that.** Eight new cases in `tests/land-survey.test.ts`
+cover the closing side being taken from the first corner, the length including
+it, the refusal to close two corners, and the shape staying a LineString.
+**The UI wiring — checkbox to state to geometry — is not tested**, because the
+repo still has no component-testing stack; it is verified by reading and by a
+green build, the same limit the design-system dossier records.
+
+**Not driven in a browser either.** The dev server was restarted during the
+session and the browser lost its Clerk session; signing back in would mean
+handling the founder's credentials. The arithmetic is the part that matters here
+and it is covered.
 
 ### 2026-08-29 — The last map (`claude/the-last-map`)
 
@@ -2223,12 +2273,11 @@ rented ground, and retrofitting it means rewriting the report.
 - **The layout has only ever been run on a rectangle.** A real field with a
   bent lane is the first honest test of the reachability warning, and of a
   fence meeting the lane at an angle instead of square.
-- **NOTHING HAS BEEN WALKED WITH A REAL PHONE ON REAL GROUND.** 2b.1 was driven
-  against a stubbed geolocation, because the sandboxed browser has no location
-  and the alternative was shipping it unclicked. That proves the plumbing and
-  cannot prove the claim the whole direction rests on — that a walked line and a
-  later walk back to it share their error. **Walk a tree line before 2b.2 is
-  built on top of it.**
+- ~~Nothing has been walked with a real phone~~ — **CLOSED 2026-08-29.** The
+  founder walked a property's four corners in a field and reported it worked
+  perfectly. That is the correlated-error assumption the whole of 2b.1–2b.4
+  rests on, tested on real ground rather than argued for. **2b.3 is unblocked.**
+  The same walk found that four corners made three sides, fixed the same day.
 - **Nobody has drawn a feature on production.** 2b.0 was driven end to end on
   the dev branch's Hilltop Farm — drawn, measured, saved, promoted — and every
   bug it found is written up in the build log. Production has the table, the RLS

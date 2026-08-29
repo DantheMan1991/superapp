@@ -130,6 +130,20 @@ function closeRing(positions: Position[]): Position[] {
 }
 
 /**
+ * Can this walk be closed into a loop?
+ *
+ * **ONLY A LINE, AND ONLY WITH THREE CORNERS.** An area closes itself already.
+ * A two-corner line "closed" is A→B→A: a fence walked out and back along its
+ * own length, which is not a loop and would double every figure counted off it.
+ */
+export function canClose(
+  points: readonly WalkPoint[],
+  shape: GeometryShape,
+): boolean {
+  return shape === "line" && points.length >= 3;
+}
+
+/**
  * The walked corners as geometry the rest of the pack already understands.
  *
  * **THE SAME SHAPES THE MAP DRAWS**, so everything downstream — the length
@@ -146,6 +160,7 @@ function closeRing(positions: Position[]): Position[] {
 export function walkToGeometry(
   points: readonly WalkPoint[],
   shape: GeometryShape,
+  closed = false,
 ): FeatureGeometry | null {
   if (!hasEnoughPoints(points, shape)) return null;
   const positions = points.map((p) => [p.position[0], p.position[1]] as Position);
@@ -154,7 +169,25 @@ export function walkToGeometry(
     return { type: "Point", coordinates: positions[0] };
   }
   if (shape === "line") {
-    return { type: "LineString", coordinates: positions };
+    /**
+     * **FOUR CORNERS ARE THREE SIDES UNLESS YOU SAY OTHERWISE**, which is what
+     * a fence walked round a field found the hard way. The closing side is the
+     * one you cannot walk: you would have to arrive back at a corner you have
+     * already left, and no two GPS readings of the same spot agree. So it is
+     * added from the FIRST point rather than measured — a closed fence meets
+     * itself exactly, and pretending otherwise would leave a metre-wide gap in
+     * the drawing and in the wire count.
+     *
+     * It stays a LineString. A ring of fence is a line that happens to come
+     * back; making it a Polygon would give it an area nobody asked for and
+     * would take its length away from `geometryLengthM`, which is the figure
+     * the takeoff buys wire against.
+     */
+    return {
+      type: "LineString",
+      coordinates:
+        closed && canClose(points, shape) ? closeRing(positions) : positions,
+    };
   }
   return { type: "Polygon", coordinates: [closeRing(positions)] };
 }

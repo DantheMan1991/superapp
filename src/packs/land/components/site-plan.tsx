@@ -55,6 +55,9 @@ export function SitePlan({
   areaUnit,
   lengthUnit,
   canEdit,
+  canEditBoundary,
+  parcelName,
+  declaredAcres,
 }: {
   parcelId: string;
   parcelBoundary: Boundary | null;
@@ -65,6 +68,10 @@ export function SitePlan({
   areaUnit: AreaUnit;
   lengthUnit: LengthUnit;
   canEdit: boolean;
+  /** Owner-only: the outline is a legal fact, not a chore. */
+  canEditBoundary: boolean;
+  parcelName: string;
+  declaredAcres: number | null;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showRemoved, setShowRemoved] = useState(false);
@@ -123,6 +130,9 @@ export function SitePlan({
         areaUnit={areaUnit}
         lengthUnit={lengthUnit}
         canEdit={canEdit}
+        canEditBoundary={canEditBoundary}
+        parcelName={parcelName}
+        declaredAcres={declaredAcres}
         selectedId={selectedId}
         onSelect={setSelectedId}
       />

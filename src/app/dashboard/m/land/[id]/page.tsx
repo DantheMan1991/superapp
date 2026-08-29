@@ -265,6 +265,9 @@ export default async function ParcelDetailPage({
         packConfig={pack.config}
         unit={unit}
         canEdit={isOwner && parcel.status === "active"}
+        // The site plan below draws the boundary now. What is left here is the
+        // reading — measured against recorded — and the paste box.
+        withMap={false}
       />
 
       <Panel className="p-5">
@@ -305,6 +308,11 @@ export default async function ParcelDetailPage({
             // A CHORE, NOT A DECISION — see the ops comment. Drawing the fence
             // you just built is not the owner's job, so this is not `isOwner`.
             canEdit={parcel.status === "active"}
+            // The OUTLINE is a different matter: it is what the deed says and
+            // what every acreage divides by, so it stays the owner's.
+            canEditBoundary={isOwner && parcel.status === "active"}
+            parcelName={parcel.name}
+            declaredAcres={parcel.areaAcres}
           />
         </div>
       </Panel>

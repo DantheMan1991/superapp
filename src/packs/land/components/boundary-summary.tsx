@@ -34,6 +34,7 @@ export function BoundarySummary({
   packConfig,
   unit,
   canEdit,
+  withMap = true,
 }: {
   target: "zone" | "parcel";
   id: string;
@@ -47,6 +48,21 @@ export function BoundarySummary({
   packConfig: unknown;
   unit: AreaUnit;
   canEdit: boolean;
+  /**
+   * Whether to draw a map here.
+   *
+   * **THE PARCEL PAGE PASSES FALSE, because its site plan draws the boundary
+   * now** — it has the basemap toggle, the symbology, the shape picker and the
+   * ability to WALK an outline rather than trace it, and keeping a weaker map
+   * beside it to do one job was asking somebody to learn two tools for one act.
+   *
+   * What stays here either way is the READING: measured against recorded, and
+   * the sentence about why they are allowed to disagree. That was always the
+   * valuable half. The paste box stays too — a county GIS export is more
+   * accurate than anything traced by hand, and it is now the side door to a
+   * front door that lives somewhere else.
+   */
+  withMap?: boolean;
 }) {
   const boundary = asBoundary(geometry);
   const comparison = compareArea(declaredAcres, boundary);
@@ -78,16 +94,18 @@ export function BoundarySummary({
         )}
       </div>
 
-      <BoundaryMap
-        target={target}
-        id={id}
-        declaredAcres={declaredAcres}
-        current={boundary}
-        context={shapes}
-        unit={unit}
-        basemap={basemapFrom(packConfig)}
-        canEdit={canEdit}
-      />
+      {withMap && (
+        <BoundaryMap
+          target={target}
+          id={id}
+          declaredAcres={declaredAcres}
+          current={boundary}
+          context={shapes}
+          unit={unit}
+          basemap={basemapFrom(packConfig)}
+          canEdit={canEdit}
+        />
+      )}
 
       {boundary !== null && (
         <div className="rounded-md border p-4 text-sm">

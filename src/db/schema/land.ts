@@ -234,6 +234,27 @@ export const landZones = pgTable(
      * report the difference; nothing corrects it.
      */
     geometry: jsonb("geometry"),
+    /**
+     * `planned`, `active` or `retired`. **`planned` arrived with slice 2b.2**,
+     * on the front of a lifecycle this table already had.
+     *
+     * A PLANNED ZONE IS GROUND WITH NO FENCE ROUND IT YET — the output of
+     * subdividing a field, before anybody has been out to build the divisions.
+     * It is a real row with a real polygon and a real acreage, and it must not
+     * behave like ground you can use:
+     *
+     *   - `zoneAtPoint` excludes it. You are not standing in a paddock that
+     *     does not exist.
+     *   - It syncs NO `dimension_members` row. A cost object for unfenced
+     *     ground would put empty columns in every report; `activateZone` is
+     *     what creates it.
+     *   - `startOccupancy` refuses it. Build it first.
+     *   - Rest and rotation exclude it — it would dilute every paddock-count.
+     *
+     * Every one of those reads already filtered on `active` explicitly, which
+     * is why widening this column changed no query. The one guard that had to
+     * be ADDED is occupancy's, because it never looked at status at all.
+     */
     status: text("status").notNull().default("active"),
     notes: text("notes").notNull().default(""),
     metadata: jsonb("metadata").notNull().default({}),
@@ -257,7 +278,10 @@ export const landZones = pgTable(
       foreignColumns: [landParcels.tenantId, landParcels.id],
     }),
     check("land_zones_name_present", sql`length(btrim(${t.name})) > 0`),
-    check("land_zones_status_valid", sql`${t.status} in ('active', 'retired')`),
+    check(
+      "land_zones_status_valid",
+      sql`${t.status} in ('planned', 'active', 'retired')`,
+    ),
     check(
       "land_zones_area_positive",
       sql`${t.areaAcres} is null or ${t.areaAcres} > 0`,

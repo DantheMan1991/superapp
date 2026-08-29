@@ -536,6 +536,44 @@ d("land tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  it("takes a PLANNED zone, which is ground with no fence round it yet", async () => {
+    // Slice 2b.2 widened this CHECK. The value has to exist at the database
+    // level or the layout has nowhere to put what it produced.
+    const rows = await withSystem((tx) =>
+      tx
+        .insert(schema.landZones)
+        .values({
+          tenantId: tenantA,
+          parcelId: homeA,
+          name: "Proposed 1",
+          status: "planned",
+        })
+        .returning(),
+    );
+    expect(rows[0].status).toBe("planned");
+
+    // CLEANED UP IN THE TEST THAT MADE IT. This file's other assertions list
+    // tenant A's zones by name and expect the fixture set, so a row left behind
+    // here would fail a test three screens away that has nothing to do with
+    // planned ground.
+    await withSystem((tx) =>
+      tx.delete(schema.landZones).where(eq(schema.landZones.id, rows[0].id)),
+    );
+  });
+
+  it("still refuses a zone status it does not know", async () => {
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landZones).values({
+          tenantId: tenantA,
+          parcelId: homeA,
+          name: "Nonsense",
+          status: "proposed",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
   it("refuses a status that is not planned, built or removed", async () => {
     // The column the whole slice turns on. A fourth value would be a proposal
     // and a fact wearing the same clothes again, which is the thing the split

@@ -58,7 +58,7 @@ export function SitePlan({
 }: {
   parcelId: string;
   parcelBoundary: Boundary | null;
-  zones: { name: string; geometry: unknown }[];
+  zones: { name: string; geometry: unknown; status: string }[];
   features: PanelFeature[];
   kinds: TenantFeatureKind[];
   basemap: Basemap;
@@ -88,11 +88,28 @@ export function SitePlan({
     [features],
   );
 
-  const lengths = listed.map((f) => {
+  /**
+   * Lengths for the total, and the row-by-row column.
+   *
+   * **A POINT IS LEFT OUT OF THE TOTAL, NOT COUNTED AS UNKNOWN.** Both render
+   * as an em dash in the Length column, but they are different facts:
+   * `totalLength` reports its unknowns as "not drawn", and four gates dropped
+   * exactly where they belong were being announced as four things nobody had
+   * drawn yet. A gate HAS no length; a fence that has not been traced is
+   * MISSING one.
+   */
+  const rowLengths = listed.map((f) => {
     const geometry = asFeatureGeometry(f.geometry);
     if (!geometry) return null;
     return shapeOf(geometry) === "point" ? null : geometryLengthM(geometry);
   });
+  const measurable = listed
+    .map((f, index) => {
+      const geometry = asFeatureGeometry(f.geometry);
+      if (geometry && shapeOf(geometry) === "point") return undefined;
+      return rowLengths[index];
+    })
+    .filter((length): length is number | null => length !== undefined);
 
   return (
     <div className="space-y-4">
@@ -169,7 +186,7 @@ export function SitePlan({
                     <StatusBadge status={feature.status} />
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {formatLength(lengths[index], lengthUnit)}
+                    {formatLength(rowLengths[index], lengthUnit)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -179,7 +196,7 @@ export function SitePlan({
           <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
             {/* A total that let an undrawn feature read as zero would be
                 confidently wrong — `totalLength` reports the unknowns instead. */}
-            <span>{formatLengthTotal(totalLength(lengths), lengthUnit)} in all</span>
+            <span>{formatLengthTotal(totalLength(measurable), lengthUnit)} in all</span>
             {removedCount > 0 && (
               <Button
                 size="sm"

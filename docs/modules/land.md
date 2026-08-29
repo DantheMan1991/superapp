@@ -29,7 +29,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2a.2** | **Standing in a field** — point-in-polygon fills the paddock in for you | **shipped 2026-08-19** |
 | **2b.0** | **The as-built layer** — `land_features`, `planned`/`built`/`removed`, symbology, the length function, the aerial/plan toggle | **shipped 2026-08-28** |
 | **2b.1** | **Walk to place a point** — an input mode for every kind, with the accuracy figure shown. [Designed 2026-08-29](#the-paddock-layout--designed-2026-08-29-not-yet-built) | **shipped 2026-08-29** |
-| 2b.2 | **Subdivide** — walk the lane, say how many, get n planned paddocks with their dividing fences and gates. `planned` arrives on zones | |
+| **2b.2** | **Subdivide** — pick the ground and a lane, say how many, get n planned paddocks with their dividing fences and gates. `planned` arrives on zones | **shipped 2026-08-29** |
 | 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | |
 | 2b.4 | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | |
 | ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
@@ -548,6 +548,117 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-29 — Slice 2b.2: four paddocks off a lane (`claude/four-paddocks-off-a-lane`)
+
+**Migration `0236`** — `planned` joins `land_zones.status`. One CHECK, applied to
+dev and production before the merge.
+
+**`core/subdivide.ts`** is the whole of the geometry and is pure. Everything
+below is a decision recorded there.
+
+**The lane is what makes the problem well posed.** "Divide a polygon into n
+efficient pieces" is badly posed — efficient by area, by fence length, or by
+shape? Those fight, and an answer to one is a bad answer to the others. **Every
+paddock has to touch the lane**, because that is how the cows reach water, and
+that single constraint collapses the search to parallel strips cut across it:
+one direction, n−1 cuts, equal area each, found by bisection on the offset.
+
+**THE DESIGN'S FIDDLY CASE WAS DISSOLVED RATHER THAN SOLVED.** It said to cut
+perpendicular to the lane's LOCAL direction and to detect two cuts crossing on
+the inside of a bend. Cutting perpendicular to the lane's OVERALL direction
+makes crossing impossible — parallel lines do not cross — so there is nothing to
+detect. What is given up is a fence meeting a bent lane at an angle rather than
+square, which is visible and draggable. What replaced the crossing check is a
+REACHABILITY check: every strip is tested for whether the lane actually runs
+through it, because a bent lane can strand one, and a paddock the cows cannot
+walk to is the failure this layout exists to prevent. It warns; it never
+refuses.
+
+**All the arithmetic is in a local flat frame.** Clipping and area-splitting in
+degrees would be out by the cosine of the latitude — about 24% at 40°N — so a
+"square" paddock would come out a quarter wider than it is tall and the
+equal-area search would divide the wrong quantity. Equirectangular about the
+shape's own centre is accurate to millimetres across a farm. **The REPORTED
+acreage still comes from `boundaryAreaAcres`**, the spherical one the rest of
+the pack uses, so a paddock cut here and measured anywhere else agree.
+
+**The founder's correction, built as he asked for it.** The layout creates the
+PADDOCKS and their fences and gates in one act. An earlier design had it emit
+fences only, with zones created once a fence was built — which did not remove
+the problem of inferring what a ring of fences encloses, it deferred it to the
+worst possible moment. The layout already knows the polygons; it computed them.
+And a paddock boundary is not always a fence — a creek, a road, a bluff — so
+zone geometry and fence geometry are two objects that often coincide and need
+not.
+
+**`planned` on `land_zones`, and what it cost**
+
+Widening the CHECK changed no existing query, which is worth knowing because it
+easily could have: every read that must not see unfenced ground —
+`zoneAtPoint`, `zoneCountsByParcel`, `mappedZoneCount`, `retireParcel`,
+`combineParcels` — already filtered `status = 'active'` explicitly rather than
+"not retired". **The one guard that had to be ADDED is `startOccupancy`'s**,
+which never looked at zone status at all and would have put animals on a paddock
+whose fence nobody has built, feeding the rest clock and every per-acre figure
+downstream from ground that does not exist.
+
+A planned zone syncs **no** `dimension_members` row. `activateZone` is what
+creates it, and it is owner-gated because `upsertDimensionMember` requires it —
+the same constraint that makes `createZone` owner-only, arriving later because a
+planned zone deliberately skipped it.
+
+**Decisions worth knowing**
+
+- **THE DRAWN ACREAGE IS THE RECORDED ACREAGE, and this is the one place that
+  differs from a parcel.** A parcel has a deed and a county record to disagree
+  with, so `area_acres` is DECLARED there and the drawing may differ. A paddock
+  has no external source — you decided where the fence goes — so the drawing IS
+  the record, and a declared-versus-computed split would invent a disagreement
+  with nothing on the other side of it.
+- **Laying out is OWNER-ONLY**, unlike the rest of the feature surface. Drawing
+  a fence is a chore; deciding that this field is four paddocks is not, and they
+  become cost objects the moment they are activated.
+- **There is no separate preview, and that is the point of `planned`.** What the
+  dialog produces is proposed paddocks and proposed fences, ghosted on the plan
+  like any other proposal — so the preview IS the result, and adjusting it means
+  dragging a fence rather than re-running a dialog with different numbers.
+- **Activation is per paddock**, because fences go in one at a time and marking
+  four built because you finished the first is how the map stops matching the
+  ground. Idempotent, because two people can walk a fence in together.
+- **Proposed paddocks get their own list, not a row in the paddock table.** That
+  table's columns are about ground you are using — what is on it, how long it
+  has rested — and every one of them is meaningless for unfenced ground. A
+  planned row there would show four dashes and read as a broken paddock rather
+  than an unbuilt one.
+- **The page reads planned zones separately rather than widening the existing
+  read.** Rest, the paddock count, the rotation arithmetic and `zoneCoverage`
+  are all about ground that exists; folding planned rows into `zones` would put
+  unfenced acres into all of them at once.
+
+**A bug this slice surfaced in 2b.0's own screen.** The length total counted a
+POINT as "not drawn" — so four gates dropped exactly where they belonged were
+announced as "4 not drawn". A gate HAS no length; a fence that has not been
+traced is MISSING one, and only the second belongs in that count. Points are now
+left out of the total rather than counted as unknown.
+
+**Driven on Hilltop Farm's Home Farm.** Four paddocks off a centre lane came out
+at 9.9756, 9.9755, 9.9753 and 9.9752 acres — **summing to 39.9016, which is
+exactly the parcel's own measured area** — with three dividing fences at the
+field's full 1,318 ft width and four gates on the lane, everything `planned`.
+The paddock table and the coverage figures did not move. Activating one moved it
+into the table with its acreage and dropped the proposed count to three.
+
+**The map's screenshots could not be captured this session** — the browser pane
+stopped painting WebGL after many reloads — so the planned-ground layers were
+verified through the DOM and the data rather than by eye. The layer code is the
+same shape as the feature layers beside it, but **nobody has looked at a
+proposed paddock on the map**.
+
+**Open after this slice:** still nothing walked with a real phone (2b.1's open
+item, and 2b.3 depends on it more than this did), and the layout has only been
+run on a rectangle — a real field with a bent lane will be the first honest test
+of the reachability warning.
 
 ### 2026-08-29 — Slice 2b.1: walk it, do not trace it (`claude/walk-the-fence-line`)
 
@@ -1593,6 +1704,7 @@ Platform-wide change; the reasoning is in
 | `land_zones` | Management units inside a parcel. **`geometry` jsonb since 2a.0**, same rules as the parcel's | Composite FK `land_zones_parcel_fk` on `(tenant_id, parcel_id)` → `(tenant_id, id)`, **RESTRICT**, so cross-tenant nesting is unrepresentable and a parcel cannot be deleted out from under its zones |
 | `land_zone_uses` | What a zone is for, over a date range | Composite FK to the zone, **CASCADE**. `ended_on` is **INCLUSIVE**; null means current. CHECK `ended_on >= started_on`; `use` matches `^[a-z][a-z0-9_]{0,62}$` (**format only**) |
 | `land_occupancy` | What was actually ON a zone, in what structure, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
+| `land_zones` (2b.2) | `status` gained **`planned`** — ground a layout proposed and nobody has fenced. Syncs no `dimension_members` row until `activateZone`; refused by `startOccupancy`; excluded from `zoneAtPoint`, rest and every paddock count | Widening the CHECK changed no query: every read that must not see unfenced ground already filtered `active` explicitly. `startOccupancy` was the one guard that had to be added |
 | `land_features` | **Slice 2b.0.** Things ON the ground: fences, gates, buildings, woods, waterlines, buried cable. One table for points, lines AND areas — `geometry` jsonb, read through `asFeatureGeometry`, nullable meaning "not drawn yet" | Composite FK `land_features_parcel_fk` → the parcel, **RESTRICT**. Attached to a PARCEL, never a zone: a fence runs *between* paddocks. `land_features_fed_by_fk` is the same shape pointed at **its own table**. CHECKs: `status` in `planned\|built\|removed`; `kind` format-only; `fed_by_id` is distinct from `id`; `line_width` null or 0.5–12. **No posts** — a fence is one row with a spacing. `line_width` is a DRAWING property and deliberately not in `attributes`, which the takeoff will compute from |
 
 Mirrored into **`dimension_members`** with `dimension_type = 'parcel'` and
@@ -1644,6 +1756,15 @@ rented ground, and retrofitting it means rewriting the report.
 - `src/packs/land/components/walk-panel.tsx` — the live fix, the accuracy
   figure and the drop button. It watches only while it is open, and it assumes
   geolocation exists because the button that opens it checked
+- `src/packs/land/core/subdivide.ts` — pure. Equal-area strips cut across a
+  lane, in a local flat frame because degrees are out by the cosine of the
+  latitude. **The cuts are all parallel**, which makes the design's
+  crossing-on-a-bend case impossible rather than detected; what replaces it is
+  a reachability check, because a paddock the cows cannot walk to is the
+  failure the layout exists to prevent
+- `src/packs/land/components/paddock-layout.tsx` ·
+  `planned-zones.tsx` — the dialog, and the list of ground waiting for a fence.
+  **There is no separate preview: the proposals ARE the preview**
 - `src/packs/land/core/parcel-lookup.ts` — pure. The source registry, the
   where-clause building and the candidate mapping
 - `src/packs/land/parcel-lookup-service.ts` — the only outward fetch in this
@@ -1786,6 +1907,14 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
+- **Nobody has looked at a proposed paddock on the map.** 2b.2's planned-ground
+  layers were verified through the DOM and the data — the browser pane stopped
+  painting WebGL partway through the session. The layer code is the same shape
+  as the feature layers beside it, but that is an argument rather than a
+  screenshot.
+- **The layout has only ever been run on a rectangle.** A real field with a
+  bent lane is the first honest test of the reachability warning, and of a
+  fence meeting the lane at an angle instead of square.
 - **NOTHING HAS BEEN WALKED WITH A REAL PHONE ON REAL GROUND.** 2b.1 was driven
   against a stubbed geolocation, because the sandboxed browser has no location
   and the alternative was shipping it unclicked. That proves the plumbing and

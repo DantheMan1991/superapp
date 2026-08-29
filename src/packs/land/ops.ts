@@ -18,6 +18,7 @@ import { defaultProductive, isTenure, isValidZoneUse } from "./vocabulary";
 import { zoneRest, dayBefore, daysOccupied, type ZoneRest } from "./core/rest";
 import {
   asBoundary,
+  asFeatureGeometry,
   boundaryAreaSqM,
   parseBoundary,
   parseFeatureGeometry,
@@ -27,6 +28,7 @@ import {
   type LinearRing,
   type Position,
 } from "./core/geo";
+import { subdivide } from "./core/subdivide";
 import {
   isFeatureStatus,
   isLineWidth,
@@ -84,7 +86,9 @@ export class LandError extends Error {
       /** A `fed_by` pointing at nothing, at itself, or at something removed. */
       | "INVALID_FEED"
       /** A stroke weight outside what the CHECK will take. */
-      | "INVALID_WIDTH",
+      | "INVALID_WIDTH"
+      /** Ground or a lane that cannot be divided, in the subdivider's own words. */
+      | "LAYOUT_INVALID",
     message: string,
   ) {
     super(message);
@@ -896,6 +900,19 @@ export async function startOccupancy(
   requireWrite(ctx, "member");
   const zone = await getZone(tx, ctx.tenantId, zoneId);
   if (!zone) throw new LandError("NOT_FOUND", `zone ${zoneId} not found`);
+  /**
+   * **THE ONE GUARD `planned` HAD TO ADD** (slice 2b.2). Every other read that
+   * must not see unfenced ground already filtered `status = 'active'`
+   * explicitly; this one never looked at status at all, and would have put
+   * animals on a paddock whose fence nobody has built yet — which then feeds
+   * the rest clock, the paddock count and every per-acre figure downstream.
+   */
+  if (zone.status === "planned") {
+    throw new LandError(
+      "LAYOUT_INVALID",
+      `${zone.name} is still only planned — mark it built first`,
+    );
+  }
 
   const occupantType = (input.occupantType ?? "manual").trim().toLowerCase();
   if (!isValidZoneUse(occupantType)) {
@@ -1997,4 +2014,208 @@ export async function deleteFeature(
         eq(schema.landFeatures.id, id),
       ),
     );
+}
+
+// ------------------------------------------------------- paddock layout ---
+
+/**
+ * Subdividing ground into paddocks. Slice 2b.2.
+ *
+ * **ONE ACT CREATES THE PADDOCKS AND THE FENCES TOGETHER**, and the founder was
+ * right to insist on it. The first design had the layout emit fences only, with
+ * zones created once a fence was built — which did not remove the problem of
+ * working out what polygon a ring of fences encloses, it just deferred it to
+ * the worst possible moment, standing in a field. The layout already KNOWS the
+ * polygons; it computed them to cut the strips.
+ *
+ * And the better reason is a fact about farms rather than about code: **a
+ * paddock boundary is not always a fence.** A creek, a road, a hedge, a bluff.
+ * Zone geometry and fence geometry coincide often and need not, so they are two
+ * objects rather than one duplicated.
+ *
+ * EVERYTHING IT MAKES IS `planned`. The paddocks have no fence round them yet,
+ * so they sync no dimension member, take no occupancy and answer no "which
+ * paddock am I in" until somebody has been out and built them.
+ */
+
+export interface LayoutInput {
+  /** The ground to divide. A parcel, or an existing zone. */
+  parcelId: string;
+  /** Divide this zone's polygon; null means the parcel's own boundary. */
+  zoneId?: string | null;
+  /** The lane feature the paddocks hang off. */
+  laneFeatureId: string;
+  count: number;
+  /** "North" gives "North 1", "North 2"… Defaults to "Paddock". */
+  namePrefix?: string;
+}
+
+export interface LayoutResult {
+  zoneIds: string[];
+  featureIds: string[];
+  warnings: string[];
+}
+
+/**
+ * **OWNER-ONLY, unlike everything else in the feature layer.**
+ *
+ * Drawing a fence is a chore and is member-write. Deciding that this field is
+ * four paddocks is not: they become cost objects the moment they are activated,
+ * and `upsertDimensionMember` requires the owner role. Letting staff create the
+ * proposal and then refusing them the act that makes it real would be a worse
+ * shape than refusing at the start.
+ */
+export async function layoutPaddocks(
+  tx: Tx,
+  ctx: LandCtx,
+  input: LayoutInput,
+): Promise<LayoutResult> {
+  requireWrite(ctx, "owner");
+
+  const parcel = await getParcel(tx, ctx.tenantId, input.parcelId);
+  if (!parcel) {
+    throw new LandError("PARCEL_INVALID", "that parcel does not exist");
+  }
+
+  let area: Boundary | null;
+  if (input.zoneId) {
+    const zone = await getZone(tx, ctx.tenantId, input.zoneId);
+    if (!zone) throw new LandError("NOT_FOUND", `zone ${input.zoneId} not found`);
+    area = asBoundary(zone.geometry);
+    if (!area) {
+      throw new LandError(
+        "LAYOUT_INVALID",
+        "that paddock has no boundary drawn, so there is nothing to divide",
+      );
+    }
+  } else {
+    area = asBoundary(parcel.geometry);
+    if (!area) {
+      throw new LandError(
+        "LAYOUT_INVALID",
+        "that parcel has no boundary drawn, so there is nothing to divide",
+      );
+    }
+  }
+
+  const laneFeature = await getFeature(tx, ctx.tenantId, input.laneFeatureId);
+  if (!laneFeature) throw new LandError("NOT_FOUND", "that lane no longer exists");
+  const lane = asFeatureGeometry(laneFeature.geometry);
+  if (!lane) {
+    throw new LandError("LAYOUT_INVALID", "that lane has not been drawn yet");
+  }
+
+  // The refusals are written for a person — "that ground is in two pieces" —
+  // so they reach the screen unaltered, the courtesy `parseBoundary` gets.
+  const outcome = subdivide(area, lane, input.count);
+  if (!outcome.ok) throw new LandError("LAYOUT_INVALID", outcome.error);
+  const { paddocks, cuts, warnings } = outcome.result;
+
+  const prefix = (input.namePrefix ?? "Paddock").trim() || "Paddock";
+  const zoneIds: string[] = [];
+  const featureIds: string[] = [];
+
+  for (const paddock of paddocks) {
+    const rows = await tx
+      .insert(schema.landZones)
+      .values({
+        tenantId: ctx.tenantId,
+        parcelId: input.parcelId,
+        name: `${prefix} ${paddock.index}`,
+        // **THE DRAWN ACREAGE IS THE RECORDED ACREAGE, and this is the one
+        // place that rule differs from a parcel's.** A parcel has a deed and a
+        // county record to disagree with, so `area_acres` is DECLARED there and
+        // the drawing is allowed to differ. A paddock has no external source —
+        // you decided where the fence goes — so the drawing IS the record, and
+        // a declared-versus-computed split would invent a disagreement with
+        // nothing on the other side of it.
+        areaAcres: paddock.areaAcres,
+        geometry: paddock.geometry,
+        status: "planned",
+      })
+      .returning();
+    zoneIds.push(rows[0].id);
+
+    // NO `upsertDimensionMember` HERE. Planned ground is not a cost object;
+    // `activateZone` is what makes it one, and it is owner-gated for that.
+
+    if (paddock.gate) {
+      const gate = await tx
+        .insert(schema.landFeatures)
+        .values({
+          tenantId: ctx.tenantId,
+          parcelId: input.parcelId,
+          kind: "gate",
+          name: `${prefix} ${paddock.index} gate`,
+          status: "planned",
+          geometry: { type: "Point", coordinates: paddock.gate },
+        })
+        .returning();
+      featureIds.push(gate[0].id);
+    }
+  }
+
+  for (let i = 0; i < cuts.length; i += 1) {
+    const rows = await tx
+      .insert(schema.landFeatures)
+      .values({
+        tenantId: ctx.tenantId,
+        parcelId: input.parcelId,
+        kind: "fence",
+        name: `${prefix} division ${i + 1}`,
+        status: "planned",
+        geometry: cuts[i],
+      })
+      .returning();
+    featureIds.push(rows[0].id);
+  }
+
+  return { zoneIds, featureIds, warnings };
+}
+
+/**
+ * A planned paddock becomes real. **The act the status exists for**, and the
+ * moment the ground turns into a cost object.
+ *
+ * Owner-only because `upsertDimensionMember` requires it — the same constraint
+ * that makes `createZone` owner-only, arriving here instead because a planned
+ * zone deliberately skipped it.
+ *
+ * Idempotent for an already-active zone rather than an error: two people
+ * pressing the button after walking the fence in together is not a mistake.
+ */
+export async function activateZone(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+): Promise<LandZone> {
+  requireWrite(ctx, "owner");
+  const existing = await getZone(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `zone ${id} not found`);
+  if (existing.status === "retired") {
+    throw new LandError(
+      "LAYOUT_INVALID",
+      "that ground was retired — it cannot be brought back this way",
+    );
+  }
+
+  const rows = await tx
+    .update(schema.landZones)
+    .set({ status: "active", updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landZones.tenantId, ctx.tenantId),
+        eq(schema.landZones.id, id),
+      ),
+    )
+    .returning();
+  const zone = rows[0];
+
+  await upsertDimensionMember(tx, ctx, {
+    dimensionType: ZONE_DIMENSION,
+    packEntityId: zone.id,
+    displayName: zone.name,
+  });
+
+  return zone;
 }

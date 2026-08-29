@@ -1653,6 +1653,13 @@
       "when": 1787971903707,
       "tag": "0235_sloppy_photon",
       "breakpoints": true
+    },
+    {
+      "idx": 236,
+      "version": "7",
+      "when": 1788002091245,
+      "tag": "0236_fuzzy_thunderbird",
+      "breakpoints": true
     }
   ]
 }

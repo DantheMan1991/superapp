@@ -46,7 +46,11 @@ import {
 import { formatArea, type AreaUnit } from "../core/area";
 import { formatLength, type LengthUnit } from "../core/length";
 import type { Basemap } from "../core/basemap";
-import { createFeatureAction, setFeatureGeometryAction } from "../actions";
+import {
+  createFeatureAction,
+  setFeatureGeometryAction,
+  setParcelBoundaryAction,
+} from "../actions";
 import { CONTINENTAL_US, FIELD_ZOOM } from "../core/basemap";
 import { WalkPanel } from "./walk-panel";
 import {
@@ -80,6 +84,21 @@ type ViewMode = "aerial" | "plan";
 type Mode = "view" | "draw";
 /** Where a vertex comes from: a click on the map, or the ground you stand on. */
 type InputMode = "tap" | "walk";
+
+/**
+ * The kind picker's value for the parcel's own outline.
+ *
+ * **THE BOUNDARY IS DRAWN HERE NOW, AND THE SECOND MAP IS GONE.** The parcel
+ * page carried two of them: one that traced the outline and one that drew
+ * everything on it. The site plan was always the stronger of the two — it has
+ * the basemap toggle, the symbology, the shape picker and, since 2b.1, the
+ * ability to WALK a shape rather than trace it. Keeping a weaker map beside it
+ * to do one job was asking somebody to learn two tools for one act.
+ *
+ * It sits in the kind picker rather than in a mode of its own because from the
+ * founder's side that is what it is: another thing you draw on this map.
+ */
+const BOUNDARY_TARGET = "__parcel_boundary__";
 
 export interface PlanFeature {
   id: string;
@@ -202,6 +221,9 @@ export function SitePlanMap({
   areaUnit,
   lengthUnit,
   canEdit,
+  canEditBoundary,
+  parcelName,
+  declaredAcres,
   selectedId,
   onSelect,
 }: {
@@ -220,6 +242,11 @@ export function SitePlanMap({
   areaUnit: AreaUnit;
   lengthUnit: LengthUnit;
   canEdit: boolean;
+  /** Whether the parcel's own boundary can be drawn here. Owner-only. */
+  canEditBoundary: boolean;
+  parcelName: string;
+  /** The deed's figure, for the live comparison while tracing the boundary. */
+  declaredAcres: number | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
@@ -258,6 +285,8 @@ export function SitePlanMap({
    * last override.
    */
   const [shapeOverride, setShapeOverride] = useState<GeometryShape | null>(null);
+  /** Whether what is about to be drawn is the parcel's own outline. */
+  const boundaryTarget = drawKind === BOUNDARY_TARGET;
   /**
    * How the next shape gets its vertices: by clicking the map, or by standing
    * on each corner.
@@ -828,7 +857,13 @@ export function SitePlanMap({
             ? existingWalked
               ? shapeOf(existingWalked)
               : shapeOfKind(feature.kind)
-            : (shapeOverride ?? shapeOfKind(drawKind)),
+            : drawKind === BOUNDARY_TARGET
+              ? // A boundary is an area however it is placed. Without this the
+                // walk branch asked `shapeOfKind` about a value that is not a
+                // kind, got "point" back, and four walked corners came out as a
+                // single dot saying "Placed where you are standing".
+                "area"
+              : (shapeOverride ?? shapeOfKind(drawKind)),
         );
         setMode("draw");
         return;
@@ -857,7 +892,9 @@ export function SitePlanMap({
         ? existing
           ? shapeOf(existing)
           : shapeOfKind(feature.kind)
-        : (shapeOverride ?? shapeOfKind(drawKind));
+        : drawKind === BOUNDARY_TARGET
+          ? "area"
+          : (shapeOverride ?? shapeOfKind(drawKind));
 
       const instanceDraw = new TerraDraw({
         adapter: new TerraDrawMapLibreGLAdapter({ map: instance }),
@@ -982,14 +1019,27 @@ export function SitePlanMap({
     }
 
     setPending(true);
-    const result = redrawing
-      ? await setFeatureGeometryAction({ id: redrawing.id, geometry })
-      : await createFeatureAction({
-          parcelId,
-          kind: drawKind,
-          status: drawStatus,
-          geometry,
-        });
+    const result = boundaryTarget
+      ? // The boundary REPLACES rather than creating, so it has its own action
+        // — and its own audit entry, which somebody will go looking for.
+        //
+        // **IT TAKES A JSON STRING, NOT AN OBJECT.** That action was written for
+        // the paste box, where what arrives is text somebody copied out of a
+        // county GIS export, and `parseBoundary` reads either. Passing the
+        // object failed Zod and returned a generic "check the details" that is
+        // easy to miss in a toast — which is exactly how this was found.
+        await setParcelBoundaryAction({
+          id: parcelId,
+          geojson: JSON.stringify(geometry),
+        })
+      : redrawing
+        ? await setFeatureGeometryAction({ id: redrawing.id, geometry })
+        : await createFeatureAction({
+            parcelId,
+            kind: drawKind,
+            status: drawStatus,
+            geometry,
+          });
     setPending(false);
 
     if ("error" in result) {
@@ -997,20 +1047,24 @@ export function SitePlanMap({
       return;
     }
     toast.success(
-      redrawing
-        ? "Redrawn"
-        : drawStatus === "planned"
-          ? `${featureKindLabel(drawKind)} added as a proposal`
-          : `${featureKindLabel(drawKind)} added`,
+      boundaryTarget
+        ? `${parcelName}'s boundary saved`
+        : redrawing
+          ? "Redrawn"
+          : drawStatus === "planned"
+            ? `${featureKindLabel(drawKind)} added as a proposal`
+            : `${featureKindLabel(drawKind)} added`,
     );
     stopDrawing();
     router.refresh();
   }, [
+    boundaryTarget,
     drawKind,
     drawStatus,
     drawingShape,
     input,
     parcelId,
+    parcelName,
     redrawing,
     router,
     stopDrawing,
@@ -1056,7 +1110,12 @@ export function SitePlanMap({
   }, []);
 
   const selectedKind = kinds.find((k) => k.kind === drawKind);
-  const nextShape = shapeOverride ?? selectedKind?.shape ?? "point";
+  // A boundary is an area, always. Offering a shape picker for it would be
+  // offering a parcel whose outline is a single point, and every acreage in
+  // the pack would then be silently zero.
+  const nextShape = boundaryTarget
+    ? "area"
+    : (shapeOverride ?? selectedKind?.shape ?? "point");
   // While a session is open the shape is whatever that session opened with;
   // otherwise it is what the picker would open next.
   const drawShape = mode === "draw" ? drawingShape : nextShape;
@@ -1092,6 +1151,8 @@ export function SitePlanMap({
                 geometry={measured}
                 shape={drawShape}
                 input={input}
+                boundary={boundaryTarget}
+                declaredAcres={declaredAcres}
                 areaUnit={areaUnit}
                 lengthUnit={lengthUnit}
               />
@@ -1119,6 +1180,11 @@ export function SitePlanMap({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {canEditBoundary && (
+                      <SelectItem value={BOUNDARY_TARGET}>
+                        {parcelName}&rsquo;s boundary
+                      </SelectItem>
+                    )}
                     {kinds.map((kind) => (
                       <SelectItem key={kind.kind} value={kind.kind}>
                         {kind.label}
@@ -1126,6 +1192,7 @@ export function SitePlanMap({
                     ))}
                   </SelectContent>
                 </Select>
+                {!boundaryTarget && (
                 <div className="inline-flex overflow-hidden rounded-md border">
                   {SHAPE_CHOICES.map(({ shape, label, Icon }) => (
                     <button
@@ -1145,6 +1212,8 @@ export function SitePlanMap({
                     </button>
                   ))}
                 </div>
+                )}
+                {!boundaryTarget && (
                 <div className="inline-flex overflow-hidden rounded-md border">
                   {(["built", "planned"] as const).map((option) => (
                     <button
@@ -1161,6 +1230,7 @@ export function SitePlanMap({
                     </button>
                   ))}
                 </div>
+                )}
                 <div className="inline-flex overflow-hidden rounded-md border">
                   {(["tap", "walk"] as const).map((option) => (
                     <button
@@ -1179,8 +1249,36 @@ export function SitePlanMap({
                 </div>
                 <Button size="sm" onClick={() => startDrawing(null)} disabled={!ready}>
                   <Pencil className="mr-2 h-4 w-4" />
-                  {input === "walk" ? "Walk it" : "Draw it"}
+                  {boundaryTarget
+                    ? input === "walk"
+                      ? "Walk the boundary"
+                      : "Trace the boundary"
+                    : input === "walk"
+                      ? "Walk it"
+                      : "Draw it"}
                 </Button>
+                {/* The existing outline, with handles. `startDrawing` takes a
+                    FEATURE, so the boundary borrows the shape of one — nothing
+                    is written until Save, which routes on `boundaryTarget`. */}
+                {boundaryTarget && parcelBoundary && input === "tap" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!ready}
+                    onClick={() =>
+                      startDrawing({
+                        id: parcelId,
+                        kind: "fence",
+                        name: parcelName,
+                        status: "built",
+                        geometry: parcelBoundary,
+                        lineWidth: null,
+                      })
+                    }
+                  >
+                    Move the corners
+                  </Button>
+                )}
               </>
             )}
             <Button size="sm" variant="ghost" onClick={locate} disabled={!ready}>
@@ -1283,12 +1381,16 @@ function Measurement({
   geometry,
   shape,
   input,
+  boundary,
+  declaredAcres,
   areaUnit,
   lengthUnit,
 }: {
   geometry: FeatureGeometry | null;
   shape: GeometryShape;
   input: InputMode;
+  boundary: boolean;
+  declaredAcres: number | null;
   areaUnit: AreaUnit;
   lengthUnit: LengthUnit;
 }) {
@@ -1297,6 +1399,15 @@ function Measurement({
   // the kind of copy that makes a screen feel like it was built for a
   // different job than the one being done with it.
   if (!geometry) {
+    if (boundary) {
+      return (
+        <span className="text-muted-foreground">
+          {input === "walk"
+            ? "Stand on each corner of the property and drop a point."
+            : "Click each corner of the property. Click the first one again to close it."}
+        </span>
+      );
+    }
     if (input === "walk") {
       return (
         <span className="text-muted-foreground">
@@ -1329,15 +1440,46 @@ function Measurement({
   }
 
   const length = geometryLengthM(geometry);
-  const boundary = asBoundary(geometry);
+  const area = asBoundary(geometry);
+
+  /**
+   * **TRACING A BOUNDARY LEADS WITH ACRES, NOT FEET**, and shows the deed's
+   * figure beside it while you are still moving the corners. That comparison is
+   * what the old boundary map existed for, and it is the one thing that had to
+   * survive folding it in here: a live "you said 40 acres, this encloses 38.6"
+   * is a real finding, and it is far more use before you save than after.
+   *
+   * It REPORTS and never corrects — the standing rule since 2a.0. A deed and a
+   * fence line disagree for real reasons.
+   */
+  if (boundary && area) {
+    const acres = boundaryAreaAcres(area);
+    const difference =
+      declaredAcres === null ? null : Math.round((acres - declaredAcres) * 10_000) / 10_000;
+    return (
+      <span className="flex items-center gap-2">
+        <span className="font-medium tabular-nums">
+          {formatArea(acres, areaUnit)}
+        </span>
+        {difference !== null && Math.abs(difference) >= 0.01 && (
+          <span className="text-muted-foreground">
+            {difference > 0 ? "+" : "−"}
+            {formatArea(Math.abs(difference), areaUnit)} against the{" "}
+            {formatArea(declaredAcres, areaUnit)} recorded
+          </span>
+        )}
+      </span>
+    );
+  }
+
   return (
     <span className="flex items-center gap-2">
       <span className="font-medium tabular-nums">
         {formatLength(length, lengthUnit)}
       </span>
-      {boundary && (
+      {area && (
         <span className="text-muted-foreground tabular-nums">
-          {formatArea(boundaryAreaAcres(boundary), areaUnit)} enclosed
+          {formatArea(boundaryAreaAcres(area), areaUnit)} enclosed
         </span>
       )}
     </span>

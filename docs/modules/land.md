@@ -553,6 +553,77 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-08-29 — One map for the whole parcel (`claude/one-map-for-the-whole-parcel`)
+
+**No migration.** The parcel's own boundary is drawn in the site plan now, and
+the second map on that page is gone.
+
+**THE FOUNDER'S ASK, and it was two things that turn out to be one.** He wanted
+to walk the four corners of a property with GPS pins, and he wanted the boundary
+tool folded into the site plan *"so there are not 2 maps being displayed"*.
+Walking already worked for features (2b.1); it only ever needed the boundary to
+be a thing this map could draw. Fold that in and the second map has no job left.
+
+**Why this map and not the other.** The parcel page carried two. The site plan
+was always the stronger — basemap toggle, symbology, shape picker, and since
+2b.1 the ability to WALK a shape rather than trace it. Keeping a weaker map
+beside it to do one job was asking somebody to learn two tools for one act.
+
+**The boundary sits in the KIND PICKER**, at the top, as `Home Farm's boundary`
+— because from the founder's side that is what it is: another thing you draw on
+this map. Selecting it:
+
+  - **hides the shape picker.** A boundary is an area, always. Offering the
+    choice would be offering a parcel whose outline is a single point, and every
+    acreage in the pack would then divide by zero.
+  - **hides the built/proposed toggle.** A deed line is not a proposal.
+  - **is owner-only** while features stay member-write. Drawing the fence you
+    just built is a chore; the outline is what the deed says and what every
+    per-acre figure divides by.
+  - routes Save to `setParcelBoundaryAction`, which REPLACES rather than
+    creating and has its own audit entry.
+
+**The reading survived, which was the point of keeping it.** `BoundarySummary`
+gained a `withMap` prop and the parcel page passes false. What stays is measured
+against recorded, the sentence about why they may disagree, and the paste box —
+a county GIS export is more accurate than anything traced by hand, and it is now
+the side door to a front door that lives somewhere else. **The zone page is
+untouched**: one map there, and it is the only one.
+
+**And the live comparison moved with it.** Tracing or walking a boundary now
+leads with ACRES rather than feet and shows the deed's figure beside it while
+the corners are still moving — `40.1256 acres · +0.1256 acres against the 40
+acres recorded`. That was the old map's best trick and it is more use before you
+save than after. It reports and never corrects, the rule since 2a.0.
+
+**Two bugs, both found by driving it**
+
+- **Four walked corners came out as a single dot** saying "Placed where you are
+  standing". `startDrawing` has two branches, and only the TAP one had been
+  taught that the boundary is an area; the walk branch asked `shapeOfKind`
+  about a value that is not a kind, got `point` back, and `walkToGeometry`
+  faithfully built a Point from the first corner.
+- **The save silently did nothing.** `setParcelBoundaryAction` takes
+  `geojson` as a **JSON string**, not a geometry object — it was written for the
+  paste box, where what arrives is text copied out of a county export, and
+  `parseBoundary` reads either. Passing the object failed Zod and returned a
+  generic "Check the details and try again" that is easy to miss in a toast.
+  Worth remembering: **a silently-rejected action looks exactly like a
+  successful one if nobody reads the toast.**
+
+**Driven on Hilltop Farm.** Four corners walked with plausible phone accuracies
+(±12 to ±18 ft), the readout tracking `4 corners walked · worst ±18 ft`, the
+live figure `40.1256 acres`, and after saving the panel reads
+`Boundary · measures 40.1256 acres` against `Recorded 40 acres` — the same
+number that was on screen while walking. **One map on the page.**
+
+**Housekeeping:** Hilltop Farm's `North Pasture` zone was deleted by an earlier
+cleanup in this session whose `North %` pattern matched more than intended. Dev
+branch only, and the parcel now carries the laid-out paddocks instead.
+
+**Open after this slice:** unchanged. Nothing has been walked with a REAL phone,
+which is the one that matters and the one 2b.3 waits on.
+
 ### 2026-08-29 — Slice 2b.4: what it will take (`claude/what-will-it-take`)
 
 **Migrations `0237`** (`land_plans`, `land_plan_items`, `land_features.plan_id`)
@@ -1912,8 +1983,11 @@ rented ground, and retrofitting it means rewriting the report.
   **Industry-neutral (ADR 0004): no `trough`, no `energizer`** — those come from
   `packConfig.land.featureKinds`, and an unknown kind draws with the fallback
   for its shape
-- `src/packs/land/components/site-plan-map.tsx` — the site plan. One map, a
-  basemap toggle, a shape picker, and Terra Draw in point/line/polygon modes.
+- `src/packs/land/components/site-plan-map.tsx` — the site plan, and **the only
+  map on the parcel page since 2026-08-29**: it draws the parcel's own boundary
+  too, at the top of the kind picker, owner-only and always an area. A basemap
+  toggle, a shape picker, tap-or-walk input, and Terra Draw in
+  point/line/polygon modes.
   **The map handlers read the draw mode from a REF**, because they are
   registered once and would otherwise close over the mode at creation
 - `src/packs/land/components/plan-legend.tsx` — the key. Only the kinds

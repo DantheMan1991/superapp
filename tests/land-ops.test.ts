@@ -2040,13 +2040,32 @@ d("land ops", () => {
       );
       expect(zones).toHaveLength(4);
 
-      // Three dividing fences and four gates. The fourth division would be the
-      // field's own boundary, which is already there.
+      /**
+       * Four paddocks off a CENTRAL lane is two either side, so: one dividing
+       * fence per side, plus the alley's two sides. The field's own perimeter
+       * is already there and is not drawn.
+       *
+       * **NO FENCE CROSSES THE LANE**, which is the whole point of the
+       * corridor — the previous version drew three dividers straight through
+       * the walkway.
+       */
       const features = await asOwner((tx) =>
         listFeatures(tx, tenantId, { parcelId: parcel.id }),
       );
-      expect(features.filter((f) => f.kind === "fence")).toHaveLength(3);
+      const fences = features.filter((f) => f.kind === "fence");
+      expect(fences).toHaveLength(4);
+      expect(fences.filter((f) => /division/.test(f.name))).toHaveLength(2);
+      expect(fences.filter((f) => /lane fence/.test(f.name))).toHaveLength(2);
       expect(features.filter((f) => f.kind === "gate")).toHaveLength(4);
+
+      const laneLon = LANE.coordinates[0][0];
+      for (const fence of fences.filter((f) => /division/.test(f.name))) {
+        const lons = (
+          fence.geometry as { coordinates: number[][] }
+        ).coordinates.map((c) => c[0]);
+        const crosses = Math.min(...lons) < laneLon && Math.max(...lons) > laneLon;
+        expect(crosses).toBe(false);
+      }
     });
 
     it("makes everything PLANNED, because none of it is built yet", async () => {
@@ -2110,9 +2129,11 @@ d("land ops", () => {
         const drawn = boundaryAreaAcres(asBoundary(zone.geometry)!);
         expect(zone.areaAcres!).toBeCloseTo(drawn, 3);
       }
-      // And they add back up to the field.
+      // They add back up to the field MINUS the lane's own corridor, which is
+      // ground the cows walk down rather than graze.
       const total = zones.reduce((sum, z) => sum + (z.areaAcres ?? 0), 0);
-      expect(total).toBeCloseTo(boundaryAreaAcres(FIELD), 2);
+      expect(total).toBeLessThan(boundaryAreaAcres(FIELD));
+      expect(total).toBeGreaterThan(boundaryAreaAcres(FIELD) - 1);
     });
 
     it("names them off a prefix so a farm can have more than one set", async () => {
@@ -2121,7 +2142,7 @@ d("land ops", () => {
         layoutPaddocks(tx, ownerCtx(), {
           parcelId: parcel.id,
           laneFeatureId: lane.id,
-          count: 3,
+          count: 4,
           namePrefix: "North",
         }),
       );
@@ -2132,7 +2153,47 @@ d("land ops", () => {
         "North 1",
         "North 2",
         "North 3",
+        "North 4",
       ]);
+    });
+
+    it("rounds an odd count up across two sides, and says the real number", async () => {
+      // Three paddocks either side of a lane is not three. The dialog's button
+      // reads the count back off the same function, so what it offers is what
+      // it builds — but the rounding is worth knowing about here too.
+      const { parcel, lane } = await fieldWithLane("Odd");
+      const result = await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 3,
+        }),
+      );
+      expect(result.zoneIds).toHaveLength(4);
+    });
+
+    it("puts paddocks on ONE side when asked, and says what it left out", async () => {
+      const { parcel, lane } = await fieldWithLane("One Side");
+      const result = await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 4,
+          placement: "edge",
+        }),
+      );
+      expect(result.zoneIds).toHaveLength(4);
+      // One run of lane fence, not two: the far side of an edge lane is the
+      // perimeter that is already there.
+      const features = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id }),
+      );
+      expect(
+        features.filter((f) => /lane fence/.test(f.name)),
+      ).toHaveLength(1);
+      expect(result.warnings.some((w) => /far side of the lane/.test(w))).toBe(
+        true,
+      );
     });
 
     it("is a DECISION, not a chore — staff cannot lay out paddocks", async () => {

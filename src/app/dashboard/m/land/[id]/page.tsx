@@ -431,6 +431,8 @@ export default async function ParcelDetailPage({
               <PaddockLayout
                 parcelId={parcel.id}
                 zoneWord={zoneWord}
+                areaUnit={unit}
+                lengthUnit={lengthUnitFrom(pack.config)}
                 lanes={features
                   .filter(
                     (feature) =>
@@ -441,12 +443,21 @@ export default async function ParcelDetailPage({
                   .map((feature) => ({
                     id: feature.id,
                     label: feature.name || "Lane",
+                    geometry: feature.geometry,
                   }))}
                 areas={[
-                  { id: null, label: `All of ${parcel.name}` },
+                  {
+                    id: null,
+                    label: `All of ${parcel.name}`,
+                    geometry: parcel.geometry,
+                  },
                   ...zones
                     .filter((zone) => zone.geometry !== null)
-                    .map((zone) => ({ id: zone.id, label: zone.name })),
+                    .map((zone) => ({
+                      id: zone.id,
+                      label: zone.name,
+                      geometry: zone.geometry,
+                    })),
                 ]}
               />
               <ZoneForm parcelId={parcel.id} unit={unit} zoneWord={zoneWord} />

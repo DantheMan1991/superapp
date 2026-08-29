@@ -58,8 +58,24 @@ interface AppShellProps {
    * full-width module is a flag on its definition, not an edit to this file.
    */
   fullWidthPathPrefixes?: string[];
-  /** Rendered at the bottom of the sidebar (user button, org switcher). */
+  /**
+   * Rendered at the bottom of the sidebar, and inside the mobile drawer.
+   *
+   * For ordinary links and text. Anything that opens a PORTALLED popover —
+   * Clerk's widgets, most notably — belongs in `identity` instead: the mobile
+   * drawer is a modal dialog, and a popover portalled out of it is unclickable.
+   */
   footer?: ReactNode;
+  /**
+   * The signed-in-as widgets: org switcher, user button.
+   *
+   * **A SEPARATE SLOT BECAUSE THEY CANNOT LIVE IN THE MOBILE DRAWER.** On
+   * desktop they sit in the sidebar footer exactly as before; on mobile they
+   * go in the top bar, OUTSIDE the drawer, because a Radix modal disables
+   * pointer events on `body` and Clerk portals its popovers there. See the
+   * comment at the header for the whole story.
+   */
+  identity?: ReactNode;
   children: ReactNode;
 }
 
@@ -189,6 +205,7 @@ export function AppShell({
   navGroups,
   fullWidthPathPrefixes,
   footer,
+  identity,
   children,
 }: AppShellProps) {
   const pathname = usePathname();
@@ -256,9 +273,31 @@ export function AppShell({
             {footer && (
               <div className="border-t border-sidebar-border p-4">{footer}</div>
             )}
+            {/* `identity` is deliberately NOT here — see the header below. */}
           </SheetContent>
         </Sheet>
         <Brand contextLabel={contextLabel} />
+        {/*
+          **THE IDENTITY WIDGETS LIVE IN THE BAR, NOT IN THE DRAWER**, and on
+          mobile that is a correctness requirement rather than a layout taste.
+
+          The drawer is a Radix Dialog, and a modal one sets
+          `document.body.style.pointerEvents = "none"` while it is open
+          (`react-dismissable-layer`), re-enabling it only for the layers Radix
+          itself manages. Clerk's `<OrganizationSwitcher>` and `<UserButton>`
+          portal their popovers to `body`, outside that registry — so the
+          popover PAINTED on top of the drawer and every tap fell straight
+          through it to the menu underneath. Reported from a phone: tapping
+          "Hilltop Farm" activated whatever nav item happened to be behind it.
+
+          Fixing it with CSS would mean naming Clerk's portal elements, and
+          `clerk-js` is loaded from their CDN — those names are not in the lock
+          file and can change without a deploy here. Keeping the widgets out of
+          the modal cannot break that way.
+        */}
+        {identity && (
+          <div className="ml-auto flex min-w-0 items-center gap-2">{identity}</div>
+        )}
       </header>
 
       {/* Desktop sidebar */}
@@ -273,8 +312,14 @@ export function AppShell({
           <CommandPalette items={commandItems} className={railPill} />
         </div>
         <SidebarNav navGroups={navGroups} pathname={pathname} />
-        {footer && (
-          <div className="border-t border-sidebar-border p-4">{footer}</div>
+        {(footer || identity) && (
+          <div className="space-y-3 border-t border-sidebar-border p-4">
+            {footer}
+            {/* The desktop rail is a plain <aside>, not a dialog, so nothing
+                here is inside a pointer-events lock and the popovers have
+                always worked. This is where they have always been. */}
+            {identity}
+          </div>
         )}
       </aside>
 

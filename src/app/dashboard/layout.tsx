@@ -166,28 +166,34 @@ export default async function DashboardLayout({
       navGroups={navGroups}
       fullWidthPathPrefixes={fullWidthPathPrefixes}
       footer={
-        <div className="space-y-3">
-          {admin && (
-            <a
-              href="/admin"
-              className="block text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
-            >
-              ← Platform admin
-            </a>
-          )}
-          {/* Both widgets decide DURING RENDER whether Clerk.js has loaded, and
-              the answer is always no on the server — so if that script wins the
-              race against hydration, the client renders a subtree the HTML does
-              not have. See components/app/after-hydration.tsx. */}
-          <div className="flex items-center justify-between gap-2">
-            <AfterHydration>
-              <OrganizationSwitcher
-                hidePersonal
-                afterSelectOrganizationUrl="/dashboard"
-              />
-              <UserButton />
-            </AfterHydration>
-          </div>
+        admin ? (
+          <a
+            href="/admin"
+            className="block text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground"
+          >
+            ← Platform admin
+          </a>
+        ) : null
+      }
+      /*
+        SEPARATE FROM `footer` SO THESE NEVER RENDER INSIDE THE MOBILE DRAWER.
+        Both open popovers that Clerk portals to `body`, and the drawer is a
+        modal dialog that disables pointer events there — the popover paints on
+        top and every tap goes through it. See components/app-shell.tsx.
+      */
+      identity={
+        // Both widgets decide DURING RENDER whether Clerk.js has loaded, and
+        // the answer is always no on the server — so if that script wins the
+        // race against hydration, the client renders a subtree the HTML does
+        // not have. See components/app/after-hydration.tsx.
+        <div className="flex min-w-0 items-center gap-2">
+          <AfterHydration>
+            <OrganizationSwitcher
+              hidePersonal
+              afterSelectOrganizationUrl="/dashboard"
+            />
+            <UserButton />
+          </AfterHydration>
         </div>
       }
     >

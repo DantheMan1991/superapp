@@ -536,6 +536,100 @@ d("land tables (RLS)", () => {
     ).rejects.toThrow();
   });
 
+  // ---- plans (slice 2b.4) ----------------------------------------------
+
+  it("a tenant sees only its own plans and their lists", async () => {
+    // `unit_cost` makes a leak here worse than a miscount: it is what somebody
+    // typed they were paying, which is the sort of figure a competitor wants.
+    const mineId = await withSystem(async (tx) => {
+      const plans = await tx
+        .insert(schema.landPlans)
+        .values([
+          { tenantId: tenantA, parcelId: homeA, name: "Mine" },
+          { tenantId: tenantB, parcelId: leasedB, name: "Theirs" },
+        ])
+        .returning();
+      await tx.insert(schema.landPlanItems).values([
+        {
+          tenantId: tenantA,
+          planId: plans[0].id,
+          material: "post",
+          label: "Posts",
+          quantity: 100,
+          unit: "each",
+          unitCost: 4.25,
+        },
+        {
+          tenantId: tenantB,
+          planId: plans[1].id,
+          material: "post",
+          label: "Posts",
+          quantity: 50,
+          unit: "each",
+          unitCost: 9.99,
+        },
+      ]);
+      return plans[0].id;
+    });
+
+    const mine = await asStaff((tx) => tx.select().from(schema.landPlans));
+    expect(mine.map((p) => p.name)).toEqual(["Mine"]);
+
+    const items = await asStaff((tx) => tx.select().from(schema.landPlanItems));
+    expect(items).toHaveLength(1);
+    expect(items[0].planId).toBe(mineId);
+    // Their price is not on this tenant's screen.
+    expect(items.map((i) => i.unitCost)).not.toContain(9.99);
+  });
+
+  it("cannot put a line on another tenant's plan", async () => {
+    const theirs = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.landPlans)
+        .values({ tenantId: tenantB, parcelId: leasedB, name: "Theirs 2" })
+        .returning();
+      return rows[0].id;
+    });
+    await expect(
+      withSystem((tx) =>
+        tx.insert(schema.landPlanItems).values({
+          tenantId: tenantA,
+          planId: theirs,
+          material: "post",
+          label: "Posts",
+          quantity: 1,
+          unit: "each",
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a unit the takeoff does not use, and a quantity of nothing", async () => {
+    const plan = await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(schema.landPlans)
+        .values({ tenantId: tenantA, parcelId: homeA, name: "Checks" })
+        .returning();
+      return rows[0].id;
+    });
+    for (const bad of [
+      { unit: "rolls", quantity: 1 },
+      { unit: "each", quantity: 0 },
+    ]) {
+      await expect(
+        withSystem((tx) =>
+          tx.insert(schema.landPlanItems).values({
+            tenantId: tenantA,
+            planId: plan,
+            material: "post",
+            label: "Posts",
+            ...bad,
+          }),
+        ),
+      ).rejects.toThrow();
+    }
+  });
+
   it("takes a PLANNED zone, which is ground with no fence round it yet", async () => {
     // Slice 2b.2 widened this CHECK. The value has to exist at the database
     // level or the layout has nowhere to put what it produced.
@@ -652,6 +746,12 @@ d("land tables (RLS)", () => {
     ).toHaveLength(0);
     expect(
       await withTenant(nowhere, (tx) => tx.select().from(schema.landFeatures)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.landPlans)),
+    ).toHaveLength(0);
+    expect(
+      await withTenant(nowhere, (tx) => tx.select().from(schema.landPlanItems)),
     ).toHaveLength(0);
   });
 

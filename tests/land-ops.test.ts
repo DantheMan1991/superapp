@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
+import { takeoffFor, totalsOf } from "../src/packs/land/core/takeoff";
 import {
   asBoundary,
   asFeatureGeometry,
@@ -18,15 +19,22 @@ import {
   combineParcels,
   completedStayDays,
   activateZone,
+  addPlanItem,
   createFeature,
+  createPlan,
+  deletePlan,
   createParcel,
   createZone,
   currentUses,
   deleteFeature,
   deleteOccupancy,
   getFeature,
+  getPlan,
   layoutPaddocks,
   listFeatures,
+  listPlanItems,
+  saveTakeoff,
+  setFeaturePlan,
   setFeatureGeometry,
   setFeatureStatus,
   updateFeature,
@@ -2371,6 +2379,280 @@ d("land ops", () => {
           asOwner((tx) => activateZone(tx, staffCtx(), result.zoneIds[0])),
         ).rejects.toMatchObject({ code: "FORBIDDEN" });
       });
+    });
+  });
+
+  // ---- plans and the takeoff (slice 2b.4) -------------------------------
+
+  describe("plans", () => {
+    const FIELD2: Boundary = {
+      type: "Polygon",
+      coordinates: [
+        [
+          [-82.48, 40.4],
+          [-82.47526, 40.4],
+          [-82.47526, 40.40361],
+          [-82.48, 40.40361],
+          [-82.48, 40.4],
+        ],
+      ],
+    };
+    const LANE2: FeatureGeometry = {
+      type: "LineString",
+      coordinates: [
+        [-82.47763, 40.4],
+        [-82.47763, 40.40361],
+      ],
+    };
+
+    async function laidOut(name: string) {
+      const parcel = await newParcel(name);
+      await asOwner((tx) => setParcelBoundary(tx, ownerCtx(), parcel.id, FIELD2));
+      const lane = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "lane",
+          name: "Centre",
+          geometry: LANE2,
+        }),
+      );
+      const result = await asOwner((tx) =>
+        layoutPaddocks(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          laneFeatureId: lane.id,
+          count: 4,
+          namePrefix: "North",
+        }),
+      );
+      return { parcel, lane, result };
+    }
+
+    it("LAYING OUT MAKES A PLAN, and everything it drew belongs to it", async () => {
+      // A plan is a named set of proposals costed together, and dividing a
+      // field is exactly that. Making somebody create one and then attach
+      // twelve features would be asking them to restate what the app knows.
+      const { parcel, result } = await laidOut("Plan From Layout");
+      expect(result.planId).toBeTruthy();
+
+      const plan = await asOwner((tx) => getPlan(tx, tenantId, result.planId));
+      expect(plan?.name).toBe("North");
+      expect(plan?.takenOffAt).toBeNull();
+
+      const features = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id }),
+      );
+      const inPlan = features.filter((f) => f.planId === result.planId);
+      // Every fence and gate it drew — but NOT the lane, which was there first.
+      expect(inPlan).toHaveLength(result.featureIds.length);
+      expect(inPlan.some((f) => f.kind === "lane")).toBe(false);
+    });
+
+    it("computes a takeoff off the plan's own features", async () => {
+      const { parcel, result } = await laidOut("Counted");
+      const features = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id }),
+      );
+      const mine = features
+        .filter((f) => f.planId === result.planId)
+        .map((f) => ({
+          id: f.id,
+          name: f.name,
+          kind: f.kind,
+          geometry: asFeatureGeometry(f.geometry),
+          attributes: {} as Record<string, string | number | boolean>,
+        }));
+
+      const { lines, notes } = takeoffFor(mine, "foot");
+      // Four gates, and every fence contributes its own footage.
+      expect(
+        totalsOf(lines).find((t) => t.material === "gate")?.quantity,
+      ).toBe(4);
+      expect(totalsOf(lines).find((t) => t.material === "fence")).toBeDefined();
+      // Nothing has a post spacing yet, so it says so rather than guessing.
+      expect(notes.some((n) => n.message.includes("post_spacing"))).toBe(true);
+    });
+
+    it("SAVES A SNAPSHOT, and the drawing may drift from it afterwards", async () => {
+      const { result } = await laidOut("Snapshot");
+      const source = result.featureIds[0];
+      await asOwner((tx) =>
+        saveTakeoff(tx, ownerCtx(), result.planId, [
+          { material: "post", label: "Posts", quantity: 156, unit: "each", sourceFeatureId: source },
+          { material: "wire", label: "Wire", quantity: 1240, unit: "ft", sourceFeatureId: source },
+        ]),
+      );
+
+      const plan = await asOwner((tx) => getPlan(tx, tenantId, result.planId));
+      expect(plan?.takenOffAt).not.toBeNull();
+
+      const items = await asOwner((tx) =>
+        listPlanItems(tx, tenantId, result.planId),
+      );
+      expect(items.map((i) => i.material).sort()).toEqual(["post", "wire"]);
+      expect(items.find((i) => i.material === "wire")?.quantity).toBe(1240);
+    });
+
+    it("keeps HAND-ADDED lines when the list is taken off again", async () => {
+      // Insulators and a bag of staples are not in the geometry, and no amount
+      // of redrawing the fence tells us anything about them.
+      const { result } = await laidOut("Hand Lines");
+      const source = result.featureIds[0];
+      await asOwner((tx) =>
+        saveTakeoff(tx, ownerCtx(), result.planId, [
+          { material: "post", label: "Posts", quantity: 100, unit: "each", sourceFeatureId: source },
+        ]),
+      );
+      await asOwner((tx) =>
+        addPlanItem(tx, ownerCtx(), result.planId, {
+          material: "insulator",
+          label: "Insulators",
+          quantity: 300,
+          unit: "each",
+        }),
+      );
+
+      await asOwner((tx) =>
+        saveTakeoff(tx, ownerCtx(), result.planId, [
+          { material: "post", label: "Posts", quantity: 120, unit: "each", sourceFeatureId: source },
+        ]),
+      );
+
+      const items = await asOwner((tx) =>
+        listPlanItems(tx, tenantId, result.planId),
+      );
+      expect(items.find((i) => i.material === "insulator")?.quantity).toBe(300);
+      // …and the counted line was replaced, not doubled.
+      expect(items.filter((i) => i.material === "post")).toHaveLength(1);
+      expect(items.find((i) => i.material === "post")?.quantity).toBe(120);
+    });
+
+    it("REFUSES a counted line that names no feature", async () => {
+      // Otherwise it would survive every re-take and quietly double the order.
+      // Hand-added lines go through addPlanItem, which is the unambiguous path.
+      const { result } = await laidOut("Sourceless");
+      await expect(
+        asOwner((tx) =>
+          saveTakeoff(tx, ownerCtx(), result.planId, [
+            { material: "post", label: "Posts", quantity: 10, unit: "each" },
+          ]),
+        ),
+      ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+    });
+
+    it("takes a price somebody typed, and leaves it null when nobody did", async () => {
+      const { result } = await laidOut("Priced");
+      const item = await asOwner((tx) =>
+        addPlanItem(tx, ownerCtx(), result.planId, {
+          material: "post",
+          label: "Posts",
+          quantity: 156,
+          unit: "each",
+          unitCost: 4.25,
+        }),
+      );
+      expect(item.unitCost).toBe(4.25);
+
+      const free = await asOwner((tx) =>
+        addPlanItem(tx, ownerCtx(), result.planId, {
+          material: "wire",
+          label: "Wire",
+          quantity: 10,
+          unit: "ft",
+        }),
+      );
+      // Null, not zero: zero is a thing that is free.
+      expect(free.unitCost).toBeNull();
+    });
+
+    it("refuses a material name the column would not take", async () => {
+      const { result } = await laidOut("Bad Material");
+      await expect(
+        asOwner((tx) =>
+          addPlanItem(tx, ownerCtx(), result.planId, {
+            material: "Barbed Wire",
+            label: "Wire",
+            quantity: 10,
+            unit: "ft",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+    });
+
+    it("refuses a quantity of nothing, and a negative price", async () => {
+      const { result } = await laidOut("Bad Numbers");
+      await expect(
+        asOwner((tx) =>
+          addPlanItem(tx, ownerCtx(), result.planId, {
+            material: "post",
+            label: "Posts",
+            quantity: 0,
+            unit: "each",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+
+      await expect(
+        asOwner((tx) =>
+          addPlanItem(tx, ownerCtx(), result.planId, {
+            material: "post",
+            label: "Posts",
+            quantity: 5,
+            unit: "each",
+            unitCost: -1,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+    });
+
+    it("DELETING A PLAN LEAVES ITS FEATURES STANDING", async () => {
+      // Deciding not to proceed with a proposal is not deciding that the fence
+      // you already built as part of it never happened.
+      const { parcel, result } = await laidOut("Abandoned");
+      const before = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id }),
+      );
+      await asOwner((tx) => deletePlan(tx, ownerCtx(), result.planId));
+
+      const after = await asOwner((tx) =>
+        listFeatures(tx, tenantId, { parcelId: parcel.id }),
+      );
+      expect(after).toHaveLength(before.length);
+      expect(after.every((f) => f.planId === null)).toBe(true);
+      expect(await asOwner((tx) => getPlan(tx, tenantId, result.planId))).toBeNull();
+    });
+
+    it("is the owner's call, not a chore", async () => {
+      const { parcel } = await laidOut("Owner Only Plans");
+      await expect(
+        asOwner((tx) =>
+          createPlan(tx, staffCtx(), { parcelId: parcel.id, name: "Theirs" }),
+        ),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("moves features in and out of a plan", async () => {
+      const { parcel, result } = await laidOut("Moving");
+      const loose = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          name: "Extra",
+          geometry: LANE2,
+        }),
+      );
+      expect(loose.planId).toBeNull();
+
+      await asOwner((tx) =>
+        setFeaturePlan(tx, ownerCtx(), [loose.id], result.planId),
+      );
+      expect(
+        (await asOwner((tx) => getFeature(tx, tenantId, loose.id)))?.planId,
+      ).toBe(result.planId);
+
+      await asOwner((tx) => setFeaturePlan(tx, ownerCtx(), [loose.id], null));
+      expect(
+        (await asOwner((tx) => getFeature(tx, tenantId, loose.id)))?.planId,
+      ).toBeNull();
     });
   });
 });

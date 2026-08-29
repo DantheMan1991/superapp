@@ -495,6 +495,61 @@ export const landOccupancy = pgTable(
 );
 
 /**
+ * A PLAN: a named set of proposals, and what they will take to build.
+ *
+ * **IT DOES THREE JOBS AND THAT IS WHY IT IS ONE TABLE** (site-plan design,
+ * 2026-08-28):
+ *
+ *   - it is what a saved takeoff attaches to — a fence project is several runs,
+ *     some gates and a brace, not one line
+ *   - it answers mutual exclusivity: two competing waterline routes are two
+ *     plans, and only one of them gets built
+ *   - it is what you mark built, by promoting its features
+ *
+ * **NO STATUS COLUMN, DELIBERATELY.** Its features already carry
+ * `planned`/`built`/`removed`, so "is this plan built" is derivable — and a
+ * second status is a second thing that can be wrong.
+ */
+export const landPlans = pgTable(
+  "land_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Composite FK, so a plan is always about same-tenant ground. */
+    parcelId: uuid("parcel_id").notNull(),
+    name: text("name").notNull(),
+    notes: text("notes").notNull().default(""),
+    /**
+     * When the list below was taken off the drawing.
+     *
+     * Null until somebody saves one — a plan with no saved takeoff is a plan
+     * whose figures are still live, and the screens say so rather than showing
+     * a drift against nothing.
+     */
+    takenOffAt: timestamp("taken_off_at", { withTimezone: true }),
+    metadata: jsonb("metadata").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("land_plans_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("land_plans_tenant_parcel_idx").on(t.tenantId, t.parcelId),
+    foreignKey({
+      name: "land_plans_parcel_fk",
+      columns: [t.tenantId, t.parcelId],
+      foreignColumns: [landParcels.tenantId, landParcels.id],
+    }),
+    check("land_plans_name_present", sql`length(btrim(${t.name})) > 0`),
+  ],
+);
+
+/**
  * A FEATURE: something on the ground that is not the ground itself.
  *
  * A fence, a gate, a trough, a waterline, a buried cable, a tree line, a barn.
@@ -612,6 +667,15 @@ export const landFeatures = pgTable(
      */
     fedById: uuid("fed_by_id"),
     /**
+     * The plan this was proposed as part of, or null for one drawn on its own.
+     * Slice 2b.4.
+     *
+     * NULLABLE AND IT STAYS THAT WAY: most features are traced one at a time
+     * off the aerial and belong to no plan at all. A plan is for a set of
+     * proposals you are costing together.
+     */
+    planId: uuid("plan_id"),
+    /**
      * How thick to draw it, in screen pixels. Null means the kind's own weight.
      *
      * **A DRAWING PROPERTY, AND DELIBERATELY NOT IN `attributes`.** That bag
@@ -647,6 +711,17 @@ export const landFeatures = pgTable(
     index("land_features_tenant_kind_idx").on(t.tenantId, t.kind),
     // "Everything on the north energizer".
     index("land_features_tenant_fed_by_idx").on(t.tenantId, t.fedById),
+    // "Everything this plan proposes" — the takeoff's own read.
+    index("land_features_tenant_plan_idx").on(t.tenantId, t.planId),
+    // Composite, so a feature can only belong to a same-tenant plan. No
+    // `onDelete`: a bare SET NULL on a composite would null `tenant_id` too
+    // (`drizzle/0192`), and deleting a plan should require dealing with what it
+    // proposed rather than quietly orphaning it.
+    foreignKey({
+      name: "land_features_plan_fk",
+      columns: [t.tenantId, t.planId],
+      foreignColumns: [landPlans.tenantId, landPlans.id],
+    }),
     // RESTRICT, matching land_zones: deleting a parcel must not silently take
     // every fence, gate and waterline drawn on it.
     foreignKey({
@@ -674,6 +749,93 @@ export const landFeatures = pgTable(
   ],
 );
 
+/**
+ * One line of a saved materials list.
+ *
+ * **ROWS RATHER THAN A JSONB BLOB, AND A LINE MAY BE HAND-ADDED.** A list that
+ * can only hold what geometry produced is useless the first time you need
+ * insulators and a bag of staples, so `source_feature_id` is nullable: from the
+ * drawing, or typed. Rows because the obvious next consumer is a BILL for these
+ * materials and this repo already matches bills — a blob would have to be
+ * exploded the day anybody used it.
+ *
+ * **THE QUANTITY IS A SNAPSHOT AND THE DRAWING MAY DRIFT FROM IT.** Not a new
+ * rule: it is what `land_parcels.area_acres` already does, where the declared
+ * figure is deliberately not recomputed from the geometry. You ordered from
+ * 1,240 ft; somebody has since nudged the line to 1,310; the screen shows both
+ * and corrects neither. Recomputing on read would silently rewrite what you
+ * bought from, which is the one thing a saved list exists to prevent.
+ */
+export const landPlanItems = pgTable(
+  "land_plan_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id").notNull(),
+    /**
+     * The feature this line was counted off, or null for a hand-added one.
+     *
+     * NO `onDelete`, i.e. RESTRICT, and composite: a bare SET NULL would null
+     * `tenant_id` too (`drizzle/0192`), and deleting a fence somebody has
+     * already ordered materials against should require dealing with the list.
+     */
+    sourceFeatureId: uuid("source_feature_id"),
+    /** Open taxonomy (P1): `post`, `wire`, `pipe`, and whatever a kind is called. */
+    material: text("material").notNull(),
+    /** What to call it on screen. A COPY, like `occupant_label`. */
+    label: text("label").notNull(),
+    quantity: numeric("quantity", {
+      precision: 14,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    /** `each`, `ft` or `m` — what was on screen when the list was taken off. */
+    unit: text("unit").notNull(),
+    /**
+     * **WHAT YOU TYPED, ON THIS LINE, ON THAT DAY — NEVER A CATALOG.** The
+     * moment there is a price list there are vendors, quotes and effective
+     * dates, and this slice has quietly become purchasing. Quantities are the
+     * deliverable; a dollar figure is a convenience stored beside them.
+     */
+    unitCost: numeric("unit_cost", { precision: 14, scale: 4, mode: "number" }),
+    notes: text("notes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("land_plan_items_tenant_id_id_idx").on(t.tenantId, t.id),
+    index("land_plan_items_tenant_plan_idx").on(t.tenantId, t.planId),
+    index("land_plan_items_tenant_source_idx").on(t.tenantId, t.sourceFeatureId),
+    // CASCADE: a line has no meaning without its plan.
+    foreignKey({
+      name: "land_plan_items_plan_fk",
+      columns: [t.tenantId, t.planId],
+      foreignColumns: [landPlans.tenantId, landPlans.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "land_plan_items_source_fk",
+      columns: [t.tenantId, t.sourceFeatureId],
+      foreignColumns: [landFeatures.tenantId, landFeatures.id],
+    }),
+    check(
+      "land_plan_items_material_format",
+      sql`${t.material} ~ '^[a-z][a-z0-9_]{0,62}$'`,
+    ),
+    check("land_plan_items_unit_valid", sql`${t.unit} in ('each', 'ft', 'm')`),
+    check("land_plan_items_quantity_positive", sql`${t.quantity} > 0`),
+    check(
+      "land_plan_items_unit_cost_positive",
+      sql`${t.unitCost} is null or ${t.unitCost} >= 0`,
+    ),
+  ],
+);
+
 export type LandParcel = typeof landParcels.$inferSelect;
 export type NewLandParcel = typeof landParcels.$inferInsert;
 export type LandZone = typeof landZones.$inferSelect;
@@ -683,3 +845,7 @@ export type LandOccupancy = typeof landOccupancy.$inferSelect;
 export type NewLandOccupancy = typeof landOccupancy.$inferInsert;
 export type LandFeature = typeof landFeatures.$inferSelect;
 export type NewLandFeature = typeof landFeatures.$inferInsert;
+export type LandPlan = typeof landPlans.$inferSelect;
+export type NewLandPlan = typeof landPlans.$inferInsert;
+export type LandPlanItem = typeof landPlanItems.$inferSelect;
+export type NewLandPlanItem = typeof landPlanItems.$inferInsert;

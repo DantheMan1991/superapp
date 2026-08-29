@@ -31,7 +31,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2b.1** | **Walk to place a point** — an input mode for every kind, with the accuracy figure shown. [Designed 2026-08-29](#the-paddock-layout--designed-2026-08-29-not-yet-built) | **shipped 2026-08-29** |
 | **2b.2** | **Subdivide** — pick the ground and a lane, say how many, get n planned paddocks with their dividing fences and gates. `planned` arrives on zones | **shipped 2026-08-29** |
 | 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | |
-| 2b.4 | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | |
+| **2b.4** | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | **shipped 2026-08-29** |
 | ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
@@ -552,6 +552,91 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-29 — Slice 2b.4: what it will take (`claude/what-will-it-take`)
+
+**Migrations `0237`** (`land_plans`, `land_plan_items`, `land_features.plan_id`)
+**and `0238`** (their RLS), applied to dev and production before the merge.
+2b.3 is skipped for now: navigating to a point still waits on somebody walking a
+tree line with a real phone.
+
+**A takeoff is arithmetic on a shape you drew**, which is the whole of the line
+between it and the optimizer this pack refuses. Every number can be checked by
+looking at the drawing and doing the division: 650.8 ft of fence ÷ 8 ft spacing
+= 81 spans + 1 = 82 posts. Nothing decides anything.
+
+**IT NEVER GUESSES A MISSING FIGURE, and that is the design.** A fence with no
+`post_spacing` recorded produces a NOTE saying so, not a count off a default
+nobody chose. "164 posts" from a spacing nobody set is a made-up number wearing
+a decimal point, and it would be ordered from. This is also the first thing in
+the pack that READS the attribute bag rather than displaying it — the bag is
+only worth having if what comes out is what somebody put in.
+
+**What shipped**
+
+- **`core/takeoff.ts`**, pure and testable without a database. Per-feature
+  lines, totals by material, drift, and per-line cost.
+- **A plan is a named set of proposals**, and **laying out a field now creates
+  one** with every fence and gate it drew attached. A plan is exactly "a set of
+  proposals costed together", and making somebody create one and then attach
+  twelve features would be asking them to restate what the app already knew.
+  The lane is NOT attached: it was there first.
+- **The generic rules are what make it work for a kind the pack has never heard
+  of.** A point is one of the thing; a line is its length. Both restate the
+  drawing rather than inventing anything, so a profile's `trough` or
+  `energizer` is counted without this file learning the word (ADR 0004). An
+  AREA gets nothing — there is no generic material in an acre.
+- **Lengths come out in the tenant's own unit**, because this is a list to
+  order from, and `post_spacing` is read in that same unit — it is a figure
+  somebody typed on a screen labelled in it.
+
+**Decisions worth knowing**
+
+- **The saved list is a SNAPSHOT and the drawing may drift from it.** Not a new
+  rule: `land_parcels.area_acres` has worked this way since 2a.0. You ordered
+  from 3,906.9 ft of wire; somebody has since put a fourth strand on one run;
+  the screen shows both and corrects neither. Recomputing on read would silently
+  rewrite what you bought from.
+- **`saveTakeoff` REQUIRES every line to name the feature it was counted off.**
+  The replace-on-re-take finds counted lines by asking which have a source, so
+  a counted line arriving WITHOUT one would survive every re-take and quietly
+  double the order. Requiring it makes the two paths unambiguous: counted lines
+  through `saveTakeoff`, hand-added ones through `addPlanItem`. **Found by a
+  test that saved sourceless lines twice and got two of everything.**
+- **A unit cost is what you typed, on that line, on that day — never a
+  catalog.** The moment there is a price list there are vendors, quotes and
+  effective dates, and this has quietly become purchasing.
+- **Null cost, not zero.** Zero is a thing that is free.
+- **Deleting a plan leaves its features standing.** Deciding not to proceed with
+  a proposal is not deciding that the fence you already built as part of it
+  never happened; the link is cleared and the features stay.
+- **Owner-only throughout**, the line `layoutPaddocks` already drew. The one act
+  in this area a person in a field performs is marking a feature built, and that
+  stayed member-write where it was.
+
+**A bug found by driving it.** A hand-added line of insulators showed **"Now: 0
+each"** next to its saved 300 — because drift compares the saved list against
+the COMPUTED one, and nothing computes insulators. That reads as "you do not
+need any of these any more" rather than "this one is not counted off anything".
+Hand-added materials are now excluded from the drift and the column says
+**"typed in"**.
+
+**Driven on Hilltop Farm.** Four paddocks laid out, which created the plan:
+
+  - `Fence 3,939.2 ft` — **exactly the figure the layout dialog predicted**
+    before anything was written — and `Gate 4 each`
+  - every fence noted as needing a `post_spacing` and a `wire_count`
+  - giving the two divisions 8 ft and 3 strands turned those notes into
+    `Posts 164 each` and `Wire 3,906.9 ft`, both checkable by hand
+  - saved; every row then read `same`
+  - a fourth strand on one division moved wire to `4,558.05 ft` with the saved
+    figure untouched and the button changed to "Take it off again"
+  - 300 insulators at $0.42 added by hand: `$126.00`, and the total line
+
+**Open after this slice:** unchanged and now three deep — nothing walked with a
+real phone (which is what 2b.3 waits on), nobody has looked at a proposed
+paddock on the map, and the layout has only ever run on a rectangle. None of
+these is code; all three need somebody in a field.
 
 ### 2026-08-29 — The lane is a corridor, not a line (`claude/the-lane-is-a-corridor`)
 
@@ -1787,6 +1872,8 @@ Platform-wide change; the reasoning is in
 | `land_zone_uses` | What a zone is for, over a date range | Composite FK to the zone, **CASCADE**. `ended_on` is **INCLUSIVE**; null means current. CHECK `ended_on >= started_on`; `use` matches `^[a-z][a-z0-9_]{0,62}$` (**format only**) |
 | `land_occupancy` | What was actually ON a zone, in what structure, and when | Composite FK to the zone, **CASCADE**. `ended_on` inclusive; null means still there, which is what makes a zone read as occupied. `extension_slug` + `occupant_type` + `occupant_id` describe the occupant (P3); `occupant_label` is a **copy**. `area_acres` null means the whole zone |
 | `land_zones` (2b.2) | `status` gained **`planned`** — ground a layout proposed and nobody has fenced. Syncs no `dimension_members` row until `activateZone`; refused by `startOccupancy`; excluded from `zoneAtPoint`, rest and every paddock count | Widening the CHECK changed no query: every read that must not see unfenced ground already filtered `active` explicitly. `startOccupancy` was the one guard that had to be added |
+| `land_plans` (2b.4) | A named set of proposals and the materials list taken off them. **Laying out a field creates one.** `taken_off_at` null means the figures are still live | **No status column**: its features carry `planned`/`built`/`removed`, so "is it built" is derivable. Composite FK to the parcel |
+| `land_plan_items` (2b.4) | One line of a saved list. `source_feature_id` NULL means hand-added — insulators and staples are not in the geometry | Quantities are a **SNAPSHOT**; the drawing may drift and nothing corrects either, the `area_acres` rule. CHECKs: `unit` in `each\|ft\|m`; quantity > 0; `unit_cost` null or ≥ 0. **`saveTakeoff` refuses a counted line with no source**, or it would survive every re-take and double the order |
 | `land_features` | **Slice 2b.0.** Things ON the ground: fences, gates, buildings, woods, waterlines, buried cable. One table for points, lines AND areas — `geometry` jsonb, read through `asFeatureGeometry`, nullable meaning "not drawn yet" | Composite FK `land_features_parcel_fk` → the parcel, **RESTRICT**. Attached to a PARCEL, never a zone: a fence runs *between* paddocks. `land_features_fed_by_fk` is the same shape pointed at **its own table**. CHECKs: `status` in `planned\|built\|removed`; `kind` format-only; `fed_by_id` is distinct from `id`; `line_width` null or 0.5–12. **No posts** — a fence is one row with a spacing. `line_width` is a DRAWING property and deliberately not in `attributes`, which the takeoff will compute from |
 
 Mirrored into **`dimension_members`** with `dimension_type = 'parcel'` and
@@ -1850,6 +1937,13 @@ rented ground, and retrofitting it means rewriting the report.
 - `src/packs/land/components/paddock-layout.tsx` ·
   `planned-zones.tsx` — the dialog, and the list of ground waiting for a fence.
   **There is no separate preview: the proposals ARE the preview**
+- `src/packs/land/core/takeoff.ts` — pure. What a plan takes to build, counted
+  off the shapes. **It never guesses a missing figure**: a fence with no
+  `post_spacing` produces a note, not a post count off a default nobody chose.
+  The generic point-is-one / line-is-its-length rules are what let a profile's
+  own kind be counted without this file learning the word
+- `src/packs/land/components/plan-takeoff.tsx` — the saved list against what the
+  drawing says now, side by side and neither corrected
 - `src/packs/land/core/parcel-lookup.ts` — pure. The source registry, the
   where-clause building and the candidate mapping
 - `src/packs/land/parcel-lookup-service.ts` — the only outward fetch in this
@@ -1992,6 +2086,9 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
+- **The takeoff has never priced a real order.** 2b.4 was driven with a made-up
+  42-cent insulator; nothing has been bought off one of these lists, so nobody
+  has yet found the material it cannot count or the unit it does not have.
 - **Nobody has looked at a proposed paddock on the map.** 2b.2's planned-ground
   layers were verified through the DOM and the data — the browser pane stopped
   painting WebGL partway through the session. The layer code is the same shape

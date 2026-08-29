@@ -1,9 +1,11 @@
 import "server-only";
-import { and, asc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Tx } from "@/db";
 import { allowsWrite, type WriteLevel } from "@/lib/packs/authorize";
 import type {
   LandFeature,
+  LandPlan,
+  LandPlanItem,
   LandOccupancy,
   LandParcel,
   LandZone,
@@ -2055,6 +2057,8 @@ export interface LayoutInput {
 }
 
 export interface LayoutResult {
+  /** The plan everything it made belongs to. Slice 2b.4. */
+  planId: string;
   zoneIds: string[];
   featureIds: string[];
   warnings: string[];
@@ -2119,6 +2123,22 @@ export async function layoutPaddocks(
   const { paddocks, cuts, laneFences, warnings } = outcome.result;
 
   const prefix = (input.namePrefix ?? "Paddock").trim() || "Paddock";
+
+  /**
+   * **A LAYOUT IS A PLAN, and it is created here rather than by hand.**
+   *
+   * A plan is a named set of proposals you are costing together, and dividing a
+   * field is exactly that — the fences, the gates and the paddocks all came out
+   * of one decision. Making the founder create a plan and then attach twelve
+   * features to it would be asking him to re-state what the app already knows.
+   * The takeoff then has something to attach to on the first press.
+   */
+  const plan = await createPlan(tx, ctx, {
+    parcelId: input.parcelId,
+    name: prefix,
+    notes: "",
+  });
+
   const zoneIds: string[] = [];
   const featureIds: string[] = [];
 
@@ -2156,6 +2176,7 @@ export async function layoutPaddocks(
           name: `${prefix} ${paddock.index} gate`,
           status: "planned",
           geometry: { type: "Point", coordinates: paddock.gate },
+          planId: plan.id,
         })
         .returning();
       featureIds.push(gate[0].id);
@@ -2172,6 +2193,7 @@ export async function layoutPaddocks(
         name: `${prefix} division ${i + 1}`,
         status: "planned",
         geometry: cuts[i],
+        planId: plan.id,
       })
       .returning();
     featureIds.push(rows[0].id);
@@ -2193,12 +2215,13 @@ export async function layoutPaddocks(
         name: `${prefix} lane fence ${i + 1}`,
         status: "planned",
         geometry: laneFences[i],
+        planId: plan.id,
       })
       .returning();
     featureIds.push(rows[0].id);
   }
 
-  return { zoneIds, featureIds, warnings };
+  return { planId: plan.id, zoneIds, featureIds, warnings };
 }
 
 /**
@@ -2246,4 +2269,361 @@ export async function activateZone(
   });
 
   return zone;
+}
+
+// ----------------------------------------------- plans and the takeoff ---
+
+/**
+ * Plans, and the materials list taken off them. Slice 2b.4.
+ *
+ * **OWNER-ONLY THROUGHOUT.** Drawing a fence is a chore and is member-write;
+ * deciding to spend money on four paddocks is not, which is the same line
+ * `layoutPaddocks` already draws. The one thing here a person in a field does
+ * is mark a feature built, and that stays where it was.
+ */
+
+export interface PlanInput {
+  parcelId: string;
+  name: string;
+  notes?: string;
+}
+
+export async function listPlans(
+  tx: Tx,
+  tenantId: string,
+  filter: { parcelId?: string } = {},
+): Promise<LandPlan[]> {
+  const where = [eq(schema.landPlans.tenantId, tenantId)];
+  if (filter.parcelId) where.push(eq(schema.landPlans.parcelId, filter.parcelId));
+  return tx.query.landPlans.findMany({
+    where: and(...where),
+    orderBy: (p, { desc: byDesc }) => [byDesc(p.createdAt)],
+  });
+}
+
+export async function getPlan(
+  tx: Tx,
+  tenantId: string,
+  id: string,
+): Promise<LandPlan | null> {
+  const row = await tx.query.landPlans.findFirst({
+    where: and(
+      eq(schema.landPlans.tenantId, tenantId),
+      eq(schema.landPlans.id, id),
+    ),
+  });
+  return row ?? null;
+}
+
+export async function createPlan(
+  tx: Tx,
+  ctx: LandCtx,
+  input: PlanInput,
+): Promise<LandPlan> {
+  requireWrite(ctx, "owner");
+  const parcel = await getParcel(tx, ctx.tenantId, input.parcelId);
+  if (!parcel) {
+    throw new LandError("PARCEL_INVALID", "that parcel does not exist");
+  }
+  const name = input.name.trim();
+  if (!name) throw new LandError("LAYOUT_INVALID", "a plan needs a name");
+
+  const rows = await tx
+    .insert(schema.landPlans)
+    .values({
+      tenantId: ctx.tenantId,
+      parcelId: input.parcelId,
+      name,
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+export async function deletePlan(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+): Promise<void> {
+  requireWrite(ctx, "owner");
+  const existing = await getPlan(tx, ctx.tenantId, id);
+  if (!existing) throw new LandError("NOT_FOUND", `plan ${id} not found`);
+
+  /**
+   * **THE FEATURES SURVIVE THE PLAN.** Deleting a plan is deciding not to
+   * proceed with a proposal, which is not the same as deciding the fence you
+   * already built as part of it never happened. So the link is cleared and the
+   * features stay; the items go with the plan, because a materials list has no
+   * meaning without the thing it was for.
+   */
+  await tx
+    .update(schema.landFeatures)
+    .set({ planId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, ctx.tenantId),
+        eq(schema.landFeatures.planId, id),
+      ),
+    );
+
+  await tx
+    .delete(schema.landPlans)
+    .where(
+      and(
+        eq(schema.landPlans.tenantId, ctx.tenantId),
+        eq(schema.landPlans.id, id),
+      ),
+    );
+}
+
+/** Put features into a plan, or take them out of one with `planId: null`. */
+export async function setFeaturePlan(
+  tx: Tx,
+  ctx: LandCtx,
+  featureIds: string[],
+  planId: string | null,
+): Promise<number> {
+  requireWrite(ctx, "owner");
+  if (featureIds.length === 0) return 0;
+  if (planId) {
+    const plan = await getPlan(tx, ctx.tenantId, planId);
+    if (!plan) throw new LandError("NOT_FOUND", `plan ${planId} not found`);
+  }
+  const rows = await tx
+    .update(schema.landFeatures)
+    .set({ planId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, ctx.tenantId),
+        inArray(schema.landFeatures.id, featureIds),
+      ),
+    )
+    .returning();
+  return rows.length;
+}
+
+export async function listPlanItems(
+  tx: Tx,
+  tenantId: string,
+  planId: string,
+): Promise<LandPlanItem[]> {
+  return tx.query.landPlanItems.findMany({
+    where: and(
+      eq(schema.landPlanItems.tenantId, tenantId),
+      eq(schema.landPlanItems.planId, planId),
+    ),
+    orderBy: (i, { asc: byAsc }) => [byAsc(i.label), byAsc(i.createdAt)],
+  });
+}
+
+/**
+ * Save the list as it stands. **A SNAPSHOT, NOT A VIEW.**
+ *
+ * The lines are handed in already computed, because the arithmetic lives in
+ * `core/takeoff.ts` where it can be tested without a database — and because
+ * what gets stored has to be exactly what the person was looking at when they
+ * pressed the button. Recomputing here would let the two drift apart between
+ * the screen and the write.
+ *
+ * **HAND-ADDED LINES SURVIVE A RE-TAKE.** They are the ones with no source
+ * feature — insulators, staples, a day of somebody's time — and no amount of
+ * redrawing the fence tells us anything about them. Only the counted lines are
+ * replaced.
+ */
+export interface TakeoffLineInput {
+  material: string;
+  label: string;
+  quantity: number;
+  unit: string;
+  sourceFeatureId?: string | null;
+  unitCost?: number | null;
+  notes?: string;
+}
+
+const TAKEOFF_UNITS = new Set(["each", "ft", "m"]);
+
+function itemOrThrow(line: TakeoffLineInput): TakeoffLineInput {
+  if (!/^[a-z][a-z0-9_]{0,62}$/.test(line.material)) {
+    throw new LandError(
+      "LAYOUT_INVALID",
+      `"${line.material}" is not a usable material name — lowercase letters, numbers and underscores`,
+    );
+  }
+  if (!TAKEOFF_UNITS.has(line.unit)) {
+    throw new LandError("LAYOUT_INVALID", `${line.unit} is not a usable unit`);
+  }
+  if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
+    throw new LandError("LAYOUT_INVALID", "a quantity has to be more than zero");
+  }
+  if (
+    line.unitCost !== null &&
+    line.unitCost !== undefined &&
+    (!Number.isFinite(line.unitCost) || line.unitCost < 0)
+  ) {
+    throw new LandError("LAYOUT_INVALID", "a price cannot be negative");
+  }
+  return line;
+}
+
+export async function saveTakeoff(
+  tx: Tx,
+  ctx: LandCtx,
+  planId: string,
+  lines: TakeoffLineInput[],
+): Promise<LandPlanItem[]> {
+  requireWrite(ctx, "owner");
+  const plan = await getPlan(tx, ctx.tenantId, planId);
+  if (!plan) throw new LandError("NOT_FOUND", `plan ${planId} not found`);
+  lines.forEach(itemOrThrow);
+
+  /**
+   * **EVERY LINE HERE MUST NAME THE FEATURE IT WAS COUNTED OFF.**
+   *
+   * The replace-on-re-take below finds the counted lines by asking which ones
+   * have a source, and a counted line arriving WITHOUT one would survive every
+   * re-take and quietly double the order. Requiring it makes the two paths
+   * unambiguous: counted lines come through here, hand-added ones through
+   * `addPlanItem`, and nothing has to guess which it is looking at. Found by a
+   * test that saved sourceless lines twice and got two of everything.
+   */
+  for (const line of lines) {
+    if (!line.sourceFeatureId) {
+      throw new LandError(
+        "LAYOUT_INVALID",
+        `"${line.label}" was not counted off anything — add it as a line of its own instead`,
+      );
+    }
+  }
+
+  // Only the COUNTED lines are replaced — see the comment above.
+  await tx
+    .delete(schema.landPlanItems)
+    .where(
+      and(
+        eq(schema.landPlanItems.tenantId, ctx.tenantId),
+        eq(schema.landPlanItems.planId, planId),
+        isNotNull(schema.landPlanItems.sourceFeatureId),
+      ),
+    );
+
+  if (lines.length > 0) {
+    await tx.insert(schema.landPlanItems).values(
+      lines.map((line) => ({
+        tenantId: ctx.tenantId,
+        planId,
+        sourceFeatureId: line.sourceFeatureId ?? null,
+        material: line.material,
+        label: line.label.trim() || line.material,
+        quantity: line.quantity,
+        unit: line.unit,
+        unitCost: line.unitCost ?? null,
+        notes: line.notes?.trim() ?? "",
+      })),
+    );
+  }
+
+  await tx
+    .update(schema.landPlans)
+    .set({ takenOffAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(schema.landPlans.tenantId, ctx.tenantId),
+        eq(schema.landPlans.id, planId),
+      ),
+    );
+
+  return listPlanItems(tx, ctx.tenantId, planId);
+}
+
+/** A line somebody typed. No source feature, and nothing recomputes it. */
+export async function addPlanItem(
+  tx: Tx,
+  ctx: LandCtx,
+  planId: string,
+  line: TakeoffLineInput,
+): Promise<LandPlanItem> {
+  requireWrite(ctx, "owner");
+  const plan = await getPlan(tx, ctx.tenantId, planId);
+  if (!plan) throw new LandError("NOT_FOUND", `plan ${planId} not found`);
+  itemOrThrow(line);
+
+  const rows = await tx
+    .insert(schema.landPlanItems)
+    .values({
+      tenantId: ctx.tenantId,
+      planId,
+      // Hand-added by construction: a source would make it a counted line and
+      // the next re-take would delete it.
+      sourceFeatureId: null,
+      material: line.material,
+      label: line.label.trim() || line.material,
+      quantity: line.quantity,
+      unit: line.unit,
+      unitCost: line.unitCost ?? null,
+      notes: line.notes?.trim() ?? "",
+    })
+    .returning();
+  return rows[0];
+}
+
+export async function updatePlanItem(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+  patch: { quantity?: number; unitCost?: number | null; notes?: string },
+): Promise<LandPlanItem> {
+  requireWrite(ctx, "owner");
+  const existing = await tx.query.landPlanItems.findFirst({
+    where: and(
+      eq(schema.landPlanItems.tenantId, ctx.tenantId),
+      eq(schema.landPlanItems.id, id),
+    ),
+  });
+  if (!existing) throw new LandError("NOT_FOUND", `item ${id} not found`);
+
+  const next: Record<string, unknown> = { updatedAt: new Date() };
+  if (patch.quantity !== undefined) {
+    if (!Number.isFinite(patch.quantity) || patch.quantity <= 0) {
+      throw new LandError("LAYOUT_INVALID", "a quantity has to be more than zero");
+    }
+    next.quantity = patch.quantity;
+  }
+  if (patch.unitCost !== undefined) {
+    if (
+      patch.unitCost !== null &&
+      (!Number.isFinite(patch.unitCost) || patch.unitCost < 0)
+    ) {
+      throw new LandError("LAYOUT_INVALID", "a price cannot be negative");
+    }
+    next.unitCost = patch.unitCost;
+  }
+  if (patch.notes !== undefined) next.notes = patch.notes.trim();
+
+  const rows = await tx
+    .update(schema.landPlanItems)
+    .set(next)
+    .where(
+      and(
+        eq(schema.landPlanItems.tenantId, ctx.tenantId),
+        eq(schema.landPlanItems.id, id),
+      ),
+    )
+    .returning();
+  return rows[0];
+}
+
+export async function deletePlanItem(
+  tx: Tx,
+  ctx: LandCtx,
+  id: string,
+): Promise<void> {
+  requireWrite(ctx, "owner");
+  await tx
+    .delete(schema.landPlanItems)
+    .where(
+      and(
+        eq(schema.landPlanItems.tenantId, ctx.tenantId),
+        eq(schema.landPlanItems.id, id),
+      ),
+    );
 }

@@ -28,7 +28,7 @@ import {
   type LinearRing,
   type Position,
 } from "./core/geo";
-import { subdivide } from "./core/subdivide";
+import { subdivide, type LanePlacement } from "./core/subdivide";
 import {
   isFeatureStatus,
   isLineWidth,
@@ -2046,6 +2046,10 @@ export interface LayoutInput {
   /** The lane feature the paddocks hang off. */
   laneFeatureId: string;
   count: number;
+  /** Paddocks on one side of the lane, or both. */
+  placement?: LanePlacement;
+  /** Metres. The corridor is clipped out of the ground in either placement. */
+  laneWidthM?: number;
   /** "North" gives "North 1", "North 2"… Defaults to "Paddock". */
   namePrefix?: string;
 }
@@ -2107,9 +2111,12 @@ export async function layoutPaddocks(
 
   // The refusals are written for a person — "that ground is in two pieces" —
   // so they reach the screen unaltered, the courtesy `parseBoundary` gets.
-  const outcome = subdivide(area, lane, input.count);
+  const outcome = subdivide(area, lane, input.count, {
+    placement: input.placement ?? "split",
+    laneWidthM: input.laneWidthM,
+  });
   if (!outcome.ok) throw new LandError("LAYOUT_INVALID", outcome.error);
-  const { paddocks, cuts, warnings } = outcome.result;
+  const { paddocks, cuts, laneFences, warnings } = outcome.result;
 
   const prefix = (input.namePrefix ?? "Paddock").trim() || "Paddock";
   const zoneIds: string[] = [];
@@ -2165,6 +2172,27 @@ export async function layoutPaddocks(
         name: `${prefix} division ${i + 1}`,
         status: "planned",
         geometry: cuts[i],
+      })
+      .returning();
+    featureIds.push(rows[0].id);
+  }
+
+  /**
+   * The alley's own sides. **This is fence that did not exist before**, and it
+   * is the difference between the two placements: one run for an edge lane,
+   * whose far side is the perimeter already there, and two for a lane with
+   * paddocks either side.
+   */
+  for (let i = 0; i < laneFences.length; i += 1) {
+    const rows = await tx
+      .insert(schema.landFeatures)
+      .values({
+        tenantId: ctx.tenantId,
+        parcelId: input.parcelId,
+        kind: "fence",
+        name: `${prefix} lane fence ${i + 1}`,
+        status: "planned",
+        geometry: laneFences[i],
       })
       .returning();
     featureIds.push(rows[0].id);

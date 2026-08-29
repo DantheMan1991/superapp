@@ -30,10 +30,9 @@
  */
 import {
   boundaryAreaAcres,
-  pointInBoundary,
+  geometryLengthM,
   type Boundary,
   type FeatureGeometry,
-  type LinearRing,
   type Polygon,
   type Position,
 } from "./geo";
@@ -146,8 +145,27 @@ function crossing(from: XY, to: XY, dFrom: number, dTo: number): XY {
   return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
 }
 
+/**
+ * **THE LANE IS A CORRIDOR, NOT A LINE**, and getting that wrong is the bug
+ * this replaced. The first version used the lane only for its DIRECTION, so
+ * every dividing fence was drawn straight across it — three fences built
+ * through the walkway the cows are supposed to use to reach water. It also
+ * recorded a strip that spanned the lane as ONE paddock when it is physically
+ * two, with a gate dropped in the middle of it opening onto nothing.
+ *
+ * So the lane's own ground is clipped OUT first, in every layout. What is left
+ * is one side of it or two, and that is the whole of the difference between the
+ * two placements below.
+ */
+export type LanePlacement = "edge" | "split";
+
+export const LANE_PLACEMENTS: readonly LanePlacement[] = ["edge", "split"];
+
+/** A lane wide enough to turn a tractor down, and the default nobody has to think about. */
+export const DEFAULT_LANE_WIDTH_M = 5;
+
 export interface Paddock {
-  /** 1-based, in order along the lane. */
+  /** 1-based, in order along the lane; the far side continues the numbering. */
   index: number;
   geometry: Polygon;
   /** Spherical, from `boundaryAreaAcres`, so it agrees with every other acreage. */
@@ -161,9 +179,16 @@ export interface Paddock {
 }
 
 export interface SubdivideResult {
+  placement: LanePlacement;
   paddocks: Paddock[];
-  /** The dividing lines, in order. `count - 1` of them. */
+  /** The dividing fences, in order. */
   cuts: { type: "LineString"; coordinates: Position[] }[];
+  /**
+   * The alley's own sides — **fence that did not exist before and has to be
+   * built.** One for an edge lane, whose outer side is the perimeter that is
+   * already there; two for a lane with ground on both sides.
+   */
+  laneFences: { type: "LineString"; coordinates: Position[] }[];
   /** Things a person should see before committing. Never fatal. */
   warnings: string[];
 }
@@ -174,8 +199,17 @@ export type SubdivideOutcome =
 
 export const MAX_PADDOCKS = 60;
 
+export interface SubdivideOptions {
+  placement: LanePlacement;
+  laneWidthM?: number;
+}
+
 /**
- * Divide `area` into `count` equal-area paddocks, cut across `lane`.
+ * Divide `area` into about `count` equal-area paddocks along `lane`.
+ *
+ * `edge` puts paddocks on ONE side of the lane — the larger side — and leaves
+ * the other out of the rotation. `split` puts them on both, which is why it
+ * yields roughly twice as many for one extra run of lane fence.
  *
  * Refusals are written for a person, the way `parseBoundary`'s are: this is
  * driven from a form, and "that ground is in two pieces" is a fixable
@@ -185,6 +219,7 @@ export function subdivide(
   area: Boundary,
   lane: FeatureGeometry,
   count: number,
+  options: SubdivideOptions = { placement: "split" },
 ): SubdivideOutcome {
   if (!Number.isInteger(count) || count < 2) {
     return { ok: false, error: "Two or more paddocks." };
@@ -193,8 +228,6 @@ export function subdivide(
     return { ok: false, error: `That is more than ${MAX_PADDOCKS} paddocks.` };
   }
   if (area.type !== "Polygon") {
-    // Ground split by a road is two pieces of ground, and equal strips across
-    // both of them is not a thing anybody wants.
     return {
       ok: false,
       error: "That ground is in more than one piece. Divide each piece on its own.",
@@ -226,9 +259,118 @@ export function subdivide(
   if (!axis) {
     return { ok: false, error: "That lane is too short to divide along." };
   }
+  /** Perpendicular to the lane: the direction the corridor has width in. */
+  const across: XY = [-axis[1], axis[0]];
+  const half = Math.max(0.5, (options.laneWidthM ?? DEFAULT_LANE_WIDTH_M) / 2);
 
-  const project = (p: XY) => p[0] * axis[0] + p[1] * axis[1];
-  const ts = ring.map(project);
+  /**
+   * Where the lane sits, measured across itself.
+   *
+   * The MEAN of its points, consistent with taking the overall direction: a
+   * bent lane has no single offset, and averaging keeps the corridor centred
+   * on the run rather than on whichever end happened to be first.
+   */
+  const laneOffset =
+    laneXY.reduce((sum, p) => sum + p[0] * across[0] + p[1] * across[1], 0) /
+    laneXY.length;
+
+  /**
+   * How far the lane actually RUNS, measured along itself.
+   *
+   * **THE CORRIDOR IS CLIPPED WITH AN INFINITE LINE, SO THIS IS THE ONLY THING
+   * THAT KNOWS THE LANE ENDS.** Without it a lane covering the bottom fifth of
+   * a field would hand every paddock a gate onto a stretch of "lane fence"
+   * with no lane behind it — which is exactly the paddock-you-cannot-reach
+   * that the warning exists for.
+   */
+  const laneTs = laneXY.map((p) => p[0] * axis[0] + p[1] * axis[1]);
+  const laneRange: [number, number] = [
+    Math.min(...laneTs),
+    Math.max(...laneTs),
+  ];
+
+  // The ground either side of the corridor. Either may come back empty, which
+  // is what an edge lane looks like from here.
+  const sides: { ring: XY[]; area: number; sign: 1 | -1 }[] = [];
+  for (const sign of [-1, 1] as const) {
+    const clipped =
+      sign === -1
+        ? clipHalfplane(ring, across, laneOffset - half, true)
+        : clipHalfplane(ring, across, laneOffset + half, false);
+    if (clipped.length >= 3) {
+      const size = planarArea(clipped);
+      if (size > 0) sides.push({ ring: clipped, area: size, sign });
+    }
+  }
+  if (sides.length === 0) {
+    return {
+      ok: false,
+      error: "That lane covers the whole of that ground. Check the lane width.",
+    };
+  }
+
+  sides.sort((a, b) => b.area - a.area);
+  const used = options.placement === "edge" ? sides.slice(0, 1) : sides;
+
+  // `split` divides each side, so the count asked for is shared between them.
+  const perSide =
+    used.length > 1 ? Math.max(1, Math.round(count / used.length)) : count;
+  if (perSide < 1) return { ok: false, error: "Two or more paddocks." };
+
+  const paddocks: Paddock[] = [];
+  const cuts: SubdivideResult["cuts"] = [];
+  const warnings: string[] = [];
+
+  for (const side of used) {
+    const outcome = stripsOf(side.ring, axis, across, perSide, frame, {
+      laneAt: laneOffset + side.sign * half,
+      laneRange,
+      startIndex: paddocks.length + 1,
+    });
+    if (!outcome.ok) return outcome;
+    paddocks.push(...outcome.paddocks);
+    cuts.push(...outcome.cuts);
+    warnings.push(...outcome.warnings);
+  }
+
+  /**
+   * The alley's sides. **Only for ground that is actually being used**: an edge
+   * lane needs the one fence between it and the paddocks, because its far side
+   * is the perimeter that is already there.
+   */
+  const laneFences: SubdivideResult["laneFences"] = [];
+  for (const side of used) {
+    const line = cutLine(ring, across, laneOffset + side.sign * half, frame);
+    if (line) laneFences.push({ type: "LineString", coordinates: line });
+  }
+
+  if (options.placement === "edge" && sides.length > 1) {
+    const left = sides[1];
+    warnings.push(
+      `The ground on the far side of the lane (about ${
+        Math.round((left.area / 4046.8564224) * 10) / 10
+      } acres) is not in these paddocks.`,
+    );
+  }
+
+  return {
+    ok: true,
+    result: { placement: options.placement, paddocks, cuts, laneFences, warnings },
+  };
+}
+
+/** Equal-area strips of one side of the lane, cut across it. */
+function stripsOf(
+  ring: XY[],
+  axis: XY,
+  across: XY,
+  count: number,
+  frame: Frame,
+  context: { laneAt: number; laneRange: [number, number]; startIndex: number },
+):
+  | { ok: true; paddocks: Paddock[]; cuts: SubdivideResult["cuts"]; warnings: string[] }
+  | { ok: false; error: string } {
+  const ts = ring.map((p) => p[0] * axis[0] + p[1] * axis[1]);
   const tMin = Math.min(...ts);
   const tMax = Math.max(...ts);
   const total = planarArea(ring);
@@ -236,15 +378,12 @@ export function subdivide(
     return { ok: false, error: "That ground has no area to divide." };
   }
 
-  // n−1 offsets, each placed so the ground behind it is i/n of the whole.
   const offsets: number[] = [];
   for (let i = 1; i < count; i += 1) {
-    offsets.push(
-      solveOffset(ring, axis, tMin, tMax, (total * i) / count),
-    );
+    offsets.push(solveOffset(ring, axis, tMin, tMax, (total * i) / count));
   }
-
   const bounds = [tMin, ...offsets, tMax];
+
   const paddocks: Paddock[] = [];
   const cuts: SubdivideResult["cuts"] = [];
   const warnings: string[] = [];
@@ -265,17 +404,38 @@ export function subdivide(
       coordinates: [closeRing(positions)],
     };
 
-    const gate = gateFor(laneXY, frame, strip, (bounds[i] + bounds[i + 1]) / 2, axis);
-    if (!gate) {
+    /**
+     * The gate goes ON THE LANE FENCE, at the middle of this paddock's
+     * frontage — not somewhere in its interior, which is what the previous
+     * version produced when a strip spanned the lane.
+     */
+    const midT = (bounds[i] + bounds[i + 1]) / 2;
+    const onFence: XY = [
+      axis[0] * midT + across[0] * context.laneAt,
+      axis[1] * midT + across[1] * context.laneAt,
+    ];
+    const gatePosition = fromLocal(frame, onFence);
+    const index = context.startIndex + i;
+    /**
+     * Reachable means BOTH: the gate sits on this paddock's own frontage, and
+     * the lane actually runs past that point. The first is generous by a metre
+     * because a gate a hair outside the ring is still the right spot; the
+     * second is what catches a lane that stops short.
+     */
+    const withinLane =
+      midT >= context.laneRange[0] && midT <= context.laneRange[1];
+    const reachable = withinLane && nearRing(onFence, strip, 1);
+    if (!reachable) {
       warnings.push(
-        `Paddock ${i + 1} does not touch the lane — the cows cannot get to it.`,
+        `Paddock ${index} does not touch the lane — the cows cannot get to it.`,
       );
     }
+
     paddocks.push({
-      index: i + 1,
+      index,
       geometry,
       areaAcres: boundaryAreaAcres(geometry),
-      gate,
+      gate: reachable ? gatePosition : null,
     });
   }
 
@@ -284,8 +444,97 @@ export function subdivide(
     if (line) cuts.push({ type: "LineString", coordinates: line });
   }
 
-  return { ok: true, result: { paddocks, cuts, warnings } };
+  return { ok: true, paddocks, cuts, warnings };
 }
+
+/** Inside the ring, or within `slack` metres of its edge. */
+function nearRing(point: XY, ring: XY[], slack: number): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (
+      yi > point[1] !== yj > point[1] &&
+      point[0] < ((xj - xi) * (point[1] - yi)) / (yj - yi) + xi
+    ) {
+      inside = !inside;
+    }
+  }
+  if (inside) return true;
+  for (let i = 0; i < ring.length; i += 1) {
+    if (segmentDistance(point, ring[i], ring[(i + 1) % ring.length]) <= slack) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function segmentDistance(point: XY, a: XY, b: XY): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return Math.hypot(point[0] - a[0], point[1] - a[1]);
+  let t = ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / lengthSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(point[0] - (a[0] + t * dx), point[1] - (a[1] + t * dy));
+}
+
+/**
+ * What each placement would cost, so a person can choose rather than be told.
+ *
+ * **BOTH LAYOUTS GIVE THE PADDOCK COUNT YOU ASKED FOR**, which is what makes
+ * them comparable at all: the difference is how much GROUND those paddocks
+ * cover and how much fence it takes. An edge lane off the middle of a field
+ * leaves the far side out of the rotation entirely; a split lane puts paddocks
+ * on both sides, so each one is about twice the size.
+ *
+ * **THE NUMBER THAT DECIDES IT IS FENCE PER ACRE.** Total fence always
+ * favours whichever layout does less, and acres always favour whichever does
+ * more; the ratio is the only one of the three that says which is the better
+ * deal — and it is usually `split`, because the second run of lane fence buys
+ * a whole extra side of the field.
+ */
+export interface LayoutOption {
+  placement: LanePlacement;
+  paddockCount: number;
+  /** New fence to build: dividers plus the alley's own sides. */
+  fenceM: number;
+  acresInPaddocks: number;
+  acresPerPaddock: number;
+  fencePerAcreM: number;
+  warnings: string[];
+}
+
+export function compareLayouts(
+  area: Boundary,
+  lane: FeatureGeometry,
+  count: number,
+  laneWidthM: number = DEFAULT_LANE_WIDTH_M,
+): LayoutOption[] {
+  const options: LayoutOption[] = [];
+  for (const placement of LANE_PLACEMENTS) {
+    const outcome = subdivide(area, lane, count, { placement, laneWidthM });
+    if (!outcome.ok) continue;
+    const { paddocks, cuts, laneFences, warnings } = outcome.result;
+    const fenceM = [...cuts, ...laneFences].reduce(
+      (sum, line) => sum + geometryLengthM(line),
+      0,
+    );
+    const acres = paddocks.reduce((sum, p) => sum + p.areaAcres, 0);
+    options.push({
+      placement,
+      paddockCount: paddocks.length,
+      fenceM,
+      acresInPaddocks: Math.round(acres * 10_000) / 10_000,
+      acresPerPaddock:
+        paddocks.length > 0 ? Math.round((acres / paddocks.length) * 100) / 100 : 0,
+      fencePerAcreM: acres > 0 ? fenceM / acres : 0,
+      warnings,
+    });
+  }
+  return options;
+}
+
 
 /** The lane's positions, whatever line-ish geometry it arrived as. */
 function laneLine(lane: FeatureGeometry): Position[] | null {
@@ -372,45 +621,6 @@ function cutLine(
     fromLocal(frame, sorted[0]),
     fromLocal(frame, sorted[sorted.length - 1]),
   ];
-}
-
-/**
- * Where this paddock meets the lane, or null if it does not.
- *
- * **THIS IS THE CHECK THAT REPLACED THE CROSSING CHECK.** Parallel cuts cannot
- * cross, but a lane that bends away can still leave a strip with no frontage —
- * and a paddock the cows cannot walk to is the failure this layout exists to
- * prevent. Reported, never corrected: the shape is real and a drag handle is a
- * better answer than a guess.
- */
-function gateFor(
-  lane: XY[],
-  frame: Frame,
-  strip: XY[],
-  targetT: number,
-  axis: XY,
-): Position | null {
-  const stripRing: LinearRing = closeRing(strip.map((p) => fromLocal(frame, p)));
-  const asPolygon: Boundary = { type: "Polygon", coordinates: [stripRing] };
-
-  // Walk the lane for the point nearest the middle of this strip, measured
-  // along the cutting axis, and take it only if it is actually inside.
-  let best: { point: XY; delta: number } | null = null;
-  for (let i = 0; i < lane.length - 1; i += 1) {
-    const a = lane[i];
-    const b = lane[i + 1];
-    for (let s = 0; s <= 10; s += 1) {
-      const point: XY = [
-        a[0] + (b[0] - a[0]) * (s / 10),
-        a[1] + (b[1] - a[1]) * (s / 10),
-      ];
-      const delta = Math.abs(point[0] * axis[0] + point[1] * axis[1] - targetT);
-      if (!best || delta < best.delta) best = { point, delta };
-    }
-  }
-  if (!best) return null;
-  const position = fromLocal(frame, best.point);
-  return pointInBoundary(position, asPolygon) ? position : null;
 }
 
 function closeRing(positions: Position[]): Position[] {

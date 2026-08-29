@@ -399,6 +399,10 @@ This looked like a complication and is the opposite. *"Divide a polygon into 4
 efficient pieces"* is badly posed — efficient by area, by fence length, or by
 shape? Those fight.
 
+**Superseded in part on 2026-08-29: the lane is a CORRIDOR, not a line.** Its
+own ground is clipped out before anything is divided, so no fence is ever drawn
+across it — see the build log. The rest of this section stands.
+
 **"Every paddock must touch the lane" collapses the search space to one answer:
 parallel strips perpendicular to the lane.** One parameter (the lane's
 direction), n−1 cuts, equal area each. A sweep with a binary search on the
@@ -548,6 +552,84 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-29 — The lane is a corridor, not a line (`claude/the-lane-is-a-corridor`)
+
+**No migration.** A bug fix and a choice, both in `core/subdivide.ts`.
+
+**THE BUG, FOUND BY THE FOUNDER ASKING A DIFFERENT QUESTION.** He asked whether
+the layout reuses the existing perimeter and only runs divider wire — it does,
+`n − 1` cuts and no boundary. Checking his data to answer that turned up
+something worse beside it. On Home Farm:
+
+```
+Centre lane        lon -82.47763 → -82.47763
+North division 1   lon -82.48000 → -82.47526
+North division 2   lon -82.48000 → -82.47526
+North division 3   lon -82.48000 → -82.47526
+```
+
+**Every divider ran straight through the lane.** Three fences built across the
+walkway the cows use to reach water — the exact opposite of the rotation the
+whole design was for. And a strip that spanned the lane was recorded as ONE
+paddock when it is physically two, with its gate dropped in its own interior
+opening onto nothing.
+
+**The cause was a modelling error, not an arithmetic one.** 2b.2 used the lane
+only for its DIRECTION. A lane occupies ground and has to stay passable, and
+nothing in the algorithm knew that.
+
+**The fix: the lane's corridor is clipped OUT of the ground first**, in every
+layout. What is left is one side of it or two, and that is the whole of the
+difference between the two placements. Dividers are then cut from each side's
+own ring, so they start at the lane fence and cannot reach across it. Gates go
+ON the lane fence at the middle of each paddock's frontage.
+
+**Both placements, costed side by side — the founder chose "both".**
+
+  - **`edge`** — paddocks on the larger side only, one run of lane fence
+    (the far side is the perimeter already there), and a warning naming the
+    acres left out of the rotation.
+  - **`split`** — paddocks both sides, two runs of lane fence.
+
+**BOTH GIVE THE PADDOCK COUNT YOU ASKED FOR**, which is what makes them
+comparable: the difference is how much GROUND those paddocks cover and how much
+fence it takes. **The deciding number is FENCE PER ACRE** — total fence always
+favours whichever layout does less and acres always favour whichever does more,
+so only the ratio says which is the better deal. `compareLayouts` runs both from
+the real geometry and the dialog recomputes as the numbers are typed, using the
+same function the server will run.
+
+On Home Farm, four paddocks off the centre lane: one side gives 19.7 acres at
+4.93 each for 3,272 ft of new fence; both sides give 39.4 acres at 9.85 each for
+3,939 ft. **Twenty per cent more fence for twice the ground.**
+
+**One more thing the corridor broke and had to fix.** `clipHalfplane` cuts with
+an INFINITE line, so the corridor spans the whole field however short the lane
+is — which meant a lane covering the bottom fifth handed every paddock a gate
+onto a stretch of "lane fence" with no lane behind it. The reachability check
+now also tests that the gate falls within the lane's actual extent along its own
+axis. That is what restored the warning the test was written for.
+
+**Driven on Hilltop Farm.** The old layout was deleted first, because the fences
+in it ran through the lane. The new one:
+
+```
+North lane fence 1   lon -82.47760          (east side of the corridor)
+North lane fence 2   lon -82.47766          (west side)
+North division 1     lon -82.47760 → -82.47526   (all east)
+North division 2     lon -82.48000 → -82.47766   (all west)
+North 1..4 gate      on the lane fences, not in any paddock's interior
+```
+
+Four paddocks at 9.8545 / 9.8542 / 9.8545 / 9.8542 acres, 39.4174 in total —
+the field's 39.9016 less the corridor, and exactly the figure the dialog
+predicted before anything was written.
+
+**Open after this slice:** unchanged from 2b.2 — nothing walked with a real
+phone, and the layout has still only been run on a rectangle. A real field with
+a bent lane is where the corridor's single mean offset will first show its
+limits: a lane that wanders is being straightened by that average.
 
 ### 2026-08-29 — Slice 2b.2: four paddocks off a lane (`claude/four-paddocks-off-a-lane`)
 
@@ -1761,7 +1843,10 @@ rented ground, and retrofitting it means rewriting the report.
   latitude. **The cuts are all parallel**, which makes the design's
   crossing-on-a-bend case impossible rather than detected; what replaces it is
   a reachability check, because a paddock the cows cannot walk to is the
-  failure the layout exists to prevent
+  failure the layout exists to prevent. **THE LANE IS A CORRIDOR**: its own
+  ground is clipped out first, so a divider starts at the lane fence and can
+  never cross it. `compareLayouts` costs one-side against both-sides on the
+  same geometry, and the deciding figure is fence per acre
 - `src/packs/land/components/paddock-layout.tsx` ·
   `planned-zones.tsx` — the dialog, and the list of ground waiting for a fence.
   **There is no separate preview: the proposals ARE the preview**

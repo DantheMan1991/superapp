@@ -1057,6 +1057,10 @@ const layoutSchema = z.object({
   // which refuses one paddock because that is not a division.
   count: z.number().int().min(2).max(60),
   namePrefix: z.string().max(60).optional(),
+  placement: z.enum(["edge", "split"]).optional(),
+  // Metres. A lane narrower than half a metre is not a lane, and one wider
+  // than 30 m would swallow the ground it is meant to serve.
+  laneWidthM: z.number().min(0.5).max(30).optional(),
 });
 
 export async function layoutPaddocksAction(input: unknown) {
@@ -1079,6 +1083,7 @@ export async function layoutPaddocksAction(input: unknown) {
       targetId: parsed.data.parcelId,
       meta: {
         count: parsed.data.count,
+        placement: parsed.data.placement ?? "split",
         zones: result.zoneIds.length,
         features: result.featureIds.length,
         unreachable: result.warnings.length,

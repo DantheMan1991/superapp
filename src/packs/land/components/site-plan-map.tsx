@@ -48,6 +48,12 @@ import { formatLength, type LengthUnit } from "../core/length";
 import type { Basemap } from "../core/basemap";
 import { createFeatureAction, setFeatureGeometryAction } from "../actions";
 import { CONTINENTAL_US, FIELD_ZOOM } from "../core/basemap";
+import { WalkPanel } from "./walk-panel";
+import {
+  hasEnoughPoints,
+  walkToGeometry,
+  type WalkPoint,
+} from "../core/survey";
 
 /**
  * The site plan. **ONE MAP, TWO VIEWS, AND NO TRANSFER STEP.**
@@ -72,6 +78,8 @@ import { CONTINENTAL_US, FIELD_ZOOM } from "../core/basemap";
 
 type ViewMode = "aerial" | "plan";
 type Mode = "view" | "draw";
+/** Where a vertex comes from: a click on the map, or the ground you stand on. */
+type InputMode = "tap" | "walk";
 
 export interface PlanFeature {
   id: string;
@@ -93,6 +101,13 @@ export interface PlanFeature {
  * class the app's theming already sets, so the plan does not turn into a white
  * rectangle in the middle of a dark page.
  */
+/**
+ * The walk in progress. Not from the kind palette on purpose: this is not a
+ * feature yet, and colouring it as one would make a half-walked fence
+ * indistinguishable from a saved one at a glance.
+ */
+const WALK_COLOR = "#2563eb";
+
 const PAPER = { light: "#f6f5f3", dark: "#1c1917" };
 const GROUND = { light: "#e7e5e4", dark: "#292524" };
 
@@ -231,6 +246,17 @@ export function SitePlanMap({
    * last override.
    */
   const [shapeOverride, setShapeOverride] = useState<GeometryShape | null>(null);
+  /**
+   * How the next shape gets its vertices: by clicking the map, or by standing
+   * on each corner.
+   *
+   * **AN INPUT MODE, NOT A SECOND KIND OF FEATURE.** Both produce the same
+   * geometry through the same validator and the same save action; the only
+   * difference is where the coordinates come from. That is what keeps this a
+   * slice rather than a fork — see `core/survey.ts`.
+   */
+  const [input, setInput] = useState<InputMode>("tap");
+  const [walk, setWalk] = useState<WalkPoint[]>([]);
   /** Set while REDRAWING an existing feature; null while tracing a new one. */
   const [redrawing, setRedrawing] = useState<PlanFeature | null>(null);
   /**
@@ -241,7 +267,11 @@ export function SitePlanMap({
    * nothing to save.
    */
   const [drawingShape, setDrawingShape] = useState<GeometryShape>("line");
-  const [measured, setMeasured] = useState<FeatureGeometry | null>(null);
+  /**
+   * What the TAP path has drawn so far, pushed here by Terra Draw's `change`
+   * event. The walk path needs no equivalent — see `measured` below.
+   */
+  const [tapMeasured, setTapMeasured] = useState<FeatureGeometry | null>(null);
   const [pending, setPending] = useState(false);
 
   const shapeOfKind = useCallback(
@@ -451,6 +481,17 @@ export function SitePlanMap({
           data: collection("point"),
         });
 
+        /**
+         * The walk in progress: the corners stood on, and the shape they make
+         * so far. Its own source so it can be updated without touching the
+         * saved features, and drawn ABOVE them — you are placing this one now,
+         * and it has to be findable among everything already on the plan.
+         */
+        instance.addSource("walk", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
         instance.addLayer({
           id: "feature-fill",
           type: "fill",
@@ -575,7 +616,68 @@ export function SitePlanMap({
         },
       });
     }
+
+    if (!instance.getLayer("walk-vertex")) {
+      instance.addLayer({
+        id: "walk-shape",
+        type: "line",
+        source: "walk",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": WALK_COLOR,
+          "line-width": 2.5,
+          "line-dasharray": [2, 1],
+        },
+      });
+      instance.addLayer({
+        id: "walk-vertex-casing",
+        type: "circle",
+        source: "walk",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-color": "#ffffff", "circle-radius": 7 },
+      });
+      instance.addLayer({
+        id: "walk-vertex",
+        type: "circle",
+        source: "walk",
+        filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-color": WALK_COLOR, "circle-radius": 5 },
+      });
+    }
   }, [ready, dashKeys]);
+
+  /**
+   * Push the walk to the map as it happens.
+   *
+   * Corners as points AND the shape they currently make, in one collection, so
+   * a half-walked paddock reads as a paddock being walked rather than as four
+   * unrelated dots.
+   *
+   * The geometry is rebuilt INSIDE the effect rather than taken from `measured`
+   * above: that is a new object on every render, so depending on it would push
+   * the same data to the map continuously. The corners are the real input.
+   */
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance || !ready) return;
+    const source = instance.getSource("walk");
+    if (!source || !("setData" in source)) return;
+
+    const shapes: { type: "Feature"; properties: object; geometry: object }[] =
+      walk.map((point) => ({
+        type: "Feature" as const,
+        properties: {},
+        geometry: { type: "Point", coordinates: point.position },
+      }));
+    const shape = walkToGeometry(walk, drawingShape);
+    if (shape && shape.type !== "Point") {
+      shapes.push({ type: "Feature" as const, properties: {}, geometry: shape });
+    }
+    (source as { setData: (d: unknown) => void }).setData({
+      type: "FeatureCollection",
+      features: shapes,
+    });
+  }, [drawingShape, ready, walk]);
 
   /** Keep the drawn data in step after a save, without rebuilding the map. */
   useEffect(() => {
@@ -657,6 +759,35 @@ export function SitePlanMap({
     async (feature: PlanFeature | null) => {
       const instance = map.current;
       if (!instance) return;
+
+      /**
+       * **WALK MODE NEVER STARTS TERRA DRAW.** Terra Draw turns map clicks into
+       * vertices, and in a walk the vertices come from the ground under your
+       * feet — there is nothing for it to listen to. Loading it anyway would
+       * mean a stray tap on the map silently adding a corner you did not stand
+       * on, which is the one thing this input mode exists to prevent.
+       */
+      if (input === "walk") {
+        if (typeof navigator === "undefined" || !navigator.geolocation) {
+          toast.error("This browser cannot report a location.");
+          return;
+        }
+        const existingWalked = feature ? asFeatureGeometry(feature.geometry) : null;
+        drawingRef.current = true;
+        setWalk([]);
+        setTapMeasured(null);
+        setRedrawing(feature);
+        setDrawingShape(
+          feature
+            ? existingWalked
+              ? shapeOf(existingWalked)
+              : shapeOfKind(feature.kind)
+            : (shapeOverride ?? shapeOfKind(drawKind)),
+        );
+        setMode("draw");
+        return;
+      }
+
       const [
         {
           TerraDraw,
@@ -739,7 +870,7 @@ export function SitePlanMap({
 
       const measure = () => {
         const last = lastDrawn(instanceDraw.getSnapshot(), shape);
-        setMeasured(
+        setTapMeasured(
           last ? asFeatureGeometry(last.geometry as unknown as object) : null,
         );
       };
@@ -757,12 +888,12 @@ export function SitePlanMap({
       // than in CSS so it survives the hover handler above, which is what was
       // putting the hand back on every mouse move.
       instance.getCanvas().style.cursor = "crosshair";
-      setMeasured(existing);
+      setTapMeasured(existing);
       setRedrawing(feature);
       setDrawingShape(shape);
       setMode("draw");
     },
-    [drawKind, shapeOfKind, shapeOverride],
+    [drawKind, input, shapeOfKind, shapeOverride],
   );
 
   const stopDrawing = useCallback(() => {
@@ -773,20 +904,36 @@ export function SitePlanMap({
     // Back to MapLibre's own cursor: "" lets it paint grab/grabbing again,
     // which is right the moment panning is what the map is for.
     if (canvas) canvas.style.cursor = "";
-    setMeasured(null);
+    setTapMeasured(null);
     setRedrawing(null);
+    setWalk([]);
     setMode("view");
   }, []);
 
   const save = useCallback(async () => {
-    const instanceDraw = draw.current;
-    if (!instanceDraw) return;
-    const last = lastDrawn(instanceDraw.getSnapshot(), drawingShape);
-    if (!last) {
-      toast.error("Nothing drawn yet.");
-      return;
+    /**
+     * **ONE SAVE PATH FOR BOTH INPUT MODES.** A walked shape and a tapped one
+     * are the same geometry by the time they reach here, which is the claim
+     * `core/survey.ts` exists to make true — everything downstream (the
+     * validator, the action, the audit entry, the symbology) is reached once.
+     */
+    let geometry: object | null = null;
+    if (input === "walk") {
+      geometry = walkToGeometry(walk, drawingShape);
+      if (!geometry) {
+        toast.error("Not enough corners walked yet.");
+        return;
+      }
+    } else {
+      const instanceDraw = draw.current;
+      if (!instanceDraw) return;
+      const last = lastDrawn(instanceDraw.getSnapshot(), drawingShape);
+      if (!last) {
+        toast.error("Nothing drawn yet.");
+        return;
+      }
+      geometry = last.geometry as unknown as object;
     }
-    const geometry = last.geometry as unknown as object;
 
     setPending(true);
     const result = redrawing
@@ -816,10 +963,12 @@ export function SitePlanMap({
     drawKind,
     drawStatus,
     drawingShape,
+    input,
     parcelId,
     redrawing,
     router,
     stopDrawing,
+    walk,
   ]);
 
   const locate = useCallback(() => {
@@ -838,6 +987,26 @@ export function SitePlanMap({
       () => toast.error("Could not get a location. Check the browser's permission."),
       { enableHighAccuracy: true, timeout: 10_000 },
     );
+  }, []);
+
+  /**
+   * What is currently drawn, whichever way it was placed.
+   *
+   * **DERIVED FOR THE WALK, NOT MIRRORED.** A walked shape is a pure function
+   * of the corners walked, so keeping a copy in state would be the cascading
+   * render React's own guidance warns about — and worse, a second thing that
+   * can disagree with `walk`. The tap path genuinely does need state, because
+   * its vertices live inside Terra Draw and only an event tells us they moved.
+   */
+  const measured =
+    input === "walk" ? walkToGeometry(walk, drawingShape) : tapMeasured;
+
+  const dropWalkPoint = useCallback((point: WalkPoint) => {
+    setWalk((current) => [...current, point]);
+  }, []);
+
+  const undoWalkPoint = useCallback(() => {
+    setWalk((current) => current.slice(0, -1));
   }, []);
 
   const selectedKind = kinds.find((k) => k.kind === drawKind);
@@ -876,6 +1045,7 @@ export function SitePlanMap({
               <Measurement
                 geometry={measured}
                 shape={drawShape}
+                input={input}
                 areaUnit={areaUnit}
                 lengthUnit={lengthUnit}
               />
@@ -945,9 +1115,25 @@ export function SitePlanMap({
                     </button>
                   ))}
                 </div>
+                <div className="inline-flex overflow-hidden rounded-md border">
+                  {(["tap", "walk"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setInput(option)}
+                      className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                        input === option
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {option === "tap" ? "Tap the map" : "Walk it"}
+                    </button>
+                  ))}
+                </div>
                 <Button size="sm" onClick={() => startDrawing(null)} disabled={!ready}>
                   <Pencil className="mr-2 h-4 w-4" />
-                  Draw it
+                  {input === "walk" ? "Walk it" : "Draw it"}
                 </Button>
               </>
             )}
@@ -962,7 +1148,14 @@ export function SitePlanMap({
           </>
         ) : (
           <>
-            <Button size="sm" onClick={save} disabled={pending}>
+            <Button
+              size="sm"
+              onClick={save}
+              disabled={
+                pending ||
+                (input === "walk" && !hasEnoughPoints(walk, drawingShape))
+              }
+            >
               {pending ? "Saving…" : redrawing ? "Save the shape" : "Save it"}
             </Button>
             <Button size="sm" variant="outline" onClick={stopDrawing} disabled={pending}>
@@ -975,7 +1168,8 @@ export function SitePlanMap({
               disabled={pending}
               onClick={() => {
                 draw.current?.clear();
-                setMeasured(null);
+                setWalk([]);
+                setTapMeasured(null);
                 draw.current?.setMode(DRAW_MODE[drawShape]);
               }}
             >
@@ -985,6 +1179,16 @@ export function SitePlanMap({
           </>
         )}
       </div>
+
+      {mode === "draw" && input === "walk" && (
+        <WalkPanel
+          points={walk}
+          shape={drawingShape}
+          lengthUnit={lengthUnit}
+          onDrop={dropWalkPoint}
+          onUndo={undoWalkPoint}
+        />
+      )}
 
       {canEdit && selectedId && mode === "view" && (
         <RedrawButton
@@ -1032,15 +1236,32 @@ function RedrawButton({
 function Measurement({
   geometry,
   shape,
+  input,
   areaUnit,
   lengthUnit,
 }: {
   geometry: FeatureGeometry | null;
   shape: GeometryShape;
+  input: InputMode;
   areaUnit: AreaUnit;
   lengthUnit: LengthUnit;
 }) {
+  // **THE INSTRUCTION HAS TO MATCH THE INPUT MODE.** Telling somebody to
+  // double-click to finish while they are stood in a field walking a fence is
+  // the kind of copy that makes a screen feel like it was built for a
+  // different job than the one being done with it.
   if (!geometry) {
+    if (input === "walk") {
+      return (
+        <span className="text-muted-foreground">
+          {shape === "point"
+            ? "Stand where it is and drop a point below."
+            : shape === "line"
+              ? "Walk it, dropping a point at each corner."
+              : "Walk the corners. The shape closes itself."}
+        </span>
+      );
+    }
     return (
       <span className="text-muted-foreground">
         {shape === "point"
@@ -1052,7 +1273,13 @@ function Measurement({
     );
   }
   if (geometry.type === "Point") {
-    return <span className="text-muted-foreground">Placed. Save it, or click again to move it.</span>;
+    return (
+      <span className="text-muted-foreground">
+        {input === "walk"
+          ? "Placed where you are standing. Save it."
+          : "Placed. Save it, or click again to move it."}
+      </span>
+    );
   }
 
   const length = geometryLengthM(geometry);

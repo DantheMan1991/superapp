@@ -4206,4 +4206,101 @@ d("livestock ops", () => {
     );
     expect(parent.get(made.lot.id)).toBeUndefined();
   });
+
+  // ---- a calf stays with its mother's lot --------------------------------
+
+  it("A CALF IS BORN INTO ITS MOTHER'S LOT", async () => {
+    // The founder, 2026-08-28: "the birthing thing says it creates a new lot,
+    // but don't we want it to stay in the same lot with its mother and the
+    // other cows in that lot." A birth was the one way to make an animal that
+    // landed nowhere.
+    const herd = await newLot("NORTH HERD", "cattle");
+    const dam = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Meadow",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+        parentLotId: herd.lot.id,
+      }),
+    );
+
+    const calf = await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        itemId,
+        code: "Meadow's calf",
+        damLotId: dam.lot.id,
+        head: 1,
+        bornOn: "2026-08-15",
+      }),
+    );
+
+    // In the HERD beside her mother — not inside her mother, which would be a
+    // second level, and not loose.
+    const inHerd = await asOwner((tx) =>
+      lotMembers(tx, tenantId, herd.lot.id, "2026-08-15"),
+    );
+    expect(inHerd.map((m) => m.memberLotId).sort()).toEqual(
+      [dam.lot.id, calf.lot.id].sort(),
+    );
+    expect(
+      await asOwner((tx) => lotMembers(tx, tenantId, dam.lot.id, "2026-08-15")),
+    ).toHaveLength(0);
+  });
+
+  it("chicks out of a flock are born INTO the flock", async () => {
+    // The dam is a LOT rather than an animal, and "her lot" is herself.
+    const flock = await newLot("LAYERS", "poultry");
+    await asOwner((tx) =>
+      placeHead(tx, ctx(), {
+        itemId,
+        inventoryLotId: flock.lot.inventoryLotId,
+        head: 40,
+        occurredOn: "2026-08-01",
+      }),
+    );
+
+    const hatch = await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        itemId,
+        code: "HATCH-8H",
+        damLotId: flock.lot.id,
+        head: 25,
+        bornOn: "2026-08-16",
+      }),
+    );
+
+    const inside = await asOwner((tx) =>
+      lotMembers(tx, tenantId, flock.lot.id, "2026-08-16"),
+    );
+    expect(inside.map((m) => m.memberLotId)).toEqual([hatch.lot.id]);
+    // Twenty-five is a lot, not an animal — the kind still comes off the head.
+    expect(hatch.lot.recordKind).toBe("lot");
+  });
+
+  it("a calf out of a LOOSE cow is loose too", async () => {
+    // There is no lot to put her in, and inventing one would be the app making
+    // a grouping nobody asked for.
+    const dam = await asOwner((tx) =>
+      startIndividual(tx, ctx(), {
+        itemId,
+        name: "Wanderer",
+        species: "cattle",
+        occurredOn: "2026-08-01",
+      }),
+    );
+    const calf = await asOwner((tx) =>
+      recordBirth(tx, ctx(), {
+        itemId,
+        code: "Wanderer's calf",
+        damLotId: dam.lot.id,
+        head: 1,
+        bornOn: "2026-08-17",
+      }),
+    );
+    const parent = await asOwner((tx) =>
+      parentByLot(tx, tenantId, [calf.lot.id], "2026-08-17"),
+    );
+    expect(parent.get(calf.lot.id)).toBeUndefined();
+  });
 });

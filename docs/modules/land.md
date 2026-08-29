@@ -49,6 +49,110 @@ grazing wedge and dry-matter measurement, and every planner including water
 layout. Operations first, planning second — and no planner before three
 examples exist.
 
+## The site plan — brainstormed 2026-08-28, NOT YET BUILT
+
+**The founder's ask, in his words:** take the parcel map and identify what is
+actually there — tree lines, fencing rows, buildings — *"and then keep that map
+but also generate a site plan drawing that I can add features like fencing,
+gates, buildings, waterlines to. It needs measuring tools. A full suite."*
+
+**Read this before starting slice 2b.** It is the same slice seen from further
+out, and the shape below is what a session picking it up should argue with
+rather than re-derive.
+
+### Most of the foundation is already here
+
+Not a rewrite. The 2026-08-13 design chose GeoJSON in jsonb *specifically* so
+this would be cheap — *"land is not only polygons… GeoJSON handles all three
+natively, so it is free now and painful to retrofit."* Shipped and usable:
+
+  - **MapLibre over NAIP aerial**, with tracing and corner-dragging
+  - **Spherical area**, accurate enough to agree with a county figure to 0.003%
+  - **Point-in-polygon**, bounding box, centroid — `core/geo.ts`
+  - **Boundaries on parcels and zones**, validated and parsed
+
+What is missing is a table for features, a length function, and the one decision
+below.
+
+### THE DECISION THAT DECIDES THE REST: as-built vs planned
+
+The ask contains two different things wearing the same clothes:
+
+  - **What IS there.** A tree line, the existing perimeter fence, the barn.
+    Traced off imagery. A survey.
+  - **What MIGHT be there.** A fence you are costing, a waterline you have not
+    dug, a gate you are deciding the position of. A proposal.
+
+**Same geometry, different status, and the difference is load-bearing:**
+
+  - A *planned* waterline must not answer "which paddocks have water", which the
+    design already names as the binding constraint on rotation at 10×
+  - A *planned* fence must not become an `assets` row with a depreciation
+    schedule, because it does not exist and nothing has been spent
+  - But a planned thing has to be able to BECOME built in one act — redrawing it
+    to promote it would make the plan a sketchpad instead of a record
+
+**Get this in from the first migration.** It is the same argument the design
+already won about points and lines: free now, painful to retrofit. A `status` on
+the feature is probably enough; what must not happen is a separate "plans" table
+that duplicates geometry, because then a built fence and the plan it came from
+drift apart.
+
+### Where it meets `assets`, already settled in the design
+
+*"A fence has geometry from one and a cost, life and maintenance schedule from
+the other (fence is typically 7-year property)."* So a BUILT feature may point
+at an asset; a PLANNED one has no asset yet, which is a second reason status
+comes first. **`land` owns where it is, `assets` owns what it cost** — the same
+split `livestock` has with `inventory`, and the pack model's whole argument.
+
+### Measurement — one real gap
+
+`core/geo.ts` has area and containment and **no length**. A fence run, a
+waterline, a lane: all LineStrings, all needing haversine distance along the
+line. It is a small pure function and it is what makes the thing feel like a
+tool rather than a picture. Area already exists and should be reused, never
+re-derived on the client.
+
+### The open question a session should settle FIRST
+
+**Is this `land`'s site plan, or a drawing surface `land` happens to use?**
+
+The founder has a second, closely related ambition already recorded: the
+Documents module's construction layer — *drawings with markups and
+measurements*. A site-plan editor and a drawing-markup tool are close cousins:
+both are "put shapes and dimensions over a base image and measure them".
+
+Two honest answers, and the choice belongs to the founder rather than to
+whoever picks this up:
+
+  1. **Build it in `land`, farm-shaped.** Faster, and `land` is an agricultural
+     pack so it may name a hydrant without breaking ADR 0004. Risks building the
+     measuring and drawing surface twice.
+  2. **Build the surface neutral and let `land` supply the vocabulary.** Slower
+     to first value, but the construction client gets it free.
+
+**Do not start drawing tools before this is answered.** It is the difference
+between one surface and two.
+
+### What to resist
+
+*"A full suite"* is where this goes wrong, and the pack model already has the
+answer: **modules stay empty slots until a paying client pulls them in.** A
+CAD-lite editor is an enormous surface and most of it is never used.
+
+The honest test for each tool is what QUESTION it answers:
+
+  - the as-built layer earns its keep immediately — you can see your farm
+  - a length tool earns its keep the first time somebody asks *how many feet of
+    fence is that*
+  - a water layer earns its keep the first time it answers *which paddocks have
+    water*
+  - a general polyline-editing suite with layer groups and snapping earns
+    nothing until one of those questions needs it
+
+Ship the questions, not the toolbox.
+
 ## Build log
 
 ### 2026-08-26 — The land page was down, and it was a function prop (`claude/a-function-cannot-cross-the-boundary`)

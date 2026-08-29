@@ -28,7 +28,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2a.1b** | **Find my parcels** — the county's own boundary by parcel number or tax mailing address | **shipped 2026-08-19** |
 | **2a.2** | **Standing in a field** — point-in-polygon fills the paddock in for you | **shipped 2026-08-19** |
 | **2b.0** | **The as-built layer** — `land_features`, `planned`/`built`/`removed`, symbology, the length function, the aerial/plan toggle | **shipped 2026-08-28** |
-| 2b.1 | **Walk to place a point** — an input mode for every kind, with the accuracy figure shown. [Designed 2026-08-29](#the-paddock-layout--designed-2026-08-29-not-yet-built) | |
+| **2b.1** | **Walk to place a point** — an input mode for every kind, with the accuracy figure shown. [Designed 2026-08-29](#the-paddock-layout--designed-2026-08-29-not-yet-built) | **shipped 2026-08-29** |
 | 2b.2 | **Subdivide** — walk the lane, say how many, get n planned paddocks with their dividing fences and gates. `planned` arrives on zones | |
 | 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | |
 | 2b.4 | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | |
@@ -548,6 +548,86 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-29 — Slice 2b.1: walk it, do not trace it (`claude/walk-the-fence-line`)
+
+**No migration.** Walking a shape onto the map produces the same geometry the
+tap path already produced, which is the whole claim of the slice and the reason
+it needed no schema.
+
+**`core/survey.ts`** is where the decisions live, and it is deliberately free of
+`navigator` so every one of them is testable without a browser: how many corners
+a shape needs, what closes a ring, which accuracy band a fix falls in, and what
+counts as a mis-tap.
+
+**What was built**
+
+- **An input mode, not a second kind of feature.** `Tap the map` / `Walk it`
+  sits beside the kind and shape pickers. `walkToGeometry` turns walked corners
+  into the same `FeatureGeometry` the draw tool emits, so the validator, the
+  action, the audit entry and the symbology are all reached by exactly one path.
+  The test that matters asserts precisely this: every shape a walk can produce
+  passes `validateFeatureGeometry`.
+- **Three corners make a paddock, not four.** The closing repeat is added by
+  `closeRing`. Asking somebody to walk back to their first corner and tap it a
+  second time is asking them not to bother.
+- **The accuracy figure is part of the instruction.** `formatAccuracy` rounds
+  UP — the one length in the pack where erring generous is the wrong direction,
+  because "±3 m" for a 3.4 m fix claims more than the instrument gave. Bands at
+  5 m and 20 m colour the readout and **nothing is ever refused for being
+  inaccurate**: under a tree line ±15 m may be the best the phone will give, and
+  refusing it leaves the fence unrecorded rather than recorded imprecisely. The
+  same rule `compareArea` follows for a disagreeing acreage.
+- **The worst corner describes the shape**, not the average. Averaging flatters
+  a run where three corners were clean and the fourth was taken under a tree.
+- **A mis-tap is refused at one metre** — deliberately below the instrument's own
+  error, because a larger guard would start refusing real corners on a tight jog
+  round a gatepost. Measured against the LAST corner only: a fence that doglegs
+  back past an earlier one is a real fence.
+
+**Decisions worth knowing**
+
+- **WALK MODE NEVER STARTS TERRA DRAW.** Terra Draw turns map clicks into
+  vertices; in a walk the vertices come from the ground under your feet. Loading
+  it anyway would let a stray tap on the map silently add a corner nobody stood
+  on — the one thing this input mode exists to prevent.
+- **It watches while the panel is open, and that is not the background tracking
+  2b.0 refused.** Nothing records where anybody was, nothing runs when the panel
+  is shut, and the watch stops when the walk ends. What it buys is the reason
+  the accuracy figure is worth showing at all: you can see the fix SETTLE before
+  committing a corner instead of tapping blind. `maximumAge: 0`, because a
+  cached fix from the last corner is the one answer this panel must never give.
+- **The geometry is DERIVED for a walk and stateful for a tap**, and the lint
+  rule that forced this was right. A walked shape is a pure function of the
+  corners walked, so a copy in state would be a second thing that can disagree
+  with them. The tap path genuinely needs state, because its vertices live
+  inside Terra Draw and only an event says they moved.
+- **The panel assumes geolocation exists.** The button that opens it checks
+  first and refuses with a toast — the shape `locate()` already used. Reporting
+  the capability from inside the panel meant setting state in an effect body on
+  mount, which is the cascading render React's own guidance warns about.
+- **The map preview rebuilds the shape inside its effect** rather than depending
+  on the derived geometry, which is a new object every render and would push the
+  same data to MapLibre continuously.
+
+**Driven on Hilltop Farm's Home Farm**, with the browser's real geolocation
+denied and a stubbed fix standing in for a phone — the sandboxed browser has no
+location, and the alternative was shipping the slice unclicked:
+
+  - the **denied** path renders its own message and leaves Drop disabled
+  - ±14 ft at 4.2 m and ±42 ft at 12.5 m, the second amber with *"usable —
+    better in the open"*, and neither refused
+  - `worst ±42 ft` after the third corner, tracking the bad one rather than the
+    average
+  - the mis-tap guard fired on a double tap and the count stayed at 3
+  - **four corners measured 1,318 ft live and saved as 1,318 ft** — which is
+    also the parcel's known width, so the walked geometry checks out against a
+    figure derived a completely different way
+
+**Open after this slice:** nothing has been walked with a REAL phone on REAL
+ground, which is the only test that can confirm the correlated-error argument
+this whole direction rests on. A stub proves the plumbing; it cannot prove that
+walking beats tracing. Walk a tree line before 2b.2 is built on top of it.
 
 ### 2026-08-28 — What a quick review of 2b.0 found (`claude/the-plan-needs-a-key`)
 
@@ -1557,6 +1637,13 @@ rented ground, and retrofitting it means rewriting the report.
   registered once and would otherwise close over the mode at creation
 - `src/packs/land/components/plan-legend.tsx` — the key. Only the kinds
   actually on this parcel, drawn from the same `featureStyle` the map uses
+- `src/packs/land/core/survey.ts` — pure, and deliberately free of `navigator`
+  so every decision in it is testable without a browser: corners per shape,
+  ring closing, accuracy bands, the mis-tap guard. **`walkToGeometry` is what
+  makes walking an INPUT MODE rather than a second kind of feature**
+- `src/packs/land/components/walk-panel.tsx` — the live fix, the accuracy
+  figure and the drop button. It watches only while it is open, and it assumes
+  geolocation exists because the button that opens it checked
 - `src/packs/land/core/parcel-lookup.ts` — pure. The source registry, the
   where-clause building and the candidate mapping
 - `src/packs/land/parcel-lookup-service.ts` — the only outward fetch in this
@@ -1699,6 +1786,12 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
+- **NOTHING HAS BEEN WALKED WITH A REAL PHONE ON REAL GROUND.** 2b.1 was driven
+  against a stubbed geolocation, because the sandboxed browser has no location
+  and the alternative was shipping it unclicked. That proves the plumbing and
+  cannot prove the claim the whole direction rests on — that a walked line and a
+  later walk back to it share their error. **Walk a tree line before 2b.2 is
+  built on top of it.**
 - **Nobody has drawn a feature on production.** 2b.0 was driven end to end on
   the dev branch's Hilltop Farm — drawn, measured, saved, promoted — and every
   bug it found is written up in the build log. Production has the table, the RLS

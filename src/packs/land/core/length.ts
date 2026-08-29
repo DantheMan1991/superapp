@@ -89,6 +89,28 @@ export function formatLength(
   return `${value.toLocaleString("en-US")} ${LENGTH_UNIT_LABELS[unit].short}`;
 }
 
+/**
+ * "±3 m" / "±10 ft" — how well the phone knows where it is.
+ *
+ * **THE ± IS NOT DECORATION AND THE FIGURE IS NOT OPTIONAL.** A screen that
+ * shows a position without its accuracy is the screen that gets a post planted
+ * in the wrong place with total confidence. `GeolocationCoordinates.accuracy`
+ * is a 95% radius in metres and every browser reports it, so there is never a
+ * reason to hide it.
+ *
+ * Rounded UP, unlike every other length here. A ±3.4 m reading shown as "±3 m"
+ * claims a little more than the instrument offered, and this is the one number
+ * in the pack where erring generous is the wrong direction.
+ */
+export function formatAccuracy(
+  metres: number | null,
+  unit: LengthUnit = DEFAULT_LENGTH_UNIT,
+): string {
+  if (metres === null || !Number.isFinite(metres)) return "±?";
+  const value = Math.ceil(fromMetres(metres, unit));
+  return `±${value.toLocaleString("en-US")} ${LENGTH_UNIT_LABELS[unit].short}`;
+}
+
 export interface LengthTotal {
   /** Sum of what could be measured, in metres. */
   metres: number;

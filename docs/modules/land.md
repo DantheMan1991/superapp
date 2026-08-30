@@ -32,6 +32,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2b.2** | **Subdivide** — pick the ground and a lane, say how many, get n planned paddocks with their dividing fences and gates. `planned` arrives on zones | **shipped 2026-08-29** |
 | 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | **unblocked 2026-08-29** — the field test it waited on has happened |
 | **2b.4** | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | **shipped 2026-08-29** |
+| **2b.5** | **Snap, and the ground inside the fences** — a drawn point joins what is already there, and the loops the fences make become ground you can divide | **shipped 2026-08-29** |
 | ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
@@ -380,7 +381,22 @@ built on top of it.
 anything you intend to BUILD.** Tracing stays right for recording what is
 already there, which is what 2b.0 is for.
 
-### Enclosure detection is NOT needed, and that matters
+### Enclosure detection is NOT needed, and that matters — **BUILT ANYWAY in 2b.5, and here is why the argument below was half right**
+
+> **Read this heading before the section under it.** The claim that enclosure
+> detection is off the critical path held for 2b.2 and stopped holding the
+> moment somebody used it. The reasoning below is correct that *divide this
+> polygon* needs no topology inference — and wrong that any polygon on offer
+> was the right one. Every polygon a person could choose was the DEED line or a
+> zone they had already drawn, so paddocks laid out on real ground ran through
+> the fence and out the far side. The founder reported it as *"it cant leack
+> out"* on 2026-08-29.
+>
+> **The hard part named below is real and was fixed rather than avoided.**
+> Hand-traced fences do not meet — so 2b.5 made them meet (`core/snap.ts`)
+> before asking what they enclose (`core/enclosure.ts`). No flood fill: the
+> fences are a graph and the loops are cycles in it.
+
 
 The founder originally wanted *"click on a fenced in area and say add 4 paddocks
 to this"*, which reads as inferring a polygon from a ring of fence lines. That
@@ -552,6 +568,175 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-29 — Slice 2b.5: snap to the fence (`claude/snap-to-the-fence`)
+
+**No migration.** Two things asked for in one sentence, and they turned out to
+be one feature in the right order: *"we need to create snap so that when i build
+a lane that goes from one end of a fence to the other it actually connects. Then
+I want to make sure when we auto generate padocks it stays withing the border of
+the fence. It cant leack out."*
+
+**FIRST, WHAT WAS NOT WRONG.** `subdivide` never leaked. It clips every paddock
+against the polygon it is handed, so a paddock cannot escape it by construction
+— and a test now asserts that against the fence ring rather than by reading the
+code. The leak was in what was being HANDED OVER. The only choices were **all of
+<parcel>**, which is the deed line the county drew, or a zone somebody had
+already outlined. A fence normally sits inside the deed line, sometimes by a
+road width. Correct arithmetic on the wrong outline: paddocks running straight
+through the wire and out the far side.
+
+**AND THE TWO HALVES ARE THE SAME PROBLEM.** The design section above deferred
+enclosure detection as fragile, for a stated reason — *"hand-traced fences do
+not meet, so the ring does not close and a flood fill escapes into the rest of
+the parcel"*. Snapping is what makes fences meet. So snapping is not a drawing
+nicety that happens to be next on the list; it is the thing that turns a picture
+of a farm into a graph of one, and the founder put the two asks in that order
+without being told they were connected.
+
+**SNAPPING** (`core/snap.ts`) — a point is moved onto the nearest thing already
+drawn, and nothing else about it changes.
+
+- **A CORNER OUTRANKS A RUN, even a nearer one.** Bringing a lane up to the top
+  of a fence, the fence's last few metres are closer to you than its endpoint for
+  most of the approach — so nearest-wins joins the lane a metre short of the
+  corner every time and leaves exactly the stub this exists to remove.
+- **Two tolerances, because they are different instruments.** Walking uses five
+  metres, which is about one GPS fix in the open: somebody standing genuinely at
+  the corner post reads as somewhere within five metres of it. Tapping uses
+  fourteen PIXELS converted to metres at the current zoom — a fixed distance in
+  metres is wrong in both directions, invisible zoomed out and half the screen
+  zoomed in, while a finger is wrong by roughly the same pixels at any zoom.
+- **It moves a point, it does not join two rows.** A snapped endpoint is a
+  coordinate that happens to be identical to one on another feature. No
+  shared-vertex table, no cascade when the fence is redrawn. The alternative is
+  topology maintenance, which is a CAD suite, which is the thing this is not.
+- **Announced, never silent.** A point that jumps four metres unexplained reads
+  as the app losing the tap; *"Joined to the end of West Fence"* reads as the app
+  working, and it is the only way to notice it joined the WRONG fence.
+- **It can be turned off**, and that is a real answer — a waterline deliberately
+  a few metres inside the fence is a thing people mean. Defaulted on.
+
+**THE TRAP: `TerraDrawPointMode` TAKES NO `snapping` OPTION.** Lines and polygons
+do; points do not. A gate is a point, and a gate is exactly what you want a lane
+to arrive at — so a tapped point snaps on SAVE instead, where a single coordinate
+can be moved exactly. A worse moment to learn it than watching a vertex jump, and
+the only moment available. Terra Draw's own snapping is also no use on its own:
+it sees only features in ITS store, which holds the one shape being drawn.
+Everything already on the plan is in MapLibre sources, so `snapping.toCustom` is
+the way in.
+
+**THE GROUND INSIDE THE FENCES** (`core/enclosure.ts`) — the fence lines as a
+graph, and every loop they make offered as ground to divide.
+
+- **Fences are cut where another fence ARRIVES at them.** Without that a cross
+  fence divides nothing: its ends land in the middle of the west and east runs,
+  not at their corners, so it shares no endpoint with anything and sits in the
+  graph as an island. The loop found is the outside of the whole field and the
+  two halves it plainly makes are invisible. Cutting the west run in two at that
+  point gives it a degree of three, which is what a junction is.
+- **A run that closes on itself needs no graph at all** — four corners walked
+  round a field with "close it" ticked, which is what the founder did in a field
+  yesterday.
+- **The tolerance is the same one snapping uses**, deliberately. Fences drawn
+  from now on meet exactly, so any tolerance would do; the tolerance is what lets
+  fences drawn BEFORE this slice still form loops. Without it this would find
+  nothing on any farm that already has fences on the map, which is all of them.
+- **A fence is not only a `fence` kind.** A hedge, a wall and a treeline all stop
+  stock. The filter is by SHAPE and status — every drawn line not `removed` —
+  rather than a list of kinds that would need keeping in step with the tenant's
+  own taxonomy.
+
+**THE IDS TRAVEL, NOT THE POLYGON.** The client works out the loops so it can
+offer them with an acreage on the label; what it posts back is which FENCES, and
+`layoutPaddocks` computes the ring again from stored geometry. A polygon posted
+from a browser is client input, and the ground a paddock is cut from decides an
+acreage that lands on a cost object. The op requires the set of bounding fences
+to match exactly — anything else means the fences moved between the option being
+offered and taken, and dividing different ground than the screen showed is the
+worst available outcome.
+
+**A refactor on the way:** the local equirectangular frame (`frameAt`/`toLocal`/
+`fromLocal`) was private to `subdivide.ts` and is now in `geo.ts`. Snapping,
+enclosure detection and subdivision all have to agree about what a metre is, and
+a second nearly-identical projection is how they would stop agreeing.
+
+**Tested:** 19 snap cases, 16 enclosure cases and 5 db-backed layout cases —
+including the one that states the bug and the fix side by side: paddocks cut from
+the deed line fall outside the fence, and paddocks cut from the enclosure do not.
+2,293 pure pass, as do land-ops' 126 db-backed cases; lint, `tsc` and the build
+are green.
+
+**Two of my own assertions were wrong before the code was.** A "200 m" side
+built from 111_320/110_540 is out by most of a metre against the sphere `geo.ts`
+measures on, which is 0.7% of the acreage; and a 20 m inset off a ~400 m field
+leaves 81% of it, not under 80%. Both were arguing with a correct implementation.
+
+**DRIVEN IN A BROWSER, on Hilltop Farm — and it found three bugs the tests did
+not.** The founder signed in and said to take it for a spin. Every one of these
+was invisible to a green suite, and the first two made the feature do nothing at
+all.
+
+**1. The tolerance was 256x too small, so nothing ever snapped.** Metres per
+pixel was computed as `156543.03392 * cos(lat) / 2^(zoom + 8)` — the Web
+Mercator resolution for a **256-pixel tile**. MapLibre's zoom is defined against
+**512-pixel** tiles. The pixel tolerance collapsed to nothing, the `max(5 m, …)`
+floor took over, and five metres is about four pixels at the zoom somebody draws
+a field at. Found by drawing a fence along an existing one and reading 1,351 ft
+where the fence itself says 1,318 ft.
+
+The fix is not a corrected constant. It asks the map: `project` the point,
+`unproject` it fourteen pixels to the right, measure between them. **A formula
+can be wrong about the tile size; `project` cannot, because it is what put the
+pixel there.** The five-metre floor went too — that is the WALKING tolerance,
+where the instrument is a GPS fix. Somebody who has zoomed right in is doing it
+to place a vertex precisely, and a floor drags it onto a fence a hundred pixels
+away.
+
+**2. Snapping was not IDEMPOTENT, so a two-click fence came out with three
+vertices.** Terra Draw snaps twice for one click — once for the provisional
+vertex that follows the pointer, once when the click commits — and it feeds the
+second pass the first pass's answer. `snap(snap(p))` has to equal `snap(p)`.
+
+It did not, and the cause was the feature's own best idea: **a corner outranks a
+run.** A point sitting exactly on a fence, re-snapped, jumps to that fence's
+nearest corner. So the two passes landed in different places and BOTH ended up
+in the line — the middle one nine metres from anywhere anybody clicked.
+`ALREADY_JOINED_M` fixes it: a point within a centimetre of any candidate has
+already joined, and is left alone. **It has to test the NEAREST hit, not the
+preferred one** — a point on a fence four metres below its corner has the corner
+as its preferred hit, and testing that would decide it had joined nothing.
+
+**3. The op divided a DIFFERENT RING from the one the dialog offered.** The
+label said 36.4825 acres. The op divided 36.6253, and two paddock corners came
+out 1.43 m past the fence the founder had just been shown.
+
+**An enclosure is not a function of its bounding fences alone.** The op loaded
+only the four submitted fences and ran the detector over those — but
+`splitAtTouches` cuts a run wherever another run ARRIVES at it, so the lane and
+the cross fences landing mid-way along the north fence add vertices to the ring.
+Drop those neighbours and the ring changes shape. The client had offered the loop
+having seen every line on the parcel; the server has to see them too. The ids
+still travel and the polygon still does not — **the ids say WHICH loop, and
+everything they are computed from comes out of the database.**
+
+**What the spin proved, on his own 40-acre parcel:** an east and a west fence
+drawn with two clicks each, both ends landing exactly on the stored coordinates
+of the fences already there — `[-82.47526, 40.40361]` to the digit. The loop
+closed, `Inside Fence, South line — 36.4825 acres` appeared in Ground to divide,
+four paddocks were laid out in it, and **every corner of all four is inside the
+fence** with the paddocks totalling 35.9906 acres — the dialog's figure exactly,
+the difference being the lane. Against a **40.1256-acre deed line**: three and a
+half acres that the old behaviour would have divided into paddocks and fenced,
+outside the wire.
+
+Everything drawn for that was deleted afterwards; the parcel is back to the 15
+features it started with.
+
+**Still not exercised: the walk half.** Snapping a walked corner has only ever
+run against a stubbed `navigator.geolocation`. A five-metre tolerance against an
+instrument that is itself wrong by five metres is a judgement call nothing has
+tested outdoors.
 
 ### 2026-08-29 — You could not draw a paddock (`claude/draw-a-paddock`)
 
@@ -2140,11 +2325,28 @@ rented ground, and retrofitting it means rewriting the report.
   to anyone used to saying it out loud. Since 2b.0 it also holds
   `FeatureGeometry` (the wider type), its own validator — **separate from
   `validateBoundary` so neither can be called wrongly** — and `haversineM` /
-  `geometryLengthM`
+  `geometryLengthM`. Since 2b.5 it also owns the **local equirectangular frame**
+  (`frameAt`/`toLocal`/`fromLocal`), which was private to `subdivide.ts`:
+  snapping, enclosure detection and subdivision all have to agree what a metre
+  is, and a second nearly-identical projection is how they would stop agreeing.
+  Nothing REPORTED comes from the frame — lengths are haversine and areas are
+  spherical, so a shape cut in the frame and measured anywhere else agree
 - `src/packs/land/core/length.ts` — pure. The sibling of `area.ts`, with one
   difference: **length has no canonical store.** Nothing writes a length, so
   there is no `toMetres` matching `toAcres`; it is computed from the geometry
   every time it is shown
+- `src/packs/land/core/snap.ts` — pure. Moving a placed point onto whatever is
+  already drawn. **A corner outranks a run even when the run is nearer**, which
+  is the difference between a lane that meets the fence and one that stops a
+  metre short of the corner. Two tolerances: metres for walking (one GPS fix),
+  pixels-at-the-current-zoom for tapping (a finger is wrong by pixels, not
+  metres). It moves a coordinate and nothing else — there is no shared-vertex
+  table and no cascade, deliberately
+- `src/packs/land/core/enclosure.ts` — pure. The loops fence lines make, as
+  ground you can divide. Fences are **cut where another fence arrives at them**,
+  or a cross fence divides nothing; a run that closes on itself is a field
+  without needing the graph at all. Reads any drawn LINE that is not `removed`,
+  not a list of kinds — a hedge stops stock as well as wire does
 - `src/packs/land/core/features.ts` — pure. Feature kinds, per-kind symbology,
   the status styles, and `featureKindsFrom` for a profile's own words.
   **Industry-neutral (ADR 0004): no `trough`, no `energizer`** — those come from
@@ -2332,6 +2534,29 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
+- ~~Nobody has watched a point snap~~ — **closed the same day.** Driven on
+  Hilltop Farm and it found three bugs, all invisible to a green suite: a
+  tolerance 256x too small so nothing snapped at all, a non-idempotent snap that
+  left a stranded vertex in every line, and an op dividing a different ring from
+  the one the dialog offered. See the build log.
+- **The WALK half is still untouched by a real phone.** Snapping a walked corner
+  has only ever run against a stubbed `navigator.geolocation`. **A five-metre
+  tolerance against an instrument that is itself wrong by five metres is a
+  judgement call nothing has tested outdoors.** If it grabs corners somebody did
+  not mean, the number to move is `SNAP_TOLERANCE_M`.
+- **A point is snapped on SAVE, not while it is placed.** `TerraDrawPointMode`
+  takes no `snapping` option, so a gate jumps after you commit it rather than
+  under the cursor. It is the only moment available and it is the wrong one.
+- **Enclosure detection has only run on squares.** Every case in
+  `tests/land-enclosure.test.ts` is a rectangle or a rectangle with a cross
+  fence. Real fences bend, overlap, double back and stop short, and the graph
+  walk finds *a* loop per fence rather than a guaranteed-simple polygon — a
+  self-intersecting ring would reach `subdivide` and produce a shape nobody
+  wants. It is visible on the map before anything is built, which is the
+  mitigation, not a fix.
+- **A fenced area cannot be turned into a zone directly.** You can divide it;
+  you cannot say "this loop is North Pasture" in one act. Drawing the paddock
+  by hand still works, so this is a shortcut rather than a gap.
 - **The takeoff has never priced a real order.** 2b.4 was driven with a made-up
   42-cent insulator; nothing has been bought off one of these lists, so nobody
   has yet found the material it cannot count or the unit it does not have.

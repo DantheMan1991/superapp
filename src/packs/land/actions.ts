@@ -1062,6 +1062,11 @@ export async function deleteFeatureAction(input: unknown) {
 const layoutSchema = z.object({
   parcelId: z.string().uuid(),
   zoneId: z.string().uuid().nullable().optional(),
+  // The fences bounding the ground to divide. The RING is recomputed from
+  // stored geometry in the op — see `LayoutInput.fenceFeatureIds` for why the
+  // polygon itself never travels. Capped because a loop of more than a few
+  // dozen runs is not a field.
+  fenceFeatureIds: z.array(z.string().uuid()).max(60).optional(),
   laneFeatureId: z.string().uuid(),
   // The upper bound matches `MAX_PADDOCKS`; the lower one is the subdivider's,
   // which refuses one paddock because that is not a division.

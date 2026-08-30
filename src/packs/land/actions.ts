@@ -21,6 +21,8 @@ import {
   createParcel,
   createZone,
   deleteFeature,
+  deleteFeatures,
+  discardZones,
   deleteOccupancy,
   endOccupancy,
   endZoneUse,
@@ -1012,6 +1014,91 @@ export async function setFeatureStatusAction(input: unknown) {
     });
     revalidatePath(`${BASE}/${feature.parcelId}`);
     return { ok: true };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Delete several features in one act.
+ *
+ * The cap is the same order as `MAX_PADDOCKS` — a selection of more than a few
+ * dozen is a filter that did not do its job, and an unbounded `IN` list from a
+ * browser is a request nobody meant to make.
+ */
+const deleteFeaturesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+});
+
+export async function deleteFeaturesAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = deleteFeaturesSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    // The op returns the rows it deleted, so there is no pre-read: the single
+    // version needs one because it returns nothing, and reading every feature
+    // in the tenant to describe a handful would be a scan for an audit line.
+    const gone = await withTenant(
+      ctx.tenant.id,
+      (tx) => deleteFeatures(tx, landCtx(ctx), parsed.data.ids),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.features.deleted",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_parcel",
+      targetId: gone[0]?.parcelId ?? null,
+      // Identifiers and counts only — the kinds say what went without naming
+      // anything, which is the rule the rest of this file follows.
+      meta: {
+        deleted: gone.length,
+        kinds: Array.from(new Set(gone.map((feature) => feature.kind))),
+      },
+    });
+    for (const parcelId of new Set(gone.map((feature) => feature.parcelId))) {
+      revalidatePath(`${BASE}/${parcelId}`);
+    }
+    return { ok: true, deleted: gone.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Throw away proposed paddocks. Owner-only, and planned ground only — see
+ * `discardZones`.
+ */
+const discardZonesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+});
+
+export async function discardZonesAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = discardZonesSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const gone = await withTenant(
+      ctx.tenant.id,
+      (tx) => discardZones(tx, landCtx(ctx), parsed.data.ids),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.zones.discarded",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_parcel",
+      targetId: gone[0]?.parcelId ?? null,
+      meta: { discarded: gone.length },
+    });
+    for (const parcelId of new Set(gone.map((zone) => zone.parcelId))) {
+      revalidatePath(`${BASE}/${parcelId}`);
+    }
+    return { ok: true, discarded: gone.length };
   } catch (err) {
     return toResult(err);
   }

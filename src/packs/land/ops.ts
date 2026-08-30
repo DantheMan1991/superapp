@@ -92,7 +92,9 @@ export class LandError extends Error {
       /** A stroke weight outside what the CHECK will take. */
       | "INVALID_WIDTH"
       /** Ground or a lane that cannot be divided, in the subdivider's own words. */
-      | "LAYOUT_INVALID",
+      | "LAYOUT_INVALID"
+      /** Discarding ground that is not a proposal — that is a retirement. */
+      | "NOT_A_PROPOSAL",
     message: string,
   ) {
     super(message);
@@ -636,6 +638,69 @@ export async function retireZone(
 
   await archiveMember(tx, ctx, ZONE_DIMENSION, id);
   return rows[0];
+}
+
+/**
+ * Throw away proposed ground. **PLANNED ONLY, and hard.**
+ *
+ * **A PROPOSAL YOU ABANDON LEAVES NO HISTORY WORTH KEEPING**, which is why this
+ * deletes where `retireZone` archives. Retiring records that a paddock existed
+ * and no longer does — the use history stays, and so does every cost ever
+ * tagged to it. A paddock that was never fenced has none of that: no uses, no
+ * occupancy (`startOccupancy` refuses planned ground), and no dimension member,
+ * because `layoutPaddocks` deliberately does not create one. There is nothing
+ * to preserve, and a "retired" paddock nobody ever built would sit in the
+ * archive forever answering a question nobody asked.
+ *
+ * **WHY IT EXISTS AT ALL** (founder, 2026-08-30, on production): he ran a
+ * layout, changed his mind, deleted every fence it drew — and the paddocks
+ * stayed. There was no way to remove one. `deletePlan` does not help: a plan
+ * owns the FEATURES it proposed, not the ground, and it deliberately lets the
+ * features survive it. So the purple stayed on the map with no control anywhere
+ * that would clear it.
+ *
+ * Anything not `planned` is refused rather than quietly retired instead. The
+ * two acts have different consequences and picking one for somebody is how a
+ * paddock's history disappears without them asking.
+ */
+export async function discardZones(
+  tx: Tx,
+  ctx: LandCtx,
+  ids: readonly string[],
+): Promise<LandZone[]> {
+  requireWrite(ctx, "owner");
+  if (ids.length === 0) return [];
+
+  for (const id of ids) {
+    const existing = await getZone(tx, ctx.tenantId, id);
+    if (!existing) throw new LandError("NOT_FOUND", `zone ${id} not found`);
+    if (existing.status !== "planned") {
+      throw new LandError(
+        "NOT_A_PROPOSAL",
+        `${existing.name} is not a proposal — retire it instead, so its history survives`,
+      );
+    }
+    /**
+     * Defensive: planned ground has no cost object, but a zone that reached
+     * `planned` by some other route one day would leave a member pointing at a
+     * row that no longer exists.
+     */
+    await archiveMember(tx, ctx, ZONE_DIMENSION, id);
+  }
+
+  const rows = await tx
+    .delete(schema.landZones)
+    .where(
+      and(
+        eq(schema.landZones.tenantId, ctx.tenantId),
+        inArray(schema.landZones.id, [...ids]),
+        // Belt and braces against a race with `activateZone`: the status was
+        // checked a moment ago, and this is the statement that acts on it.
+        eq(schema.landZones.status, "planned"),
+      ),
+    )
+    .returning();
+  return rows;
 }
 
 // ------------------------------------------------------------------- uses ---
@@ -2038,6 +2103,75 @@ export async function deleteFeature(
         eq(schema.landFeatures.id, id),
       ),
     );
+}
+
+/**
+ * Delete several features at once.
+ *
+ * **THE FEED GUARD ASKS A DIFFERENT QUESTION FROM `deleteFeature`'s**, and that
+ * is the whole reason this is not a loop over it. Singly, "does anything run off
+ * this?" is the right check. In bulk it is wrong: selecting a waterline and the
+ * three troughs it feeds is a perfectly sensible thing to want gone, and a
+ * per-row check refuses it depending on which order the loop happens to reach
+ * them in. So what matters is whether anything runs off it **from outside the
+ * selection** — a dependant you are also deleting is not a dependant.
+ *
+ * Refused as a whole rather than partly done. Half a deletion leaves somebody
+ * looking at a list they have to re-read to find out what happened, and the
+ * transaction rolls back anyway.
+ */
+export async function deleteFeatures(
+  tx: Tx,
+  ctx: LandCtx,
+  ids: readonly string[],
+): Promise<LandFeature[]> {
+  requireWrite(ctx, "member");
+  if (ids.length === 0) return [];
+  const wanted = new Set(ids);
+
+  const existing = await tx.query.landFeatures.findMany({
+    where: and(
+      eq(schema.landFeatures.tenantId, ctx.tenantId),
+      inArray(schema.landFeatures.id, [...wanted]),
+    ),
+  });
+  if (existing.length !== wanted.size) {
+    throw new LandError("NOT_FOUND", "one of those is already gone");
+  }
+
+  const dependants = await tx.query.landFeatures.findMany({
+    where: and(
+      eq(schema.landFeatures.tenantId, ctx.tenantId),
+      inArray(schema.landFeatures.fedById, [...wanted]),
+    ),
+  });
+  const stranded = dependants.filter((feature) => !wanted.has(feature.id));
+  if (stranded.length > 0) {
+    const names = stranded
+      .slice(0, 3)
+      .map((feature) => feature.name || feature.kind)
+      .join(", ");
+    throw new LandError(
+      "INVALID_FEED",
+      stranded.length > 3
+        ? `${stranded.length} others run off these — ${names} and more. Select them too, or repoint them first.`
+        : `${names} ${stranded.length === 1 ? "runs" : "run"} off these. Select ${stranded.length === 1 ? "it" : "them"} too, or repoint ${stranded.length === 1 ? "it" : "them"} first.`,
+    );
+  }
+
+  const rows = await tx
+    .delete(schema.landFeatures)
+    .where(
+      and(
+        eq(schema.landFeatures.tenantId, ctx.tenantId),
+        inArray(schema.landFeatures.id, [...wanted]),
+      ),
+    )
+    .returning();
+  // The ROWS, not a count: the caller has to name what went in an audit entry
+  // and revalidate the parcels they were on, and after this there is nothing
+  // left to ask. A pre-read to answer that would be a second full scan.
+  return rows;
 }
 
 // ------------------------------------------------------- paddock layout ---

@@ -33,6 +33,7 @@ the first act of building it. Agreed 2026-08-15:
 | 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | **unblocked 2026-08-29** — the field test it waited on has happened |
 | **2b.4** | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | **shipped 2026-08-29** |
 | **2b.5** | **Snap, and the ground inside the fences** — a drawn point joins what is already there, and the loops the fences make become ground you can divide | **shipped 2026-08-29** |
+| **2b.6** | **Getting rid of things** — discard a proposed paddock, and sort/filter/bulk-delete the plan list | **shipped 2026-08-30** |
 | ~~2b.x~~ | ~~**"What is here"** — the phone screen~~ — **absorbed into 2b.1/2b.3 on 2026-08-29.** It was always the same machinery, and it is far more trustworthy once the boundary was WALKED rather than traced | |
 | 3 | **Weather + GDD** — Open-Meteo by parcel centroid | |
 | 4 | Lease screens, haul movement and cost, the improvement-payback warning | |
@@ -568,6 +569,101 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-30 — Slice 2b.6: getting rid of things (`claude/get-rid-of-things`)
+
+**No migration.** Reported from production: *"i had it auto create some paddocks
+… I ended up deleting all of the paddock lines, but I can't seem to get rid of
+the purple areas. Plus all of the proposed paddocks are still there and I don't
+know how to delete. There should also be a way to sort all of the items in the
+list … this list could grow where there are 100s of items. sort, bulk select and
+delete and filter."*
+
+**A PROPOSED PADDOCK COULD NEVER BE REMOVED. NOT BY ANY ROUTE.** That is the
+whole of the first complaint and it was exactly true:
+
+- `retireZone` archives; there was no delete, and the Proposed panel offered
+  only **The fence is in**.
+- Deleting every fence the layout drew does nothing, because **the fences are
+  not the ground**. The zones are their own rows with their own polygons.
+- `deletePlan` does not help either, and deliberately: a plan owns the FEATURES
+  it proposed and lets them survive it. It never owned the zones.
+
+So the purple stayed on the map with no control anywhere in the app that would
+clear it.
+
+**`discardZones` — PLANNED ONLY, AND HARD.** Retiring and discarding are
+different acts and the difference is what is being kept. Retiring records that a
+paddock existed and no longer does: the use history stays, and so does every
+cost ever tagged to it. Ground that was never fenced has none of that — no uses,
+no occupancy (`startOccupancy` refuses planned ground), and no dimension member,
+because `layoutPaddocks` deliberately does not create one. There is nothing to
+preserve, and a "retired" paddock nobody ever built would sit in the archive
+forever answering a question nobody asked.
+
+Anything not `planned` is **refused**, not quietly retired instead. Choosing one
+of those for somebody is how a paddock's history disappears without them asking.
+It is all-or-nothing over a set for the same reason: half a discard leaves you
+re-reading a list to work out what happened.
+
+**Discard is offered per row AND for the lot**, because changing your mind about
+a layout is one decision about twelve paddocks, not twelve decisions. Both
+confirm in place — the button becomes `Sure?` for one click — rather than in a
+modal. The only thing being guarded against is a mis-tap.
+
+**THE LIST MOVED OUT INTO `feature-list.tsx` AND GREW THREE CONTROLS.** He is
+right that it will grow: one `layoutPaddocks` run on a twelve-paddock field
+emits a fence and a gate per paddock plus the lane fences, so a single decision
+can put thirty rows here. Before this, removing any of them meant clicking each
+one, opening its panel, and deleting it.
+
+- **Filter** by kind and by state. The kind options are only the kinds actually
+  present — an option that matches nothing is a dead end. The state filter
+  *replaces* the old `Show N removed` toggle rather than sitting beside it: two
+  controls governing which rows appear is one too many. Its default is
+  **Built and proposed**, which keeps the rule that was already documented here.
+- **Sort** on any of the four columns. Two rules worth keeping: **unmeasured
+  rows sink in both directions** (a gate and an untraced fence answer neither
+  "what is longest" nor "what is shortest", and floating them to the top on the
+  descending pass would bury the answer), and **the tiebreak is the name, not
+  the id** — the first version put eight fences in insertion order, which reads
+  as no order at all. The tiebreak does not flip with the direction: reversing
+  "by kind" should reverse the kinds, not scramble the rows inside each.
+- **Select and delete.** The count is **narrowed to what is on screen, always**.
+  Tick four rows, change the filter, and the ticks for rows that are no longer
+  listed must not still count — a delete button whose number includes things you
+  cannot see is how somebody removes a fence they never looked at.
+
+**THE BULK FEED GUARD ASKS A DIFFERENT QUESTION FROM THE SINGLE ONE**, which is
+why `deleteFeatures` is not a loop over `deleteFeature`. Singly, "does anything
+run off this?" is right. In bulk it is wrong: selecting a waterline and the three
+troughs it feeds is a perfectly sensible thing to want gone, and a per-row check
+refuses it depending on which order the loop happens to reach them in. What
+matters is whether anything runs off it **from outside the selection** — a
+dependant you are also deleting is not a dependant.
+
+**Two things the drive caught.** Deleting the last waterline left the filter
+pointing at a kind that no longer existed: the list went empty, the count read
+"0 of 15", and the only clue was a filter naming something gone. The effective
+kind is now DERIVED rather than reset in an effect — state that corrects itself
+after a render is state that was briefly wrong. And the op now returns the rows
+it deleted instead of a count, so the action needs no pre-read; the first version
+listed every feature in the tenant to write one audit line.
+
+**Driven on Hilltop Farm.** Filtered eighteen rows to three waterlines, selected
+all three from the header, confirmed, and watched them go — 15 features left in
+the database and the filter recovering by itself. Discarded a proposed paddock
+per row and watched the purple leave the map. Sorted by length descending and
+confirmed the four gates stayed at the bottom.
+
+**Tested:** ten new db-backed cases — discard deletes planned ground, refuses
+real ground, refuses a whole set containing one real paddock, is owner-only; and
+bulk delete takes a feeder and what it feeds together, refuses a stranded
+dependant, refuses the lot when one id is already gone. 2,293 pure pass.
+
+**No component tests, as ever.** The sort comparator and the on-screen narrowing
+of the selection are the two pieces here most worth one, and this repo has no
+stack for it — the design-system dossier records the same gap.
 
 ### 2026-08-29 — Slice 2b.5: snap to the fence (`claude/snap-to-the-fence`)
 
@@ -2335,6 +2431,12 @@ rented ground, and retrofitting it means rewriting the report.
   difference: **length has no canonical store.** Nothing writes a length, so
   there is no `toMetres` matching `toAcres`; it is computed from the geometry
   every time it is shown
+- `src/packs/land/components/feature-list.tsx` — the plan's inventory: filter by
+  kind and state, sort on any column, tick rows and delete them together. Split
+  out of `site-plan.tsx` in 2b.6 — the parent keeps only the thing genuinely
+  shared with the map, which is which feature is selected. **The delete count is
+  narrowed to what is currently listed**, so a filter change can never leave a
+  tick counting towards something off screen
 - `src/packs/land/core/snap.ts` — pure. Moving a placed point onto whatever is
   already drawn. **A corner outranks a run even when the run is nearer**, which
   is the difference between a lane that meets the fence and one that stops a
@@ -2557,6 +2659,15 @@ rented ground, and retrofitting it means rewriting the report.
 - **A fenced area cannot be turned into a zone directly.** You can divide it;
   you cannot say "this loop is North Pasture" in one act. Drawing the paddock
   by hand still works, so this is a shortcut rather than a gap.
+- **A retired paddock still cannot be un-retired, and now a discarded one is
+  simply gone.** 2b.6 added the delete that proposals needed; it deliberately
+  did not touch retirement, which stays one-way. The asymmetry is defensible —
+  a proposal has no history to lose — but "discard" and "retire" sitting a
+  centimetre apart on the same screen is worth watching somebody use.
+- **Nothing bulk-acts on paddocks.** Features can be filtered, sorted and
+  deleted together; the paddock table has none of that. It matters at the same
+  scale — a hundred paddocks is the number that makes both urgent — and only
+  one of them got the treatment.
 - **The takeoff has never priced a real order.** 2b.4 was driven with a made-up
   42-cent insulator; nothing has been bought off one of these lists, so nobody
   has yet found the material it cannot count or the unit it does not have.

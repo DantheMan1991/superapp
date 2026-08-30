@@ -10,6 +10,58 @@
 
 ## Build log
 
+### 2026-08-30 — Somebody finally clicked it (`claude/nobody-has-clicked-it`)
+
+**No code changed. Docs only, and one toggle on the dev branch.**
+
+Both dossiers had carried a **NOBODY HAS CLICKED IT** open item since the module
+shipped, each blaming Clerk auth for keeping agents out. That was wrong, and the
+real answer took one query: **neither module had ever been switched on for any
+tenant.** `requireModuleEnabled` was doing its job, the route was a 404, and a
+404 reads exactly like a feature that does not exist. Three weeks of "nobody has
+clicked it" was one toggle on `/admin/tenants/<id>`.
+
+**Switched on for Hilltop Farm on the DEV branch and driven end to end. Nothing
+was broken.** That is worth stating plainly, because the honest outcome of a
+verification session is often not a bug list:
+
+- **Scheduling** — day, week and month all render. An event created from the
+  dialog landed at 9am on the right day, reopened with every field populated
+  (including the `Related to` search that only exists on a saved event), and
+  showed in the month cell. Calendars, sharing and the subscribe link all load.
+- **The ICS feed, fetched signed-out with `curl`** — the riskiest thing here,
+  a public token route nobody had ever hit. `text/calendar`, `no-store,
+  private`, `nosniff`, `no-referrer`, `content-disposition: inline`, a valid
+  `VCALENDAR`, and `DTSTART:20260830T130000Z` for a 9am America/New_York event.
+  The timezone conversion is right.
+- **Work** — an item added from "my work" grouped under `No date` with its list
+  badge, moved To do → In progress from the row, opened in the sheet with every
+  control present, and appeared in the correct board column.
+
+**TWO THINGS I NEARLY REPORTED AS BUGS AND WERE NOT**, both worth writing down
+because the next person driving this will see them too:
+
+- **The whole toolbar looked like it had vanished from the DOM** after closing
+  the event dialog. It had not — Day/Week/Month are `<a>` links carrying
+  `?view=`, and a query for `button` found nothing. The screen was correct the
+  whole time.
+- **The work item sheet looked clipped at the right edge.** Measured: 383 px
+  wide, right edge at exactly the viewport, nothing overflowing. It was the
+  screenshot being scaled from 987 px to 800.
+
+The lesson is the cheap one: **measure before reporting.** A screenshot of a
+scaled viewport is not evidence about layout, and absence from a `querySelector`
+is not absence from the page.
+
+**The one real defect found belongs to neither module.** People render as raw
+email addresses wherever somebody is named, because `profiles.name` is null.
+`memberLabel` is `name || email`, the name is synced from Clerk's first and last
+name in both the webhook and the backfill, and the founder's Clerk account has
+neither — so the fallback fires and is correct. The fix is a name in Clerk.
+
+**Production is still off for both.** The dev toggle proves the modules work;
+turning them on for a paying tenant is the founder's switch, not a deploy.
+
 ### 2026-08-23 — `ON DELETE SET NULL` on the nesting FK could never have worked (branch `claude/hopeful-raman-823a48`)
 
 Same bug, same migration and the same reasoning as
@@ -880,12 +932,27 @@ button do not change that.
 - ~~**Nothing keeps `updated_at` current.**~~ — **fixed in slice 1.** Every op
   sets it. There is still no trigger, so a future op that forgets will not fail
   any test; the guard is that all of them go through `list-ops`/`item-ops`.
-- **NOBODY HAS CLICKED ANY OF THIS.** Slice 1 compiles, its ops are covered and
-  the build renders the routes, but the dashboard is behind Clerk auth and no
-  agent can reach it. The highest-value thing a human can do is switch the
-  module on for one tenant and try: adding work from "my work" versus from a
-  list, closing and reopening, handing work to somebody else, and an
-  owners-only list seen from a staff account.
+- ~~**NOBODY HAS CLICKED ANY OF THIS.**~~ — **clicked at last on 2026-08-30, and
+  nothing was broken.** A work item was added from "my work", landed under the
+  `No date` group with its list badge, moved To do → In progress from the row's
+  own control, opened in the sheet with title, notes, start, due, status,
+  assignee and the attach box all present, and appeared in the right column of
+  the board with the empty columns reading `Nothing here`.
+- **THE REASON NOBODY HAD CLICKED IT WAS NOT CLERK — THE MODULE HAD NEVER BEEN
+  SWITCHED ON.** `requireModuleEnabled` was answering honestly and the route was
+  a 404 that reads like a missing feature. The open item below about the seed row
+  was pointing at the same thing from the other end. **On for Hilltop Farm on the
+  DEV branch only**; production is still off, and that is the founder's switch.
+- **People show as raw email addresses wherever work is assigned**, and this is
+  NOT a work bug. `memberLabel` is `name || email`, `profiles.name` is synced
+  from Clerk's first and last name, and the founder's Clerk account has neither
+  — so the fallback fires and is doing exactly what it should. Inventing a
+  placeholder would be worse. It bites here more than elsewhere because the
+  assignee sits in a narrow select and truncates to `danr.houser91@gm…`. **The
+  fix is a name in Clerk, not code.**
+- **What a human still has to try**, because it is about a second person and
+  there is only one account on the dev tenant: handing work to somebody else,
+  and an owners-only list seen from a staff account.
 - **The seed row only exists after `npm run db:seed` runs.** Until then
   `requireModuleEnabled(tenant, "work")` has no row to find and the module
   cannot be switched on, however green the deploy is.

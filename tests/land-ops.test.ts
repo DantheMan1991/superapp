@@ -30,6 +30,8 @@ import {
   createZone,
   currentUses,
   deleteFeature,
+  deleteFeatures,
+  discardZones,
   deleteOccupancy,
   getFeature,
   getPlan,
@@ -2060,6 +2062,234 @@ d("land ops", () => {
       );
       expect(planned).toHaveLength(1);
       expect(planned[0].status).toBe("planned");
+    });
+  });
+
+  // ---- getting rid of things (slice 2b.6) -------------------------------
+
+  /**
+   * The founder ran a layout on production, changed his mind, deleted every
+   * fence it drew — and the paddocks stayed on the map with no control anywhere
+   * that would clear them. `deletePlan` does not help: a plan owns the FEATURES
+   * it proposed, not the ground.
+   */
+  describe("discarding proposed ground", () => {
+    /** A paddock the layout would have made: real ground, no fence round it. */
+    async function proposed(parcelId: string, name: string) {
+      const zone = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId, name }),
+      );
+      await asOwner((tx) =>
+        tx
+          .update(schema.landZones)
+          .set({ status: "planned" })
+          .where(eq(schema.landZones.id, zone.id)),
+      );
+      return zone;
+    }
+
+    it("deletes a planned paddock outright", async () => {
+      const parcel = await newParcel("Changed My Mind");
+      const zone = await proposed(parcel.id, "Maybe");
+
+      const gone = await asOwner((tx) => discardZones(tx, ownerCtx(), [zone.id]));
+      expect(gone).toHaveLength(1);
+      expect(await asOwner((tx) => getZone(tx, tenantId, zone.id))).toBeNull();
+    });
+
+    /**
+     * **DISCARDING AND RETIRING ARE NOT THE SAME ACT.** Retiring keeps the use
+     * history and every cost ever tagged to the paddock; discarding is for
+     * ground that was never fenced and has none of that. Choosing one for
+     * somebody is how a paddock's history disappears without them asking.
+     */
+    it("refuses ground that is not a proposal", async () => {
+      const parcel = await newParcel("Real Ground");
+      const zone = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "North" }),
+      );
+      await expect(
+        asOwner((tx) => discardZones(tx, ownerCtx(), [zone.id])),
+      ).rejects.toMatchObject({ code: "NOT_A_PROPOSAL" });
+      expect(await asOwner((tx) => getZone(tx, tenantId, zone.id))).not.toBeNull();
+    });
+
+    it("takes a whole layout away in one act", async () => {
+      const parcel = await newParcel("Whole Layout");
+      const proposals: Awaited<ReturnType<typeof proposed>>[] = [];
+      for (const name of ["1", "2", "3", "4"]) {
+        proposals.push(await proposed(parcel.id, `Paddock ${name}`));
+      }
+      const gone = await asOwner((tx) =>
+        discardZones(
+          tx,
+          ownerCtx(),
+          proposals.map((z) => z.id),
+        ),
+      );
+      expect(gone).toHaveLength(4);
+      expect(
+        await asOwner((tx) =>
+          listZones(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+        ),
+      ).toHaveLength(0);
+    });
+
+    it("refuses the whole set when one of them is real", async () => {
+      const parcel = await newParcel("Mixed Bag");
+      const proposals: Awaited<ReturnType<typeof proposed>>[] = [];
+      for (const name of ["1", "2", "3"]) {
+        proposals.push(await proposed(parcel.id, `Paddock ${name}`));
+      }
+      const real = await asOwner((tx) =>
+        createZone(tx, ownerCtx(), { parcelId: parcel.id, name: "Built" }),
+      );
+      await expect(
+        asOwner((tx) =>
+          discardZones(tx, ownerCtx(), [
+            ...proposals.map((z) => z.id),
+            real.id,
+          ]),
+        ),
+      ).rejects.toMatchObject({ code: "NOT_A_PROPOSAL" });
+      // Nothing half-done: the planned ones are all still there.
+      expect(
+        await asOwner((tx) =>
+          listZones(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+        ),
+      ).toHaveLength(3);
+    });
+
+    it("is owner-only", async () => {
+      const parcel = await newParcel("Staff Cannot Discard");
+      const zone = await proposed(parcel.id, "Theirs");
+      await expect(
+        asOwner((tx) => discardZones(tx, staffCtx(), [zone.id])),
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+  });
+
+  describe("deleting features in bulk", () => {
+    const RUN: FeatureGeometry = {
+      type: "LineString",
+      coordinates: [
+        [-82.48, 40.4],
+        [-82.4798, 40.4008],
+      ],
+    };
+
+    it("takes them all in one act", async () => {
+      const parcel = await newParcel("Bulk Gone");
+      const made: Awaited<ReturnType<typeof createFeature>>[] = [];
+      for (const name of ["A", "B", "C"]) {
+        made.push(
+          await asOwner((tx) =>
+            createFeature(tx, ownerCtx(), {
+              parcelId: parcel.id,
+              kind: "fence",
+              name,
+              geometry: RUN,
+            }),
+          ),
+        );
+      }
+      const gone = await asOwner((tx) =>
+        deleteFeatures(
+          tx,
+          ownerCtx(),
+          made.map((f) => f.id),
+        ),
+      );
+      expect(gone).toHaveLength(3);
+      expect(
+        await asOwner((tx) => listFeatures(tx, tenantId, { parcelId: parcel.id })),
+      ).toHaveLength(0);
+    });
+
+    /**
+     * **THE BULK FEED GUARD ASKS A DIFFERENT QUESTION FROM THE SINGLE ONE.**
+     * Singly, "does anything run off this?" is right. In bulk it is wrong:
+     * selecting a waterline and the troughs it feeds is a sensible thing to
+     * want gone, and a per-row check would refuse it depending on the order the
+     * loop happened to reach them in.
+     */
+    it("allows a feeder and what it feeds to go together", async () => {
+      const parcel = await newParcel("Feeder And Fed");
+      const main = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "waterline",
+          name: "Main",
+          geometry: RUN,
+        }),
+      );
+      const branch = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "waterline",
+          name: "Branch",
+          geometry: RUN,
+          fedById: main.id,
+        }),
+      );
+      expect(
+        await asOwner((tx) =>
+          deleteFeatures(tx, ownerCtx(), [main.id, branch.id]),
+        ),
+      ).toHaveLength(2);
+    });
+
+    it("refuses when something OUTSIDE the selection runs off one", async () => {
+      const parcel = await newParcel("Stranded");
+      const main = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "waterline",
+          name: "Main",
+          geometry: RUN,
+        }),
+      );
+      await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "waterline",
+          name: "Branch",
+          geometry: RUN,
+          fedById: main.id,
+        }),
+      );
+      await expect(
+        asOwner((tx) => deleteFeatures(tx, ownerCtx(), [main.id])),
+      ).rejects.toMatchObject({ code: "INVALID_FEED" });
+      expect(
+        await asOwner((tx) => listFeatures(tx, tenantId, { parcelId: parcel.id })),
+      ).toHaveLength(2);
+    });
+
+    it("refuses the lot when one id is already gone", async () => {
+      const parcel = await newParcel("Already Gone");
+      const kept = await asOwner((tx) =>
+        createFeature(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          kind: "fence",
+          geometry: RUN,
+        }),
+      );
+      await expect(
+        asOwner((tx) =>
+          deleteFeatures(tx, ownerCtx(), [
+            kept.id,
+            "00000000-0000-4000-8000-000000000000",
+          ]),
+        ),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      expect(
+        await asOwner((tx) => listFeatures(tx, tenantId, { parcelId: parcel.id })),
+      ).toHaveLength(1);
+    });
+
+    it("does nothing, successfully, for an empty selection", async () => {
+      expect(await asOwner((tx) => deleteFeatures(tx, ownerCtx(), []))).toEqual([]);
     });
   });
 

@@ -23,6 +23,7 @@ import {
   deleteFeature,
   deleteFeatures,
   discardZones,
+  retireZones,
   deleteOccupancy,
   endOccupancy,
   endZoneUse,
@@ -1062,6 +1063,47 @@ export async function deleteFeaturesAction(input: unknown) {
       revalidatePath(`${BASE}/${parcelId}`);
     }
     return { ok: true, deleted: gone.length };
+  } catch (err) {
+    return toResult(err);
+  }
+}
+
+/**
+ * Retire several paddocks in one act.
+ *
+ * The cap matches the discard one. A selection of more than a couple of hundred
+ * is a filter that did not do its job.
+ */
+const retireZonesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+  endedOn: optionalDate,
+});
+
+export async function retireZonesAction(input: unknown) {
+  const ctx = await requireTenant();
+  await requireModuleEnabled(ctx.tenant.id, PACK);
+  const parsed = retireZonesSchema.safeParse(input);
+  if (!parsed.success) return { error: "Check the details and try again." };
+
+  try {
+    const retired = await withTenant(
+      ctx.tenant.id,
+      (tx) =>
+        retireZones(tx, landCtx(ctx), parsed.data.ids, parsed.data.endedOn),
+      { role: ctx.role },
+    );
+    await logAudit({
+      action: "land.zones.retired",
+      tenantId: ctx.tenant.id,
+      actorClerkUserId: ctx.userId,
+      targetType: "land_parcel",
+      targetId: retired[0]?.parcelId ?? null,
+      meta: { retired: retired.length, endedOn: parsed.data.endedOn ?? null },
+    });
+    for (const parcelId of new Set(retired.map((zone) => zone.parcelId))) {
+      revalidatePath(`${BASE}/${parcelId}`);
+    }
+    return { ok: true, retired: retired.length };
   } catch (err) {
     return toResult(err);
   }

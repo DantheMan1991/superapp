@@ -703,6 +703,58 @@ export async function discardZones(
   return rows;
 }
 
+/**
+ * Retire several paddocks at once.
+ *
+ * **THE BULK ACT FOR REAL GROUND IS RETIRE, NOT DELETE**, and that asymmetry
+ * with `deleteFeatures` is the point rather than an oversight. A fence you pull
+ * out is gone; a paddock you stop managing had cattle on it, has a use history
+ * and has costs tagged to it, and every one of those questions still has an
+ * answer that a delete would erase. `discardZones` is the delete, and it only
+ * ever touches ground nobody fenced.
+ *
+ * All-or-nothing, for the same reason as everywhere else in this file: half a
+ * bulk act leaves somebody re-reading a list to work out what happened, and the
+ * transaction rolls back anyway.
+ */
+export async function retireZones(
+  tx: Tx,
+  ctx: LandCtx,
+  ids: readonly string[],
+  endedOn?: string,
+): Promise<LandZone[]> {
+  requireWrite(ctx, "owner");
+  const retired: LandZone[] = [];
+  for (const id of ids) {
+    const existing = await getZone(tx, ctx.tenantId, id);
+    if (!existing) throw new LandError("NOT_FOUND", `zone ${id} not found`);
+    /**
+     * Already retired is REFUSED rather than skipped. Retiring closes the open
+     * use as of `endedOn`, and running that over ground retired last year would
+     * either do nothing or quietly move a date — and a count that says "3
+     * retired" when one of them was already is a count nobody can act on.
+     */
+    if (existing.status === "retired") {
+      throw new LandError("NOT_FOUND", `${existing.name} is already retired`);
+    }
+    /**
+     * A PROPOSAL IS DISCARDED, NOT RETIRED — the distinction `discardZones`
+     * exists for. Retiring one would archive ground nobody ever fenced, which
+     * is the outcome that rule was written to prevent. Nothing reaches here
+     * with a planned zone today (the table this serves shows active ground),
+     * so this is a guard rather than a fix.
+     */
+    if (existing.status === "planned") {
+      throw new LandError(
+        "NOT_A_PROPOSAL",
+        `${existing.name} has no fence round it yet — discard it instead`,
+      );
+    }
+    retired.push(await retireZone(tx, ctx, id, endedOn));
+  }
+  return retired;
+}
+
 // ------------------------------------------------------------------- uses ---
 
 /** Every use a zone has had, newest first. */

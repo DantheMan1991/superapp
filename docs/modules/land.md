@@ -578,6 +578,71 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-08-30 — Fields are not rectangles (`claude/fields-are-not-rectangles`)
+
+**No migration.** Two open items said the same thing from different ends —
+*enclosure detection has only run on squares* and *the layout has only ever been
+run on a rectangle* — so this went looking for what breaks on real ground: an
+L-shaped field, fences that overshoot at the corners, a fence following a creek,
+and two fields sharing a middle fence.
+
+**ELEVEN OF TWELVE CASES PASSED FIRST TIME.** The graph walk handles a reflex
+corner, keeps the notch out, follows a bend instead of straightening it, closes a
+corner where two runs overshoot, and finds both halves of a cross-fenced field
+rather than the outline of both. That is worth recording as plainly as a bug
+would be.
+
+**THE TWELFTH FOUND A REAL ONE, AND IT IS NOT ABOUT L-SHAPED FIELDS.**
+
+`subdivide` shared the paddock count between the two sides of the lane as
+`round(count / used.length)` — **two and two, whatever the two sides weighed.**
+On a rectangle with the lane down the middle that is exactly right, and a
+rectangle with the lane down the middle was the only thing this had ever been
+run on, in every test and every drive including the browser ones.
+
+Move the lane a quarter of the way across and the sides are 1:3, so four
+paddocks come out as two small and two large — **a 1.95:1 spread under a dialog
+that says "Equal areas" and shows a single "Each" figure.** Nothing crashes,
+nothing leaks past the fence, the paddocks do not overlap. They are just not
+equal, which is the kind of wrong that gets fenced before anybody notices. **A
+lane goes where the gate and the water are, not down the middle**, so this would
+have bitten on the first real field.
+
+`shareOut` now apportions by AREA — largest-remainder, with a floor of one
+paddock per side, because asking for both sides and getting none on one of them
+is ground silently left out of the layout. Three paddocks on a side with three
+times the ground are the same size as one paddock on the small side.
+
+**WHERE EQUAL IS ARITHMETICALLY IMPOSSIBLE, IT NOW SAYS SO.** Both sides get at
+least one paddock, so a 2:1 lane split four ways cannot be equal whatever you
+choose. `EQUAL_ENOUGH` is a threshold for what to SAY, not what to build:
+*"These cannot come out equal: the biggest is 1.5 times the smallest. Ask for
+more paddocks, or put them all on one side of the lane."* It reaches the person
+through `compareLayouts`, which is what the dialog costs the two placements
+with — asserted, because a warning that exists in the outcome and not in the
+option is one nobody sees until after they have built it.
+
+**I TOOK THE WRONG MEASURE FIRST AND IT ARGUED FOR THE WORSE LAYOUT.** On the L,
+two-and-two is 1.95:1 with every paddock 32% off the mean; three-and-one is
+1.54:1 with three paddocks identical and one odd. **Mean-deviation prefers the
+first; largest-over-smallest prefers the second**, and the second is plainly
+better on a farm. I reported the fix as an improvement on a first read of the
+numbers that was simply wrong, then went back and measured. The tests now
+brute-force every split there is and assert the chosen one wins on ratio, which
+is the measure the warning itself reports.
+
+**Tested:** 16 new pure cases. The L-shaped field found as one enclosure with
+the notch genuinely outside; its paddocks contained, non-overlapping and
+optimally split; overshooting corners; a creek-following fence neither
+straightened nor lost when divided; two fields sharing a fence found as two.
+Four lane offsets and two counts brute-forced against every alternative split.
+2,331 pure pass; lint, `tsc` and the build are green.
+
+**Not driven in a browser**, deliberately: the bug is arithmetic, the fix is
+arithmetic, and the assertions here are stronger than a screenshot of one field
+would be. What a browser would add is whether the warning reads well, which is
+the same open question every other warning in this pack has.
+
 Newest first. One entry per session or PR that touched this pack. Every PR that
 changes it MUST add an entry here (rule in AGENTS.md).
 
@@ -1333,13 +1398,13 @@ rented ground, and retrofitting it means rewriting the report.
 - **A point is snapped on SAVE, not while it is placed.** `TerraDrawPointMode`
   takes no `snapping` option, so a gate jumps after you commit it rather than
   under the cursor. It is the only moment available and it is the wrong one.
-- **Enclosure detection has only run on squares.** Every case in
-  `tests/land-enclosure.test.ts` is a rectangle or a rectangle with a cross
-  fence. Real fences bend, overlap, double back and stop short, and the graph
-  walk finds *a* loop per fence rather than a guaranteed-simple polygon — a
-  self-intersecting ring would reach `subdivide` and produce a shape nobody
-  wants. It is visible on the map before anything is built, which is the
-  mitigation, not a fix.
+- ~~Enclosure detection has only run on squares~~ — **closed 2026-08-30.**
+  `tests/land-real-fields.test.ts` runs it over an L-shaped field with a reflex
+  corner, fences that overshoot at the corners, a fence following a creek, and
+  two fields sharing a middle fence. All passed first time. **The graph walk
+  still finds *a* loop per fence rather than a guaranteed-simple polygon**, so a
+  deliberately self-crossing fence could still yield a ring nobody wants; it is
+  visible on the map before anything is built, which is the mitigation.
 - **A fenced area cannot be turned into a zone directly.** You can divide it;
   you cannot say "this loop is North Pasture" in one act. Drawing the paddock
   by hand still works, so this is a shortcut rather than a gap.
@@ -1362,9 +1427,15 @@ rented ground, and retrofitting it means rewriting the report.
   painting WebGL partway through the session. The layer code is the same shape
   as the feature layers beside it, but that is an argument rather than a
   screenshot.
-- **The layout has only ever been run on a rectangle.** A real field with a
-  bent lane is the first honest test of the reachability warning, and of a
-  fence meeting the lane at an angle instead of square.
+- ~~The layout has only ever been run on a rectangle~~ — **closed 2026-08-30,
+  and it was hiding a real bug.** The count was split evenly between the sides
+  of the lane whatever they weighed, so any lane that is not down the middle
+  gave unequal paddocks under a dialog promising equal ones. Fixed by
+  apportioning on area; see the build log.
+- **A lane's two sides still cannot always be equal**, and now the layout says
+  so instead of averaging it away. Both sides get at least one paddock, so a
+  small count against lopsided ground has a floor on how equal it can be.
+  `EQUAL_ENOUGH` decides when to mention it.
 - ~~Nothing has been walked with a real phone~~ — **CLOSED 2026-08-29.** The
   founder walked a property's four corners in a field and reported it worked
   perfectly. That is the correlated-error assumption the whole of 2b.1–2b.4

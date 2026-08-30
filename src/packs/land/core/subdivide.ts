@@ -265,17 +265,33 @@ export function subdivide(
   sides.sort((a, b) => b.area - a.area);
   const used = options.placement === "edge" ? sides.slice(0, 1) : sides;
 
-  // `split` divides each side, so the count asked for is shared between them.
-  const perSide =
-    used.length > 1 ? Math.max(1, Math.round(count / used.length)) : count;
-  if (perSide < 1) return { ok: false, error: "Two or more paddocks." };
+  /**
+   * How many paddocks each side of the lane gets — **BY AREA, NOT ONE EACH.**
+   *
+   * The first version was `round(count / used.length)`, which gives two and two
+   * whatever the two sides weigh. On a rectangle with the lane down the middle
+   * that is right, and a rectangle with the lane down the middle was the only
+   * thing this had ever been run on — in every test and every drive. Move the
+   * lane a quarter of the way across and the sides are 1:3, so four paddocks
+   * come out as two small and two large: **a 50% spread, under a dialog that
+   * says "Equal areas".** Nothing crashes, nothing leaks past the fence, the
+   * paddocks do not overlap. They are just not equal, which is the kind of
+   * wrong that gets fenced before anybody notices.
+   *
+   * Found by dividing an L-shaped field, where the lane cannot be central and
+   * the sides came out 32% apart.
+   */
+  const shares = shareOut(
+    used.map((side) => side.area),
+    count,
+  );
 
   const paddocks: Paddock[] = [];
   const cuts: SubdivideResult["cuts"] = [];
   const warnings: string[] = [];
 
-  for (const side of used) {
-    const outcome = stripsOf(side.ring, axis, across, perSide, frame, {
+  for (const [sideIndex, side] of used.entries()) {
+    const outcome = stripsOf(side.ring, axis, across, shares[sideIndex], frame, {
       laneAt: laneOffset + side.sign * half,
       laneRange,
       startIndex: paddocks.length + 1,
@@ -297,6 +313,30 @@ export function subdivide(
     if (line) laneFences.push({ type: "LineString", coordinates: line });
   }
 
+  /**
+   * **WHEN "EQUAL AREAS" CANNOT BE TRUE, SAY SO.**
+   *
+   * `shareOut` makes the paddocks equal whenever the count can express the
+   * ratio between the two sides. It cannot always: both sides of the lane get
+   * at least one paddock, so a lane with ten times more ground on one side and
+   * only two paddocks asked for gives one of each, and they are ten to one.
+   * That is not a bug to fix by arithmetic — it is a fact about the numbers —
+   * but a screen that says "Equal areas" and shows a single "Each" figure has
+   * to admit it rather than average it away.
+   */
+  if (paddocks.length > 1) {
+    const areas = paddocks.map((paddock) => paddock.areaAcres);
+    const largest = Math.max(...areas);
+    const smallest = Math.min(...areas);
+    if (smallest > 0 && largest / smallest > 1 + EQUAL_ENOUGH) {
+      warnings.push(
+        `These cannot come out equal: the biggest is ${
+          Math.round((largest / smallest) * 10) / 10
+        } times the smallest. Ask for more paddocks, or put them all on one side of the lane.`,
+      );
+    }
+  }
+
   if (options.placement === "edge" && sides.length > 1) {
     const left = sides[1];
     warnings.push(
@@ -310,6 +350,62 @@ export function subdivide(
     ok: true,
     result: { placement: options.placement, paddocks, cuts, laneFences, warnings },
   };
+}
+
+/**
+ * How far apart the biggest and smallest paddock may be before "equal areas"
+ * stops being a fair description.
+ *
+ * **FIVE PERCENT, WHICH IS UNDER WHAT ANYBODY WOULD NOTICE ON THE GROUND** and
+ * well over what the bisection leaves behind. It is a threshold for what to SAY,
+ * not for what to build — nothing is refused for being uneven.
+ */
+export const EQUAL_ENOUGH = 0.05;
+
+/**
+ * Share `count` paddocks between the sides of the lane, in proportion to how
+ * much ground each side has.
+ *
+ * **EVERY SIDE WITH GROUND GETS AT LEAST ONE.** Asking for paddocks on both
+ * sides and getting none on one of them would be ground silently left out of
+ * the layout — worse than an uneven split, because it is invisible. Beyond that
+ * floor the remainder goes by largest fractional share, which is the ordinary
+ * apportionment rule and is what makes the paddocks come out equal: three
+ * paddocks on a side with three times the ground are the same size as one
+ * paddock on the small side.
+ */
+function shareOut(areas: readonly number[], count: number): number[] {
+  const total = areas.reduce((sum, area) => sum + area, 0);
+  if (areas.length === 0 || total <= 0) return areas.map(() => 0);
+  if (areas.length === 1) return [count];
+
+  const quota = areas.map((area) => (count * area) / total);
+  const given = quota.map((q) => Math.max(1, Math.floor(q)));
+  let left = count - given.reduce((sum, n) => sum + n, 0);
+
+  // More sides than paddocks: take back from the largest allocation until it
+  // fits. Cannot happen for two sides and `count >= 2`, but the guard is the
+  // difference between an off-by-one and a paddock nobody asked for.
+  while (left < 0) {
+    let biggest = 0;
+    for (let i = 1; i < given.length; i += 1) {
+      if (given[i] > given[biggest]) biggest = i;
+    }
+    if (given[biggest] <= 1) break;
+    given[biggest] -= 1;
+    left += 1;
+  }
+
+  // Hand out what is left to whoever is furthest short of their share.
+  while (left > 0) {
+    let neediest = 0;
+    for (let i = 1; i < given.length; i += 1) {
+      if (quota[i] - given[i] > quota[neediest] - given[neediest]) neediest = i;
+    }
+    given[neediest] += 1;
+    left -= 1;
+  }
+  return given;
 }
 
 /** Equal-area strips of one side of the lane, cut across it. */

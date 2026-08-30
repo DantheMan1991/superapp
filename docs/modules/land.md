@@ -661,10 +661,10 @@ worst available outcome.
 enclosure detection and subdivision all have to agree about what a metre is, and
 a second nearly-identical projection is how they would stop agreeing.
 
-**Tested:** 15 snap cases, 16 enclosure cases and 4 db-backed layout cases —
+**Tested:** 19 snap cases, 16 enclosure cases and 5 db-backed layout cases —
 including the one that states the bug and the fix side by side: paddocks cut from
 the deed line fall outside the fence, and paddocks cut from the enclosure do not.
-2,289 pure pass, as do land-ops' 125 db-backed cases; lint, `tsc` and the build
+2,293 pure pass, as do land-ops' 126 db-backed cases; lint, `tsc` and the build
 are green.
 
 **Two of my own assertions were wrong before the code was.** A "200 m" side
@@ -672,11 +672,71 @@ built from 111_320/110_540 is out by most of a metre against the sphere `geo.ts`
 measures on, which is 0.7% of the acreage; and a 20 m inset off a ~400 m field
 leaves 81% of it, not under 80%. Both were arguing with a correct implementation.
 
-**Not driven in a browser.** The same limit as the last three entries: the dev
-server drops the Clerk session on restart and signing back in would mean handling
-the founder's credentials. Snapping is the kind of thing that is only really
-confirmed by watching a vertex jump — **the walk half especially, which nothing
-here has exercised against a real phone.**
+**DRIVEN IN A BROWSER, on Hilltop Farm — and it found three bugs the tests did
+not.** The founder signed in and said to take it for a spin. Every one of these
+was invisible to a green suite, and the first two made the feature do nothing at
+all.
+
+**1. The tolerance was 256x too small, so nothing ever snapped.** Metres per
+pixel was computed as `156543.03392 * cos(lat) / 2^(zoom + 8)` — the Web
+Mercator resolution for a **256-pixel tile**. MapLibre's zoom is defined against
+**512-pixel** tiles. The pixel tolerance collapsed to nothing, the `max(5 m, …)`
+floor took over, and five metres is about four pixels at the zoom somebody draws
+a field at. Found by drawing a fence along an existing one and reading 1,351 ft
+where the fence itself says 1,318 ft.
+
+The fix is not a corrected constant. It asks the map: `project` the point,
+`unproject` it fourteen pixels to the right, measure between them. **A formula
+can be wrong about the tile size; `project` cannot, because it is what put the
+pixel there.** The five-metre floor went too — that is the WALKING tolerance,
+where the instrument is a GPS fix. Somebody who has zoomed right in is doing it
+to place a vertex precisely, and a floor drags it onto a fence a hundred pixels
+away.
+
+**2. Snapping was not IDEMPOTENT, so a two-click fence came out with three
+vertices.** Terra Draw snaps twice for one click — once for the provisional
+vertex that follows the pointer, once when the click commits — and it feeds the
+second pass the first pass's answer. `snap(snap(p))` has to equal `snap(p)`.
+
+It did not, and the cause was the feature's own best idea: **a corner outranks a
+run.** A point sitting exactly on a fence, re-snapped, jumps to that fence's
+nearest corner. So the two passes landed in different places and BOTH ended up
+in the line — the middle one nine metres from anywhere anybody clicked.
+`ALREADY_JOINED_M` fixes it: a point within a centimetre of any candidate has
+already joined, and is left alone. **It has to test the NEAREST hit, not the
+preferred one** — a point on a fence four metres below its corner has the corner
+as its preferred hit, and testing that would decide it had joined nothing.
+
+**3. The op divided a DIFFERENT RING from the one the dialog offered.** The
+label said 36.4825 acres. The op divided 36.6253, and two paddock corners came
+out 1.43 m past the fence the founder had just been shown.
+
+**An enclosure is not a function of its bounding fences alone.** The op loaded
+only the four submitted fences and ran the detector over those — but
+`splitAtTouches` cuts a run wherever another run ARRIVES at it, so the lane and
+the cross fences landing mid-way along the north fence add vertices to the ring.
+Drop those neighbours and the ring changes shape. The client had offered the loop
+having seen every line on the parcel; the server has to see them too. The ids
+still travel and the polygon still does not — **the ids say WHICH loop, and
+everything they are computed from comes out of the database.**
+
+**What the spin proved, on his own 40-acre parcel:** an east and a west fence
+drawn with two clicks each, both ends landing exactly on the stored coordinates
+of the fences already there — `[-82.47526, 40.40361]` to the digit. The loop
+closed, `Inside Fence, South line — 36.4825 acres` appeared in Ground to divide,
+four paddocks were laid out in it, and **every corner of all four is inside the
+fence** with the paddocks totalling 35.9906 acres — the dialog's figure exactly,
+the difference being the lane. Against a **40.1256-acre deed line**: three and a
+half acres that the old behaviour would have divided into paddocks and fenced,
+outside the wire.
+
+Everything drawn for that was deleted afterwards; the parcel is back to the 15
+features it started with.
+
+**Still not exercised: the walk half.** Snapping a walked corner has only ever
+run against a stubbed `navigator.geolocation`. A five-metre tolerance against an
+instrument that is itself wrong by five metres is a judgement call nothing has
+tested outdoors.
 
 ### 2026-08-29 — You could not draw a paddock (`claude/draw-a-paddock`)
 
@@ -2474,13 +2534,19 @@ rented ground, and retrofitting it means rewriting the report.
 
 ## Open items
 
-- **Nobody has watched a point snap.** 2b.5's whole product is a vertex jumping
-  four metres onto a fence, and the only way to know it feels right — rather
-  than fights you — is to draw with it. The walk half matters more and has been
-  exercised only against a stubbed `navigator.geolocation`: **a snap tolerance
-  of five metres against a phone that is itself wrong by five metres is a
-  judgement call nothing here has tested.** If it turns out to grab corners
-  somebody did not mean, the number to move is `SNAP_TOLERANCE_M`.
+- ~~Nobody has watched a point snap~~ — **closed the same day.** Driven on
+  Hilltop Farm and it found three bugs, all invisible to a green suite: a
+  tolerance 256x too small so nothing snapped at all, a non-idempotent snap that
+  left a stranded vertex in every line, and an op dividing a different ring from
+  the one the dialog offered. See the build log.
+- **The WALK half is still untouched by a real phone.** Snapping a walked corner
+  has only ever run against a stubbed `navigator.geolocation`. **A five-metre
+  tolerance against an instrument that is itself wrong by five metres is a
+  judgement call nothing has tested outdoors.** If it grabs corners somebody did
+  not mean, the number to move is `SNAP_TOLERANCE_M`.
+- **A point is snapped on SAVE, not while it is placed.** `TerraDrawPointMode`
+  takes no `snapping` option, so a gate jumps after you commit it rather than
+  under the cursor. It is the only moment available and it is the wrong one.
 - **Enclosure detection has only run on squares.** Every case in
   `tests/land-enclosure.test.ts` is a rectangle or a rectangle with a cross
   fence. Real fences bend, overlap, double back and stop short, and the graph

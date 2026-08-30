@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALREADY_JOINED_M,
   movedM,
   snapLabel,
   snapPosition,
@@ -187,6 +188,43 @@ describe("snapPosition", () => {
     expect(hit).not.toBeNull();
     const onFence: Position = [LON, hit!.position[1]];
     expect(haversineM(hit!.position, onFence)).toBeLessThan(0.001);
+  });
+});
+
+/**
+ * **SNAPPING TWICE MUST BE THE SAME AS SNAPPING ONCE**, and this is not a
+ * theoretical nicety. Terra Draw snaps a click twice — once for the provisional
+ * vertex following the pointer, once when the click commits — and it feeds the
+ * second pass the first pass's answer. When `snap(snap(p))` moved, both answers
+ * ended up in the line: a two-click fence came out with three vertices, the
+ * middle one nine metres from anywhere anybody clicked.
+ *
+ * The vertex preference is what breaks it unaided, so that is the case tested.
+ */
+describe("snapping is idempotent", () => {
+  it("leaves a point that is already ON a line exactly where it is", () => {
+    const onTheRun: Position = [LON, north(196)];
+    expect(snapPosition(onTheRun, [NORTH_FENCE])).toBeNull();
+  });
+
+  it("does not pull a point on the run up to the corner it is near", () => {
+    // Four metres below the top corner and exactly on the fence. The corner is
+    // within tolerance and outranks a run — and must not win, because the point
+    // has already joined.
+    const first = snapPosition([east(0.5), north(196)], [NORTH_FENCE]);
+    expect(first).not.toBeNull();
+    expect(snapPosition(first!.position, [NORTH_FENCE])).toBeNull();
+  });
+
+  it("still moves a point that is further off than the floor", () => {
+    const justOutside: Position = [east(ALREADY_JOINED_M * 3), north(100)];
+    expect(snapPosition(justOutside, [NORTH_FENCE])).not.toBeNull();
+  });
+
+  it("holds for a snap onto a corner too", () => {
+    const near = snapPosition([east(1), north(199)], [NORTH_FENCE]);
+    expect(near?.kind).toBe("vertex");
+    expect(snapPosition(near!.position, [NORTH_FENCE])).toBeNull();
   });
 });
 

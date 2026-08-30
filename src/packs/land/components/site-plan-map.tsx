@@ -32,6 +32,7 @@ import {
   boundaryAreaAcres,
   boundingBox,
   geometryLengthM,
+  haversineM,
   shapeOf,
   type Boundary,
   type FeatureGeometry,
@@ -66,7 +67,6 @@ import {
 import {
   snapLabel,
   snapPosition,
-  SNAP_TOLERANCE_M,
   SNAP_TOLERANCE_PX,
   type SnapCandidate,
 } from "../core/snap";
@@ -1084,18 +1084,30 @@ export function SitePlanMap({
        * metres is a fraction of a pixel and nothing ever snaps; zoomed in it is
        * half the screen and everything does. A finger is wrong by about the
        * same number of pixels whatever the zoom, so the tolerance is too.
+       *
+       * **CONVERTED BY ASKING THE MAP, NOT BY A FORMULA.** The first version
+       * computed metres per pixel as `156543.03392 * cos(lat) / 2^(zoom + 8)`,
+       * which is the Web Mercator resolution for a 256-pixel tile. MapLibre's
+       * zoom is defined against 512-pixel tiles, so that was 256x too small,
+       * the tolerance collapsed to about four pixels, and nothing snapped —
+       * found by drawing a fence over an existing one and reading 1,351 ft
+       * where the fence says 1,318 ft. `project`/`unproject` cannot be wrong
+       * about this, because they are what put the pixel there.
+       *
+       * **NO METRE FLOOR HERE.** Five metres is the WALKING tolerance, where
+       * the instrument is a GPS fix. Somebody who has zoomed right in is doing
+       * it to place a vertex precisely, and a floor would drag it onto a fence
+       * a hundred pixels away.
        */
       const snapToPlan = (event: { lng: number; lat: number }): Position | undefined => {
         if (!snappingRef.current) return undefined;
         const here: Position = [event.lng, event.lat];
-        const centre = instance.getCenter();
-        const metresPerPixel =
-          (156_543.03392 * Math.cos((centre.lat * Math.PI) / 180)) /
-          Math.pow(2, instance.getZoom() + 8);
+        const at = instance.project(here);
+        const edge = instance.unproject([at.x + SNAP_TOLERANCE_PX, at.y]);
         const hit = snapPosition(
           here,
           snapCandidatesRef.current,
-          Math.max(SNAP_TOLERANCE_M, SNAP_TOLERANCE_PX * metresPerPixel),
+          haversineM(here, [edge.lng, edge.lat]),
         );
         return hit ? hit.position : undefined;
       };

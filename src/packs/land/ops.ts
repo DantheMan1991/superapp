@@ -2130,27 +2130,60 @@ export async function layoutPaddocks(
      * far side. `subdivide` was never the problem; it clips against whatever
      * it is handed, and it was being handed the wrong outline.
      */
-    const runs: FenceRun[] = [];
+    /**
+     * **EVERY LINE ON THE PARCEL, NOT JUST THE FOUR THAT BOUND IT.**
+     *
+     * The first version of this loaded only the submitted fences and ran the
+     * detector over those. It produced a DIFFERENT RING from the one the person
+     * had just picked off the screen — 36.6253 acres against the 36.4825 the
+     * dialog offered — and some paddocks came out over the line they were shown.
+     *
+     * An enclosure is not a function of its bounding fences alone.
+     * `splitAtTouches` cuts a run wherever another run ARRIVES at it, so a lane
+     * or a cross fence landing mid-way along the north fence adds a vertex to
+     * the ring. Drop those neighbours and the ring changes shape. The client
+     * offered the loop having seen all of them; the server has to see all of
+     * them too, or the two are computing different things and only one of them
+     * is on the screen.
+     *
+     * The ids still travel and the polygon still does not — the ids say WHICH
+     * loop, and everything they are computed from comes out of the database.
+     */
+    const drawn = await listFeatures(tx, ctx.tenantId, {
+      parcelId: input.parcelId,
+    });
+    const byId = new Map(drawn.map((feature) => [feature.id, feature]));
     for (const id of input.fenceFeatureIds) {
-      const fence = await getFeature(tx, ctx.tenantId, id);
-      if (!fence || fence.parcelId !== input.parcelId) {
+      const fence = byId.get(id);
+      if (!fence) {
         throw new LandError("NOT_FOUND", "one of those fences no longer exists");
       }
-      const geometry = asFeatureGeometry(fence.geometry);
-      if (!geometry) {
+      if (!asFeatureGeometry(fence.geometry)) {
         throw new LandError(
           "LAYOUT_INVALID",
           `${fence.name || "that fence"} has not been drawn yet`,
         );
       }
-      runs.push({ id: fence.id, name: fence.name, geometry });
+    }
+
+    const runs: FenceRun[] = [];
+    for (const feature of drawn) {
+      if (feature.status === "removed") continue;
+      const geometry = asFeatureGeometry(feature.geometry);
+      if (
+        !geometry ||
+        (geometry.type !== "LineString" && geometry.type !== "MultiLineString")
+      ) {
+        continue;
+      }
+      runs.push({ id: feature.id, name: feature.name || "Fence", geometry });
     }
     /**
      * The set has to match EXACTLY. The client sends the fences of one loop, so
-     * running the detector over just those must give that loop back; anything
-     * else means the fences moved between offering the option and taking it,
-     * and dividing a different piece of ground than the one on the screen is
-     * the worst available outcome.
+     * running the detector over the same ground must give that loop back;
+     * anything else means the drawing moved between the option being offered
+     * and taken, and dividing a different piece of ground than the one on the
+     * screen is the worst available outcome.
      */
     const wanted = new Set(input.fenceFeatureIds);
     const enclosure = enclosuresFrom(runs).find((candidate) => {
@@ -2163,7 +2196,7 @@ export async function layoutPaddocks(
     if (!enclosure) {
       throw new LandError(
         "LAYOUT_INVALID",
-        "those fences no longer close a single piece of ground — redraw them and try again",
+        "those fences no longer close a single piece of ground — reopen this and pick it again",
       );
     }
     area = enclosure.ring;

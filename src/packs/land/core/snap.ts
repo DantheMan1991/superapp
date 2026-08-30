@@ -84,6 +84,27 @@ export const SNAP_TOLERANCE_M = 5;
  */
 export const SNAP_TOLERANCE_PX = 14;
 
+/**
+ * A point this close to a candidate is ALREADY on it, and is left alone.
+ *
+ * **THIS IS WHAT MAKES SNAPPING IDEMPOTENT, AND WITHOUT IT A LINE GROWS
+ * VERTICES NOBODY PLACED.** Terra Draw snaps twice for one click — once for
+ * the provisional vertex that follows the pointer, once when the click commits
+ * — and it hands the second pass the position the first pass produced. Snapping
+ * an already-snapped point has to be a no-op, or the two passes land in
+ * different places and BOTH end up in the geometry.
+ *
+ * It is `snapPosition`'s vertex preference that breaks that on its own: a point
+ * sitting exactly on a fence, re-snapped, jumps to that fence's nearest CORNER,
+ * because a corner outranks a run. Drawing a two-click line across a field
+ * produced three vertices — the second being a stranded provisional one, nine
+ * metres from where anybody clicked. Found by drawing one on Hilltop Farm.
+ *
+ * A centimetre is far below any tolerance somebody could mean and far above
+ * the noise of a round trip through Terra Draw's coordinate precision.
+ */
+export const ALREADY_JOINED_M = 0.01;
+
 /** Every position in a geometry, flattened. Rings keep their closing repeat. */
 function positionsOf(geometry: FeatureGeometry): Position[][] {
   switch (geometry.type) {
@@ -156,6 +177,17 @@ export function snapPosition(
     return hit.distanceM < best.distanceM;
   };
 
+  /**
+   * The nearest thing full stop, ignoring the corner preference.
+   *
+   * **THE ALREADY-JOINED TEST HAS TO ASK THIS ONE, NOT `best`.** A point sitting
+   * exactly on a fence four metres below its corner has `best` = that corner,
+   * four metres away, because a corner outranks a run — so testing `best` would
+   * decide the point had not joined anything and move it. It has joined; it is
+   * on the fence.
+   */
+  let nearestM = Infinity;
+
   for (const candidate of candidates) {
     for (const path of positionsOf(candidate.geometry)) {
       if (path.length === 0) continue;
@@ -174,6 +206,7 @@ export function snapPosition(
           name: candidate.name,
           distanceM,
         };
+        nearestM = Math.min(nearestM, distanceM);
         if (better(hit)) best = hit;
       }
 
@@ -208,11 +241,14 @@ export function snapPosition(
           name: candidate.name,
           distanceM,
         };
+        nearestM = Math.min(nearestM, distanceM);
         if (better(hit)) best = hit;
       }
     }
   }
 
+  // Already on it: nothing to move, and moving it would be the bug above.
+  if (nearestM <= ALREADY_JOINED_M) return null;
   return best;
 }
 

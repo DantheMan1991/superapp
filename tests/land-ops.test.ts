@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { withSystem, withTenant, schema, type Tx } from "../src/db";
 import { takeoffFor, totalsOf } from "../src/packs/land/core/takeoff";
+import { enclosuresFrom } from "../src/packs/land/core/enclosure";
 import {
   asBoundary,
   asFeatureGeometry,
@@ -2425,6 +2426,78 @@ d("land ops", () => {
         expect(boundaryAreaAcres(FIELD) - insideTheWire).toBeGreaterThan(5);
       });
 
+      /**
+       * **THE OP MUST DIVIDE THE RING THE DIALOG OFFERED**, and this is the
+       * case that caught it not doing so.
+       *
+       * The layout dialog labels each fenced area with its acreage, worked out
+       * on the client from EVERY line on the parcel. The op recomputed the ring
+       * from only the fences whose ids were submitted — and an enclosure is not
+       * a function of its bounding fences alone, because `splitAtTouches` cuts a
+       * run wherever another run arrives at it. On Hilltop Farm the dialog said
+       * 36.4825 acres and the op divided 36.6253, putting paddock corners over
+       * the line the founder had just been shown.
+       *
+       * The lane here is what makes this bite: it runs from one bounding fence
+       * to the other, touching each mid-run.
+       */
+      it("divides the ring the dialog offered, not a ring of its own", async () => {
+        const { parcel, lane, fences } = await fencedField("Same Ring");
+        const clientView = await asOwner((tx) =>
+          listFeatures(tx, tenantId, { parcelId: parcel.id }),
+        );
+        const offered = enclosuresFrom(
+          clientView.flatMap((feature) => {
+            if (feature.status === "removed") return [];
+            const geometry = asFeatureGeometry(feature.geometry);
+            if (
+              !geometry ||
+              (geometry.type !== "LineString" &&
+                geometry.type !== "MultiLineString")
+            ) {
+              return [];
+            }
+            return [
+              { id: feature.id, name: feature.name || "Fence", geometry },
+            ];
+          }),
+        ).find((candidate) => {
+          const bounding = new Set(candidate.runIds);
+          return (
+            bounding.size === fences.length &&
+            fences.every((fence) => bounding.has(fence.id))
+          );
+        });
+        expect(offered).toBeDefined();
+
+        const result = await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            fenceFeatureIds: fences.map((f) => f.id),
+            count: 4,
+            namePrefix: "Same",
+          }),
+        );
+        expect(result.zoneIds).toHaveLength(4);
+
+        const zones = await asOwner((tx) =>
+          listZones(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+        );
+        // Every corner inside the ring the dialog priced, or exactly on it.
+        for (const zone of zones) {
+          const boundary = asBoundary(zone.geometry) as {
+            coordinates: Position[][];
+          };
+          for (const position of boundary.coordinates[0]) {
+            const inside =
+              pointInBoundary(position, offered!.ring) ||
+              distanceToRing(position, offered!.ring.coordinates[0]) < 0.05;
+            expect(inside).toBe(true);
+          }
+        }
+      });
+
       it("refuses fences that do not close a piece of ground", async () => {
         const { parcel, lane, fences } = await fencedField("Three Sides");
         await expect(
@@ -2865,3 +2938,25 @@ d("land ops", () => {
     });
   });
 });
+
+/** Metres from a position to the nearest point on a ring, near enough. */
+function distanceToRing(position: Position, ring: Position[]): number {
+  const mPerLat = (Math.PI / 180) * 6_378_137;
+  const mPerLon = mPerLat * Math.cos((position[1] * Math.PI) / 180);
+  let best = Infinity;
+  for (let i = 1; i < ring.length; i += 1) {
+    const ax = (ring[i - 1][0] - position[0]) * mPerLon;
+    const ay = (ring[i - 1][1] - position[1]) * mPerLat;
+    const bx = (ring[i][0] - position[0]) * mPerLon;
+    const by = (ring[i][1] - position[1]) * mPerLat;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSq = dx * dx + dy * dy;
+    const t =
+      lengthSq === 0
+        ? 0
+        : Math.max(0, Math.min(1, (-ax * dx - ay * dy) / lengthSq));
+    best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+  }
+  return best;
+}

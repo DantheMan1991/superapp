@@ -14,6 +14,58 @@
 
 ## Build log
 
+### 2026-08-30 — Somebody finally clicked it (`claude/nobody-has-clicked-it`)
+
+**No code changed. Docs only, and one toggle on the dev branch.**
+
+Both dossiers had carried a **NOBODY HAS CLICKED IT** open item since the module
+shipped, each blaming Clerk auth for keeping agents out. That was wrong, and the
+real answer took one query: **neither module had ever been switched on for any
+tenant.** `requireModuleEnabled` was doing its job, the route was a 404, and a
+404 reads exactly like a feature that does not exist. Three weeks of "nobody has
+clicked it" was one toggle on `/admin/tenants/<id>`.
+
+**Switched on for Hilltop Farm on the DEV branch and driven end to end. Nothing
+was broken.** That is worth stating plainly, because the honest outcome of a
+verification session is often not a bug list:
+
+- **Scheduling** — day, week and month all render. An event created from the
+  dialog landed at 9am on the right day, reopened with every field populated
+  (including the `Related to` search that only exists on a saved event), and
+  showed in the month cell. Calendars, sharing and the subscribe link all load.
+- **The ICS feed, fetched signed-out with `curl`** — the riskiest thing here,
+  a public token route nobody had ever hit. `text/calendar`, `no-store,
+  private`, `nosniff`, `no-referrer`, `content-disposition: inline`, a valid
+  `VCALENDAR`, and `DTSTART:20260830T130000Z` for a 9am America/New_York event.
+  The timezone conversion is right.
+- **Work** — an item added from "my work" grouped under `No date` with its list
+  badge, moved To do → In progress from the row, opened in the sheet with every
+  control present, and appeared in the correct board column.
+
+**TWO THINGS I NEARLY REPORTED AS BUGS AND WERE NOT**, both worth writing down
+because the next person driving this will see them too:
+
+- **The whole toolbar looked like it had vanished from the DOM** after closing
+  the event dialog. It had not — Day/Week/Month are `<a>` links carrying
+  `?view=`, and a query for `button` found nothing. The screen was correct the
+  whole time.
+- **The work item sheet looked clipped at the right edge.** Measured: 383 px
+  wide, right edge at exactly the viewport, nothing overflowing. It was the
+  screenshot being scaled from 987 px to 800.
+
+The lesson is the cheap one: **measure before reporting.** A screenshot of a
+scaled viewport is not evidence about layout, and absence from a `querySelector`
+is not absence from the page.
+
+**The one real defect found belongs to neither module.** People render as raw
+email addresses wherever somebody is named, because `profiles.name` is null.
+`memberLabel` is `name || email`, the name is synced from Clerk's first and last
+name in both the webhook and the backfill, and the founder's Clerk account has
+neither — so the fallback fires and is correct. The fix is a name in Clerk.
+
+**Production is still off for both.** The dev toggle proves the modules work;
+turning them on for a paying tenant is the founder's switch, not a deploy.
+
 ### 2026-08-23 — `ON DELETE SET NULL` on the nesting FK could never have worked (branch `claude/hopeful-raman-823a48`)
 
 Found by reading `drizzle-kit`'s constraint churn during the production pack's
@@ -1042,13 +1094,24 @@ them. If something does, the boundary was drawn wrong.
 - **The month cell caps at three events and then says "+N more"**, and the
   "more" is not clickable. Clicking the day number opens a new event rather than
   expanding the day, which is the wrong instinct once a day is busy.
-- **NOBODY HAS CLICKED THE SLICE 1 OR SLICE 2 UI.** It compiles, its actions are covered by
-  9 tests through real RLS, and the RLS itself is covered by 14 more — but the
-  dashboard is behind Clerk auth, so no agent can reach it and none of this
-  says the sharing dialog reads correctly to a human. The questions still open:
-  does "Free/busy only" read as a level or as a status, is the pinned
-  everyone-row understood as sharing rather than a setting, and does anybody
-  find the archive button before they look for delete.
+- ~~**NOBODY HAS CLICKED THE SLICE 1 OR SLICE 2 UI.**~~ — **clicked at last on
+  2026-08-30, and nothing was broken.** Day, week and month all render; an event
+  was created, placed correctly at 9am on the right day, reopened for editing
+  with every field populated, and shown in month view; the calendars page,
+  sharing controls and the subscribe link all load. **The ICS feed was fetched
+  signed-out and is correct** — `text/calendar`, `no-store, private`,
+  `nosniff`, `no-referrer`, a valid `VCALENDAR`, and `DTSTART:20260830T130000Z`
+  for a 9am America/New_York event, so the timezone conversion is right.
+- **THE REASON NOBODY HAD CLICKED IT WAS NOT THE UI, AND NOT CLERK.** The module
+  had never been switched on for any tenant. `requireModuleEnabled` was
+  answering honestly and the page was a 404 that reads like a missing feature.
+  Three weeks of "nobody has clicked it" was one toggle on
+  `/admin/tenants/<id>`. **It is now on for Hilltop Farm on the DEV branch
+  only** — production is still off, and that is the founder's switch to throw.
+- **The human questions are still open**, because they are about reading rather
+  than working: does "Free/busy only" read as a level or as a status, is the
+  pinned everyone-row understood as sharing rather than a setting, and does
+  anybody find the archive button before they look for delete.
 - **`listShares` is loaded for every administrable calendar up front.** One
   query per calendar at page load. Right at a handful, wrong at hundreds, and
   the fix is to load them when the dialog opens rather than to paginate.

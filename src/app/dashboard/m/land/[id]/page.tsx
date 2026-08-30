@@ -309,6 +309,7 @@ export default async function ParcelDetailPage({
             // what every acreage divides by, so it stays the owner's.
             canEditBoundary={isOwner && parcel.status === "active"}
             parcelName={parcel.name}
+            zoneWord={zoneWord}
             declaredAcres={parcel.areaAcres}
           />
         </div>

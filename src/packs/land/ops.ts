@@ -21,6 +21,7 @@ import { zoneRest, dayBefore, daysOccupied, type ZoneRest } from "./core/rest";
 import {
   asBoundary,
   asFeatureGeometry,
+  boundaryAreaAcres,
   boundaryAreaSqM,
   parseBoundary,
   parseFeatureGeometry,
@@ -487,6 +488,15 @@ export interface ZoneInput {
   name: string;
   areaAcres?: number | null;
   notes?: string;
+  /**
+   * The outline, if it is being drawn at the same moment it is created.
+   *
+   * **ADDED SO A PADDOCK CAN BE DRAWN ON THE SITE PLAN IN ONE ACT.** Before
+   * this, creating one and giving it a shape were two steps in two places —
+   * and after the zone page lost its map there was no second step left at all
+   * for a paddock created by hand. See the build log for 2026-08-29.
+   */
+  geometry?: unknown;
 }
 
 export async function createZone(
@@ -500,13 +510,24 @@ export async function createZone(
     throw new LandError("PARCEL_INVALID", "that parcel does not exist");
   }
 
+  const geometry = boundaryOrThrow(input.geometry);
   const rows = await tx
     .insert(schema.landZones)
     .values({
       tenantId: ctx.tenantId,
       parcelId: input.parcelId,
       name: input.name.trim(),
-      areaAcres: input.areaAcres ?? null,
+      /**
+       * **A DRAWN PADDOCK'S ACREAGE IS ITS DRAWN ACREAGE**, the same rule
+       * `layoutPaddocks` follows and the one place this pack departs from
+       * declared-versus-computed. A parcel has a deed to disagree with; a
+       * paddock has no external source, so the drawing IS the record. An
+       * explicitly given figure still wins — somebody typing one means it.
+       */
+      areaAcres:
+        input.areaAcres ??
+        (geometry ? boundaryAreaAcres(geometry) : null),
+      geometry,
       notes: input.notes?.trim() ?? "",
     })
     .returning();

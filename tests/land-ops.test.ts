@@ -138,6 +138,74 @@ d("land ops", () => {
     expect(member?.isActive).toBe(true);
   });
 
+  it("creates a zone WITH its outline, in one act", async () => {
+    // Before 2026-08-29 creating a paddock and giving it a shape were two steps
+    // in two places — and once the zone page lost its map there was no second
+    // step at all for one created by hand. It could only be given a shape by
+    // pasting GeoJSON.
+    const parcel = await newParcel("Drawn At Birth");
+    const outline: Boundary = {
+      type: "Polygon",
+      coordinates: [
+        [
+          [-82.48, 40.4],
+          [-82.479, 40.4],
+          [-82.479, 40.401],
+          [-82.48, 40.401],
+          [-82.48, 40.4],
+        ],
+      ],
+    };
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), {
+        parcelId: parcel.id,
+        name: "Walked It",
+        geometry: outline,
+      }),
+    );
+    expect(asBoundary(zone.geometry)).not.toBeNull();
+    // **THE DRAWN ACREAGE IS THE RECORDED ACREAGE** — the layout's rule, and
+    // the one place this pack departs from declared-versus-computed.
+    expect(zone.areaAcres).toBeCloseTo(boundaryAreaAcres(outline), 3);
+  });
+
+  it("lets a typed acreage win over the drawn one", async () => {
+    // Somebody typing a figure means it; the drawing only fills a gap.
+    const parcel = await newParcel("Typed Wins");
+    const zone = await asOwner((tx) =>
+      createZone(tx, ownerCtx(), {
+        parcelId: parcel.id,
+        name: "Says Ten",
+        areaAcres: 10,
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [-82.48, 40.4],
+              [-82.479, 40.4],
+              [-82.479, 40.401],
+              [-82.48, 40.4],
+            ],
+          ],
+        },
+      }),
+    );
+    expect(zone.areaAcres).toBe(10);
+  });
+
+  it("refuses an outline it cannot read, in the parser's own words", async () => {
+    const parcel = await newParcel("Bad Outline");
+    await expect(
+      asOwner((tx) =>
+        createZone(tx, ownerCtx(), {
+          parcelId: parcel.id,
+          name: "Nonsense",
+          geometry: { type: "LineString", coordinates: [[-82.48, 40.4]] },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_GEOMETRY" });
+  });
+
   it("creating a zone makes it a SEPARATE kind of cost object", async () => {
     // Two dimension types, not one. Rent attaches to the deed; mowing attaches
     // to the paddock, and a report about paddocks must not carry deed rows.

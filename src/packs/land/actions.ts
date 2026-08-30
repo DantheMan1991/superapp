@@ -257,6 +257,9 @@ const zoneSchema = z.object({
   name: z.string().min(1).max(200),
   areaAcres: acres,
   notes: z.string().max(5000).optional(),
+  // Drawn or walked on the site plan. Validated by `parseBoundary`, whose
+  // refusals are written for a person, not by a second Zod shape for GeoJSON.
+  geometry: z.unknown().optional(),
 });
 
 export async function createZoneAction(input: unknown) {

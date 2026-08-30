@@ -602,6 +602,14 @@ builds its text from primitives and the suggested name is memoised on the COUNT.
 Worth knowing: `npx eslint` reports these as errors, and a green `tsc` and build
 will not.
 
+**AND `Divide into paddocks` MOVED ONTO THE PLAN**, asked for in the same
+conversation. It had been sitting in the Paddocks list four sections below the
+map, replaced by a grey sentence whenever no lane was drawn — so the founder
+went looking for it on the site plan twice and could not find it. That is the
+right instinct: everything else that makes a shape happens there. **Moved, not
+duplicated**, so there is one place to look and one thing to keep working. What
+stays in the list is `Add paddock`, for one whose shape comes later.
+
 **Tested:** three new ops cases — created with an outline, a typed acreage
 winning over the drawn one, and an unreadable outline refused in the parser's
 own words. 121 db-backed and 2,258 pure pass.

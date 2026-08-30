@@ -266,13 +266,59 @@ export default async function ParcelDetailPage({
       />
 
       <Panel className="p-5">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="font-heading text-base font-semibold tracking-heading">
-            Site plan
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            What is on the ground — and what is only proposed.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-heading text-base font-semibold tracking-heading">
+              Site plan
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              What is on the ground — and what is only proposed.
+            </p>
+          </div>
+          {/*
+            **SUBDIVIDING LIVES ON THE PLAN, NOT AT THE BOTTOM OF THE PAGE.**
+
+            It used to sit in the Paddocks list, four sections below the map,
+            and be replaced by a grey sentence when no lane was drawn. The
+            founder went looking for it on the site plan twice and could not
+            find it — which is the right instinct: everything else that makes a
+            shape happens here. Moved rather than duplicated, so there is one
+            place to look and one thing to maintain.
+          */}
+          {isOwner && parcel.status === "active" && (
+            <PaddockLayout
+              parcelId={parcel.id}
+              zoneWord={zoneWord}
+              areaUnit={unit}
+              lengthUnit={lengthUnitFrom(pack.config)}
+              lanes={features
+                .filter(
+                  (feature) =>
+                    feature.kind === "lane" &&
+                    feature.status !== "removed" &&
+                    feature.geometry !== null,
+                )
+                .map((feature) => ({
+                  id: feature.id,
+                  label: feature.name || "Lane",
+                  geometry: feature.geometry,
+                }))}
+              areas={[
+                {
+                  id: null,
+                  label: `All of ${parcel.name}`,
+                  geometry: parcel.geometry,
+                },
+                ...zones
+                  .filter((zone) => zone.geometry !== null)
+                  .map((zone) => ({
+                    id: zone.id,
+                    label: zone.name,
+                    geometry: zone.geometry,
+                  })),
+              ]}
+            />
+          )}
         </div>
         <div className="mt-4">
           <SitePlan
@@ -493,42 +539,11 @@ export default async function ParcelDetailPage({
           <h2 className="text-sm font-medium">
             {zoneWord}s {zones.length > 0 && `(${zones.length})`}
           </h2>
+          {/* Dividing ground into several happens on the SITE PLAN above. What
+              is left here is adding a single one by name, for a paddock whose
+              shape comes later. */}
           {isOwner && parcel.status === "active" && (
-            <div className="flex flex-wrap items-center gap-2">
-              <PaddockLayout
-                parcelId={parcel.id}
-                zoneWord={zoneWord}
-                areaUnit={unit}
-                lengthUnit={lengthUnitFrom(pack.config)}
-                lanes={features
-                  .filter(
-                    (feature) =>
-                      feature.kind === "lane" &&
-                      feature.status !== "removed" &&
-                      feature.geometry !== null,
-                  )
-                  .map((feature) => ({
-                    id: feature.id,
-                    label: feature.name || "Lane",
-                    geometry: feature.geometry,
-                  }))}
-                areas={[
-                  {
-                    id: null,
-                    label: `All of ${parcel.name}`,
-                    geometry: parcel.geometry,
-                  },
-                  ...zones
-                    .filter((zone) => zone.geometry !== null)
-                    .map((zone) => ({
-                      id: zone.id,
-                      label: zone.name,
-                      geometry: zone.geometry,
-                    })),
-                ]}
-              />
-              <ZoneForm parcelId={parcel.id} unit={unit} zoneWord={zoneWord} />
-            </div>
+            <ZoneForm parcelId={parcel.id} unit={unit} zoneWord={zoneWord} />
           )}
         </div>
 

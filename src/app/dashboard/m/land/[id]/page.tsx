@@ -39,6 +39,7 @@ import {
   readAttributes,
 } from "@/packs/land/core/features";
 import { basemapFrom } from "@/packs/land/core/basemap";
+import { enclosuresFrom } from "@/packs/land/core/enclosure";
 import { lengthUnitFrom } from "@/packs/land/core/length";
 import { SitePlan } from "@/packs/land/components/site-plan";
 import { formatDays, rotationFinding } from "@/packs/land/core/rest";
@@ -185,6 +186,30 @@ export default async function ParcelDetailPage({
   const zoneWord = labelFor(pack.labels, "zone", "Zone");
   const isOwner = ctx.role === "owner";
 
+  /**
+   * The loops the fences make, largest first.
+   *
+   * **A FENCE IS NOT ONLY A `fence` KIND.** A hedge, a wall and a treeline all
+   * stop stock as well as wire does, and a paddock bounded by one of them is a
+   * paddock. What matters is that the line is something you cannot walk
+   * through, so the filter is by SHAPE and status — every drawn line that has
+   * not been removed — rather than by a list of kinds that would have to be
+   * kept in step with the tenant's own taxonomy.
+   *
+   * `removed` is excluded because a fence that is gone bounds nothing.
+   */
+  const fencedAreas = enclosuresFrom(
+    features.flatMap((feature) => {
+      if (feature.status === "removed") return [];
+      const geometry = asFeatureGeometry(feature.geometry);
+      if (!geometry) return [];
+      if (geometry.type !== "LineString" && geometry.type !== "MultiLineString") {
+        return [];
+      }
+      return [{ id: feature.id, name: feature.name || "Fence", geometry }];
+    }),
+  );
+
   const coverage = zoneCoverage(
     parcel.areaAcres,
     zones.map((z) => z.areaAcres),
@@ -309,6 +334,31 @@ export default async function ParcelDetailPage({
                   label: `All of ${parcel.name}`,
                   geometry: parcel.geometry,
                 },
+                /**
+                 * **THE GROUND INSIDE THE FENCES, WHICH IS USUALLY THE ANSWER.**
+                 *
+                 * "All of <parcel>" is the DEED line. A fence normally sits
+                 * inside it, so paddocks cut from the parcel run through the
+                 * fence and out the far side — arithmetically perfect, and
+                 * outside the wire. These are offered above the paddocks
+                 * because on a farm with fences one of them is nearly always
+                 * what was meant.
+                 *
+                 * They are found, not stored: `enclosuresFrom` reads the loops
+                 * the fence lines make each time the page renders, so a fence
+                 * moved this morning changes what is on offer this afternoon
+                 * with nothing to keep in step.
+                 */
+                ...fencedAreas.map((enclosure, index) => ({
+                  id: null,
+                  key: `fenced:${index}`,
+                  label: `Inside ${enclosure.names.join(", ")} — ${formatArea(
+                    enclosure.areaAcres,
+                    unit,
+                  )}`,
+                  geometry: enclosure.ring,
+                  fenceIds: Array.from(new Set(enclosure.runIds)),
+                })),
                 ...zones
                   .filter((zone) => zone.geometry !== null)
                   .map((zone) => ({

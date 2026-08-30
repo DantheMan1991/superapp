@@ -9,8 +9,10 @@ import {
   asFeatureGeometry,
   boundaryAreaAcres,
   geometryLengthM,
+  pointInBoundary,
   type Boundary,
   type FeatureGeometry,
+  type Position,
 } from "../src/packs/land/core/geo";
 import {
   LandError,
@@ -2320,6 +2322,145 @@ d("land ops", () => {
           }),
         ),
       ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+    });
+
+    /**
+     * Dividing the ground inside the FENCES rather than inside the deed line
+     * (slice 2b.5). The founder's complaint was that paddocks "leack out" past
+     * the fence — which they did, because "All of <parcel>" is the county's
+     * outline and the wire sits inside it.
+     */
+    describe("dividing the ground inside the fences", () => {
+      /** The fence, 20 m inside the parcel on every side. */
+      const INSET_SW: Position = [-82.47977, 40.40018];
+      const INSET_SE: Position = [-82.47549, 40.40018];
+      const INSET_NE: Position = [-82.47549, 40.40343];
+      const INSET_NW: Position = [-82.47977, 40.40343];
+
+      async function fencedField(name: string) {
+        const { parcel, lane } = await fieldWithLane(name);
+        const sides: [string, Position, Position][] = [
+          ["South Fence", INSET_SW, INSET_SE],
+          ["East Fence", INSET_SE, INSET_NE],
+          ["North Fence", INSET_NE, INSET_NW],
+          ["West Fence", INSET_NW, INSET_SW],
+        ];
+        const fences = [];
+        for (const [fenceName, from, to] of sides) {
+          fences.push(
+            await asOwner((tx) =>
+              createFeature(tx, ownerCtx(), {
+                parcelId: parcel.id,
+                kind: "fence",
+                name: fenceName,
+                geometry: { type: "LineString", coordinates: [from, to] },
+              }),
+            ),
+          );
+        }
+        return { parcel, lane, fences };
+      }
+
+      it("keeps every paddock inside the fence, not inside the deed line", async () => {
+        const { parcel, lane, fences } = await fencedField("Inset Fence");
+        const result = await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            fenceFeatureIds: fences.map((f) => f.id),
+            count: 4,
+          }),
+        );
+        expect(result.zoneIds).toHaveLength(4);
+
+        const zones = await asOwner((tx) =>
+          listZones(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+        );
+        const inside: Boundary = {
+          type: "Polygon",
+          coordinates: [
+            [INSET_SW, INSET_SE, INSET_NE, INSET_NW, INSET_SW],
+          ],
+        };
+        for (const zone of zones) {
+          const boundary = asBoundary(zone.geometry);
+          expect(boundary).not.toBeNull();
+          for (const position of (boundary as { coordinates: Position[][] })
+            .coordinates[0]) {
+            // Inside the fence, or exactly on it — the clipper puts corners on
+            // the ring, and `pointInBoundary` is not asked to rule on those.
+            const onTheWire =
+              Math.abs(position[0] - INSET_SW[0]) < 1e-9 ||
+              Math.abs(position[0] - INSET_SE[0]) < 1e-9 ||
+              Math.abs(position[1] - INSET_SW[1]) < 1e-9 ||
+              Math.abs(position[1] - INSET_NW[1]) < 1e-9;
+            expect(pointInBoundary(position, inside) || onTheWire).toBe(true);
+          }
+        }
+      });
+
+      it("adds up to the fenced acreage, well under the parcel's", async () => {
+        const { parcel, lane, fences } = await fencedField("Acreage Check");
+        await asOwner((tx) =>
+          layoutPaddocks(tx, ownerCtx(), {
+            parcelId: parcel.id,
+            laneFeatureId: lane.id,
+            fenceFeatureIds: fences.map((f) => f.id),
+            count: 4,
+          }),
+        );
+        const zones = await asOwner((tx) =>
+          listZones(tx, tenantId, { parcelId: parcel.id, status: "planned" }),
+        );
+        const total = zones.reduce((sum, z) => sum + (z.areaAcres ?? 0), 0);
+        const insideTheWire = boundaryAreaAcres({
+          type: "Polygon",
+          coordinates: [[INSET_SW, INSET_SE, INSET_NE, INSET_NW, INSET_SW]],
+        });
+        // Everything inside the fence except the lane corridor...
+        expect(total).toBeLessThan(insideTheWire);
+        expect(total).toBeGreaterThan(insideTheWire * 0.9);
+        // ...and the deed line really is a materially bigger piece of ground,
+        // which is the whole reason dividing it was wrong.
+        expect(boundaryAreaAcres(FIELD) - insideTheWire).toBeGreaterThan(5);
+      });
+
+      it("refuses fences that do not close a piece of ground", async () => {
+        const { parcel, lane, fences } = await fencedField("Three Sides");
+        await expect(
+          asOwner((tx) =>
+            layoutPaddocks(tx, ownerCtx(), {
+              parcelId: parcel.id,
+              laneFeatureId: lane.id,
+              fenceFeatureIds: fences.slice(0, 3).map((f) => f.id),
+              count: 4,
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "LAYOUT_INVALID" });
+      });
+
+      it("refuses a fence belonging to another parcel", async () => {
+        const { parcel, lane, fences } = await fencedField("Wrong Parcel");
+        const other = await newParcel("Somewhere Else");
+        const stray = await asOwner((tx) =>
+          createFeature(tx, ownerCtx(), {
+            parcelId: other.id,
+            kind: "fence",
+            name: "Stray",
+            geometry: { type: "LineString", coordinates: [INSET_SW, INSET_SE] },
+          }),
+        );
+        await expect(
+          asOwner((tx) =>
+            layoutPaddocks(tx, ownerCtx(), {
+              parcelId: parcel.id,
+              laneFeatureId: lane.id,
+              fenceFeatureIds: [...fences.map((f) => f.id), stray.id],
+              count: 4,
+            }),
+          ),
+        ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      });
     });
 
     describe("a planned paddock is not ground you can use", () => {

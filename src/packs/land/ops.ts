@@ -32,6 +32,7 @@ import {
   type Position,
 } from "./core/geo";
 import { subdivide, type LanePlacement } from "./core/subdivide";
+import { enclosuresFrom, type FenceRun } from "./core/enclosure";
 import {
   isFeatureStatus,
   isLineWidth,
@@ -2066,6 +2067,18 @@ export interface LayoutInput {
   parcelId: string;
   /** Divide this zone's polygon; null means the parcel's own boundary. */
   zoneId?: string | null;
+  /**
+   * Divide the ground INSIDE these fences.
+   *
+   * **THE IDS TRAVEL, NOT THE POLYGON.** The client works out which loops the
+   * fences make so it can offer them in a list, but what it sends back is which
+   * fences — and the ring is computed again here from the stored geometry. A
+   * polygon posted from a browser is client input, and the ground a paddock is
+   * cut from decides an acreage that ends up on a cost object.
+   *
+   * Takes precedence over `zoneId`, and both are ignored if this is set.
+   */
+  fenceFeatureIds?: string[];
   /** The lane feature the paddocks hang off. */
   laneFeatureId: string;
   count: number;
@@ -2107,7 +2120,54 @@ export async function layoutPaddocks(
   }
 
   let area: Boundary | null;
-  if (input.zoneId) {
+  if (input.fenceFeatureIds && input.fenceFeatureIds.length > 0) {
+    /**
+     * **THE FENCE IS THE BORDER, NOT THE DEED LINE.**
+     *
+     * Dividing a parcel divides what the county says you own, and a fence
+     * normally sits inside that — sometimes by a road width. The paddocks came
+     * out arithmetically perfect and ran straight through the fence and out the
+     * far side. `subdivide` was never the problem; it clips against whatever
+     * it is handed, and it was being handed the wrong outline.
+     */
+    const runs: FenceRun[] = [];
+    for (const id of input.fenceFeatureIds) {
+      const fence = await getFeature(tx, ctx.tenantId, id);
+      if (!fence || fence.parcelId !== input.parcelId) {
+        throw new LandError("NOT_FOUND", "one of those fences no longer exists");
+      }
+      const geometry = asFeatureGeometry(fence.geometry);
+      if (!geometry) {
+        throw new LandError(
+          "LAYOUT_INVALID",
+          `${fence.name || "that fence"} has not been drawn yet`,
+        );
+      }
+      runs.push({ id: fence.id, name: fence.name, geometry });
+    }
+    /**
+     * The set has to match EXACTLY. The client sends the fences of one loop, so
+     * running the detector over just those must give that loop back; anything
+     * else means the fences moved between offering the option and taking it,
+     * and dividing a different piece of ground than the one on the screen is
+     * the worst available outcome.
+     */
+    const wanted = new Set(input.fenceFeatureIds);
+    const enclosure = enclosuresFrom(runs).find((candidate) => {
+      const bounding = new Set(candidate.runIds);
+      return (
+        bounding.size === wanted.size &&
+        [...bounding].every((id) => wanted.has(id))
+      );
+    });
+    if (!enclosure) {
+      throw new LandError(
+        "LAYOUT_INVALID",
+        "those fences no longer close a single piece of ground — redraw them and try again",
+      );
+    }
+    area = enclosure.ring;
+  } else if (input.zoneId) {
     const zone = await getZone(tx, ctx.tenantId, input.zoneId);
     if (!zone) throw new LandError("NOT_FOUND", `zone ${input.zoneId} not found`);
     area = asBoundary(zone.geometry);

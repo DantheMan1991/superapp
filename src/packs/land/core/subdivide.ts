@@ -30,64 +30,17 @@
  */
 import {
   boundaryAreaAcres,
+  fromLocal,
+  frameAt,
   geometryLengthM,
+  toLocal,
   type Boundary,
   type FeatureGeometry,
+  type Frame,
   type Polygon,
   type Position,
+  type XY,
 } from "./geo";
-
-/** WGS84 equatorial radius, matching `geo.ts` so areas agree between them. */
-const EARTH_RADIUS_M = 6_378_137;
-const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;
-
-/** Metres east and north of an origin. */
-type XY = [number, number];
-
-/**
- * A local flat frame, so the whole algorithm can be plane geometry.
- *
- * **CLIPPING AND AREA-SPLITTING IN DEGREES WOULD BE WRONG BY THE COSINE OF THE
- * LATITUDE** — about 24% at 40°N — so a "square" paddock would come out a
- * quarter wider than it is tall and the equal-area search would divide the
- * wrong quantity. Equirectangular about the shape's own centre is accurate to
- * millimetres across a farm, which is far inside the error of the GPS that
- * placed the corners.
- *
- * The REPORTED acreage still comes from `boundaryAreaAcres`, the spherical one
- * the rest of the pack uses, so a paddock cut here and measured anywhere else
- * agree.
- */
-interface Frame {
-  lon0: number;
-  lat0: number;
-  mPerLon: number;
-  mPerLat: number;
-}
-
-function frameAt(origin: Position): Frame {
-  const [lon0, lat0] = origin;
-  return {
-    lon0,
-    lat0,
-    mPerLon: (Math.PI / 180) * EARTH_RADIUS_M * Math.cos(toRadians(lat0)),
-    mPerLat: (Math.PI / 180) * EARTH_RADIUS_M,
-  };
-}
-
-function toLocal(frame: Frame, position: Position): XY {
-  return [
-    (position[0] - frame.lon0) * frame.mPerLon,
-    (position[1] - frame.lat0) * frame.mPerLat,
-  ];
-}
-
-function fromLocal(frame: Frame, point: XY): Position {
-  return [
-    frame.lon0 + point[0] / frame.mPerLon,
-    frame.lat0 + point[1] / frame.mPerLat,
-  ];
-}
 
 /** Shoelace. Sign is ignored everywhere here, as `ringAreaSqM` ignores winding. */
 function planarArea(ring: XY[]): number {

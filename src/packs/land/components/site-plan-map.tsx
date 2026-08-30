@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   Crosshair,
   Layers,
+  Magnet,
   MapPin,
   Pencil,
   Pentagon,
@@ -35,6 +36,7 @@ import {
   type Boundary,
   type FeatureGeometry,
   type GeometryShape,
+  type Position,
 } from "../core/geo";
 import {
   featureKindLabel,
@@ -61,6 +63,13 @@ import {
   walkToGeometry,
   type WalkPoint,
 } from "../core/survey";
+import {
+  snapLabel,
+  snapPosition,
+  SNAP_TOLERANCE_M,
+  SNAP_TOLERANCE_PX,
+  type SnapCandidate,
+} from "../core/snap";
 
 /**
  * The site plan. **ONE MAP, TWO VIEWS, AND NO TRANSFER STEP.**
@@ -377,6 +386,68 @@ export function SitePlanMap({
   const [closeWalk, setCloseWalk] = useState(false);
   /** Set while REDRAWING an existing feature; null while tracing a new one. */
   const [redrawing, setRedrawing] = useState<PlanFeature | null>(null);
+
+  /**
+   * Everything already on the plan that a new point may land on.
+   *
+   * **THE FEATURE BEING DRAWN IS LEFT OUT**, and that is not tidiness: a line
+   * whose own last vertex is a candidate snaps every new point back onto it and
+   * never advances. Nothing else is filtered — a lane should be able to meet a
+   * waterline as readily as a fence, and a gate is exactly the thing you want a
+   * lane to arrive at.
+   *
+   * The parcel boundary is in here too. Fences run along deed lines often
+   * enough that snapping to one is usually what somebody means, and when it is
+   * not they are more than five metres off it.
+   */
+  const snapCandidates = useMemo<SnapCandidate[]>(() => {
+    const skip = redrawing?.id ?? null;
+    const list: SnapCandidate[] = [];
+    for (const item of features) {
+      if (item.id === skip) continue;
+      const geometry = asFeatureGeometry(item.geometry);
+      if (geometry) list.push({ id: item.id, name: item.name, geometry });
+    }
+    for (const zone of zones) {
+      if (zone.id === selectedZoneId) continue;
+      const geometry = asBoundary(zone.geometry);
+      if (geometry) list.push({ id: zone.id, name: zone.name, geometry });
+    }
+    if (parcelBoundary && !boundaryTarget) {
+      list.push({ id: parcelId, name: parcelName, geometry: parcelBoundary });
+    }
+    return list;
+  }, [
+    boundaryTarget,
+    features,
+    parcelBoundary,
+    parcelId,
+    parcelName,
+    redrawing,
+    selectedZoneId,
+    zones,
+  ]);
+
+  /**
+   * Kept in a ref as well because Terra Draw's snap hook is handed to the
+   * constructor ONCE, inside `startDrawing`, and would otherwise close over the
+   * candidate list as it stood when drawing began.
+   */
+  const snapCandidatesRef = useRef(snapCandidates);
+
+  /** Whether snapping is on. Off is a real answer — see the toggle's comment. */
+  const [snapping, setSnapping] = useState(true);
+  const snappingRef = useRef(snapping);
+
+  // Mirrored in an EFFECT, not assigned during render: writing a ref while
+  // rendering is what React's own lint rule is there to stop, and the compiler
+  // bails out of optimising the whole component when it sees one.
+  useEffect(() => {
+    snapCandidatesRef.current = snapCandidates;
+  }, [snapCandidates]);
+  useEffect(() => {
+    snappingRef.current = snapping;
+  }, [snapping]);
   /**
    * The shape the open draw session is producing. Held in state rather than
    * recomputed at save time, because a redraw takes its shape from the geometry
@@ -1002,16 +1073,56 @@ export function SitePlanMap({
           ? "area"
           : (shapeOverride ?? shapeOfKind(drawKind));
 
+      /**
+       * Terra Draw's own snapping only sees features in ITS store, which holds
+       * exactly the one shape being drawn. Everything already on the plan is in
+       * MapLibre sources, so the hook is the only way in — `toCustom` is handed
+       * the pointer position and returns where the vertex should actually go.
+       *
+       * **THE TOLERANCE IS PIXELS CONVERTED TO METRES AT THE CURRENT ZOOM.** A
+       * fixed distance in metres is wrong in both directions: zoomed out, five
+       * metres is a fraction of a pixel and nothing ever snaps; zoomed in it is
+       * half the screen and everything does. A finger is wrong by about the
+       * same number of pixels whatever the zoom, so the tolerance is too.
+       */
+      const snapToPlan = (event: { lng: number; lat: number }): Position | undefined => {
+        if (!snappingRef.current) return undefined;
+        const here: Position = [event.lng, event.lat];
+        const centre = instance.getCenter();
+        const metresPerPixel =
+          (156_543.03392 * Math.cos((centre.lat * Math.PI) / 180)) /
+          Math.pow(2, instance.getZoom() + 8);
+        const hit = snapPosition(
+          here,
+          snapCandidatesRef.current,
+          Math.max(SNAP_TOLERANCE_M, SNAP_TOLERANCE_PX * metresPerPixel),
+        );
+        return hit ? hit.position : undefined;
+      };
+
       const instanceDraw = new TerraDraw({
         adapter: new TerraDrawMapLibreGLAdapter({ map: instance }),
         modes: [
+          /**
+           * **POINT MODE TAKES NO `snapping` OPTION** — Terra Draw offers it on
+           * lines and polygons only. A gate dropped on a fence therefore snaps
+           * on SAVE instead, in `save` below, where a single coordinate can be
+           * moved exactly and the person is told what it joined. That is a
+           * worse moment to learn it than watching the vertex jump, but it is
+           * the only moment available, and a gate that is four metres off the
+           * fence is a gate the graph cannot see.
+           */
           new TerraDrawPointMode({}),
-          new TerraDrawLineStringMode({ pointerDistance: 20 }),
+          new TerraDrawLineStringMode({
+            pointerDistance: 20,
+            snapping: { toCustom: snapToPlan },
+          }),
           new TerraDrawPolygonMode({
             // A self-intersecting building has no area the formula can trust,
             // the same reason boundary-map.tsx validates it while drawing.
             validation: ValidateNotSelfIntersecting,
             pointerDistance: 20,
+            snapping: { toCustom: snapToPlan },
           }),
           new TerraDrawSelectMode({
             flags: {
@@ -1122,6 +1233,24 @@ export function SitePlanMap({
         return;
       }
       geometry = last.geometry as unknown as object;
+
+      /**
+       * A tapped POINT snaps here rather than while it is being placed, because
+       * Terra Draw's point mode takes no snapping option — see the mode list.
+       * Lines and polygons have already snapped every vertex live, so this
+       * never fires for them.
+       */
+      if (snapping && drawingShape === "point") {
+        const placed = asFeatureGeometry(geometry);
+        if (placed?.type === "Point") {
+          const hit = snapPosition(placed.coordinates, snapCandidates);
+          if (hit) {
+            geometry = { type: "Point", coordinates: hit.position };
+            const label = snapLabel(hit);
+            if (label) toast.success(label);
+          }
+        }
+      }
     }
 
     setPending(true);
@@ -1194,6 +1323,8 @@ export function SitePlanMap({
     parcelName,
     redrawing,
     router,
+    snapCandidates,
+    snapping,
     stopDrawing,
     walk,
   ]);
@@ -1230,9 +1361,31 @@ export function SitePlanMap({
       ? walkToGeometry(walk, drawingShape, closeWalk)
       : tapMeasured;
 
-  const dropWalkPoint = useCallback((point: WalkPoint) => {
-    setWalk((current) => [...current, point]);
-  }, []);
+  const dropWalkPoint = useCallback(
+    (point: WalkPoint) => {
+      /**
+       * **SNAPPED ON THE WAY IN, NOT ON SAVE.** The person is standing there
+       * and can see the point land; telling them half an hour later that the
+       * corner moved four metres is telling the wrong person at the wrong time.
+       *
+       * It also matters more here than when tapping. A phone in the open is
+       * good to about five metres, so somebody standing AT the corner post
+       * reads as somewhere near it — and a lane that starts near the fence is
+       * exactly the gap that stops the ground being dividable.
+       */
+      const hit = snappingRef.current
+        ? snapPosition(point.position, snapCandidatesRef.current)
+        : null;
+      if (hit) {
+        const label = snapLabel(hit);
+        if (label) toast.success(label);
+        setWalk((current) => [...current, { ...point, position: hit.position }]);
+        return;
+      }
+      setWalk((current) => [...current, point]);
+    },
+    [],
+  );
 
   const undoWalkPoint = useCallback(() => {
     setWalk((current) => current.slice(0, -1));
@@ -1493,6 +1646,29 @@ export function SitePlanMap({
               <Trash2 className="mr-2 h-4 w-4" />
               Start over
             </Button>
+            {/*
+              **SNAPPING CAN BE TURNED OFF, AND THAT IS A REAL ANSWER.** Most of
+              what gets drawn here SHOULD meet what is already there — a lane
+              that stops short of the fence leaves a paddock with a gate onto
+              nothing. But a waterline running a few metres inside the fence,
+              or a proposed fence deliberately offset from the old one, is a
+              thing somebody means, and an app that keeps dragging it back onto
+              the fence is unusable for it. Defaulted ON because the joined case
+              is much the commoner one.
+            */}
+            <button
+              type="button"
+              onClick={() => setSnapping((on) => !on)}
+              disabled={pending}
+              className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                snapping
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <Magnet className="h-3.5 w-3.5" />
+              {snapping ? "Snapping on" : "Snapping off"}
+            </button>
           </>
         )}
       </div>

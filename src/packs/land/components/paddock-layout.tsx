@@ -36,9 +36,25 @@ import { formatArea, type AreaUnit } from "../core/area";
 import { formatLength, fromMetres, toMetres, type LengthUnit } from "../core/length";
 
 export interface LayoutArea {
+  /** A zone's id, or null for the parcel. Null for a fenced area too. */
   id: string | null;
   label: string;
   geometry: unknown;
+  /**
+   * Set only on a FENCED AREA: the fences whose loop makes this ground.
+   *
+   * The ring is worked out on the client so the option can be offered with an
+   * acreage on it, and thrown away on submit — the server recomputes it from
+   * these ids. See `LayoutInput.fenceFeatureIds`.
+   */
+  fenceIds?: string[];
+  /** Distinguishes fenced areas from zones, which can share a null id. */
+  key?: string;
+}
+
+/** What the Select is keyed on. A zone has an id; the parcel and fences do not. */
+function areaKey(area: LayoutArea): string {
+  return area.key ?? area.id ?? "__parcel__";
 }
 
 export interface LayoutLane {
@@ -97,7 +113,7 @@ export function PaddockLayout({
   const [namePrefix, setNamePrefix] = useState("");
 
   const options = useMemo<LayoutOption[]>(() => {
-    const area = areas.find((a) => (a.id ?? "__parcel__") === areaId);
+    const area = areas.find((a) => areaKey(a) === areaId);
     const lane = lanes.find((l) => l.id === laneId);
     const boundary = area ? asBoundary(area.geometry) : null;
     const spine = lane ? asFeatureGeometry(lane.geometry) : null;
@@ -121,9 +137,11 @@ export function PaddockLayout({
 
   function submit() {
     startTransition(async () => {
+      const area = areas.find((a) => areaKey(a) === areaId);
       const result = await layoutPaddocksAction({
         parcelId,
-        zoneId: areaId === "__parcel__" ? null : areaId,
+        zoneId: area?.fenceIds ? null : areaId === "__parcel__" ? null : areaId,
+        fenceFeatureIds: area?.fenceIds,
         laneFeatureId: laneId,
         count,
         placement,
@@ -182,10 +200,7 @@ export function PaddockLayout({
                 </SelectTrigger>
                 <SelectContent>
                   {areas.map((area) => (
-                    <SelectItem
-                      key={area.id ?? "__parcel__"}
-                      value={area.id ?? "__parcel__"}
-                    >
+                    <SelectItem key={areaKey(area)} value={areaKey(area)}>
                       {area.label}
                     </SelectItem>
                   ))}

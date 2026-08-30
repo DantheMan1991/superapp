@@ -441,6 +441,55 @@ export function haversineM(a: Position, b: Position): number {
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/** Metres east and north of an origin. */
+export type XY = [number, number];
+
+/**
+ * A local flat frame, so an algorithm can be plane geometry.
+ *
+ * **MEASURING ACROSS A SHAPE IN DEGREES IS WRONG BY THE COSINE OF THE
+ * LATITUDE** — about 24% at 40degN — so a distance east and the same distance
+ * north would not compare, and anything that clips, offsets or snaps would be
+ * skewed by that ratio. Equirectangular about a nearby origin is accurate to
+ * millimetres across a farm, which is far inside the error of the GPS or the
+ * hand that placed the corners.
+ *
+ * **REPORTED figures never come from here.** Lengths come from `haversineM`
+ * and areas from `boundaryAreaSqM`, both spherical, so a shape cut in this
+ * frame and measured anywhere else agree. This exists to do geometry in, not
+ * to answer with.
+ */
+export interface Frame {
+  lon0: number;
+  lat0: number;
+  mPerLon: number;
+  mPerLat: number;
+}
+
+export function frameAt(origin: Position): Frame {
+  const [lon0, lat0] = origin;
+  return {
+    lon0,
+    lat0,
+    mPerLon: (Math.PI / 180) * EARTH_RADIUS_M * Math.cos(toRadians(lat0)),
+    mPerLat: (Math.PI / 180) * EARTH_RADIUS_M,
+  };
+}
+
+export function toLocal(frame: Frame, position: Position): XY {
+  return [
+    (position[0] - frame.lon0) * frame.mPerLon,
+    (position[1] - frame.lat0) * frame.mPerLat,
+  ];
+}
+
+export function fromLocal(frame: Frame, point: XY): Position {
+  return [
+    frame.lon0 + point[0] / frame.mPerLon,
+    frame.lat0 + point[1] / frame.mPerLat,
+  ];
+}
+
 function pathLengthM(path: Position[]): number {
   let total = 0;
   for (let i = 1; i < path.length; i += 1) {

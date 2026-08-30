@@ -30,7 +30,7 @@ the first act of building it. Agreed 2026-08-15:
 | **2b.0** | **The as-built layer** — `land_features`, `planned`/`built`/`removed`, symbology, the length function, the aerial/plan toggle | **shipped 2026-08-28** |
 | **2b.1** | **Walk to place a point** — an input mode for every kind, with the accuracy figure shown. [Designed 2026-08-29](#the-paddock-layout--designed-2026-08-29-not-yet-built) | **shipped 2026-08-29** |
 | **2b.2** | **Subdivide** — pick the ground and a lane, say how many, get n planned paddocks with their dividing fences and gates. `planned` arrives on zones | **shipped 2026-08-29** |
-| 2b.3 | **Navigate to a point** — bearing, distance and live accuracy, so the plan can be built where it was drawn | **unblocked 2026-08-29** — the field test it waited on has happened |
+| **2b.3** | **Navigate to a point** — distance counting down, bearing, and arrival judged against the live accuracy | **shipped 2026-08-30** |
 | **2b.4** | **Plans and the takeoff** — a named set of proposals, saved quantities, hand-added lines | **shipped 2026-08-29** |
 | **2b.5** | **Snap, and the ground inside the fences** — a drawn point joins what is already there, and the loops the fences make become ground you can divide | **shipped 2026-08-29** |
 | **2b.6** | **Getting rid of things** — discard a proposed paddock, and sort/filter/bulk-delete the plan list | **shipped 2026-08-30** |
@@ -570,6 +570,90 @@ grounds, which were never about optimisation as such.
   - **Assuming RTK.** Everything here must be useful at 3 m.
 
 ## Build log
+
+### 2026-08-30 — Slice 2b.3: navigate to the post (`claude/navigate-to-the-post`)
+
+**No migration, no schema, no ops, no actions.** A pure core and a screen. That
+is what the last five slices bought: everything this needed already existed.
+
+**THIS IS THE ONE THE REST OF 2b WAS FOR.** The founder's words when he asked
+for the layout, on 2026-08-29: *"out in the field, you click on the start of a
+paddock and using GPS it directs you until you are standing right in the right
+spot to set the posts and wire for the paddock."* Without it the layout is a
+picture. It waited on a real field test of walk mode, which happened on
+2026-08-29; nothing has blocked it since.
+
+**THE DISTANCE IS THE INSTRUMENT. THE BEARING IS SUPPORT.** This is the design
+decision the screen is built around and it went the other way at first. A
+bearing of 271 degrees only helps if you know which way you are facing, and a
+phone being carried does not reliably know — the compass wants a permission
+prompt on iOS, is thrown by a truck door, and is wrong in a way nobody can see.
+What always works is walking a few paces and watching the number: it drops, or
+it climbs and you turned wrong. So the number is the hero at three times the
+size of anything else, the trend sits beside it, and the compass point is there
+to save the first guess.
+
+**ARRIVAL IS MEASURED AGAINST THE ACCURACY, NOT AGAINST A DISTANCE SOMEBODY
+PICKED.** This is the honest limit from the design section turned into the
+interface rather than left as a footnote. You have arrived when **the target is
+inside the circle the phone says it is unsure by**. Standing 4 m away on a
++/-6 m fix, the phone genuinely cannot tell you are not on it; on a +/-2 m fix
+it can, and it says so. The consequence is deliberate: on a bad fix you arrive
+EARLIER and the screen tells you the radius, because the alternative is a
+countdown that never reaches zero and somebody in a field being told to keep
+walking by an instrument that has lost them.
+
+It never says "you are here". It says **"Within 20 ft — as close as the phone
+can tell today"**, which is the sentence that decides whether to drive a corner
+post or wait for a better sky. Underneath: *"Good enough for polywire. For a
+permanent corner post, check it against something you can see."*
+
+**THE VERTICES ARE THE POSTS.** `targetsOf` turns any geometry into an ordered
+list of places to stand, because a planned fence's corners are exactly where
+somebody has to dig and walking them in order is how the run gets built. A gate
+is one target. **A ring's closing repeat is dropped** — walking to it would tell
+somebody to go back to the corner they started at.
+
+**The first fix chooses which corner to start at, and only the first.** Somebody
+opening this is already somewhere, usually at one end of the run; being sent to
+the far end because that vertex happens to be index 1 wastes a walk. Re-choosing
+every fix would be worse than useless — the moment you arrived it would hand you
+that same corner forever.
+
+**Two things the drive caught, neither of which a test would have.**
+
+- **A farm working in feet read "7 ft" in letters an inch tall and "Within 6 m"
+  underneath it.** `arrivalNote` was writing the metres in itself. It has no
+  business knowing what unit anybody uses — `length.ts` owns that — so the radius
+  now arrives already formatted, with `arrivalRadiusM` exported so the sentence
+  describes the circle the decision actually used rather than a second one that
+  might disagree.
+- **Every `setState` moved into the fix.** The starting corner and the trend
+  were computed in effects, which React's own lint rule refuses, and rightly:
+  both are reactions to a new POSITION, which is an event. In effects it is also
+  a render that immediately schedules another one, twice per fix, for as long as
+  somebody is walking.
+
+**Driven on Hilltop Farm against a stubbed phone**, walked in along a real
+fence: 517 ft → 374 → 204 → 58 → 7, "getting closer" the whole way, "Keep going"
+then "Close. Slow down and watch the distance" then "Within 20 ft" with a
+**you are on it** badge. Walked past it and the trend flipped to "further away"
+with the bearing turning round to NW 305 degrees. Next corner and Back both move
+the target and clear the trend, which they must — a distance measured to
+somewhere else is not a comparison.
+
+**Tested:** 24 pure cases, the ones worth writing down being a bearing that is a
+real azimuth rather than an angle between coordinate differences (out by 15
+degrees at 40N if you get it wrong), arrival opening under a bad sky and
+tightening under a good one, the ring's closing repeat, and drift below the
+noise floor not registering as movement. 2,317 pure pass; lint, `tsc` and the
+build are green.
+
+**NOT DRIVEN WITH A REAL PHONE, and this is the slice where that matters most.**
+The sandbox denies geolocation, so every fix above was synthetic — which means
+the arithmetic is proved and **the feel is not**. Whether five metres of
+tolerance reads as "you are on it" or as "it lost me" is a question only a walk
+answers, and the same is still true of walk-mode snapping from 2b.5.
 
 ### 2026-08-30 — Slice 2b.7: the paddock table gets it too (`claude/the-paddock-table`)
 
@@ -2520,6 +2604,16 @@ rented ground, and retrofitting it means rewriting the report.
   shared with the map, which is which feature is selected. **The delete count is
   narrowed to what is currently listed**, so a filter change can never leave a
   tick counting towards something off screen
+- `src/packs/land/core/navigate.ts` — pure. Bearing, compass point, the trend,
+  and **arrival judged against the live accuracy rather than a fixed distance**.
+  `targetsOf` turns a geometry into the ordered list of places to stand: the
+  vertices are the posts, and a ring's closing repeat is dropped. It knows
+  nothing about units — the radius arrives already formatted
+- `src/packs/land/components/navigate-panel.tsx` — the field screen, opened by
+  **Take me there** on any drawn feature. Not owner-gated: the person setting
+  the posts is often not the person who drew them. Watches only while it is
+  open, the rule `walk-panel.tsx` set, and every `setState` happens inside the
+  fix rather than in an effect
 - `src/packs/land/core/snap.ts` — pure. Moving a placed point onto whatever is
   already drawn. **A corner outranks a run even when the run is nearer**, which
   is the difference between a lane that meets the fence and one that stops a
@@ -2724,11 +2818,13 @@ rented ground, and retrofitting it means rewriting the report.
   tolerance 256x too small so nothing snapped at all, a non-idempotent snap that
   left a stranded vertex in every line, and an op dividing a different ring from
   the one the dialog offered. See the build log.
-- **The WALK half is still untouched by a real phone.** Snapping a walked corner
-  has only ever run against a stubbed `navigator.geolocation`. **A five-metre
-  tolerance against an instrument that is itself wrong by five metres is a
-  judgement call nothing has tested outdoors.** If it grabs corners somebody did
-  not mean, the number to move is `SNAP_TOLERANCE_M`.
+- **NOTHING THAT READS A PHONE'S POSITION HAS BEEN DRIVEN BY A REAL PHONE SINCE
+  2b.1**, and that now covers two slices. Walk-mode snapping (2b.5) and the whole
+  of navigation (2b.3) have only run against a stubbed `navigator.geolocation`,
+  so the arithmetic is proved and the FEEL is not. Two judgement calls are
+  waiting on one walk: whether `SNAP_TOLERANCE_M` grabs corners nobody meant, and
+  whether arriving inside the accuracy circle reads as "you are on it" or as "it
+  lost me".
 - **A point is snapped on SAVE, not while it is placed.** `TerraDrawPointMode`
   takes no `snapping` option, so a gate jumps after you commit it rather than
   under the cursor. It is the only moment available and it is the wrong one.

@@ -57,6 +57,7 @@ export function SitePlan({
   canEdit,
   canEditBoundary,
   parcelName,
+  zoneWord,
   declaredAcres,
 }: {
   parcelId: string;
@@ -77,6 +78,7 @@ export function SitePlan({
   /** Owner-only: the outline is a legal fact, not a chore. */
   canEditBoundary: boolean;
   parcelName: string;
+  zoneWord: string;
   declaredAcres: number | null;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -147,6 +149,7 @@ export function SitePlan({
         canEdit={canEdit}
         canEditBoundary={canEditBoundary}
         parcelName={parcelName}
+        zoneWord={zoneWord}
         declaredAcres={declaredAcres}
         selectedId={selectedId}
         onSelect={setSelectedId}

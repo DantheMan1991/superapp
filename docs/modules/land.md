@@ -553,6 +553,73 @@ grounds, which were never about optimisation as such.
 
 ## Build log
 
+### 2026-08-29 — You could not draw a paddock (`claude/draw-a-paddock`)
+
+**No migration.** The founder went looking for how to create a paddock on the
+site plan and could not find it. He was right: there was no such option, and one
+of the routes that should have substituted for it **was broken by "The last
+map" earlier the same day.**
+
+**WHAT THE THREE ROUTES ACTUALLY WERE**
+
+1. **Divide into paddocks** — the subdivision dialog. Works, but lives in the
+   Paddocks section rather than on the plan, and needs a LANE drawn first.
+2. **Add paddock** — creates a zone with a name and no geometry.
+3. Give that one a shape… and there was no way to. `groundCollection` skips a
+   zone whose boundary it cannot read, so **an undrawn paddock never rendered on
+   the site plan and could never be clicked** — and the zone page had just lost
+   its own map on the promise that outlines are traced on the plan. The only
+   remaining path was pasting GeoJSON.
+
+That is a regression introduced by the map consolidation: it moved zone tracing
+to the plan without checking that a zone with no shape is reachable there. It
+is not.
+
+**THE FIX, in two parts**
+
+- **`A new paddock` in the kind picker.** Draw it or WALK it, exactly like the
+  parcel's boundary, and it is created with that outline in one act. Owner-only,
+  because a zone becomes a cost object. `createZone` now takes a `geometry`, and
+  **the drawn acreage becomes the recorded acreage** — the rule
+  `layoutPaddocks` already follows, and the one place this pack departs from
+  declared-versus-computed. A typed figure still wins; the drawing only fills a
+  gap.
+- **Undrawn paddocks are LISTED in the picker.** Drawn ones are clicked on the
+  map; ones with no shape have nothing to click, so they appear as
+  `North Pasture — not drawn yet`. Listing only the undrawn ones is what keeps
+  that list short — a farm with two hundred paddocks has them all on the map and
+  none of them here.
+
+**The name is asked for BEFORE drawing, not after.** Prefilled with the next
+number and editable. The walk version of this ends with somebody standing in a
+field having just walked four corners, and a modal asking for a name is the
+worst possible moment for one.
+
+**A React Compiler bail-out fixed on the way.** `save`'s dependency list had
+grown to include a display name derived from the `zones` array, and the compiler
+skipped optimising the whole component rather than trust it. The toast now
+builds its text from primitives and the suggested name is memoised on the COUNT.
+Worth knowing: `npx eslint` reports these as errors, and a green `tsc` and build
+will not.
+
+**AND `Divide into paddocks` MOVED ONTO THE PLAN**, asked for in the same
+conversation. It had been sitting in the Paddocks list four sections below the
+map, replaced by a grey sentence whenever no lane was drawn — so the founder
+went looking for it on the site plan twice and could not find it. That is the
+right instinct: everything else that makes a shape happens there. **Moved, not
+duplicated**, so there is one place to look and one thing to keep working. What
+stays in the list is `Add paddock`, for one whose shape comes later.
+
+**Tested:** three new ops cases — created with an outline, a typed acreage
+winning over the drawn one, and an unreadable outline refused in the parser's
+own words. 121 db-backed and 2,258 pure pass.
+
+**Not driven in a browser.** The dev server lost its Clerk session again and
+signing back in would mean handling the founder's credentials. The ops path is
+covered; the picker entry and the name field are read-and-build-verified only,
+the same limit the design-system dossier records for having no component-test
+stack.
+
 ### 2026-08-29 — Four corners were three sides (`claude/close-the-loop`)
 
 **No migration.**
@@ -2084,7 +2151,10 @@ rented ground, and retrofitting it means rewriting the report.
   `packConfig.land.featureKinds`, and an unknown kind draws with the fallback
   for its shape
 - `src/packs/land/components/site-plan-map.tsx` — the site plan, and **the only
-  map in the pack since 2026-08-29** (`boundary-map.tsx` is deleted). It draws
+  map in the pack since 2026-08-29**. The kind picker is where everything
+  drawable lives: the parcel's outline, **a new paddock**, any paddock with no
+  shape yet, then the feature kinds. Drawn paddocks are CLICKED on the map;
+  undrawn ones are listed, because there is nothing to click (`boundary-map.tsx` is deleted). It draws
   the parcel's outline AND any paddock's — a paddock is chosen by clicking it,
   because a farm at 10x has two hundred and they do not belong in a picker: it draws the parcel's own boundary
   too, at the top of the kind picker, owner-only and always an area. A basemap

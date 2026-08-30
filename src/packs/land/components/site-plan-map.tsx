@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -48,6 +49,7 @@ import { formatLength, type LengthUnit } from "../core/length";
 import type { Basemap } from "../core/basemap";
 import {
   createFeatureAction,
+  createZoneAction,
   setFeatureGeometryAction,
   setParcelBoundaryAction,
   setZoneBoundaryAction,
@@ -100,6 +102,22 @@ type InputMode = "tap" | "walk";
  * founder's side that is what it is: another thing you draw on this map.
  */
 const BOUNDARY_TARGET = "__parcel_boundary__";
+
+/**
+ * The kind picker's value for a paddock that does not exist yet.
+ *
+ * **THERE WAS NO WAY TO DRAW ONE HERE UNTIL 2026-08-29, AND THAT WAS A HOLE
+ * THIS MAP OPENED.** Paddocks arrived from `layoutPaddocks` (which needs a lane
+ * drawn first) or from the "Add paddock" form, which creates one with NO
+ * geometry — and `groundCollection` below skips a zone it cannot read a
+ * boundary from, so an undrawn paddock never rendered here and could never be
+ * clicked. When the zone page lost its own map there was no second step left at
+ * all: a paddock added by hand could only be given a shape by pasting GeoJSON.
+ *
+ * Reported by the founder, who went looking for the option and correctly could
+ * not find it.
+ */
+const NEW_ZONE_TARGET = "__new_paddock__";
 
 export interface PlanFeature {
   id: string;
@@ -224,6 +242,7 @@ export function SitePlanMap({
   canEdit,
   canEditBoundary,
   parcelName,
+  zoneWord,
   declaredAcres,
   selectedId,
   onSelect,
@@ -255,6 +274,8 @@ export function SitePlanMap({
   /** Whether the parcel's own boundary can be drawn here. Owner-only. */
   canEditBoundary: boolean;
   parcelName: string;
+  /** What this tenant calls a zone — "Paddock", "Bed", "Field". */
+  zoneWord: string;
   /** The deed's figure, for the live comparison while tracing the boundary. */
   declaredAcres: number | null;
   selectedId: string | null;
@@ -298,22 +319,49 @@ export function SitePlanMap({
    * last override.
    */
   const [shapeOverride, setShapeOverride] = useState<GeometryShape | null>(null);
+  /**
+   * What a newly drawn paddock will be called.
+   *
+   * Prefilled and editable BEFORE drawing rather than prompted for after: the
+   * walk version of this ends with somebody standing in a field having just
+   * walked four corners, and a modal asking for a name is the worst possible
+   * moment for one. A default that is usually right beats a dialog that is
+   * always in the way.
+   */
+  const [newZoneName, setNewZoneName] = useState("");
+  /** Whether what is about to be drawn is a paddock that does not exist yet. */
+  const newZoneTarget = drawKind === NEW_ZONE_TARGET;
   /** Whether what is about to be drawn is an OUTLINE — the parcel's or a paddock's. */
-  const boundaryTarget = drawKind === BOUNDARY_TARGET;
+  const boundaryTarget = drawKind === BOUNDARY_TARGET || newZoneTarget;
   const selectedZone = zones.find((zone) => zone.id === selectedZoneId) ?? null;
-  const boundaryTargetName = selectedZone?.name ?? parcelName;
-  const boundaryTargetGeometry = selectedZone
-    ? asBoundary(selectedZone.geometry)
-    : parcelBoundary;
+  const undrawnZones = zones.filter((zone) => asBoundary(zone.geometry) === null);
+  // Memoised on the COUNT rather than derived from `zones` inline: `save`
+  // depends on this, and a value the compiler reads as array-derived makes it
+  // give up on optimising the whole component.
+  const zoneCount = zones.length;
+  const suggestedZoneName = useMemo(
+    () => `${zoneWord} ${zoneCount + 1}`,
+    [zoneCount, zoneWord],
+  );
+  const boundaryTargetName = newZoneTarget
+    ? (newZoneName.trim() || suggestedZoneName)
+    : (selectedZone?.name ?? parcelName);
+  const boundaryTargetGeometry = newZoneTarget
+    ? null
+    : selectedZone
+      ? asBoundary(selectedZone.geometry)
+      : parcelBoundary;
   /**
    * The recorded figure to measure against — **the TARGET's, not always the
    * parcel's.** Tracing a paddock and being told it is 37 acres short of the
    * deed is comparing it to the wrong thing; what matters is whether it agrees
    * with what was recorded for that paddock.
    */
-  const boundaryTargetAcres = selectedZone
-    ? selectedZone.areaAcres
-    : declaredAcres;
+  const boundaryTargetAcres = newZoneTarget
+    ? null
+    : selectedZone
+      ? selectedZone.areaAcres
+      : declaredAcres;
   /**
    * How the next shape gets its vertices: by clicking the map, or by standing
    * on each corner.
@@ -950,7 +998,7 @@ export function SitePlanMap({
         ? existing
           ? shapeOf(existing)
           : shapeOfKind(feature.kind)
-        : drawKind === BOUNDARY_TARGET
+        : drawKind === BOUNDARY_TARGET || drawKind === NEW_ZONE_TARGET
           ? "area"
           : (shapeOverride ?? shapeOfKind(drawKind));
 
@@ -1034,7 +1082,7 @@ export function SitePlanMap({
       setDrawingShape(shape);
       setMode("draw");
     },
-    [drawKind, input, shapeOfKind, shapeOverride],
+    [drawKind, input, setCloseWalk, shapeOfKind, shapeOverride],
   );
 
   const stopDrawing = useCallback(() => {
@@ -1078,7 +1126,13 @@ export function SitePlanMap({
 
     setPending(true);
     const result = boundaryTarget
-      ? selectedZoneId
+      ? newZoneTarget
+        ? await createZoneAction({
+            parcelId,
+            name: newZoneName.trim() || suggestedZoneName,
+            geometry,
+          })
+        : selectedZoneId
         ? // Same act, same geometry, different owner of the row.
           await setZoneBoundaryAction({
             id: selectedZoneId,
@@ -1111,9 +1165,13 @@ export function SitePlanMap({
       return;
     }
     toast.success(
-      boundaryTarget
-        ? `${boundaryTargetName}'s boundary saved`
-        : redrawing
+      newZoneTarget
+        ? `${newZoneName.trim() || suggestedZoneName} added`
+        : boundaryTarget
+          ? selectedZoneId
+            ? "Boundary saved"
+            : `${parcelName}'s boundary saved`
+          : redrawing
           ? "Redrawn"
           : drawStatus === "planned"
             ? `${featureKindLabel(drawKind)} added as a proposal`
@@ -1123,7 +1181,9 @@ export function SitePlanMap({
     router.refresh();
   }, [
     boundaryTarget,
-    boundaryTargetName,
+    newZoneTarget,
+    newZoneName,
+    suggestedZoneName,
     selectedZoneId,
     drawKind,
     drawStatus,
@@ -1131,6 +1191,7 @@ export function SitePlanMap({
     drawingShape,
     input,
     parcelId,
+    parcelName,
     redrawing,
     router,
     stopDrawing,
@@ -1242,10 +1303,17 @@ export function SitePlanMap({
                     // the last override forward would silently draw the next
                     // waterline as an area because the last thing was woods.
                     setShapeOverride(null);
-                    // The picker's boundary entry always means the PARCEL. A
-                    // paddock is chosen by clicking it, so choosing from here
-                    // has to let go of whichever one was last clicked.
-                    if (value === BOUNDARY_TARGET) onSelectZone(null);
+                    // The picker's boundary entry always means the PARCEL, and
+                    // a new paddock belongs to nothing yet — both have to let go
+                    // of whichever paddock was last clicked.
+                    if (value === BOUNDARY_TARGET || value === NEW_ZONE_TARGET) {
+                      onSelectZone(null);
+                    } else if (value.startsWith("zone:")) {
+                      // An undrawn paddock, picked from the list because there
+                      // is nothing on the map to click.
+                      onSelectZone(value.slice("zone:".length));
+                      setDrawKind(BOUNDARY_TARGET);
+                    }
                   }}
                 >
                   <SelectTrigger size="sm" className="w-[170px]">
@@ -1254,9 +1322,29 @@ export function SitePlanMap({
                   <SelectContent>
                     {canEditBoundary && (
                       <SelectItem value={BOUNDARY_TARGET}>
-                        {boundaryTargetName}&rsquo;s boundary
+                        {parcelName}&rsquo;s boundary
                       </SelectItem>
                     )}
+                    {canEditBoundary && (
+                      <SelectItem value={NEW_ZONE_TARGET}>
+                        A new {zoneWord.toLowerCase()}
+                      </SelectItem>
+                    )}
+                    {/*
+                      **UNDRAWN PADDOCKS ARE LISTED; DRAWN ONES ARE CLICKED.**
+                      A paddock with no boundary does not render on this map, so
+                      there is nothing to click — which is exactly how one
+                      created by the "Add paddock" form became unreachable once
+                      the zone page lost its own map. Listing only the undrawn
+                      ones keeps this short: a farm with two hundred paddocks
+                      has them all on screen, and none of them here.
+                    */}
+                    {canEditBoundary &&
+                      undrawnZones.map((zone) => (
+                        <SelectItem key={zone.id} value={`zone:${zone.id}`}>
+                          {zone.name} &mdash; not drawn yet
+                        </SelectItem>
+                      ))}
                     {kinds.map((kind) => (
                       <SelectItem key={kind.kind} value={kind.kind}>
                         {kind.label}
@@ -1264,6 +1352,15 @@ export function SitePlanMap({
                     ))}
                   </SelectContent>
                 </Select>
+                {newZoneTarget && (
+                  <Input
+                    value={newZoneName}
+                    onChange={(event) => setNewZoneName(event.target.value)}
+                    placeholder={suggestedZoneName}
+                    aria-label={`${zoneWord} name`}
+                    className="h-8 w-[150px]"
+                  />
+                )}
                 {!boundaryTarget && (
                 <div className="inline-flex overflow-hidden rounded-md border">
                   {SHAPE_CHOICES.map(({ shape, label, Icon }) => (
@@ -1321,13 +1418,17 @@ export function SitePlanMap({
                 </div>
                 <Button size="sm" onClick={() => startDrawing(null)} disabled={!ready}>
                   <Pencil className="mr-2 h-4 w-4" />
-                  {boundaryTarget
+                  {newZoneTarget
                     ? input === "walk"
-                      ? "Walk the boundary"
-                      : "Trace the boundary"
-                    : input === "walk"
-                      ? "Walk it"
-                      : "Draw it"}
+                      ? `Walk the ${zoneWord.toLowerCase()}`
+                      : `Draw the ${zoneWord.toLowerCase()}`
+                    : boundaryTarget
+                      ? input === "walk"
+                        ? "Walk the boundary"
+                        : "Trace the boundary"
+                      : input === "walk"
+                        ? "Walk it"
+                        : "Draw it"}
                 </Button>
                 {/* The existing outline, with handles. `startDrawing` takes a
                     FEATURE, so the boundary borrows the shape of one — nothing
@@ -1477,8 +1578,8 @@ function Measurement({
       return (
         <span className="text-muted-foreground">
           {input === "walk"
-            ? "Stand on each corner of the property and drop a point."
-            : "Click each corner of the property. Click the first one again to close it."}
+            ? "Stand on each corner and drop a point."
+            : "Click each corner. Click the first one again to close it."}
         </span>
       );
     }
